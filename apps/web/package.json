@@ -1,0 +1,18 @@
+{
+  "name": "@openslate/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "@openslate/core": "workspace:*", "react": "19.2.8", "react-dom": "19.2.8" },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.2.2"
+  }
+}

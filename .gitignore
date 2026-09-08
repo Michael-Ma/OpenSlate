@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+.openslate/
+data/
+models/
+*.sqlite
+*.sqlite-*
+.pnpm-store/
+__pycache__/
+.venv/

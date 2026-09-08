@@ -1,0 +1,14 @@
+{
+  "name": "@openslate/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": { "@openslate/core": "workspace:*", "fastify": "5.12.3" },
+  "devDependencies": { "tsx": "4.23.13" }
+}
