@@ -4,7 +4,7 @@
 **Version:** 0.1 · September 8, 2026
 **Purpose:** define the architecture, core production logic, component boundaries, and implementation sequence for an open-source agent that creates and revises multi-scene videos.
 
-Start here for the overall design. Continue with [Component Design](COMPONENT-DESIGN.md) for subsystem behavior, [Implementation Plan](IMPLEMENTATION-PLAN.md) for delivery phases and unresolved decisions.
+Start here for the overall design. Continue with [Component Design](COMPONENT-DESIGN.md) for subsystem behavior, [Implementation Plan](IMPLEMENTATION-PLAN.md) for delivery phases and unresolved decisions, and [Review Notes](REVIEW-NOTES.md) for review findings and validation limits.
 
 ## 1. Product and scope
 

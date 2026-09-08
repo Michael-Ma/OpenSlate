@@ -51,14 +51,17 @@ packages/director/    Initial director lifecycle interface
 packages/providers/   Initial video capability interface
 skills/               Planned creative skills
 workers/h3-python/    Future local inference boundary
-docs/design/          Architecture, component design, and roadmap
+docs/                 Documentation index and design files
 ```
 
 ## Design and next steps
 
+Start with the [documentation index](docs/README.md).
+
 - [Architecture](docs/design/README.md)
 - [Component design](docs/design/COMPONENT-DESIGN.md)
 - [Implementation plan](docs/design/IMPLEMENTATION-PLAN.md)
+- [Design review notes](docs/design/REVIEW-NOTES.md)
 
 Next: prove the Codex/MCP integration with a fake asynchronous provider, then build a short end-to-end production with real cloud APIs. See [Contributing](CONTRIBUTING.md) for development guidance.
 
