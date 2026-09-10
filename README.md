@@ -13,6 +13,8 @@ OpenSlate is designed to plan scenes and shots, create reference assets, generat
 - GPT Image 2 for assets and MiniMax H3 cloud for video generation.
 - Optional Python H3 inference workers later, behind the same provider boundary.
 - OpenSlate-owned project state, generation jobs, budgets, and edit decisions.
+- Code-authored execution plans with parallel work and targeted edits that reuse existing outputs.
+- A small initial skill/tool set with explicit loading, versioning, and request lifecycle.
 
 ## Quick start
 
@@ -60,10 +62,12 @@ Start with the [documentation index](docs/README.md).
 
 - [Architecture](docs/design/README.md)
 - [Component design](docs/design/COMPONENT-DESIGN.md)
+- [Skills and tools](docs/design/SKILLS-AND-TOOLS.md)
+- [Execution and editing](docs/design/EXECUTION-AND-EDITING.md)
 - [Implementation plan](docs/design/IMPLEMENTATION-PLAN.md)
 - [Design review notes](docs/design/REVIEW-NOTES.md)
 
-Next: prove the Codex/MCP integration with a fake asynchronous provider, then build a short end-to-end production with real cloud APIs. See [Contributing](CONTRIBUTING.md) for development guidance.
+Next: prove the skill/tool lifecycle, code-plan execution, and mid-run edits with fake operations, then build a short end-to-end production with real cloud APIs. See [Contributing](CONTRIBUTING.md) for development guidance.
 
 ## License
 

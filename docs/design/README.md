@@ -1,158 +1,107 @@
 # OpenSlate — Technical Design
 
-**Status:** architecture proposal; the repository currently contains an initial application skeleton.
-**Version:** 0.1 · September 8, 2026
-**Purpose:** define the architecture, core production logic, component boundaries, and implementation sequence for an open-source agent that creates and revises multi-scene videos.
+**Version:** 0.2 · September 10, 2026
+**Status:** architecture proposal; implementation remains an initial TypeScript skeleton.
 
-Start here for the overall design. Continue with [Component Design](COMPONENT-DESIGN.md) for subsystem behavior, [Implementation Plan](IMPLEMENTATION-PLAN.md) for delivery phases and unresolved decisions, and [Review Notes](REVIEW-NOTES.md) for review findings and validation limits.
+OpenSlate turns a creative brief into an editable film: story and shot planning, reference assets, generated takes, timeline assembly, and finishing. Its first director uses Codex, image assets use GPT Image 2, and video generation starts with H3 cloud. A later Python H3 worker implements the same provider boundary.
 
-## 1. Product and scope
+## 1. Direction
 
-OpenSlate turns a creative brief into an editable video project and a finished export. It develops a story and production plan, creates reusable visual references, writes generation prompts, produces shot takes, assembles an audio/video timeline, and renders the result. Users can review the work, change a decision, or replace an individual shot while preserving unaffected material.
+The application should be fast to execute and easy to revise. Once the intent and current project state are clear for a requested scope, the director writes an execution plan in a small TypeScript planning language. OpenSlate compiles it into a durable dependency graph and executes ready operations directly. The user can intervene during production; the director translates the request into a scoped change rather than rebuilding the film.
 
-“Long video” means a coherent sequence of many generated shots. The project model must support multi-minute outputs without putting the full project, every frame, or every generation response into one model context. Continuous single-shot generation is an optional technique within a scene, not a prerequisite for producing a long film.
-
-### Confirmed decisions
-
-| Decision | Rationale |
+| Decision | Purpose |
 |---|---|
-| TypeScript for the application and production engine | Shared contracts across UI, service, tools, jobs, and provider adapters |
-| Codex as the first director runtime | Reuse its agent loop, conversational iteration, skills, and tool integration |
-| MiniMax H3 cloud API first | Start with an operational generation service before operating GPU inference |
-| GPT Image 2 as the initial image provider | Generate and edit reference assets and shot keyframes |
-| Optional Python H3 workers later | Keep local model dependencies and GPU execution behind the provider boundary |
-| Open-source distribution | Make project formats, core behavior, and extension interfaces inspectable |
+| TypeScript application, React UI, Fastify service | Share contracts across the product and execution engine |
+| Codex behind a director adapter | Reuse conversation and reasoning while OpenSlate owns project state |
+| Two initial skills; five agent-facing tools | Prove extensibility and lifecycle before adding specialist features |
+| Code-authored plan, compiled dependency graph | Batch decisions and remove the agent from routine dispatch/polling |
+| Versioned project and scoped atomic patches | Change one shot while preserving valid completed and running work |
+| SQLite, local artifacts, separate TypeScript worker | Straightforward local installation and durable progress |
+| GPT Image 2 and H3 cloud adapters | Keep provider-specific behavior outside the project model |
+| Optional Python H3 worker later | Isolate model/GPU dependencies from cloud users |
 
-### Working assumptions awaiting product confirmation
+The two skills are `production` and `plan-authoring`. Continuity and asset direction begin as guidance inside `production`, with references loaded when relevant. They can become separate skills when real usage justifies the split.
 
-These are provisional product defaults. They can change without replacing the core architecture.
-
-| Topic | Proposed initial default | Consequence if changed |
-|---|---|---|
-| Distribution | Single-user local web app; user supplies provider credentials | Multi-user hosting adds identity, access control, worker isolation, and shared storage |
-| First acceptance example | Narrated 2–5 minute video, first proven with a 30–60 second slice | Dialogue films prioritize speech continuity; music videos prioritize beat and section timing |
-| Autonomy | Review the production plan and canonical references; then execute within an approved scope and budget | Fully automatic mode uses a standing policy; per-shot review adds more pauses |
-| Initial audio | Import narration/music; optionally retain generated shot audio | Integrated speech/music generation requires additional provider selection |
-| First output profile | Landscape, fixed project frame rate, MP4 video and editable project export | Other ratios/profiles become configuration, with reference-fit validation |
-| Initial platform | macOS/Linux for cloud use | Windows support requires an explicit installation and runtime compatibility pass |
-
-The first version includes planning, reference generation, shot generation, take selection, basic timeline controls, audio mixing, captions, and reliable export. A full nonlinear editor, hosted multi-user product, automatic feature-length quality guarantees, model training, and local GPU inference are outside the first release.
-
-## 2. Architecture decision
-
-Use a **modular TypeScript application with a separate worker process**, a Codex director adapter, and explicit provider adapters. Keep project state and paid operations under OpenSlate’s control. Codex receives project context and calls validated tools; it does not own the authoritative database or submit generation requests outside the job system.
+## 2. Overall architecture
 
 ```mermaid
 flowchart TB
-    User[User] --> UI[React web UI]
-    UI --> Service[OpenSlate application service]
-    CLI[CLI] --> Service
-    Service --> Store[(SQLite project and job state)]
-    Service --> Files[Immutable media and project exports]
-    Service <--> Runtime[Codex director adapter]
-    Runtime <--> Codex[Local Codex App Server]
-    Codex --> Tools[OpenSlate MCP tools]
-    Tools --> Service
-    Worker[TypeScript worker and reconciler] <--> Store
-    Worker --> Files
-    Worker --> Images[GPT Image 2 adapter]
-    Worker --> Video[Video provider interface]
-    Video --> Cloud[H3 cloud adapter]
-    Video -. later .-> Local[Python H3 worker adapter]
-    Worker --> Render[FFmpeg renderer]
-    Service --> Events[Persisted domain events and progress]
+    User[User conversation and direct edits] <--> UI[Web workspace]
+    UI <--> App[Application service]
+    App <--> State[(Project and execution state)]
+    App <--> Director[Codex director adapter]
+    Catalog[Locked skills and tool catalog] --> Director
+    Director --> Tools[Five validated domain tools]
+    Tools --> Change[Change service and plan compiler]
+    Change --> State
+    Change --> Graph[Versioned execution graph]
+    Graph --> Scheduler[Ready-work scheduler]
+    Scheduler --> Workers[Trusted operation handlers]
+    Workers --> Cloud[Image and H3 cloud adapters]
+    Workers -. later .-> Local[Python H3 worker]
+    Workers --> Edit[Timeline and FFmpeg rendering]
+    Workers --> Media[Artifact library]
+    Workers --> State
+    State --> Events[Progress and decision events]
     Events --> UI
+    Events --> Director
 ```
 
-### Recommended implementation stack
+The director makes creative decisions and authors plans. The compiler validates those plans. The scheduler and workers execute them. Only decisions needing reasoning return to the director; task completion and provider polling do not inherently require a model call.
 
-| Area | Starting choice | Boundary |
-|---|---|---|
-| Workspace | pnpm workspace, TypeScript, supported Node LTS pinned during setup | No Python requirement for cloud users |
-| UI | React + Vite | Storyboard, review, conversation, simple timeline |
-| HTTP service | Fastify; REST commands and server-sent events | Local browser/CLI access and reconnectable progress |
-| Contracts | Zod schemas, versioned JSON payloads, generated API/tool schemas where practical | Validate all external and agent inputs |
-| Persistence | SQLite with migrations and transactional repositories | Local metadata, jobs, reservations, approvals, events |
-| Storage | Local immutable media files with database metadata | Optional staging/object storage adapter for provider transfers |
-| Agent integration | Codex App Server over local stdio; MCP for domain tools | Pin and validate the supported protocol subset |
-| Execution | TypeScript worker with durable database jobs and leases | No Redis or distributed workflow platform in v0 |
-| Rendering | FFmpeg and ffprobe invoked with validated arguments | Frozen timeline in, validated render out |
+## 3. Four durable artifacts
 
-Fastify is a proposed implementation choice, not an architectural dependency; its official documentation covers the server framework. [Fastify documentation](https://fastify.dev/docs/latest/)
+| Artifact | What it preserves |
+|---|---|
+| **Project revision** | Brief, story/bible, scenes/shots, accepted references, selected takes, editorial intent |
+| **Plan revision** | Readable plan source, normalized operation graph, exact input bindings, execution policy and version lock |
+| **Execution records** | Service-owned generation intent/candidate IDs, attempts, receipts, cost reservations, node progress |
+| **Media and timeline revisions** | Immutable outputs/provenance, exact edit selections, render recipes and finished exports |
 
-Codex’s documentation distinguishes programmatic SDK runs from App Server integration for applications with conversation history, approvals, and streamed events. That makes App Server the proposed interactive path. Use default local stdio; avoid depending on experimental dynamic tools, remote Code Mode, or WebSocket transport. A pinned-release compatibility spike is a prerequisite, and the simpler SDK remains a fallback for bounded runs. [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk), [Codex App Server](https://learn.chatgpt.com/docs/app-server)
+These records survive conversation resets. Skill loading and conversation summaries are context management, not the production database. A shot is an intended moment, a take is a generated candidate, and a timeline clip is an editorial use of an exact take.
 
-## 3. Ownership and source of truth
+## 4. Main execution loop
 
-| Information or action | Owner | Durable record |
-|---|---|---|
-| Creative intent and director proposals | Director runtime | Accepted plan revisions plus conversation references |
-| Project entities and changes | Application/domain service | SQLite entities and immutable revisions |
-| User authorization and review policy | Application/domain service | Policy, approval scope, inputs, and revision references |
-| Paid generation admission and recovery | Job engine | Job, attempt, reservation, provider receipt |
-| Reference and output bytes | Artifact service | Local files, checksums, provenance metadata |
-| Chosen takes and editing decisions | Timeline service | Timeline revision with exact artifact references |
-| Export execution | Render worker | Render job, recipe, tool versions, output artifact |
-| Provider-specific limits and translation | Provider adapter | Versioned capability descriptor and execution specification |
+1. **Understand the request.** Read current project state and clarify only missing decisions that affect the requested work.
+2. **Author the creative change.** Develop the initial story/shot plan, or identify a local revision with any continuity consequences.
+3. **Write plan code.** Describe operations, dependencies, reference bindings, and review gates for that scope.
+4. **Prepare and inspect.** Compile without side effects. Return a proposed project/plan diff, reused work, new work, holds, and estimated cost/time impact.
+5. **Commit under policy.** Apply the approved or already-authorized change atomically. Admit new work only within the active policy and budget.
+6. **Execute ready work.** Dispatch independent branches in parallel; ingest outputs and advance dependencies without routine agent turns.
+7. **Guide at decision points.** Surface reference choices, quality failures, material edit impacts, or exhausted budgets. Resume only the branches requiring that decision.
+8. **Finish or revise.** Resolve an editable timeline, render a preview/export, and accept further scoped changes at any time.
 
-Conversation history is a useful interaction record. The project can be reconstructed and edited without that conversation. Markdown plans and JSON exports are readable projections of committed state; editing them creates an explicit import proposal rather than silently changing the database.
+“Finalizing intent” applies to the scope being executed. It does not require locking the whole project against future changes or waiting for every scene before useful work can start.
 
-## 4. Production logic, step by step
+## 5. What must be built first
 
-1. **Capture the brief.** Establish audience, format, approximate duration, story intent, style, aspect ratio, audio approach, supplied assets, and spending policy. Record missing creative details as assumptions.
-2. **Develop the story and production bible.** Define the narrative arc, characters, locations, wardrobe/props, visual rules, and pronunciation or dialogue notes. Produce stable entity IDs for reuse.
-3. **Plan scenes and shots.** Each scene has a narrative purpose and duration target. Each shot specifies action, framing, motion, continuity inputs/outputs, reference needs, audio intent, and edit duration. Split shots when provider limits or complexity require it.
-4. **Review the plan and estimate.** Validate duration coverage, dependency cycles, provider compatibility, reference count, and estimated work. Freeze an execution scope when the applicable policy authorizes it.
-5. **Generate canonical references.** Create/select character and location references, then derive shot keyframes as needed. Review canonical references before propagating them across many shots under the default policy.
-6. **Compile and execute shot requests.** Resolve exact input revisions, write a provider-suitable prompt, validate the conditioning mode, reserve budget, and enqueue durable jobs. Run independent shots concurrently within provider and user limits; wait for real dependencies.
-7. **Ingest and review takes.** Download output, verify technical properties, create proxies/contact sheets, and evaluate adherence. Keep every take’s lineage. Automatic checks advise the director; retry and revision loops remain bounded.
-8. **Assemble the timeline.** Select takes, set trims and order, place narration/music/native audio, apply transitions and captions, and identify missing coverage. Review a rough cut before costly refinements.
-9. **Render and finish.** Normalize media to the project profile, compile the frozen timeline into an FFmpeg recipe, mix audio, render, verify output, and publish an artifact atomically.
-10. **Revise selectively.** A user request becomes a scoped patch. Mark affected dependents for review, reuse valid assets/takes, generate only approved changes, and create a new timeline/export revision.
+| Build the framework now | Keep the initial content small |
+|---|---|
+| Skill discovery, compatibility checks, immutable version locks, request activation | Production guidance and plan authoring |
+| Tool registry, schemas, permissions, idempotency, shared handlers | Read context, prepare change, apply change, control execution, inspect artifact |
+| Plan compiler, dependency scheduler, stable identities, revision comparison | Image generation, video generation, timeline assembly, rendering |
+| Scoped edit protocol, stale-result protection, progress events | Single-shot replacement, trim/reorder, reference selection |
 
-This is a recommended production sequence, not a second agent framework. The director may move between stages. Application preconditions ensure that generation and rendering always have valid inputs and authorization.
+The first executable proof should use fake media operations, demonstrate parallel work and editing a running plan, and then connect real providers. Avoid building a large skill library or a professional timeline editor before those behaviors work.
 
-## 5. Fundamental project model
+## 6. Provisional product defaults
 
-```text
-Project
-  Brief revision + Production bible revision + Execution policy
-  Scenes → Shot revisions → Generation attempts → Takes
-  Asset revisions → References and generated media
-  Timeline revisions → Selected takes + trims + audio + captions
-  Render jobs → Export artifacts
-  Director runs + Approvals + Budget ledger + Domain events
-```
+Distribution remains a single-user local web app with user-supplied credentials. The initial acceptance example is a narrated 2–5 minute film, first proven with a short sequence; imported narration/music and optional native shot audio are sufficient initially. The default policy reviews the production plan and important references, then permits execution within a bounded budget. These defaults remain open for product discussion.
 
-A **shot** is an intended cinematic moment. A **take** is a generated candidate for that shot. A **timeline clip** is an editorial use of a take, potentially trimmed or reused. These are separate objects so regeneration does not erase editing decisions.
+Fast execution does not mean unbounded concurrency or speculative paid takes. Optimize the critical path, overlap independent work, cache valid artifacts, and batch reasoning. Measure time to first useful preview and time to apply a shot edit, not only total job throughput.
 
-Every generated artifact records its exact prompt, input asset revisions, provider/model identity, generation settings, and job. Reusing a seed is useful metadata, not a guarantee of identical future generation. A render records the timeline, source checksums, output settings, and rendering toolchain.
+## 7. Reading map
 
-Changing a reference creates a new revision. Existing takes remain available and become outdated only along recorded dependency edges. Late results attach to the revision that produced them; they never automatically replace a newer selection.
+| Document | Read for |
+|---|---|
+| [Component design](COMPONENT-DESIGN.md) | Architecture diagrams, component ownership, and high-level execution algorithms |
+| [Skills and tools](SKILLS-AND-TOOLS.md) | Loading, versioning, multi-request lifecycle, extension rules, and minimal initial surface |
+| [Execution and editing](EXECUTION-AND-EDITING.md) | Code plan example, scheduler logic, incremental changes, and user intervention |
+| [Implementation plan](IMPLEMENTATION-PLAN.md) | Milestones and acceptance criteria |
+| [Review notes](REVIEW-NOTES.md) | Design review findings and unresolved validation gates |
 
-## 6. Reliability and autonomy
+## 8. Runtime and provider boundaries
 
-- Persist and authorize work before external submission. Treat an accepted request with a lost response as an **unknown submission**; never blindly repeat a potentially paid call.
-- A remote success becomes a usable take only after its media is stored and verified locally.
-- Enforce budgets, retry limits, and review policy in application tools. Instructions in a skill do not grant spending authority.
-- Bind approvals to revisions and action scope. A material change requires renewed authorization only when it falls outside the standing policy or existing approval.
-- Let job monitoring and rendering continue without an active Codex turn. Restarted directors rebuild context from project state.
-- Preserve prior outputs. A targeted revision or failed render must not require rerunning the whole project.
+Use a locally scoped Codex App Server adapter over stdio and OpenSlate MCP tools, subject to a pinned-release compatibility test. The official documentation covers session integration and skill activation; OpenSlate's version locks, tool policies, and plan execution are application features. [Codex App Server](https://learn.chatgpt.com/docs/app-server), [Codex skills](https://learn.chatgpt.com/docs/build-skills)
 
-The [component design](COMPONENT-DESIGN.md) specifies state transitions, budget treatment, worker ownership, timeline validation, and the failure recovery paths behind these rules.
-
-## 7. Cloud now, local later
-
-Both H3 cloud and a later local worker implement a semantic video-provider contract: describe capabilities, prepare a request, submit, inspect status, and retrieve outputs; cancellation and reconciliation are optional capabilities. The planner validates what each provider actually supports.
-
-The Python worker owns model loading, GPU placement, inference, and model-specific preprocessing. TypeScript retains project state, scheduling, authorization, asset identity, and timeline/render logic. Requests use transferable artifact references, not filesystem paths assumed to exist on another machine.
-
-The published H3 stack has Python dependencies. Its released base model is not the complete hosted pipeline: Context-IR and Regenerate-2K are described as outside the open-source release. Local capability and quality parity must therefore be evaluated rather than assumed. [H3 repository](https://github.com/MiniMax-AI/MiniMax-H3), [H3 dependencies](https://github.com/MiniMax-AI/MiniMax-H3/blob/main/requirements.txt)
-
-## 8. Delivery strategy
-
-Prove the runtime/tool boundary first. Then build one complete short video path, prove restart and one-shot replacement, and expand to the multi-minute acceptance case. Introduce local H3 only after the provider contract works against both a fake asynchronous provider and cloud H3.
-
-The first implementation should optimize for a small, understandable contributor setup and inspectable project state. Additional orchestration frameworks, multi-agent director hierarchies, distributed queues, and a full editor need demonstrated requirements before introduction.
-
-See the [implementation plan](IMPLEMENTATION-PLAN.md) for milestones, exit criteria, unresolved choices, and the first engineering tasks.
+Providers expose their actual conditioning modes and limits. Cloud success is not local completion until media is copied and validated. Preserve ambiguous submissions without blindly repeating paid requests. H3 cloud and local Base must remain separate capability profiles. Python owns local inference, while TypeScript retains scheduling, policy, plans, and editing; any hybrid hosted stages are explicit TypeScript jobs. Local H3 inference alone does not make the Codex director or image generation offline.

@@ -1,160 +1,121 @@
 # OpenSlate — Implementation Plan
 
-Companion to the [overall design](README.md) and [component design](COMPONENT-DESIGN.md). This is a proposed sequence, not a time or cost commitment. Build a complete vertical slice before adding more providers or agent hierarchies.
+**Version:** 0.2 · September 10, 2026
+**Status:** direction and acceptance gates; the repository remains a basic application skeleton.
 
-## 1. Decision register
+See the [architecture](README.md), [component overview](COMPONENT-DESIGN.md), [skill/tool framework](SKILLS-AND-TOOLS.md), and [execution/editing design](EXECUTION-AND-EDITING.md).
 
-| Item | Status | Design treatment |
-|---|---|---|
-| TypeScript application, Codex director | Selected | Foundation of all milestones |
-| H3 cloud first, local Python H3 later | Selected | Provider interface from the start; local execution deferred |
-| GPT Image 2 asset generation | Selected | Initial image adapter |
-| Local web app / own credentials | Proposed, awaiting confirmation | Default deployment; no hosted multi-user scope |
-| Narrated 2–5 minute acceptance example | Proposed, awaiting confirmation | Architecture also accommodates other genres |
-| Plan/reference review then budgeted execution | Proposed, awaiting confirmation | Policy supports full-auto and per-shot review later |
-| Imported narration/music first | Proposed | Exact speech/music provider selection deferred |
-| App Server stdio + MCP | Proposed implementation | Phase 0 proves a compatible pinned release |
-| Fastify, React/Vite, Zod, SQLite, local files, FFmpeg | Proposed implementation | Keep packages replaceable behind domain boundaries |
-| Repository license | MIT | Track dependency/model licenses separately |
+## 1. Delivery priorities
 
-The product defaults remain provisional. They do not change the selected TypeScript/Codex/cloud-to-local boundary. Multi-user hosting would materially expand the first milestone and should not be assumed implicitly.
+1. Prove reusable skill/tool lifecycle with a very small capability set.
+2. Prove code-plan compilation, parallel execution, and a targeted edit against fake media.
+3. Connect real image/video providers and render a short complete sequence.
+4. Validate recovery, useful preview latency, and multi-minute editing before widening feature scope.
+5. Add optional local H3 execution after the provider boundary is proven.
 
-## 2. Suggested repository ownership map
+Continuity and asset direction start as references inside `production`. The initial second skill is `plan-authoring`. More specialist skills, more director agents, and more model-facing tools are not prerequisites.
 
-```text
-apps/
-  web/                     # React workspace, storyboard, review and timeline
-  server/                  # Local HTTP API, SSE, runtime and worker supervisor
-  worker/                  # Job dispatch, reconciliation, ingestion and rendering
-  cli/                     # Setup, project import/export, diagnostics, headless commands
-packages/
-  domain/                  # Entities, revisions, policies and invariants
-  contracts/               # Versioned API/tool/provider schemas
-  persistence/             # SQLite repositories, migrations, transaction/outbox logic
-  artifacts/               # Blob store, ingestion, derivatives, cloud media transfer
-  director/                # Runtime interface, context builder, wakeup/session manager
-  director-codex/          # App Server adapter and pinned protocol bindings
-  tools/                   # MCP transport and shared domain-command bindings
-  production/              # Scene/shot planning validation and dependency analysis
-  jobs/                    # Admission, attempts, leases, retry and budget ledger
-  providers/               # Image/video contracts, GPT Image 2, H3 cloud, fake provider
-  timeline/                # Edit model, time conversions and validators
-  render/                  # FFmpeg compiler, profiles and output checks
-skills/                    # Versioned creative instructions and reference guides
-examples/                  # Synthetic demo, sample briefs and portable projects
-docs/                      # Setup, architecture, provider contracts and troubleshooting
-workers/h3-python/         # Later optional local inference package
-```
+## 2. Decisions and assumptions
 
-These are ownership boundaries, not a requirement to create every package immediately. Start with a few packages and split when dependencies justify it. Application code must not import a provider’s raw response schema outside its adapter or Codex protocol types outside `director-codex`.
-
-## 3. Milestones and exit criteria
-
-### Phase 0 — Prove the integration boundaries
-
-**Build:** a minimal TypeScript service, pinned Codex adapter, one OpenSlate MCP tool, a small versioned project object, and fake asynchronous generation. Use a read-only project projection and scoped scratch space. Establish how local media reaches H3, and which credentials each component needs.
-
-**Verify:**
-
-- Start/authenticate the chosen Codex release; load a skill; call an MCP tool; receive stream/turn events; complete a user-input/approval request round trip; interrupt; and resume after a restart.
-- Demonstrate a real permission boundary: the agent cannot read media-provider keys or write authoritative state directly, and unapproved jobs are rejected by the service.
-- Prove that submitting a fake job returns promptly, completes after the Codex turn ends, and produces one durable result despite duplicate wakeups or a replayed turn with fresh tool IDs. Use application-owned generation intents.
-- Verify project/action scoping across two projects and that an interrupted director stays paused despite completion events. Reconcile a lost turn-start acknowledgment before starting another turn.
-- Generate protocol types or validate checked-in bindings for the pinned release. Confirm release support for the exact stdio features used.
-- Confirm model input support for sampled image review; leave audio/video interpretation claims out until tested.
-- With a separately authorized test budget and configured credentials, run one image request and one H3 request, including input transfer and output download. Record actual responses, latency, usage availability, and capability assumptions.
-
-**Exit:** a working runtime/tool/job seam, a documented startup path, and a decision on App Server versus the bounded-run SDK fallback. If App Server fails the gate, retain Codex as director and adjust the adapter; do not replace the selected runtime silently.
-
-**Validation status:** the skeleton has no Codex or live generation integration yet. Pin and test the intended runtime and provider behavior during Phase 0.
-
-### Phase 1 — Build one complete short production
-
-**Build:** project/bible/scene/shot schemas, revision commits, asset ingestion, GPT Image 2 and H3 adapters, durable attempts and budget admission, one director with core skills, and a basic storyboard.
-
-Support a 30–60 second sequence with a few scenes and reusable references. Add imported audio, simple take selection, ordered trims/cuts, a draft timeline, and MP4 export. Include no-credential demo mode using fake jobs and small redistributable synthetic media.
-
-**Exit:** brief → reviewed plan → selected reference → generated takes → edited timeline → playable export, with exact provenance and visible job costs. Successful export does not depend on the original conversation remaining available.
-
-### Phase 2 — Prove recovery and selective revision
-
-**Build:** complete reconciliation, phase-specific retries, ingest recovery, fencing, domain events/wakeups, pause/cancel semantics, revision impact lists, and scoped approvals. These safeguards begin in Phase 1; this phase validates difficult failure paths before broad use.
-
-**Exit:** restart during each job phase; recover a known remote job without resubmission; expose an unknown submission without silently repeating it; survive failed output downloads; and replace one shot while leaving unrelated media intact. An old result arriving after an edit cannot replace the new selection. Concurrent budget requests cannot double-admit the same allowance.
-
-### Phase 3 — Deliver the multi-minute authoring experience
-
-**Build:** scene-level planning and context retrieval, audio cue planning, batch production controls, bounded take review, timeline reorder/trim controls, captions, transitions, audio fades/mixing, scene previews, and final render validation.
-
-**Exit:** the agreed multi-minute reference project meets its narrative and timing targets; the user can inspect decisions and revise a scene or shot without a full rerun. Measure continuity issues and regeneration burden on several representative briefs. Use those results to set expectations; do not claim universal long-form coherence from a single demo.
-
-### Phase 4 — Prepare the open-source release
-
-**Build:** clean installation, dependency checks, schema migrations/backup/import/export, examples, diagnostic tooling, provider fixture tests, contribution guide, dependency license inventory, and documented extension contracts.
-
-**Exit:** a new contributor can run the synthetic demo with no API spend and the cloud workflow with their own credentials. Test cloud-mode setup on the declared OS matrix. Document shutdown/sleep behavior, credential locations, disk use, paid-call limits, and unsupported provider features. Public release readiness requires the Phase 2 recovery guarantees, not only an attractive demo.
-
-### Phase 5 — Add local H3 inference
-
-**Build:** versioned Python worker API and worker persistence, idempotent job acceptance, model/capability discovery, artifact transfer, warm model loading, GPU admission, progress, and failure recovery. Implement the TypeScript local-provider adapter against that API.
-
-**Exit:** the same OpenSlate project and editing flow work with local Base capabilities. Benchmark the chosen hardware/runtime; distinguish local-only and hybrid hosted enhancement. Verify cancellation/restart behavior and model identity. Cloud behavior and local installation remain independent; cloud users still do not install Python or model weights.
-
-## 4. Acceptance tests that exercise the design
-
-| Test | What it proves |
+| Selected direction | Still provisional |
 |---|---|
-| No-key synthetic end-to-end project | Installation, tools, edits, jobs, and export without provider spend |
-| Short real cloud production | Actual provider integration, reference transfer, output ingestion |
-| Lost create response in fake provider | Unknown-submission handling and retained budget liability |
-| Creation client with automatic retries disabled | No hidden duplicate paid calls after ambiguous failure |
-| Worker crash and lease takeover | Existing receipts monitored; stale progress fenced; late correlated receipt evidence preserved |
-| Crash during blob/metadata publication | Recovery does not expose a missing artifact as ready |
-| Concurrent admission near cap | Atomic reservation and job creation |
-| User edits while director proposes a patch | Revision conflict prevents lost updates |
-| Reference/wardrobe revision mid-generation | Correct dependency invalidation and late-result lineage |
-| Director restart after batch completion | Project reconstruction and coalesced wakeups |
-| Director replay with fresh tool IDs | Logical generation intent prevents duplicate admission |
-| User authorizes replacement of unknown submission | New reservation created while original liability remains |
-| H3 stop control during accepted work | Stops new work without unsafe remote record deletion |
-| Unsupported conditioning combination | Failure before spend, with a clear planning alternative |
-| Different source frame rates and audio rates | Correct normalization, trims, and timeline duration |
-| Killed render followed by retry | Frozen edit survives and existing export remains intact |
-| Export/import and checksum verification | Portable state independent of runtime conversation |
-| Fake local worker with different capabilities | Provider abstraction handles non-parity explicitly |
+| TypeScript application, Codex director | Exact pinned Codex release and adapter compatibility |
+| Code-authored operation plan and deterministic executor | Concrete restricted planning-language syntax |
+| Two skills, five domain tools, four operation families | Later skill split points based on usage |
+| Scoped edits, stable work identities, output reuse | UI detail and review presentation |
+| GPT Image 2 and H3 cloud first; Python worker later | Local inference hardware/runtime |
+| Public repository with MIT license | Packaging/dependency distribution details |
 
-Use unit tests for timeline arithmetic, validation, budget admission, and revision conflicts; integration tests for runtime/MCP boundaries, jobs, and artifacts; and end-to-end tests for production and recovery. Live provider tests are explicit, bounded-cost checks and should not run in ordinary contributor CI. Synthetic failures test contracts; they cannot establish undocumented provider guarantees.
+The initial product assumptions remain a single-user local app, narrated 2–5 minute acceptance example, imported narration/music, and plan/reference review followed by budgeted execution. Confirm them before setting product acceptance thresholds; they do not prevent proving the framework with fake operations.
 
-## 5. Quality and cost evaluation
+## 3. Components to implement, without premature package proliferation
 
-Record technical success separately from creative acceptance. Technical success means valid, available media and an export matching the edit. Creative acceptance measures story coverage, character/style continuity, action/prompt adherence, pacing, and usefulness of agent revisions.
-
-For each representative project, record output duration, generated seconds, take count, accepted takes, regeneration reasons, estimated/reported spend, queue/generation/ingestion/render time, and unresolved liabilities. Ratios such as generated seconds per accepted second show waste without requiring a fixed provider price assumption.
-
-Use a small curated set of briefs spanning the initial format, a recurring character, a location change, an audio-led section, and a requested shot replacement. Set release quality thresholds after the first measured pilots. Runtime model and provider behavior may change, so record versions with results.
-
-## 6. Open questions and validation work
-
-| Question | Why it matters | Resolve by |
+| Boundary | Initial home | Add when needed |
 |---|---|---|
-| First genre and typical duration | Planning, audio, and creative acceptance emphasis | Before Phase 1 acceptance brief |
-| Local app versus hosted service | Identity, isolation, storage, deployment scope | Before implementation foundation |
-| Default autonomy and budget behavior | Review screens and admission policy | Before paid batch execution |
-| Narration/music generation provider | Integrated audio production and cost | Before claiming full audio generation |
-| Codex release and authentication path | Installation and runtime compatibility | Phase 0 |
-| H3 transfer path and URL lifetime | Reference availability from a local app | Phase 0 |
-| H3 idempotency/cancellation/reconciliation details | Unknown states and potentially duplicate spending | Phase 0; retain conservative defaults if unverified |
-| Real latency/concurrency/pricing behavior | Batch sizing, estimates, user expectations | Authorized pilot measurements |
-| Local GPU/runtime/checkpoints | Memory, performance, supported modes | Before Phase 5 |
-| Dependency licenses and distribution packaging | Public contribution and dependency distribution | Before Phase 4 release |
+| Project records, constraints, revisions | `packages/core` | Dedicated persistence/artifact packages |
+| Codex adapter, scoped context, skill lock | `packages/director` | Runtime-specific package once adapter warrants it |
+| Tool descriptors and shared domain handlers | Server modules with versioned contracts | Separate tool package when reused |
+| Plan parser, graph compiler, change comparison | Core execution module | Separate compiler package if substantial |
+| Scheduler, job records, events | Server/worker modules | Separate worker process for generation/rendering |
+| Capability discovery and media adapters | `packages/providers` | Provider-specific packages when useful |
+| Timeline and trusted FFmpeg compilation | Core media modules | Dedicated timeline/render packages |
+| Creative instructions and reference examples | `skills/production`, `skills/plan-authoring` | Specialist skills after demonstrated need |
+| Local inference | Deferred `workers/h3-python` | Python job API, model runtime, GPU management |
 
-## 7. First implementation work items
+These are design ownership boundaries, not a request to create empty packages for every box in a diagram.
 
-1. Confirm or keep the three product assumptions visible, and choose one representative brief.
-2. Initialize a minimal TypeScript workspace with domain contracts and a fake provider.
-3. Implement the Codex adapter/MCP spike with project state outside agent write access.
-4. Define scene/shot/take/spec/timeline revisions and durable command idempotency.
-5. Implement job admission, reservations, submission ambiguity, and atomic artifact ingestion.
-6. Complete the short end-to-end path with cloud adapters and a basic FFmpeg edit.
+## 4. Milestones
 
-Avoid starting with a full timeline UI or a library of autonomous subagents. The first useful engineering proof is a small film that can survive a restart and a targeted revision.
+### Phase 0 — Skill/tool runtime and compilation proof
+
+**Build:** two minimal skill packages, an OpenSlate catalog/immutable lock, scoped request context, the five domain tool contracts, a local Codex/MCP adapter, and a small parser/compiler for the four operation families plus references and gates. Use fake handlers only.
+
+**Exit:** a new request selects pinned skills; a follow-up request preserves the same lock and settled intent; runtime recreation reinjects the necessary guidance; unexpected skills and incompatible tools are rejected; the agent authors and prepares a valid graph with no side effects. Test runtime input/approval round trips, interruption, and uncertain turn-start recovery against the pinned release.
+
+A source skill edit must not alter an active snapshot. Adding a test skill or operation should require registration and focused tests, not scattered changes across the system. Resolve the exact planning-language subset here; the example is not a promise of general TypeScript support.
+
+### Phase 1 — Parallel execution and live edits with fake media
+
+**Build:** stable node/candidate identities, graph comparison, ready queue, policy/budget admission, scoped edit holds, transactional patch publication, progress events, and a fake provider capable of delayed completion/failure.
+
+**Exit:** two independent branches overlap; one reference gate does not block unrelated work; a mid-run shot patch reuses unaffected outputs; compatible in-flight work attaches correctly; stale outputs cannot replace new selections. Test a trim-only change, a deliberate new take with identical inputs, conflicting edits, an abandoned edit hold, and replay with fresh model tool-call IDs.
+
+The compiler may rebuild the entire normalized graph. The acceptance criterion is preservation of valid execution and artifacts, not an incremental compiler.
+
+### Phase 2 — Short complete cloud production
+
+**Build:** real GPT Image 2 and H3 adapters, cloud-reachable reference transfer, durable receipts/ingestion, a simple storyboard, imported audio, take selection, a basic timeline, and FFmpeg rendering. Maintain the fake no-key demonstration path.
+
+**Exit:** a bounded 30–60 second sequence runs from brief to usable export and supports replacing one shot. Record actual access, capability behavior, output transfer, latency, and usage availability. Keep provider calls opt-in with a separately authorized test allowance. A local app path alone is not a valid cloud reference URL.
+
+### Phase 3 — Recovery and fast multi-minute iteration
+
+**Build:** complete reconciliation, phase-specific retries, cost accounting, output validation, scene previews, scoped creative review, and lightweight timeline controls. Recovery rules begin with Phase 1; this phase hardens them for real providers and longer runs.
+
+**Exit:** restart while queued, submitting, monitoring, ingesting, and rendering. Preserve unknown submissions and liabilities, delayed receipt evidence, exact take lineage, and prior previews. Demonstrate the agreed multi-minute project and measure a targeted edit's turnaround and extra work. Jobs advance without a model turn for each poll or completed node.
+
+### Phase 4 — Open-source release readiness
+
+**Build:** clean installation, migrations/export/import, examples, contribution instructions, diagnostics, compatibility fixtures, and a declared OS matrix. Keep precise provider/runtime implementation notes separate from high-level architecture documents.
+
+**Exit:** a contributor can run the fake demo without credentials and the cloud path with their own credentials. The required recovery/editing tests pass. Performance and quality statements are supported by measured representative projects rather than assumed speedups.
+
+### Phase 5 — Optional local H3 worker
+
+**Build:** Python job/capability API, persistent accepted work, transferable artifacts, warm model loading, GPU admission, and a TypeScript local-provider adapter.
+
+**Exit:** the same project/change/scheduler flow works with actual local capabilities. Local-only H3 does not make hidden hosted enhancement calls. TypeScript composes any explicitly configured hybrid stages. Benchmark hardware and model behavior separately; cloud users still do not install Python or weights.
+
+## 5. Architecture acceptance matrix
+
+| Case | Must demonstrate |
+|---|---|
+| Follow-up request and context compaction | Same capability lock; fresh scoped project state; no replayed media effects |
+| Skill reference changed on disk | Active snapshot unchanged until an explicit upgrade |
+| Unknown operation or invalid plan | Useful compiler diagnostics before any side effect |
+| Creative discussion before plan code exists | Project-only change persists decisions without paid execution |
+| Intent changes while prompt text stays the same | Stale prompt provenance blocks unreviewed reuse/dispatch |
+| Patch completes during a user pause | Only its own hold clears; dispatch remains paused |
+| Two independent shots | Overlapping execution within capacity/budget |
+| Review gate on one branch | Other ready branches proceed |
+| Close-up request on one shot | Focused patch, reused unrelated takes, visible continuity consequences |
+| Trim/music/caption edit | Reuse generation; rebuild only affected editing/render work |
+| Mid-run result after unrelated edit | Compatible candidate remains attachable |
+| Mid-run result after replacement | Historical take retained; no current-selection overwrite |
+| Two competing edits | Revision conflict and explicit rebase, not silent lost updates |
+| Director crash during edit | Hold remains visible; no automatic resumption of spending |
+| Lost provider create response | Unknown liability retained; no blind resubmission |
+| Late receipt after worker ownership changes | Correlated evidence reconciled without stale progress overwrite |
+| Replay or identical deliberate new take | Deduplication and intentional regeneration remain distinct |
+| Render for an older working edit finishes | Previous export kept as history, not promoted over new target |
+| Restart/import/export | Project survives independently of conversation history |
+
+Use narrow unit tests for compiler normalization, dependency impact, timing, revision checks, and admission. Use integration tests for registry/runtime isolation, fake execution, and race/recovery behavior. Real provider checks are bounded pilots rather than default contributor CI.
+
+## 6. Measurements and unresolved choices
+
+Measure orchestration overhead separately from provider inference: request-to-plan latency, model/tool round trips per batch, ready-to-dispatch delay, resource occupancy, time to first useful preview, and edit-to-updated-preview latency. Track generated seconds, reused takes, regeneration reasons, estimates/reported costs, and unsettled liabilities.
+
+Do not promise a speed multiplier before measurement. Parallelism shortens only independent portions of the dependency path; review gates, capacity, and provider latency still matter. Start with straightforward scheduling and add optimization only where these measurements show a bottleneck.
+
+Unresolved product choices are video genre/duration, default autonomy, audio generation provider, and local versus hosted distribution. Implementation gates are exact Codex/skill behavior, the bounded plan syntax, H3 transfer/recovery behavior, and local inference capabilities. None requires expanding the initial skill/tool inventory.

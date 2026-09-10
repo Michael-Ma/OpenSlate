@@ -1,14 +1,43 @@
 # OpenSlate — Design Review Notes
 
-**Reviewed:** September 8, 2026. These notes record the architecture review before the initial application skeleton. Current build checks are reported separately in repository CI.
+## Revision 0.2 — September 10, 2026
 
-## Review method
+This revision responds to the request for a smaller initial skill/tool set, reliable capability lifecycle across requests, code-authored fast execution, live targeted edits, and a high-level component document. It changes design documents only; the application remains a skeleton.
+
+### Changes reviewed
+
+- Two initial skills, with continuity and asset direction kept as production references.
+- OpenSlate-owned immutable package/handler locks and explicit activation across requests, separate from native Codex discovery.
+- Five typed domain tools, including project-only creative changes before plan code exists.
+- Restricted TypeScript plan source compiled without side effects into a durable operation graph.
+- Parallel ready-work execution, semantic versus execution dependencies, and result reuse across plan revisions.
+- Scoped edit holds, atomic patches, stale-result protection, and explicit user-pause ownership.
+- Short diagrams and execution algorithms in the component overview, with dedicated framework/execution companions.
+
+### Review findings incorporated
+
+| Finding | Resolution |
+|---|---|
+| Discussion-only decisions had no persistence route | Prepare/apply tools accept a project-only variant without generating execution intents |
+| Literal prompt text could remain unchanged after creative intent changed | Bind prompts/specs to generation-relevant intent; require reauthoring or reconfirmation before reuse/dispatch |
+| Edit scope could miss semantic dependents | Initial hold covers known semantic and execution influence; newly discovered in-flight work is reported honestly |
+| Patch completion or model controls could override a user pause | Release only the owned edit hold; all other applicable controls remain in force |
+
+Independent Codex-framework and execution-reliability reviews were followed by an author consistency pass. Validation checks document links, code fences, diagram structure, and alignment across architecture, component, framework, execution, and roadmap documents. Diagram rendering and the illustrative planning language are not runtime-validated implementations.
+
+The new native Codex claims were checked against official skill, MCP, and App Server documentation. Compatibility with the chosen release, precise planning-language support, provider behavior, real speed gains, and creative quality remain implementation gates. The defaults for video format, distribution, and autonomy remain provisional.
+
+## Revision 0.1 — September 8, 2026 (historical)
+
+The following records the initial architecture review before the application skeleton and the 0.2 document reorganization. References to component count and document layout describe that earlier snapshot. Current behavior is proposed in the 0.2 documents; build checks are tracked separately in CI.
+
+### Initial review method
 
 The primary author drafted the architecture, ten component breakdowns, ownership map, and phased plan. Three independent agents researched/reviewed Codex integration, media/H3 architecture, and execution reliability. The author evaluated their findings, revised the documents, and checked the resulting cross-document consistency and internal navigation.
 
 Provider/runtime facts were checked against primary documentation. Suggested OpenSlate interfaces and behavior are labeled as proposals. No image/video generation was purchased and no end-to-end runtime, provider, or render test was performed.
 
-## Material findings resolved in the draft
+### Material findings resolved in the draft
 
 | Finding | Resolution |
 |---|---|
@@ -25,7 +54,7 @@ Provider/runtime facts were checked against primary documentation. Suggested Ope
 | Optional context enhancement could be confused with vendor-internal processing | Distinguish extra standalone enhancement jobs from the normal hosted request pipeline |
 | Hybrid local/cloud execution could hide hosted calls inside Python | TypeScript composes explicit hosted and local jobs; Python retains inference-only responsibility |
 
-## Cross-component checks
+### Cross-component checks
 
 The final draft addresses the whole production loop: brief, story/bible, scenes/shots, reference assets, prompt compilation, generation, take review, timeline/audio, render/post-processing, and selective revision. Each has an owner and an output artifact or committed state.
 
@@ -33,7 +62,7 @@ It also distinguishes creative acceptance from technical completion; project per
 
 The roadmap starts with a small complete video and a fake provider. It reserves advanced editor features, multiple autonomous directors, hosted multi-user infrastructure, and GPU inference for demonstrated needs or later phases.
 
-## Remaining uncertainty
+### Remaining uncertainty
 
 - Product assumptions still need confirmation: first genre/duration, local versus hosted distribution, and default autonomy. Imported narration/music is a proposed initial scope.
 - Codex integration is documentation-backed. Compatibility testing of the intended pinned runtime remains a Phase 0 gate.
