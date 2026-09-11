@@ -1,6 +1,6 @@
 # OpenSlate — Codex and Provider Boundaries
 
-**Version:** 0.3 · September 10, 2026
+**Version:** 0.4 · September 10, 2026
 **Status:** proposed integration, verified against official documentation; adapters remain unimplemented.
 
 ## 1. Two different extension boundaries
@@ -56,7 +56,7 @@ We use Codex as the director runtime. Its conversation history is not the produc
 3. Codex reasons with the production/plan-authoring guidance and calls OpenSlate MCP tools. The application reads context, prepares changes, or commits authorized revisions through the same services used by its UI.
 4. Normalized text/progress/questions stream to the browser. Runtime-specific IDs stay in the adapter/session mapping; durable project IDs identify the film and jobs.
 5. Once the graph is committed, workers independently generate keyframes, await recorded human approval, dispatch video jobs, and render previews. Routine polling does not require Codex turns.
-6. A new user edit or unresolved decision can start/steer a director turn. Interrupting Codex also persists OpenSlate's director-automation pause; it does not cancel already accepted provider jobs or automatically resume paused dispatch.
+6. A new user edit or unresolved decision starts a director request. V0 authority-changing requests revoke the previous tool epoch and drain/replace its runtime process before obtaining new mutation authority; informational steering is optional only when authority remains unchanged and attribution is proven. The [runtime design](../technical/DIRECTOR-RUNTIME.md) defines this boundary. Interrupting Codex also persists OpenSlate's director-automation pause; it does not cancel already accepted provider jobs or automatically resume paused dispatch.
 
 All native method names, event details, approval round trips, and effective tool restrictions must pass a pinned-release compatibility test. Native general-purpose file/shell capabilities must not provide a second path to credentials, paid-generation APIs, or canonical state writes. The adapter verifies effective runtime permissions and the MCP catalog before production; prompt instructions alone are insufficient.
 

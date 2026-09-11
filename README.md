@@ -63,6 +63,8 @@ docs/                 Documentation index and design files
 Start with the [documentation index](docs/README.md).
 
 - [Architecture](docs/design/README.md)
+- [Detailed technical designs](docs/technical/README.md)
+- [Building with Codex and GPT-6](docs/development/CODEX-WORKFLOW.md)
 - [Component design](docs/design/COMPONENT-DESIGN.md)
 - [Skills and tools](docs/design/SKILLS-AND-TOOLS.md)
 - [Execution and editing](docs/design/EXECUTION-AND-EDITING.md)

@@ -1,9 +1,11 @@
 # OpenSlate — Component Design
 
-**Version:** 0.3 · September 10, 2026
-**Level:** architecture and execution logic. API fields, SQL tables, worker protocols, and implementation details are intentionally deferred.
+**Version:** 0.4 · September 10, 2026
+**Level:** architecture and execution logic. API fields, SQL tables, worker protocols, and implementation details are covered in the technical companions.
 
 Read the [overall design](README.md) first. Focused companions cover [skills/tools](SKILLS-AND-TOOLS.md), [execution/editing](EXECUTION-AND-EDITING.md), [Codex/providers](CODEX-AND-PROVIDERS.md), and a [commercial walkthrough](COMMERCIAL-WALKTHROUGH.md).
+
+Implementation-level contracts for these components are in the [technical design index](../technical/README.md).
 
 ## 1. Components and ownership
 
@@ -166,7 +168,7 @@ Keep a versioned shot-level plan even though normal review shows summaries: scen
 - Project state and the budget ledger remain outside direct agent write access.
 - A logical patch commits atomically; external media production completes asynchronously and cannot be rolled back like a database transaction.
 - Provider completion becomes usable media only after local ingestion succeeds.
-- New candidates require an authorized initial slot, a scoped user creative request, or trusted technical-failure evidence with retry allowance; the agent cannot manufacture a recovery reason.
+- Creative candidates consume an immutable authorized initial/user-request grant slot once; technical recovery keeps that candidate and creates another attempt with trusted failure evidence and retry allowance. The agent cannot manufacture a recovery reason.
 - Every video job requires an exact human-reviewed keyframe and current relevant intent; general autonomy policy cannot bypass that gate.
 - Review/authorization gates block only the work they govern.
 - A user interrupt pauses automatic director turns until resume; dispatch controls and monitoring are separate.

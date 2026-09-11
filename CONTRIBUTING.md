@@ -1,6 +1,6 @@
 # Contributing to OpenSlate
 
-OpenSlate is at the skeleton stage. Start with the [design](docs/design/README.md) and [implementation plan](docs/design/IMPLEMENTATION-PLAN.md). For a substantial feature or architecture change, discuss its scope in an issue before implementing it.
+OpenSlate is at the skeleton stage. Start with the [design](docs/design/README.md) and [implementation plan](docs/design/IMPLEMENTATION-PLAN.md). For a substantial feature or architecture change, discuss its scope in an issue before implementing it. The [technical index](docs/technical/README.md) defines target component contracts, and the [Codex/GPT-6 workflow](docs/development/CODEX-WORKFLOW.md) describes focused implementation and review. These are proposed designs; only checked-in implementation and passing tests establish current behavior.
 
 Use Node.js 24 and the pnpm version declared in `package.json`:
 

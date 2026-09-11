@@ -1,137 +1,163 @@
-# OpenSlate — Implementation Plan
+# OpenSlate — Development Plan
 
-**Version:** 0.3 · September 10, 2026
-**Status:** direction and acceptance gates; the repository remains a basic application skeleton.
+**Version:** 0.4 · September 10, 2026
+**Status:** detailed design complete for review; production features remain unimplemented. The existing repository provides the web/API skeleton and build/typecheck CI.
 
-See the [architecture](README.md), [component overview](COMPONENT-DESIGN.md), [skill/tool framework](SKILLS-AND-TOOLS.md), and [execution/editing design](EXECUTION-AND-EDITING.md).
+This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction; the [Codex development workflow](../development/CODEX-WORKFLOW.md) describes how to implement these slices with GPT-6.
 
-## 1. Delivery priorities
+## 1. Confirmed release scope
 
-1. Prove reusable skill/tool lifecycle with a very small capability set.
-2. Prove code-plan compilation, parallel execution, and a targeted edit against fake media.
-3. Connect image/video and narration adapters; render a short sequence after human keyframe review.
-4. Validate recovery, useful preview latency, and multi-minute editing before widening feature scope.
-5. Add optional local H3 execution after the provider boundary is proven.
+Single-user local application; user-configured model/credential profiles; up to 360 seconds of resolved output; uploaded or conversationally developed/generated narration; scene/shot plans and debug records; human-reviewed conditioning keyframes for every video shot; user-directed creative regeneration; bounded technical recovery; conversational creative edits and visual review/playback. Initial production integrations are Codex, GPT Image 2, H3 cloud and selected speech/transcription profiles. Python H3 workers, ten/thirty-minute releases and a direct timeline editor follow later.
 
-Continuity and asset direction start as references inside `production`. The initial second skill is `plan-authoring`. More specialist skills, more director agents, and more model-facing tools are not prerequisites.
+Two production skills, five agent tools and six worker operation families are sufficient. Development skills/plugins are separate and are not dependencies of the embedded director. No implementation slice should quietly expand this product scope.
 
-## 2. Decisions and assumptions
+## 2. Delivery sequence and dependencies
 
-| Selected direction | Still provisional |
-|---|---|
-| TypeScript application, Codex director | Exact pinned Codex release and adapter compatibility |
-| Code-authored operation plan and deterministic executor | Concrete restricted planning-language syntax |
-| Two skills, five domain tools, six operation families | Later skill split points based on usage |
-| Scoped edits, stable work identities, output reuse | UI detail and review presentation |
-| Up to six minutes; uploaded/generated narration; conversational creative edits | Exact first speech/transcription profiles and OS packaging |
-| Human keyframe review; user-directed quality changes | Review layout and performance thresholds |
-| Extensible LLM/image/video/audio profiles; Codex, GPT Image 2 and H3 first | Additional production adapters and local hardware/runtime |
-| Public repository with MIT license | Packaging/dependency distribution details |
+```mermaid
+flowchart LR
+    T00[00 Compatibility probes] --> T01[01 Core and persistence]
+    T01 --> T02[02 Commands and events]
+    T01 --> T03[03 Plan compiler]
+    T02 --> T04[04 Fake executor and review]
+    T03 --> T04
+    T02 --> T05[05 Review UI]
+    T02 --> T06[06 Codex and skills]
+    T03 --> T06
+    T04 --> T07[07 Narration workflow]
+    T04 --> T08[08 Local timeline and render]
+    T05 --> T11[11 Integrated conversational edits]
+    T06 --> T11
+    T07 --> T09[09 Image and audio APIs]
+    T08 --> T10[10 H3 short production]
+    T09 --> T10
+    T10 --> T11
+    T11 --> T12[12 Recovery and six minutes]
+    T12 --> T13[13 OSS release]
+    T13 --> Later[Local H3 and longer films]
+```
 
-The product decisions are confirmed: single-user local app with user-configured credentials; exports up to six minutes; uploaded or conversationally developed/generated narration; concise plan review plus human-approved keyframes for every shot; automatic technical recovery only; conversational creative editing and visual review. Ten- and thirty-minute films and direct timeline editing are later milestones. The [commercial walkthrough](COMMERCIAL-WALKTHROUGH.md) is the 150-second acceptance story, followed by a full six-minute boundary test.
+After shared contracts settle, UI fixture work, Codex integration and compiler/executor work can overlap with disjoint file ownership. Integrate one coherent behavior at a time. Each task below may contain several small PRs; a PR should have an independently reviewable outcome, not merely create empty modules.
 
-## 3. Components to implement, without premature package proliferation
+## 3. T00–T04: prove the foundation before real generation
 
-| Boundary | Initial home | Add when needed |
-|---|---|---|
-| Project records, constraints, revisions | `packages/core` | Dedicated persistence/artifact packages |
-| Codex adapter, scoped context, skill lock | `packages/director` | Runtime-specific package once adapter warrants it |
-| Tool descriptors and shared domain handlers | Server modules with versioned contracts | Separate tool package when reused |
-| Plan parser, graph compiler, change comparison | Core execution module | Separate compiler package if substantial |
-| Scheduler, job records, events | Server/worker modules | Separate worker process for generation/rendering |
-| Capability discovery and image/video/speech/transcription adapters | `packages/providers` | Provider-specific packages when useful |
-| Narration readiness, scripts, source segments and cues | Core project modules with production guidance | Separate audio modules as implementation grows |
-| Timeline and trusted FFmpeg compilation | Core media modules | Dedicated timeline/render packages |
-| Creative instructions and reference examples | `skills/production`, `skills/plan-authoring` | Specialist skills after demonstrated need |
-| Local inference | Deferred `workers/h3-python` | Python job API, model runtime, GPU management |
+### T00 — Compatibility and toolchain probes
 
-These are design ownership boundaries, not a request to create empty packages for every box in a diagram.
+**Dependencies:** current skeleton. **Homes:** disposable/test fixtures initially; finalized adapters in their existing packages.
 
-## 4. Milestones
+Verify Node 24 with the selected SQLite driver, Babel's TypeScript parser, the proposed JSON Schema validation path, and the installed FFmpeg feature set. Against a pinned Codex release, exercise process initialization, session resume, tool catalog, skill injection, input replies and interruption. Prove the fenced bridge/authorization epoch mechanism before trusting media tools. Record exact versions and observed capabilities; do not assume TypeScript 7 exposes the historical JavaScript compiler API.
 
-### Phase 0 — Skill/tool runtime and compilation proof
+**Exit evidence:** reproducible fixture scripts/results and a small compatibility matrix. Missing account/provider access remains a named gate. No paid media calls are needed; any live LLM smoke check uses an explicitly configured test allowance. Probes do not bypass the remaining product implementation.
 
-**Build:** two minimal skill packages, an OpenSlate catalog/immutable lock, scoped request context, the five domain tool contracts, a local Codex/MCP adapter, and a small parser/compiler for the six operation families plus references and human-only review gates. Use fake handlers only.
+### T01 — Shared contracts, identities and persistence
 
-**Exit:** a new request selects pinned skills; a follow-up request preserves the same lock and settled intent; runtime recreation reinjects the necessary guidance; unexpected skills and incompatible tools are rejected; the agent authors and prepares a valid graph with no side effects. Test runtime input/approval round trips, interruption, and uncertain turn-start recovery against the pinned release.
+**Dependencies:** T00. **Homes:** `packages/core/contracts`; server persistence/migrations.
 
-A source skill edit must not alter an active snapshot. Adding a test skill, media profile, or operation should require registration and focused tests, not scattered changes across the system. A fake second DirectorRuntime must satisfy the same domain-tool contract. Prove capability rejection for a video profile that cannot consume the approved keyframe. Resolve the exact planning-language subset here; the example is not a promise of general TypeScript support.
+Implement IDs/revisions, money/time types, project heads and initial manifests, command idempotency, grant slots, project events, holds and migration infrastructure. Add job/review families only as T03/T04 consumers land. Establish short transactions, project ownership checks, local data layout and artifact metadata foundations.
 
-### Phase 1 — Parallel execution and live edits with fake media
+**Exit evidence:** migration round-trip, two-connection transaction tests, duplicate command behavior, immutable purpose-bound slot consumption, and backup/restore of a minimal project. A recreated logical node cannot reuse a consumed slot.
 
-**Build:** stable node/candidate identities, graph comparison, ready queue, policy/budget admission, exact keyframe review records, scoped edit holds, transactional patch publication, progress events, narration readiness/segment revisions, and fake providers capable of delayed completion/failure.
+**Design:** [Data and persistence](../technical/DATA-PERSISTENCE.md).
 
-**Exit:** two independent branches overlap; an approved storyboard batch advances while an unapproved batch stays held; a mid-run shot patch reuses unaffected outputs; compatible in-flight work attaches correctly; stale outputs cannot replace new selections. Test a trim-only change, a deliberate new take with identical inputs, conflicting edits, an abandoned edit hold, and replay with fresh model tool-call IDs.
+### T02 — Application commands, conversation records and event feed
 
-The compiler may rebuild the entire normalized graph. The acceptance criterion is preservation of valid execution and artifacts, not an incremental compiler.
+**Dependencies:** T01. **Homes:** server application/http/events.
 
-### Phase 2 — Short complete cloud production
+Build project snapshots, persisted user requests, trusted actor/authority context, prepare/apply command infrastructure, controls, strict schema errors and snapshot/SSE reconnect. Add local session/origin protections and environment credential references. Keep typed key saving unavailable until a secure backend is implemented.
 
-**Build:** real GPT Image 2 and H3 adapters, configurable speech/transcription adapters, cloud-reachable reference transfer, durable receipts/ingestion, scene-grouped storyboard review, uploaded/generated narration, playback/comparison, conversational take selection, a basic internal timeline, and FFmpeg rendering. Maintain the fake no-key demonstration path.
+**Exit evidence:** idempotent command retry, revision conflict, hold ownership, negative/ambiguous review reply rejection, old authorization epoch rejection and reconnect with deliberately lagging projections. Tests verify canonical state and events together.
 
-**Exit:** a bounded 30–60 second sequence runs from brief to usable export and supports replacing one shot. Exercise uploaded audio and notes-to-script-to-speech paths; reject every video submission lacking current human keyframe approval; verify quality feedback cannot autonomously purchase a take. Record actual access, capability behavior, output transfer, latency, and usage availability. Keep provider calls opt-in with a separately authorized test allowance. A local app path alone is not a valid cloud reference URL.
+**Design:** [Application API](../technical/APPLICATION-API.md).
 
-### Phase 3 — Recovery and fast multi-minute iteration
+### T03 — Restricted plan compiler and exact review requirements
 
-**Build:** complete reconciliation, phase-specific retries, cost accounting, output validation, scene previews, scoped human review, conversational timing edits, and a read-only detailed-plan/debug view. Recovery rules begin with Phase 1; this phase hardens them for real providers and longer runs.
+**Dependencies:** T01; integrate with T02 when available. **Homes:** core planning modules and server preparation handler.
 
-**Exit:** restart while queued, submitting, monitoring, ingesting, and rendering. Preserve unknown submissions and liabilities, delayed receipt evidence, exact take lineage, and prior previews. Demonstrate the 150-second boots commercial and a six-minute project; measure first useful storyboard/scene preview and targeted edit turnaround/extra work. Validate duration at the product boundary, cue alignment, memory/queue behavior, review batching, and partial-source narration. Jobs advance without a model turn for each poll or completed node.
+Implement the bounded parser, symbol-to-service-ID mapping, typed operation descriptors, source/destination roles and ordering, normalized graph, canonical source, prompt provenance, human-review descriptors and typed patches. Support pending narration timing and the six-minute final-timeline constraint. No provider calls or financial reservation in compilation.
 
-### Phase 4 — Open-source release readiness
+**Exit evidence:** a two-shot fake plan compiles; omitted/mismatching review gates fail; malicious/nested unsupported syntax fails; source round-trips semantically; cycles and incompatible roles fail; cue placement-only changes preserve video fingerprints; changed creative intent cannot reuse stale prompts.
 
-**Build:** clean installation, migrations/export/import, examples, contribution instructions, diagnostics, compatibility fixtures, and a declared OS matrix. Keep precise provider/runtime implementation notes separate from high-level architecture documents.
+**Design:** [Plan compiler](../technical/PLAN-COMPILER.md).
 
-**Exit:** a contributor can run the fake demo without credentials and the cloud path with their own credentials. The required recovery/editing tests pass. Performance and quality statements are supported by measured representative projects rather than assumed speedups.
+### T04 — Durable fake execution and human approval
 
-### Phase 5 — Optional local H3 worker
+**Dependencies:** T02 + T03. **Homes:** server executor/worker and review services.
 
-**Build:** Python job/capability API, persistent accepted work, transferable artifacts, warm model loading, GPU admission, and a TypeScript local-provider adapter.
+Implement readiness, leases/fences, origin checks, exact approval equality, reservations, attempt phases, trusted technical retries and fake provider outcomes. Build an approval endpoint that can release exact scene members. Use controlled fake-provider barriers to exercise submission and completion races.
 
-**Exit:** the same project/change/scheduler flow works with actual local capabilities. Local-only H3 does not make hidden hosted enhancement calls. TypeScript composes any explicitly configured hybrid stages. Benchmark hardware and model behavior separately; cloud users still do not install Python or weights.
+**Exit evidence:** two independent scene branches overlap; unapproved videos never submit; technical retry retains a candidate while user-directed replacement creates a new one; unknown submission never silently repeats; a shot edit preserves unaffected work; user pause survives patch completion. This is the first executable production-engine proof, using API/test clients if UI is not yet ready.
 
-### Later product expansion — Ten/thirty minutes and direct editing
+**Design:** [Execution engine](../technical/EXECUTION-ENGINE.md), [providers/artifacts](../technical/PROVIDERS-ARTIFACTS.md).
 
-Keep duration ceilings configurable and use scene summaries, bounded context retrieval, paged review, and stable narration segments now. Add longer-film support only after separate 600/1,800-second workload, quality, recovery, and rendering validation. Introduce a direct timeline editor through existing change services later; conversation remains a supported editing surface.
+## 4. T05–T08: complete the fake/local product path
 
-## 5. Architecture acceptance matrix
+### T05 — Conversation and visual review workspace
 
-| Case | Must demonstrate |
-|---|---|
-| Follow-up request and context compaction | Same capability lock; fresh scoped project state; no replayed media effects |
-| Skill reference changed on disk | Active snapshot unchanged until an explicit upgrade |
-| Unknown operation or invalid plan | Useful compiler diagnostics before any side effect |
-| Creative discussion before plan code exists | Project-only change persists decisions without paid execution |
-| Notes, partial script, uploaded audio, mixed sources | Detect gaps; preserve decisions/source media; produce accepted audio and measured cues |
-| Unapproved or replaced keyframe | No affected video dispatch; batch approval covers exact displayed inputs |
-| Quality dislike versus technical error | Only eligible technical recovery is automatic; quality retries require user intent |
-| Agent requests extra take with approved frame and budget left | Reject without a scoped user request or trusted eligible failure record |
-| Changed narration | Realign immutable audio ranges/cue revisions; reuse takes for placement-only shifts and review changed duration/meaning |
-| Preparation before narration timing exists | Compile pending timing; gate dependent video dispatch and resolved assembly |
-| New profile outside active lock | Explicit successor lock/run boundary; preserve old attempts and enforce renewed review |
-| Alternate model/runtime profile | Same domain state, explicit capability checks, no secret leakage or lost jobs |
-| Six-minute release boundary | Accept up to 360 seconds and reject unsupported larger targets clearly |
-| Intent changes while prompt text stays the same | Stale prompt provenance blocks unreviewed reuse/dispatch |
-| Patch completes during a user pause | Only its own hold clears; dispatch remains paused |
-| Two independent shots | Overlapping execution within capacity/budget |
-| Review gate on one branch | Other ready branches proceed |
-| Close-up request on one shot | Focused patch, reused unrelated takes, visible continuity consequences |
-| Trim/music/caption edit | Reuse generation; rebuild only affected editing/render work |
-| Mid-run result after unrelated edit | Compatible candidate remains attachable |
-| Mid-run result after replacement | Historical take retained; no current-selection overwrite |
-| Two competing edits | Revision conflict and explicit rebase, not silent lost updates |
-| Director crash during edit | Hold remains visible; no automatic resumption of spending |
-| Lost provider create response | Unknown liability retained; no blind resubmission |
-| Late receipt after worker ownership changes | Correlated evidence reconciled without stale progress overwrite |
-| Replay or identical deliberate new take | Deduplication and intentional regeneration remain distinct |
-| Render for an older working edit finishes | Previous export kept as history, not promoted over new target |
-| Restart/import/export | Project survives independently of conversation history |
+**Dependencies:** T02 contracts; fixture development can overlap T03/T04. **Homes:** `apps/web`.
 
-Use narrow unit tests for compiler normalization, dependency impact, timing, revision checks, and admission. Use integration tests for registry/runtime isolation, fake execution, and race/recovery behavior. Real provider checks are bounded pilots rather than default contributor CI.
+Build conversation, narration readiness, concise scene plan, scene-grouped storyboard, member approval, shot-linked playback/chat, decision tray, progress and pause controls. Use fake media and persistent server snapshots. Detailed plans are read-only debug views. Do not build drag/drop timeline editing.
 
-## 6. Measurements and unresolved choices
+**Exit evidence:** browser flows for displayed subset approval, stale member refresh, conditional/negative replies, selected-shot conversation, previous-preview visibility and reconnect without restarting work. Keyboard review and bounded thumbnail loading work.
 
-Measure orchestration overhead separately from provider inference: request-to-plan latency, model/tool round trips per batch, ready-to-dispatch delay, resource occupancy, time to first useful preview, and edit-to-updated-preview latency. Track generated seconds, reused takes, regeneration reasons, estimates/reported costs, and unsettled liabilities.
+**Design:** [Review UI](../technical/REVIEW-UI.md).
 
-Do not promise a speed multiplier before measurement. Parallelism shortens only independent portions of the dependency path; review gates, capacity, and provider latency still matter. Start with straightforward scheduling and add optimization only where these measurements show a bottleneck.
+### T06 — Codex director, skill lifecycle and five tools
 
-Remaining integration choices are the first speech/transcription profiles, exact pinned runtime release, packaging/OS matrix, and measured performance thresholds. Implementation gates include runtime/model compatibility, bounded plan syntax, exact human-review enforcement, narration timing, provider transfer/recovery behavior, and future local inference capabilities. Product duration, distribution, autonomy, and conversational editing scope are settled; no further specialist skill or agent tool is needed for the confirmed scope.
+**Dependencies:** T02 + T03, informed by T00. **Homes:** `packages/director`, server supervisor and application tool handlers; two `skills/` packages.
+
+Implement scoped context, immutable catalog/locks, the production and plan-authoring skills, fixed MCP catalog, request/activation records, director queue, pending replies and process/bridge authority fencing. Add fake second-runtime fixtures and incompatible profile/skill cases. Reconstruct project state after replacing a runtime session.
+
+**Exit evidence:** a follow-up request preserves settled intent and locked skill content, produces a valid scoped plan, and cannot fabricate human approval or technical-retry authority. Interrupt/unknown-turn recovery preserves previous command effects. Measure process restart/resume overhead before optimizing the safe epoch boundary.
+
+**Design:** [Director runtime](../technical/DIRECTOR-RUNTIME.md), [skills/tools](../technical/SKILLS-TOOLS.md).
+
+### T07 — Narration readiness, source choices and cue propagation
+
+**Dependencies:** T04; conversation integration uses T05/T06. **Homes:** core narration, production references and fake audio adapters.
+
+Support absent/notes/draft/approved script independently of absent/partial/accepted audio; source choices and gaps; immutable script/audio segments; timing extraction and cue revisions; acceptance and scoped edits. Initial tests use fixtures/fake speech; user-uploaded recordings can already exercise real local media probing.
+
+**Exit evidence:** complete upload, notes-to-script, partial audio and mixed-source cases progress without restarting the conversation. Text edits cannot falsely mutate recorded audio. A longer earlier sentence shifts later placements while preserving compatible video; changed duration/meaning renews affected review.
+
+**Design:** [Narration](../technical/NARRATION.md).
+
+### T08 — Local artifacts, timeline and rendering
+
+**Dependencies:** T04; audio fixtures from T07 where needed. **Homes:** server artifact/media workers and core edit domain.
+
+Implement durable artifact installation and quarantine, normalized derivatives, exact take/audio resolution, integer frames/samples, simple cuts, imported music/captions/overlays, frozen manifests and FFmpeg rendering. Start with supplied media. Server completion projection chooses draft selections and conditionally promotes previews.
+
+**Exit evidence:** supplied clips render into a complete commercial; real frame/audio assertions pass; an old render cannot overwrite a new target; disk/cancel/crash recovery preserves inputs; scene previews and narration-only edits reuse media. Process-kill tests and documented filesystem synchronization guarantees are distinguished.
+
+**Design:** [Providers/artifacts](../technical/PROVIDERS-ARTIFACTS.md), [timeline/rendering](../technical/TIMELINE-RENDERING.md).
+
+## 5. T09–T13: connect real APIs and validate the release
+
+| Task | Dependencies | Build | Exit evidence |
+|---|---|---|---|
+| **T09 — Image and audio adapters** | T06–T08 | GPT Image 2, selected speech/transcription profiles, actual input transport, output ingestion and price/capability records | Bounded live fixtures; conditioning normalized before review; timing support verified per model; no hidden SDK submit retries |
+| **T10 — H3 short production** | T04, T08, T09 | H3 cloud adapter and 30–60-second full sequence | Every clip uses exact reviewed image; receipts/unknown states retained; no cancellation/delete race; playable export and one user-requested replacement |
+| **T11 — Integrated conversational revisions** | T05–T10 | End-to-end narration/story/frame/take/trim edits, impact summaries, renewed gates and old-preview retention | Mid-run edit, take reuse, project-only stale-plan hold, delayed old result, same-setup new take, no unauthorized quality regeneration |
+| **T12 — Recovery and six-minute acceptance** | T11 | Recovery hardening, 150-second boots example, six-minute workload, diagnostics/performance tuning | Restart at every effect boundary; exact cue/video/export timing; bounded memory/disk/review load; measured latency/cost/reuse and no duplicate simulated accepts |
+| **T13 — Open-source release packaging** | T12 | Production local launcher/assets, supported credential backend, clean install, migrations/export/import, examples and contributor docs | Fake demo without keys, cloud setup with own keys, documented OS/runtime matrix, restore starts paused, CI and release criteria pass |
+
+Real tests use explicit allowance and the user's configured credentials. A live test failure can alter an integration choice, but does not authorize switching models, opening public tunnels or increasing budget silently. The fake path stays available to contributors throughout.
+
+## 6. Later extensions
+
+**Local H3 worker:** after the provider boundary works, add an authenticated versioned Python job API, weights/capability reporting, warm inference, GPU admission, durable receipts and transferable artifacts. Keep SQLite, human approval, budgeting and hybrid-stage composition in TypeScript. Validate cloud/local feature differences independently.
+
+**Ten and thirty minutes:** raise duration only with separate 600/1,800-second acceptance fixtures and measured context/review/queue/storage/render behavior. Reuse scene summaries, cue revisions and paged review; do not feed the whole film into every director request.
+
+**Direct timeline editor:** reuse the existing typed change/selection services. Add UI editing after conversational behavior and conflict handling are proven.
+
+## 7. Review and implementation rules
+
+For each task create a bounded implementation brief that references the relevant documents, files, behavior and exit tests. Implement one vertical slice, run the appropriate checks, request an independent diff review, resolve actionable findings and record evidence. Use native Codex/GPT-6 initially; a full workflow plugin is optional and should be evaluated against repeated actual problems.
+
+Shared schema/identity changes have one integration owner. Agents can author disjoint adapters, fixtures or reviews after interfaces settle; they must not independently change core grant/revision/error semantics. Any contract revision updates the relevant design and tests in the same PR.
+
+Current `pnpm check` builds and typechecks. Add meaningful test commands when their harness lands; do not report nonexistent suites as passing. Every task remains pending until its exit evidence exists. Documentation review is not a completed runtime compatibility, provider-access or six-minute quality test.
+
+## 8. Decisions still resolved by implementation evidence
+
+The selected direction is firm. Remaining probes choose exact dependency versions, supported OS/keychain packaging, pinned Codex compatibility, precise provider limits/access/pricing, useful speech/transcription profiles, and measured performance thresholds. Native turn steering of authority-changing requests is deferred until attribution/fencing can be proven. The conservative v0 process boundary is explicit, measurable and replaceable behind the adapter.

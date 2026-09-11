@@ -1,6 +1,45 @@
 # OpenSlate — Design Review Notes
 
-## Revision 0.3 — September 10, 2026
+## Revision 0.4 — September 10, 2026
+
+This revision turns the accepted architecture into eleven component designs, a shared contract index, and an implementation sequence. It also researches the current Codex/GPT-6 development guidance and Superpowers from primary sources. The repository remains a runnable skeleton; this revision does not implement the proposed application behavior.
+
+### Coverage and review method
+
+The [technical index](../technical/README.md) links persistence, application API, director runtime, skills/tools, plan compilation, execution, narration, providers/artifacts, timeline/rendering, review UI and operations/testing. Each document defines ownership, records or interfaces, execution logic, failure behavior and acceptance evidence. The [development plan](IMPLEMENTATION-PLAN.md) orders tasks T00–T13 around working slices and explicit compatibility gates.
+
+Three component authors contributed runtime, execution and media designs. Cross-component review examined authority, identity, invalidation, durability and user-visible recovery; the integrating author reconciled contracts and reviewed the complete set. The [development workflow research](../development/CODEX-WORKFLOW.md) distinguishes documented product behavior from our project-specific recommendations. External skill source was read as research material; no Superpowers installation or new development instructions were activated.
+
+### Material findings incorporated
+
+| Finding | Resolution |
+|---|---|
+| Recreating a logical node could appear to renew permission for paid generation | Creative candidates consume a unique immutable service-issued grant slot independent of node identity; technical retries remain attempts of the same candidate |
+| A delayed tool call could borrow the current request's authority | Bind each bridge credential to an immutable authorization epoch; revoke before an authority-changing request and recheck inside every mutation transaction |
+| Native steering lacked proven per-call authorization attribution | V0 replaces the runtime/bridge when authority changes; preserve project state and compatible conversation history, and measure this cost before optimizing |
+| Conditioned inputs with the same hashes could be reordered or assigned different roles | Include named destination ports, roles and ordering in normalized input and review digests |
+| A project-only edit could release execution with an obsolete plan | Retain affected holds and stale bindings until a compatible executable plan restores freshness |
+| Model interpretation of casual or conditional chat could approve unseen media | Require a reply bound to a displayed decision and a trusted full-message grammar, or a concrete structured decision; preserve explicit batch membership |
+| An asynchronous projection could skip unseen events on reconnect | Return a snapshot's applied watermark; initially read canonical state and its matching event counter in one transaction |
+| New audio or cue identities could unnecessarily invalidate unchanged videos | Separate full narration lineage/readiness from consumed meaning and relative timing; render inputs still include exact audio and placement |
+| Artifact-local cue coordinates could be confused with assembled timeline offsets | Keep cue source ranges local to the referenced audio artifact and represent placement separately |
+| A renamed file could be called durable before its bytes/directory were synced | Require a tested durable-file publication barrier before usable database publication; verify and quarantine missing/corrupt media on startup |
+| Worker completion could overwrite a newer creative choice | Workers publish evidence and guarded outputs; the application projector alone promotes compatible draft selections and previews |
+| Roadmap tasks could imply implemented capabilities or guaranteed external behavior | Mark all new component work pending; require fake-provider races and compatibility probes before bounded paid pilots |
+
+The author pass also aligned authorization field names, attempt ordinals, artifact staging paths and shared contract terminology. Checks cover local Markdown links and anchors, fenced-block balance, whitespace and the changed-file scope. Illustrative TypeScript and Mermaid diagrams remain design artifacts; no runtime test or visual diagram-rendering claim is made.
+
+### Implementation gates still open
+
+- Pin and test the Node/SQLite/parser/FFmpeg dependencies and the Codex release's skills, MCP, permissions, process replacement and input behavior.
+- Prove approval/admission/edit races, epoch revocation, unknown submissions, duplicate grants, artifact publication and recovery using real SQLite plus controllable fake operations.
+- Validate image/video/audio account access, exact conditioning transfer, measured cue timing, provider pricing bounds and error classifications before enabling each profile.
+- Measure restart latency, ready-work throughput, time to review/preview, memory and recovery on short, 150-second and six-minute workloads. There is no measured speed claim yet.
+- Validate local packaging, credentials, backup/restore and a single active installation owner. GPU workers and ten/thirty-minute support remain later work.
+
+Earlier sections below are historical review records. The v0.4 technical contracts supersede any inconsistent earlier terminology, including candidate versus technical-attempt authorization.
+
+## Revision 0.3 — September 10, 2026 (historical)
 
 This revision records the user's product decisions: up to six-minute films (ten/thirty later), uploaded or generated narration with conversational gap discovery, a single-user local app with extensible models, human-reviewed keyframes for every shot before video spending, technical-error recovery without autonomous quality regeneration, and conversational creative edits with visual review.
 
@@ -36,7 +75,7 @@ Independent runtime and execution reviews completed with the findings above inco
 - Measure short-sequence, 150-second commercial, and six-minute workloads; ten/thirty-minute release support remains future work.
 - Validate actual image/video provider capabilities, reference transfer, account access and recovery. Select packaging/OS support during detailed design.
 
-Earlier sections below are historical review records; any old provisional defaults are superseded by v0.3.
+Earlier sections below are historical review records; their provisional defaults were superseded by v0.3, and the current v0.4 contracts govern implementation.
 
 ## Revision 0.2 — September 10, 2026 (historical)
 

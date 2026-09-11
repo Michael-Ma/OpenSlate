@@ -1,6 +1,6 @@
 # OpenSlate — Technical Design
 
-**Version:** 0.3 · September 10, 2026
+**Version:** 0.4 · September 10, 2026
 **Status:** architecture proposal; implementation remains an initial TypeScript skeleton.
 
 OpenSlate turns a creative brief into an editable film of up to six minutes: conversational narration development, story and shot planning, human-reviewed keyframes, generated takes, timeline assembly, and finishing. It is a single-user local application with user-configured credentials and extensible model adapters. Codex, GPT Image 2, and H3 cloud are the first director/image/video integrations. A later Python H3 worker implements the video provider boundary; ten- and thirty-minute films are later validation targets.
@@ -97,6 +97,8 @@ V0 creative edits are conversational. The interface supports playback, frame/tak
 Fast execution does not mean unbounded concurrency or speculative paid takes. Optimize the critical path, overlap independent work, cache valid artifacts, and batch reasoning. Measure time to first useful preview and time to apply a shot edit, not only total job throughput.
 
 ## 7. Reading map
+
+The [detailed technical design set](../technical/README.md) adds implementation contracts for every component while this document remains the architecture overview. The [Codex development workflow](../development/CODEX-WORKFLOW.md) covers how to build the repository, separately from the embedded video director.
 
 | Document | Read for |
 |---|---|

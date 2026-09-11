@@ -1,6 +1,6 @@
 # OpenSlate — Execution Plans and Live Editing
 
-**Version:** 0.3 · September 10, 2026
+**Version:** 0.4 · September 10, 2026
 **Status:** proposed algorithms and illustrative plan syntax, not implemented APIs.
 
 ## 1. Code as the production plan
@@ -119,7 +119,7 @@ Keep four identities separate:
 | Candidate/attempt ID | One explicitly requested take and its execution attempts |
 | Execution fingerprint | Effective inputs/settings used to decide whether work can be reused |
 
-A changed global plan revision must not invalidate every node. A retry delivering the same intent is not a request for another take. “Generate another take” creates a distinct authorized candidate even when the prompt is identical. Admission bounds initial candidates to the authorized plan slots. Every additional or replacement creative candidate must link to a recorded user request/decision covering that scope; unused budget and a reusable keyframe approval are insufficient. Automatic replacement requires a trusted worker/provider technical-failure record and a remaining retry allowance. The model cannot invent that evidence or authorize a new candidate by labeling it a technical retry.
+A changed global plan revision must not invalidate every node. A retry delivering the same intent is not a request for another take. “Generate another take” creates a distinct authorized candidate even when the prompt is identical. Admission bounds initial candidates to the authorized plan slots. Every additional or replacement creative candidate must link to a recorded user request/decision covering that scope; unused budget and a reusable keyframe approval are insufficient. Automatic technical recovery keeps the candidate and creates a new attempt under a trusted worker/provider failure record and remaining retry allowance. Creative candidates consume immutable purpose-bound grant slots exactly once, even if a logical graph node is recreated. The model cannot invent that evidence or authorize a new candidate by labeling it a technical retry.
 
 Maintain two kinds of relationship:
 

@@ -1,6 +1,6 @@
 # OpenSlate — Skill and Tool Framework
 
-**Version:** 0.3 · September 10, 2026
+**Version:** 0.4 · September 10, 2026
 **Status:** proposed framework; no skills or tool implementations are added by this document.
 
 ## 1. Responsibilities and minimum scope
@@ -111,7 +111,7 @@ The UI uses the same change/control services. V0 creative changes go through con
 
 Project-only changes persist settled intent before any execution plan exists, with no generation intents or paid side effects. If such a change affects a running plan, hold/invalidate its affected work until prompt/spec freshness is restored; do not resume stale instructions. Pure discussion notes and unrelated metadata do not invalidate production.
 
-Candidate admission checks origin as well as budget: an initial authorized plan slot, a recorded user request for the scoped creative change, or an eligible technical-failure record supplied by trusted execution code. The model cannot mint extra same-input candidates merely because approval and budget remain, or self-classify a quality defect as an error to get an automatic retry.
+Candidate admission checks origin as well as budget: an immutable initial-plan or scoped-user-request grant slot consumed once independently of graph node identity. Technical recovery creates another attempt under the same candidate, using an eligible failure record supplied by trusted execution code. The model cannot mint extra same-input candidates merely because approval and budget remain, or self-classify a quality defect as an error to get an automatic retry.
 
 An agent control can release only an edit hold it owns or a pause the user has explicitly authorized it to clear. It cannot override a user pause, another edit, or a remaining review gate. All applicable controls must permit dispatch.
 
