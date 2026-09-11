@@ -8,6 +8,8 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Component design](design/COMPONENT-DESIGN.md) | High-level diagrams, component ownership, and execution algorithms |
 | [Skills and tools](design/SKILLS-AND-TOOLS.md) | Minimal capability set, loading, versioning, and multi-request lifecycle |
 | [Execution and editing](design/EXECUTION-AND-EDITING.md) | Code-authored plans, parallel scheduling, scoped edits, and output reuse |
+| [Commercial walkthrough](design/COMMERCIAL-WALKTHROUGH.md) | A 150-second boots commercial: narration, human review, services, and saved data |
+| [Codex and providers](design/CODEX-AND-PROVIDERS.md) | What the runtime provides, what OpenSlate owns, and model extensibility |
 | [Implementation plan](design/IMPLEMENTATION-PLAN.md) | Milestones, repository structure, acceptance criteria, and open decisions |
 | [Review notes](design/REVIEW-NOTES.md) | Design review findings, corrections, and remaining validation work |
 

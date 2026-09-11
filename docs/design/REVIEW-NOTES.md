@@ -1,6 +1,44 @@
 # OpenSlate — Design Review Notes
 
-## Revision 0.2 — September 10, 2026
+## Revision 0.3 — September 10, 2026
+
+This revision records the user's product decisions: up to six-minute films (ten/thirty later), uploaded or generated narration with conversational gap discovery, a single-user local app with extensible models, human-reviewed keyframes for every shot before video spending, technical-error recovery without autonomous quality regeneration, and conversational creative edits with visual review.
+
+### Changes reviewed
+
+- Narration readiness split into text and audio dimensions; scripts, source segments, accepted audio, and measured cue timing have persistent identities.
+- Speech synthesis and transcription/alignment add two operation families while preserving two skills and five agent-facing tools.
+- Every video depends on a human-approved conditioning image and current relevant shot/motion/profile settings; scene batches keep review manageable.
+- Detailed shot plans and execution provenance remain available for debugging while normal review uses summaries, images and playback.
+- DirectorRuntime and media-provider adapters have separate extension contracts; Codex compatibility is not universal LLM compatibility.
+- A 150-second leather-boots walkthrough maps conversation, narration, storyboard review, generation, editing and export to services and saved records.
+
+### Review findings incorporated
+
+| Finding | Resolution |
+|---|---|
+| Previous plan example allowed a video without its own reviewed keyframe | Replace it with two image-to-video branches behind an explicit human scene review; compiler rejects missing conditioning/gates |
+| Previous narration edit wording implied unconditional take reuse | Reuse only when meaning, timing and coverage remain compatible; explain scoped changes otherwise |
+| Roadmap retained old operation count and provisional product choices | Six operation families and confirmed product scope are consistent across current documents |
+| Reusable keyframe approval and budget could be mistaken for permission to generate extra takes | Candidate admission requires an initial authorized slot, a scoped user request, or trusted technical-failure evidence and retry allowance |
+| Narration timing could block the preparation that produces it | Preparation graphs accept pending timing; dependent dispatch/assembly require measured accepted cues |
+| Narration edits could leave downstream timestamps stale | Bind segments to immutable audio ranges and cue revisions; realign replacements and separate placement shifts from changed generation inputs |
+| Active profile switching conflicted with immutable run locks | Switch within a locked catalog as a scoped change; new capabilities require an explicit successor-lock boundary while old jobs retain their identity |
+| A profile lock could imply immutable hosted model identity | Preserve requested profile and reported resolved identity where available; do not claim a local lock freezes hosted weights |
+
+Independent runtime and execution reviews completed with the findings above incorporated; a focused re-review found no remaining blocking contradiction. They were followed by the author consistency pass. Local checks cover document links, code-fence balance, and cross-document scope/terminology. The illustrative TypeScript syntax and Mermaid definitions are design artifacts, not tested runtime implementations. No paid media, application code, or new skill implementations are included in this revision.
+
+### Remaining validation gates
+
+- Pin and test the Codex release, permissions, skills/MCP catalog, model compatibility and interruption/input flows.
+- Choose the first speech/transcription models and validate narration timing, voice behavior and credentials.
+- Prove exact review binding, controlled retries, partial narration sources, and stale-result prevention with fake operations before live pilots.
+- Measure short-sequence, 150-second commercial, and six-minute workloads; ten/thirty-minute release support remains future work.
+- Validate actual image/video provider capabilities, reference transfer, account access and recovery. Select packaging/OS support during detailed design.
+
+Earlier sections below are historical review records; any old provisional defaults are superseded by v0.3.
+
+## Revision 0.2 — September 10, 2026 (historical)
 
 This revision responds to the request for a smaller initial skill/tool set, reliable capability lifecycle across requests, code-authored fast execution, live targeted edits, and a high-level component document. It changes design documents only; the application remains a skeleton.
 

@@ -10,7 +10,9 @@ OpenSlate is designed to plan scenes and shots, create reference assets, generat
 
 - TypeScript application with a React interface and Fastify service.
 - Codex as the first director runtime, connected through validated OpenSlate tools.
-- GPT Image 2 for assets and MiniMax H3 cloud for video generation.
+- Up to six-minute films, with uploaded or conversationally developed/generated narration.
+- Extensible model adapters; GPT Image 2 and MiniMax H3 cloud are the first image/video integrations.
+- Human-reviewed keyframes before video generation, visual review, and conversational creative edits.
 - Optional Python H3 inference workers later, behind the same provider boundary.
 - OpenSlate-owned project state, generation jobs, budgets, and edit decisions.
 - Code-authored execution plans with parallel work and targeted edits that reuse existing outputs.
@@ -64,6 +66,8 @@ Start with the [documentation index](docs/README.md).
 - [Component design](docs/design/COMPONENT-DESIGN.md)
 - [Skills and tools](docs/design/SKILLS-AND-TOOLS.md)
 - [Execution and editing](docs/design/EXECUTION-AND-EDITING.md)
+- [Commercial walkthrough](docs/design/COMMERCIAL-WALKTHROUGH.md)
+- [Codex and model providers](docs/design/CODEX-AND-PROVIDERS.md)
 - [Implementation plan](docs/design/IMPLEMENTATION-PLAN.md)
 - [Design review notes](docs/design/REVIEW-NOTES.md)
 

@@ -1,6 +1,6 @@
 # OpenSlate — Skill and Tool Framework
 
-**Version:** 0.2 · September 10, 2026
+**Version:** 0.3 · September 10, 2026
 **Status:** proposed framework; no skills or tool implementations are added by this document.
 
 ## 1. Responsibilities and minimum scope
@@ -21,12 +21,12 @@ flowchart LR
 
 | Skill | Trigger | Responsibility | Output |
 |---|---|---|---|
-| `production` | New brief, creative discussion, review, or edit | Clarify intent, plan the film, reuse assets, maintain basic continuity, and explain revisions | Structured creative proposal and decisions |
+| `production` | New brief, creative discussion, review, or edit | Clarify intent/narration gaps, develop the script and film, reuse assets, maintain basic continuity, and explain revisions | Structured creative proposal and decisions |
 | `plan-authoring` | Enough intent/state is settled to execute or revise a scope | Write code against the planning language; describe dependencies, gates, and local patches | Plan source or a scoped plan patch |
 
 Keep a short runtime instruction sheet always present: read current state, preserve prior decisions, use the application interfaces, and identify which skill to activate. Do not turn this into a third large skill. The two skills may be activated in the same request; they are instructions for one director, not separate agents.
 
-Story conventions, shot grammar, continuity checks, image recipes, H3 prompt guidance, review criteria, and editing examples start as lazy references under these skills. Add a separate skill only when it has a distinct reusable trigger and output contract that no longer fits a reference.
+Story conventions, narration readiness and gap-closing dialogue, shot grammar, continuity checks, image recipes, provider-specific prompt guidance, human keyframe review, and conversational editing examples start as lazy references under these skills. Add a separate skill only when it has a distinct reusable trigger and output contract that no longer fits a reference.
 
 ### Continuity and asset examples
 
@@ -93,7 +93,7 @@ Keep context scoped. Editing shot 7 normally needs its current intent, reference
 
 ### Upgrade rules
 
-New projects can select a new approved catalog. Existing production runs keep their lock through follow-up requests. An explicit between-run upgrade creates a new lock after compatibility validation and uses a fresh runtime conversation if needed to avoid mixing old and new instructions. Reconstruct state rather than replaying production side effects.
+New projects can select a new approved catalog. Existing production runs keep their lock through follow-up requests. A lock may include multiple approved model profiles; a scoped switch among them changes input bindings, not the lock, and renews affected human review. Selecting an unlocked profile, new runtime, skill version, or handler version requires an explicit successor lock and production-run/plan boundary: hold affected new dispatch, validate compatibility, recompile/rebind new work, and recreate the runtime conversation when needed. Broader runtime/tool changes may require a broader dispatch hold. Existing jobs continue under their old lock and are not resubmitted. Reconstruct state rather than replaying production side effects; this boundary need not wait for every old provider job to finish.
 
 Running jobs keep their operation/provider implementation identity. Preserve the supported implementation until they finish, or pause dispatch and use an explicit compatible migration. A skill update alone never invalidates completed media. Only a resulting change to creative intent, effective inputs, or operation behavior can require new work.
 
@@ -107,9 +107,11 @@ Running jobs keep their operation/provider implementation identity. Preserve the
 | `control_execution` | Hold/resume a scope, pause director automation or dispatch, inspect control state | Cannot erase accepted provider work or silently release liabilities |
 | `inspect_artifact` | Return preview frames, media properties, and review evidence for known artifacts | Read-only inspection; actual modality support is validated |
 
-The UI uses the same change/control services. User approval, policy configuration, uploads, and setup are application routes; they need not all become model tools. The agent can ask for a decision but cannot call a tool to approve its own spending.
+The UI uses the same change/control services. V0 creative changes go through conversation; playback, shot selection for chat, review decisions, and pause controls are UI interactions. Every shot video needs human approval of its keyframe and current intent/settings; scene-level batch approval records exact coverage. A skill or autonomous quality check cannot grant this approval or authorize quality-driven regeneration. User approval, policy configuration, uploads, and setup are application routes; they need not all become model tools. The agent can ask for a decision but cannot call a tool to approve its own spending.
 
 Project-only changes persist settled intent before any execution plan exists, with no generation intents or paid side effects. If such a change affects a running plan, hold/invalidate its affected work until prompt/spec freshness is restored; do not resume stale instructions. Pure discussion notes and unrelated metadata do not invalidate production.
+
+Candidate admission checks origin as well as budget: an initial authorized plan slot, a recorded user request for the scoped creative change, or an eligible technical-failure record supplied by trusted execution code. The model cannot mint extra same-input candidates merely because approval and budget remain, or self-classify a quality defect as an error to get an automatic retry.
 
 An agent control can release only an edit hold it owns or a pause the user has explicitly authorized it to clear. It cannot override a user pause, another edit, or a remaining review gate. All applicable controls must permit dispatch.
 
@@ -117,7 +119,7 @@ These tools use explicit typed variants for supported changes; `apply_change` is
 
 ## 6. Tool and operation registry lifecycle
 
-Each registered handler has a stable ID, contract version, input/output schema, permission scope, side-effect category, and execution/retry policy. Media operations additionally declare how inputs bind to artifacts and how their effects participate in dependency analysis. The first operation families are image generation, video generation, timeline assembly, and rendering.
+Each registered handler has a stable ID, contract version, input/output schema, permission scope, side-effect category, and execution/retry policy. Media operations additionally declare how inputs bind to artifacts and how their effects participate in dependency analysis. The six initial operation families are image generation, video generation, speech synthesis, transcription/alignment, timeline assembly, and rendering. The added narration paths use the existing five tools and production references; they do not require a new specialist skill or an agent tool for every API.
 
 **Registration algorithm:** validate trusted descriptors at application startup; resolve compatibility with the capability lock; generate the MCP catalog and compiler operation catalog from those descriptors; verify that required handlers exist; expose only the project/action-allowed tool subset. The scheduler calls operation handlers directly through the registry.
 
@@ -137,6 +139,9 @@ A new skill needs an ID, manifest, references, compatibility declaration, and fo
 - A catalog conflict, missing handler, or incompatible version fails before paid work.
 - Replayed requests with fresh model tool-call IDs cannot duplicate service-owned generation intents.
 - Adding one test skill and one fake operation needs registration, not changes scattered across the director and scheduler.
+- Uploaded, partial, and generated narration use the same durable project context across requests.
+- Model-profile swaps preserve capability/review constraints; another runtime can use the same domain contracts.
+- A skill suggesting better visual quality cannot trigger a new paid take without user instruction.
 - Unexpected external skills/tools cannot override the project's effective catalog or permissions.
 
 The first implementation should prove these cases with fake media before expanding the skill library.
