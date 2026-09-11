@@ -1,6 +1,6 @@
 # Application Services, API and Events
 
-**Version:** 0.4 · Proposed implementation design
+**Version:** 0.5 · Proposed implementation design
 
 ## 1. Boundary and module ownership
 
@@ -20,6 +20,8 @@ flowchart LR
 ```
 
 Initial modules: `application/project-service`, `conversation-service`, `change-service`, `review-service`, `control-service`, `configuration-service`, `artifact-service`; `http/routes`; `events/projector` and `events/stream`. Keep domain schemas in `packages/core/contracts` and the Codex transport in `packages/director`. The service interface is independent of HTTP/MCP; a future CLI or direct timeline editor uses it too.
+
+Add `application/workflow-service` for [stage contracts and readiness](PRODUCTION-WORKFLOW.md). It shares the command/transaction boundary with the change service and never dispatches providers. Snapshots include scope-specific stage progress, known hard requirements and AI-observed creative gaps; debug details retain the recipe, prompt, input and stage versions.
 
 ## 2. Commands, actors and idempotency
 
@@ -88,9 +90,9 @@ No v0 route exposes arbitrary shot-field mutation as a public editor API. Creati
 1. Validate project/session, attachments and client-selected scope. Persist the user message and intent origin before starting model work.
 2. If the user explicitly requests a scoped edit, create an edit hold for the known potential impact. With ambiguous scope, hold new project dispatch while asking a focused question. A UI selection is context, not approval of unseen changes.
 3. Enqueue one director request. V0 scope- or authority-changing messages interrupt/drain the previous turn, revoke its tool authorization epoch, and start a new request after fencing; they do not use native steering. Informational steering is optional only when it leaves authority unchanged and the pinned adapter proves call attribution. Persist the new message/hold immediately while this happens. Never run competing automatic directors for one project.
-4. The director reads state, proposes project-only changes or plan patches, and calls `prepare_change`. Store a typed proposal/read set and return a concise impact summary.
+4. The director reads state, proposes stages and missing information, and calls `prepare_change` with stage proposals and optional creative changes/plan patches. Validate registered stage contracts and current prerequisites, store the proposal/read set, and return a concise impact summary. All variants receive service-derived contract coverage from their actual mutation footprint; a misleading stage label cannot weaken the checks.
 5. For work already authorized, the application may apply it without another redundant approval. New spend scope or creative ambiguity produces a recorded pending decision. Human keyframe review remains mandatory regardless of standing budget policy.
-6. Apply under a revision- and epoch-checked transaction and emit events. Release only the edit's own hold when compatible executable bindings are restored; a project-only intent change that leaves the active plan stale retains the affected hold until planning catches up. Execution workers discover eligible work independently.
+6. Apply under a revision-, stage-binding-version- and epoch-checked transaction and emit events. Stage and creative changes in one prepared batch commit together or not at all. Release only the edit's own hold when compatible executable bindings are restored; a project-only intent change that leaves the active plan stale retains the affected hold until planning catches up. Execution workers discover eligible work independently.
 
 Plan approval covers the presented scene/narration direction and preparation allowance. It does not approve later unseen keyframes. A request such as “another take of shot 7 with the same setup” can carry creative authority for a new candidate while reusing current keyframe approval; it still passes budget and pause checks.
 
@@ -111,6 +113,8 @@ Persist domain events in the same transaction as state changes. Useful kinds inc
 Transient text deltas and high-frequency progress are separate SSE event kinds without durable sequence IDs. Persist completed public messages and important attempt transitions; coalesce percentages and token deltas. After disconnect, the snapshot/final message reconstructs truth even if transient chunks were lost. Use bounded subscriber buffers; a lagging client receives a reset/reconnect instruction. If durable events have been compacted beyond its cursor, require a new snapshot.
 
 The server completion projector consumes worker output events idempotently. It checks current node/candidate/spec and chooses eligible draft bindings; it never replaces user-accepted selections automatically. Preview promotion compares the frozen target identity, not just “job finished.” The worker itself publishes output and evidence, not creative selection heads.
+
+The workflow service derives stage readiness from those outputs and human decisions, emitting `workflow.assessed`, `workflow.stage_changed` and `workflow.requirements_changed` in its own short transactions. These events use the same snapshot/reconnect semantics. Deterministic advancement does not require a director turn; unresolved interpretation produces a coalesced wakeup. Replayed evidence cannot bypass current stage inputs, user holds or origin grants.
 
 ## 7. Errors and control failures
 

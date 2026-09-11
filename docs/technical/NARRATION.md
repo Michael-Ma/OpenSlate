@@ -1,6 +1,6 @@
 # Narration and timed story development
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** detailed design; contracts below are proposed, not implemented.
 
 ## Responsibility and boundaries
@@ -8,6 +8,8 @@
 The narration component turns uploaded recordings, notes, partial scripts, or an empty brief into an accepted sequence of timed speech segments. It supplies versioned meaning and timing to shot planning. It does not write directly to provider APIs from a director turn, infer human acceptance from successful synthesis, or silently rewrite supplied text.
 
 The director proposes prose and asks useful questions. Application services preserve accepted choices; trusted operations perform import, synthesis, transcription, and timing. All paid operations use the admission and recovery rules in [Execution engine](EXECUTION-ENGINE.md). Audio bytes follow [artifact storage](PROVIDERS-ARTIFACTS.md); their editorial placement follows [timeline design](TIMELINE-RENDERING.md).
+
+The [production workflow](PRODUCTION-WORKFLOW.md) consumes this component's text/audio/timing readiness instead of duplicating it as a generic completed-stage flag. The AI proposes whether to develop narration, retain supplied audio or address another useful scope; code checks the actual prerequisites for the requested action. Provisional story/shot work can coexist with incomplete narration. Consumed timing and approval requirements remain enforced at video admission.
 
 ```mermaid
 flowchart LR

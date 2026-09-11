@@ -5,7 +5,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | Document | Contents |
 |---|---|
 | [Detailed technical designs](technical/README.md) | Component contracts, data model, algorithms, recovery, API/UI and verification |
-| [Codex/GPT-6 development workflow](development/CODEX-WORKFLOW.md) | Current primary-source research, Superpowers comparison and recommended working process |
+| [Production workflow](technical/PRODUCTION-WORKFLOW.md) | AI stage selection, missing information, coded stage contracts and resumable scoped work |
 | [Architecture](design/README.md) | Product scope, stack, high-level architecture, ownership, and production flow |
 | [Component design](design/COMPONENT-DESIGN.md) | High-level diagrams, component ownership, and execution algorithms |
 | [Skills and tools](design/SKILLS-AND-TOOLS.md) | Minimal capability set, loading, versioning, and multi-request lifecycle |

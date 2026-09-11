@@ -1,12 +1,14 @@
 # OpenSlate — Plan Compiler and Atomic Changes
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** implementation specification; proposed contracts, not implemented APIs.
 **Ownership:** `packages/core` compiler/change modules; server invokes creative-state transactions. Read [Execution and Editing](../design/EXECUTION-AND-EDITING.md) for product behavior, [Data and Persistence](DATA-PERSISTENCE.md) for shared records, and [Execution Engine](EXECUTION-ENGINE.md) for dispatch.
 
 ## 1. Responsibility and boundaries
 
 The compiler translates restricted TypeScript plan source or a typed patch into immutable operation specifications, dependencies, and an impact report. It never calls a provider, reserves money, approves a keyframe, or executes generated JavaScript. Applying a prepared change publishes creative state and execution bindings atomically; workers subsequently admit eligible jobs.
+
+The [production workflow](PRODUCTION-WORKFLOW.md) sits above compilation: the AI proposes story/scene/shot stages and gaps; the application enforces each stage's contract. Creative stage outputs use typed project patches. The compiler receives the resulting media source/patch and relevant intent revisions; it does not call the LLM to develop a story or treat a stage label as evidence of approval. No LLM/workflow operations, arbitrary branches or executable callbacks are added to this DSL. Stage code runs in the trusted application registry.
 
 V0 supports six operation families: image generation, video generation, speech synthesis, transcription/alignment, timeline assembly, and rendering. Asset/shot references and human-review gates are graph primitives, not additional paid operations. Every video consumes its reviewed conditioning image. The initial output profile uses 30/1 frames per second and 48 kHz audio; the final timeline must fit 360 seconds after trims and overlaps. Source generation length may exceed edit length for handles.
 
@@ -50,6 +52,7 @@ interface PreparedChange {
   baseHeadVersion: number;          // ProjectHead concurrency token
   capabilityLockId: CapabilityLockId;
   creativePatch: CreativePatch;
+  stageBindings: PreparedStageBinding[]; // application-owned validated bindings
   sourceDigest?: string;
   graphDigest?: string;
   nodes: CompiledNode[];
@@ -64,6 +67,8 @@ The complete graph also contains output-port schemas, mechanical edges, review-g
 Operation schemas define destination ports, accepted source types, roles, cardinality, explicit list ordering, and which effective values contribute to hashes. Reject duplicate destination/role/order bindings, undeclared ports, gaps where a dense list is required, or unsupported role combinations. Preserve order unless the descriptor explicitly defines a set and its canonicalization. Hash these semantics with the operation contract; adapters cannot silently reinterpret ordered references.
 
 Store the submitted source, canonical source projection, normalized graph, parser/compiler identity, and capability lock with the plan revision. Preserve submitted source for audit even when later typed patches produce canonical source. The graph is authoritative for execution; source edits must pass preparation and commit.
+
+`PreparedStageBinding` links the prepared change to service-owned stage IDs/proposals, expected stage binding versions, consumed inputs and contract digests. The application constructs it; neither source declarations nor model arguments can mint authority. Every variant receives contract coverage derived from the normalized creative/plan diff, so a misleading stage label or omitted workflow proposal cannot bypass the protocol. Pure compiler tests can run without a live workflow, but applying their output still requires valid application bindings.
 
 ## 3. Restricted syntax and parser
 
@@ -129,6 +134,7 @@ Preparation occurs outside the write lock. Applying uses one short `BEGIN IMMEDI
 ```text
 load prepared change; verify digest, idempotency and expected revision
 verify actor/request authorization epoch, scope, edit ownership and lock
+verify application-owned stage bindings, current stage binding versions and predicates
 verify current requirements without adopting another request's authority
 recheck affected bindings; consume each authorized grantSlotId at most once
 publish project revision + source/graph revision + active bindings

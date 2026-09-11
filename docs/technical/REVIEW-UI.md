@@ -1,12 +1,14 @@
 # Review Workspace and Conversational Editing
 
-**Version:** 0.4 · Proposed implementation design
+**Version:** 0.5 · Proposed implementation design
 
 ## 1. Product contract
 
 V0 gives the user a conversation, a scene-oriented review workspace and playback. Every creative edit is expressed through conversation. Selecting a frame/shot/timecode supplies context for that conversation; approve, pause and playback controls are available directly. A timeline editor is a later interface over existing change services.
 
 The primary flow is: brief and narration options → concise production plan → narrated storyboard/keyframe review → clip/scene draft review → final playback/export. Each stage can coexist with progress in other scenes. The application keeps the last usable preview visible during revision.
+
+Treat that flow as orientation, not a mandatory wizard. The [workflow service](PRODUCTION-WORKFLOW.md) supplies scope-specific readiness. Show “scene 2: ready for frame review; scene 3: needs narration ending,” along with the director's proposed next work. Distinguish hard missing requirements from suggested creative improvements. A valid draft, a usable generated take and human acceptance have different labels; an AI stage assessment cannot display them as equivalent.
 
 ```mermaid
 flowchart LR

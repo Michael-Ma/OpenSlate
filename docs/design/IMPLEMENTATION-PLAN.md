@@ -1,15 +1,17 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** detailed design complete for review; production features remain unimplemented. The existing repository provides the web/API skeleton and build/typecheck CI.
 
-This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction; the [Codex development workflow](../development/CODEX-WORKFLOW.md) describes how to implement these slices with GPT-6.
+This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
 ## 1. Confirmed release scope
 
 Single-user local application; user-configured model/credential profiles; up to 360 seconds of resolved output; uploaded or conversationally developed/generated narration; scene/shot plans and debug records; human-reviewed conditioning keyframes for every video shot; user-directed creative regeneration; bounded technical recovery; conversational creative edits and visual review/playback. Initial production integrations are Codex, GPT Image 2, H3 cloud and selected speech/transcription profiles. Python H3 workers, ten/thirty-minute releases and a direct timeline editor follow later.
 
 Two production skills, five agent tools and six worker operation families are sufficient. Development skills/plugins are separate and are not dependencies of the embedded director. No implementation slice should quietly expand this product scope.
+
+The AI proposes useful stages and missing information from user input; the application enforces registered contracts, current evidence and critical boundaries. Add one adaptable narrated-video recipe, with scope-specific progress and reusable outputs. Logical stages need not be separate model calls. T02A below introduces this workflow service before director integration; existing task IDs are preserved.
 
 ## 2. Delivery sequence and dependencies
 
@@ -18,10 +20,11 @@ flowchart LR
     T00[00 Compatibility probes] --> T01[01 Core and persistence]
     T01 --> T02[02 Commands and events]
     T01 --> T03[03 Plan compiler]
-    T02 --> T04[04 Fake executor and review]
+    T02 --> T02A[02A Stage contracts and workflow]
+    T02A --> T04[04 Fake executor and review]
     T03 --> T04
-    T02 --> T05[05 Review UI]
-    T02 --> T06[06 Codex and skills]
+    T02A --> T05[05 Review UI]
+    T02A --> T06[06 Codex and skills]
     T03 --> T06
     T04 --> T07[07 Narration workflow]
     T04 --> T08[08 Local timeline and render]
@@ -68,11 +71,23 @@ Build project snapshots, persisted user requests, trusted actor/authority contex
 
 **Design:** [Application API](../technical/APPLICATION-API.md).
 
+### T02A — Production workflow and stage contracts
+
+**Dependencies:** T02; integrate media-plan preparation with T03 when available. **Homes:** core workflow schemas/predicates, server workflow service, existing application changes/events.
+
+Implement the narrated-video stage registry, typed stage proposals/outputs, scoped stage records, separate binding/progress versions and missing-requirement projections. Derive mandatory contracts from the actual creative/plan diff for every prepare variant. Add workflow context and proposals through the existing five tools; use fake director outputs initially. Support supplied material, provisional drafts, pending questions, batched stages and scoped revision paths without a global stage cursor.
+
+**Exit evidence:** complete-upload versus notes-only paths; a mislabeled intake proposal cannot bypass shot/video checks; AI completion cannot grant approval; compatible completion during preparation does not force another model call; stale material bindings fail; repeated no-progress assessments stop; a same-input user-requested take remains a new authorized candidate. Restart preserves stage provenance and pending decisions.
+
+**Design:** [Production workflow](../technical/PRODUCTION-WORKFLOW.md), [application API](../technical/APPLICATION-API.md).
+
 ### T03 — Restricted plan compiler and exact review requirements
 
 **Dependencies:** T01; integrate with T02 when available. **Homes:** core planning modules and server preparation handler.
 
 Implement the bounded parser, symbol-to-service-ID mapping, typed operation descriptors, source/destination roles and ordering, normalized graph, canonical source, prompt provenance, human-review descriptors and typed patches. Support pending narration timing and the six-minute final-timeline constraint. No provider calls or financial reservation in compilation.
+
+Integrate normalized mutation footprints and prepared stage bindings with T02A. Story/scene/shot task execution stays in the workflow/director layers; do not add arbitrary LLM calls or executable workflow code to the planning DSL.
 
 **Exit evidence:** a two-shot fake plan compiles; omitted/mismatching review gates fail; malicious/nested unsupported syntax fails; source round-trips semantically; cycles and incompatible roles fail; cue placement-only changes preserve video fingerprints; changed creative intent cannot reuse stale prompts.
 
@@ -80,7 +95,7 @@ Implement the bounded parser, symbol-to-service-ID mapping, typed operation desc
 
 ### T04 — Durable fake execution and human approval
 
-**Dependencies:** T02 + T03. **Homes:** server executor/worker and review services.
+**Dependencies:** T02A + T03. **Homes:** server executor/worker and review services.
 
 Implement readiness, leases/fences, origin checks, exact approval equality, reservations, attempt phases, trusted technical retries and fake provider outcomes. Build an approval endpoint that can release exact scene members. Use controlled fake-provider barriers to exercise submission and completion races.
 
@@ -92,9 +107,11 @@ Implement readiness, leases/fences, origin checks, exact approval equality, rese
 
 ### T05 — Conversation and visual review workspace
 
-**Dependencies:** T02 contracts; fixture development can overlap T03/T04. **Homes:** `apps/web`.
+**Dependencies:** T02/T02A contracts; fixture development can overlap T03/T04. **Homes:** `apps/web`.
 
 Build conversation, narration readiness, concise scene plan, scene-grouped storyboard, member approval, shot-linked playback/chat, decision tray, progress and pause controls. Use fake media and persistent server snapshots. Detailed plans are read-only debug views. Do not build drag/drop timeline editing.
+
+Show scope-specific stage readiness and proposed next work; distinguish hard blockers, advisory creative gaps, valid drafts and human acceptance. Existing uploads can enter the relevant review/preparation path without a forced wizard.
 
 **Exit evidence:** browser flows for displayed subset approval, stale member refresh, conditional/negative replies, selected-shot conversation, previous-preview visibility and reconnect without restarting work. Keyboard review and bounded thumbnail loading work.
 
@@ -102,9 +119,11 @@ Build conversation, narration readiness, concise scene plan, scene-grouped story
 
 ### T06 — Codex director, skill lifecycle and five tools
 
-**Dependencies:** T02 + T03, informed by T00. **Homes:** `packages/director`, server supervisor and application tool handlers; two `skills/` packages.
+**Dependencies:** T02A + T03, informed by T00. **Homes:** `packages/director`, server supervisor and application tool handlers; two `skills/` packages.
 
 Implement scoped context, immutable catalog/locks, the production and plan-authoring skills, fixed MCP catalog, request/activation records, director queue, pending replies and process/bridge authority fencing. Add fake second-runtime fixtures and incompatible profile/skill cases. Reconstruct project state after replacing a runtime session.
+
+Add stage/gap assessment and focused task-prompt references, pinned with recipe/check/schema identities. Permit assessment plus related creative outputs in one turn and stop repeated reassessment without progress. Keep one active director turn per project; measure model calls/tokens and useful-output latency instead of assuming more stages are faster.
 
 **Exit evidence:** a follow-up request preserves settled intent and locked skill content, produces a valid scoped plan, and cannot fabricate human approval or technical-retry authority. Interrupt/unknown-turn recovery preserves previous command effects. Measure process restart/resume overhead before optimizing the safe epoch boundary.
 
@@ -115,6 +134,8 @@ Implement scoped context, immutable catalog/locks, the production and plan-autho
 **Dependencies:** T04; conversation integration uses T05/T06. **Homes:** core narration, production references and fake audio adapters.
 
 Support absent/notes/draft/approved script independently of absent/partial/accepted audio; source choices and gaps; immutable script/audio segments; timing extraction and cue revisions; acceptance and scoped edits. Initial tests use fixtures/fake speech; user-uploaded recordings can already exercise real local media probing.
+
+Expose actual narration readiness to the workflow service; do not duplicate it with an AI-writable completed-stage flag. Validate that provisional storyboard work can proceed while affected video dispatch waits for measured timing.
 
 **Exit evidence:** complete upload, notes-to-script, partial audio and mixed-source cases progress without restarting the conversation. Text edits cannot falsely mutate recorded audio. A longer earlier sentence shifts later placements while preserving compatible video; changed duration/meaning renews affected review.
 

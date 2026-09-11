@@ -1,11 +1,13 @@
 # OpenSlate — Execution Plans and Live Editing
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** proposed algorithms and illustrative plan syntax, not implemented APIs.
 
 ## 1. Code as the production plan
 
 After clarifying the requested intent and reading current state, Codex writes a small TypeScript plan. It describes operations, input bindings, dependencies, and decision gates. OpenSlate compiles that source into a persistent directed acyclic graph (DAG), then trusted workers execute it.
+
+The [production workflow](../technical/PRODUCTION-WORKFLOW.md) now guides the work preceding or revising that plan: the AI proposes stages and gaps, while trusted code validates their actual prerequisites and output protocols. Story/scene/shot tasks produce typed creative revisions. They do not expand the media DSL into arbitrary generated workflow execution. Assessment and several related creative outputs can share a reasoning pass; existing material and unaffected stages are reused.
 
 The planning language accepts a bounded subset of TypeScript: literal parameters, named references, operation declarations, lists, and approved composition helpers. Parse and validate this subset; do not run model-written JavaScript using `eval`, arbitrary imports, filesystem access, network calls, or subprocesses. Compilation has no generation side effects. This is a declarative code format, not a general-purpose agent-written server program.
 

@@ -1,6 +1,6 @@
 # Data Model and Persistence
 
-**Version:** 0.4 · Proposed implementation design
+**Version:** 0.5 · Proposed implementation design
 
 ## 1. Responsibilities and storage layout
 
@@ -52,6 +52,7 @@ A project revision is a manifest of exact object revisions, not a duplicated fil
 | `capability_locks`, `profile_revisions`, `skill_snapshots` | Exact package/handler/compiler/runtime/profile identity; credential references only | Configuration/run transition service |
 | `plan_revisions`, `plan_nodes`, `plan_edges`, `node_bindings` | Source/normalized graph hashes; stable logical node and immutable spec; execution dependencies; current candidate/output binding | Change service; executor updates eligible output bindings |
 | `prepared_changes`, `commands`, `user_requests` | Base/head checks, request digest, scoped proposal, trusted origin, result reference and lifecycle | Application services |
+| `workflow_runs`, `stage_runs`, `stage_inputs`, `stage_outputs`, `workflow_assessments` | Locked recipe, scoped stage identities/versions, consumed input fields, output/decision links and proposed gaps | Workflow service through shared change transactions |
 | `review_snapshots`, `review_members`, `review_decisions` | Frozen displayed items/digests; per-member effective spec; trusted human decision and exact covered set | Human decision service |
 | `holds` | Owner, project/scene/shot/node scope, reason, release status and originating request | Application control service |
 | `generation_intents`, `grant_slots`, `candidates`, `attempts` | Immutable purpose-bound grant slot, authorization source, candidate identity, attempt retry authority, lease/fence, submission phase and status | Change service creates authorized intent; executor advances attempts |
@@ -63,6 +64,8 @@ A project revision is a manifest of exact object revisions, not a duplicated fil
 | `project_events` | Ordered durable changes, correlation IDs and typed payloads | Same transaction as owning mutation |
 
 The record families are a migration plan, not a requirement to implement every table before the first slice. Introduce each family with the command and test that needs it. Separate creative state from execution progress so a provider poll does not create a new story revision or invalidate an unrelated prepared edit.
+
+Workflow records are defined in [Production Workflow](PRODUCTION-WORKFLOW.md). Persist recipe/stage-check/prompt/schema digests with capability locks; reuse existing narration gaps, user decisions and director requests. There is no single authoritative project stage. Stage binding and progress versions are separate; derived progress alone changes neither the creative head nor proposal freshness. A prepared change carries the expected stage binding versions and consumed-input read set, rechecked with current predicates at commit alongside authorization. Workflow status cannot rewrite media job state or satisfy an approval record.
 
 ## 3. Key record shapes
 

@@ -1,10 +1,12 @@
 # OpenSlate — Durable Execution Engine
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** implementation specification; proposed contracts, not implemented behavior.
 **Ownership:** local TypeScript worker plus shared executor/policy repositories. The server owns creative mutations; the worker owns execution progress. See [Plan Compiler](PLAN-COMPILER.md) and the [confirmed execution rules](../design/EXECUTION-AND-EDITING.md).
 
 ## 1. Process and storage boundary
+
+The [production workflow](PRODUCTION-WORKFLOW.md) selects validated creative tasks upstream of media execution. A stage marked satisfied is never an admission shortcut. This executor continues to verify actual artifact, review, timing, binding, hold, grant and budget evidence. Workflow services reference these job records and reconcile stage status; they do not maintain a second queue or launch providers themselves.
 
 The server and separately supervised local worker share one SQLite database through `better-sqlite3`, WAL, foreign keys, and short transactions. Mutating claims/admission use `BEGIN IMMEDIATE`; no transaction contains `await`, provider traffic, file transfer, FFmpeg, or model reasoning. Configure bounded busy handling and retry contention outside transactions. Domain checks are shared code, not duplicated browser/worker interpretations.
 

@@ -1,6 +1,6 @@
 # OpenSlate — Component Design
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Level:** architecture and execution logic. API fields, SQL tables, worker protocols, and implementation details are covered in the technical companions.
 
 Read the [overall design](README.md) first. Focused companions cover [skills/tools](SKILLS-AND-TOOLS.md), [execution/editing](EXECUTION-AND-EDITING.md), [Codex/providers](CODEX-AND-PROVIDERS.md), and a [commercial walkthrough](COMMERCIAL-WALKTHROUGH.md).
@@ -15,7 +15,9 @@ flowchart LR
     App <--> Store[(Project revisions)]
     App <--> Agent[Director and context manager]
     Framework[Skill and tool framework] --> Agent
-    Agent --> Compiler[Plan compiler]
+    Agent --> Workflow[Stage proposals and workflow contracts]
+    Workflow --> App
+    App --> Compiler[Plan compiler]
     Compiler --> Runner[Scheduler and workers]
     Runner --> Providers[Media providers]
     Runner --> Timeline[Timeline and renderer]
@@ -29,6 +31,7 @@ flowchart LR
 |---|---|---|
 | Application/change service | User actions, policy, revision conflicts, scoped change commits | Accepted project and plan revisions |
 | Director/context manager | Intent, creative reasoning, relevant context, decision dialogue | Creative proposals and plan source/patches |
+| Production workflow | Registered stage contracts, scoped prerequisites, gap observations and output evidence | Validated stage bindings and resumable task progress |
 | Skill/tool framework | Discovery, compatibility, activation, authorization boundaries | Locked capabilities for each request/run |
 | Plan compiler | Allowed plan syntax, operation validation, dependency analysis, graph diff | Validated execution graph and impact report |
 | Scheduler/workers | Readiness, concurrency, receipts, budgets, restart recovery | Durable progress and usable outputs |
@@ -60,6 +63,16 @@ The initial skills are `production` and `plan-authoring`. Production includes st
 
 ## 3. Creative planning and reference direction
 
+### Production workflow
+
+**Goal:** let the AI choose useful stages and identify gaps while enforcing critical protocols in code.
+
+**Algorithm:** read scoped readiness and the locked recipe; have the director propose relevant stages and missing context; derive mandatory checks from the actual proposed changes; validate prerequisites and typed outputs; commit stage records with compatible creative changes; wait for needed evidence or user decisions; resume eligible work from persisted state. Reuse existing outputs instead of replaying every earlier stage. A scene waiting for narration does not stop another approved scene's video jobs.
+
+The workflow guides story, scene, shot, narration, storyboard, video, assembly and review tasks. Code can verify structural completeness, current inputs and approval records; artistic quality remains human judgment. Logical stages may share an LLM turn. The [technical workflow design](../technical/PRODUCTION-WORKFLOW.md) defines records, contract enforcement and edit/replay behavior. It adds no new agent-facing tools or media operation families.
+
+### Story, shots and references
+
 **Goal:** turn narrative intent into feasible shots and reusable assets.
 
 **Algorithm:** establish narration readiness and story beats within the six-minute release limit; define a minimal bible for recurring characters/locations; split scenes into provider-sized shots; record action, composition, timing, continuity requirements, and audio intent; reuse known references and request only missing assets; mark review gates where later expensive work depends on a creative choice.
@@ -84,6 +97,8 @@ The director writes the script; a speech provider produces audio. Transcription/
 ## 4. Plan compiler and change service
 
 **Goal:** convert code-authored intent into bounded executable work and small reviewable revisions.
+
+Workflow stage code belongs in the trusted application registry. Creative stage outputs use typed project patches; the compiler continues to accept only bounded media-plan declarations. An AI-proposed stage label never grants approval or selects weaker validation.
 
 ```mermaid
 flowchart LR
@@ -165,6 +180,7 @@ Keep a versioned shot-level plan even though normal review shows summaries: scen
 ## 9. Invariants and first proof
 
 - Skills, tool handlers, and compiled plans have pinned identities; updates do not silently change running work.
+- The AI selects stages and reports gaps; readiness comes from verified scoped evidence, with contract coverage derived from the actual mutation.
 - Project state and the budget ledger remain outside direct agent write access.
 - A logical patch commits atomically; external media production completes asynchronously and cannot be rolled back like a database transaction.
 - Provider completion becomes usable media only after local ingestion succeeds.

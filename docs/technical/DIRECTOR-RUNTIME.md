@@ -1,11 +1,13 @@
 # Director runtime technical design
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** proposed implementation. The existing `packages/director` exports only a lifecycle placeholder; the integration described here does not exist yet.
 
 ## 1. Responsibility and ownership
 
 The director turns conversation and current production evidence into proposed creative changes and execution plans. Codex supplies its first reasoning/tool loop. OpenSlate owns request ordering, current context, durable decisions, authorization, and recovery. A completed Codex turn is not a completed video project.
+
+The director also proposes the next useful production stages, their scope and missing information. The [production workflow service](PRODUCTION-WORKFLOW.md) validates those proposals and derives readiness; the director cannot mark a stage satisfied or waive its requirements. Keep stage assessment in the same turn as creative work when possible, rather than requiring a routing-model call for every request.
 
 ```mermaid
 flowchart LR
@@ -78,6 +80,7 @@ The server persists these records using the shared persistence conventions:
 | Director request | Originating user/event IDs, scope, priority, context/activation IDs, dispatch state, outcome |
 | Authorization epoch | Authorization-origin request/project/lock IDs, immutable allowed scope, bridge instance, credential hash, active/read-only/revoked state |
 | Context snapshot | Referenced project/plan revisions, selected evidence IDs/digests, build version |
+| Workflow binding | Service-owned stage run/proposal IDs, consumed input revisions, stage versions, locked recipe and task prompt identities |
 | Pending input | Request, normalized kind, allowed response shape, native correlation, resolution |
 | Wakeup | Source event IDs, scope, reason, deduplication key, consumption state |
 
@@ -88,6 +91,8 @@ Persist `sending` before communication, then record the acknowledgment. Never ho
 ## 5. Context and multi-request behavior
 
 For each request, assemble a bounded context snapshot from the current brief, settled decisions, narration readiness, selected scope, relevant neighboring shots, active plan bindings, accepted artifacts, active jobs, and unresolved reviews. Summaries contain object IDs/revisions so `read_context` can retrieve exact details. Include full images only when the selected model supports them and they are relevant; otherwise expose usable inspection evidence or request human judgment.
+
+Include the locked recipe's suggested methods, scope-specific stage readiness, registered missing requirements and relevant task prompts. Separate AI-observed creative concerns from service-verified blockers. The director may choose among supported tasks, draft provisional work, ask for missing context or propose a different valid path. It does not need to traverse completed stages or follow a single project-wide stage number. Several logical stages may be addressed in one bounded output batch; v0 still has one active director turn per project.
 
 The latest conversation message refines the ongoing project. It does not reset the film. Persist settled creative changes even before a runnable plan exists. Select the pinned `production` and/or `plan-authoring` skill at each request boundary; do not assume old instructions survived compaction. The [skill/tool contract](SKILLS-TOOLS.md) specifies activation provenance.
 
@@ -104,6 +109,8 @@ Interrupting from the UI atomically revokes the active epoch and persists the ap
 The concrete bridge is a stdio MCP child with a process-fixed opaque credential accepted by the local application. It resolves to one epoch and authorization-origin request, never a mutable current request; it is absent from model arguments. Reused read-only calls retain that epoch attribution. Replace the process when new authority needs a new credential, without assuming MCP hot reload. Native thread resume is optional and compatibility-tested; otherwise reconstruct canonical context. Resuming history must not replay tool side effects. Measure restart/resume latency and context cost as a v0 tradeoff. Later reuse across authority changes requires request-bound capabilities or proven native per-call attribution preserving the same fence. If credential isolation cannot be enforced, block integration.
 
 Workers emit durable domain events using the shared envelope (`eventId`, `projectId`, project `sequence`, `kind`, `occurredAt`, `correlationId`, `payload`). Wakeups are derived from relevant decisions, failures requiring reasoning, or completed evidence needed for the next creative step. Coalesce repeated events for the same scope, retain their source IDs, and consume at least once with deduplication. Routine provider polling, DAG progress, and retries do not each require a model turn.
+
+The workflow service reconciles stage evidence before deciding whether a wakeup needs reasoning. Pending application questions and stage outputs survive process replacement. A stage transition within the same authorized request does not itself change the authorization epoch; each output still needs a valid prepared-change/stage binding and current input versions. Reassessments without new evidence or changed valid output are bounded and eventually wait for input rather than running indefinitely.
 
 ## 7. Pending questions and process isolation
 

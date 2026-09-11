@@ -1,9 +1,11 @@
 # OpenSlate — Skill and Tool Framework
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** proposed framework; no skills or tool implementations are added by this document.
 
 ## 1. Responsibilities and minimum scope
+
+The [production workflow](../technical/PRODUCTION-WORKFLOW.md) makes stage selection an AI proposal and enforces critical protocols in application code. Stage task prompts remain references inside the two skills; recipe/check/schema identities join the immutable capability lock. The five tools carry workflow context and typed proposals through the existing prepare/apply services. No skill per stage or new media operation family is required.
 
 A **skill** supplies creative methods and plan-writing guidance. A **tool** is a validated application command available to the director. An **operation** is a trusted unit executed by a worker from a compiled plan. Keeping these distinct allows a small model-facing surface to drive many media jobs efficiently.
 

@@ -1,6 +1,6 @@
 # OpenSlate — Technical Design
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** architecture proposal; implementation remains an initial TypeScript skeleton.
 
 OpenSlate turns a creative brief into an editable film of up to six minutes: conversational narration development, story and shot planning, human-reviewed keyframes, generated takes, timeline assembly, and finishing. It is a single-user local application with user-configured credentials and extensible model adapters. Codex, GPT Image 2, and H3 cloud are the first director/image/video integrations. A later Python H3 worker implements the video provider boundary; ten- and thirty-minute films are later validation targets.
@@ -9,10 +9,13 @@ OpenSlate turns a creative brief into an editable film of up to six minutes: con
 
 The application should be fast to execute and easy to revise. Once the intent and current project state are clear for a requested scope, the director writes an execution plan in a small TypeScript planning language. OpenSlate compiles it into a durable dependency graph and executes ready operations directly. The user can intervene during production; the director translates the request into a scoped change rather than rebuilding the film.
 
+The AI determines useful production stages and missing information from the user's input and saved evidence. A versioned production workflow supplies the overall guide and enforces critical stage/output protocols in application code. Stage readiness is per scope; there is no fixed global sequence that every request must restart. Storytelling remains a creative task, while prerequisites, revision integrity, approvals and paid execution remain application rules.
+
 | Decision | Purpose |
 |---|---|
 | TypeScript application, React UI, Fastify service | Share contracts across the product and execution engine |
 | Codex behind a director adapter | Reuse conversation and reasoning while OpenSlate owns project state |
+| AI stage proposals with coded workflow contracts | Adapt the procedure to available material and enforce critical boundaries |
 | Two initial skills; five agent-facing tools | Prove extensibility and lifecycle before adding specialist features |
 | Uploaded or generated narration | Discover readiness, close gaps through conversation, and time shots against accepted audio |
 | Human-reviewed keyframe for every shot | Confirm composition and intended motion before admitting video generation |
@@ -34,6 +37,8 @@ flowchart TB
     App <--> Director[Codex director adapter]
     Catalog[Locked skills and tool catalog] --> Director
     Director --> Tools[Five validated domain tools]
+    Tools --> Workflow[Stage contracts and scoped readiness]
+    Workflow --> Change
     Tools --> Change[Change service and plan compiler]
     Change --> State
     Change --> Graph[Versioned execution graph]
@@ -49,13 +54,14 @@ flowchart TB
     Events --> Director
 ```
 
-The director makes creative decisions and authors plans. The compiler validates those plans. The scheduler and workers execute them. Only decisions needing reasoning return to the director; task completion and provider polling do not inherently require a model call.
+The director proposes stages, creative decisions and plans. The workflow service validates stage contracts against the actual requested mutations and saved evidence. The compiler validates media plans; the scheduler and workers execute them. Only decisions needing reasoning return to the director; task completion and provider polling do not inherently require a model call. Existing project-only/plan-only tools receive the same workflow checks.
 
-## 3. Four durable artifacts
+## 3. Five durable record groups
 
 | Artifact | What it preserves |
 |---|---|
 | **Project revision** | Brief, narration readiness and scripts/cues, story/bible, scenes/shots, references, review decisions, selected takes, editorial intent |
+| **Workflow and stage records** | Locked recipe/task prompts, scoped assessments, consumed inputs, output evidence, pending questions and derived readiness |
 | **Plan revision** | Readable plan source, normalized operation graph, exact input bindings, execution policy and version lock |
 | **Execution records** | Service-owned generation intent/candidate IDs, attempts, receipts, cost reservations, node progress |
 | **Media and timeline revisions** | Immutable outputs/provenance, exact edit selections, render recipes and finished exports |
@@ -64,11 +70,11 @@ These records survive conversation resets. Skill loading and conversation summar
 
 ## 4. Main execution loop
 
-1. **Understand the request.** Read current project state and clarify only missing decisions that affect the requested work.
-2. **Author the creative change.** Assess narration text/audio readiness; close gaps through options and conversation. Develop the initial story/shot plan or a local revision with its continuity consequences.
+1. **Assess stages and gaps.** Read current project state; the AI proposes useful supported stages and missing information for the requested scope. Code derives the applicable contracts and checks known prerequisites.
+2. **Author the creative change.** Use focused stage guidance to develop the story, scenes, shots or narration. Reuse supplied material and settled decisions; ask only about missing decisions that affect the work. Assessment and creative output can share one reasoning pass.
 3. **Write plan code.** Describe operations, dependencies, reference bindings, and review gates for that scope.
 4. **Prepare and inspect.** Compile without side effects. Return a proposed project/plan diff, reused work, new work, holds, and estimated cost/time impact.
-5. **Commit under policy.** Apply the approved or already-authorized change atomically. Admit new work only within the active policy and budget.
+5. **Commit under policy.** Apply validated stage records and approved or already-authorized creative/plan changes atomically. Recheck material inputs and authority; a progress-only update does not invalidate compatible work. Admit media only within the active policy and budget.
 6. **Execute ready work.** Prepare accepted narration and shot keyframes in parallel where independent. Admit a video only after a human approves its exact keyframe and relevant shot intent/settings. Ingest outputs and advance dependencies without routine agent turns.
 7. **Guide at decision points.** Surface storyboard batches, technical failures, material edit impacts, or exhausted budgets. The user decides creative quality; automatic retries handle eligible technical errors only. Resume only eligible branches.
 8. **Finish or revise.** Resolve an editable timeline, render a preview/export, and accept further scoped changes at any time.
@@ -80,6 +86,7 @@ These records survive conversation resets. Skill loading and conversation summar
 | Build the framework now | Keep the initial content small |
 |---|---|
 | Skill discovery, compatibility checks, immutable version locks, request activation | Production guidance and plan authoring |
+| Stage registry, typed outputs, scoped readiness, evidence-based transitions | One narrated-video recipe with flexible intake, planning, narration, review and revision paths |
 | Tool registry, schemas, permissions, idempotency, shared handlers | Read context, prepare change, apply change, control execution, inspect artifact |
 | Plan compiler, dependency scheduler, stable identities, revision comparison | Image/video generation, speech synthesis, transcription/alignment, timeline assembly, rendering |
 | Scoped edit protocol, stale-result protection, progress events | Conversational shot replacement, trim/reorder, reference selection; visual playback and review |
@@ -98,11 +105,12 @@ Fast execution does not mean unbounded concurrency or speculative paid takes. Op
 
 ## 7. Reading map
 
-The [detailed technical design set](../technical/README.md) adds implementation contracts for every component while this document remains the architecture overview. The [Codex development workflow](../development/CODEX-WORKFLOW.md) covers how to build the repository, separately from the embedded video director.
+The [detailed technical design set](../technical/README.md) adds implementation contracts for every component while this document remains the architecture overview.
 
 | Document | Read for |
 |---|---|
 | [Component design](COMPONENT-DESIGN.md) | Architecture diagrams, component ownership, and high-level execution algorithms |
+| [Production workflow](../technical/PRODUCTION-WORKFLOW.md) | AI stage selection, missing information, enforced protocols, reuse and task-prompt versions |
 | [Skills and tools](SKILLS-AND-TOOLS.md) | Loading, versioning, multi-request lifecycle, extension rules, and minimal initial surface |
 | [Execution and editing](EXECUTION-AND-EDITING.md) | Code plan example, scheduler logic, incremental changes, and user intervention |
 | [Commercial walkthrough](COMMERCIAL-WALKTHROUGH.md) | A 150-second leather boots example, narration branches, services and saved records |

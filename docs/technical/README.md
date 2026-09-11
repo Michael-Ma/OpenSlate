@@ -1,6 +1,6 @@
 # OpenSlate — Detailed Technical Design
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** implementation proposal. The repository still contains the original runnable skeleton; these contracts and modules are not implemented.
 
 The [architecture overview](../design/README.md) and [component overview](../design/COMPONENT-DESIGN.md) explain direction. This set defines implementation boundaries, records, interfaces, algorithms, failure handling and verification. Examples describe target contracts, not a stable public SDK. The [development plan](../design/IMPLEMENTATION-PLAN.md) orders the work after these designs.
@@ -11,6 +11,8 @@ The [architecture overview](../design/README.md) and [component overview](../des
 flowchart TB
     UI[Review UI and conversation] --> API[Application API and change services]
     API <--> Director[Director runtime and context]
+    Director --> Workflow[Stage proposals and workflow contracts]
+    Workflow --> API
     Director <--> Tools[Locked skills and domain tools]
     Tools --> API
     API --> Compiler[Plan parser and compiler]
@@ -30,6 +32,7 @@ flowchart TB
 | Canonical state, revisions, persistence | [Data and persistence](DATA-PERSISTENCE.md) | Core contracts; server persistence repositories |
 | HTTP commands, trusted actors, transactions, events | [Application API](APPLICATION-API.md) | `apps/server/src/application`, `http`, `events` |
 | Codex adapter and context across requests | [Director runtime](DIRECTOR-RUNTIME.md) | `packages/director`; server supervisor |
+| AI stage selection and enforced production protocols | [Production workflow](PRODUCTION-WORKFLOW.md) | Core workflow contracts; server workflow service |
 | Skill locking, registration and five tools | [Skills and tools](SKILLS-TOOLS.md) | Director catalog/bridge; shared core contracts |
 | Restricted TypeScript and graph/change compilation | [Plan compiler](PLAN-COMPILER.md) | `packages/core/src/planning` |
 | Admission, scheduling, attempts, budgets, recovery | [Execution engine](EXECUTION-ENGINE.md) | Server executor modules; separate worker entry point |
@@ -89,6 +92,7 @@ Editorial time is integer frames at a rational frame rate, initially 30/1; audio
 8. A patch clears only its own hold. All user pauses, other holds and remaining gates still apply.
 9. Keys are backend-only references in plans/logs. The embedded production runtime cannot inherit development skills or alternate paid-tool routes.
 10. Technical correctness and creative acceptance are separate. The user controls quality-driven regeneration; useful draft previews need not wait for individual clip acceptance.
+11. The director proposes stages and missing information per scope. Workflow readiness is derived from current evidence and contracts, never a model-authored global stage flag. All production mutations pass the applicable stage rules.
 
 ## 4. Proposed implementation baseline
 
@@ -101,5 +105,3 @@ Default process layout: one local HTTP application plus one local TypeScript wor
 ## 5. How to use this design
 
 Read shared contracts and data/API boundaries before implementing a component. Work on one vertical slice with its relevant documents and acceptance cases. If a prototype disproves a library or contract assumption, record the evidence and update this set in the same PR. Keep unresolved external compatibility checks explicit; do not replace them with an undocumented assumption.
-
-For developing the software with Codex/GPT-6, see the separate [development workflow research](../development/CODEX-WORKFLOW.md). Those development instructions are not the two production skills used by the video agent.

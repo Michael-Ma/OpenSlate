@@ -1,6 +1,6 @@
 # Local Operations, Diagnostics and Verification
 
-**Version:** 0.4 · Proposed implementation design
+**Version:** 0.5 · Proposed implementation design
 
 ## 1. Runtime and distribution
 
@@ -98,8 +98,10 @@ Prompt/skill evaluations use small scenario fixtures: notes-only narration, comp
 
 ## 6. CI and release gates
 
+Workflow verification adds fixtures for AI stage proposals, uploaded material satisfying existing requirements, advisory versus hard gaps, cross-stage batching, stage/input version conflicts and bypass attempts through old tool variants. Measure stage-assessment calls/tokens, no-progress loops and scoped edit reuse. Prompt evaluations assess useful suggestions separately from deterministic contract tests. See [Production Workflow](PRODUCTION-WORKFLOW.md).
+
 Extend CI in slices: build/types, domain tests, real SQLite integration, a small browser smoke flow, then selected local-media fixtures. Paid calls require explicit opt-in credentials and a bounded allowance and are never default PR checks. Tests must not load a contributor's personal Codex skills or media keys.
 
 A six-minute release candidate must pass the fake full-length workflow, a measured real production example within budget, restart/recovery invariants, review/quality-origin rules, export/import and installation verification. Record actual model/runtime/profile versions and hardware. Do not promise a speed multiplier or thirty-minute readiness from short clips.
 
-For each PR run the tests that exercise its changed behavior plus required CI checks. Broaden testing after new failures, integration changes or unresolved risks; repeated full-suite runs without a new reason do not add much evidence. The [development workflow](../development/CODEX-WORKFLOW.md) explains how to scope Codex implementation and independent reviews.
+For each PR run the tests that exercise its changed behavior plus required CI checks. Broaden testing after new failures, integration changes or unresolved risks; repeated full-suite runs without a new reason do not add much evidence.

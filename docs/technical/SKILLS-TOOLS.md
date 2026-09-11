@@ -1,11 +1,13 @@
 # Skills and tools technical design
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 10, 2026
 **Status:** proposed implementation. This document adds no installed skills, MCP server, handlers, or application code.
 
 ## 1. Three separate extension mechanisms
 
 A skill teaches the director how to reason. A tool invokes a bounded application service. An operation executes trusted worker code from the compiled plan. Skill text cannot register a handler, widen permissions, approve a keyframe, or authorize another paid candidate.
+
+The [production workflow](PRODUCTION-WORKFLOW.md) adds versioned stage contracts in trusted application code. The AI uses production guidance to propose stages and gaps; the service validates transitions and outputs. Workflow stages are neither extra model tools nor media operations. Keep their task prompts as references inside the existing skills and their enforceable predicates in core/application code.
 
 ```mermaid
 flowchart LR
@@ -52,6 +54,7 @@ interface SkillManifest {
   compatibility: {
     toolContract: string;
     planLanguage: string;
+    workflowContract: string;
   };
   requiredToolIds: ToolId[];
 }
@@ -74,6 +77,8 @@ Codex natively discovers skill name/description/path before loading full instruc
 ## 3. Catalog, lock, and request activation
 
 The catalog lists trusted available packages and handlers. A capability lock selects exact skill digests, tool/operation contract versions, handler builds, compiler identity, and relevant runtime/provider profile revisions for a production boundary. Request activation records identify what OpenSlate explicitly supplied for one request: lock ID, context snapshot ID, selected skill IDs/digests, and entry paths.
+
+The lock also pins recipe, stage-check implementation, task-prompt and output-schema digests. Task prompts resolve within the immutable skill snapshots; do not maintain a competing prompt loader. Activation records include relevant stage/proposal bindings and prompt identities. An instruction upgrade changes future task context under a successor lock; it does not automatically invalidate finished media or rerun satisfied stages.
 
 Do not claim an activation proves that the model read every reference or obeyed instructions. The application can record its own injection and mediated reads, but opaque runtime file access does not necessarily provide complete reference-consumption events.
 
@@ -141,6 +146,8 @@ V0 replaces the process/bridge when request authority changes; it never lends an
 
 Project-only preparation is valid before a plan exists and stores a proposal only. `apply_change` commits settled creative decisions without generation intents. If that commit changes active production inputs, retain the affected hold/stale bindings until a compatible executable plan resolves them. Discussion notes do not automatically invalidate work.
 
+Extend `read_context` with a workflow view of scope-specific stages, known requirements and AI-observed gaps. Add a `workflow` variant to `prepare_change` containing stage proposals and optional typed creative/plan changes; assessment and output may be batched. `apply_change` commits the validated stage records and creative changes atomically. Every variant receives service-derived contract coverage and stage bindings from the normalized mutation footprint; the proposed stage label cannot select weaker checks. Completion and approval flags are never writable model fields. These additions preserve the five-tool catalog.
+
 Plan source is the bounded TypeScript planning language, parsed and compiled into supported operations; it is never evaluated as arbitrary JavaScript. Preparation returns concrete compiler/impact findings. Application commits may establish authorized generation intents, but the worker executor performs final admission/reservation under current holds, budget, dependencies, and gates.
 
 Every video requires human approval covering the exact keyframe and current shot intent/settings. Scene batch approval records exact coverage. Candidate origins are `initial_slot` or `user_change`; each consumes one immutable service-issued `grantSlotId`, bound to its permitted purpose independently of logical node identity. Recreating a node cannot reuse the slot. Trusted technical evidence may grant `RetryAuthority` for another attempt of the same candidate, not another creative candidate. Quality criticism cannot grant it.
@@ -162,3 +169,5 @@ Test package hashing with changed references, traversal/symlinks, missing files,
 For all five tools, test schema rejection, cross-project IDs, forged authority fields, response limits, stale revisions, and lost responses after commit. Test old-credential arrival after replacement and epoch revocation between validation/commit. Replay a change after recreating its node and native call IDs: its grant slot still permits one candidate. A quality retry fails without user authority; technical recovery uses trusted evidence for a same-candidate attempt. Test exact review mismatch, another hold's release, and preparation that leaves canonical creative state unchanged.
 
 Finally, register a fake additional operation without changing the five-tool catalog, upgrade a skill while an old job runs, and recover a replaced Codex session without replaying side effects. The fixed surface is adequate only if these cases pass with fake media before live generation is enabled.
+
+Test stage proposals with fabricated completion, stale inputs, unsupported IDs and an attempt to bypass checks through the older tool variants. A task-prompt update must preserve prior output provenance and human review; loading a guide cannot itself satisfy a stage predicate.

@@ -1,14 +1,40 @@
 # OpenSlate — Design Review Notes
 
-## Revision 0.4 — September 10, 2026
+## Revision 0.5 — September 10, 2026
 
-This revision turns the accepted architecture into eleven component designs, a shared contract index, and an implementation sequence. It also researches the current Codex/GPT-6 development guidance and Superpowers from primary sources. The repository remains a runnable skeleton; this revision does not implement the proposed application behavior.
+This revision records the agreed boundary: the AI interprets user input, proposes useful stages and identifies missing information; trusted application code enforces the critical protocols. The [production workflow design](../technical/PRODUCTION-WORKFLOW.md) adds scoped stage contracts above creative planning and media compilation. The application remains a skeleton. This design baseline is approved for a local documentation commit before implementation; subsequent commits and pushes require the user's approval.
+
+### Changes reviewed
+
+- One narrated-video recipe with flexible entry, supplied-material reuse, provisional work and scoped revision paths; no global current-stage cursor.
+- Stage proposals, input/output evidence and pending gaps persisted through existing prepare/apply services. Two skills, five tools and six media operation families remain sufficient.
+- Typed story/scene/shot task outputs, with workflow code in the trusted application registry and the restricted media planning language unchanged.
+- Recipe, stage-check, prompt and schema identities pinned with the existing capability lock; prompt references remain inside the production skills.
+- Separate material-binding and progress versions, preserving compatible completion without unnecessary director work.
+- T02A added before fake execution/director integration, with corresponding API, persistence, UI, narration and test-design updates.
+
+### Review findings incorporated
+
+| Finding | Resolution |
+|---|---|
+| A model could choose a weak stage label for a stronger mutation | Derive mandatory contracts from the actual normalized creative/plan diff for all prepare variants |
+| A stale stage result could be confused with late paid-job evidence | Reject stale creative publication while retaining executor receipts, artifacts and liabilities under existing binding rules |
+| Workflow diagram initially placed compilation after publication | Compile during preparation; commit validated stage/creative/plan records atomically |
+| Derived progress could invalidate otherwise compatible prepared work | Separate binding and progress versions; recheck predicates without requiring another model call for compatible completion |
+| A completed stage could be mistaken for human acceptance | Define completion per output requirement; retain independent exact approvals and quality decisions |
+| A strict sequence could block the work needed to satisfy its own prerequisites | Distinguish draft prerequisites from dispatch requirements and permit independent scopes to progress |
+
+A focused execution/authority review and author consistency pass cover these changes. Document checks cover local links/anchors, fenced blocks and whitespace; no workflow runtime or prompt-evaluation results are claimed. Implementation must still prove stage coverage, late-output behavior, supplied-input routes, no-progress limits and actual latency using the planned fixtures. Story quality and inferred semantic gaps remain areas for human judgment, not guaranteed by schemas.
+
+## Revision 0.4 — September 10, 2026 (historical)
+
+This revision turns the accepted architecture into eleven component designs, a shared contract index, and an implementation sequence. The repository remains a runnable skeleton; this revision does not implement the proposed application behavior.
 
 ### Coverage and review method
 
 The [technical index](../technical/README.md) links persistence, application API, director runtime, skills/tools, plan compilation, execution, narration, providers/artifacts, timeline/rendering, review UI and operations/testing. Each document defines ownership, records or interfaces, execution logic, failure behavior and acceptance evidence. The [development plan](IMPLEMENTATION-PLAN.md) orders tasks T00–T13 around working slices and explicit compatibility gates.
 
-Three component authors contributed runtime, execution and media designs. Cross-component review examined authority, identity, invalidation, durability and user-visible recovery; the integrating author reconciled contracts and reviewed the complete set. The [development workflow research](../development/CODEX-WORKFLOW.md) distinguishes documented product behavior from our project-specific recommendations. External skill source was read as research material; no Superpowers installation or new development instructions were activated.
+Three component authors contributed runtime, execution and media designs. Cross-component review examined authority, identity, invalidation, durability and user-visible recovery; the integrating author reconciled contracts and reviewed the complete set.
 
 ### Material findings incorporated
 
