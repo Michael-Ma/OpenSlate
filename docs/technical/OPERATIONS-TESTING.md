@@ -1,10 +1,10 @@
 # Local Operations, Diagnostics and Verification
 
-**Version:** 0.5 · Proposed implementation design
+**Version:** 0.6 · September 12, 2026 · Target implementation design
 
 ## 1. Runtime and distribution
 
-Ship a single-user local web application. Development continues with Node 24 and the checked-in pnpm workspace. The first production package serves the built React assets and API from the same loopback origin, starts the local worker, and supervises the chosen director runtime. A desktop wrapper, hosted multi-user deployment, and direct timeline editor are later products.
+Ship a single-user, single-machine local web application. UI, API, SQLite, media files, operation workers and native Codex all run on one computer. Multi-host application deployments, remote GPU workers, distributed scheduling and shared-database deployment are outside v0. Cloud LLM, GPT Image 2 and H3 APIs remain initial provider integrations; a local installation does not promise offline generation. Development continues with Node 24 and the checked-in pnpm workspace. The first production package serves the built React assets and API from the same loopback origin, starts the local worker, and supervises the chosen director runtime. A desktop wrapper, hosted multi-user deployment, and direct timeline editor are later products.
 
 Separate installation paths from user data. A configured data directory stores SQLite/artifacts/snapshots/logs, while the checkout or packaged application holds code. Initial compatibility testing should include the user's macOS environment and Linux CI; publish the actually tested OS/architecture matrix with the first release. Do not promise Windows/native dependency support before clean-machine verification.
 
@@ -34,6 +34,7 @@ interface InstallationConfig {
   maxExportSeconds: 360;
   worker: { enabled: boolean; maxConcurrentLocalTasks: number };
   directorProfileId: Id | null;
+  localCodexPolicy: LocalCodexPolicy | null; // required when native Codex is selected
   ffmpegPath: string | null;
   ffprobePath: string | null;
 }
@@ -44,6 +45,8 @@ interface CredentialStore {
 }
 ```
 
+`LocalCodexPolicy` has only mode `local` and pins the exact native version/configuration identity. It records the accepted trust in the installed runtime/sandbox; it is not a separate external-confinement or independent-isolation assertion. Verify effective permissions and exact skill/tool catalogs, retain the loopback epoch-bound bridge, and keep application authorization in force. Independent code-host/authentication isolation remains unverified. The actual supervisor/native backend fixture has passed; default to fake while local runtime configuration and browser setup are completed. See the [accepted decision](../implementation/RUNTIME-TRUST-DECISION.md).
+
 Implement an environment-reference credential backend first; it works for contributor and CI setups without putting secrets in project files. The settings UI can select validated environment references and show configured/not-configured status. Add an OS-keychain backend for saved keys on the first supported desktop platform; typed-key saving is unavailable until that backend exists. Do not silently save form input to plaintext application settings. An ignored user-managed `.env` is an explicit local configuration choice, not part of exports.
 
 The backend passes only the chosen LLM credential to the director runtime and only required media credentials to a worker invocation. Redact auth headers, secret values and signed URL query parameters from logs. API responses return masked status/reference names. A provider connection check that incurs usage must be distinguished from read-only configuration validation and covered by the user's allowance.
@@ -52,13 +55,13 @@ Changing defaults affects future plan/profile resolution. Active locked work kee
 
 ## 3. Process lifecycle and recovery
 
-One active server owns an installation; workers have identities and lease epochs. A second application instance attaches to the existing UI or reports the existing owner instead of starting another dispatcher. PID files alone are insufficient across crashes/reboots; combine an OS-held lock with an installation generation token and process liveness. Workers verify installation ownership before new admission.
+One active server owns an installation on the local computer; same-machine workers have identities and lease epochs. A second application instance attaches to the existing UI or reports the existing owner instead of starting another dispatcher. PID files alone are insufficient across crashes/reboots; combine an OS-held lock with an installation generation token and process liveness. Workers verify installation ownership before new admission.
 
-On normal stop, persist dispatch/director pause as appropriate, stop claiming new work, flush known provider evidence and allow bounded completion of local artifact writes. Accepted remote tasks may continue after all local processes exit. On restart, resume monitoring/reconciliation from durable records before any new submission. A local crash cannot retract a remote charge.
+On normal stop, persist dispatch/director pause as appropriate, stop claiming new work, flush known provider evidence and allow bounded completion of local artifact writes. Accepted cloud provider tasks may continue after all local processes exit. On restart, resume monitoring/reconciliation from durable records before any new submission. A local crash cannot retract a remote charge.
 
 FFmpeg and other trusted local operations run in child processes with explicit argument arrays, bounded concurrency, timeouts and cancellation. Capture sanitized stderr for diagnostics. Stop the child process tree on cancellation and keep incomplete output in staging. A killed render can restart from its frozen manifest; it does not regenerate source video.
 
-The future Python H3 worker has its own accepted-work records and transferable artifacts; it never reads installation SQLite or local application paths. Remote worker liveness is not proof of generation failure; reconciliation uses accepted job identity and capability-specific evidence.
+After v0, optional same-machine Python H3 inference can use a versioned loopback job API with its own accepted-work records and transferred artifacts. It does not own installation SQLite or project mutations. That local process exiting is not proof that an accepted inference failed; reconcile its durable job identity before retrying. Remote GPU hosting requires a separate future design and is not a v0 operational mode.
 
 ## 4. Observability and debug evidence
 
@@ -87,7 +90,7 @@ The first implementation uses Node 24's built-in test runner, real SQLite for pe
 | Domain/service tests | Narration gap cases, scoped impact, candidate origin, hold ownership | Product rules without paid dependencies |
 | Real SQLite integration | Concurrent approve/edit/admit, duplicate commands, migration/backup | Actual transaction and constraint behavior |
 | Worker/provider fixtures | Accepted/direct-complete/rejected/unknown outcomes, lost response, duplicate/late receipt, partial download | Durable effect handling and bounded recovery |
-| Runtime contract fixtures | Turn streaming/input/interrupt, session recreation, tool replay, unexpected skills | Adapter behavior under the pinned release |
+| Runtime contract fixtures | Local policy/config equality, turn streaming/input/interrupt, same-host process recreation, tool replay, unexpected skills | Adapter behavior and application fences under the pinned release; not independent host/auth isolation |
 | Browser flows | Exact batch approval, stale review, shot-linked chat, reconnect/pause | Usable human intervention |
 | Local media tests | Known audio/video fixtures, trims/overlaps, cue alignment, six-minute duration | Render and timing correctness |
 | Bounded live pilots | One approved image/video/speech/transcription path, then short sequence | Actual account/provider compatibility |
@@ -101,6 +104,8 @@ Prompt/skill evaluations use small scenario fixtures: notes-only narration, comp
 Workflow verification adds fixtures for AI stage proposals, uploaded material satisfying existing requirements, advisory versus hard gaps, cross-stage batching, stage/input version conflicts and bypass attempts through old tool variants. Measure stage-assessment calls/tokens, no-progress loops and scoped edit reuse. Prompt evaluations assess useful suggestions separately from deterministic contract tests. See [Production Workflow](PRODUCTION-WORKFLOW.md).
 
 Extend CI in slices: build/types, domain tests, real SQLite integration, a small browser smoke flow, then selected local-media fixtures. Paid calls require explicit opt-in credentials and a bounded allowance and are never default PR checks. Tests must not load a contributor's personal Codex skills or media keys.
+
+Native integration acceptance exercises actual supervisor dispatch and scoped continuation under the accepted local policy. The two-start backend fixture verified a conversational question, restart and scoped edit; this does not verify native structured pending-input or vision. Product configuration/browser setup and those capability evaluations remain open. Retain exact catalog/permission checks and record native limitations without treating a model refusal as independent enforcement evidence. Independent code-host/authentication isolation is not a separate v0 release prerequisite; there is no externally confined mode framework.
 
 A six-minute release candidate must pass the fake full-length workflow, a measured real production example within budget, restart/recovery invariants, review/quality-origin rules, export/import and installation verification. Record actual model/runtime/profile versions and hardware. Do not promise a speed multiplier or thirty-minute readiness from short clips.
 

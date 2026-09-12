@@ -1,7 +1,7 @@
 # Timeline assembly and rendering
 
-**Version:** 0.4 · September 10, 2026
-**Status:** detailed design; the initial implementation supports conversation-driven edits, not a direct timeline editor.
+**Version:** 0.5 · September 11, 2026
+**Status:** target design. A separate supplied-media service now normalizes files and renders exact cuts/audio placements with immutable manifests and guarded publication. It is not yet connected to canonical timeline resolution, the executor or the browser. Captions, overlays, transitions and a timeline editor remain pending. See [implementation boundaries](../implementation/CONVERSATION-WORKSPACE.md).
 
 ## Ownership and composition model
 

@@ -1,9 +1,11 @@
 # Media providers and immutable artifacts
 
-**Version:** 0.4 · September 10, 2026
+**Version:** 0.5 · September 12, 2026
 **Status:** detailed design; no provider integration or paid generation is implemented by this document.
 
 ## Boundary and ownership
+
+V0 is a single-machine application: the server, database, artifacts and operation workers live on the user's computer. Image/video/speech/transcription providers can be cloud services; local deployment is not offline generation. Remote GPU workers, distributed execution and shared-database deployment are outside v0.
 
 The worker invokes role-specific adapters for image, video, speech, and transcription operations. The application owns job admission, human review, budgets, and current selections. An adapter translates one validated operation into a provider protocol; it cannot create another creative take, silently substitute models, or mutate the active plan.
 
@@ -13,7 +15,7 @@ flowchart LR
     Registry[Locked profile and adapter registry] --> Handler
     Secret[Backend credential resolver] --> Handler
     Handler --> Adapter[Image video or audio adapter]
-    Adapter --> Provider[Cloud API or later local worker]
+    Adapter --> Provider[Cloud API; same-machine inference after v0]
     Provider --> Receipt[Receipt status and outputs]
     Receipt --> Ingest[Download hash probe and validate]
     Ingest --> Store[Immutable local artifacts]
@@ -116,8 +118,8 @@ The application data root contains `artifacts/sha256/<prefix>/<digest>` and `sta
 
 Media inspection uses a pinned `ffprobe`/decode toolchain and records actual stream properties. [ffprobe documentation](https://ffmpeg.org/ffprobe.html) Original uploads remain unchanged; thumbnails, waveforms, normalized media, and render caches are immutable derivatives. Browser delivery resolves authorized artifact IDs into local streams and supports range requests; raw filesystem paths and provider locators are not browser API inputs.
 
-## Local workers later and verification
+## Same-machine inference later and verification
 
-A local H3 adapter will speak an authenticated, versioned HTTP job protocol to a Python service. The worker receives task IDs, immutable media transfers, settings and capability requirements; it has no SQLite access, no director session, and no authority to release review or budget gates. Persist request identity before GPU execution, return durable receipts, advertise build/weights/capability revisions, and support restart queries. Cloud and local profiles remain distinct, including any missing upscaling/audio stages.
+After v0, a local H3 adapter can speak an authenticated, versioned loopback HTTP job protocol to a Python service on the same computer. This is an optional inference implementation, not a remote GPU deployment mode. The worker receives task IDs, immutable media transfers, settings and capability requirements; it has no SQLite access, no director session, and no authority to release review or budget gates. Persist request identity before GPU execution, return durable receipts, advertise build/weights/capability revisions, and support restart queries. Cloud and local profiles remain distinct, including any missing upscaling/audio stages.
 
-Contract tests cover each normalized status/error, delayed receipts, repeated polling, expired outputs, SDK retry disabling, input-role rejection, hash corruption, forged review data, stale-result binding, and model-profile changes. Crash tests cut execution before submission, after remote acceptance, during download, after blob rename, after directory synchronization, and before database commit. Exercise failed/unsupported synchronization and startup quarantine. Document the tested filesystem/OS guarantees; process-kill tests alone do not prove power-loss durability. A second fake provider with incompatible capabilities must run through the same engine without model-specific branches. Local protocol fixtures verify duplicate request reconciliation and prove that remote workers cannot modify project state.
+Contract tests cover each normalized status/error, delayed receipts, repeated polling, expired outputs, SDK retry disabling, input-role rejection, hash corruption, forged review data, stale-result binding, and model-profile changes. Crash tests cut execution before submission, after remote acceptance, during download, after blob rename, after directory synchronization, and before database commit. Exercise failed/unsupported synchronization and startup quarantine. Document the tested filesystem/OS guarantees; process-kill tests alone do not prove power-loss durability. A second fake provider with incompatible capabilities must run through the same engine without model-specific branches. Same-machine protocol fixtures verify duplicate request reconciliation and that the inference service cannot mutate project state through its exposed job API. Process ownership and lease recovery stay local. A multi-host worker transport would require a separate future design; these tests do not establish remote deployment or independent OS isolation.

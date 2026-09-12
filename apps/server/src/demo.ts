@@ -34,8 +34,9 @@ function expect(value: unknown, message: string): asserts value { invariant(valu
 
 // Only this trusted fixture builder writes seed records directly. All production
 // changes, grants and review decisions below go through ProductionService.
-function seedFixture(service: ProductionService, directory: string): ProjectRecord {
-  const project = service.createProject("OpenSlate FAKE two-shot boots demonstration");
+export function seedFixture(service: ProductionService, directory: string, existingProjectId?: string): ProjectRecord {
+  const project = existingProjectId ? service.store.getProject(existingProjectId) : service.createProject("OpenSlate FAKE two-shot boots demonstration");
+  invariant(!project.shots.length && !project.activePlanId && !project.brief && !project.story && !project.narration.script && !project.scenes.length, "DEMO_REQUIRES_EMPTY_PROJECT", "Create a new empty project for the fixture demonstration");
   const importDirectory = join(directory, "fixture-imports"); mkdirSync(importDirectory, { recursive: true });
   const product = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#e9dfd2"/><path d="M125 25h65v65l65 35v20H80v-25l45-25z" fill="#754e31"/><text x="12" y="165" font-size="13">FAKE PRODUCT REFERENCE</text></svg>');
   const samples = 12 * 48000; const audio = Buffer.alloc(44 + samples * 2);

@@ -1,11 +1,17 @@
 import Fastify from "fastify";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
 import { ToolInvocationService } from "./application/tool-invocations.js";
 import type { ProductionService } from "./application/service.js";
+import type { DirectorSupervisor } from "./application/director-supervisor.js";
+import type { ArtifactRecord, PlanRecord, ReviewSnapshot } from "./execution/engine.js";
+import { seedFixture } from "./demo.js";
+import type { DemoCommand } from "./application/fake-director.js";
 
-interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean }
+interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean; director?: DirectorSupervisor }
 const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
@@ -13,6 +19,7 @@ export function createApp(options: AppOptions = {}) {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 3 * 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const actors = new WeakMap<object, ActorContext>();
+  const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
   const service = () => { invariant(options.service, "SERVICE_UNAVAILABLE", "Application storage is not configured"); return options.service; };
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
@@ -27,6 +34,8 @@ export function createApp(options: AppOptions = {}) {
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
     invariant(!origin || ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"].includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
+    const commandKey = request.headers["idempotency-key"];
+    invariant(commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health") return;
     const bearer = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{20,256})$/)?.[1];
     invariant(bearer, "AUTH_REQUIRED", "A local session or director bridge token is required");
@@ -36,17 +45,85 @@ export function createApp(options: AppOptions = {}) {
     } else invariant(options.localToken && timingSafeEqual(Buffer.from(digest(bearer)), Buffer.from(digest(options.localToken))), "AUTH_REQUIRED", "Invalid local session token");
   });
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
-  app.post<{ Body: { name: string } }>("/api/projects", { schema: { body: object({ name: string }, ["name"]) } }, async request => service().createProject(request.body.name));
+  app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
+  app.post<{ Body: { name: string } }>("/api/projects", { schema: { body: object({ name: string }, ["name"]) } }, async request =>
+    service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => service().createProject(request.body.name)));
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
-  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; replyToReviewId?: string } }>("/api/projects/:projectId/messages", {
-    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, replyToReviewId: string }, ["text"]) },
-  }, async request => {
-    const actor = service().beginRequest(request.params.projectId, "local-user", request.body.text,
-      { ...request.body, contextDigest: digest({ replyToReviewId: request.body.replyToReviewId ?? null }), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
-    if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, request.body.text);
-    return { requestId: actor.requestId, status: "recorded", director: "not_connected" };
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director", async request => {
+    service().store.getProject(request.params.projectId);
+    return options.director?.status(request.params.projectId) ?? { mode: "offline", status: "not_connected", activeRequestId: null };
   });
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/review", async request => service().engine.reviewSnapshot(request.params.projectId));
+  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; replyToReviewId?: string; replyToQuestionId?: string } }>("/api/projects/:projectId/messages", {
+    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, replyToReviewId: string, replyToQuestionId: string }, ["text"]) },
+  }, async request => {
+    if (request.body.replyToQuestionId) {
+      invariant(options.director && !request.body.replyToReviewId && !request.body.scopeIds && !request.body.continuationRequestId && request.body.editing === undefined, "VALIDATION_ERROR", "Reply to one pending question using its original scope");
+      const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.text, request.headers["idempotency-key"] as string | undefined ?? newId());
+      options.director.tick(); return { requestId: actor.requestId, status: "queued", director: options.director.options.mode };
+    }
+    const actor = service().store.transaction(() => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.text,
+        { ...request.body, contextDigest: digest({ replyToReviewId: request.body.replyToReviewId ?? null }), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
+      if (!request.body.replyToReviewId) options.director?.enqueue(request.params.projectId, actor);
+      return actor;
+    });
+    if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, request.body.text);
+    options.director?.tick();
+    return { requestId: actor.requestId, status: options.director ? "queued" : "recorded", director: options.director ? options.director.options.mode : "not_connected" };
+  });
+  app.post<{ Params: { projectId: string }; Body: DemoCommand }>("/api/projects/:projectId/demo", {
+    schema: { body: object({ action: { enum: ["create", "close_up", "wide"] }, shotId: string }, ["action"]) },
+  }, async request => {
+    invariant(options.director?.options.mode === "fake", "ACTOR_DENIED", "The demo is available only with the offline fake director");
+    const { projectId } = request.params;
+    const key = request.headers["idempotency-key"] as string | undefined ?? newId();
+    // Dedicated human demo command authorizes bounded fake slots. Ordinary chat never grants generation.
+    const result = service().store.command(`local-user:${projectId}:demo`, key, digest(request.body), () => {
+      if (request.body.action === "create") seedFixture(service(), join(service().engine.artifactDir, projectId), projectId);
+      const project = service().store.getProject(projectId);
+      invariant(project.shots.length === 2 && project.brief === "A deliberately fake leather-boots commercial integration fixture", "DEMO_PROJECT_REQUIRED", "Use the dedicated two-shot fixture project");
+      const shotIds = request.body.action === "create" ? project.shots.map(shot => shot.id) : [request.body.shotId];
+      invariant(shotIds.every(id => id && project.shots.some(shot => shot.id === id)), "VALIDATION_ERROR", "Select a demo shot");
+      const text = request.body.action === "create" ? "Create a 2-shot offline demo with sample media." : `Try ${request.body.action === "close_up" ? "a close-up" : "a wide view"} for the selected demo shot.`;
+      const actor = service().beginRequest(projectId, "local-user", text, { scopeIds: request.body.action === "create" ? [projectId] : shotIds as string[], key: `demo:${key}`, contextDigest: digest(request.body) });
+      service().authorize(projectId, actor, (shotIds as string[]).flatMap(scopeId => [{ scopeId, kind: "image" as const }, { scopeId, kind: "video" as const }]), `demo-slots:${actor.requestId}`, request.body.action === "create" ? "initial_slot" : "user_change");
+      service().store.insert("demo_command", actor.requestId, projectId, request.body);
+      const turn = options.director!.enqueue(projectId, actor);
+      return { requestId: actor.requestId, turnId: turn.id, status: "queued", director: "fake" };
+    });
+    options.director.tick(); return result;
+  });
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/review", async request => {
+    const { projectId } = request.params, project = service().store.getProject(projectId);
+    if (!project.activePlanId) return { id: null, projectId, planId: null, members: [], headVersion: project.headVersion, revisionId: project.revisionId };
+    const cursor = service().store.cursor(projectId);
+    let cached = reviewCache.get(projectId);
+    if (!cached || cached.cursor !== cursor) {
+      cached = { cursor, snapshot: service().engine.reviewSnapshot(projectId) }; reviewCache.set(projectId, cached);
+    }
+    const plan = service().store.get<PlanRecord>("plan", cached.snapshot.planId)!;
+    const approvals = service().store.list<{ videoNodeId: string; approvalDigest: string }>("approval", projectId);
+    return { ...cached.snapshot, headVersion: project.headVersion, revisionId: project.revisionId, members: cached.snapshot.members.map(member => {
+      const node = plan.compiled.nodes.find(node => node.id === member.videoNodeId)!;
+      return { ...member, approved: approvals.some(approval => approval.videoNodeId === member.videoNodeId && approval.approvalDigest === member.approvalDigest), motionPrompt: node.args.prompt, durationFrames: node.args.durationFrames, profileLabel: node.profileId };
+    }) };
+  });
+  app.get<{ Params: { projectId: string; artifactId: string } }>("/api/projects/:projectId/artifacts/:artifactId/content", async (request, reply) => {
+    const artifact = service().store.get<ArtifactRecord>("artifact", request.params.artifactId);
+    invariant(artifact?.projectId === request.params.projectId, "NOT_FOUND", "Artifact does not belong to this project");
+    const root = realpathSync(service().engine.artifactDir), path = realpathSync(artifact.path), rel = relative(root, path);
+    invariant(rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep), "SCOPE_DENIED", "Artifact is outside managed media storage");
+    const fd = openSync(artifact.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = fstatSync(fd);
+      invariant(stat.isFile() && stat.size <= 64 * 1024 * 1024, "ARTIFACT_TOO_LARGE", "Artifact preview exceeds its limit");
+      const bytes = readFileSync(fd);
+      invariant(createHash("sha256").update(bytes).digest("hex") === artifact.artifact.sha256, "ARTIFACT_CORRUPT", "Artifact bytes changed");
+      const allowed = ["image/svg+xml", "image/png", "image/jpeg", "video/mp4", "audio/wav", "audio/mpeg"];
+      invariant(allowed.includes(artifact.mimeType), "ARTIFACT_TYPE_UNSUPPORTED", "Artifact is not a supported preview");
+      return reply.header("X-Content-Type-Options", "nosniff").header("Cache-Control", "private, no-store").header("Content-Security-Policy", "sandbox; default-src 'none'").type(artifact.mimeType).send(bytes);
+    } finally { closeSync(fd); }
+  });
   app.post<{ Params: { projectId: string }; Body: { snapshotId: string; videoNodeIds: string[] } }>("/api/projects/:projectId/approvals", {
     schema: { body: object({ snapshotId: string, videoNodeIds: { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: string } }, ["snapshotId", "videoNodeIds"]) },
   }, async request => {
@@ -56,8 +133,12 @@ export function createApp(options: AppOptions = {}) {
   app.post<{ Params: { projectId: string }; Body: { action: "pause" | "resume" } }>("/api/projects/:projectId/controls", {
     schema: { body: object({ action: { enum: ["pause", "resume"] } }, ["action"]) },
   }, async request => {
-    const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action, { editing: false });
-    return service().control(request.params.projectId, actor, request.body.action);
+    const key = request.headers["idempotency-key"] as string | undefined ?? newId();
+    const result = service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action, { editing: false, key: `control:${key}` });
+      return service().control(request.params.projectId, actor, request.body.action);
+    });
+    options.director?.tick(); return result;
   });
   app.get<{ Params: { projectId: string }; Querystring: { after?: string } }>("/api/projects/:projectId/events", async (request, reply) => {
     let cursor = Number(request.headers["last-event-id"] ?? request.query.after ?? 0);

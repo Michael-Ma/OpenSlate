@@ -29,6 +29,8 @@ export interface DirectorContextProjection {
   page: { offset: number; returned: number; total: number; nextOffset: number | null; offsetUnit: "records" | "utf16_characters" };
   items: unknown[];
   messages: Message[];
+  assistantMessages?: { id: string; requestId: string; turnId: string; text: string; phase: string }[];
+  questions?: unknown[];
   holds: Hold[];
   toolCalls: ToolSummary[];
   workflow: unknown;
@@ -81,7 +83,8 @@ function receipts(service: ProductionService, projectId: string): unknown[] {
     json_extract(result,'$.headVersion') AS headVersion, json_extract(result,'$.activePlanId') AS activePlanId,
     json_extract(result,'$.cursor') AS cursor
     FROM commands WHERE instr(actor_scope, ':' || ? || ':') > 0 ORDER BY rowid DESC`).all(projectId) as Record<string, unknown>[];
-  return [...tool.map(row => ({ kind: "tool", ...row, resultProjection: "identities_and_digests_only" })), ...commands.map(row => ({ kind: "command", ...row, resultProjection: "identities_and_counts_only" }))];
+  const reconciled = service.store.list<Record<string, unknown>>("tool_reconciliation", projectId).reverse();
+  return [...reconciled.map(row => ({ kind: "tool_reconciliation", ...row })), ...tool.map(row => ({ kind: "tool", ...row, resultProjection: "identities_and_digests_only" })), ...commands.map(row => ({ kind: "command", ...row, resultProjection: "identities_and_counts_only" }))];
 }
 function workSummary(service: ProductionService, projectId: string, planId: string | null) {
   const phaseCounts = service.store.db.prepare("SELECT json_extract(body,'$.phase') AS phase,count(*) AS count FROM entities WHERE kind='attempt' AND project_id=? GROUP BY phase").all(projectId);
@@ -141,18 +144,20 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       return itemsPage(service.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id)).map(grant => ({ ...grant, unused: true, authorityRelation: authorities.has(grant.authorityId) ? "current_or_explicitly_continued_request" : "other_request", authorization: "informational_only_service_rechecks_scope_origin_and_current_authority" })));
     }
     const messages = service.store.list<Message>("message", projectId).reverse();
+    const assistantMessages = service.store.list<{ id: string; requestId: string; turnId: string; text: string; phase: string }>("director_output", projectId).reverse();
+    const questions = service.store.list("director_question", projectId).reverse();
     const holds = service.store.list<Hold>("hold", projectId).filter(hold => hold.active).reverse();
     const toolCalls = toolSummaries(service, projectId);
     const readiness = workflowReadiness(saved);
-    const total = Math.max(saved.shots.length, saved.scenes.length, messages.length, holds.length, toolCalls.length, readiness.scopes.length, readiness.narration.acceptedMeasuredCues.length);
-    base.guard.dataDigest = digest({ shots: saved.shots, scenes: saved.scenes, messages, holds, toolCalls, readiness });
+    const total = Math.max(saved.shots.length, saved.scenes.length, messages.length, assistantMessages.length, questions.length, holds.length, toolCalls.length, readiness.scopes.length, readiness.narration.acceptedMeasuredCues.length);
+    base.guard.dataDigest = digest({ shots: saved.shots, scenes: saved.scenes, messages, assistantMessages, questions, holds, toolCalls, readiness });
     base.work = workSummary(service, projectId, activePlanId);
     return adaptive(offset, total, count => {
       const slice = <T>(values: T[]) => values.slice(offset, offset + count);
       return {
         ...base,
         project: { ...base.project, shots: slice(saved.shots).map(({ id, revisionId, sceneId, desiredFrames }) => ({ id, revisionId, sceneId, desiredFrames })), scenes: slice(saved.scenes).map(({ id, revisionId }) => ({ id, revisionId })) },
-        messages: slice(messages), holds: slice(holds), toolCalls: slice(toolCalls),
+        messages: slice(messages), assistantMessages: slice(assistantMessages), questions: slice(questions), holds: slice(holds), toolCalls: slice(toolCalls),
         workflow: { ...readiness, scopes: slice(readiness.scopes), narration: { ...readiness.narration, acceptedMeasuredCues: slice(readiness.narration.acceptedMeasuredCues) } },
         page: page(offset, count, total),
         coverage: { ...base.coverage, overview: { pagination: "The same record window applies to each listed collection; follow nextOffset until null. Messages and tool calls are newest first.", messages: { total: messages.length, returned: slice(messages).length }, holds: { total: holds.length, returned: slice(holds).length }, toolCalls: { total: toolCalls.length, returned: slice(toolCalls).length }, scopes: { total: readiness.scopes.length, returned: slice(readiness.scopes).length }, shots: { total: saved.shots.length, returned: slice(saved.shots).length, detailsSection: "shots" }, scenes: { total: saved.scenes.length, returned: slice(saved.scenes).length, detailsSection: "scenes" }, acceptedMeasuredCues: { total: readiness.narration.acceptedMeasuredCues.length, returned: slice(readiness.narration.acceptedMeasuredCues).length } } },

@@ -1,7 +1,7 @@
 # Narration and timed story development
 
-**Version:** 0.5 · September 10, 2026
-**Status:** detailed design; contracts below are proposed, not implemented.
+**Version:** 0.6 · September 11, 2026
+**Status:** target design. A draft/projection service now implements independent text/audio/timing readiness, exact human acceptance, supplied-audio import and scoped revision impact. It deliberately does not update canonical project cues or execution holds. Browser/tool integration, canonical commit, synthesis and transcription remain pending. See [implementation boundaries](../implementation/CONVERSATION-WORKSPACE.md).
 
 ## Responsibility and boundaries
 

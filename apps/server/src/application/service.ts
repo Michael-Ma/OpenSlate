@@ -290,13 +290,36 @@ export class ProductionService {
   readContext(projectId: string, actor: ActorContext, query: DirectorContextQuery = {}) { return projectDirectorContext(this, projectId, actor, query); }
 
   snapshot(projectId: string) {
-    return this.store.transaction(() => ({ project: this.store.getProject(projectId), workflow: workflowReadiness(this.store.getProject(projectId)),
+    return this.store.transaction(() => {
+      const project = this.store.getProject(projectId);
+      const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : undefined;
+      const messages = this.store.list<RequestRecord>("message", projectId);
+      const outputs = this.store.list<{ id: string; requestId: string; text: string; phase: string }>("director_output", projectId);
+      const conversation = this.store.readEvents(projectId).flatMap(event => {
+        if (event.kind === "message.recorded") {
+          const message = messages.find(message => message.id === event.payload.requestId);
+          return message ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
+        }
+        if (event.kind === "director.message") {
+          const output = outputs.find(output => output.id === event.payload.outputId);
+          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId }] : [];
+        }
+        return [];
+      });
+      return { project, workflow: workflowReadiness(project),
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts: this.engine.attempts(projectId),
       assessments: this.store.list("stage_assessment", projectId),
-      holds: this.store.list("hold", projectId), messages: this.store.list("message", projectId),
+      holds: this.store.list("hold", projectId), messages, conversation,
+      control: { paused: this.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false },
+      plan: plan ? { id: plan.id, graphDigest: plan.compiled.graphDigest, canonicalSource: plan.compiled.canonicalSource, nodes: plan.compiled.nodes } : null,
+      questions: this.store.list("director_question", projectId),
+      previousPreviews: this.engine.attempts(projectId).filter(attempt => attempt.request.kind === "render" && attempt.phase === "succeeded")
+        .reverse().flatMap(attempt => Object.values(attempt.outputs).map(artifact => ({ artifact, nodeId: attempt.nodeId, fixture: true }))).slice(0, 3),
+      reconciliations: this.store.list("tool_reconciliation", projectId),
       toolCalls: this.store.list<{ id: string; requestId: string; epochId: string; callId: string; tool: string; state: string; resultDigest: string | null }>("tool_invocation", projectId).slice(-20)
         .map(({ id, requestId, epochId, callId, tool, state, resultDigest }) => ({ id, requestId, epochId, callId, tool, state, resultDigest })),
-      cursor: this.store.cursor(projectId) }));
+      cursor: this.store.cursor(projectId) };
+    });
   }
 
   approve(projectId: string, human: ActorContext, snapshotId: string, videoNodeIds: string[]) {

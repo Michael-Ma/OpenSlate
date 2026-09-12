@@ -1,10 +1,13 @@
 # OpenSlate Documentation
 
-The design documents describe OpenSlate's intended architecture. The repository now contains an executable fake backend foundation; implemented behavior and outstanding validation gates are distinguished in the status page.
+The design documents describe OpenSlate's intended architecture. The repository now contains an interactive scripted workspace, durable execution/director foundations and separately tested local media/narration services. The status page distinguishes implemented behavior from outstanding integration and live validation. V0 runs for one user on one computer; local deployment still supports cloud LLM and media APIs. The accepted native policy trusts the pinned installed runtime/sandbox while retaining OpenSlate authorization and recovery.
 
 | Document | Contents |
 |---|---|
 | [Implementation status](implementation/STATUS.md) | Tested foundation, demo, compatibility evidence and remaining gates |
+| [Conversation workspace and local services](implementation/CONVERSATION-WORKSPACE.md) | Current UI, supervisor, native adapter, narration drafts, supplied-media renderer and verification |
+| [Supervised Codex validation](implementation/CODEX-SUPERVISOR-VALIDATION.md) | Actual native supervisor question/restart/scoped-edit fixture passed; allowance exhausted; structured questions and vision unverified |
+| [Runtime trust decision](implementation/RUNTIME-TRUST-DECISION.md) | Accepted single-machine v0 boundary and pinned local native-runtime trust policy |
 | [Codex probe](implementation/CODEX-PROBE.md) | Pinned no-turn runtime evidence and baseline limitations |
 | [Codex live probe](implementation/CODEX-LIVE-PROBE.md) | Three-turn dispatch/interruption/resume evidence, history limitations and remaining gates |
 | [Codex MCP follow-up](implementation/CODEX-MCP-FOLLOWUP.md) | Live MCP and model continuation after process replacement, with explicit limits |

@@ -1,6 +1,7 @@
 # Review Workspace and Conversational Editing
 
-**Version:** 0.5 · Proposed implementation design
+**Version:** 0.6 · September 11, 2026
+**Status:** target design. The scripted workspace implements project/conversation persistence, scene-grouped exact keyframe review, playback, scoped demo edits, previous-preview retention and pause/resume. It polls durable snapshots; it does not yet consume SSE in the browser. General AI conversation, narration uploads and real-media export remain pending. See [browser verification and limits](../implementation/CONVERSATION-WORKSPACE.md).
 
 ## 1. Product contract
 

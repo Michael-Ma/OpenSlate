@@ -1,6 +1,6 @@
 # T06 implementation: skills, tools and request context
 
-September 11, 2026. This slice implements the skill/tool foundation and application records. It does not yet connect browser messages to a live Codex supervisor.
+September 12, 2026. The skill/tool foundation now feeds a durable supervisor and a scripted browser conversation. The actual pinned local Codex adapter and supervisor have passed a live backend fixture across a conversational question, restart and scoped edit; native configuration/browser wiring is not enabled in the default app. See [the supervised workspace slice](CONVERSATION-WORKSPACE.md).
 
 ## Ownership and flow
 
@@ -11,8 +11,9 @@ flowchart LR
     Snapshots --> Lock[Exact skill and implementation lock]
     Lock --> Capture[Fresh request context and explicit skill activation]
     Capture --> DB[(OpenSlate SQLite records)]
-    Future[Future Codex supervisor] -. selects pinned inputs .-> Capture
-    Future -. fixed epoch .-> MCP[Bounded stdio MCP bridge]
+    Supervisor[Durable request supervisor] --> Capture
+    Supervisor --> Runtime[Scripted or pinned local native runtime]
+    Runtime --> MCP[Bounded stdio MCP bridge]
     MCP --> API[Authenticated five-tool endpoint]
     API --> Started[Persist invocation before handler]
     Started --> Domain[Existing prepare / apply / holds / review checks]
@@ -20,7 +21,9 @@ flowchart LR
     Receipt --> DB
 ```
 
-The [MCP follow-up](CODEX-MCP-FOLLOWUP.md) demonstrates the native transport and restart path with synthetic tools. The production bridge and database integration below are verified offline. Neither result establishes the complete production director.
+V0 places the application, database, media, workers and native Codex on one computer. Native setup uses `LocalCodexPolicy` with only mode `local`, bound to exact version/configuration identity. The accepted boundary trusts the installed runtime/sandbox while retaining catalogs, loopback MCP and application epochs/authority. It is not an independent isolation proof or a multi-host deployment framework. Cloud model/media services remain supported.
+
+The [MCP follow-up](CODEX-MCP-FOLLOWUP.md) demonstrates the native transport and restart path with synthetic tools. The production bridge/database integration has offline coverage, and the later [native supervisor fixture](CODEX-SUPERVISOR-VALIDATION.md) verified the actual adapter, supervisor and input builder across a backend restart. That bounded result does not establish the complete production director or native structured-input/vision support.
 
 ## Instruction packages and locks
 
@@ -34,11 +37,11 @@ Two repository packages live under `skills/production` and `skills/plan-authorin
 - Explicit per-request skill selection. Repeated requests and compaction can reactivate the same lock with a fresh activation/context identity. Unselected instructions cannot be fetched through the mediated-read helper.
 - Pinned task-prompt paths/hashes and implementation binding digests. Stage methods remain guidance; application predicates still control readiness and authority.
 
-The package compatibility labels currently use `1.0.0`; individual existing stage/recipe check versions retain their own identities. The application must supply actual compiler/runtime/handler/profile bindings when building a production lock. A version string alone does not freeze hosted model weights or implementation bytes.
+The package compatibility labels currently use `1.0.0`; individual existing stage/recipe check versions retain their own identities. The input builder binds runtime port identity, stage/recipe contracts and the tool catalog. This does not freeze every compiler/runtime/handler binary or hosted model weight; stronger production binding remains required where behavior changes independently of these contracts.
 
 ## Durable context and provenance
 
-`DirectorContextService` installs a verified lock through application authority, captures current project evidence and a skill activation, and records mediated instruction reads. These records survive a server restart. An epoch cannot switch its lock, and a replacement request cannot reuse an older request's activation.
+`DirectorContextService` installs a verified lock through application authority, captures current project evidence and a skill activation, and records mediated instruction reads. Trusted startup configuration can bootstrap a project's first lock, including for a read-only first request; it cannot replace an existing lock. These records survive a server restart. An epoch cannot switch its lock, and a replacement request cannot reuse an older request's activation.
 
 Stage bindings must name a known stage, its exact prompt reference, a current request-covered scope and, when supplied, a prepared proposal owned by that request/epoch. Selecting or reading a skill cannot mark a stage complete. File verification runs outside SQLite write transactions; the short commit rechecks authority, immutable identities and current context.
 
@@ -50,6 +53,9 @@ Stage bindings must name a known stage, its exact prompt reference, a current re
 | `skill_activation` | Explicit selections bound to request, epoch and context |
 | `skill_read` | Exact mediated file bytes supplied for that activation |
 | `tool_invocation` | Transport identity, original epoch, argument digest and recorded outcome |
+| `director_turn` / `director_output` | Persistent dispatch, request/epoch identity, status, lease and assistant output |
+| `director_question` | Pending question and its authenticated answer/continuation identity |
+| `tool_reconciliation` | Evidence-backed resolution or required follow-up after an epoch is revoked |
 
 These are application records, not proof that a model read or followed every instruction. The [native skill validation](CODEX-SKILL-VALIDATION.md) accepted explicit skill inputs on two real model turns and matched all 13 tool results to application receipts. Exact focused reference bytes were supplied by OpenSlate; native internal entry expansion remains unobserved.
 
@@ -59,7 +65,7 @@ These are application records, not proof that a model read or followed every ins
 
 The bridge captures its loopback endpoint, project and opaque credential once at launch. Model arguments cannot replace them. It sends an application call ID with every request, forbids redirects, limits input/output/concurrency/time, and performs no HTTP retries. A timeout, malformed response, lost connection or server failure after dispatch returns an unresolved outcome. Cancelling a wait does not imply rollback.
 
-The stdio entry is `packages/director/dist/tools/mcp.js`. Launch configuration uses `OPENSLATE_BRIDGE_ENDPOINT`, `OPENSLATE_BRIDGE_PROJECT_ID` and `OPENSLATE_BRIDGE_CREDENTIAL`; the future supervisor supplies these from trusted application state. Ordinary development does not launch this process or contact a model automatically.
+The stdio entry is `packages/director/dist/tools/mcp.js`. Launch configuration uses `OPENSLATE_BRIDGE_ENDPOINT`, `OPENSLATE_BRIDGE_PROJECT_ID` and `OPENSLATE_BRIDGE_CREDENTIAL`; the supervisor/input builder supplies these from trusted application state. Ordinary development uses the scripted runtime and does not launch a native process or contact a model automatically.
 
 ## Results and recovery
 
@@ -69,14 +75,16 @@ Preparation returns a compact durable ID and summary. Full source, proposed proj
 
 `read_context` exposes a bounded overview plus paged shots, scenes, canonical plan source, logical aliases, grants and receipt summaries. Callers follow returned offsets and compare revision/plan identities across pages. This makes existing plan branches available to a resumed editor without sending the whole project on every request. Grant visibility describes saved eligibility and never grants new authority.
 
-Known errors are recorded as failed outcomes. They can still leave a documented hold, so failure is not a claim of zero application effects. Unexpected failures and result-recording gaps remain unresolved. Automatic reconciliation of director invocation/turn records is still pending; current code stops rather than guessing whether to replay a command.
+Known errors are recorded as failed outcomes. They can still leave a documented hold, so failure is not a claim of zero application effects. Unexpected failures and result-recording gaps remain unresolved. The supervisor now revokes expired epochs and records reconciliation: a matching saved preparation or domain command receipt can confirm an effect; missing evidence requires follow-up. The original transport receipt is preserved. Neither an unresolved tool invocation nor an unknown model turn is automatically replayed.
 
 ## Remaining integration work
 
-- A production supervisor, durable model-turn dispatch/reconciliation, wakeups and pending-input replies.
-- Production integration of the now-tested explicit skill inputs/catalog checks, plus explicit stage/gap proposal and compaction evaluations.
-- Proven code-host/credential isolation before connecting real generation authority. Command sandbox canaries passed; the model declined the separate host script, leaving that boundary inconclusive.
-- Wiring the locked production prompts into workflow stage selection and the browser conversation/review flow.
-- Six-minute workload measurements, real narration ingestion, rendering and provider adapters.
+- Local native configuration and browser setup. The actual supervisor fixture passed conversational question/restart/scoped-edit behavior, and offline queue/dispatch/reconciliation tests pass. Native structured pending-input and vision still require separate evaluation.
+- Explicit stage/gap proposal, context efficiency and compaction evaluations with actual model output.
+- Maintain the accepted local runtime policy and exact compatibility checks. Independent code-host/authentication isolation is unverified: command canaries passed, while the model declined the separate host script. This evidence limit is not a mandatory independent-isolation gate for v0. Real generation still needs its application-owned provider, review and allowance integration.
+- General browser AI conversation and stage selection beyond the canned demo. The input builder already supplies exact locked entry/reference bytes per request.
+- Canonical integration of the new narration/local-media services, provider adapters and six-minute workload measurements.
+
+The latest complete offline baseline is 291 passing tests, including 36 runtime tests under the accepted local policy. The earlier September 12 pre-decision baseline was 290. Twelve native starts have now been used across the separate experiments; the latest three-start allowance is exhausted. Its final two starts verified the same skill lock with fresh activation/epoch, shot-2 and narration/story/motion/timing preservation, and old-bridge rejection after restart. No media attempts, artifacts, approvals or media API calls were created. Keep the default scripted while native product configuration/browser wiring is completed; T06 remains open. See the [accepted runtime decision](RUNTIME-TRUST-DECISION.md).
 
 See [implementation status](STATUS.md) for the final verified test count and development sequence. Fake fixtures do not evaluate creative quality or spend provider credits.

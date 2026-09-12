@@ -15,6 +15,8 @@ export interface ToolInvocation {
   result: JsonValue | null;
   resultDigest: string | null;
   error: { code: string; message: string } | null;
+  /** Minimal domain correlation; credentials and full context never belong here. */
+  recovery?: { preparedId?: string; proposalDigest?: string };
 }
 
 /** Transport receipts supplement, but never replace, domain command/grant deduplication. */
@@ -38,7 +40,9 @@ export class ToolInvocationService {
         return previous;
       }
       const record: ToolInvocation = { id, projectId, requestId: actor.requestId, epochId: actor.epochId, callId,
-        tool: parsed.name, argumentsDigest: argumentHash, state: "started", result: null, resultDigest: null, error: null };
+        tool: parsed.name, argumentsDigest: argumentHash, state: "started", result: null, resultDigest: null, error: null,
+        recovery: parsed.name === "apply_change" ? { preparedId: parsed.arguments.preparedId as string }
+          : parsed.name === "prepare_change" ? { proposalDigest: digest(parsed.arguments) } : {} };
       store.insert("tool_invocation", id, projectId, record);
       store.appendEvent(projectId, "tool.started", { invocationId: id, callId, requestId: actor.requestId, tool: parsed.name });
       return null;
@@ -88,6 +92,36 @@ export class ToolInvocationService {
       this.finish(id, projectId, "unresolved", null, { code: "TOOL_CALL_UNRESOLVED", message: "Result could not be recorded; reconcile domain receipts" });
       throw new DomainError("TOOL_CALL_UNRESOLVED", "Result could not be recorded; reconcile domain receipts");
     }
+  }
+
+  /** Recover only from authoritative application receipts. This never calls a tool again. */
+  reconcileEpoch(projectId: string, epochId: string): void {
+    const store = this.service.store;
+    store.transaction(() => {
+      const epoch = store.get<{ projectId: string; state: string; principalId: string; requestId: string }>("epoch", epochId);
+      invariant(epoch?.projectId === projectId && epoch.state === "revoked", "ACTOR_DENIED", "Reconciliation requires a fenced epoch");
+      for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
+        if (store.get("tool_reconciliation", call.id)) continue;
+        let receipt: unknown = null;
+        if (call.tool === "apply_change" && call.recovery?.preparedId) {
+          const prepared = store.get<{ projectId: string; requestId: string; epochId: string; proposalDigest: string }>("prepared", call.recovery.preparedId);
+          if (prepared?.projectId === projectId && prepared.requestId === call.requestId && prepared.epochId === epochId) {
+            const row = store.db.prepare("SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?")
+              .get(`${epoch.principalId}:${projectId}:apply`, call.recovery.preparedId, prepared.proposalDigest) as { result: string } | undefined;
+            if (row) receipt = JSON.parse(row.result);
+          }
+        }
+        if (call.tool === "prepare_change" && call.recovery?.proposalDigest) {
+          const prepared = store.list<{ id: string; requestId: string; epochId: string; proposalDigest: string }>("prepared", projectId)
+            .find(row => row.requestId === call.requestId && row.epochId === epochId && row.proposalDigest === call.recovery!.proposalDigest);
+          if (prepared) receipt = { preparedId: prepared.id, proposalDigest: prepared.proposalDigest };
+        }
+        if (call.state === "started") this.finish(call.id, projectId, "unresolved", null, { code: "TOOL_CALL_UNRESOLVED", message: "Owning turn ended before its tool result was recorded" });
+        store.insert("tool_reconciliation", call.id, projectId, { id: call.id, requestId: call.requestId, epochId,
+          state: receipt ? "effect_confirmed" : "needs_followup", receipt, receiptDigest: receipt ? digest(receipt) : null });
+        store.appendEvent(projectId, "tool.reconciled", { invocationId: call.id, requestId: call.requestId, effectConfirmed: !!receipt });
+      }
+    });
   }
 
   private finish(id: string, projectId: string, state: ToolInvocation["state"], result: JsonValue | null, error: ToolInvocation["error"]): void {

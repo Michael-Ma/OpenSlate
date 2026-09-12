@@ -1,9 +1,9 @@
 # OpenSlate — Technical Design
 
-**Version:** 0.5 · September 10, 2026
-**Status:** architecture proposal; implementation remains an initial TypeScript skeleton.
+**Version:** 0.6 · September 12, 2026
+**Status:** target architecture with an accepted single-machine v0 boundary. The scripted workspace, supervisor and separate narration/rendering services have working implementations, and a live native backend fixture verified question/restart/scoped-edit behavior; consult [implementation status](../implementation/STATUS.md) for verification and remaining integration.
 
-OpenSlate turns a creative brief into an editable film of up to six minutes: conversational narration development, story and shot planning, human-reviewed keyframes, generated takes, timeline assembly, and finishing. It is a single-user local application with user-configured credentials and extensible model adapters. Codex, GPT Image 2, and H3 cloud are the first director/image/video integrations. A later Python H3 worker implements the video provider boundary; ten- and thirty-minute films are later validation targets.
+OpenSlate turns a creative brief into an editable film of up to six minutes: conversational narration development, story and shot planning, human-reviewed keyframes, generated takes, timeline assembly, and finishing. It is a single-user, single-machine local application with user-configured credentials and extensible model adapters. The browser workspace, application service, SQLite database, artifact files, operation workers and native Codex process all run on that computer. Codex, GPT Image 2, and H3 cloud are the first director/image/video integrations. A later same-machine Python H3 worker implements the video provider boundary; ten- and thirty-minute films are later validation targets.
 
 ## 1. Direction
 
@@ -13,6 +13,7 @@ The AI determines useful production stages and missing information from the user
 
 | Decision | Purpose |
 |---|---|
+| One user and one computer for v0 | Keep application state and local process ownership together; no shared-database or distributed deployment |
 | TypeScript application, React UI, Fastify service | Share contracts across the product and execution engine |
 | Codex behind a director adapter | Reuse conversation and reasoning while OpenSlate owns project state |
 | AI stage proposals with coded workflow contracts | Adapt the procedure to available material and enforce critical boundaries |
@@ -23,7 +24,7 @@ The AI determines useful production stages and missing information from the user
 | Versioned project and scoped atomic patches | Change one shot while preserving valid completed and running work |
 | SQLite, local artifacts, separate TypeScript worker | Straightforward local installation and durable progress |
 | Role-specific image/video/speech/transcription adapters | Start with GPT Image 2 and H3; add models without changing project logic |
-| Optional Python H3 worker later | Isolate model/GPU dependencies from cloud users |
+| Optional same-machine Python H3 worker after v0 | Keep model/GPU dependencies out of the initial cloud-provider installation |
 
 The two skills are `production` and `plan-authoring`. Continuity and asset direction begin as guidance inside `production`, with references loaded when relevant. They can become separate skills when real usage justifies the split.
 
@@ -31,6 +32,7 @@ The two skills are `production` and `plan-authoring`. Continuity and asset direc
 
 ```mermaid
 flowchart TB
+    subgraph Computer[One user computer]
     User[User conversation and review decisions] <--> UI[Web workspace]
     UI <--> App[Application service]
     App <--> State[(Project and execution state)]
@@ -45,13 +47,16 @@ flowchart TB
     Graph --> Scheduler[Ready-work scheduler]
     Scheduler --> Workers[Trusted operation handlers]
     Workers --> Cloud[Image video and narration adapters]
-    Workers -. later .-> Local[Python H3 worker]
     Workers --> Edit[Timeline and FFmpeg rendering]
     Workers --> Media[Artifact library]
     Workers --> State
     State --> Events[Progress and decision events]
     Events --> UI
     Events --> Director
+    Workers -. after v0 .-> Local[Same-machine Python H3 inference]
+    end
+    Cloud --> Services[Cloud image video and narration APIs]
+    Director --> LLM[Cloud model service]
 ```
 
 The director proposes stages, creative decisions and plans. The workflow service validates stage contracts against the actual requested mutations and saved evidence. The compiler validates media plans; the scheduler and workers execute them. Only decisions needing reasoning return to the director; task completion and provider polling do not inherently require a model call. Existing project-only/plan-only tools receive the same workflow checks.
@@ -95,7 +100,7 @@ The first executable proof should use fake media operations, demonstrate paralle
 
 ## 6. Confirmed product decisions
 
-The first release is a single-user local web app supporting video exports up to 360 seconds. Users can upload narration, develop and generate it through conversation, or combine sources with explicit segment choices. Imported music and optional native shot audio are supported; a music-generation adapter is deferred. The agent identifies missing script/audio/timing decisions and offers useful options rather than assuming every project starts from scratch.
+The first release is a single-user, single-machine local web app supporting video exports up to 360 seconds. Multi-host application deployment, remote GPU workers, distributed scheduling and shared SQLite deployment are outside v0. Cloud provider jobs remain external requests whose receipts and artifacts are tracked locally; this product is not an offline-generation promise. Users can upload narration, develop and generate it through conversation, or combine sources with explicit segment choices. Imported music and optional native shot audio are supported; a music-generation adapter is deferred. The agent identifies missing script/audio/timing decisions and offers useful options rather than assuming every project starts from scratch.
 
 Users review a concise production plan and scene-grouped keyframes. Every shot requires a human-approved conditioning image before video generation; a batch decision covers exact displayed shots and inputs. Detailed shot plans, prompts, settings, versions, and execution records remain available for debugging. The agent never purchases quality-driven regeneration autonomously. Technical recovery is bounded and preserves uncertain submission liability.
 
@@ -120,6 +125,6 @@ The [detailed technical design set](../technical/README.md) adds implementation 
 
 ## 8. Runtime and provider boundaries
 
-Use a locally scoped Codex App Server adapter over stdio and OpenSlate MCP tools, subject to a pinned-release compatibility test. A DirectorRuntime interface permits another runtime later; media provider adapters are a separate boundary. Model profiles declare actual capabilities and reference backend-only credentials. Codex custom-provider configuration is not universal LLM compatibility; see the [runtime/provider design](CODEX-AND-PROVIDERS.md). The official documentation covers session integration and skill activation; OpenSlate's version locks, tool policies, and plan execution are application features. [Codex App Server](https://learn.chatgpt.com/docs/app-server), [Codex skills](https://learn.chatgpt.com/docs/build-skills)
+Use a same-machine Codex App Server adapter over stdio and loopback OpenSlate MCP tools, subject to a pinned-release compatibility test. The accepted `LocalCodexPolicy` has only mode `local`, bound to an exact runtime version/configuration; v0 trusts that installed runtime and its sandbox. Exact catalogs, epoch fencing and application-owned mutation/media authority remain mandatory. Independent code-host/authentication isolation is unverified and does not create a second externally confined deployment mode. A live backend fixture has verified supervised conversational question/restart/edit behavior. Keep the default fake while local runtime configuration and browser integration are completed; native structured questions and vision remain unverified. See the [accepted decision](../implementation/RUNTIME-TRUST-DECISION.md). A DirectorRuntime interface permits another runtime later; media provider adapters are a separate boundary. Model profiles declare actual capabilities and reference backend-only credentials. Codex custom-provider configuration is not universal LLM compatibility; see the [runtime/provider design](CODEX-AND-PROVIDERS.md). The official documentation covers session integration and skill activation; OpenSlate's version locks, tool policies, and plan execution are application features. [Codex App Server](https://learn.chatgpt.com/docs/app-server), [Codex skills](https://learn.chatgpt.com/docs/build-skills)
 
 Providers expose their actual conditioning modes and limits. Cloud success is not local completion until media is copied and validated. Preserve ambiguous submissions without blindly repeating paid requests. H3 cloud and local Base must remain separate capability profiles. Python owns local inference, while TypeScript retains scheduling, policy, plans, and editing; any hybrid hosted stages are explicit TypeScript jobs. Local H3 inference alone does not make the Codex director or image generation offline.

@@ -10,7 +10,7 @@ The [production workflow](PRODUCTION-WORKFLOW.md) selects validated creative tas
 
 The server and separately supervised local worker share one SQLite database through `better-sqlite3`, WAL, foreign keys, and short transactions. Mutating claims/admission use `BEGIN IMMEDIATE`; no transaction contains `await`, provider traffic, file transfer, FFmpeg, or model reasoning. Configure bounded busy handling and retry contention outside transactions. Domain checks are shared code, not duplicated browser/worker interpretations.
 
-The worker executes six registered operation families and their transfer/validation phases. A remote Python GPU worker later receives versioned requests and artifacts through an adapter; it never opens OpenSlate's database. Codex sessions are not job storage. Browser disconnection and director interruption do not stop monitoring accepted work while the application worker remains running.
+The worker executes six registered operation families and their transfer/validation phases. An optional same-machine Python inference worker after v0 receives versioned requests and artifacts through an adapter; it never opens OpenSlate's database. Remote GPU hosting requires a separate future design. Codex sessions are not job storage. Browser disconnection and director interruption do not stop monitoring accepted work while the application worker remains running.
 
 All identities are opaque UUIDs. Persist domain events using the shared envelope: `eventId`, `projectId`, project `sequence`, `kind`, `occurredAt`, `correlationId`, and `payload`. Insert the event in the same transaction as the change; UI delivery and director wakeups may be retried independently.
 

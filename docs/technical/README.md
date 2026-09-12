@@ -1,9 +1,11 @@
 # OpenSlate — Detailed Technical Design
 
-**Version:** 0.6 · September 11, 2026
-**Status:** target technical design. The fake backend and skill/tool foundations now have working implementations; the production director, review UI and real media integrations remain pending. Consult [implementation status](../implementation/STATUS.md) for verified behavior rather than treating every design contract below as shipped.
+**Version:** 0.8 · September 12, 2026
+**Status:** target technical design. A scripted conversation/review workspace, durable director supervisor, pinned local native adapter, narration draft service and supplied-media renderer now have working implementations. An actual native backend fixture has verified conversational question/restart/scoped-edit behavior. Native product configuration/browser wiring, structured pending-input, vision and complete narration/provider/render integration remain pending. Independent code-host/authentication isolation is unverified under the accepted local runtime trust policy. Consult [implementation status](../implementation/STATUS.md) for verified behavior rather than treating every design contract below as shipped.
 
 The [architecture overview](../design/README.md) and [component overview](../design/COMPONENT-DESIGN.md) explain direction. This set defines implementation boundaries, records, interfaces, algorithms, failure handling and verification. Examples describe target contracts, not a stable public SDK. The [development plan](../design/IMPLEMENTATION-PLAN.md) orders the work after these designs.
+
+V0 is single-user and single-machine: UI, API, SQLite, media files, workers and native Codex run on the same computer. Cloud LLM and media APIs remain external services; local deployment is not offline generation. Multi-host/remote-GPU/distributed/shared-database deployment is outside v0. The accepted native policy is `LocalCodexPolicy`, mode `local`, with exact pinned version/configuration identity and trust in the installed runtime/sandbox. See the [runtime decision](../implementation/RUNTIME-TRUST-DECISION.md).
 
 ## 1. Component map
 
@@ -100,7 +102,7 @@ Keep the checked-in Node 24, TypeScript 7 and pnpm baseline. Add dependencies th
 
 The parser choice is supported by Babel's documented TypeScript syntax plugin; it is only a parser, so OpenSlate still rejects every AST form outside its language. [Babel parser](https://babeljs.io/docs/babel-parser)
 
-Default process layout: one local HTTP application plus one local TypeScript worker, each with its own SQLite connection and short transactions. Server application services own creative mutations; executor repositories own job progress and admission under shared current-state checks. Additional local workers use the same leases; remote GPU workers never open the database. The production Codex process is a separate restricted runtime launched by the backend.
+Target process layout: one loopback HTTP application plus a same-machine TypeScript worker, each with its own SQLite connection and short transactions. Server application services own creative mutations; executor repositories own job progress and admission under shared current-state checks. Additional workers on that computer use the same local ownership/lease checks; v0 does not support remote GPU workers or a shared database across hosts. The native Codex process is launched on that computer by the backend under the pinned local policy. Same-host process crashes and ambiguous cloud submissions still require durable recovery.
 
 ## 5. How to use this design
 

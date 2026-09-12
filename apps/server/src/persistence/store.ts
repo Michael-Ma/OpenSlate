@@ -40,6 +40,10 @@ export class Store {
           ON entities(json_extract(body,'$.workKey')) WHERE kind='attempt' AND json_extract(body,'$.candidateId') IS NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS reservation_attempt_once
           ON entities(json_extract(body,'$.attemptId')) WHERE kind='reservation';
+        CREATE UNIQUE INDEX IF NOT EXISTS director_request_once
+          ON entities(project_id,json_extract(body,'$.requestId')) WHERE kind='director_turn';
+        CREATE UNIQUE INDEX IF NOT EXISTS director_running_once
+          ON entities(project_id) WHERE kind='director_turn' AND json_extract(body,'$.state')='running';
         CREATE TABLE IF NOT EXISTS commands (
           actor_scope TEXT NOT NULL, key TEXT NOT NULL, digest TEXT NOT NULL,
           result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(actor_scope,key)
@@ -80,6 +84,10 @@ export class Store {
     const row = this.db.prepare("SELECT body,head_version FROM projects WHERE id=?").get(id) as ProjectRow | undefined;
     invariant(row, "NOT_FOUND", "Project not found");
     return JSON.parse(row.body) as ProjectRecord;
+  }
+
+  listProjects(): ProjectRecord[] {
+    return (this.db.prepare("SELECT body FROM projects ORDER BY rowid DESC").all() as ProjectRow[]).map(row => JSON.parse(row.body) as ProjectRecord);
   }
 
   saveProject(project: ProjectRecord, expectedHeadVersion: number): ProjectRecord {
@@ -129,6 +137,11 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "director_turn") {
+      reference("message", body.requestId);
+      if (body.epochId !== null) reference("epoch", body.epochId);
+      invariant(["queued", "running", "completed", "waiting_user", "interrupted", "unknown", "failed"].includes(String(body.state)), "VALIDATION_ERROR", "Invalid director turn state");
+    }
     if (["director_epoch_lock", "director_context", "skill_activation", "skill_read"].includes(kind)) {
       reference("message", body.requestId);
       reference("epoch", body.epochId);
@@ -160,7 +173,7 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
@@ -173,9 +186,17 @@ export class Store {
       if (kind === "tool_invocation") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
-        for (const field of ["requestId", "epochId", "callId", "tool", "argumentsDigest"])
-          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", `Tool invocation ${field} is immutable`);
+        for (const field of ["requestId", "epochId", "callId", "tool", "argumentsDigest", "recovery"])
+          invariant(canonical(previous[field] ?? null) === canonical(next[field] ?? null), "IMMUTABLE_RECORD", `Tool invocation ${field} is immutable`);
         if (previous.state !== "started") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed tool invocations are immutable");
+      }
+      if (kind === "director_turn") {
+        const previous = JSON.parse(old.body) as Record<string, unknown>;
+        const next = JSON.parse(encoded) as Record<string, unknown>;
+        for (const field of ["requestId", "runtimeId", "createdAt"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", `Director ${field} is immutable`);
+        if (previous.state !== "queued" && previous.state !== "running") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Terminal director turns are immutable");
+        if (previous.state === "running") invariant(next.state !== "queued", "IMMUTABLE_RECORD", "A dispatched turn cannot be requeued");
       }
       if (kind === "attempt") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;

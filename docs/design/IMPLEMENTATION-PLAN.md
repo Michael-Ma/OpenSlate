@@ -1,13 +1,13 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.8 · September 11, 2026
-**Status:** backend and skill/tool foundations verified with fake media. T00–T04 and the T06 foundation have working evidence. Live native skill inputs and two actual application-backed edits passed across replacement, as did command-sandbox canaries. Code-host/credential isolation and the production supervisor remain open. See [implementation status](../implementation/STATUS.md). Real generation and the review UI remain unimplemented.
+**Version:** 0.11 · September 12, 2026
+**Status:** T00–T04 foundations, a T05 scripted review workspace and the T06 supervisor/runtime framework have working evidence. T07 narration drafts and T08 supplied-media rendering have separate tested services. The complete checkout passes 291 offline tests, builds and typechecks. A live fixture has verified the actual native supervisor across a conversational question, backend restart and scoped edit. Native runtime configuration/browser wiring, structured-question/vision validation, narration/render integration and real generation remain open. The runtime trust decision is accepted: v0 uses one local machine and trusts the installed pinned native runtime/sandbox; independent code-host/authentication isolation remains unverified. See [implementation status](../implementation/STATUS.md) and [latest implementation](../implementation/CONVERSATION-WORKSPACE.md).
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
 ## 1. Confirmed release scope
 
-Single-user local application; user-configured model/credential profiles; up to 360 seconds of resolved output; uploaded or conversationally developed/generated narration; scene/shot plans and debug records; human-reviewed conditioning keyframes for every video shot; user-directed creative regeneration; bounded technical recovery; conversational creative edits and visual review/playback. Initial production integrations are Codex, GPT Image 2, H3 cloud and selected speech/transcription profiles. Python H3 workers, ten/thirty-minute releases and a direct timeline editor follow later.
+Single-user, single-machine local application; user-configured model/credential profiles; up to 360 seconds of resolved output; uploaded or conversationally developed/generated narration; scene/shot plans and debug records; human-reviewed conditioning keyframes for every video shot; user-directed creative regeneration; bounded technical recovery; conversational creative edits and visual review/playback. Initial production integrations are Codex, GPT Image 2, H3 cloud and selected speech/transcription profiles. Same-machine Python H3 inference, ten/thirty-minute releases and a direct timeline editor follow later. V0 keeps the app, SQLite, media, workers and native Codex on one computer. Cloud providers remain external services; local deployment does not mean offline generation. Multi-host applications, remote GPU workers, distributed scheduling and shared-database deployment are outside v0.
 
 Two production skills, five agent tools and six worker operation families are sufficient. Development skills/plugins are separate and are not dependencies of the embedded director. No implementation slice should quietly expand this product scope.
 
@@ -115,6 +115,8 @@ Show scope-specific stage readiness and proposed next work; distinguish hard blo
 
 **Exit evidence:** browser flows for displayed subset approval, stale member refresh, conditional/negative replies, selected-shot conversation, previous-preview visibility and reconnect without restarting work. Keyboard review and bounded thumbnail loading work.
 
+**Implemented slice:** project/conversation persistence, exact displayed-member selection, authenticated playback, scoped demo framing edits, previous-preview retention, pause/resume and keyboard review. Browser checks verified the primary loop and reconnect. Polling uses durable snapshots with backoff. Arbitrary AI chat, narration input/editing and real export remain pending; the scripted demo is explicitly labeled.
+
 **Design:** [Review UI](../technical/REVIEW-UI.md).
 
 ### T06 — Codex director, skill lifecycle and five tools
@@ -123,15 +125,21 @@ Show scope-specific stage readiness and proposed next work; distinguish hard blo
 
 Implement scoped context, immutable catalog/locks, the production and plan-authoring skills, fixed MCP catalog, request/activation records, director queue, pending replies and process/bridge authority fencing. Add fake second-runtime fixtures and incompatible profile/skill cases. Reconstruct project state after replacing a runtime session.
 
-Add stage/gap assessment and focused task-prompt references, pinned with recipe/check/schema identities. Permit assessment plus related creative outputs in one turn and stop repeated reassessment without progress. Keep one active director turn per project; measure model calls/tokens and useful-output latency instead of assuming more stages are faster.
+Add stage/gap assessment and focused task-prompt references, pinned with recipe/check/schema identities. Permit assessment plus related creative outputs in one turn and stop repeated reassessment without progress. Use `LocalCodexPolicy` with mode `local` and exact pinned version/configuration identity. Trust the installed runtime/sandbox; retain effective permissions/catalog checks, loopback MCP, epoch fencing and application authorization. Do not add a separate externally confined mode or make independent code-host/auth isolation a v0 prerequisite. Keep one active director turn per project on this machine; measure model calls/tokens and useful-output latency instead of assuming more stages are faster.
 
 **Exit evidence:** a follow-up request preserves settled intent and locked skill content, produces a valid scoped plan, and cannot fabricate human approval or technical-retry authority. Interrupt/unknown-turn recovery preserves previous command effects. Measure process restart/resume overhead before optimizing the safe epoch boundary.
 
-**September 11 progress:** the two instruction packages, strict loader, immutable snapshots/locks, request activations, fixed five-tool bridge, paged context and durable invocation outcomes are implemented. The full checkout passes 195 tests plus builds/typechecks. Separate synthetic live tests demonstrated MCP calls and model continuation after process replacement using canonical context. See [T06 implementation](../implementation/T06-SKILLS-TOOLS.md) and [live evidence](../implementation/CODEX-MCP-FOLLOWUP.md).
+**September 11 progress:** instruction packages, exact locks, fresh context, five-tool bridge and durable receipts now feed a supervisor with persistent turn queue/leases, stale-epoch fencing, unknown-outcome reconciliation and question continuation. The runtime-neutral port has a scripted implementation and a pinned Codex adapter with bounded transport, exact effective permissions/catalog validation and process shutdown. The default app uses the scripted runtime. Current application requests use fresh native threads; native resume has adapter-fixture coverage only. See [implementation](../implementation/CONVERSATION-WORKSPACE.md).
 
-**Latest validation:** the [three-start allowance](../implementation/CODEX-NEXT-VALIDATION.md) is consumed. Both scoped edits passed with explicit native skill inputs and 13 durable successful tool calls. Command sandbox canaries passed; the final model declined the code-host script, so that boundary remains inconclusive. See [full evidence and timings](../implementation/CODEX-SKILL-VALIDATION.md).
+**Earlier skill validation:** the [three-start allowance](../implementation/CODEX-NEXT-VALIDATION.md) is consumed. Both scoped edits passed with explicit native skill inputs and 13 durable successful tool calls. Command sandbox canaries passed; the final model declined the code-host script, so that boundary remains inconclusive. See [full evidence and timings](../implementation/CODEX-SKILL-VALIDATION.md).
 
-**Next:** establish code-host/credential enforcement using a deterministic test or independently enforced boundary before exposing real media authority. Continue the supervisor, durable turn dispatch/reconciliation, wakeups and pending replies against offline fixtures. Include strict named-profile selection/serialization tests and reduce duplicated context while retaining freshness checks. Connect explicit stage/gap proposals and browser conversation after those foundations. Further native turns require a new allowance; T06 remains open.
+**September 12 diagnostic:** corrected comparison of Codex's explicit null defaults without admitting extra permissions; the pre-decision runtime suite reached 35 tests. A separate NativeClient fixture passed command canaries, but its live model declined the code-host script. That first start left independent isolation inconclusive; the experiment initially paused with two starts unused.
+
+**Accepted-policy verification:** the complete suite now passes 291 tests, including 36 runtime tests and a regression rejecting a non-loopback bridge before launch. This adds to the historical 290-test pre-decision baseline.
+
+**Native supervisor result:** under the [accepted local policy](../implementation/RUNTIME-TRUST-DECISION.md), both remaining starts passed using the actual adapter, `DirectorSupervisor` and `createDirectorInput`. A conversational framing question was saved; after restarting the backend over the same SQLite database, the answer applied a shot-1 edit and matching plan while preserving shot 2, narration, story, motion and timing. The same skill lock was reactivated under a fresh epoch; the old bridge returned 403. No media attempts, artifacts, approvals or media API calls were created. This was not a native structured pending-input test. See [evidence](../implementation/CODEX-SUPERVISOR-VALIDATION.md).
+
+**Next:** wire local native runtime configuration and browser setup, then evaluate stage/gap behavior, structured questions and vision. Narration/canonical-render integration can proceed in parallel. The default remains fake; T06 is still open. Twelve native starts have been used overall, and the latest allowance is exhausted at three of three. Any further live evaluation needs a new allowance; independent code-host/authentication isolation remains unverified under the accepted v0 trust boundary.
 
 **Design:** [Director runtime](../technical/DIRECTOR-RUNTIME.md), [skills/tools](../technical/SKILLS-TOOLS.md).
 
@@ -145,6 +153,8 @@ Expose actual narration readiness to the workflow service; do not duplicate it w
 
 **Exit evidence:** complete upload, notes-to-script, partial audio and mixed-source cases progress without restarting the conversation. Text edits cannot falsely mutate recorded audio. A longer earlier sentence shifts later placements while preserving compatible video; changed duration/meaning renews affected review.
 
+**Implemented slice:** a draft/projection service with independent script/audio/timing readiness and exact acceptance, immutable segments/recordings/cues, supplied-audio normalization and scoped change impact. Eleven tests include partial/mixed sources, stale acceptance, authority recheck after import and placement-only visual reuse. The projection explicitly does not change canonical project cues or holds. Next, commit it through guarded application changes and integrate the five tools/UI; ASR/TTS and generation provenance follow. Source imports are currently capped at 360 seconds.
+
 **Design:** [Narration](../technical/NARRATION.md).
 
 ### T08 — Local artifacts, timeline and rendering
@@ -154,6 +164,8 @@ Expose actual narration readiness to the workflow service; do not duplicate it w
 Implement durable artifact installation and quarantine, normalized derivatives, exact take/audio resolution, integer frames/samples, simple cuts, imported music/captions/overlays, frozen manifests and FFmpeg rendering. Start with supplied media. Server completion projection chooses draft selections and conditionally promotes previews.
 
 **Exit evidence:** supplied clips render into a complete commercial; real frame/audio assertions pass; an old render cannot overwrite a new target; disk/cancel/crash recovery preserves inputs; scene previews and narration-only edits reuse media. Process-kill tests and documented filesystem synchronization guarantees are distinguished.
+
+**Implemented slice:** a separate local media service preserves originals, normalizes video/audio, freezes manifests, renders exact cuts/audio placement, retains immutable receipts and exposes an atomic publish callback. Thirteen tests decode actual frames/audio and cover bounded input handling, cancellation, stale publication and recoverable completion. The executor/API/browser still use their fake path. Next, connect canonical timeline/artifact ownership and preview publication before adding captions/overlays/transitions or claiming commercial-scale acceptance.
 
 **Design:** [Providers/artifacts](../technical/PROVIDERS-ARTIFACTS.md), [timeline/rendering](../technical/TIMELINE-RENDERING.md).
 
@@ -171,7 +183,7 @@ Real tests use explicit allowance and the user's configured credentials. A live 
 
 ## 6. Later extensions
 
-**Local H3 worker:** after the provider boundary works, add an authenticated versioned Python job API, weights/capability reporting, warm inference, GPU admission, durable receipts and transferable artifacts. Keep SQLite, human approval, budgeting and hybrid-stage composition in TypeScript. Validate cloud/local feature differences independently.
+**Same-machine H3 worker:** after v0 and after the provider boundary works, add an authenticated versioned loopback Python job API, weights/capability reporting, warm inference, GPU admission, durable receipts and transferable artifacts. Keep SQLite, human approval, budgeting and hybrid-stage composition in TypeScript. Validate cloud/local feature differences independently. Remote GPU hosting and multi-host deployment require a separate future design; they are not part of this extension or v0 acceptance.
 
 **Ten and thirty minutes:** raise duration only with separate 600/1,800-second acceptance fixtures and measured context/review/queue/storage/render behavior. Reuse scene summaries, cue revisions and paged review; do not feed the whole film into every director request.
 
@@ -187,4 +199,4 @@ Current `pnpm check` builds, runs the Node test suite and typechecks. Use the st
 
 ## 8. Decisions still resolved by implementation evidence
 
-The selected direction is firm. Remaining probes choose exact dependency versions, supported OS/keychain packaging, pinned Codex compatibility, precise provider limits/access/pricing, useful speech/transcription profiles, and measured performance thresholds. Native turn steering of authority-changing requests is deferred until attribution/fencing can be proven. The conservative v0 process boundary is explicit, measurable and replaceable behind the adapter.
+The selected direction is firm. Remaining probes choose exact dependency versions, supported OS/keychain packaging, pinned Codex compatibility, precise provider limits/access/pricing, useful speech/transcription profiles, and measured performance thresholds. Native turn steering of authority-changing requests is deferred until attribution/fencing can be proven. The v0 boundary is one trusted local installation with pinned native runtime configuration. Local process leases and restart reconciliation remain necessary; choosing one machine does not remove uncertain-turn or uncertain-provider outcomes.

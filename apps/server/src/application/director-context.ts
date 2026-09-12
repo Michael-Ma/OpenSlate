@@ -12,6 +12,19 @@ interface ActivationRecord { id: string; projectId: string; requestId: string; e
 export class DirectorContextService {
   constructor(readonly service: ProductionService, readonly environment: SkillEnvironment) {}
 
+  /** Trusted host configuration, never exposed through director tools or HTTP request data. */
+  bootstrapLock(projectId: string, lock: SkillCapabilityLock): string {
+    verifySkillLock(lock, this.environment);
+    return this.service.store.transaction(() => {
+      this.service.store.getProject(projectId);
+      const existing = this.service.store.list<LockRecord>("director_skill_lock", projectId);
+      invariant(existing.length === 0, "CAPABILITY_MISMATCH", "Bootstrap cannot replace an existing project skill lock");
+      this.service.store.insert("director_skill_lock", lock.id, projectId, { id: lock.id, projectId, lock });
+      this.service.store.appendEvent(projectId, "director.lock_installed", { lockId: lock.id, lockDigest: lock.lockDigest, source: "application_configuration" });
+      return lock.id;
+    });
+  }
+
   installLock(projectId: string, human: ActorContext, lock: SkillCapabilityLock): string {
     invariant(human.kind === "human", "ACTOR_DENIED", "Runtime locks are installed by the application request handler");
     this.service.assertActor(projectId, human, true);

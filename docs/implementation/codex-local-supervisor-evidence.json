@@ -1,0 +1,222 @@
+{
+  "date": "2026-09-12",
+  "scope": "single-user single-machine local v0",
+  "runtimeVersion": "0.153.4",
+  "model": "gpt-6-astra",
+  "reasoningEffort": "low",
+  "implementation": [
+    "DirectorSupervisor",
+    "CodexDirectorRuntime",
+    "createDirectorInput",
+    "five-tool MCP bridge",
+    "ProductionService",
+    "SQLite Store"
+  ],
+  "fixture": {
+    "synthetic": true,
+    "metadataOnlyAudio": true,
+    "twoShots": true,
+    "mediaWorkerStarted": false,
+    "profiles": "fake only",
+    "initialCandidateSlots": 4,
+    "replacementCandidateSlots": 2,
+    "realProjectMutations": 0,
+    "mediaApiCalls": 0
+  },
+  "allowance": {
+    "used": 3,
+    "maximum": 3,
+    "previous": 9,
+    "totalStartsAcrossExperiments": 12,
+    "remaining": 0
+  },
+  "turns": [
+    {
+      "label": "supervised-question",
+      "requestId": "60c3103d-2e2c-4399-bfc2-7f947d9970d4",
+      "epochId": "53610bf8-d2a6-47d9-9fab-52e2296342b4",
+      "turnId": "d9fb0e49-3c0a-46c7-8ae2-4052c018663d",
+      "nativeThreadId": "01a094b4-d467-7873-a9bf-7c2284fff262",
+      "inputBytes": 287,
+      "contextBytes": 26538,
+      "contextDigest": "cc308780f352b57d1b2e17b3f858cc077c52e01de7758c991659a9c47ac5b9e1",
+      "startedAt": "2026-09-12T08:21:13.886Z",
+      "finishedAt": "2026-09-12T08:21:20.295Z",
+      "nativeTurnId": "01a094b4-d586-7732-bac2-f6f49f189cdf",
+      "status": "completed",
+      "dispatched": true,
+      "elapsedSeconds": 6.409,
+      "elapsedIncludes": "native setup, model/tool work, and process cleanup"
+    },
+    {
+      "label": "supervised-answer-and-edit",
+      "requestId": "0cbce668-95fa-425b-8957-b90cefb8fe11",
+      "epochId": "05e78441-2c45-446a-9ad3-6c453be07160",
+      "turnId": "e0838e83-c55b-4577-8f0f-876f3b83f7ec",
+      "nativeThreadId": "01a094b4-ee15-75d1-97bf-147bfd136124",
+      "inputBytes": 371,
+      "contextBytes": 27524,
+      "contextDigest": "482a5c2c7c3e1806f7ad3c626c4ce03664d228fa4753931cdca45a2ca501f644",
+      "startedAt": "2026-09-12T08:21:20.455Z",
+      "finishedAt": "2026-09-12T08:21:51.725Z",
+      "nativeTurnId": "01a094b4-ef35-7420-ba24-9a9e42d7e2e2",
+      "status": "completed",
+      "dispatched": true,
+      "elapsedSeconds": 31.27,
+      "elapsedIncludes": "native setup, model/tool work, and process cleanup"
+    }
+  ],
+  "checks": [
+    {
+      "name": "configured_native_authentication_available",
+      "pass": true
+    },
+    {
+      "name": "approved_model_available",
+      "pass": true
+    },
+    {
+      "name": "question_turn_confirmed",
+      "pass": true
+    },
+    {
+      "name": "missing_choice_saved",
+      "pass": true
+    },
+    {
+      "name": "question_did_not_mutate_shots",
+      "pass": true
+    },
+    {
+      "name": "question_preserved_canonical_project",
+      "pass": true
+    },
+    {
+      "name": "question_preserved_plan_candidates_and_grants",
+      "pass": true
+    },
+    {
+      "name": "no_media_dispatch_or_review",
+      "pass": true
+    },
+    {
+      "name": "question_survives_application_restart",
+      "pass": true
+    },
+    {
+      "name": "answer_edit_turn_confirmed",
+      "pass": true
+    },
+    {
+      "name": "matching_plan_committed",
+      "pass": true
+    },
+    {
+      "name": "requested_framing_committed",
+      "pass": true
+    },
+    {
+      "name": "shot_one_other_fields_preserved",
+      "pass": true
+    },
+    {
+      "name": "unrelated_shot_unchanged",
+      "pass": true
+    },
+    {
+      "name": "unrelated_active_bindings_preserved",
+      "pass": true
+    },
+    {
+      "name": "narration_story_and_timing_preserved",
+      "pass": true
+    },
+    {
+      "name": "same_lock_fresh_activation",
+      "pass": true
+    },
+    {
+      "name": "old_epoch_cannot_borrow_answer_authority",
+      "pass": true
+    },
+    {
+      "name": "no_media_dispatch_or_review",
+      "pass": true
+    }
+  ],
+  "question": {
+    "kind": "conversation",
+    "text": "For shot 1, would you prefer an extreme close-up of the stitching, a close-up of the boot\u2019s upper, or a wider view of the whole boot?"
+  },
+  "nativeStructuredQuestionExercised": false,
+  "applicationRestartBetweenTurns": true,
+  "threadsArchived": true,
+  "runtimeProcessCleanup": "adapter awaited transport close for both confirmed completed results; no cleanup error",
+  "controlProcesses": [
+    {
+      "pid": 92998,
+      "exited": true,
+      "code": 0,
+      "signal": null
+    },
+    {
+      "pid": 94101,
+      "exited": true,
+      "code": 0,
+      "signal": null
+    }
+  ],
+  "toolInvocations": [
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    },
+    {
+      "tool": "control_execution",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    },
+    {
+      "tool": "prepare_change",
+      "state": "succeeded"
+    },
+    {
+      "tool": "apply_change",
+      "state": "succeeded"
+    }
+  ],
+  "scriptSha256": "ab4715f57aae4d26d40fc609abc680f7ea4477cc23b644527b72b4f92657bc8f",
+  "limits": [
+    "Synthetic two-shot application fixture; default browser still scripted",
+    "No native structured input, vision or native-history recall claim",
+    "No independent code-host or authentication-isolation proof",
+    "No media API, real media generation or production-scale performance claim",
+    "Persistent pause from conversational intent was not demonstrated; final model pause summary was inaccurate"
+  ],
+  "reviewFindings": [
+    {
+      "finding": "Final model statement that execution remained paused was inaccurate",
+      "verifiedState": "Director set a scoped request hold; apply released it. No active final hold or global execution_control record.",
+      "noMediaBasis": "Fixture ran no execution worker; read-only SQLite audit found zero attempt/artifact/approval/fake_jobs records."
+    }
+  ]
+}
