@@ -1,6 +1,7 @@
 import { canonical, digest, invariant, workflowReadiness } from "@openslate/core";
 import type { ActorContext, CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
 import type { ProductionService } from "./service.js";
+import type { NarrationState, SegmentRevision } from "../narration/types.js";
 
 export const DIRECTOR_PROJECTION_LIMITS = Object.freeze({ bytes: 512 * 1024, records: 20, sourceCharacters: 64 * 1024, maximumOffset: 10_000_000 });
 export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts";
@@ -36,6 +37,9 @@ export interface DirectorContextProjection {
   toolCalls: ToolSummary[];
   workflow: unknown;
   work: unknown;
+  assets?: unknown[];
+  cues?: ProjectRecord["cues"];
+  narrationDraft?: { version: number; segments: unknown[]; authority: string };
   coverage: Record<string, unknown>;
   source?: string;
 }
@@ -152,8 +156,11 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     const holds = service.store.list<Hold>("hold", projectId).filter(hold => hold.active).reverse();
     const toolCalls = toolSummaries(service, projectId);
     const readiness = workflowReadiness(saved);
-    const total = Math.max(saved.shots.length, saved.scenes.length, messages.length, assistantMessages.length, questions.length, holds.length, toolCalls.length, readiness.scopes.length, readiness.narration.acceptedMeasuredCues.length);
-    base.guard.dataDigest = digest({ shots: saved.shots, scenes: saved.scenes, messages, assistantMessages, questions, holds, toolCalls, readiness });
+    const assets = saved.artifacts.map(artifact => ({ ...artifact, metadata: service.store.get("artifact", artifact.artifactId) ? service.inspectArtifact(projectId, actor, artifact.artifactId) : null }));
+    const draft = service.store.get<NarrationState>("narration_state", projectId);
+    const segments = (draft?.entries ?? []).map(entry => ({ ...entry, script: service.store.get<SegmentRevision>("narration_segment", entry.segmentRevisionId) ?? null }));
+    const total = Math.max(saved.shots.length, saved.scenes.length, assets.length, saved.cues.length, segments.length, messages.length, assistantMessages.length, questions.length, holds.length, toolCalls.length, readiness.scopes.length, readiness.narration.acceptedMeasuredCues.length);
+    base.guard.dataDigest = digest({ shots: saved.shots, scenes: saved.scenes, messages, assistantMessages, questions, holds, toolCalls, readiness, assets, cues: saved.cues, draft: draft ?? null });
     base.work = workSummary(service, projectId, activePlanId);
     return adaptive(offset, total, count => {
       const slice = <T>(values: T[]) => values.slice(offset, offset + count);
@@ -161,9 +168,11 @@ export function projectDirectorContext(service: ProductionService, projectId: st
         ...base,
         project: { ...base.project, shots: slice(saved.shots).map(({ id, revisionId, sceneId, desiredFrames }) => ({ id, revisionId, sceneId, desiredFrames })), scenes: slice(saved.scenes).map(({ id, revisionId }) => ({ id, revisionId })) },
         messages: slice(messages), assistantMessages: slice(assistantMessages), questions: slice(questions), holds: slice(holds), toolCalls: slice(toolCalls),
+        assets: slice(assets), cues: slice(saved.cues),
+        narrationDraft: { version: draft?.version ?? 0, segments: slice(segments), authority: "Draft records are context, not canonical cues or permission. Human script, recording and timing acceptance is required in narration review before a canonical commit. Use current canonical cues/assets for executable planning." },
         workflow: { ...readiness, scopes: slice(readiness.scopes), narration: { ...readiness.narration, acceptedMeasuredCues: slice(readiness.narration.acceptedMeasuredCues) } },
         page: page(offset, count, total),
-        coverage: { ...base.coverage, overview: { pagination: "The same record window applies to each listed collection; follow nextOffset until null. Messages and tool calls are newest first.", messages: { total: messages.length, returned: slice(messages).length }, holds: { total: holds.length, returned: slice(holds).length }, toolCalls: { total: toolCalls.length, returned: slice(toolCalls).length }, scopes: { total: readiness.scopes.length, returned: slice(readiness.scopes).length }, shots: { total: saved.shots.length, returned: slice(saved.shots).length, detailsSection: "shots" }, scenes: { total: saved.scenes.length, returned: slice(saved.scenes).length, detailsSection: "scenes" }, acceptedMeasuredCues: { total: readiness.narration.acceptedMeasuredCues.length, returned: slice(readiness.narration.acceptedMeasuredCues).length } } },
+        coverage: { ...base.coverage, overview: { pagination: "The same record window applies to each listed collection; follow nextOffset until null. Messages and tool calls are newest first.", messages: { total: messages.length, returned: slice(messages).length }, holds: { total: holds.length, returned: slice(holds).length }, toolCalls: { total: toolCalls.length, returned: slice(toolCalls).length }, scopes: { total: readiness.scopes.length, returned: slice(readiness.scopes).length }, shots: { total: saved.shots.length, returned: slice(saved.shots).length, detailsSection: "shots" }, scenes: { total: saved.scenes.length, returned: slice(saved.scenes).length, detailsSection: "scenes" }, assets: { total: assets.length, returned: slice(assets).length }, cues: { total: saved.cues.length, returned: slice(saved.cues).length }, narrationSegments: { total: segments.length, returned: slice(segments).length }, acceptedMeasuredCues: { total: readiness.narration.acceptedMeasuredCues.length, returned: slice(readiness.narration.acceptedMeasuredCues).length } } },
       };
     });
   });

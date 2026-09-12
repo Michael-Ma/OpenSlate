@@ -5,6 +5,7 @@ export class ApiError extends Error {
   readonly code: string;
   constructor(code: string) { super(errorMessage(code)); this.name = "ApiError"; this.code = code; }
 }
+type RequestOptions = { method?: "GET" | "POST"; body?: unknown; rawBody?: Blob; key?: string; signal?: AbortSignal; timeoutMs?: number };
 /** Access tokens exist only in this tab's memory and are never placed in URLs. */
 export class StudioApi {
   #token: string;
@@ -14,16 +15,20 @@ export class StudioApi {
   async request<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown; key?: string; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
     return this.#fetch(path, options, response => response.json() as Promise<T>);
   }
-  async #fetch<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown; key?: string; signal?: AbortSignal; timeoutMs?: number }, consume: (response: Response) => Promise<T>): Promise<T> {
+  async upload<T>(path: string, file: Blob, key: string, signal?: AbortSignal): Promise<T> {
+    if (!file.size || file.size > 128 * 1024 * 1024) throw new ApiError("UPLOAD_TOO_LARGE");
+    return this.#fetch(path, { method: "POST", rawBody: file, key, ...(signal ? { signal } : {}), timeoutMs: 180000 }, response => response.json() as Promise<T>);
+  }
+  async #fetch<T>(path: string, options: RequestOptions, consume: (response: Response) => Promise<T>): Promise<T> {
     if (!path.startsWith("/api/")) throw new ApiError("INVALID_PATH");
     const controller = new AbortController(); this.#controllers.add(controller);
     const abort = () => controller.abort(); options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) controller.abort();
-    const timer = setTimeout(abort, Math.min(90000, Math.max(1000, options.timeoutMs ?? 15000)));
+    const timer = setTimeout(abort, Math.min(180000, Math.max(1000, options.timeoutMs ?? 15000)));
     try {
       const response = await fetch(path, { method: options.method ?? "GET", credentials: "omit", redirect: "error", signal: controller.signal,
-        headers: { authorization: `Bearer ${this.#token}`, ...(options.body === undefined ? {} : { "content-type": "application/json" }), ...(options.key ? { "idempotency-key": options.key } : {}) },
-        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }) });
+        headers: { authorization: `Bearer ${this.#token}`, ...(options.rawBody ? { "content-type": "application/octet-stream" } : options.body === undefined ? {} : { "content-type": "application/json" }), ...(options.key ? { "idempotency-key": options.key } : {}) },
+        ...(options.rawBody ? { body: options.rawBody } : options.body === undefined ? {} : { body: JSON.stringify(options.body) }) });
       if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: { code?: string } }; throw new ApiError(body.error?.code ?? "REQUEST_FAILED"); }
       return await consume(response);
     } catch (error) {
@@ -33,8 +38,13 @@ export class StudioApi {
     } finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); this.#controllers.delete(controller); }
   }
   async artifact(projectId: string, artifact: Artifact, signal: AbortSignal): Promise<string> {
-    return this.#fetch(`/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/content`, { signal }, async response => {
-    const limit = 32 * 1024 * 1024;
+    return this.verifiedMedia(`/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifact.artifactId)}/content`, artifact.sha256, signal, artifact.kind === "image" ? 32 * 1024 * 1024 : 256 * 1024 * 1024);
+  }
+  async narrationAudio(projectId: string, audioId: string, sha256: string, signal: AbortSignal): Promise<string> {
+    return this.verifiedMedia(`/api/projects/${encodeURIComponent(projectId)}/narration/audio/${encodeURIComponent(audioId)}/content`, sha256, signal, 80 * 1024 * 1024);
+  }
+  private async verifiedMedia(path: string, sha256: string, signal: AbortSignal, limit: number): Promise<string> {
+    return this.#fetch(path, { signal, timeoutMs: 90000 }, async response => {
     if (Number(response.headers.get("content-length") ?? 0) > limit || !response.body) throw new ApiError("ARTIFACT_TOO_LARGE");
     const reader = response.body.getReader(); const chunks: Uint8Array<ArrayBuffer>[] = []; let length = 0;
     try {
@@ -42,7 +52,7 @@ export class StudioApi {
         length += chunk.value.byteLength; if (length > limit) throw new ApiError("ARTIFACT_TOO_LARGE"); chunks.push(new Uint8Array(chunk.value)); }
     } finally { await reader.cancel().catch(() => {}); }
     const bytes = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    if (hex(await crypto.subtle.digest("SHA-256", bytes)) !== artifact.sha256) throw new ApiError("ARTIFACT_CHANGED");
+    if (hex(await crypto.subtle.digest("SHA-256", bytes)) !== sha256) throw new ApiError("ARTIFACT_CHANGED");
     const mime = response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
     return URL.createObjectURL(new Blob([bytes], { type: mime }));
     });

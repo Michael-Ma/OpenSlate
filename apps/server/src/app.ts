@@ -11,10 +11,14 @@ import type { LocalDirectorController, LocalDirectorSelection } from "./applicat
 import type { ArtifactRecord, PlanRecord, ReviewSnapshot } from "./execution/engine.js";
 import { seedFixture } from "./demo.js";
 import type { DemoCommand } from "./application/fake-director.js";
+import { registerNarrationRoutes } from "./narration/routes.js";
+import { registerMediaRoutes } from "./media/routes.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
-  runtimeSettings?: LocalDirectorController }
+  runtimeSettings?: LocalDirectorController;
+  narrationRoutes?: Parameters<typeof registerNarrationRoutes>[1];
+  mediaRoutes?: Parameters<typeof registerMediaRoutes>[1] }
 const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
@@ -49,6 +53,8 @@ export function createApp(options: AppOptions = {}) {
     } else invariant(options.localToken && timingSafeEqual(Buffer.from(digest(bearer)), Buffer.from(digest(options.localToken))), "AUTH_REQUIRED", "Invalid local session token");
   });
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
+  if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
+  if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
   app.post<{ Body: { name: string } }>("/api/projects", { schema: { body: object({ name: string }, ["name"]) } }, async request =>
     service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => service().createProject(request.body.name)));
@@ -130,7 +136,7 @@ export function createApp(options: AppOptions = {}) {
     const fd = openSync(artifact.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const stat = fstatSync(fd);
-      invariant(stat.isFile() && stat.size <= 64 * 1024 * 1024, "ARTIFACT_TOO_LARGE", "Artifact preview exceeds its limit");
+      invariant(stat.isFile() && stat.size <= 256 * 1024 * 1024, "ARTIFACT_TOO_LARGE", "Artifact preview exceeds its limit");
       const bytes = readFileSync(fd);
       invariant(createHash("sha256").update(bytes).digest("hex") === artifact.artifact.sha256, "ARTIFACT_CORRUPT", "Artifact bytes changed");
       const allowed = ["image/svg+xml", "image/png", "image/jpeg", "video/mp4", "audio/wav", "audio/mpeg"];

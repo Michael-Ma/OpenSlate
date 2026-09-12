@@ -3,6 +3,7 @@ import type { ActorContext } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
+import { directorInputDigest } from "./director-input-identity.js";
 
 export type TurnState = "queued" | "running" | "completed" | "waiting_user" | "interrupted" | "unknown" | "failed";
 export interface DirectorTurn {
@@ -170,7 +171,7 @@ export class DirectorSupervisor {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
         invariant(turn.owner === this.owner && turn.state === "running", "DIRECTOR_LEASE_LOST", "Director turn ownership changed");
         this.save({ ...turn, dispatched: true });
-        service.store.appendEvent(claimed.projectId, "director.dispatch_intent", { turnId: claimed.id, requestId: claimed.requestId, contextDigest: digest(input.context) });
+        service.store.appendEvent(claimed.projectId, "director.dispatch_intent", { turnId: claimed.id, requestId: claimed.requestId, contextDigest: digest(input.context), inputDigest: directorInputDigest(input) });
       });
       attempted = true;
       const onEvent = (event: DirectorRuntimeEvent) => {

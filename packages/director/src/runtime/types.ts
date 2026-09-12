@@ -1,3 +1,5 @@
+import type { DirectorImageInput } from "./images.js";
+export type { DirectorImageInput } from "./images.js";
 /** Application identities remain authoritative; native IDs are correlation hints only. */
 export interface DirectorRunIdentity {
   projectId: string;
@@ -19,6 +21,8 @@ export interface DirectorRunInput extends DirectorRunIdentity {
   /** Reconstructed application state and focused references, never native history. */
   context: string;
   skills: readonly DirectorSkillRef[];
+  /** Trusted host-projected thumbnails. Include their hashes/media types in durable input identity. */
+  images?: readonly DirectorImageInput[];
   bridge: DirectorBridgeConfig;
   resumeThreadId?: string;
 }

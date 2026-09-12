@@ -3,6 +3,7 @@ import { TOOL_NAMES } from "@openslate/core";
 import { normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
+import { prepareDirectorImages } from "./images.js";
 import { fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
 import type { DirectorQuestion, DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent, DirectorStartOptions } from "./types.js";
 
@@ -101,6 +102,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     let result: DirectorRunResult | undefined;
     try {
       requireRuntime(!options.signal?.aborted, "RUNTIME_ABORTED", "Director run was cancelled");
+      const images = await prepareDirectorImages(input.images, config.cwd);
       await this.verifyVersion(cancellation.signal);
       if (stopReason) throw stopReason;
       const launch = this.launchConfig(input);
@@ -175,7 +177,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       await delivery; if (stopReason) throw stopReason;
       dispatched = true;
       const started = object(await rpc("turn/start", { threadId: nativeThreadId,
-        input: [{ type: "text", text: input.text }, ...input.skills.map(skill => ({ type: "skill", ...skill }))],
+        input: [{ type: "text", text: input.text }, ...input.skills.map(skill => ({ type: "skill", ...skill })), ...images],
         additionalContext: { openslate: { kind: "application", value: input.context } },
         effort: "low", permissions: config.policy.id, approvalPolicy: "never" }));
       const turn = object(started.turn);
@@ -241,6 +243,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none", check_for_update_on_startup: false,
       "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
       "features.code_mode_host": true, "features.skip_host_skill_discovery": true,
+      "features.default_mode_request_user_input": true,
       "skills.config": [...(Array.isArray(this.#options.policy.config["skills.config"])
         ? this.#options.policy.config["skills.config"].filter(value => object(value).enabled === false &&
           !input.skills.some(skill => skill.path === object(value).path)) : []),
@@ -268,7 +271,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     requireRuntime(config.default_permissions === policy.id && equal(normalizePermissionProfile(object(config.permissions)[policy.id]), normalizePermissionProfile(configuredProfile(policy.config, policy.id))),
       "RUNTIME_POLICY_MISMATCH", "Effective native permissions differ from the exact configured profile");
     const features = object(config.features);
-    requireRuntime(features.code_mode_host === true && DISABLED.every(name => features[name] === false), "RUNTIME_CONFIG_MISMATCH", "Native capability configuration differs from expected settings");
+    requireRuntime(features.code_mode_host === true && features.default_mode_request_user_input === true && DISABLED.every(name => features[name] === false), "RUNTIME_CONFIG_MISMATCH", "Native capability configuration differs from expected settings");
     const data = object(await transport.request("skills/list", { cwds: [this.#options.cwd], forceReload: true }, signal)).data;
     requireRuntime(Array.isArray(data), "RUNTIME_PROTOCOL_INVALID", "Native skill catalog is missing");
     const found: { name: unknown; path: unknown }[] = [];

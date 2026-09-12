@@ -1,0 +1,65 @@
+export interface NarrationDraft { text: string; textKind: "notes" | "outline" | "draft"; language: string; meaning: string; source: { kind: "undecided" | "uploaded" } | { kind: "generated"; voice: string | null; profileRevisionId: string | null } }
+export interface Recording { id: string; declaredOrigin: "uploaded" | "generated"; media: { artifactId: string; sha256: string; byteLength: number; probe: { audio?: { samples: number | null; durationSeconds: number } } } }
+export interface NarrationSegment {
+  entry: { segmentId: string; atSample: number; audioId: string | null };
+  script: NarrationDraft & { id: string };
+  audio: Recording | null;
+  cue: { id: string; startSample: number; endSample: number } | null;
+  accepted: { script: boolean; audio: boolean; timing: boolean };
+}
+export interface NarrationView {
+  headVersion: number; revisionId: string;
+  session: { id: string; requestId: string; state: "active" | "stale" } | null;
+  snapshot: { state: { version: number }; segments: NarrationSegment[]; readiness: { gaps: Array<{ key: string; category: string }> } };
+  canonical: { id: string; preparedId: string; narrationVersion: number; shotMappings: Array<{ shotId: string; segmentId: string | null }> } | null;
+  audioLibrary: Recording[];
+  coverage: { audioLibrary: { total: number; nextOffset: number | null } };
+}
+export interface NarrationPreparation { id: string; requestId: string; expectedHeadVersion: number; expectedNarrationVersion: number; shotImpact: Array<{ shotId: string; visual: "reuse" | "replan"; reason: string }>; projection: { segments: unknown[] } }
+export function secondsToSamples(value: string): number {
+  if (!/^(0|[1-9]\d*)(\.\d{1,6})?$/.test(value.trim())) throw new Error("Enter seconds as a positive number, with up to six decimal places.");
+  const [whole, fraction = ""] = value.trim().split(".");
+  const millionths = BigInt(whole!) * 1000000n + BigInt(fraction.padEnd(6, "0"));
+  const samples = (millionths * 48000n + 500000n) / 1000000n;
+  if (samples > 17280000n) throw new Error("Keep narration within six minutes.");
+  return Number(samples);
+}
+export function sampleSeconds(samples: number): string { return (samples / 48000).toFixed(6).replace(/\.?0+$/, "") || "0"; }
+export function draftOf(value?: NarrationDraft): NarrationDraft {
+  return value ? { text: value.text, textKind: value.textKind, language: value.language, meaning: value.meaning, source: structuredClone(value.source) }
+    : { text: "", textKind: "notes", language: "en", meaning: "", source: { kind: "undecided" } };
+}
+export function preparationCurrent(prepared: NarrationPreparation | null, view: NarrationView | null): boolean {
+  return !!prepared && !!view && prepared.expectedHeadVersion === view.headVersion && prepared.expectedNarrationVersion === view.snapshot.state.version && view.session?.state === "active" && prepared.requestId === view.session.requestId;
+}
+/** Human review must describe the saved version currently shown in the editor. */
+export function narrationReviewState(view: NarrationView | null, prepared: NarrationPreparation | null, edits: { writing: boolean; timing: boolean; newSection: NarrationDraft }) {
+  const draft = edits.newSection;
+  const newSectionChanged = draft.text !== "" || draft.textKind !== "notes" || draft.language !== "en" || draft.meaning !== "" || draft.source.kind !== "undecided";
+  const unsavedChanges = edits.writing || edits.timing || newSectionChanged;
+  const savedReady = !!view && view.snapshot.segments.length > 0 && narrationTimingIssues(view.snapshot.segments).length === 0
+    && view.snapshot.segments.every(row => row.accepted.script && row.accepted.audio && row.accepted.timing);
+  const canReview = savedReady && view?.session?.state === "active" && !unsavedChanges;
+  return { newSectionChanged, unsavedChanges, savedReady, canReview, canApply: canReview && preparationCurrent(prepared, view) };
+}
+export function narrationError(code: string, fallback: string): string {
+  return ({ NARRATION_SESSION_STALE: "Another edit superseded this narration session. Refresh, then explicitly continue it.", NARRATION_SESSION_EXISTS: "A narration session is already saved. Use Continue narration to resume it.",
+    NARRATION_NOT_READY: "Finish the draft, attach a recording, and accept its saved script, audio and timing before continuing.", NARRATION_SOURCE_UNDECIDED: "Choose the matching recording source before attaching it.",
+    NARRATION_STALE_ACCEPTANCE: "That saved version changed. Refresh and review the current version before accepting it.", NARRATION_MAPPING_REQUIRED: "A removed narration section is still linked to a shot. Choose a replacement or No narration for that shot.",
+    REVISION_CONFLICT: "A saved version changed. Your typed text is still here; refresh and compare it before saving again.", NARRATION_CUE_OUT_OF_RANGE: "The selected range goes beyond the recording. Check its start and end times.",
+    UPLOAD_TOO_LARGE: "Choose a recording smaller than 128 MiB.", MEDIA_BUSY: "Another local media operation is running. Try again shortly.", MEDIA_TOOL_FAILED: "This recording could not be read. Try a supported audio file.",
+    NARRATION_INVALID_INPUT: "Check the section, timing and recording choices before saving.", NARRATION_INTEGRITY_ERROR: "The saved narration no longer matches its inputs. Refresh before continuing." } as Record<string, string>)[code] ?? fallback;
+}
+
+export function narrationTimingIssues(segments: NarrationSegment[]): string[] {
+  const issues: string[] = []; let end = 0;
+  for (const [index, row] of segments.entries()) {
+    if (!row.cue) continue;
+    const duration = row.cue.endSample - row.cue.startSample;
+    if (row.entry.atSample < end) issues.push(`Section ${index + 1} begins before the previous section ends at ${sampleSeconds(end)}s. Move its video position later or shorten the previous range.`);
+    if (duration < 800) issues.push(`Section ${index + 1} needs a recording range long enough to cover a video frame.`);
+    end = row.entry.atSample + duration;
+    if (end > 17280000) issues.push(`Section ${index + 1} extends beyond the six-minute limit.`);
+  }
+  return issues;
+}

@@ -1,0 +1,35 @@
+{
+  "kind": "synthetic_local_media_acceptance",
+  "capturedAt": "2026-09-12T09:20:48.309Z",
+  "apiCalls": 0,
+  "geometry": "1280x720",
+  "frames": 10800,
+  "durationSeconds": 360,
+  "frameRate": "30/1",
+  "sampleRate": 48000,
+  "clips": 64,
+  "audioPlacements": 64,
+  "distinctAudioInputs": 2,
+  "simultaneousAudioLanes": 1,
+  "sourceRangeOrder": "descending within six-minute recordings",
+  "manifestDigest": "283f14f3f9f199e05b0af1c845cd1d6e3d670da3f11e78c698aa192babd9fe3a",
+  "outputSha256": "a3dececa9c5d2a84726e2f0e9f90470e80daad101f9803822af137e541dd717e",
+  "outputBytes": 9313831,
+  "checks": {
+    "allPictureFramesAndCuts": true,
+    "all64CueSourceOrders": true,
+    "all64IntentionalSilenceGaps": true,
+    "fullDecode": true
+  },
+  "renderElapsedMs": 34208,
+  "peakSampledProcessTreeRssKiB": 819808,
+  "memorySamples": 336,
+  "samplingIntervalMs": 100,
+  "resourceScope": "Render/validate/install phase; RSS sampled for this Node process and descendants, including sampler overhead. Approximate observed peak, not a memory guarantee.",
+  "limitations": [
+    "Synthetic repeated-color clips and sine tones, not generated commercial footage",
+    "Local media layer only; application authority and canonical narration integration covered by separate tests",
+    "No H3/image/speech APIs",
+    "One local machine and toolchain; not a production throughput benchmark"
+  ]
+}

@@ -35,6 +35,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
     ":root": "deny", ":minimal": "read", [f.input.directories.projection]: "read", [f.input.directories.snapshots]: "read",
     [await realpath(process.execPath)]: "read" } });
   assert.equal(policy.config.sqlite_home, join(f.input.directories.storage, "native-state"));
+  assert.equal(policy.config["features.default_mode_request_user_input"], true);
   assert.equal(policy.config["mcp_servers.inherited.enabled"], false);
   assert.deepEqual(policy.config["skills.config"], [{ path: f.input.env.SETUP_FIXTURE_SKILL, enabled: false }]);
   assert.ok(!JSON.stringify(policy).includes("INHERITED_TOKEN"));
@@ -53,7 +54,7 @@ for (const [scenario, code] of [
   ["version", "SETUP_VERSION_MISMATCH"], ["auth", "SETUP_AUTH_REQUIRED"], ["model", "SETUP_MODEL_UNAVAILABLE"],
   ["effort", "SETUP_MODEL_UNSUPPORTED"], ["cursor-loop", "SETUP_MODEL_CATALOG_INVALID"], ["policy", "SETUP_POLICY_MISMATCH"],
   ["mcp-drift", "SETUP_MCP_UNEXPECTED"], ["skill-drift", "SETUP_SKILLS_UNEXPECTED"], ["feature-drift", "SETUP_CONFIG_MISMATCH"],
-  ["search-drift", "SETUP_CONFIG_MISMATCH"],
+  ["search-drift", "SETUP_CONFIG_MISMATCH"], ["question-feature-drift", "SETUP_CONFIG_MISMATCH"],
   ["skill-error", "SETUP_SKILLS_INVALID"], ["invalid-mcp-name", "SETUP_CATALOG_INVALID"], ["rpc-error", "RUNTIME_RPC_REJECTED"],
   ["hang", "RUNTIME_RPC_TIMEOUT"], ["approval", "SETUP_INTERACTIVE_DENIED"],
 ]) test(`setup blocks ${scenario} without returning launch options or native diagnostics`, async t => {

@@ -11,6 +11,7 @@ import type {
 } from "@openslate/core";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
+import type { ArtifactRecord } from "../execution/engine.js";
 import { projectDirectorContext } from "./context-projection.js";
 import type { DirectorContextQuery } from "./context-projection.js";
 
@@ -353,14 +354,18 @@ export class ProductionService {
     this.assertActor(projectId, actor, true);
     return this.store.transaction(() => {
       this.assertActor(projectId, actor, true);
-      return this.request(projectId, actor).scopeIds.map(scopeId => this.engine.setHold(projectId, { scopeId, ownerId: actor.requestId }));
+      const holds = this.store.list<Hold>("hold", projectId);
+      return this.request(projectId, actor).scopeIds.map(scopeId => holds.find(hold => hold.active && hold.ownerId === actor.requestId && hold.scopeId === scopeId)
+        ?? this.engine.setHold(projectId, { scopeId, ownerId: actor.requestId }));
     });
   }
 
   inspectArtifact(projectId: string, actor: ActorContext, artifactId: string) {
     this.assertActor(projectId, actor);
-    const artifact = this.store.get<{ id: string; projectId: string }>("artifact", artifactId);
+    const artifact = this.store.get<ArtifactRecord & { byteLength?: number; physicalDurationSeconds?: number }>("artifact", artifactId);
     invariant(artifact?.projectId === projectId, "NOT_FOUND", "Artifact does not belong to this project");
-    return artifact;
+    return { id: artifact.id, projectId, artifact: artifact.artifact, mimeType: artifact.mimeType, fixture: artifact.fixture,
+      origin: artifact.origin ?? (artifact.fixture ? "fixture" : "unknown"), byteLength: artifact.byteLength ?? null,
+      physicalDurationSeconds: artifact.physicalDurationSeconds ?? null };
   }
 }

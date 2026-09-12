@@ -46,6 +46,7 @@ lines.on("line", line => {
     }
     if (verifying && scenario === "mcp-drift") config.mcp_servers.new_server = { command: "must-not-launch" };
     if (verifying && scenario === "feature-drift") config.features.plugins = true;
+    if (verifying && scenario === "question-feature-drift") config.features.default_mode_request_user_input = false;
     if (verifying && scenario === "search-drift") config.web_search = "live";
     if (scenario === "invalid-mcp-name") config.mcp_servers["contains.dot"] = { enabled: true };
     return respond(id, { config });

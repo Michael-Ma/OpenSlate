@@ -7,6 +7,7 @@ import type { DirectorRunInput, DirectorRuntime, DirectorStartOptions } from "@o
 import { DirectorSupervisor } from "./director-supervisor.js";
 import { FakeWorkflowDirector } from "./fake-director.js";
 import { createDirectorInput } from "./director-input.js";
+import { directorInputDigest } from "./director-input-identity.js";
 import type { ProductionService } from "./service.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
@@ -144,7 +145,7 @@ export class LocalDirectorController {
       if (event.kind === "runtime_started") this.service.store.transaction(() => {
         invariant(!this.service.store.get("native_model_start", input.turnId), "NATIVE_DISPATCH_ALREADY_RESERVED", "This native turn already has a dispatch reservation; do not replay it");
         this.service.store.insert("native_model_start", input.turnId, input.projectId, { id: input.turnId, projectId: input.projectId, requestId: input.requestId,
-          epochId: input.epochId, nativeThreadId: event.nativeThreadId, contextDigest: digest(input.context), reservedAt: new Date().toISOString() });
+          epochId: input.epochId, nativeThreadId: event.nativeThreadId, contextDigest: digest(input.context), inputDigest: directorInputDigest(input), reservedAt: new Date().toISOString() });
       });
       await options.onEvent?.(event);
     } });

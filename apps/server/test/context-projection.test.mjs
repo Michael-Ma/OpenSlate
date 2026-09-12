@@ -34,6 +34,19 @@ async function install(f) {
   const receipt = f.service.apply(project.id, f.actor, prepared.id);
   return { prepared, receipt };
 }
+
+test('overview exposes owned assets and canonical cues without host storage paths',t=>{
+  const f=setup(t),before=f.store.getProject(f.project.id),asset={artifactId:newId(),sha256:'a'.repeat(64),kind:'audio'};
+  const p=f.store.saveProject({...before,artifacts:[asset]},before.headVersion);
+  f.store.insert('artifact',asset.artifactId,p.id,{id:asset.artifactId,projectId:p.id,artifact:asset,path:'/private/host-only/recording.wav',mimeType:'audio/wav',fixture:true,attemptId:null,physicalDurationSeconds:12});
+  const view=f.read({});
+  assert.equal(view.assets.length,p.artifacts.length);assert.deepEqual(view.cues,p.cues);
+  assert.equal(view.assets[0].metadata.physicalDurationSeconds,12);
+  assert.ok(!JSON.stringify(view).includes('/private/host-only'));
+  assert.ok(!JSON.stringify(f.service.inspectArtifact(p.id,f.actor,asset.artifactId)).includes('/private/host-only'));
+  assert.equal(view.coverage.overview.assets.total,p.artifacts.length);
+  assert.equal(view.narrationDraft.version,0);
+});
 function collect(f, section, field = "items") {
   let offset = 0; const values = []; let count = 0; let identity;
   do {

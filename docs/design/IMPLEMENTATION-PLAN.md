@@ -1,7 +1,7 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.11 · September 12, 2026
-**Status:** T00–T04 foundations, a T05 scripted review workspace and the T06 supervisor/runtime framework have working evidence. T07 narration drafts and T08 supplied-media rendering have separate tested services. The complete checkout passes 291 offline tests, builds and typechecks. A live fixture has verified the actual native supervisor across a conversational question, backend restart and scoped edit. Native runtime configuration/browser wiring, structured-question/vision validation, narration/render integration and real generation remain open. The runtime trust decision is accepted: v0 uses one local machine and trusts the installed pinned native runtime/sandbox; independent code-host/authentication isolation remains unverified. See [implementation status](../implementation/STATUS.md) and [latest implementation](../implementation/CONVERSATION-WORKSPACE.md).
+**Version:** 0.12 · September 12, 2026
+**Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render passed; native image/structured-question capability passed a small live fixture. GPT Image 2 and H3 transports are implemented with offline tests but remain disconnected from execution and credentials. See [current implementation status](../implementation/STATUS.md) for current counts, limits and remaining work.
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
@@ -115,7 +115,7 @@ Show scope-specific stage readiness and proposed next work; distinguish hard blo
 
 **Exit evidence:** browser flows for displayed subset approval, stale member refresh, conditional/negative replies, selected-shot conversation, previous-preview visibility and reconnect without restarting work. Keyboard review and bounded thumbnail loading work.
 
-**Implemented slice:** project/conversation persistence, exact displayed-member selection, authenticated playback, scoped demo framing edits, previous-preview retention, pause/resume and keyboard review. Browser checks verified the primary loop and reconnect. Polling uses durable snapshots with backoff. Arbitrary AI chat, narration input/editing and real export remain pending; the scripted demo is explicitly labeled.
+**Implemented slice:** Persistent conversations, per-project native setup, exact storyboard approval, authenticated playback, scoped demo edits and pause/resume. Browser narration now supports drafts, supplied recordings, exact acceptance and canonical review/apply; clip import and render controls use owned media routes. The browser decoded real synthetic audio/video. The automation file picker remains unverified after stalls; uploads were checked through HTTP. Broader accessibility and live production remain open.
 
 **Design:** [Review UI](../technical/REVIEW-UI.md).
 
@@ -139,7 +139,7 @@ Add stage/gap assessment and focused task-prompt references, pinned with recipe/
 
 **Native supervisor result:** under the [accepted local policy](../implementation/RUNTIME-TRUST-DECISION.md), both remaining starts passed using the actual adapter, `DirectorSupervisor` and `createDirectorInput`. A conversational framing question was saved; after restarting the backend over the same SQLite database, the answer applied a shot-1 edit and matching plan while preserving shot 2, narration, story, motion and timing. The same skill lock was reactivated under a fresh epoch; the old bridge returned 403. No media attempts, artifacts, approvals or media API calls were created. This was not a native structured pending-input test. See [evidence](../implementation/CODEX-SUPERVISOR-VALIDATION.md).
 
-**Next:** wire local native runtime configuration and browser setup, then evaluate stage/gap behavior, structured questions and vision. Narration/canonical-render integration can proceed in parallel. The default remains fake; T06 is still open. Twelve native starts have been used overall, and the latest allowance is exhausted at three of three. Any further live evaluation needs a new allowance; independent code-host/authentication isolation remains unverified under the accepted v0 trust boundary.
+**Current follow-through:** Per-project native setup and two browser turns passed, including restart and brief-only editing. Two later capability turns brought the historical total to sixteen: the enabled pinned question feature emitted a persisted native question and the model correctly described a supplied PNG. Production image attachment, structured narration tool writes and broader stage/gap evaluation remain next. Further bounded live Codex tests are preapproved; historical experiment caps do not block a new recorded allowance. See [native capability evidence](../implementation/CODEX-CAPABILITY-VALIDATION.md).
 
 **Design:** [Director runtime](../technical/DIRECTOR-RUNTIME.md), [skills/tools](../technical/SKILLS-TOOLS.md).
 
@@ -153,7 +153,7 @@ Expose actual narration readiness to the workflow service; do not duplicate it w
 
 **Exit evidence:** complete upload, notes-to-script, partial audio and mixed-source cases progress without restarting the conversation. Text edits cannot falsely mutate recorded audio. A longer earlier sentence shifts later placements while preserving compatible video; changed duration/meaning renews affected review.
 
-**Implemented slice:** a draft/projection service with independent script/audio/timing readiness and exact acceptance, immutable segments/recordings/cues, supplied-audio normalization and scoped change impact. Eleven tests include partial/mixed sources, stale acceptance, authority recheck after import and placement-only visual reuse. The projection explicitly does not change canonical project cues or holds. Next, commit it through guarded application changes and integrate the five tools/UI; ASR/TTS and generation provenance follow. Source imports are currently capped at 360 seconds.
+**Implemented slice:** Immutable script/audio/cue revisions, partial/mixed source readiness, normalization and exact human acceptance now feed a guarded canonical commit with scoped shot impact. Authenticated session/upload/review routes and the browser panel are integrated. Commit keeps holds until a matching plan applies; user-declared generated audio is not internal generation provenance. Next: versioned conversational draft tools, ASR/TTS and transcript alignment. Source recordings are capped at 360 seconds. See [narration integration](../implementation/NARRATION-INTEGRATION.md).
 
 **Design:** [Narration](../technical/NARRATION.md).
 
@@ -165,7 +165,7 @@ Implement durable artifact installation and quarantine, normalized derivatives, 
 
 **Exit evidence:** supplied clips render into a complete commercial; real frame/audio assertions pass; an old render cannot overwrite a new target; disk/cancel/crash recovery preserves inputs; scene previews and narration-only edits reuse media. Process-kill tests and documented filesystem synchronization guarantees are distinguished.
 
-**Implemented slice:** a separate local media service preserves originals, normalizes video/audio, freezes manifests, renders exact cuts/audio placement, retains immutable receipts and exposes an atomic publish callback. Thirteen tests decode actual frames/audio and cover bounded input handling, cancellation, stale publication and recoverable completion. The executor/API/browser still use their fake path. Next, connect canonical timeline/artifact ownership and preview publication before adding captions/overlays/transitions or claiming commercial-scale acceptance.
+**Implemented slice:** Owned local imports and canonical timeline resolution now feed frozen renders, durable receipts and guarded preview publication through HTTP/browser controls. Physical durations are checked; fixture bytes cannot masquerade as real takes. A 360-second 720p synthetic render with 64 cuts/64 cues passed all decoded checks in 34.2 seconds with about 801 MiB sampled peak RSS. This is local media-layer evidence, not generated-film acceptance. Next: broader integrated edits/recovery, captions/overlays/transitions and portable export. See [media integration](../implementation/MEDIA-INTEGRATION.md).
 
 **Design:** [Providers/artifacts](../technical/PROVIDERS-ARTIFACTS.md), [timeline/rendering](../technical/TIMELINE-RENDERING.md).
 
@@ -180,6 +180,10 @@ Implement durable artifact installation and quarantine, normalized derivatives, 
 | **T13 — Open-source release packaging** | T12 | Production local launcher/assets, supported credential backend, clean install, migrations/export/import, examples and contributor docs | Fake demo without keys, cloud setup with own keys, documented OS/runtime matrix, restore starts paused, CI and release criteria pass |
 
 Real tests use explicit allowance and the user's configured credentials. A live test failure can alter an integration choice, but does not authorize switching models, opening public tunnels or increasing budget silently. The fake path stays available to contributors throughout.
+
+### Current integration order
+
+The GPT Image 2 and MiniMax H3 transports have offline protocol/fault tests; they make no live calls and are not registered with the fake engine. Connect them through generic provider profiles, durable attempt/receipt mapping, bounded artifact ingestion, credential resolution and explicit dispatch allowances. Then extend structured narration tools and evaluate stage/gap behavior. Production launcher, backup/export and offline recovery work can continue while media keys are unavailable. Live H3 remains deferred; other real media needs an explicit test allowance.
 
 ## 6. Later extensions
 

@@ -4,7 +4,7 @@ An open-source video agent for turning a story into a finished film.
 
 OpenSlate is designed to plan scenes and shots, create reference assets, generate video takes, and assemble an editable timeline for rendering and post-processing.
 
-**Status: an interactive local workspace with a scripted demo.** Create a project, review keyframes, approve sample videos, and change one shot while keeping the others. SQLite state, validated plans, durable jobs, skill locks, a director supervisor and a pinned local Codex adapter are implemented. Supplied-media rendering and narration drafts have separately tested services. A live backend fixture verified the actual Codex adapter and supervisor across a saved question, backend restart and scoped edit. The default app still uses a canned director and fake media; native runtime setup/browser wiring, real media APIs and the complete narrated-film flow remain pending.
+**Status: an early local studio with native Codex conversations and supplied-media workflows.** Plan and review shots, develop narration, import recordings/clips, accept exact narration and render a compatible local timeline. SQLite state, validated plans, durable jobs and human review remain application-owned. The demo uses fake generation; offline-tested GPT Image 2 and H3 transports are not yet connected to production execution or credentials. The full generated-film workflow remains in development. See [verified status](docs/implementation/STATUS.md).
 
 ## Direction
 
@@ -19,7 +19,7 @@ OpenSlate is designed to plan scenes and shots, create reference assets, generat
 - Code-authored execution plans with parallel work and targeted edits that reuse existing outputs.
 - A small initial skill/tool set with explicit loading, versioning, and request lifecycle.
 
-Local deployment does not mean offline generation. The initial production adapters will call cloud LLM, GPT Image 2 and H3 services with user-configured credentials. V0 trusts the installed, pinned Codex runtime and its sandbox under an explicit `LocalCodexPolicy` with mode `local` and an exact version/configuration identity. OpenSlate still enforces tool catalogs, request epochs, approvals and generation authority. Independent code-host and authentication isolation are not proven or required as a separate deployment mode. The native supervisor has passed a bounded backend fixture; the default remains fake while local native configuration and browser wiring are completed. See the [accepted runtime boundary](docs/implementation/RUNTIME-TRUST-DECISION.md).
+Local deployment does not mean offline generation. The initial production adapters will call cloud LLM, GPT Image 2 and H3 services with user-configured credentials. V0 trusts the installed, pinned Codex runtime and its sandbox under an explicit `LocalCodexPolicy` with mode `local` and an exact version/configuration identity. OpenSlate still enforces tool catalogs, request epochs, approvals and generation authority. Independent code-host and authentication isolation are not proven or required as a separate deployment mode. Native setup and browser conversations are connected; projects use the demo director until native Codex is selected. See the [accepted runtime boundary](docs/implementation/RUNTIME-TRUST-DECISION.md).
 
 ## Quick start
 
@@ -38,7 +38,7 @@ The default app and fake demo require no API keys, Codex installation, FFmpeg, o
 
 The server stores local state in `.openslate/` relative to its working directory, or `OPENSLATE_DATA_DIR`. It creates a private `local-session.token` there unless `OPENSLATE_LOCAL_TOKEN` is configured. With `pnpm dev`, the default file is `apps/server/.openslate/local-session.token`. Paste this local token into the connection screen. It stays in tab memory and must be entered again after a full reload. Protected routes require bearer authentication; only the health endpoint is public. No model-credential saving API is enabled.
 
-Create a project and select **Create 2-shot demo**. Inspect and select the keyframes, then approve the selection to release their sample videos. Use a shot's **Discuss** action and the demo framing choices to exercise a scoped change. Ordinary chat is saved and receives canned guidance; it does not interpret arbitrary creative requests. The application preserves the previous preview during a revision. All sample outputs are explicitly fake.
+Create a project and choose its director. Native Codex setup checks the pinned local installation using its existing sign-in, without starting a model conversation. To try the offline workflow, close setup or choose Demo, then select **Create a 2-shot demo**. Inspect and select the keyframes, then approve the selection to release their sample videos. Use a shot's **Discuss** action and the demo framing choices to exercise a scoped change. In demo mode, ordinary chat receives canned guidance. Native mode handles live conversations through the validated application tools. The application preserves the previous preview during a revision. All sample outputs are explicitly fake.
 
 Run `pnpm demo:headless` for a reproducible two-shot example. It generates clearly labeled fake keyframes and one-second placeholder clips, simulates exact human reviews, edits only one shot, then restarts during an uncertain submission. It prints a new temporary output directory, preview path and JSON summary. A successful run records six fake accepts and zero duplicate accepts. This is an execution proof, not a finished film or a quality sample.
 
@@ -56,7 +56,7 @@ Run `pnpm demo:headless` for a reproducible two-shot example. It generates clear
 | `pnpm typecheck` | Build shared packages and check TypeScript |
 | `pnpm --filter @openslate/server start` | Start the built API after `pnpm build` |
 
-The web build is written to `apps/web/dist`; production serving is not wired yet. Tests use isolated local databases and require permission to bind loopback ports. The native Codex probe test is opt-in through `OPENSLATE_CODEX_PROBE_BINARY`; normal CI does not require Codex or credentials. Real supplied-media tests use local FFmpeg/ffprobe when available; these services are not yet connected to browser uploads or the execution engine.
+The web build is written to `apps/web/dist`; production serving is not wired yet. Tests use isolated local databases and require permission to bind loopback ports. The native Codex probe test is opt-in through `OPENSLATE_CODEX_PROBE_BINARY`; normal CI does not require Codex or credentials. Supplied-media workflows require FFmpeg and ffprobe on PATH (or OPENSLATE_FFMPEG and OPENSLATE_FFPROBE). They provide authenticated local upload, narration review, clip playback and rendering of compatible plans. They do not call cloud media APIs.
 
 ## Repository
 
@@ -65,7 +65,7 @@ apps/web/             React conversation, storyboard, review and playback worksp
 apps/server/          Application, director supervisor, SQLite, execution and local media
 packages/core/        Domain contracts, workflow predicates and bounded plan compiler
 packages/director/    Skill locks, MCP bridge, fake/native runtime ports and probes
-packages/providers/   Durable fault-injectable fake provider and provider boundary
+packages/providers/   Fake provider and offline-tested image/H3 transports
 skills/               Production and plan-authoring instruction packages
 workers/h3-python/    Future local inference boundary
 docs/                 Documentation index and design files

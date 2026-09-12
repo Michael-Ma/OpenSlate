@@ -6,3 +6,4 @@ export { CODEX_PROTOCOL_VERSION, CODEX_RUNTIME_LIMITS } from "./policy.js";
 export type { CodexConfigValue, CodexDirectorOptions, CodexRuntimeLimits, LocalCodexPolicy } from "./policy.js";
 export { setupLocalCodex } from "./setup.js";
 export type { LocalCodexSetupInput, LocalCodexSetupOptions, LocalCodexSetupResult, LocalCodexReadiness, LocalCodexSetupCheck } from "./setup.js";
+export { DIRECTOR_IMAGE_LIMITS } from "./images.js";

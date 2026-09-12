@@ -50,6 +50,7 @@ lines.on("line", line => {
   }
   if (method === "initialized") return;
   if (method === "config/read") {
+    if (mode === "question-feature-wrong") config.features.default_mode_request_user_input = false;
     if (mode === "bridge-wrong") config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL = "wrong-fixed-credential";
     if (mode === "permissions-wrong") config.permissions.fixture.network.enabled = true;
     if (mode === "permissions-expanded") config.permissions.fixture.filesystem["/unexpected-readable-root"] = "read";

@@ -88,7 +88,7 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
     model: input.model, model_provider: "openai", model_reasoning_effort: "low", approval_policy: "never", web_search: "disabled",
     project_doc_max_bytes: 0, "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none",
     check_for_update_on_startup: false, "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
-    "features.code_mode_host": true, "features.skip_host_skill_discovery": true,
+    "features.code_mode_host": true, "features.skip_host_skill_discovery": true, "features.default_mode_request_user_input": true,
   };
   for (const name of DISABLED) config[`features.${name}`] = false;
   const options = validateOptions({ command: structuredClone(input.command), cwd: projection,
@@ -222,6 +222,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
         object(config.analytics).enabled === false && object(config.feedback).enabled === false && object(config.history).persistence === "none" &&
         config.sqlite_home === runtime.policy.config.sqlite_home && config.log_dir === runtime.policy.config.log_dir &&
         config.project_doc_max_bytes === 0 && object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&
+        object(config.features).default_mode_request_user_input === true &&
         DISABLED.every(name => object(config.features)[name] === false) && object(config.shell_environment_policy).inherit === "none" &&
         object(config.shell_environment_policy).experimental_use_profile === false,
       "SETUP_CONFIG_MISMATCH", "Native configuration differs from the pinned local settings");

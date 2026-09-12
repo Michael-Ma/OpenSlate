@@ -1,6 +1,6 @@
 # Canonical narration integration
 
-September 12, 2026. This document covers the implemented narration commit adapter. It does not claim that speech generation, transcription, conversational narration tools or the complete browser flow are connected.
+September 12, 2026. This document covers the implemented narration commit adapter and authenticated HTTP route plugin. The browser narration workspace is also implemented. Speech generation, transcription and model-facing narration proposal tools remain outside this slice.
 
 ## Responsibility and flow
 
@@ -104,6 +104,47 @@ The current local storage policy trusts the installed application and same-machi
 
 ## Verification and remaining integration
 
-The focused verification passed 24 tests: 13 canonical integration tests and 11 existing narration-domain tests. The server TypeScript build also passed. The dedicated canonical suite exercises mixed source provenance and exact trims; lost-response replay after reopening SQLite; placement-only reuse; single-shot meaning/duration invalidation; preservation of an uncertain paid fake attempt and its reservations; explicit detach/remap; human-only acceptance; stale project/narration and epoch fences during asynchronous file work; corrupt bytes; metadata conflicts; malformed input and read-only workspace views. Existing narration-domain tests cover readiness, sample rounding and acceptance invalidation independently. All media used by these tests is synthetic local audio; no vendor or model API is called.
+The focused verification passed 38 tests: 13 canonical integration tests, 9 HTTP/upload tests, 11 existing narration-domain tests and 5 browser-model tests. Server and browser TypeScript checks/builds also passed. The dedicated canonical suite exercises mixed source provenance and exact trims; lost-response replay after reopening SQLite; placement-only reuse; single-shot meaning/duration invalidation; preservation of an uncertain paid fake attempt and its reservations; explicit detach/remap; human-only acceptance; stale project/narration and epoch fences during asynchronous file work; corrupt bytes; metadata conflicts; malformed input and read-only workspace views. Existing narration-domain tests cover readiness, sample rounding and acceptance invalidation independently. All media used by these tests is synthetic local audio; no vendor or model API is called.
 
-This adapter is a working application library. HTTP/browser composition, model-facing narration proposal tools and the render-job bridge are separate integration work. Speech synthesis and transcription adapters remain future work; no model can manufacture the human decisions required to make a projection canonical.
+The adapter and HTTP plugin are working application components. Main-server/browser composition, model-facing narration proposal tools and the render-job bridge have separate integration ownership. Speech synthesis and transcription adapters remain future work; no model can manufacture the human decisions required to make a projection canonical.
+
+
+## HTTP session and review contract
+
+`registerNarrationRoutes(app, { production, narration, canonical, uploadDirectory })` is a plugin for the existing authenticated local application. It inherits the parent's loopback, origin and bearer-token checks. It must not be registered on an unauthenticated server. All mutation routes require a bounded `Idempotency-Key`; neither an actor nor a local filesystem path is accepted from the request body.
+
+| Route beneath `/api/projects/:projectId/narration` | Input and behavior |
+| --- | --- |
+| `GET /` | Project head/revision, narration snapshot, selected canonical record, narration session, and saved recording library. No new message or hold. |
+| `POST /sessions` | Optional `text` and explicit `continuationSessionId`; creates one project-scoped `local-user` editing request. Reuse the returned session for subsequent actions. An existing session must be explicitly continued, rather than silently replaced. |
+| `POST /segments` | `sessionId`, `expectedVersion`, `patch` with add/update/remove/order draft operations. |
+| `POST /bindings` | `sessionId`, `expectedVersion`, exact `segmentId` and `audioId`. |
+| `POST /cues` | `sessionId`, `expectedVersion`, `segmentId`, artifact-local `startSample` and `endSample`. |
+| `POST /placements` | `sessionId`, `expectedVersion`, exact segment/project-sample placements. |
+| `POST /acceptances` | `sessionId`, `expectedVersion`, `kind: script \| timing`, and current script-revision or cue IDs. |
+| `POST /audio-acceptances` | `sessionId`, `expectedVersion`, exact `{segmentRevisionId,audioId}` bindings. |
+| `POST /prepare` | `sessionId`, expected project/narration versions and explicit shot mapping updates. |
+| `POST /apply` | `sessionId`, `preparedId`; returns the intrinsic preparation-keyed commit receipt. |
+| `POST /audio?sessionId=…&declaredOrigin=uploaded\|generated` | Binary `application/octet-stream` upload, at most 128 MiB. |
+| `GET /audio/:audioId/content` | Project-owned, verified normalized WAV bytes with `X-Content-SHA256`; available before acceptance so the human can listen. The 80 MiB preview bound accommodates six-minute normalized PCM. |
+
+The session records its application request and local principal. Every mutation verifies that request is still active, editing and project-scoped. Another conversational edit can supersede it; subsequent narration commands fail with `NARRATION_SESSION_STALE`, and the browser must offer explicit continuation. Continuing transfers only the selected prior request's holds under the existing application policy. The route never grants generation or releases holds itself.
+
+The saved recording library includes unbound uploads, allowing attachment after reload. `audioLibrary` returns up to 400 path-free recording descriptors, newest first. `coverage.audioLibrary` supplies offset, count, total and next offset; `GET ?audioOffset=400` retrieves the next page. Compare the returned project/narration identities and library totals while paging. Selected segment recordings also remain visible within the narration snapshot.
+
+`ManagedUploadStore` consumes the authenticated request stream incrementally, bounds bytes, and hashes the content. It stages an exclusive file at a deterministic identity/content path, then passes that trusted path to `NarrationService.importAudio`. The existing import command binds the stable path and declared origin. Repeating identical bytes with the same session/key returns the original recording; changing bytes or origin conflicts even after reopening the backend. Temporary and staged files are removed in `finally` after the importer finishes; same-process overlapping readers share a reference count. Abrupt process termination may leave unreferenced staging files for the application's eventual cleanup policy; these are never registered as usable audio. Managed original/normalized recordings remain in the media store.
+
+The helper requires one shared instance per upload root in the single local backend. Narration and video uploads should use separate roots. The host must include its chosen upload directory in `LocalMediaService.allowedInputRoots`; that configuration is never model- or browser-selected.
+
+HTTP tests use real Fastify routing and local synthetic audio. They verify inherited authentication, strict schemas, no-mutation reads, session reuse/explicit continuation, stale and cross-project rejection, upload conflicts and backend restart, pre-acceptance playback, three deliberate acceptance actions, canonical commit replay, saved-library pagination, byte bounds and cleanup. No real media service or model is contacted.
+
+
+## Browser narration workspace
+
+`NarrationPanel` is connected to these HTTP contracts through `StudioApi`. It presents saved narration as expandable sections, with notes/outline/draft maturity, explicit source selection, script and meaning fields, upload/library attachment, lazy verified playback and separate human acceptance buttons. Recording range and project position are entered in seconds and converted to exact 48 kHz samples; no timeline editor is implied.
+
+GET refreshes do not replace dirty writing, trims or placements. A changed saved version presents a comparison and requires an explicit choice before overwriting it. Writing for a remotely removed section remains available to restore as a new section or explicitly discard. The application keeps this panel mounted when switching workspace tabs. Project changes isolate form state; a shared command registry retains running state, exact retry inputs, and completion results by API instance/project in a separate narration namespace. Changing projects cannot enable a second dispatch while the first request runs. Completion never calls an unmounted component, and a preparation returned after remount or an explicit retry restores its review preview. Uploaded file bytes are released from the registry after a confirmed result.
+
+The panel does not accept scripts, audio or timing automatically. Approval buttons target saved revision/cue/audio identities and disable themselves while the corresponding displayed fields have unsaved edits. Overlaps and out-of-range narration are explained before preparation. Untouched shot mapping controls preserve existing links; choosing no narration explicitly detaches that shot. The change preview is tied to both project head and narration version, and it explains when no shot links will change. Applying narration leaves holds in place, followed by an explicit conversation continuation for matching-plan work when a native director is available.
+
+Uncertain requests retain their original command key, payload and selected file. Retry sends the same request; refreshing saved data does not clear that uncertainty. Load errors are separate from mutation errors so successful polling can clear a transient connection failure without hiding a failed change. Preview eligibility checks its originating human request as well as project/narration versions; explicitly continuing a session requires a fresh preparation even when those versions are unchanged. Five browser-model tests verify exact sample conversion, stale preview guards, safe editable draft copies, useful recovery messages and timing-gap detection. Six shared command-registry tests cover retained requests, metadata/results, project/session isolation and remount behavior. Visual/end-to-end browser verification is recorded separately by the integration owner.

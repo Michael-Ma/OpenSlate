@@ -5,7 +5,7 @@ export interface ConversationMessage { id: string; role: "user" | "assistant"; t
 export interface PendingQuestion { id: string; requestId: string; state: "pending" | "answered"; questions: { id: string; header: string; question: string; options: { label: string; description: string }[] }[]; answerRequestId?: string }
 export interface ProjectSnapshot {
   project: ProjectSummary & { revisionId: string; brief: string; story: string; shots: Shot[]; scenes: { id: string; revisionId: string; purpose: string }[]; narration: { script: string; source: string }; cues: { id: string; meaning: string; accepted: boolean; measured: boolean }[] };
-  messages: { id: string; text: string; state?: string; requestId?: string }[];
+  messages: { id: string; text: string; state?: string; requestId?: string; editing?: boolean; scopeIds?: string[] }[];
   conversation?: ConversationMessage[];
   questions?: PendingQuestion[];
   previousPreviews?: { artifact: Artifact; nodeId: string; fixture: boolean }[];
@@ -92,6 +92,13 @@ export function errorMessage(code: string): string {
     DIRECTOR_SETUP_REQUIRED: "Local Codex checks did not pass. Check the executable and model, and sign in to Codex if needed.",
     ARTIFACT_CHANGED: "The preview bytes changed. Refresh before reviewing this frame.",
     ARTIFACT_TOO_LARGE: "This preview is too large to load here.",
+    UPLOAD_TOO_LARGE: "Choose a nonempty file up to 128 MiB.",
+    MEDIA_HELD: "A pending edit holds this render. Continue that edit and apply a matching plan first.",
+    MEDIA_PAUSED: "Execution is paused. Resume it when you are ready to render.",
+    MEDIA_NARRATION_REQUIRED: "Review and apply narration that matches the current plan before rendering.",
+    MEDIA_ARTIFACT_UNAVAILABLE: "The plan needs a real, owned clip. Demo fixture media cannot be used for this render.",
+    MEDIA_STALE_TARGET: "The plan changed. Prepare a render from the current version.",
+    MEDIA_RENDER_NOT_READY: "This render already started. Check its saved completion instead of starting it again.",
     NETWORK_ERROR: "The local server is unreachable. Your draft and last view are still here.",
   };
   return messages[code] ?? "The local server could not complete that action. Refresh and try again.";

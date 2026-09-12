@@ -31,6 +31,17 @@ function fixture(t) {
   return { root, store, service, tools, project, human, bridge, provider, reopen };
 }
 
+test('repeated scoped pause and preparation retain one request-owned hold', async t => {
+  const f=fixture(t), first=f.store.list('hold',f.project.id);
+  await f.tools.invoke(f.project.id,f.bridge.actor,'pause-1','control_execution',{action:'pause'});
+  await f.tools.invoke(f.project.id,f.bridge.actor,'pause-2','control_execution',{action:'pause'});
+  await f.tools.invoke(f.project.id,f.bridge.actor,'prepare-held','prepare_change',{variant:'project',expectedHeadVersion:0,creative:{brief:'A precise brief'}});
+  assert.deepEqual(f.store.list('hold',f.project.id),first);
+  const other=f.service.beginRequest(f.project.id,'human','Another edit');
+  f.service.holdRequest(f.project.id,other);
+  assert.equal(f.store.list('hold',f.project.id).filter(h=>h.active).length,2,'a different request cannot borrow or release the earlier hold');
+});
+
 test('completed invocation survives process recreation and same identity cannot change payload', async t => {
   const f = fixture(t);
   const proposal = { variant: 'project', expectedHeadVersion: 0, creative: { brief: 'Leather boots' } };

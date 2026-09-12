@@ -6,13 +6,25 @@ import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { runMediaProcess } from "./process.js";
 import type { FrozenRenderManifest, LocalMediaOptions, MediaLimits, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
 
-const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, timeoutMs: 120000 };
+const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioPlacements: 64, timeoutMs: 120000 };
 // No playlists, concat demuxer, devices or network protocols. MOV external data
 // references remain disabled by the demuxer's default; files are copied first.
 const INPUT_OPTIONS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,matroska,webm,avi,wav,mp3,flac,ogg"];
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const FPS = 30, SAMPLE_RATE = 48000, SAMPLES_PER_FRAME = 1600;
+
+/** Partition by sample intervals so late cues never allocate long delay buffers. */
+function audioLanes(audio: FrozenRenderManifest["audio"]): number[][] {
+  const lanes: number[][] = [], ends: number[] = [];
+  for (const index of audio.map((_, i) => i).sort((a, b) => audio[a]!.atSample - audio[b]!.atSample || a - b)) {
+    const placement = audio[index]!;
+    let lane = ends.findIndex(end => end <= placement.atSample);
+    if (lane < 0) { lane = lanes.length; lanes.push([]); }
+    lanes[lane]!.push(index); ends[lane] = placement.atSample + placement.durationSamples;
+  }
+  return lanes;
+}
 
 function integer(value: number, min: number, max: number, name: string): void {
   invariant(Number.isSafeInteger(value) && value >= min && value <= max, "MEDIA_INVALID_INPUT", `Invalid ${name}`);
@@ -54,6 +66,7 @@ export class LocalMediaService {
     integer(this.limits.maxDurationFrames, 1, 10800, "duration limit");
     integer(this.limits.maxClips, 1, 64, "clip limit");
     integer(this.limits.maxAudioTracks, 0, 8, "audio track limit");
+    integer(this.limits.maxAudioPlacements, 0, 64, "audio placement limit");
     integer(this.limits.timeoutMs, 50, 600000, "tool time limit");
   }
 
@@ -108,11 +121,18 @@ export class LocalMediaService {
     integer(value.width, 2, 1920, "width"); integer(value.height, 2, 1920, "height");
     invariant(value.width % 2 === 0 && value.height % 2 === 0 && value.width * value.height <= 1920 * 1080, "MEDIA_INVALID_INPUT", "Output requires bounded even dimensions");
     invariant(Array.isArray(value.clips) && value.clips.length > 0 && value.clips.length <= this.limits.maxClips, "MEDIA_INVALID_INPUT", "Invalid clip count");
-    invariant(Array.isArray(value.audio ?? []) && (value.audio?.length ?? 0) <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Invalid audio track count");
+    invariant(Array.isArray(value.audio ?? []) && (value.audio?.length ?? 0) <= this.limits.maxAudioPlacements, "MEDIA_INVALID_INPUT", "Too many audio placements");
     let totalFrames = 0;
     const clips = [];
+    const sourceIdentities = new Map<string, string>();
+    const rememberSource = (source: SuppliedMedia) => {
+      const previous = sourceIdentities.get(source.artifactId);
+      invariant(previous === undefined || previous === source.id, "MEDIA_INTEGRITY_ERROR", "One artifact identity cannot name different source descriptors");
+      sourceIdentities.set(source.artifactId, source.id);
+    };
     for (const clip of value.clips) {
       const source = await this.readSource(clip.source);
+      rememberSource(source);
       invariant(source.kind === "video" && source.probe.video, "MEDIA_INVALID_INPUT", "Clip requires normalized video");
       integer(clip.startFrame, 0, this.limits.maxDurationFrames, "source start frame");
       integer(clip.durationFrames, 1, this.limits.maxDurationFrames, "clip duration");
@@ -124,9 +144,12 @@ export class LocalMediaService {
     integer(totalFrames, 1, this.limits.maxDurationFrames, "total frames");
     const totalSamples = totalFrames * SAMPLES_PER_FRAME;
     const audio = [];
+    const audioStreams = new Set<string>();
     for (const placement of value.audio ?? []) {
       const source = await this.readSource(placement.source);
       invariant(source.kind === "audio" && source.probe.audio?.samples !== null && source.probe.audio?.samples !== undefined, "MEDIA_INVALID_INPUT", "Audio placement requires measured normalized audio");
+      rememberSource(source); audioStreams.add(source.sha256);
+      invariant(audioStreams.size <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many distinct audio source streams");
       integer(placement.startSample, 0, this.limits.maxDurationFrames * SAMPLES_PER_FRAME, "source start sample");
       integer(placement.durationSamples, 1, this.limits.maxDurationFrames * SAMPLES_PER_FRAME, "audio duration");
       integer(placement.atSample, 0, totalSamples, "audio placement");
@@ -135,6 +158,7 @@ export class LocalMediaService {
       invariant(placement.atSample + placement.durationSamples <= totalSamples, "MEDIA_AUDIO_OUTSIDE_TIMELINE", "Audio cannot be silently cut at the timeline boundary");
       audio.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
     }
+    invariant(audioLanes(audio).length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many simultaneous audio placements");
     const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, toolchainDigest: await this.toolchainDigest() };
     const manifest: FrozenRenderManifest = { digest: digest(body), ...body };
     await this.installJson("manifests", manifest.digest, manifest);
@@ -145,12 +169,21 @@ export class LocalMediaService {
     return this.exclusive(async () => this.temporary(async dir => {
       // Read the immutable stored recipe; caller-supplied paths/filters cannot enter FFmpeg.
       const manifest = await this.readManifest(input);
+      invariant(manifest.clips.length <= this.limits.maxClips && manifest.audio.length <= this.limits.maxAudioPlacements && manifest.totalFrames <= this.limits.maxDurationFrames,
+        "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the current local resource limits");
       aborted(options.signal);
       invariant(!options.isCurrent || options.isCurrent(manifest) === true, "MEDIA_STALE_TARGET", "Render target is already stale");
       invariant(manifest.toolchainDigest === await this.toolchainDigest(options.signal), "MEDIA_TOOLCHAIN_CHANGED", "Frozen render toolchain changed");
       const args = ["-nostdin", "-v", "error", "-xerror", "-filter_complex_threads", "1"];
       for (const clip of manifest.clips) { await this.verifySource(clip.source); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(clip.source)); }
-      for (const placement of manifest.audio) { await this.verifySource(placement.source); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(placement.source)); }
+      const audioSources = new Map<string, { source: SuppliedMedia; indices: number[] }>();
+      for (const [index, placement] of manifest.audio.entries()) {
+        await this.readSource(placement.source);
+        const group = audioSources.get(placement.source.sha256) ?? { source: placement.source, indices: [] };
+        group.indices.push(index); audioSources.set(placement.source.sha256, group);
+      }
+      invariant(audioSources.size <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the current audio source limit");
+      for (const group of audioSources.values()) { await this.verifySource(group.source); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(group.source)); }
       const filters: string[] = [];
       manifest.clips.forEach((clip, index) => {
         const size = `${manifest.width}:${manifest.height}`;
@@ -159,10 +192,31 @@ export class LocalMediaService {
       });
       filters.push(`${manifest.clips.map((_, i) => `[v${i}]`).join("")}concat=n=${manifest.clips.length}:v=1:a=0[outv]`);
       if (manifest.audio.length) {
+        const lanes = audioLanes(manifest.audio);
+        invariant(lanes.length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the simultaneous audio limit");
+        let sourceIndex = manifest.clips.length;
+        for (const group of audioSources.values()) {
+          filters.push(`[${sourceIndex++}:a:0]asplit=${group.indices.length}${group.indices.map(index => `[sourcea${index}]`).join("")}`);
+        }
         manifest.audio.forEach((placement, index) => {
-          filters.push(`[${manifest.clips.length + index}:a:0]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB,adelay=${placement.atSample}S:all=1[a${index}]`);
+          filters.push(`[sourcea${index}]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB[a${index}]`);
         });
-        filters.push(`${manifest.audio.map((_, i) => `[a${i}]`).join("")}amix=inputs=${manifest.audio.length}:duration=longest:dropout_transition=0:normalize=0,apad=whole_len=${manifest.totalFrames * SAMPLES_PER_FRAME},atrim=end_sample=${manifest.totalFrames * SAMPLES_PER_FRAME},aresample=48000[outa]`);
+        lanes.forEach((indices, lane) => {
+          const parts: string[] = []; let cursor = 0, silenceIndex = 0;
+          const silence = (samples: number) => {
+            if (!samples) return;
+            const label = `silence${lane}_${silenceIndex++}`;
+            filters.push(`anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end_sample=${samples},asetpts=PTS-STARTPTS[${label}]`);
+            parts.push(`[${label}]`);
+          };
+          for (const index of indices) {
+            const placement = manifest.audio[index]!; silence(placement.atSample - cursor); parts.push(`[a${index}]`);
+            cursor = placement.atSample + placement.durationSamples;
+          }
+          silence(manifest.totalFrames * SAMPLES_PER_FRAME - cursor);
+          filters.push(`${parts.join("")}concat=n=${parts.length}:v=0:a=1[lane${lane}]`);
+        });
+        filters.push(`${lanes.map((_, i) => `[lane${i}]`).join("")}amix=inputs=${lanes.length}:duration=longest:dropout_transition=0:normalize=0,apad=whole_len=${manifest.totalFrames * SAMPLES_PER_FRAME},atrim=end_sample=${manifest.totalFrames * SAMPLES_PER_FRAME},aresample=48000[outa]`);
       }
       const output = join(dir, "render.mp4");
       args.push("-filter_complex", filters.join(";"), "-map", "[outv]");
