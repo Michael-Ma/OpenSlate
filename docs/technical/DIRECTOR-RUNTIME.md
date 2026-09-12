@@ -1,7 +1,7 @@
 # Director runtime technical design
 
-**Version:** 0.10 · September 12, 2026
-**Status:** the durable supervisor, runtime-neutral port, pinned local Codex adapter, question continuation and browser conversation are implemented against offline fixtures. A separate NativeClient diagnostic left independent isolation inconclusive. Subsequently, the actual adapter, supervisor and input builder passed a live conversational question/restart/scoped-edit fixture; native structured pending-input and vision remain unverified. The accepted v0 policy trusts the installed pinned native runtime/sandbox on one computer; independent code-host/authentication isolation remains unverified rather than a mandatory deployment gate. The default application remains scripted while local native configuration and browser wiring are completed. See [current implementation and exact port](../implementation/CONVERSATION-WORKSPACE.md) and [implementation status](../implementation/STATUS.md).
+**Version:** 0.11 · September 12, 2026
+**Status:** the durable supervisor, runtime-neutral port, pinned local Codex adapter, per-project setup and browser conversations are implemented. Live fixtures passed scoped edits across restart, a small synthetic-image description, native structured-question persistence and one service-level answer continuation. Positive browser question answering and production asset attachment remain open. The accepted v0 policy trusts the installed pinned native runtime/sandbox on one computer; independent code-host/authentication isolation remains unverified. Projects start in demo mode until the user selects native Codex. See [current implementation and exact port](../implementation/CONVERSATION-WORKSPACE.md), [question evidence](../implementation/CODEX-QUESTION-CONTINUATION.md) and [implementation status](../implementation/STATUS.md).
 
 ## 1. Responsibility and ownership
 

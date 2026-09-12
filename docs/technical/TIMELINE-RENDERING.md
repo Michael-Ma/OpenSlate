@@ -1,7 +1,7 @@
 # Timeline assembly and rendering
 
-**Version:** 0.5 · September 11, 2026
-**Status:** target design. A separate supplied-media service now normalizes files and renders exact cuts/audio placements with immutable manifests and guarded publication. It is not yet connected to canonical timeline resolution, the executor or the browser. Captions, overlays, transitions and a timeline editor remain pending. See [implementation boundaries](../implementation/CONVERSATION-WORKSPACE.md).
+**Version:** 0.6 · September 12, 2026
+**Status:** broader target design. The supplied-media service normalizes files and renders exact cuts/audio placements from frozen manifests. Application-owned render jobs now resolve canonical plans and accepted narration, enforce physical source duration, and expose guarded preview/history through HTTP and browser controls. This remains separate from generated-provider execution. Captions, overlays, transitions and a timeline editor are pending. See [implemented contracts and six-minute evidence](../implementation/MEDIA-INTEGRATION.md).
 
 ## Ownership and composition model
 

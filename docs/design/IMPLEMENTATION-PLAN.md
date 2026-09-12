@@ -1,7 +1,7 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.12 · September 12, 2026
-**Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render passed; native image/structured-question capability passed a small live fixture. GPT Image 2 and H3 transports are implemented with offline tests but remain disconnected from execution and credentials. See [current implementation status](../implementation/STATUS.md) for current counts, limits and remaining work.
+**Version:** 0.13 · September 12, 2026
+**Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render and a native question-answer continuation passed. The single-process launcher has exclusive local installation ownership. GPT Image 2/H3 transports, the generic execution boundary, PNG validation and backend environment credentials are implemented offline; real media dispatch remains disconnected. See [current implementation status](../implementation/STATUS.md) for current counts, limits and remaining work.
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
@@ -183,7 +183,7 @@ Real tests use explicit allowance and the user's configured credentials. A live 
 
 ### Current integration order
 
-The GPT Image 2 and MiniMax H3 transports have offline protocol/fault tests; they make no live calls and are not registered with the fake engine. Connect them through generic provider profiles, durable attempt/receipt mapping, bounded artifact ingestion, credential resolution and explicit dispatch allowances. Then extend structured narration tools and evaluate stage/gap behavior. Production launcher, backup/export and offline recovery work can continue while media keys are unavailable. Live H3 remains deferred; other real media needs an explicit test allowance.
+The GPT Image 2 and MiniMax H3 transports have offline protocol/fault tests. The registered execution port retains exact fake/v1 compatibility; PNG ingestion and fixed backend credential aliases are available. Next connect durable spooled outputs and provider-specific receipt semantics, then real profiles, approved input transfer and explicit dispatch allowances. Synchronous images must not acquire invented remote task IDs; H3 locators must not masquerade as already measured artifacts. In parallel, extend narration through explicitly versioned tools and add owned image intake. The launcher and local installation guard are verified; migrations, portable export/paused restore and clean-install work remain. Live H3 stays deferred; other real media needs an explicit test allowance.
 
 ## 6. Later extensions
 
