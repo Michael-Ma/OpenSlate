@@ -6,6 +6,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 |---|---|
 | [Implementation status](implementation/STATUS.md) | Tested foundation, demo, compatibility evidence and remaining gates |
 | [Local launcher](implementation/LOCAL-LAUNCHER.md) | One built process for interface/API, private local state and clean shutdown |
+| [Database migrations](implementation/DATABASE-MIGRATIONS.md) | Versioned schema, verified pre-upgrade backups and WAL-consistent restore |
 | [Conversation workspace and local services](implementation/CONVERSATION-WORKSPACE.md) | Current UI, supervisor, native adapter, narration drafts, supplied-media renderer and verification |
 | [Supervised Codex validation](implementation/CODEX-SUPERVISOR-VALIDATION.md) | Actual native supervisor question/restart/scoped-edit fixture passed; historical three-start experiment; later capability evidence linked below |
 | [Local native setup](implementation/LOCAL-RUNTIME-SETUP.md) | Per-project installation and no-turn readiness checks |
@@ -26,6 +27,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Durable output storage](implementation/OUTPUT-SPOOL.md) | Owned receipt/spool identities, bounded streaming and crash recovery |
 | [Local image ingestion](implementation/IMAGE-INGESTION.md) | Full PNG validation, exact bytes and immutable publication |
 | [PNG reference library](implementation/PNG-REFERENCE-IMPORT.md) | Supplied-image import, conversational reference identity and verified browser preview |
+| [Director image attachments](implementation/DIRECTOR-IMAGE-ATTACHMENTS.md) | Explicit request selections, bounded thumbnails, immutable receipts and read-only discussion |
 | [Media credentials](implementation/MEDIA-CREDENTIALS.md) | Backend environment aliases and separation from spending authority |
 | [Runtime trust decision](implementation/RUNTIME-TRUST-DECISION.md) | Accepted single-machine v0 boundary and pinned local native-runtime trust policy |
 | [Codex probe](implementation/CODEX-PROBE.md) | Pinned no-turn runtime evidence and baseline limitations |

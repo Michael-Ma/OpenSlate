@@ -55,7 +55,7 @@ const localMedia = ffmpegPath && ffprobePath ? new LocalMediaService({ rootDir: 
 const narration = new NarrationService(service, localMedia ?? undefined);
 const imageStore = ffmpegPath && ffprobePath ? new LocalImageStore({ rootDir: join(engine.artifactDir, "images"), ffmpegPath, ffprobePath }) : null;
 // Each project starts in demo mode until its user chooses and checks local Codex.
-const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001" });
+const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
 const app = createApp({ service, director, runtimeSettings: director, localToken, logger: true,
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,

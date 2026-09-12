@@ -158,6 +158,8 @@ Each grant slot is issued by the service, bound immutably to its permitted proje
 
 ## 6. Migrations, backup and restore
 
+The local schema migration foundation is implemented through V2: read-only compatibility checks, a checksummed ledger, verified pre-upgrade SQLite snapshots and transactional V1 index repair. Historical JSON is preserved unchanged. The existing backup/restore methods validate compatible schemas and include committed WAL state. See [implemented behavior and tests](../implementation/DATABASE-MIGRATIONS.md); the media-inclusive export and paused-import requirements below remain target design.
+
 Keep numbered SQL migrations with checksum and application schema compatibility. A startup coordinator acquires installation ownership, stops new work while applying migrations, backs up the database, executes each transactional migration, checks foreign keys, and records its checksum. Workers refuse unsupported schema versions. Destructive transformations need an explicit migration/rollback plan; do not infer that rollback can reverse billed media effects.
 
 For backups, use the database backup API and a manifest of referenced artifact hashes. Since referenced artifacts are immutable, copy them after taking the database snapshot while retaining a backup pin that prevents GC. Verify hashes and referential integrity before marking a backup complete. Do not simply copy a live `.sqlite` file while ignoring its WAL.

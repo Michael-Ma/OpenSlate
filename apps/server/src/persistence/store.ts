@@ -1,8 +1,11 @@
 import Database from "better-sqlite3";
-import { mkdirSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { canonical, digest, DomainError, invariant, newId } from "@openslate/core";
 import type { JsonObject, ProjectEvent, ProjectRecord } from "@openslate/core";
+import { verifySchema } from "./schema.js";
+import { initializeDatabase } from "./migrations.js";
+import { flushSnapshot, prepareSnapshotDirectory, snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -12,49 +15,22 @@ export class Store {
   readonly db: Database.Database;
   private savepoint = 0;
   constructor(readonly path: string) {
+    invariant(typeof path === "string" && path.length > 0, "DATABASE_PATH_INVALID", "Use a database path or :memory:");
     if (path !== ":memory:") mkdirSync(dirname(resolve(path)), { recursive: true });
+    // Reject newer or unrecognized databases through a read-only connection before
+    // opening a writer or applying persistent journal/schema configuration.
+    if (path !== ":memory:" && existsSync(path)) {
+      const existing = new Database(path, { readonly: true, fileMustExist: true });
+      try { verifySchema(existing, { allowEmpty: true }); } finally { existing.close(); }
+    }
     this.db = new Database(path);
-    this.db.pragma("foreign_keys = ON");
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = FULL");
-    this.db.pragma("busy_timeout = 5000");
-    const version = this.db.pragma("user_version", { simple: true }) as number;
-    invariant(version <= 1, "DATABASE_VERSION_UNSUPPORTED", "Database requires a newer OpenSlate version");
-    this.transaction(() => {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS projects (
-          id TEXT PRIMARY KEY, head_version INTEGER NOT NULL CHECK(head_version >= 0),
-          body TEXT NOT NULL CHECK(json_valid(body)), event_sequence INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS entities (
-          kind TEXT NOT NULL, id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES projects(id),
-          body TEXT NOT NULL CHECK(json_valid(body)), version INTEGER NOT NULL DEFAULT 1,
-          PRIMARY KEY(kind,id)
-        );
-        CREATE INDEX IF NOT EXISTS entity_project ON entities(project_id,kind);
-        CREATE UNIQUE INDEX IF NOT EXISTS candidate_grant_once
-          ON entities(json_extract(body,'$.grantId')) WHERE kind='candidate';
-        CREATE UNIQUE INDEX IF NOT EXISTS attempt_ordinal_once
-          ON entities(json_extract(body,'$.candidateId'), json_extract(body,'$.ordinal')) WHERE kind='attempt';
-        CREATE UNIQUE INDEX IF NOT EXISTS local_work_once
-          ON entities(json_extract(body,'$.workKey')) WHERE kind='attempt' AND json_extract(body,'$.candidateId') IS NULL;
-        CREATE UNIQUE INDEX IF NOT EXISTS reservation_attempt_once
-          ON entities(json_extract(body,'$.attemptId')) WHERE kind='reservation';
-        CREATE UNIQUE INDEX IF NOT EXISTS director_request_once
-          ON entities(project_id,json_extract(body,'$.requestId')) WHERE kind='director_turn';
-        CREATE UNIQUE INDEX IF NOT EXISTS director_running_once
-          ON entities(project_id) WHERE kind='director_turn' AND json_extract(body,'$.state')='running';
-        CREATE TABLE IF NOT EXISTS commands (
-          actor_scope TEXT NOT NULL, key TEXT NOT NULL, digest TEXT NOT NULL,
-          result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(actor_scope,key)
-        );
-        CREATE TABLE IF NOT EXISTS events (
-          project_id TEXT NOT NULL REFERENCES projects(id), sequence INTEGER NOT NULL,
-          id TEXT NOT NULL UNIQUE, body TEXT NOT NULL CHECK(json_valid(body)), PRIMARY KEY(project_id,sequence)
-        );
-        PRAGMA user_version=1;
-      `);
-    });
+    try {
+      this.db.pragma("foreign_keys = ON");
+      this.db.pragma("synchronous = FULL");
+      this.db.pragma("busy_timeout = 5000");
+      initializeDatabase(this.db, path);
+      this.db.pragma("journal_mode = WAL");
+    } catch (error) { this.db.close(); throw error; }
   }
 
   transaction<T>(fn: () => T): T {
@@ -137,6 +113,28 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "request_image_selection") {
+      reference("message", id);
+      invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 4 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
+      const images = body.images as Array<{ artifactId: string; sha256: string }>;
+      invariant(new Set(images.map(image => image.artifactId)).size === images.length, "IDENTITY_MISMATCH", "Image selections must be unique");
+      for (const image of images) {
+        reference("artifact", image.artifactId);
+        const artifact = this.get<{ artifact: { sha256: string; kind: string }; origin?: string; fixture: boolean; mimeType: string }>("artifact", image.artifactId)!;
+        invariant(artifact.artifact.sha256 === image.sha256 && artifact.artifact.kind === "image" && artifact.origin === "supplied_image" && artifact.fixture === false && artifact.mimeType === "image/png", "IDENTITY_MISMATCH", "Image selection must bind a supplied PNG's exact content");
+      }
+      const request = this.get<{ contextDigest: string }>("message", id)!;
+      invariant(request.contextDigest === digest({ replyToReviewId: null, images }), "IDENTITY_MISMATCH", "Image selection must match the message's context identity");
+    }
+    if (kind === "request_image_projection") {
+      reference("request_image_selection", id);
+      const selection = this.get<{ selectionDigest: string; images: unknown[] }>("request_image_selection", id)!;
+      invariant(body.requestId === id && body.selectionDigest === selection.selectionDigest && Array.isArray(body.images) && body.images.length === selection.images.length &&
+        [body.recipeDigest, body.toolchainDigest].every(value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)), "IDENTITY_MISMATCH", "Image projection must bind its request, recipe and toolchain");
+      const images = body.images as Array<{ artifactId: string; sha256: string; thumbnailSha256: string; byteLength: number; mediaType: string }>;
+      invariant(canonical(images.map(({ artifactId, sha256 }) => ({ artifactId, sha256 }))) === canonical(selection.images), "IDENTITY_MISMATCH", "Image projection must preserve selected reference order and identity");
+      invariant(images.every(image => /^[a-f0-9]{64}$/.test(image.thumbnailSha256) && Number.isSafeInteger(image.byteLength) && image.byteLength > 0 && image.byteLength <= 128 * 1024 && image.mediaType === "image/jpeg"), "VALIDATION_ERROR", "Image projection requires bounded JPEG content receipts");
+    }
     if (kind === "image_import") reference("message", body.requestId);
     if (kind === "image_import_receipt") {
       reference("image_import", id);
@@ -204,7 +202,7 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
@@ -291,27 +289,23 @@ export class Store {
 
   async backup(destination: string): Promise<void> {
     invariant(!this.db.inTransaction, "TRANSACTION_ACTIVE", "Backup must run outside a write transaction");
-    invariant(resolve(destination) !== resolve(this.path) && !existsSync(destination), "BACKUP_EXISTS", "Use a new backup destination");
-    mkdirSync(dirname(resolve(destination)), { recursive: true });
-    await this.db.backup(destination);
-    Store.checkDatabase(destination);
+    invariant(typeof destination === "string" && destination.length > 0 && destination !== ":memory:" && destination === destination.trim() && resolve(destination) !== resolve(this.path)
+      && !existsSync(destination) && !existsSync(`${destination}-wal`) && !existsSync(`${destination}-shm`), "BACKUP_EXISTS", "Use a new backup destination");
+    verifySchema(this.db, { integrity: true });
+    prepareSnapshotDirectory(destination);
+    const fd = openSync(destination, "wx", 0o600); closeSync(fd);
+    try { await this.db.backup(destination); Store.checkDatabase(destination); flushSnapshot(destination); }
+    catch (error) { try { unlinkSync(destination); } catch { /* Do not replace the original backup error. */ } throw error; }
   }
 
   static checkDatabase(path: string): void {
-    const db = new Database(path, { readonly: true, fileMustExist: true });
-    try {
-      invariant(db.pragma("integrity_check", { simple: true }) === "ok", "DATABASE_CORRUPT", "SQLite integrity check failed");
-      invariant((db.pragma("foreign_key_check") as unknown[]).length === 0, "DATABASE_CORRUPT", "SQLite reference check failed");
-      invariant(db.pragma("user_version", { simple: true }) === 1, "DATABASE_VERSION_UNSUPPORTED", "Unsupported backup schema");
-    } finally { db.close(); }
+    verifyDatabase(path);
   }
 
   static restore(source: string, destination: string): void {
     invariant(!existsSync(destination) && !existsSync(`${destination}-wal`) && !existsSync(`${destination}-shm`), "RESTORE_DESTINATION_EXISTS", "Restore requires a new closed database path");
-    Store.checkDatabase(source);
-    mkdirSync(dirname(resolve(destination)), { recursive: true });
-    try { copyFileSync(source, destination); Store.checkDatabase(destination); }
-    catch (error) { if (existsSync(destination)) unlinkSync(destination); throw error; }
+    const reader = new Database(source, { readonly: true, fileMustExist: true });
+    try { snapshotDatabase(reader, destination); } finally { reader.close(); }
   }
 
   close(): void { this.db.close(); }

@@ -8,6 +8,9 @@ import { DirectorSupervisor } from "./director-supervisor.js";
 import { FakeWorkflowDirector } from "./fake-director.js";
 import { createDirectorInput } from "./director-input.js";
 import { directorInputDigest } from "./director-input-identity.js";
+import { DirectorImageProjector } from "./director-images.js";
+import type { SelectedDirectorImage } from "./director-images.js";
+import type { ActorContext } from "@openslate/core";
 import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
@@ -23,6 +26,8 @@ export interface LocalDirectorOptions {
   setup?: Setup;
   makeRuntime?: (result: Ready) => DirectorRuntime;
   defaults?: { binaryPath: string; model: string; codexHome?: string };
+  /** Trusted local executable for selected-reference thumbnails. No browser path input. */
+  ffmpegPath?: string;
 }
 
 /** One computer, persistent project choices, separate fake/native queues. */
@@ -34,9 +39,11 @@ export class LocalDirectorController {
   private readonly configuring = new Set<string>();
   readonly defaults: NonNullable<LocalDirectorOptions["defaults"]>;
   private readonly toolSettings: DirectorToolSettings;
+  private readonly imageProjector: DirectorImageProjector | null;
   constructor(readonly service: ProductionService, readonly config: LocalDirectorOptions) {
     this.setup = config.setup ?? setupLocalCodex;
     this.defaults = config.defaults ?? { binaryPath: this.findBinary(), model: "gpt-6-astra" };
+    this.imageProjector = config.ffmpegPath ? new DirectorImageProjector(service, { ffmpegPath: config.ffmpegPath }) : null;
     this.toolSettings = new DirectorToolSettings(service, projectId => this.mode(projectId) === "native"
       ? { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "native", projectId, "workspace", ".agents", "skills"), runtimeId: "codex-app-server" }
       : { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), runtimeId: "fake-workflow-v1" },
@@ -45,7 +52,12 @@ export class LocalDirectorController {
     this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: fakeInput });
     const proxy: DirectorRuntime = { id: "codex-app-server", start: async (input, options) => this.startNative(input, options) };
     this.native = new DirectorSupervisor(service, proxy, { mode: "native", projectFilter: id => this.mode(id) === "native",
-      prepareInput: async (...args) => (await this.ready(args[0].projectId)).input(...args) });
+      prepareInput: async (turn, human, bridge, preparation) => {
+        const input = await (await this.ready(turn.projectId)).input(turn, human, bridge);
+        if (!service.store.get("request_image_selection", turn.requestId)) return input;
+        invariant(this.imageProjector, "DIRECTOR_IMAGES_UNAVAILABLE", "Local FFmpeg is required to prepare reference images");
+        return this.imageProjector.prepare(input, bridge.actor, join(config.dataDirectory, "native", turn.projectId, "workspace"), preparation);
+      } });
   }
   private findBinary(): string {
     // Prefer bundled native executables over optional npm launchers that may lack platform binaries.
@@ -59,7 +71,24 @@ export class LocalDirectorController {
   }
   mode(projectId: string): "fake" | "native" { return this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection.mode ?? "fake"; }
   private controller(projectId: string) { return this.mode(projectId) === "native" ? this.native : this.fake; }
-  status(projectId: string) { return this.controller(projectId).status(projectId); }
+  status(projectId: string) {
+    const status = this.controller(projectId).status(projectId);
+    const imageErrors: Record<string, string> = {
+      DIRECTOR_IMAGE_LIMIT: "This reference's discussion thumbnail exceeds the size limit. Import a simpler or smaller PNG and start a new discussion.",
+      DIRECTOR_IMAGE_CHANGED: "A saved reference or thumbnail changed. Import the original image again and start a new discussion.",
+      DIRECTOR_IMAGE_MISSING: "A saved reference or thumbnail is missing. Import it again and start a new discussion.",
+      DIRECTOR_IMAGE_SCOPE: "The selected image is no longer available in this project's managed reference library.",
+      DIRECTOR_IMAGE_IDENTITY: "The saved image selection or thumbnail receipt no longer matches this request. Start a new discussion with the intended reference.",
+      DIRECTOR_IMAGE_TOOL_CHANGED: "The local image tool changed. Restart OpenSlate before preparing a new image discussion.",
+      DIRECTOR_IMAGES_UNAVAILABLE: "Image discussion needs a native director and local FFmpeg.",
+    };
+    return { ...status, message: status.message ?? (status.turn?.state === "failed" ? imageErrors[status.turn.errorCode ?? ""] ?? null : null),
+      imageAttachmentsAvailable: this.mode(projectId) === "native" && this.imageProjector !== null };
+  }
+  recordImages(projectId: string, actor: ActorContext, images: SelectedDirectorImage[]) {
+    invariant(this.mode(projectId) === "native" && this.imageProjector, "DIRECTOR_IMAGES_UNAVAILABLE", "Image discussion requires a native director and local FFmpeg");
+    return this.imageProjector.record(projectId, actor, images);
+  }
   enqueue(...args: Parameters<DirectorSupervisor["enqueue"]>) { return this.controller(args[0]).enqueue(...args); }
   answerQuestion(...args: Parameters<DirectorSupervisor["answerQuestion"]>) { return this.controller(args[0]).answerQuestion(...args); }
   tick(): void { this.fake.tick(); this.native.tick(); }

@@ -19,7 +19,7 @@ export interface SupervisorOptions {
   mode: "fake" | "native";
   /** Local controllers may share one store while owning disjoint project sets. */
   projectFilter?: (projectId: string) => boolean;
-  prepareInput?: (turn: DirectorTurn, human: ActorContext, bridge: { actor: ActorContext; token: string }) => Promise<DirectorRunInput> | DirectorRunInput;
+  prepareInput?: (turn: DirectorTurn, human: ActorContext, bridge: { actor: ActorContext; token: string }, preparation?: { signal: AbortSignal }) => Promise<DirectorRunInput> | DirectorRunInput;
   now?: () => number; leaseMs?: number; owner?: string;
 }
 
@@ -160,7 +160,7 @@ export class DirectorSupervisor {
       });
       invariant(bridge.actor.kind === "director", "ACTOR_DENIED", "A director epoch is required");
       const identity = { projectId: claimed.projectId, requestId: claimed.requestId, epochId: bridge.actor.epochId, turnId: claimed.id };
-      const input = this.options.prepareInput ? await this.options.prepareInput(this.turns(claimed.projectId).find(turn => turn.id === claimed.id)!, human, bridge)
+      const input = this.options.prepareInput ? await this.options.prepareInput(this.turns(claimed.projectId).find(turn => turn.id === claimed.id)!, human, bridge, { signal: abort.signal })
         : { ...identity, text: request.text, context: canonical(service.readContext(claimed.projectId, bridge.actor)), skills: [],
           bridge: { endpoint: "http://127.0.0.1:3001", projectId: claimed.projectId, credential: bridge.token, entrypoint: "" } };
       invariant(Object.entries(identity).every(([key, value]) => input[key as keyof typeof identity] === value), "RUNTIME_IDENTITY_MISMATCH", "Runtime input belongs to another request");

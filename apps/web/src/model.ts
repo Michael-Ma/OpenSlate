@@ -19,8 +19,8 @@ export interface ProjectSnapshot {
 }
 export interface ReviewMember { videoNodeId: string; shotId: string; keyframe: Artifact | null; approvalDigest: string | null; ready: boolean; approved?: boolean; motionPrompt?: string; durationFrames?: number; profileLabel?: string }
 export interface ReviewSnapshot { id: string | null; planId: string | null; projectId?: string; headVersion: number; revisionId: string; members: ReviewMember[] }
-export interface DirectorStatus { mode: "offline" | "fake" | "native"; status: "idle" | "running" | "waiting_user" | "error" | "not_connected"; message?: string; activeRequestId?: string | null }
-export type MessageBody = { text: string; scopeIds: string[]; editing: boolean; continuationRequestId?: string } | { text: string; replyToQuestionId: string };
+export interface DirectorStatus { mode: "offline" | "fake" | "native"; status: "idle" | "running" | "waiting_user" | "error" | "not_connected"; message?: string; activeRequestId?: string | null; imageAttachmentsAvailable?: boolean }
+export type MessageBody = { text: string; scopeIds: string[]; editing: boolean; continuationRequestId?: string; images?: { artifactId: string; sha256: string }[] } | { text: string; replyToQuestionId: string };
 export interface MessageCommand { key: string; projectId: string; body: MessageBody }
 
 export function makeMessageCommand(project: ProjectSnapshot["project"], draft: string, selectedIds: readonly string[], key: string, editing = true): MessageCommand {
@@ -36,6 +36,11 @@ export function makeQuestionReply(projectId: string, question: PendingQuestion, 
   if (question.state !== "pending") throw new Error("That question has already been answered. Refresh to continue.");
   if (!text || text.length > 16000 || !key) throw new Error("Write an answer of up to 16,000 characters.");
   return { projectId, key, body: { text, replyToQuestionId: question.id } };
+}
+export function makeImageDiscussion(projectId: string, artifact: Artifact, key: string): MessageCommand {
+  if (!projectId || !key || artifact.kind !== "image" || !artifact.artifactId || !/^[a-f0-9]{64}$/.test(artifact.sha256)) throw new Error("Select a saved reference image to discuss.");
+  return { projectId, key, body: { text: "Look at the attached reference image. Describe its visual direction and suggest how we could use it in the film. Ask me about any details you need. Discuss only; do not change the project or approve generation.",
+    scopeIds: [projectId], editing: false, images: [{ artifactId: artifact.artifactId, sha256: artifact.sha256 }] } };
 }
 export function previewOutput(snapshot: ProjectSnapshot) {
   const render = snapshot.plan?.nodes?.find(node => node.kind === "render");

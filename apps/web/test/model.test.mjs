@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeMessageCommand, makeQuestionReply, reviewIdentity, reviewMatchesProject, approvalPayload, previewOutput, conversation, pollingDelay, durationLabel, errorMessage } from '../src/model.ts';
+import { makeImageDiscussion, makeMessageCommand, makeQuestionReply, reviewIdentity, reviewMatchesProject, approvalPayload, previewOutput, conversation, pollingDelay, durationLabel, errorMessage } from '../src/model.ts';
 
 const artifact = (id = 'frame-1', sha = 'a'.repeat(64)) => ({ artifactId: id, sha256: sha, kind: 'image' });
 const project = () => ({ id: 'project', name: 'Boots', activePlanId: 'plan', headVersion: 3, revisionId: 'revision', shots: [{ id: 'shot-1' }, { id: 'shot-2' }] });
@@ -15,6 +15,15 @@ test('a scoped message deduplicates only selected shots and captures retry text 
 });
 test('fake and offline chat explicitly carry no edit hold authority', () => {
   assert.equal(makeMessageCommand(project(), 'What next?', ['shot-1'], 'request', false).body.editing, false);
+});
+test('image discussion freezes one exact reference without edit or continuation authority', () => {
+  const selected = artifact(), command = makeImageDiscussion('project', selected, 'image-discussion');
+  selected.sha256 = 'b'.repeat(64);
+  assert.deepEqual(command.body.images, [{ artifactId: 'frame-1', sha256: 'a'.repeat(64) }]);
+  assert.equal(command.body.editing, false); assert.equal(command.body.continuationRequestId, undefined);
+  assert.deepEqual(command.body.scopeIds, ['project']); assert.equal(command.key, 'image-discussion');
+  assert.throws(() => makeImageDiscussion('project', { ...selected, kind: 'video' }, 'key'));
+  assert.throws(() => makeImageDiscussion('project', { ...selected, sha256: 'bad' }, 'key'));
 });
 test('messages reject missing, oversized and stale scopes instead of broadening them', () => {
   for (const text of [' ', 'a'.repeat(16001)]) assert.throws(() => makeMessageCommand(project(), text, [], 'key'));

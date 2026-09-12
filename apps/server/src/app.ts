@@ -5,6 +5,8 @@ import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
 import { ToolInvocationService } from "./application/tool-invocations.js";
+import { imageMessageContext, selectedDirectorImages } from "./application/director-images.js";
+import type { SelectedDirectorImage } from "./application/director-images.js";
 import type { ProductionService } from "./application/service.js";
 import type { DirectorSupervisor } from "./application/director-supervisor.js";
 import type { LocalDirectorController, LocalDirectorSelection } from "./application/local-director.js";
@@ -91,9 +93,12 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.configure(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
-  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; replyToReviewId?: string; replyToQuestionId?: string } }>("/api/projects/:projectId/messages", {
-    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, replyToReviewId: string, replyToQuestionId: string }, ["text"]) },
+  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
+    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, replyToReviewId: string, replyToQuestionId: string,
+      images: { type: "array", minItems: 1, maxItems: 4, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, ["text"]) },
   }, async request => {
+    const images = request.body.images ? selectedDirectorImages(request.body.images) : undefined;
+    invariant(!images || (options.director && options.runtimeSettings && directorMode(request.params.projectId) === "native" && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_IMAGES_UNAVAILABLE", "Attach references to a new native conversation request");
     if (request.body.replyToQuestionId) {
       invariant(options.director && !request.body.replyToReviewId && !request.body.scopeIds && !request.body.continuationRequestId && request.body.editing === undefined, "VALIDATION_ERROR", "Reply to one pending question using its original scope");
       const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.text, request.headers["idempotency-key"] as string | undefined ?? newId());
@@ -101,7 +106,8 @@ export function createApp(options: AppOptions = {}) {
     }
     const actor = service().store.transaction(() => {
       const actor = service().beginRequest(request.params.projectId, "local-user", request.body.text,
-        { ...request.body, contextDigest: digest({ replyToReviewId: request.body.replyToReviewId ?? null }), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
+        { ...request.body, contextDigest: imageMessageContext(images, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
+      if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
       if (!request.body.replyToReviewId) options.director?.enqueue(request.params.projectId, actor);
       return actor;
     });
