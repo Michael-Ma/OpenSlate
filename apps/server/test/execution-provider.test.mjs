@@ -30,7 +30,7 @@ function legacyAttempt(f, attempt) {
 test("execution requires trusted registration rather than a concrete provider class", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const wrapped = wrap(f.provider);
   assert.throws(() => new Engine(f.store, wrapped, { artifactDir: f.artifactDir }), { code: "PROVIDER_NOT_REGISTERED" });
-  assert.throws(() => registerExecutionProvider(wrapped, { adapter: "minimax-h3-v2", version: "1" }), { code: "PROVIDER_NOT_REGISTERED" });
+  assert.throws(() => registerExecutionProvider(wrapped, { adapter: "invalid/adapter", version: "1" }), { code: "PROVIDER_NOT_REGISTERED" });
   const engine = new Engine(f.store, register(wrapped), { artifactDir: f.artifactDir });
   await engine.runReady(); await engine.reconcile();
   assert.equal(engine.outputs(f.projectId).length, 1);

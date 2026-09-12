@@ -1,6 +1,6 @@
 # Registered provider execution boundary
 
-September 12, 2026. The executor now consumes an application execution contract instead of the concrete `FakeProvider` class. **Only the existing fake/v1 contract is registered.** The standalone MiniMax H3 and OpenAI image transports are not executable profiles and remain disconnected from application dispatch.
+September 12, 2026. The executor consumes registered application execution contracts instead of the concrete `FakeProvider` class. An additive [provider-routing boundary](PROVIDER-ROUTING.md) supports multiple frozen adapter identities and separate profile revisions. **The launcher still registers only fake/v1**, and external admission defaults to denied. The standalone MiniMax H3 and OpenAI image transports remain disconnected from launcher dispatch.
 
 ## Components and authority
 
@@ -20,13 +20,13 @@ flowchart LR
 
 `packages/providers/src/execution.ts` owns the normalized request/output/outcome interfaces, trusted registration checks, and observation validation. `FakeProvider` implements this interface and registers its existing fake/v1 contract when constructed. Existing `FakeRequest`, `FakeOutput`, and `FakeOutcome` exports remain available for callers.
 
-Registration is an in-process host operation backed by a private registry. Matching methods or a provider-supplied label alone do not authorize execution. This release's registration function rejects every adapter/version except fake/v1. The core profile adapter enum remains `"fake"`; constructor defaults and immutable project locks must match the registered contract. Registration does not grant a candidate, release a hold, approve a keyframe, or reserve spending.
+Registration is an in-process host operation backed by a private registry. Matching methods or a provider-supplied label alone do not authorize execution. The installation catalog rejects duplicate adapter/version identities; a selected profile resolves its separately pinned execution version, and an existing attempt resolves only its frozen request. Historical fake defaults remain unchanged. External admission requires a separate synchronous application spending/readiness policy. Registration does not grant a candidate, release a hold, approve a keyframe, or reserve spending.
 
 The provider object and injected ingestion hook are trusted application code. This interface is not a plugin sandbox and cannot prevent a contributor from writing unrelated network code. No browser/model endpoint can register an implementation.
 
 ## Request and receipt identity
 
-The existing request fields remain: attempt ID, node ID, operation kind, effective fingerprint, exact arguments, and ordered artifact inputs. New attempts additionally persist `request.execution: {adapter, version}`. The request is already protected by the store's immutable attempt-field checks, so its execution identity cannot change after dispatch. Submission receives a separate copy; adapter mutation cannot alter the engine's in-memory attempt or persisted request.
+The existing request fields remain: attempt ID, node ID, operation kind, effective fingerprint, exact arguments, and ordered artifact inputs. New attempts persist `request.execution: {adapter, version}`; new explicit profiles also carry a frozen model/configuration snapshot and digest, with an allowance correlation for external admission. The request is protected by the store's immutable attempt-field checks, so its identity cannot change after dispatch. Submit/poll/lookup receive detached request data; adapter mutation cannot alter the engine's in-memory attempt or persisted request.
 
 Historical requests without `execution` explicitly mean fake/v1. No database migration rewrites them. Historical completed evidence keeps its original shape and digest and can finish ingestion without contacting the provider. Historical failed attempts retain their already recorded retry decision; their evidence is not rewritten or retroactively reclassified.
 
@@ -49,11 +49,11 @@ A known task ID cannot be replaced by a later conflicting receipt. Contradictory
 
 Neither failure nor rejection automatically grants a technical retry. A new attempt on the same candidate requires both `technical === true` and `retryAllowed === true` from the registered adapter, the pinned profile's retry limit, and unchanged creative inputs. Missing retry permission means false. `FakeProvider` now explicitly supplies the classification for its injected technical faults. Its historical failure-source label remains `fake_provider`.
 
-Cancellation, refunds, settled billing, provider scheduling/backoff, and real-provider retry classifications are not added by this refactor. A provider's HTTP error code alone must not be promoted into trusted retry authority by a future bridge.
+Provider calls now renew their leases and receive an abort signal on deadline or lost ownership; their late observations remain evidence. This does not add remote task cancellation, refunds, settled billing, provider scheduling/backoff, or real-provider retry classifications. A provider's HTTP error code alone must not be promoted into trusted retry authority by a future bridge.
 
 ## Output ingestion
 
-`Engine` accepts an optional trusted `ExecutionOutputIngestor` through constructor options. It receives a copy of the attempt/output plus the application artifact directory and returns a durable `ArtifactRecord`. The hook must decode/probe media, verify format and physical measurements, and publish immutable bytes before returning. A live implementation still needs explicit configuration and profile admission.
+`Engine` accepts an optional trusted `ExecutionOutputIngestor` through constructor options. It receives a copy of the attempt/output plus the application artifact directory and returns a durable `ArtifactRecord`, or an explicit `normalized_video` result with a validated derivation and generated media source. The hook must decode/probe media, verify format and physical measurements, and publish immutable bytes before returning. A live implementation still needs explicit configuration and profile admission.
 
 The default materializer remains the portable fixture implementation. It accepts **only `fixture: true`**, canonical Base64, the existing fixture extensions, matching SHA-256, and at most two million decoded bytes. It cannot silently process an output marked `fixture: false`.
 
@@ -61,15 +61,15 @@ Regardless of which hook runs, the engine checks project ownership, attempt iden
 
 The engine renews its owned lease while awaiting ingestion. A lost lease aborts the hook's signal and fences publication; a hook must cooperate with cancellation and must not launch detached work. Renewal never revives an expired lease or takes ownership from another worker. Completion evidence remains available for recovery.
 
-The shared inline output contract retains its Base64-equivalent 64-MiB limit and historical SQLite evidence. The additive [V2 spool completion boundary](SPOOL-COMPLETIONS.md) instead references owned bytes, preserves nullable vendor task IDs, and verifies installed PNG/MP4 files incrementally under the ingestion lease, with 32/256-MiB limits respectively. An optional exact-PNG ingester is implemented; the default materializer remains fixture-only, and generated MP4 normalization is explicitly unsupported by that hook. These bounds do not establish peak memory: legacy JSON/Base64, image decoding, input verification, and preview copies still have memory costs. Engine hash verification does not replace full media decoding. Transport bridges, downloads, real profile admission and live generation remain separate work.
+The shared inline output contract retains its Base64-equivalent 64-MiB limit and historical SQLite evidence. The additive [V2 spool completion boundary](SPOOL-COMPLETIONS.md) instead references owned bytes, preserves nullable vendor task IDs, and verifies installed PNG/MP4 files incrementally under the ingestion lease, with 32/256-MiB limits respectively. An optional exact-PNG ingester is implemented; the default materializer remains fixture-only. A separate [generated-video ingester](GENERATED-VIDEO-DERIVATION.md) normalizes MP4 under a pinned durable derivation, with a 128-MiB input cap and 256-MiB normalized output cap. Only its explicit tagged result allows a normalized hash to differ from the raw receipt; artifact/source/derivation publication is atomic with the attempt. These bounds do not establish peak memory: legacy JSON/Base64, image decoding, input verification, and preview copies still have memory costs. Engine hash verification does not replace full media decoding. Transport bridges, downloads, real profile admission and live generation remain separate work.
 
 Local timeline/render nodes retain the existing fixture producer and cache behavior. The separately implemented real local-render service is not connected to this execution port by this change.
 
 ## Verification
 
-Node 24 provider/server builds passed. **36 focused tests passed, zero failed/skipped:** 16 new provider-boundary tests, 19 existing execution tests, and the existing durable fake-provider test. All used local synthetic data and zero API requests.
+The initial boundary validation recorded **36 focused tests passed, zero failed/skipped:** 16 provider-boundary tests, 19 existing execution tests, and the existing durable fake-provider test. The later [routing validation](PROVIDER-ROUTING.md) records the expanded 120-test subset. All used local synthetic data and zero API requests.
 
-The new tests cover registration without concrete-class coupling, disabled cloud registration, immutable request identity, explicit retry permission, malformed and contradictory observations, retained task IDs on unusable completion, fixture-only defaults, injected artifact identity/byte/path checks, asynchronous lease renewal/loss, output roles, stored fixture flags, and historical completed/failed records. Existing tests retain coverage for exact human review, holds/pauses, stale leases, restart reconciliation, spending races, scoped reuse, and bounded retries.
+Those original tests cover registration without concrete-class coupling, immutable request identity, explicit retry permission, malformed and contradictory observations, retained task IDs on unusable completion, fixture-only defaults, injected artifact identity/byte/path checks, asynchronous lease renewal/loss, output roles, stored fixture flags, and historical completed/failed records. Later [routing checks](PROVIDER-ROUTING.md) add default-denied external admission and frozen multi-adapter recovery. Existing tests retain coverage for exact human review, holds/pauses, stale leases, restart reconciliation, spending races, scoped reuse, and bounded retries.
 
 ```sh
 pnpm --filter @openslate/providers build

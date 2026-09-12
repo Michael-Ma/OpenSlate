@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import { mkdirSync, existsSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, readFileSync, unlinkSync, constants, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { open } from "node:fs/promises";
-import { DEFAULT_PROFILES, DomainError, digest, effectiveNodeDigest, invariant, moneyMicros, newId, shotIntentDigest } from "@openslate/core";
+import { DEFAULT_PROFILES, DomainError, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, ProjectRecord, ProviderProfile } from "@openslate/core";
-import { assertExecutionProfile, assertExecutionRequest, executionFailureSource, executionIdentity, executionTaskId, fixtureOutputs, isSpoolCompletion, isSpoolOutput, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
-import type { ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
+import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionTaskId, fixtureOutputs, isLegacyExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
+import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { ExecutionOutputStore } from "./output-store.js";
+import { assertNormalizedVideoIngestion } from "./video-derivation.js";
+import type { NormalizedVideoIngestion, VideoDerivationIntent } from "./video-derivation.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
@@ -28,9 +30,10 @@ export interface Attempt {
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
-  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio";
+  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio" | "generated_video";
   outputReceiptId?: string; outputSpoolId?: string; byteLength?: number;
   width?: number; height?: number; validationDigest?: string;
+  derivationId?: string; sourceDescriptorId?: string;
 }
 interface Reservation { id: string; projectId: string; attemptId: string; micros: string; state: "reserved" | "charged" | "released" }
 interface Hold { id: string; projectId: string; scopeId: string; ownerId: string; active: boolean }
@@ -42,14 +45,22 @@ export interface ReviewSnapshot {
 interface Evidence { id: string; projectId: string; attemptId: string; outcome: ExecutionOutcome; outcomeDigest: string; recordedAt: string }
 /** Trusted host hook: decode/probe and publish immutable bytes before returning their exact record. */
 export interface ExecutionOutputIngestor {
-  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<IngestibleExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord> | ArtifactRecord;
+  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<IngestibleExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord | NormalizedVideoIngestion> | ArtifactRecord | NormalizedVideoIngestion;
 }
+interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedVideoIngestion }
 interface ResolvedInputs { artifacts: ArtifactRef[]; fingerprint: string }
+export interface ExternalExecutionAdmission {
+  /** Trusted synchronous policy; check readiness and consume allowance in this admission transaction. */
+  authorize(input: { attemptId: string; projectId: string; nodeId: string; candidateId: string; profile: Readonly<ProviderProfile>; estimatedMicros: string }): { allowanceId: string };
+}
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
 
-/** Durable executor over a registered provider port. Only fake profiles are registered in this release. */
+/** Durable executor over registered ports. The shipped launcher enables only fake execution. */
 export class Engine {
+  readonly registry: ExecutionRegistry;
+  private readonly externalAdmission: ExternalExecutionAdmission | undefined;
+  private readonly providerTimeoutMs: number;
   readonly workerId: string;
   readonly profiles: ProviderProfile[];
   readonly artifactDir: string;
@@ -57,12 +68,18 @@ export class Engine {
   readonly defaultBudgetMicros: string;
   readonly outputIngestor: ExecutionOutputIngestor | undefined;
   readonly outputStore: ExecutionOutputStore | undefined;
-  constructor(readonly store: Store, readonly provider: ExecutionProvider, options: {
+  constructor(readonly store: Store, readonly provider: ExecutionProvider | ExecutionRegistry, options: {
     artifactDir: string; profiles?: ProviderProfile[]; budgetMicros?: string; workerId?: string; leaseMs?: number;
     outputIngestor?: ExecutionOutputIngestor;
     outputStore?: ExecutionOutputStore;
+    externalAdmission?: ExternalExecutionAdmission;
+    providerTimeoutMs?: number;
   }) {
-    executionIdentity(provider);
+    this.registry = provider instanceof ExecutionRegistry ? provider : new ExecutionRegistry([provider]);
+    this.externalAdmission = options.externalAdmission;
+    invariant(!options.externalAdmission || (typeof options.externalAdmission.authorize === "function" && options.externalAdmission.authorize.constructor.name !== "AsyncFunction"), "ASYNC_TRANSACTION", "External admission policy must be synchronous");
+    this.providerTimeoutMs = options.providerTimeoutMs ?? 600000;
+    invariant(Number.isSafeInteger(this.providerTimeoutMs) && this.providerTimeoutMs >= 10 && this.providerTimeoutMs <= 600000, "PROVIDER_CONFIGURATION_INVALID", "Provider operation deadline must be bounded");
     this.workerId = options.workerId ?? newId();
     this.profiles = options.profiles ?? DEFAULT_PROFILES;
     this.artifactDir = resolve(options.artifactDir);
@@ -230,25 +247,32 @@ export class Engine {
       if (attempt.candidateId === null) {
         await this.handle(attempt, { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) }); return;
       }
-      let outcome: ExecutionOutcome;
-      try { outcome = await this.provider.submit(structuredClone(attempt.request)); }
-      catch { outcome = { type: "unknown", diagnostic: "Submission threw after intent was persisted" }; }
-      await this.handle(attempt, outcome);
+      const provider = this.registry.forRequest(attempt.request);
+      const outcome = await this.observeProvider(attempt, options => provider.submit(structuredClone(attempt.request), options), "Submission threw after intent was persisted");
+      if (outcome) await this.handle(attempt, outcome);
     }));
     return { dispatched, reused, blocked };
   }
 
-  async reconcile(): Promise<{ reconciled: number }> {
+  async reconcile(): Promise<{ reconciled: number; blocked?: { attemptId: string; code: string }[] }> {
     const pending = this.projects().flatMap(project => this.attempts(project.id)).filter(attempt => !TERMINAL.has(attempt.phase));
-    let reconciled = 0;
+    let reconciled = 0; const blocked: { attemptId: string; code: string }[] = [];
     await Promise.all(pending.map(async observed => {
+      let provider: ExecutionProvider;
+      try { provider = this.registry.forRequest(observed.request); }
+      catch (error) { if (error instanceof DomainError) { blocked.push({ attemptId: observed.id, code: error.code }); return; } throw error; }
       const attempt = this.claim(observed);
       if (!attempt) return;
       let outcome: ExecutionOutcome;
-      assertExecutionRequest(this.provider, attempt.request);
-      const completed = this.store.list<Evidence>("execution_evidence", attempt.projectId).find(item => item.attemptId === attempt.id
-        && item.outcome.type === "completed" && item.outcomeDigest === digest(item.outcome)
-        && (!attempt.taskId || executionTaskId(item.outcome) === attempt.taskId) && this.completionBound(attempt, item.outcome));
+      const observations = this.store.list<Evidence>("execution_evidence", attempt.projectId).filter(item => item.projectId === attempt.projectId
+        && item.attemptId === attempt.id && item.outcomeDigest === digest(item.outcome));
+      // Evidence is tied to this immutable attempt/request. A known task remains
+      // authoritative; a late accepted receipt can repair a previously unknown ID.
+      const acceptedIds = !attempt.taskId ? [...new Set(observations.filter(item => item.outcome.type === "accepted"
+        && normalizeExecutionOutcome(item.outcome, attempt.request).type === "accepted").map(item => executionTaskId(item.outcome)!))] : [];
+      const authoritativeTask = attempt.taskId ?? (acceptedIds.length === 1 ? acceptedIds[0]! : null);
+      const completed = observations.find(item => item.outcome.type === "completed"
+        && (!authoritativeTask || executionTaskId(item.outcome) === authoritativeTask) && this.completionBound(attempt, item.outcome));
       let recovered: ExecutionSpoolCompletion | null = null;
       if (!completed && this.outputStore) {
         try { recovered = await this.withLease(attempt, signal => this.outputStore!.recoverCompletion(attempt.projectId, attempt.id, { signal })); }
@@ -257,16 +281,21 @@ export class Engine {
         }
         if (!this.owns(attempt)) return;
       }
-      if (completed) outcome = completed.outcome;
-      else if (recovered) outcome = recovered;
+      if (acceptedIds.length > 1) outcome = { type: "unknown", diagnostic: "Conflicting accepted task receipts require attention" };
+      else if (completed) outcome = completed.outcome;
+      else if (recovered) outcome = authoritativeTask && executionTaskId(recovered) !== authoritativeTask
+        ? { type: "unknown", diagnostic: "Owned output conflicts with retained accepted task identity" } : recovered;
+      else if (acceptedIds.length === 1) outcome = { type: "accepted", taskId: acceptedIds[0]! };
       else if (attempt.candidateId === null) outcome = { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) };
       else {
-        try { outcome = attempt.taskId ? await this.provider.poll(attempt.taskId) : await this.provider.lookup(attempt.id); }
-        catch { outcome = { type: "unknown", diagnostic: "Reconciliation temporarily unavailable" }; }
+        const result = await this.observeProvider(attempt, options => attempt.taskId
+          ? provider.poll(attempt.taskId, structuredClone(attempt.request), options)
+          : provider.lookup(attempt.id, structuredClone(attempt.request), options), "Reconciliation temporarily unavailable");
+        if (!result) return; outcome = result;
       }
       await this.handle(attempt, outcome); reconciled++;
     }));
-    return { reconciled };
+    return { reconciled, ...(blocked.length ? { blocked } : {}) };
   }
 
   private projects(): ProjectRecord[] { return (this.store.db.prepare("SELECT id FROM projects").all() as { id: string }[]).map(row => this.store.getProject(row.id)); }
@@ -280,7 +309,7 @@ export class Engine {
       const profile = value as ProviderProfile;
       invariant(typeof profile.id === "string" && profile.id.length > 0 && !ids.has(profile.id), "CAPABILITY_LOCK_UNSUPPORTED", "Pinned profile identities must be unique");
       ids.add(profile.id);
-      assertExecutionProfile(this.provider, profile);
+      profileExecutionIdentity(profile);
       invariant(Number.isSafeInteger(profile.maxConcurrency) && profile.maxConcurrency > 0 && profile.maxConcurrency <= 64 && Number.isSafeInteger(profile.maxRetries) && profile.maxRetries >= 0 && profile.maxRetries <= 3, "CAPABILITY_LOCK_UNSUPPORTED", "Unsupported pinned concurrency or retry limits");
       invariant(typeof profile.unitCostMicros === "string", "CAPABILITY_LOCK_UNSUPPORTED", "Pinned price must use decimal micros");
       moneyMicros(profile.unitCostMicros);
@@ -364,11 +393,15 @@ export class Engine {
       invariant(inputs.fingerprint === preparedFingerprint, "REVISION_CONFLICT", "Inputs changed during execution preparation");
       const profiles = this.lockedProfiles(project);
       const profile = node.profileId ? profiles.find(item => item.id === node.profileId) : undefined;
+      let provider: ExecutionProvider;
       if (GENERATED.has(node.kind)) {
         invariant(profile?.kind === node.kind && node.args.profileRevision === profile.revision && node.args.profileIdentity === profile.id,
           "PROFILE_INCOMPATIBLE", "Only the exact pinned profile may run");
-        assertExecutionProfile(this.provider, profile);
-      }
+        const expected = providerProfileArguments(profile);
+        invariant(Object.entries(expected).every(([key, value]) => Object.hasOwn(node.args, key) && canonical(node.args[key]) === canonical(value)), "PROFILE_INCOMPATIBLE", "Node does not contain its exact pinned profile configuration");
+        provider = this.registry.forProfile(profile);
+      } else provider = this.registry.resolve({ adapter: "fake", version: "1" });
+      const execution = executionIdentity(provider);
       if (node.kind === "video") {
         const shot = project.shots.find(item => item.id === node.shotId);
         const cue = shot?.cueId ? project.cues.find(item => item.id === shot.cueId) : undefined;
@@ -394,17 +427,29 @@ export class Engine {
         invariant(previous.fingerprint === inputs.fingerprint, "NEW_CANDIDATE_REQUIRED", "A technical retry cannot change its creative inputs");
       }
       if (profile) {
-        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !TERMINAL.has(attempt.phase) && attempt.request.args.profileIdentity === profile.id).length;
+        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !TERMINAL.has(attempt.phase)
+          && attempt.request.args.profileIdentity === profile.id && attempt.request.args.profileRevision === profile.revision
+          && canonical(requestExecutionIdentity(attempt.request)) === canonical(execution)).length;
         invariant(active < profile.maxConcurrency, "CAPACITY_EXCEEDED", "Configured provider capacity is occupied");
       }
       const cost = profile ? moneyMicros(profile.unitCostMicros) : 0n; const budget = this.budget(projectId);
       invariant(moneyMicros(budget.committedMicros) + cost <= moneyMicros(budget.capMicros), "BUDGET_EXCEEDED", "Dispatch exceeds the configured spending cap");
       const id = newId(); const reservationId = profile ? newId() : null;
+      let externalAllowanceId: string | undefined;
+      if (!isLegacyExecution(execution)) {
+        invariant(this.externalAdmission && profile && binding.candidateId, "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "External generation requires explicit application spending permission");
+        const approval = this.externalAdmission.authorize({ attemptId: id, projectId, nodeId, candidateId: binding.candidateId,
+          profile: structuredClone(profile), estimatedMicros: cost.toString() });
+        invariant(approval && Object.keys(approval).length === 1 && typeof approval.allowanceId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(approval.allowanceId),
+          "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "External admission must return an explicit durable allowance identity");
+        externalAllowanceId = approval.allowanceId;
+      }
+      const pinnedProfile = profile ? executionProfileSnapshot(profile) : undefined;
       const attempt: Attempt = {
         id, projectId, nodeId, candidateId: binding.candidateId, ordinal: (previous?.ordinal ?? 0) + 1,
         specDigest: node.specDigest, fingerprint: inputs.fingerprint, workKey,
         request: { attemptId: id, nodeId, kind: node.kind, fingerprint: inputs.fingerprint, args: node.args, inputs: inputs.artifacts,
-          execution: { ...executionIdentity(this.provider) } },
+          execution: { ...execution }, ...(pinnedProfile ? { profile: pinnedProfile } : {}), ...(externalAllowanceId ? { externalAllowanceId } : {}) },
         phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId, failure: null, outputs: {}, createdAt: new Date().toISOString(),
       };
@@ -432,7 +477,7 @@ export class Engine {
     catch { return false; }
   }
   private async handle(attempt: Attempt, observation: ExecutionOutcome): Promise<void> {
-    assertExecutionRequest(this.provider, attempt.request);
+    const provider = this.registry.forRequest(attempt.request);
     const observed = normalizeExecutionOutcome(observation, attempt.request);
     let outcome = observed;
     // A receipt from another request cannot lend its vendor identity to this attempt.
@@ -450,7 +495,7 @@ export class Engine {
       }
       const phase: AttemptPhase = outcome.type === "accepted" ? "remote_pending" : outcome.type === "unknown" ? "submission_unknown" : "failed";
       const failure = outcome.type === "failed" || outcome.type === "rejected"
-        ? { id: outcome.failureId, technical: outcome.technical, source: executionFailureSource(this.provider),
+        ? { id: outcome.failureId, technical: outcome.technical, source: executionFailureSource(provider),
           retryAllowed: outcome.technical === true && outcome.retryAllowed === true } : null;
       const taskId = outcome.type === "accepted" || outcome.type === "failed" || outcome.type === "unknown" ? outcome.taskId ?? current.taskId : current.taskId;
       this.store.put("attempt", current.id, current.projectId, { ...current, phase, taskId, failure, leaseExpiresAt: 0 });
@@ -467,8 +512,13 @@ export class Engine {
       const current = this.owns(attempt); if (!current) return;
       if (isSpoolCompletion(completed)) this.outputStore!.assertCompletion(current.projectId, current.id, completed);
       const mapped: Record<string, ArtifactRef> = {};
-      for (const { output, record } of outputs) {
+      for (const { output, record, normalized } of outputs) {
+        if (normalized) this.validateDerived(current, output, normalized);
         this.store.insert("artifact", record.id, attempt.projectId, record); mapped[output.port] = record.artifact;
+        if (normalized) {
+          this.store.insert("video_derivation_receipt", normalized.derivation.id, attempt.projectId, normalized.derivation);
+          this.store.insert("media_source", record.id, attempt.projectId, normalized.mediaSource);
+        }
         this.store.appendEvent(attempt.projectId, "artifact.published", { artifactId: record.id, attemptId: attempt.id, fixture: record.fixture });
       }
       const finished: Attempt = { ...current, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
@@ -493,6 +543,31 @@ export class Engine {
     this.store.put("reservation", reservation.id, reservation.projectId, { ...reservation, state });
   }
 
+  /** Keep paid effects owned during slow I/O; cancellation never discards a late vendor receipt. */
+  private async observeProvider(attempt: Attempt, operation: (options: ExecutionCallOptions) => Promise<ExecutionOutcome>, diagnostic: string): Promise<ExecutionOutcome | null> {
+    const controller = new AbortController();
+    const renew = () => {
+      if (controller.signal.aborted) return;
+      try {
+        this.store.transaction(() => {
+          const current = this.owns(attempt);
+          if (!current) { controller.abort(); return; }
+          this.store.put("attempt", current.id, current.projectId, { ...current, leaseExpiresAt: Date.now() + this.leaseMs });
+        });
+      } catch { controller.abort(); }
+    };
+    renew(); if (controller.signal.aborted) return null;
+    const timer = setInterval(renew, Math.max(1, Math.floor(this.leaseMs / 3))); timer.unref();
+    const deadline = setTimeout(() => controller.abort(), this.providerTimeoutMs);
+    try {
+      // Registered adapters must settle after cancellation. Await their actual
+      // observation so an accepted task arriving after lease loss remains evidence.
+      try { return await operation(Object.freeze({ signal: controller.signal,
+        expectedLease: Object.freeze({ owner: attempt.leaseOwner, epoch: attempt.leaseEpoch }) })); }
+      catch { return { type: "unknown", diagnostic }; }
+    } finally { clearInterval(timer); clearTimeout(deadline); controller.abort(); }
+  }
+
   private async withLease<T>(attempt: Attempt, operation: (signal: AbortSignal) => Promise<T>): Promise<T | null> {
     const controller = new AbortController();
     const renew = (): void => {
@@ -513,37 +588,49 @@ export class Engine {
     } finally { clearInterval(timer); controller.abort(); }
   }
 
-  private async ingestOutputs(attempt: Attempt, descriptors: IngestibleExecutionOutput[]): Promise<{ output: IngestibleExecutionOutput; record: ArtifactRecord }[] | null> {
+  private async ingestOutputs(attempt: Attempt, descriptors: IngestibleExecutionOutput[]): Promise<IngestedOutput[] | null> {
     return this.withLease(attempt, async signal => {
-      const outputs: { output: IngestibleExecutionOutput; record: ArtifactRecord }[] = [];
+      const outputs: IngestedOutput[] = [];
       for (const output of descriptors) {
         if (signal.aborted) return [];
         const received = this.outputIngestor ? await this.outputIngestor.ingest({ attempt: structuredClone(attempt),
           output: structuredClone(output), artifactDir: this.artifactDir, signal }) : this.materializeFixture(attempt, output);
         if (signal.aborted) return [];
-        const record = structuredClone(received);
-        await this.validateIngested(attempt, output, record, signal);
-        outputs.push({ output, record });
+        const snapshot = structuredClone(received);
+        const normalized = "type" in snapshot && snapshot.type === "normalized_video" ? snapshot : undefined;
+        const record = normalized ? normalized.artifact : snapshot as ArtifactRecord;
+        await this.validateIngested(attempt, output, record, signal, normalized);
+        outputs.push({ output, record, ...(normalized ? { normalized } : {}) });
       }
       return outputs;
     });
   }
 
-  private async validateIngested(attempt: Attempt, output: IngestibleExecutionOutput, record: ArtifactRecord, signal: AbortSignal): Promise<void> {
+  private validateDerived(attempt: Attempt, output: IngestibleExecutionOutput, result: NormalizedVideoIngestion): VideoDerivationIntent {
+    const intent = this.store.get<VideoDerivationIntent>("video_derivation_intent", result.derivation?.id);
+    invariant(intent, "VIDEO_DERIVATION_CONFLICT", "Generated video requires its durable pre-transcode intent");
+    assertNormalizedVideoIngestion(intent, attempt, output, result); return intent;
+  }
+
+  private async validateIngested(attempt: Attempt, output: IngestibleExecutionOutput, record: ArtifactRecord, signal: AbortSignal, normalized?: NormalizedVideoIngestion): Promise<void> {
+    const derivation = normalized ? this.validateDerived(attempt, output, normalized) : undefined;
+    const expectedSha = normalized ? normalized.derivation.source.sha256 : output.sha256;
+    const expectedSize = normalized ? normalized.derivation.source.byteLength : isSpoolOutput(output) ? output.byteLength : undefined;
+    const maxBytes = derivation ? derivation.normalization.maxOutputBytes : isSpoolOutput(output) ? EXECUTION_SPOOL_LIMITS[output.kind] : MAX_EXECUTION_OUTPUT_BYTES;
     invariant(typeof record?.id === "string" && record.id.length > 0 && record.projectId === attempt.projectId && record.attemptId === attempt.id
-      && record.artifact?.artifactId === record.id && record.artifact.sha256 === output.sha256 && record.artifact.kind === output.kind
+      && record.artifact?.artifactId === record.id && record.artifact.sha256 === expectedSha && record.artifact.kind === output.kind
       && record.mimeType === output.mimeType && record.fixture === output.fixture && typeof record.path === "string" && isAbsolute(record.path)
       && (record.physicalDurationSeconds === null || (Number.isFinite(record.physicalDurationSeconds) && record.physicalDurationSeconds > 0)),
     "INVALID_PROVIDER_OUTPUT", "Ingested artifact does not match the admitted output identity");
     if (isSpoolOutput(output)) invariant(record.outputReceiptId === output.storage.spoolId && record.outputSpoolId === output.storage.spoolId
-      && record.byteLength === output.byteLength, "INVALID_PROVIDER_OUTPUT", "Ingested artifact lost its exact spool provenance");
+      && record.byteLength === expectedSize, "INVALID_PROVIDER_OUTPUT", "Ingested artifact lost its exact spool or derivation provenance");
     const root = realpathSync(this.artifactDir), path = realpathSync(record.path), rel = relative(root, path);
     invariant(rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel),
       "INVALID_PROVIDER_OUTPUT", "Ingested artifact is outside the owned artifact directory");
     const file = await open(record.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
-      const stat = await file.stat(), maxBytes = isSpoolOutput(output) ? EXECUTION_SPOOL_LIMITS[output.kind] : MAX_EXECUTION_OUTPUT_BYTES;
-      invariant(stat.isFile() && stat.size > 0 && stat.size <= maxBytes && (!isSpoolOutput(output) || stat.size === output.byteLength),
+      const stat = await file.stat();
+      invariant(stat.isFile() && stat.size > 0 && stat.size <= maxBytes && (expectedSize === undefined || stat.size === expectedSize),
         "INVALID_PROVIDER_OUTPUT", "Ingested artifact exceeds the execution byte limit");
       const hash = createHash("sha256"), buffer = Buffer.alloc(1024 * 1024); let size = 0;
       for (;;) {
@@ -552,7 +639,7 @@ export class Engine {
         size += read.bytesRead; invariant(size <= stat.size && size <= maxBytes, "ARTIFACT_CORRUPT", "Ingested artifact grew during verification");
         hash.update(buffer.subarray(0, read.bytesRead));
       }
-      invariant(size === stat.size && hash.digest("hex") === output.sha256,
+      invariant(size === stat.size && hash.digest("hex") === expectedSha,
         "ARTIFACT_CORRUPT", "Ingested artifact bytes differ from the completion receipt");
     } finally { await file.close(); }
     invariant(!signal.aborted, "OUTPUT_STORE_CANCELLED", "Artifact verification cancelled");

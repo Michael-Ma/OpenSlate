@@ -40,13 +40,18 @@ export interface ProviderProfile {
   id: Id;
   revision: string;
   kind: OperationKind;
-  adapter: "fake";
+  adapter: string;
+  /** Execution mapping contract, independent of this profile's revision. */
+  executionVersion?: string;
+  /** Non-secret, pinned transport settings. Omitted on historical fake profiles. */
+  configuration?: ProviderConfiguration;
   maxConcurrency: number;
   unitCostMicros: string;
   maxRetries: number;
   minFrames?: number;
   maxFrames?: number;
 }
+export interface ProviderConfiguration { model: string; settings?: JsonObject }
 
 export interface ProjectRecord {
   id: Id;

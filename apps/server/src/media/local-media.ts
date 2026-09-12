@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { runMediaProcess } from "./process.js";
-import type { FrozenRenderManifest, LocalMediaOptions, MediaLimits, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
+import type { FrozenRenderManifest, LocalMediaOptions, MediaLimits, MediaNormalizationIdentity, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
 
 const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioPlacements: 64, timeoutMs: 120000 };
 // No playlists, concat demuxer, devices or network protocols. MOV external data
@@ -68,6 +68,17 @@ export class LocalMediaService {
     integer(this.limits.maxAudioTracks, 0, 8, "audio track limit");
     integer(this.limits.maxAudioPlacements, 0, 64, "audio placement limit");
     integer(this.limits.timeoutMs, 50, 600000, "tool time limit");
+  }
+
+  /** Version probes only; no source decoding/transcoding or application-state mutation. */
+  async describeNormalization(options: { signal?: AbortSignal } = {}): Promise<MediaNormalizationIdentity> {
+    const signal = options.signal;
+    return this.exclusive(async () => {
+      const toolchainDigest = await this.toolchainDigest(signal); aborted(signal);
+      return frozen({ version: 1 as const, recipe: "silent-h264-30fps-v1" as const, toolchainDigest,
+        maxInputBytes: this.limits.maxInputBytes, maxOutputBytes: this.limits.maxOutputBytes,
+        maxDurationFrames: this.limits.maxDurationFrames, timeoutMs: this.limits.timeoutMs });
+    });
   }
 
   /** Read-only inspection of a bounded snapshot, never a remote URL. */

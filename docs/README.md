@@ -23,7 +23,10 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |
 | [Provider execution boundary](implementation/PROVIDER-EXECUTION.md) | Registered executor contracts, receipt identity, ingestion and recovery |
+| [Frozen provider routing](implementation/PROVIDER-ROUTING.md) | Immutable adapter catalog, pinned profiles, separate spending admission and provider-call leases |
+| [Image execution bridge](implementation/OPENAI-IMAGE-EXECUTION.md) | Exact admitted image requests, durable single dispatch and response recovery |
 | [Owned spool completions](implementation/SPOOL-COMPLETIONS.md) | Versioned completion receipts, local recovery, exact PNG ingestion and lease protection |
+| [Generated video normalization](implementation/GENERATED-VIDEO-DERIVATION.md) | Separate raw/normalized identities, measured frames and durable derivation recovery |
 | [Durable output storage](implementation/OUTPUT-SPOOL.md) | Owned receipt/spool identities, bounded streaming and crash recovery |
 | [Protected video downloading](implementation/VIDEO-DOWNLOAD.md) | Pinned HTTPS destination, bounded streams, cancellation and durable spool integration |
 | [Local image ingestion](implementation/IMAGE-INGESTION.md) | Full PNG validation, exact bytes and immutable publication |

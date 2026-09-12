@@ -4,7 +4,7 @@ An open-source video agent for turning a story into a finished film.
 
 OpenSlate is designed to plan scenes and shots, create reference assets, generate video takes, and assemble an editable timeline for rendering and post-processing.
 
-**Status: an early local studio with native Codex conversations and supplied-media workflows.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images, accept exact narration and render a compatible local timeline. SQLite state, validated plans, durable jobs and human review remain application-owned. The demo uses fake generation; offline-tested GPT Image 2 and H3 transports are not yet connected to production execution or credentials. The full generated-film workflow remains in development. See [verified status](docs/implementation/STATUS.md).
+**Status: an early local studio with native Codex conversations and supplied-media workflows.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images, accept exact narration and render a compatible local timeline. SQLite state, validated plans, durable jobs and human review remain application-owned. The shipped launcher uses fake generation. Offline-tested components now include frozen provider routing, an image execution bridge and recoverable video normalization; human provider/spending setup and live media validation remain in development. See [verified status](docs/implementation/STATUS.md).
 
 ## Direction
 

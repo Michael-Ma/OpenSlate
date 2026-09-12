@@ -32,6 +32,26 @@ function reject(source, context, code) {
   assert.throws(() => compilePlan(source, context), error => error.code === code, `expected ${code}`);
 }
 
+test("legacy profile arguments stay exact while explicit adapter configuration changes review and cache identity", () => {
+  const context = fixture(), source = plan(context), legacy = compilePlan(source, context);
+  assert.deepEqual(legacy.nodes[0].args, { profileRevision: "1", profileIdentity: "fake-image-v1", adapter: "fake",
+    prompt: "Brown boot close-up", width: 1024, height: 1024, settings: {} });
+  const legacyDigest = legacy.graphDigest;
+  assert.equal(compilePlan(source, context).graphDigest, legacyDigest);
+  const video = context.profiles.find(profile => profile.kind === "video");
+  Object.assign(video, { adapter: "minimax-h3", executionVersion: "1", revision: "2026-09-12", configuration: { model: "MiniMax-H3", settings: { resolution: "768P" } } });
+  const changed = compilePlan(source, context);
+  assert.equal(changed.nodes[0].specDigest, legacy.nodes[0].specDigest);
+  assert.notEqual(changed.nodes[1].specDigest, legacy.nodes[1].specDigest);
+  assert.equal(changed.nodes[1].args.executionVersion, "1"); assert.equal(changed.nodes[1].args.profileRevision, "2026-09-12");
+  assert.equal(changed.gates[0].members[0].recipeDigest, changed.nodes[1].specDigest);
+  video.configuration.model = "MiniMax-H3-Max";
+  assert.equal(changed.nodes[1].args.profileConfiguration.model, "MiniMax-H3");
+  assert.notEqual(compilePlan(source, context).nodes[1].specDigest, changed.nodes[1].specDigest);
+  const invalid = fixture(); invalid.profiles[0] = { ...invalid.profiles[0], adapter: "external" };
+  reject(plan(invalid), invalid, "PROFILE_INCOMPATIBLE");
+});
+
 test("lowers a reviewed shot into typed dependency inputs and an unresolved human gate", () => {
   const context = fixture(); const result = compilePlan(plan(context), context);
   assert.deepEqual(result.nodes.map(node => node.kind), ["image", "video", "timeline", "render"]);

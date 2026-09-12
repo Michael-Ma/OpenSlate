@@ -83,9 +83,12 @@ test("live measured cue readiness is rechecked even after keyframe approval", as
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "TIMING_REQUIRED");
 });
 test("late stale-lease evidence is retained and cannot overwrite the active fence", async t => {
-  const f = setup(t, { count: 1, leaseMs: 5 }); let release; const original = f.provider.submit.bind(f.provider);
-  f.provider.submit = async request => { const outcome = await original(request); await new Promise(resolve => { release = resolve; }); return outcome; };
-  const running = f.engine.runReady(); await new Promise(resolve => setTimeout(resolve, 15));
+  const f = setup(t, { count: 1, leaseMs: 150 }); let release, started; const entered = new Promise(resolve => { started = resolve; });
+  const original = f.provider.submit.bind(f.provider);
+  f.provider.submit = async request => { const outcome = await original(request); await new Promise(resolve => { release = resolve; started(); }); return outcome; };
+  const running = f.engine.runReady(); await entered;
+  // Submission now renews its lease. Explicitly lose it rather than relying on a slow call.
+  const attempt = f.engine.attempts(f.projectId)[0]; f.store.put("attempt", attempt.id, f.projectId, { ...attempt, leaseExpiresAt: 0 });
   const second = new Store(f.dbPath); const provider = new FakeProvider(f.providerPath); const engine = new Engine(second, provider, { artifactDir: f.artifactDir });
   try {
     await engine.reconcile(); release(); await running;
@@ -153,10 +156,10 @@ test("restart uses immutable lock prices and profiles instead of changed constru
   } finally { store.close(); provider.close(); }
 });
 
-test("unsupported pinned handler version blocks dispatch without falling back to constructor defaults", async t => {
+test("changed pinned profile revision blocks the old compiled node without falling back to defaults", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const project = f.store.getProject(f.projectId);
   f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES.map(profile => ({ ...profile, revision: "2" })) });
-  const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "CAPABILITY_LOCK_UNSUPPORTED"); assert.equal(f.provider.acceptedCount(), 0);
+  const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "PROFILE_INCOMPATIBLE"); assert.equal(f.provider.acceptedCount(), 0);
 });
 
 test("identical finalized local inputs rebind cached derivatives after an explicit new video candidate", async t => {

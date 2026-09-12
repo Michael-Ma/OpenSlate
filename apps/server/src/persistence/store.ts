@@ -6,6 +6,11 @@ import type { JsonObject, ProjectEvent, ProjectRecord } from "@openslate/core";
 import { verifySchema } from "./schema.js";
 import { initializeDatabase } from "./migrations.js";
 import { flushSnapshot, prepareSnapshotDirectory, snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
+import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
+import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
+import type { Attempt, ArtifactRecord } from "../execution/engine.js";
+import { assertImageExecutionDispatch, assertImageExecutionMapping, assertImageExecutionResult } from "../execution/openai-image-receipts.js";
+import type { ImageExecutionDispatch, ImageExecutionMapping, ImageExecutionResult } from "../execution/openai-image-receipts.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -161,6 +166,56 @@ export class Store {
         && body.port === spool.port && body.storageId === spool.storageId && body.sha256 === spool.sha256 && body.byteLength === spool.byteLength,
       "IDENTITY_MISMATCH", "Output slot must match its owned spool identity");
     }
+    if (["image_execution_mapping", "image_execution_dispatch", "image_execution_result"].includes(kind)) {
+      reference("attempt", id);
+      const attempt = this.get<Attempt>("attempt", id)!;
+      const value = { ...body, id, projectId };
+      const mapping = this.get<ImageExecutionMapping>("image_execution_mapping", id);
+      const dispatch = this.get<ImageExecutionDispatch>("image_execution_dispatch", id);
+      if (kind === "image_execution_mapping") {
+        // A failed local preparation freezes its absence of a mapping as well.
+        invariant(!this.get("image_execution_result", id) || !!mapping, "IMAGE_EXECUTION_CONFLICT", "Terminal image preparation cannot acquire a new mapping");
+        assertImageExecutionMapping(attempt, value as unknown as ImageExecutionMapping);
+        for (const input of (value as unknown as ImageExecutionMapping).transport.inputs) reference("artifact", input.artifactId);
+      } else if (kind === "image_execution_dispatch") {
+        reference("image_execution_mapping", id);
+        invariant(!this.get("image_execution_result", id) || !!dispatch, "IMAGE_EXECUTION_CONFLICT", "Terminal image preparation cannot acquire a dispatch");
+        assertImageExecutionDispatch(attempt, mapping!, value as unknown as ImageExecutionDispatch);
+      } else {
+        const result = value as unknown as ImageExecutionResult;
+        const outputId = result.observation?.kind === "completed" ? result.observation.outputReceiptId : undefined;
+        if (outputId !== undefined) reference("execution_output_receipt", outputId);
+        assertImageExecutionResult(attempt, mapping, dispatch, result, outputId ? this.get("execution_output_receipt", outputId) : undefined);
+      }
+    }
+    if (kind === "video_derivation_intent") {
+      reference("attempt", body.attemptId); reference("execution_output_slot", body.slotId); reference("execution_output_spool", body.spoolId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      const slot = this.get<{ spoolId: string; attemptId: string; port: string }>("execution_output_slot", String(body.slotId))!;
+      const spool = this.get<{ sha256: string; byteLength: number }>("execution_output_spool", String(body.spoolId))!;
+      invariant(slot.spoolId === body.spoolId && slot.attemptId === body.attemptId && slot.port === "video", "IDENTITY_MISMATCH", "Video derivation must bind the exact winning raw slot");
+      assertVideoDerivationIntent({ ...body, id, projectId } as unknown as VideoDerivationIntent, attempt,
+        { port: "video", kind: "video", mimeType: "video/mp4", extension: "mp4", sha256: spool.sha256, byteLength: spool.byteLength,
+          fixture: false, storage: { type: "spool", spoolId: String(body.spoolId) } });
+    }
+    if (kind === "video_derivation_receipt") {
+      reference("video_derivation_intent", id);
+      const intent = this.get<VideoDerivationIntent>("video_derivation_intent", id)!;
+      const receipt = { ...body, id, projectId } as unknown as VideoDerivationReceipt;
+      assertVideoDerivationReceipt(intent, receipt); reference("artifact", receipt.source.artifactId);
+      const artifact = this.get<ArtifactRecord>("artifact", receipt.source.artifactId)!;
+      invariant(artifact.attemptId === intent.attemptId && artifact.origin === "generated_video" && artifact.derivationId === id
+        && artifact.artifact.sha256 === receipt.source.sha256 && artifact.artifact.kind === "video"
+        && artifact.sourceDescriptorId === receipt.source.id && artifact.byteLength === receipt.source.byteLength
+        && artifact.outputSpoolId === intent.spoolId && artifact.outputReceiptId === intent.spoolId,
+      "IDENTITY_MISMATCH", "Derivation receipt must bind its normalized owned artifact");
+    }
+    if (kind === "media_source" && body.origin === "generated_video") {
+      reference("artifact", id); reference("attempt", body.attemptId); reference("video_derivation_receipt", body.derivationId);
+      const receipt = this.get<VideoDerivationReceipt>("video_derivation_receipt", String(body.derivationId))!;
+      invariant(receipt.source.artifactId === id && receipt.attemptId === body.attemptId && canonical(receipt.source) === canonical(body.source)
+        && body.requestId === undefined, "IDENTITY_MISMATCH", "Generated media source must retain its exact derivation without upload authority");
+    }
     if (kind === "director_turn") {
       reference("message", body.requestId);
       if (body.epochId !== null) reference("epoch", body.epochId);
@@ -202,7 +257,7 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;

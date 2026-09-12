@@ -60,7 +60,7 @@ This is an **optional PNG-only hook**, not the default materializer and not a mi
 
 ## Remaining boundaries
 
-- MP4 descriptors can represent bounded owned bytes, but the production PNG hook rejects them. Generated video needs a separate normalization derivation preserving raw SHA, normalized SHA, pinned recipe/toolchain, measured frames and the renderable `media_source` record. Engine must not silently compare a normalized file against a raw provider hash.
+- MP4 descriptors can represent bounded owned bytes, but the PNG hook rejects them. The separately injected [generated-video derivation](GENERATED-VIDEO-DERIVATION.md) preserves raw and normalized SHA values, pinned recipe/toolchain, measured frames and a renderable generated `media_source`. Its initial normalization input cap is 128 MiB; it is not wired into the launcher. Engine accepts a derived hash only through that explicit tagged contract.
 - The 256-MiB Engine path is streamed file-integrity verification, not video decoding or a memory benchmark. PNG validation still keeps bounded image buffers and decoder work. Existing input verification and browser previews still buffer whole files.
 - A future provider bridge must persist the mapping from the complete application request digest to the transport's prepared payload digest before submission. These are different identities.
 - Credential resolution, real profile admission, transport outcome mapping, downloads, allowance enforcement, and live provider verification remain separate. Protected receipt locators must stay out of ordinary UI, event and model projections.

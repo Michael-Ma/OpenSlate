@@ -1,6 +1,7 @@
 import { parse } from "@babel/parser";
 import { Worker } from "node:worker_threads";
 import { canonical, digest, DomainError, invariant } from "../common.js";
+import { providerProfileArguments } from "../provider-profile.js";
 import type {
   ArtifactRef, CompileContext, CompiledPlan, CueRecord, InputBinding, InputSource, JsonObject,
   JsonValue, NodeImpact, OperationKind, PlanNode, ProviderProfile, ReviewGate, ShotRecord,
@@ -165,7 +166,7 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
     const name = string(value, "profile"); const matches = context.profiles.filter(profile => profile.id === name || `${profile.id}@${profile.revision}` === name);
     invariant(matches.length === 1 && matches[0]!.kind === kind, "PROFILE_INCOMPATIBLE", `Unknown or incompatible ${kind} profile: ${name}`); return matches[0]!;
   };
-  const profileArgs = (profile: ProviderProfile): JsonObject => ({ profileRevision: profile.revision, profileIdentity: profile.id, adapter: profile.adapter });
+  const profileArgs = providerProfileArguments;
   const intentFor = (shot: ShotRecord | null, kind: OperationKind): string => {
     if (!shot) return digest({});
     const type = kind === "image" ? "image" : "video";

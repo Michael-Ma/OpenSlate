@@ -26,6 +26,12 @@ export interface MediaProbe {
   audio?: { streamIndex: number; sampleRate: number; channels: number; samples: number | null; durationSeconds: number; codec: string };
 }
 
+/** Read-only identity of the current video normalization algorithm and worker bounds. */
+export interface MediaNormalizationIdentity {
+  version: 1; recipe: "silent-h264-30fps-v1"; toolchainDigest: string;
+  maxInputBytes: number; maxOutputBytes: number; maxDurationFrames: number; timeoutMs: number;
+}
+
 /** A measured, normalized, service-issued descriptor. No caller-selected storage path. */
 export interface SuppliedMedia {
   id: string;

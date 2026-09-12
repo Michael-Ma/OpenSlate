@@ -1,13 +1,18 @@
-import { invariant } from "@openslate/core";
-import type { ArtifactRef, JsonObject, OperationKind, ProviderProfile } from "@openslate/core";
+import { canonical, invariant, providerProfileArguments } from "@openslate/core";
+import type { ArtifactRef, JsonObject, OperationKind, ProviderConfiguration, ProviderProfile } from "@openslate/core";
 
 /** Application execution contract, independent of any vendor's HTTP protocol. */
 export interface ExecutionIdentity { adapter: string; version: string }
+export interface ExecutionProfileSnapshot { id: string; revision: string; configuration: ProviderConfiguration; digest: string }
 export interface ExecutionRequest {
   attemptId: string; nodeId: string; kind: OperationKind; fingerprint: string;
   args: JsonObject; inputs: ArtifactRef[];
   /** Absent only on historical requests, which used the fake/v1 contract. */
   execution?: ExecutionIdentity;
+  /** Pinned only on new explicit profiles; never backfilled into historical requests. */
+  profile?: ExecutionProfileSnapshot;
+  /** Application-issued spending correlation, never a credential. */
+  externalAllowanceId?: string;
 }
 export interface ExecutionOutput {
   port: string; kind: ArtifactRef["kind"]; mimeType: string; extension: string;
@@ -32,20 +37,45 @@ export type ExecutionOutcome =
   | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed?: boolean }
   | { type: "unknown"; diagnostic: string; taskId?: string };
 export interface ExecutionProvider {
-  submit(request: ExecutionRequest): Promise<ExecutionOutcome>;
-  poll(taskId: string): Promise<ExecutionOutcome>;
+  submit(request: ExecutionRequest, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
+  poll(taskId: string, request?: Readonly<ExecutionRequest>, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
   /** A missing receipt must remain unknown; this operation must never submit. */
-  lookup(attemptId: string): Promise<ExecutionOutcome>;
+  lookup(attemptId: string, request?: Readonly<ExecutionRequest>, options?: ExecutionCallOptions): Promise<ExecutionOutcome>;
+}
+export interface ExecutionCallOptions {
+  signal?: AbortSignal;
+  /** Ephemeral caller authority for first dispatch; never part of a saved request or receipt. */
+  expectedLease?: Readonly<{ owner: string; epoch: number }>;
 }
 
 const LEGACY_IDENTITY = Object.freeze({ adapter: "fake", version: "1" });
 const registrations = new WeakMap<ExecutionProvider, Readonly<ExecutionIdentity>>();
 const generated = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 
-/** Trusted host registration. V0 admits only the existing fake contract; transports are not registrations. */
+const contractId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
+const identityKey = (identity: ExecutionIdentity) => JSON.stringify([identity.adapter, identity.version]);
+export function isLegacyExecution(identity: ExecutionIdentity): boolean { return identity.adapter === "fake" && identity.version === "1"; }
+export function requestExecutionIdentity(request: ExecutionRequest): Readonly<ExecutionIdentity> {
+  const identity = request.execution ?? LEGACY_IDENTITY;
+  invariant(identity && contractId(identity.adapter) && contractId(identity.version)
+    && Object.keys(identity).every(key => ["adapter", "version"].includes(key)), "PROVIDER_NOT_REGISTERED", "Invalid saved execution identity");
+  return Object.freeze({ adapter: identity.adapter, version: identity.version });
+}
+export function profileExecutionIdentity(profile: ProviderProfile): Readonly<ExecutionIdentity> {
+  providerProfileArguments(profile);
+  invariant(generated.has(profile.kind), "CAPABILITY_LOCK_UNSUPPORTED", "Profile is not a generated operation");
+  return Object.freeze({ adapter: profile.adapter, version: profile.executionVersion ?? "1" });
+}
+export function executionProfileSnapshot(profile: ProviderProfile): ExecutionProfileSnapshot | undefined {
+  const args = providerProfileArguments(profile);
+  if (args.profileDigest === undefined) return undefined;
+  return { id: profile.id, revision: profile.revision, configuration: structuredClone(profile.configuration!), digest: String(args.profileDigest) };
+}
+
+/** Trusted host registration establishes availability only, never spending permission. */
 export function registerExecutionProvider<T extends ExecutionProvider>(provider: T, identity: ExecutionIdentity): T {
-  invariant(identity?.adapter === LEGACY_IDENTITY.adapter && identity.version === LEGACY_IDENTITY.version,
-    "PROVIDER_NOT_REGISTERED", "This execution contract is not enabled");
+  invariant(identity && contractId(identity.adapter) && contractId(identity.version)
+    && Object.keys(identity).every(key => ["adapter", "version"].includes(key)), "PROVIDER_NOT_REGISTERED", "Invalid execution contract identity");
   invariant(provider && typeof provider.submit === "function" && typeof provider.poll === "function"
     && typeof provider.lookup === "function", "PROVIDER_NOT_REGISTERED", "Incomplete execution provider");
   const old = registrations.get(provider);
@@ -60,14 +90,44 @@ export function executionIdentity(provider: ExecutionProvider): Readonly<Executi
   return identity;
 }
 export function assertExecutionProfile(provider: ExecutionProvider, profile: ProviderProfile): void {
-  const identity = executionIdentity(provider);
-  invariant(profile.adapter === identity.adapter && profile.revision === identity.version && generated.has(profile.kind),
+  const identity = executionIdentity(provider), pinned = profileExecutionIdentity(profile);
+  invariant(pinned.adapter === identity.adapter && pinned.version === identity.version,
     "CAPABILITY_LOCK_UNSUPPORTED", "Pinned profile does not match the registered execution contract");
 }
 export function assertExecutionRequest(provider: ExecutionProvider, request: ExecutionRequest): void {
-  const registered = executionIdentity(provider), saved = request.execution ?? LEGACY_IDENTITY;
+  const registered = executionIdentity(provider), saved = requestExecutionIdentity(request);
   invariant(saved.adapter === registered.adapter && saved.version === registered.version,
     "PROVIDER_NOT_REGISTERED", "Attempt belongs to a different execution contract");
+  if (!isLegacyExecution(saved) || request.profile !== undefined || request.args.executionVersion !== undefined || request.args.profileConfiguration !== undefined) {
+    const profile = request.profile;
+    invariant(profile && Object.keys(profile).every(key => ["id", "revision", "configuration", "digest"].includes(key)), "PROFILE_INCOMPATIBLE", "Attempt has no exact frozen profile");
+    const args = providerProfileArguments({ id: profile.id, revision: profile.revision, kind: request.kind, adapter: saved.adapter,
+      executionVersion: saved.version, configuration: profile.configuration, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 });
+    invariant(profile.digest === args.profileDigest && Object.entries(args).every(([key, value]) => Object.hasOwn(request.args, key) && canonical(request.args[key]) === canonical(value)),
+      "PROFILE_INCOMPATIBLE", "Attempt profile differs from its frozen execution inputs");
+  }
+}
+/** An immutable installation catalog. Missing routes never fall back to another adapter. */
+export class ExecutionRegistry {
+  readonly #providers = new Map<string, ExecutionProvider>();
+  constructor(providers: readonly ExecutionProvider[]) {
+    invariant(Array.isArray(providers) && providers.length > 0 && providers.length <= 64, "PROVIDER_NOT_REGISTERED", "Use a bounded provider catalog");
+    for (const provider of providers) {
+      const key = identityKey(executionIdentity(provider));
+      invariant(!this.#providers.has(key), "PROVIDER_REGISTRATION_CONFLICT", "One execution identity can have only one registered implementation");
+      this.#providers.set(key, provider);
+    }
+  }
+  resolve(identity: ExecutionIdentity): ExecutionProvider {
+    const provider = this.#providers.get(identityKey(identity));
+    invariant(provider, "PROVIDER_NOT_REGISTERED", "The pinned execution adapter is unavailable"); return provider;
+  }
+  forProfile(profile: ProviderProfile): ExecutionProvider {
+    const provider = this.resolve(profileExecutionIdentity(profile)); assertExecutionProfile(provider, profile); return provider;
+  }
+  forRequest(request: ExecutionRequest): ExecutionProvider {
+    const provider = this.resolve(requestExecutionIdentity(request)); assertExecutionRequest(provider, request); return provider;
+  }
 }
 /** Preserve the historical source label without making Engine depend on FakeProvider. */
 export function executionFailureSource(provider: ExecutionProvider): string {
