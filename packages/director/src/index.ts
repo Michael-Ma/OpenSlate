@@ -1,4 +1,4 @@
-/** Initial boundary only. The Codex adapter and event/tool protocols are planned. */
+/** Supervisor/native reasoning adapter remains pending; skills and MCP transport are implemented below. */
 export interface DirectorSession {
   id: string;
   projectId: string;
@@ -11,3 +11,6 @@ export interface DirectorRuntime {
   interrupt(sessionId: string): Promise<void>;
   dispose(): Promise<void>;
 }
+
+export * from "./skills/index.js";
+export * from "./tools/index.js";

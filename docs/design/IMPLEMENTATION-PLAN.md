@@ -1,7 +1,7 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.5 · September 10, 2026
-**Status:** detailed design complete for review; production features remain unimplemented. The existing repository provides the web/API skeleton and build/typecheck CI.
+**Version:** 0.8 · September 11, 2026
+**Status:** backend and skill/tool foundations verified with fake media. T00–T04 and the T06 foundation have working evidence. Live native skill inputs and two actual application-backed edits passed across replacement, as did command-sandbox canaries. Code-host/credential isolation and the production supervisor remain open. See [implementation status](../implementation/STATUS.md). Real generation and the review UI remain unimplemented.
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
@@ -127,6 +127,12 @@ Add stage/gap assessment and focused task-prompt references, pinned with recipe/
 
 **Exit evidence:** a follow-up request preserves settled intent and locked skill content, produces a valid scoped plan, and cannot fabricate human approval or technical-retry authority. Interrupt/unknown-turn recovery preserves previous command effects. Measure process restart/resume overhead before optimizing the safe epoch boundary.
 
+**September 11 progress:** the two instruction packages, strict loader, immutable snapshots/locks, request activations, fixed five-tool bridge, paged context and durable invocation outcomes are implemented. The full checkout passes 195 tests plus builds/typechecks. Separate synthetic live tests demonstrated MCP calls and model continuation after process replacement using canonical context. See [T06 implementation](../implementation/T06-SKILLS-TOOLS.md) and [live evidence](../implementation/CODEX-MCP-FOLLOWUP.md).
+
+**Latest validation:** the [three-start allowance](../implementation/CODEX-NEXT-VALIDATION.md) is consumed. Both scoped edits passed with explicit native skill inputs and 13 durable successful tool calls. Command sandbox canaries passed; the final model declined the code-host script, so that boundary remains inconclusive. See [full evidence and timings](../implementation/CODEX-SKILL-VALIDATION.md).
+
+**Next:** establish code-host/credential enforcement using a deterministic test or independently enforced boundary before exposing real media authority. Continue the supervisor, durable turn dispatch/reconciliation, wakeups and pending replies against offline fixtures. Include strict named-profile selection/serialization tests and reduce duplicated context while retaining freshness checks. Connect explicit stage/gap proposals and browser conversation after those foundations. Further native turns require a new allowance; T06 remains open.
+
 **Design:** [Director runtime](../technical/DIRECTOR-RUNTIME.md), [skills/tools](../technical/SKILLS-TOOLS.md).
 
 ### T07 — Narration readiness, source choices and cue propagation
@@ -177,7 +183,7 @@ For each task create a bounded implementation brief that references the relevant
 
 Shared schema/identity changes have one integration owner. Agents can author disjoint adapters, fixtures or reviews after interfaces settle; they must not independently change core grant/revision/error semantics. Any contract revision updates the relevant design and tests in the same PR.
 
-Current `pnpm check` builds and typechecks. Add meaningful test commands when their harness lands; do not report nonexistent suites as passing. Every task remains pending until its exit evidence exists. Documentation review is not a completed runtime compatibility, provider-access or six-minute quality test.
+Current `pnpm check` builds, runs the Node test suite and typechecks. Use the status page to distinguish implemented foundations from complete task exit criteria. Documentation review is not a completed runtime compatibility, provider-access or six-minute quality test.
 
 ## 8. Decisions still resolved by implementation evidence
 

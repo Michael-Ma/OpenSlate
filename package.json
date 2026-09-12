@@ -5,13 +5,19 @@
   "description": "An open-source video agent for planning, generating, and editing long-form video.",
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "pnpm build:packages && pnpm --parallel --filter './apps/*' dev",
     "build:packages": "pnpm --filter './packages/*' -r build",
     "build": "pnpm -r build",
     "typecheck": "pnpm build:packages && pnpm -r typecheck",
-    "check": "pnpm build && pnpm -r typecheck"
+    "check": "pnpm test && pnpm -r typecheck",
+    "test": "pnpm build && node --test packages/core/test/*.test.mjs packages/providers/test/*.test.mjs packages/director/test/*.test.mjs apps/server/test/*.test.mjs",
+    "demo:headless": "pnpm build && node apps/server/dist/demo.js",
+    "probe:runtime": "pnpm build:packages && node packages/director/dist/probe/cli.js",
+    "probe:toolchain": "pnpm build && node apps/server/dist/toolchain-probe.js"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

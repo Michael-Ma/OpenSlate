@@ -1,0 +1,8 @@
+{
+  "id": "plan-authoring",
+  "version": "1.0.0",
+  "entry": "SKILL.md",
+  "files": ["SKILL.md", "references/grammar.md", "references/example.md", "references/example-context.json"],
+  "compatibility": { "toolContract": "1.0.0", "planLanguage": "1.0.0", "workflowContract": "1.0.0" },
+  "requiredToolIds": ["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"]
+}

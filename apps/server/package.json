@@ -7,8 +7,18 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "node --test test/*.test.mjs"
   },
-  "dependencies": { "@openslate/core": "workspace:*", "fastify": "5.12.3" },
-  "devDependencies": { "tsx": "4.23.13" }
+  "dependencies": {
+    "@openslate/core": "workspace:*",
+    "@openslate/providers": "workspace:*",
+    "@openslate/director": "workspace:*",
+    "fastify": "5.12.3",
+    "better-sqlite3": "13.0.3"
+  },
+  "devDependencies": {
+    "tsx": "4.23.13",
+    "@types/better-sqlite3": "9.6.0"
+  }
 }

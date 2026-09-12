@@ -1,7 +1,7 @@
 # Director runtime technical design
 
-**Version:** 0.5 · September 10, 2026
-**Status:** proposed implementation. The existing `packages/director` exports only a lifecycle placeholder; the integration described here does not exist yet.
+**Version:** 0.8 · September 11, 2026
+**Status:** production adapter proposed; skill locks, a fixed MCP bridge and durable application context/tool records are implemented. Synthetic live tests verified MCP dispatch and two actual application-backed edits with explicit skill inputs across process replacement. The supervisor and browser conversation integration remain pending. See [implementation status](../implementation/STATUS.md) and the [T06 implementation breakdown](../implementation/T06-SKILLS-TOOLS.md).
 
 ## 1. Responsibility and ownership
 
@@ -70,6 +70,10 @@ Avoid experimental WebSocket transport, dynamic tool registration, remote Code M
 
 Codex connects to OpenSlate's MCP server; OpenSlate does not embed the deprecated inverse `codex mcp-server` interface. Runtime tool-call notifications are useful for progress, but the corresponding application command receipt determines whether a change committed.
 
+The [MCP follow-up](../implementation/CODEX-MCP-FOLLOWUP.md) verified the planned stdio transport on Codex 0.153.4 with the native tool host enabled. Native approval policy also required explicit per-tool approval for the harmless synthetic handlers; application authorization remains independently enforced. The earlier dynamic-tool experiment remains diagnostic evidence only. Verify the effective tool/skill catalog after configuration overrides; empty table overrides and discovery flags alone did not remove inherited entries in the inspected runtime.
+
+In the tested explicit legacy history mode, native history APIs omitted tool output even though the saved session log retained it. Persist invocation identities and results in OpenSlate and reconstruct context from application records; do not make recovery or the UI depend on native history returning every tool result. Private native session-log parsing is diagnostic evidence, not a supported production dependency. The follow-up verified a real model turn after replacement with application-supplied prior receipts and current context. Native recall without that reconstruction remains unverified. A [later application-backed validation](../implementation/CODEX-SKILL-VALIDATION.md) accepted the exact native skill inputs on two scoped edits, while OpenSlate supplied and recorded their focused references. Pending-input replies, vision and production code-host/credential isolation remain separate gates.
+
 ## 4. Durable records and state transitions
 
 The server persists these records using the shared persistence conventions:
@@ -119,6 +123,12 @@ Normalize native pending requests into a durable ID, category, display text, all
 Provision a sanitized child environment with only the director's required model authentication. Keep media keys, SQLite files, application configuration secrets, and worker credentials inaccessible to native shell/file tools. Give Codex immutable skill snapshots, a read-only project projection, and bounded scratch storage. A separate runtime directory is useful state separation, but does not itself exclude inherited skill discovery or grant filesystem isolation.
 
 Do not expose unsandboxed process/shell API routes to the product. Verify effective sandbox, network, tools, and skill configuration with adversarial fixture requests. If the pinned runtime cannot enforce the required boundary on a supported OS, block real-generation integration until an enforceable isolation mechanism exists; prompt instructions are insufficient. Native sandbox/network settings and MCP access are separate surfaces. [Configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+
+The pinned runtime supports named permission profiles through experimental `permissions` selectors on thread start/resume and turn start, plus `permissionProfile` on `command/exec`. Do not combine these with legacy `sandbox`/`sandboxPolicy` selectors. Require the profile to be allowed and active, then exercise both positive and negative canaries. Keep filesystem path keys inside one structured permissions TOML value; dotted CLI overrides misparsed quoted paths in the tested binary. Treat configuration serialization and effective-profile verification as adapter compatibility tests.
+
+Observed boundaries are distinct: command sandbox canaries passed, but a live model declined the code-host canary script before execution. The first creative turn used four generic `exec` calls even with `features.code_mode=false`; that flag does not establish an absent execution surface. The app-server is trusted authentication-bearing code. Its permission to authenticate must not be confused with permission for model-generated code to inspect its files or environment. A native refusal or no observed network traffic cannot substitute for a host enforcement test.
+
+For context efficiency, supply a fresh application snapshot and only required verified references, retain a stable instruction prefix where practical, and refresh missing or stale sections. Avoid routinely supplying the entire source and then requiring it to be read again. Prepare/apply version and scope checks remain mandatory. The two-shot live fixture measured approximately 24/30 seconds per edit; these results do not establish production performance.
 
 ## 8. Recovery, models, and acceptance tests
 

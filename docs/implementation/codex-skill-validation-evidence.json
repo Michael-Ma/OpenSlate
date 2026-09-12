@@ -1,0 +1,198 @@
+{
+  "observedAt": "2026-09-12T02:49:05.927Z",
+  "runtime": "codex-cli 0.153.4",
+  "node": "24.15.0",
+  "model": "gpt-6-astra",
+  "effort": "low",
+  "overall": "partial",
+  "productionReady": false,
+  "allowance": {
+    "approvedStarts": 3,
+    "actualStarts": 3,
+    "previousStarts": 6,
+    "totalStarts": 9,
+    "remaining": 0
+  },
+  "turns": [
+    {
+      "ordinal": 1,
+      "status": "completed",
+      "validation": "passed_scoped_edit",
+      "elapsedSeconds": 23.755,
+      "nativeSkillSelectionsObserved": true,
+      "selectedSkills": [
+        {
+          "id": "plan-authoring",
+          "packageDigest": "f0284e141496a4b2ee6e19be5903e78c03c412df1614958ba3257f295347378a",
+          "entrySha256": "81f040eabf67446aa8b7a0f108fddb0d30f96d21200d2df98eb261d1f6c10149"
+        },
+        {
+          "id": "production",
+          "packageDigest": "a0ee6a6b355eb340ea18de2e4adcdeb9ab1cb5102d7cda6eac0209442c2197b2",
+          "entrySha256": "fbfb60576b11f674c916c4deb5fd0c7fa003cbe56d54fd73bcdcf19a8229b8c7"
+        }
+      ],
+      "focusedReferenceReads": 5,
+      "nativeUsageDelta": {
+        "totalTokens": 82280,
+        "inputTokens": 81804,
+        "cachedInputTokens": 60928,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 476,
+        "reasoningOutputTokens": 0
+      }
+    },
+    {
+      "ordinal": 2,
+      "status": "completed",
+      "validation": "passed_scoped_edit",
+      "elapsedSeconds": 29.537,
+      "nativeSkillSelectionsObserved": true,
+      "selectedSkills": [
+        {
+          "id": "plan-authoring",
+          "packageDigest": "f0284e141496a4b2ee6e19be5903e78c03c412df1614958ba3257f295347378a",
+          "entrySha256": "81f040eabf67446aa8b7a0f108fddb0d30f96d21200d2df98eb261d1f6c10149"
+        },
+        {
+          "id": "production",
+          "packageDigest": "a0ee6a6b355eb340ea18de2e4adcdeb9ab1cb5102d7cda6eac0209442c2197b2",
+          "entrySha256": "fbfb60576b11f674c916c4deb5fd0c7fa003cbe56d54fd73bcdcf19a8229b8c7"
+        }
+      ],
+      "focusedReferenceReads": 5,
+      "nativeUsageDelta": {
+        "totalTokens": 150441,
+        "inputTokens": 149939,
+        "cachedInputTokens": 135552,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 502,
+        "reasoningOutputTokens": 0
+      }
+    },
+    {
+      "ordinal": 3,
+      "status": "completed",
+      "validation": "inconclusive_model_declined_execution",
+      "elapsedSeconds": 7.805,
+      "nativeSkillSelectionsObserved": false,
+      "selectedSkills": [],
+      "focusedReferenceReads": 0,
+      "nativeUsageDelta": {
+        "totalTokens": 34634,
+        "inputTokens": 34545,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 89,
+        "reasoningOutputTokens": 47
+      },
+      "modelExecutedCanaryScript": false
+    }
+  ],
+  "commandSandbox": {
+    "result": "passed",
+    "checks": [
+      {
+        "name": "sandbox_allowed_canary_read",
+        "pass": true,
+        "errorCode": null
+      },
+      {
+        "name": "sandbox_denies_outside_read",
+        "pass": true,
+        "errorCode": "EPERM"
+      },
+      {
+        "name": "sandbox_denies_denied_subpath_read",
+        "pass": true,
+        "errorCode": "EPERM"
+      },
+      {
+        "name": "sandbox_denies_existing_write",
+        "pass": true,
+        "errorCode": "EPERM"
+      },
+      {
+        "name": "sandbox_denies_new_write",
+        "pass": true,
+        "errorCode": "EPERM"
+      },
+      {
+        "name": "sandbox_canaries_unchanged",
+        "pass": true,
+        "errorCode": null
+      },
+      {
+        "name": "owned_network_canary_available",
+        "pass": true,
+        "errorCode": null
+      },
+      {
+        "name": "sandbox_denies_direct_loopback_tcp",
+        "pass": true,
+        "errorCode": "EPERM"
+      }
+    ]
+  },
+  "codeHostIsolation": {
+    "result": "inconclusive_model_declined_execution",
+    "executionObserved": false,
+    "unexpectedWrites": false,
+    "unexpectedConnections": 0,
+    "genericExecAlreadyObservedWithCodeModeFalse": true,
+    "thirdTurnCodeModeEnabled": true,
+    "wholeAppServerConfinementVerified": false,
+    "authenticationMemoryIsolationVerified": false
+  },
+  "application": {
+    "successfulNativeMcpCalls": 13,
+    "callCounts": {
+      "first": {
+        "read_context": 5,
+        "prepare_change": 1,
+        "apply_change": 1
+      },
+      "second": {
+        "read_context": 4,
+        "prepare_change": 1,
+        "apply_change": 1
+      }
+    },
+    "callIdsAndResultDigestsIndependentlyMatched": true,
+    "projectHeadSequence": [
+      2,
+      3,
+      4
+    ],
+    "untouchedCreativeStatePreserved": true,
+    "sameSkillLockAcrossReplacement": true,
+    "freshRequestEpochActivationContext": true,
+    "oldCredentialRejected": true,
+    "proposalVariant": "plan",
+    "explicitWorkflowStageProposalTested": false,
+    "grants": 8,
+    "candidates": 8,
+    "mediaAttempts": 0,
+    "providerAccepts": 0,
+    "generatedArtifactRecords": 0,
+    "humanApprovals": 0
+  },
+  "nativeSkillExpandedBytesIndependentlyVerified": false,
+  "nativeLiveEventsRetainedEntryPaths": true,
+  "nativeHistoryProjectionRetainedEntryPaths": false,
+  "externalMediaCalls": 0,
+  "realProjectMutations": 0,
+  "credentialsCopied": false,
+  "cleanup": {
+    "appServerProcesses": 3,
+    "allRecordedAppServersExitedZero": true,
+    "syntheticThreadArchived": true,
+    "cleanupError": null
+  },
+  "earlierFullSuiteBaseline": {
+    "tests": 195,
+    "failed": 0,
+    "skipped": 0,
+    "rerunForThisDocumentationFollowup": false
+  }
+}

@@ -1,7 +1,7 @@
 # OpenSlate — Detailed Technical Design
 
-**Version:** 0.5 · September 10, 2026
-**Status:** implementation proposal. The repository still contains the original runnable skeleton; these contracts and modules are not implemented.
+**Version:** 0.6 · September 11, 2026
+**Status:** target technical design. The fake backend and skill/tool foundations now have working implementations; the production director, review UI and real media integrations remain pending. Consult [implementation status](../implementation/STATUS.md) for verified behavior rather than treating every design contract below as shipped.
 
 The [architecture overview](../design/README.md) and [component overview](../design/COMPONENT-DESIGN.md) explain direction. This set defines implementation boundaries, records, interfaces, algorithms, failure handling and verification. Examples describe target contracts, not a stable public SDK. The [development plan](../design/IMPLEMENTATION-PLAN.md) orders the work after these designs.
 

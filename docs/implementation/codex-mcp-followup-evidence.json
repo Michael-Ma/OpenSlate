@@ -1,0 +1,94 @@
+{
+  "observedAt": "2026-09-12T01:37:33.885Z",
+  "runtimeVersion": "codex-cli 0.153.4",
+  "node": "24.15.0",
+  "model": "gpt-6-astra",
+  "effort": "low",
+  "allowance": {
+    "authorizedAdditionalStarts": 3,
+    "actualAdditionalStarts": 3,
+    "previousStarts": 3,
+    "totalStarts": 6
+  },
+  "turns": [
+    {
+      "ordinal": 1,
+      "status": "completed",
+      "fixtureCalls": 0,
+      "result": "native MCP approval policy rejected calls before dispatch"
+    },
+    {
+      "ordinal": 2,
+      "status": "interrupted",
+      "result": "live MCP read and pending preparation; revoked handler rejected"
+    },
+    {
+      "ordinal": 3,
+      "status": "completed",
+      "result": "model continued after process restart from supplied canonical context"
+    }
+  ],
+  "verified": {
+    "pinned_runtime": true,
+    "fixture_rejects_array_arguments": true,
+    "fixture_rejects_forged_credential": true,
+    "configured_authentication": true,
+    "only_fixture_mcp_enabled": true,
+    "required_native_host_enabled": true,
+    "only_fixture_read_and_prepare_explicitly_approved": true,
+    "other_host_features_disabled": true,
+    "unexpected_skills_absent": true,
+    "model_available": true,
+    "no_inherited_instructions": true,
+    "fixed_connected_catalog": true,
+    "live_mcp_dispatch": true,
+    "active_mcp_turn_interrupted": true,
+    "late_mcp_handler_fenced": true,
+    "old_process_exited_before_replacement": true,
+    "same_thread_resumed": true,
+    "old_bridge_credential_rejected": true,
+    "model_continued_after_restart": true,
+    "new_epoch_only_for_new_work": true,
+    "no_unexpected_native_requests": true
+  },
+  "historyMode": "legacy",
+  "canonicalContextSupplied": true,
+  "nativeRecallWithoutContextVerified": false,
+  "nativeHistoryHydrationVerified": false,
+  "processReplacementExitConfirmed": true,
+  "calls": [
+    {
+      "epoch": "epoch-1",
+      "name": "read_context",
+      "status": "completed",
+      "receiptId": "receipt-epoch-1"
+    },
+    {
+      "epoch": "epoch-1",
+      "name": "prepare_change",
+      "status": "rejected_stale_epoch"
+    },
+    {
+      "epoch": "epoch-1",
+      "name": "read_context",
+      "status": "rejected_stale_epoch"
+    },
+    {
+      "epoch": "epoch-2",
+      "name": "read_context",
+      "status": "completed",
+      "receiptId": "receipt-epoch-2"
+    }
+  ],
+  "syntheticThreadsArchived": true,
+  "externalMediaCalls": 0,
+  "credentialsCopied": false,
+  "productionReady": false,
+  "notVerified": [
+    "native production skill injection",
+    "production credential/filesystem/network isolation",
+    "vision",
+    "pending-input replies",
+    "automatic director invocation reconciliation"
+  ]
+}

@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { APP_NAME } from "@openslate/core";
+import { APP_NAME } from "@openslate/core/public";
 import "./style.css";
 
 function App() {

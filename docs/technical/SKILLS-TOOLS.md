@@ -1,7 +1,9 @@
 # Skills and tools technical design
 
-**Version:** 0.5 · September 10, 2026
-**Status:** proposed implementation. This document adds no installed skills, MCP server, handlers, or application code.
+**Version:** 0.7 · September 11, 2026
+**Status:** target design with a verified foundation. Two instruction packages, exact snapshots/locks, explicit activation records, the fixed MCP bridge and durable tool invocations are implemented. Explicit native selections and two scoped edits are validated in a fixture; production activation/supervision remains pending; the [implementation breakdown](../implementation/T06-SKILLS-TOOLS.md) distinguishes shipped contracts from the broader design.
+
+The current package manifest is `openslate.skill.json`; only declared Markdown/JSON instruction files are accepted. The internal bridge requires a stable `x-openslate-tool-call-id`, preparation returns a compact saved-proposal receipt, and `read_context` supplies bounded pages for full shot/scene/source/alias/grant/receipt evidence. Read-only calls do not invalidate their own pagination guard. Automatic recovery of unresolved director calls is not yet implemented. These concrete contracts are defined in `packages/core/src/tools.ts` and the server application modules.
 
 ## 1. Three separate extension mechanisms
 
@@ -86,7 +88,7 @@ At startup, resolve the lock, verify snapshots and handlers, start the fixed MCP
 
 For each request, build fresh project context, select `production`, `plan-authoring`, or both, and explicitly inject pinned skill entry paths through the adapter. Use production for clarification, creative decisions, narration gaps, review, and edits. Add plan-authoring once sufficient intent is settled to write or patch executable plan source. Reinject at request boundaries after compaction or session replacement; do not rely on prior conversation text as a version lock.
 
-Native App Server supports skill listing, explicit skill inputs, and listing invalidation/reload behavior. Reloading a listing neither freezes package bytes nor removes instructions already in a conversation. Runtime-specific root configuration can be process-scoped, so isolate project configuration and test it against the pinned release. [App Server skills](https://learn.chatgpt.com/docs/app-server)
+The [native validation](../implementation/CODEX-SKILL-VALIDATION.md) observed exact skill names/immutable paths in native user-message events for two requests. The application supplied five focused references per request through verified mediated reads; entry injection alone does not establish reference loading or complete internal expansion. Supply required reference text explicitly when no narrowly controlled file-reading tool is available. Native App Server supports skill listing, explicit skill inputs, and listing invalidation/reload behavior. Reloading a listing neither freezes package bytes nor removes instructions already in a conversation. Runtime-specific root configuration can be process-scoped, so isolate project configuration and test it against the pinned release. [App Server skills](https://learn.chatgpt.com/docs/app-server)
 
 ## 4. Upgrade and extension algorithm
 

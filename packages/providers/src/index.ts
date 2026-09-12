@@ -12,3 +12,4 @@ export interface VideoProvider {
   readonly id: string;
   capabilities(): Promise<VideoCapabilities>;
 }
+export * from "./fake.js";

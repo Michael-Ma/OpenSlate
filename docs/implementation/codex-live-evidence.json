@@ -1,0 +1,82 @@
+{
+  "observedAt": "2026-09-11T16:48:55.693Z",
+  "runtimeVersion": "codex-cli 0.153.4",
+  "node": "24.15.0",
+  "model": "gpt-6-astra",
+  "effort": "low",
+  "allowance": {
+    "authorizedTurnStarts": 3,
+    "actualTurnStarts": 3,
+    "fourthTurnStarted": false
+  },
+  "turns": [
+    {
+      "ordinal": 1,
+      "status": "completed",
+      "transport": "mcp",
+      "toolHost": false,
+      "fixtureCalls": 0
+    },
+    {
+      "ordinal": 2,
+      "status": "completed",
+      "transport": "dynamic",
+      "toolHost": false,
+      "fixtureCalls": 0,
+      "nativeDiagnostic": "code-mode host is disabled"
+    },
+    {
+      "ordinal": 3,
+      "status": "interrupted",
+      "transport": "dynamic",
+      "toolHost": true,
+      "completedReadCalls": 1,
+      "pendingPrepareCalls": 1,
+      "latePrepareOutcome": "rejected_stale_epoch"
+    }
+  ],
+  "verified": {
+    "nativeAuthentication": "chatgpt",
+    "liveToolDispatch": true,
+    "activeTurnInterruption": true,
+    "capturedEpochFencing": true,
+    "sameThreadResumeInReplacementProcess": true,
+    "resumedState": "idle",
+    "enabledPersonalSkills": 0,
+    "enabledMcpServersInSuccessfulRun": 0,
+    "codeModeHostEnabledInSuccessfulRun": true
+  },
+  "history": {
+    "mode": "legacy",
+    "explicitExperimentalSelection": true,
+    "threadReadSucceeded": true,
+    "threadReadTurnCount": 2,
+    "threadReadContainedSyntheticToolResult": false,
+    "nativeSessionLogContainedSyntheticToolResult": true,
+    "turnsListCount": 2,
+    "itemsList": {
+      "status": "unsupported",
+      "code": -32601
+    }
+  },
+  "notVerified": [
+    "post-restart model continuation",
+    "live MCP dispatch with host enabled",
+    "complete native history API output reconstruction",
+    "explicit skill injection",
+    "production filesystem and network isolation",
+    "pending-input replies",
+    "vision"
+  ],
+  "externalMediaCalls": 0,
+  "accountCredentialsCopied": false,
+  "syntheticThreadsArchived": true,
+  "productionReady": false,
+  "sourceReports": [
+    "mcp-report.json",
+    "dynamic-report.json",
+    "final-report.json",
+    "history-report.json",
+    "allowance.json"
+  ]
+}

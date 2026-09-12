@@ -4,7 +4,7 @@ An open-source video agent for turning a story into a finished film.
 
 OpenSlate is designed to plan scenes and shots, create reference assets, generate video takes, and assemble an editable timeline for rendering and post-processing.
 
-**Status: initial skeleton.** The web app and API health endpoint run today. Codex integration, asset/video generation, persistent jobs, and rendering are planned; this repository does not yet generate videos.
+**Status: executable backend foundation with fake media.** SQLite project state, validated planning code, scoped edits, human keyframe approval, durable jobs, budgets and restart recovery are implemented and tested. Versioned instruction packages, a fixed MCP tool bridge and durable director context/receipts are also implemented. The web interface remains a starting page. Real Codex conversation, model APIs, narration production and final rendering are still ahead; this repository does not yet generate a real commercial.
 
 ## Direction
 
@@ -31,29 +31,37 @@ pnpm dev
 
 Open [the local app](http://127.0.0.1:5173). The API runs at [the health endpoint](http://127.0.0.1:3001/api/health). Both bind to loopback; the development app proxies `/api` to the server. Stop them with Ctrl+C.
 
-The skeleton requires no API keys, Codex installation, FFmpeg, or GPU. It makes no paid generation calls. Shared packages are built before development starts; restart `pnpm dev` after editing those packages.
+The default app and fake demo require no API keys, Codex installation, FFmpeg, or GPU. They make no paid generation calls. Shared packages are built before development starts; restart `pnpm dev` after editing those packages.
+
+The server stores local state in `.openslate/` relative to its working directory, or `OPENSLATE_DATA_DIR`. It creates a private `local-session.token` there unless `OPENSLATE_LOCAL_TOKEN` is configured. Protected routes require `Authorization: Bearer <token>`; only the health endpoint is public. No credential-saving API is enabled. Messages are recorded but report `director: not_connected` until the director integration lands.
+
+Run `pnpm demo:headless` for a reproducible two-shot example. It generates clearly labeled fake keyframes and one-second placeholder clips, simulates exact human reviews, edits only one shot, then restarts during an uncertain submission. It prints a new temporary output directory, preview path and JSON summary. A successful run records six fake accepts and zero duplicate accepts. This is an execution proof, not a finished film or a quality sample.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `pnpm dev` | Start the web app and API in development |
-| `pnpm check` | Build every package and run TypeScript checks |
+| `pnpm check` | Build, run domain/API/SQLite tests and check TypeScript |
+| `pnpm test` | Build and run offline tests, including the fake integration demo |
+| `pnpm demo:headless` | Run the two-shot edit/restart demonstration without keys |
+| `pnpm probe:toolchain` | Check SQLite/schema and optional local FFmpeg H.264/AAC support |
+| `pnpm probe:runtime --codex /absolute/path/to/codex` | Probe installed Codex with zero model turns |
 | `pnpm build` | Produce library/API output and the web bundle |
 | `pnpm typecheck` | Build shared packages and check TypeScript |
 | `pnpm --filter @openslate/server start` | Start the built API after `pnpm build` |
 
-The web build is written to `apps/web/dist`; production serving is not wired yet. There is no deployed service or database in this skeleton.
+The web build is written to `apps/web/dist`; production serving is not wired yet. Tests use isolated local databases and require permission to bind loopback ports. The native Codex probe test is opt-in through `OPENSLATE_CODEX_PROBE_BINARY`; normal CI does not require Codex or credentials.
 
 ## Repository
 
 ```text
 apps/web/             React + Vite starting page
-apps/server/          Fastify API and health endpoint
-packages/core/        Shared application types
-packages/director/    Initial director lifecycle interface
-packages/providers/   Initial video capability interface
-skills/               Planned creative skills
+apps/server/          Application boundary, SQLite store, fake executor, API and demo
+packages/core/        Domain contracts, workflow predicates and bounded plan compiler
+packages/director/    Skill locks, MCP bridge and probes; native supervisor pending
+packages/providers/   Durable fault-injectable fake provider and provider boundary
+skills/               Production and plan-authoring instruction packages
 workers/h3-python/    Future local inference boundary
 docs/                 Documentation index and design files
 ```
@@ -73,7 +81,7 @@ Start with the [documentation index](docs/README.md).
 - [Implementation plan](docs/design/IMPLEMENTATION-PLAN.md)
 - [Design review notes](docs/design/REVIEW-NOTES.md)
 
-Next: prove the skill/tool lifecycle, code-plan execution, and mid-run edits with fake operations, then build a short end-to-end production with real cloud APIs. See [Contributing](CONTRIBUTING.md) for development guidance.
+See the [verified implementation status](docs/implementation/STATUS.md) for remaining gates and the next work, and the [skill/tool implementation breakdown](docs/implementation/T06-SKILLS-TOOLS.md) for the latest slice. See [Contributing](CONTRIBUTING.md) for development guidance.
 
 ## License
 

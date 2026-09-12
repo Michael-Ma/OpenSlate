@@ -79,7 +79,7 @@ Metrics are diagnostics first. No hosted analytics or remote telemetry is requir
 
 ## 5. Test layers and fixtures
 
-Propose Vitest for domain/service tests, real SQLite for persistence/concurrency, Fastify injection for HTTP, and Playwright for browser flows. These are additions for implementation; the existing `pnpm check` currently builds and typechecks only. Pin versions compatible with the repository during setup. [Vitest guide](https://vitest.dev/guide/)
+The first implementation uses Node 24's built-in test runner, real SQLite for persistence/concurrency, Fastify injection for HTTP, and real loopback SSE tests. This avoids an additional test framework for the current headless slice. `pnpm check` builds, tests and typechecks. Playwright browser flows remain part of T05; see [implementation status](../implementation/STATUS.md) for observed coverage and pinned versions.
 
 | Layer | Representative cases | What it proves |
 |---|---|---|
