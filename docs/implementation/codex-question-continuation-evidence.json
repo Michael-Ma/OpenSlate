@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "test": "native structured question service continuation",
+  "recordedAt": "2026-09-12T21:38:09.325Z",
+  "runtimeVersion": "0.153.4",
+  "model": "gpt-6-astra",
+  "reasoningEffort": "low",
+  "nodeVersion": "24.15.0",
+  "sourceFixture": "enabled-live-JqXWrx",
+  "projectId": "3c0358ba-5c13-48c3-8b28-7d8a4d39694a",
+  "source": {
+    "questionId": "bfd16b97d272f463cf81539f31033f515abf877e2d35d8df5fef0e9b140846b6",
+    "requestId": "9f3ca943-9374-4edb-a182-60dc3d259663",
+    "turnId": "c490d5a3-2c7d-46c2-be0e-545b63d90969",
+    "epochId": "82c2c754-dbbe-458b-95a6-ad5606b26ca0",
+    "question": [
+      {
+        "header": "Tone",
+        "id": "film_tone",
+        "options": [
+          {
+            "description": "Use a friendly, inviting tone.",
+            "label": "Warm"
+          },
+          {
+            "description": "Use a balanced, understated tone.",
+            "label": "Neutral"
+          },
+          {
+            "description": "Use a polished, professional tone.",
+            "label": "Formal"
+          }
+        ],
+        "question": "What tone would you like for the film?"
+      }
+    ],
+    "readback": {
+      "questionUnchanged": true,
+      "canonicalProjectUnchanged": true
+    }
+  },
+  "continuation": {
+    "answer": "Warm",
+    "boundary": "actual DirectorSupervisor.answerQuestion service under original capability-human principal; HTTP local-user cannot inherit that question",
+    "requestId": "021aa153-8611-4821-b85f-5c05efe31462",
+    "turnId": "2d36f63f-bd7b-47d7-acab-862231646cb6",
+    "epochId": "35e46e92-d202-4fbd-bec2-7fae399f0f0e",
+    "nativeThreadId": "01a0978e-4d46-7b53-add6-66495f6b8642",
+    "nativeTurnId": "01a0978e-4e58-7eb3-bddd-648b96681a02",
+    "nativeResumeRequested": false,
+    "inputDigest": "d4d7d8d7c2a72a6e620fb624f050cbf0cdea4c5d9183401a985cc3ca50d0bf77",
+    "contextDigest": "2c0e43b5b3ee14a72fcdadf44e4729670a62ffe707e6b1f82c6b8732515c2bfa",
+    "elapsedMs": 8633,
+    "terminalState": "completed",
+    "output": "Warm—friendly and inviting. No project data changed or media generated.",
+    "toolInvocations": [
+      {
+        "tool": "read_context",
+        "state": "succeeded",
+        "error": null
+      }
+    ]
+  },
+  "canonicalState": {
+    "before": "4ba88e03e60cb621134385d28b088452f7f44aeb3f3fbc62092d4f6f0a10c305",
+    "after": "4ba88e03e60cb621134385d28b088452f7f44aeb3f3fbc62092d4f6f0a10c305",
+    "unchanged": true
+  },
+  "dispatch": {
+    "allowanceId": "openslate-question-continuation-20260912",
+    "maximumStarts": 2,
+    "actualStarts": 1,
+    "priorHistoricalStarts": 16,
+    "historicalStarts": 17,
+    "reservedAt": "2026-09-12T21:38:00.894Z",
+    "acknowledgedAt": "2026-09-12T21:38:00.923Z",
+    "status": "closed",
+    "unusedStarts": 1
+  },
+  "readiness": {
+    "status": "ready",
+    "checkedAt": "2026-09-12T21:37:58.958Z",
+    "runtimeVersion": "0.153.4",
+    "model": "gpt-6-astra",
+    "checks": {
+      "binary": "passed",
+      "account": "passed",
+      "model": "passed",
+      "catalog": "passed",
+      "policy": "passed"
+    },
+    "disabledMcpCount": 5,
+    "disabledSkillCount": 22,
+    "issues": []
+  },
+  "checks": [
+    {
+      "name": "source_waiting_question_intact",
+      "pass": true
+    },
+    {
+      "name": "old_epoch_already_revoked",
+      "pass": true
+    },
+    {
+      "name": "zero_turn_setup_ready",
+      "pass": true
+    },
+    {
+      "name": "isolated_application_port",
+      "pass": true
+    },
+    {
+      "name": "authenticated_other_principal_cannot_answer",
+      "pass": true
+    },
+    {
+      "name": "same_answer_replay_is_idempotent",
+      "pass": true
+    },
+    {
+      "name": "answer_keeps_read_only_authority",
+      "pass": true
+    },
+    {
+      "name": "normal_input_builder_preserves_exact_answered_question",
+      "pass": true
+    },
+    {
+      "name": "new_request_and_epoch",
+      "pass": true
+    },
+    {
+      "name": "canonical_project_unchanged",
+      "pass": true
+    },
+    {
+      "name": "no_media_reviews_or_plans",
+      "pass": true
+    },
+    {
+      "name": "both_epochs_revoked",
+      "pass": true
+    },
+    {
+      "name": "question_answer_saved_exactly",
+      "pass": true
+    },
+    {
+      "name": "original_turn_not_replayed",
+      "pass": true
+    },
+    {
+      "name": "one_acknowledged_model_start",
+      "pass": true
+    },
+    {
+      "name": "warm_film_tone_recognized",
+      "pass": true
+    },
+    {
+      "name": "terminal_outcome_known",
+      "pass": true
+    },
+    {
+      "name": "answer_survives_database_reopen",
+      "pass": true
+    }
+  ],
+  "wrongPrincipalHttp": {
+    "status": 409,
+    "body": {
+      "error": {
+        "code": "QUESTION_STALE",
+        "message": "A newer request has replaced this question"
+      }
+    }
+  },
+  "mediaApiCalls": 0,
+  "persistenceAfterClose": {
+    "answer": "Warm",
+    "questionState": "answered",
+    "answerRequestId": "021aa153-8611-4821-b85f-5c05efe31462",
+    "turnState": "completed"
+  },
+  "cleanup": {
+    "nativeThreadArchived": true,
+    "archiveProcessExited": true,
+    "applicationClosed": true,
+    "listenerClosed": true
+  },
+  "limitations": [
+    "Positive answer entered through actual supervisor service with original fixture principal, not browser or positive HTTP route.",
+    "No new image was attached on continuation; the prior image observation is saved conversation context.",
+    "One read-only Tone question; not broad stage, editing, model or provider validation.",
+    "Fresh native thread rebuilt from application context, not resumption of the interrupted native turn."
+  ]
+}
