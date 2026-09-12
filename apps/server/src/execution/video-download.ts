@@ -141,9 +141,13 @@ export class ProtectedVideoDownloader {
       // Raw network errors can contain a signed URL. Never expose or retain them.
       throw new DomainError("OUTPUT_DOWNLOAD_UNAVAILABLE", "Output download is unavailable");
     } finally {
-      clearTimeout(timer); originalSignal.removeEventListener("abort", cancel);
       abort.abort(); response?.destroy(); client?.destroy(); agent?.destroy();
-      if (closed) await closed;
+      try { if (closed) await closed; }
+      finally { clearTimeout(timer); originalSignal.removeEventListener("abort", cancel); }
     }
+    // Socket cleanup is still part of the operation. A late cancellation or
+    // deadline must not turn an interrupted download into a successful source.
+    if (timedOut) throw new DomainError("OUTPUT_DOWNLOAD_TIMEOUT", "Output download exceeded its deadline");
+    interrupted(originalSignal);
   }
 }

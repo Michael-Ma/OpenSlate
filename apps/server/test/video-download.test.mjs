@@ -16,10 +16,13 @@ const receipt = (locator = 'https://media.example.test/result.mp4?signature=priv
   vendorTaskId: 'task', diagnosticRequestId: null, source: { kind: 'protected_locator', locator, expiresAt: null }, ...extra,
 });
 function network(options = {}) {
-  const observed = { calls: [], closes: 0, aborts: 0, lookups: 0 };
+  const observed = { calls: [], closes: 0, closing: 0, aborts: 0, lookups: 0 };
   const request = (args, callback) => {
     observed.calls.push(args); const client = new EventEmitter(); let body, closed = false;
-    client.destroy = () => { if (!closed) { closed = true; args.signal.removeEventListener('abort', abort); body?.destroy(); queueMicrotask(() => { observed.closes++; client.emit('close'); }); } return client; };
+    client.destroy = () => { if (!closed) { closed = true; observed.closing++; args.signal.removeEventListener('abort', abort); body?.destroy();
+      const finish = () => { observed.closes++; client.emit('close'); };
+      if (options.closeGate) void options.closeGate.then(finish); else queueMicrotask(finish);
+    } return client; };
     const abort = () => { observed.aborts++; body?.destroy(Error('private URL must not escape')); client.emit('error', Error('private URL must not escape')); client.destroy(); };
     args.signal.addEventListener('abort', abort, { once: true });
     client.end = () => queueMicrotask(() => {
@@ -137,6 +140,18 @@ test('original cancellation and early consumer return close their own response a
   const g = network({ chunks: [Buffer.alloc(2 * 1024 * 1024)] });
   for await (const chunk of g.downloader.source(receipt())(new AbortController().signal)) { assert.equal(chunk.length, 1024 * 1024); break; }
   assert.equal(g.observed.calls.length, 1); assert.equal(g.observed.closes, 1);
+});
+
+test('cancellation and deadline during socket cleanup cannot report a successful download', async () => {
+  for (const mode of ['cancel', 'deadline']) {
+    let release; const closeGate = new Promise(resolve => { release = resolve; });
+    const f = network({ closeGate, ...(mode === 'deadline' ? { timeoutMs: 30 } : {}) }), abort = new AbortController();
+    const pending = bytes(f.downloader.source(receipt()), abort.signal);
+    await until(() => f.observed.closing === 1); assert.equal(f.observed.closes, 0);
+    if (mode === 'cancel') abort.abort(); else await new Promise(resolve => setTimeout(resolve, 50));
+    release(); await assert.rejects(pending, { code: mode === 'cancel' ? 'OUTPUT_DOWNLOAD_CANCELLED' : 'OUTPUT_DOWNLOAD_TIMEOUT' });
+    assert.equal(f.observed.calls.length, 1); assert.equal(f.observed.closes, 1);
+  }
 });
 
 async function ownedFixture(t) {
