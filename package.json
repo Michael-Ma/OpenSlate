@@ -19,6 +19,7 @@
     "demo:headless": "pnpm build && node apps/server/dist/demo.js",
     "probe:runtime": "pnpm build:packages && node packages/director/dist/probe/cli.js",
     "probe:launcher": "pnpm build && node apps/server/test/launcher-smoke.mjs",
+    "probe:workflow": "pnpm build && node apps/server/test/six-minute-workflow-smoke.mjs",
     "probe:toolchain": "pnpm build && node apps/server/dist/toolchain-probe.js"
   },
   "devDependencies": {

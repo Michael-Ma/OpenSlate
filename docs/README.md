@@ -18,6 +18,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Versioned narration tools](implementation/NARRATION-TOOLS.md) | Draft-only conversational writes, exact catalog locks and legacy compatibility |
 | [Project guidance upgrades](implementation/DIRECTOR-TOOLS-UPGRADE.md) | Explicit human upgrade, old-epoch preservation and browser evidence |
 | [Local media integration](implementation/MEDIA-INTEGRATION.md) | Owned uploads, render jobs, preview recovery and six-minute synthetic evidence |
+| [Six-minute workflow probe](implementation/SIX-MINUTE-WORKFLOW.md) | Sixty shots, exact batch review, one-shot reuse and uncertain-job restart using fake media |
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |
 | [Provider execution boundary](implementation/PROVIDER-EXECUTION.md) | Registered executor contracts, receipt identity, ingestion and recovery |

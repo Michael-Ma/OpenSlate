@@ -1,7 +1,7 @@
 # OpenSlate — Development Plan
 
 **Version:** 0.14 · September 12, 2026
-**Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render and a native question-answer continuation passed. The single-process launcher has exclusive local installation ownership. GPT Image 2/H3 transports, the generic execution boundary, PNG validation and backend environment credentials are implemented offline; real media dispatch remains disconnected. See [current implementation status](../implementation/STATUS.md) for current counts, limits and remaining work.
+**Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render, a 60-shot fake workflow with scoped reuse/restart, and a native question-answer continuation passed. The single-process launcher has exclusive local installation ownership. GPT Image 2/H3 transports, the generic execution boundary, PNG validation and backend environment credentials are implemented offline; real media dispatch remains disconnected. See [current implementation status](../implementation/STATUS.md) for current counts, limits and remaining work.
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
