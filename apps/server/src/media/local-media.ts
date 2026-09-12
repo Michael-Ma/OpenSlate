@@ -204,6 +204,29 @@ export class LocalMediaService {
     return frozen(result);
   }
 
+  /** Trusted host access only: verify a service-issued descriptor before copying bytes. */
+  async verifiedSource(source: SuppliedMedia): Promise<{ source: SuppliedMedia; path: string }> {
+    const value = structuredClone(source);
+    await this.verifySource(value);
+    return { source: frozen(value), path: this.blobPath(value) };
+  }
+
+  /** Discover installed receipts after a process exit before its SQL completion commit. */
+  async findCompletions(manifestDigest: string): Promise<RenderCompletion[]> {
+    invariant(HASH.test(manifestDigest), "MEDIA_INVALID_INPUT", "Invalid manifest identity");
+    const { opendir } = await import("node:fs/promises");
+    const names: string[] = [];
+    for await (const entry of await opendir(join(this.rootDir, "completions"))) {
+      if (entry.isFile() && entry.name.startsWith(`${manifestDigest}-`) && /^[a-f0-9]{64}-[a-f0-9]{64}\.json$/.test(entry.name)) {
+        names.push(entry.name);
+        invariant(names.length <= 8, "MEDIA_RECEIPT_LIMIT", "Too many outputs for one frozen manifest");
+      }
+    }
+    const results: RenderCompletion[] = [];
+    for (const name of names.sort()) results.push(await this.readCompletion(manifestDigest, name.slice(65, 129)));
+    return results;
+  }
+
   private async exclusive<T>(fn: () => Promise<T>): Promise<T> {
     invariant(!this.busy, "MEDIA_BUSY", "This local media worker is already running an operation");
     this.busy = true;

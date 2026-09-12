@@ -54,7 +54,7 @@ export interface CreativePatch {
   createShots?: ShotDraft[];
   updateShots?: ShotUpdate[];
   narrationScript?: string;
-  narrationSource?: "undecided" | "uploaded" | "generated";
+  narrationSource?: "undecided" | "uploaded" | "generated" | "mixed";
 }
 
 export interface ChangeProposal {
@@ -87,7 +87,7 @@ export const changeProposalSchema = object({
     updateScenes: arr(object({ id: short, purpose: text }, ["id", "purpose"])),
     createShots: arr(object({ key: short, sceneId: short, ...shotProperties, referenceArtifactIds: arr(short), cueId: { type: ["string", "null"], maxLength: 160 } }, ["key", "sceneId", ...Object.keys(shotProperties), "referenceArtifactIds", "cueId"])),
     updateShots: arr(object({ id: short, ...shotProperties, reauthorPrompts: { type: "boolean" } }, ["id"])),
-    narrationScript: text, narrationSource: { enum: ["undecided", "uploaded", "generated"] },
+    narrationScript: text, narrationSource: { enum: ["undecided", "uploaded", "generated", "mixed"] },
   }),
 }, ["variant", "expectedHeadVersion"]);
 

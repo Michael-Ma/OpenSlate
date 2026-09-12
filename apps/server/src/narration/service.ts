@@ -27,6 +27,11 @@ export class NarrationService {
   constructor(readonly production: ProductionService, readonly media: LocalMediaService) {}
   private get store() { return this.production.store; }
 
+  /** Trusted authenticated host view only; model tools must use snapshot with an actor. */
+  workspaceSnapshot(projectId: string): NarrationSnapshot {
+    return this.store.transaction(() => { this.store.getProject(projectId); return this.read(projectId); });
+  }
+
   snapshot(projectId: string, actor: ActorContext): NarrationSnapshot {
     this.production.assertActor(projectId, actor);
     return this.store.transaction(() => this.read(projectId));

@@ -56,7 +56,7 @@ export interface ProjectRecord {
   brief: string;
   story: string;
   scenes: Array<{ id: Id; revisionId: Id; purpose: string }>;
-  narration: { script: string; source: "undecided" | "uploaded" | "generated" };
+  narration: { script: string; source: "undecided" | "uploaded" | "generated" | "mixed" };
   maxFrames: number;
   capabilityLockId: Id;
   shots: ShotRecord[];
