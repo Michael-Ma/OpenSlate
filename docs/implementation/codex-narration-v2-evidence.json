@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 1,
+  "test": "native V2 narration draft after explicit V1 upgrade",
+  "recordedAt": "2026-09-12T22:29:48.283Z",
+  "runtimeVersion": "0.153.4",
+  "model": "gpt-6-astra",
+  "reasoningEffort": "low",
+  "nodeVersion": "24.15.0",
+  "precondition": {
+    "fullSuitePassed": 539,
+    "fullSuiteFailures": 0,
+    "fullSuiteSkips": 0,
+    "buildsAndTypechecksPassed": true
+  },
+  "projectId": "cc3d263a-aa4a-4cd8-9d25-4a6972f105d6",
+  "upgrade": {
+    "previousLockId": "e623ca80-1e62-4538-8e76-672d73db1377",
+    "previousLockDigest": "8586f7227bda3694c3d8914bad5dc15f993ecb9ac08b14059def5017ae653137",
+    "previousToolContract": "1.0.0",
+    "lockId": "260e5db3-3ebf-4b0d-8829-ee17ff871431",
+    "lockDigest": "e26d404095d33db8971408504a3d74552c256b7afd3853b680eb282a29a11f2e",
+    "toolContract": "2.0.0",
+    "catalogDigest": "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e",
+    "v1AndV2SnapshotsCoexist": true,
+    "receiptReplayPreservesLockAndEventCursor": true
+  },
+  "request": {
+    "text": "For our leather boots commercial, keep the existing accepted opening exactly as saved. Add two short English narration sections, each one or two sentences. The first should describe the craftsmanship and have uploaded source intent: I will supply its recording later. The second should be a closing invitation with generated source intent; leave voice and profile undecided (null). Save both as draft text in one narration edit. First read the narration context, then save the draft sections, then read narration context again to verify the saved result and explain the remaining review/audio gaps. Do not accept anything, attach or synthesize audio, create a plan or shot, alter canonical narration, change existing sections, or release any execution hold. No clarification is needed for this draft task.",
+    "requestId": "d38249b1-6485-41dd-9413-012cca15c615",
+    "turnId": "6fdc8bf9-d61f-4061-8c5d-48c4b6d9614c",
+    "epochId": "10f4d06c-acec-4cdf-9ad6-4ecd39ee5c7d",
+    "priorEpochId": "14f935e7-889f-4ac9-9b52-a14db61a04b5",
+    "nativeThreadId": "01a097bd-4e9c-7bf0-ad33-596780b9410d",
+    "nativeTurnId": "01a097bd-5589-7a00-ad1f-65d0adfa89c7",
+    "inputDigest": "515cef286e71f52c6f6c3a560f49fa5204e18c810ccfbd3b2fe1fe2221fecc35",
+    "contextDigest": "0410de11c7980f8ed062bafe20f0bcb77f6baa6ac2b031050785bb7b0d1946fe"
+  },
+  "result": {
+    "terminalState": "completed",
+    "runtimeElapsedMs": 27853,
+    "timingScope": "CodexDirectorRuntime.run, including native thread setup/catalog verification and turn; excludes preceding application setup/upgrade and final archive",
+    "narrationVersionBefore": 2,
+    "narrationVersionAfter": 3,
+    "narrationRevisionId": "4bed6906-f0a6-490d-9053-3fe3a9b15e09",
+    "originalSectionUnchanged": true,
+    "sections": [
+      {
+        "segmentId": "b96e956e-f039-49f9-bdeb-c18b4250c690",
+        "revisionId": "b17eed16-8c17-4411-bd68-2d2a39701dad",
+        "text": "Every journey begins with a first step.",
+        "textKind": "draft",
+        "language": "en",
+        "source": {
+          "kind": "undecided"
+        },
+        "accepted": {
+          "script": true,
+          "audio": false,
+          "timing": false
+        },
+        "audioId": null,
+        "cueId": null
+      },
+      {
+        "segmentId": "49aefa3f-880e-4462-903a-35e4ef10c87c",
+        "revisionId": "4eec588b-38b0-4cfc-ab53-bcbdfd6860e8",
+        "text": "From the texture of the leather to the precision of each stitch, craftsmanship lives in the details.",
+        "textKind": "draft",
+        "language": "en",
+        "source": {
+          "kind": "uploaded"
+        },
+        "accepted": {
+          "script": false,
+          "audio": false,
+          "timing": false
+        },
+        "audioId": null,
+        "cueId": null
+      },
+      {
+        "segmentId": "3bf4b531-c91e-4020-8dcd-9179b1aa4a6c",
+        "revisionId": "805981ef-2482-4f4d-8ca7-a130e3c11815",
+        "text": "Find your next pair. Step into your next chapter.",
+        "textKind": "draft",
+        "language": "en",
+        "source": {
+          "kind": "generated",
+          "profileRevisionId": null,
+          "voice": null
+        },
+        "accepted": {
+          "script": false,
+          "audio": false,
+          "timing": false
+        },
+        "audioId": null,
+        "cueId": null
+      }
+    ],
+    "output": "Saved both English draft sections in one edit and verified narration version 3:\n\n- **Craftsmanship — uploaded intent:** “From the texture of the leather to the precision of each stitch, craftsmanship lives in the details.”\n- **Closing — generated intent:** “Find your next pair. Step into your next chapter.” Voice and profile remain `null`.\n\nThe accepted opening is unchanged, including its acceptance.\n\nRemaining gaps: both new scripts need human review; craftsmanship awaits your recording; closing awaits voice/profile selection and audio. All sections lack audio and timing cues; the opening’s source remains undecided.\n\nNothing was accepted, attached, synthesized, or canonically changed. No plans, shots, or hold changes were made.",
+    "toolInvocations": [
+      {
+        "id": "2a727d6e1e76f39eca5c00dff4887c1d064318724bb30deaf53785a1705bc1ee",
+        "tool": "read_context",
+        "state": "succeeded",
+        "argumentsDigest": "ccc8756c539369372d879bf64fe0d61647c67669de3ae06b1a363a819f1a145e",
+        "toolContractVersion": "2.0.0",
+        "catalogDigest": "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e",
+        "skillLockId": "260e5db3-3ebf-4b0d-8829-ee17ff871431",
+        "error": null,
+        "result": {
+          "section": "narration",
+          "narrationVersion": 2,
+          "segments": 1
+        }
+      },
+      {
+        "id": "b104571273f49f0f0269dcff182bbbec2211b4bbd23a019634ac677a0a90f8a3",
+        "tool": "revise_narration_draft",
+        "state": "succeeded",
+        "argumentsDigest": "81b941291c9adbc53ae48fc22631e63d86cb2414fd799a4017126b6f34727ab3",
+        "toolContractVersion": "2.0.0",
+        "catalogDigest": "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e",
+        "skillLockId": "260e5db3-3ebf-4b0d-8829-ee17ff871431",
+        "error": null,
+        "result": {
+          "canonicalApplied": false,
+          "next": "Read narration context; human review accepts exact script, recording and timing. No canonical state, grants or holds changed.",
+          "readiness": {
+            "audio": "none",
+            "gapCounts": {
+              "missing_audio": 3,
+              "missing_cue": 3,
+              "missing_voice_or_profile": 1,
+              "script_unapproved": 2,
+              "source_undecided": 1
+            },
+            "text": "draft",
+            "timing": "absent"
+          },
+          "revisionId": "4bed6906-f0a6-490d-9053-3fe3a9b15e09",
+          "segments": [
+            {
+              "segmentId": "b96e956e-f039-49f9-bdeb-c18b4250c690",
+              "segmentRevisionId": "b17eed16-8c17-4411-bd68-2d2a39701dad"
+            },
+            {
+              "segmentId": "49aefa3f-880e-4462-903a-35e4ef10c87c",
+              "segmentRevisionId": "4eec588b-38b0-4cfc-ab53-bcbdfd6860e8"
+            },
+            {
+              "segmentId": "3bf4b531-c91e-4020-8dcd-9179b1aa4a6c",
+              "segmentRevisionId": "805981ef-2482-4f4d-8ca7-a130e3c11815"
+            }
+          ],
+          "version": 3
+        }
+      },
+      {
+        "id": "77a96cb77460ea285098eb5fd5b4b3e39906756477811be759cca48721f85311",
+        "tool": "read_context",
+        "state": "succeeded",
+        "argumentsDigest": "ccc8756c539369372d879bf64fe0d61647c67669de3ae06b1a363a819f1a145e",
+        "toolContractVersion": "2.0.0",
+        "catalogDigest": "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e",
+        "skillLockId": "260e5db3-3ebf-4b0d-8829-ee17ff871431",
+        "error": null,
+        "result": {
+          "section": "narration",
+          "narrationVersion": 3,
+          "segments": 3
+        }
+      }
+    ]
+  },
+  "canonicalState": {
+    "before": "51478f4a4e6e266b8b02b6831187f9dce679949b87a88a6a334ee5118bf8da50",
+    "after": "51478f4a4e6e266b8b02b6831187f9dce679949b87a88a6a334ee5118bf8da50",
+    "unchanged": true,
+    "canonicalNarrationApplied": false
+  },
+  "authority": {
+    "bothEpochsRevoked": true,
+    "requestHoldsUnchanged": true,
+    "activeRequestHoldCount": 2,
+    "newScriptAcceptances": 0,
+    "newAudioAcceptances": 0,
+    "newTimingAcceptances": 0,
+    "mediaApiCalls": 0,
+    "planPreparedAttemptArtifactApprovalGrantCandidateAudioCueRecords": 0
+  },
+  "dispatch": {
+    "allowanceId": "openslate-native-narration-v2-20260912",
+    "maximumStarts": 1,
+    "actualStarts": 1,
+    "priorHistoricalStarts": 17,
+    "historicalStarts": 18,
+    "reservedAt": "2026-09-12T22:29:22.870Z",
+    "acknowledgedAt": "2026-09-12T22:29:22.983Z",
+    "status": "exhausted",
+    "retries": 0,
+    "runTimeoutMs": 90000,
+    "rpcTimeoutMs": 15000
+  },
+  "preflight": {
+    "fixture": "preflight-3peuzC",
+    "actualModelStarts": 0,
+    "checksPassed": 17,
+    "cleanupComplete": true,
+    "nativeCatalogChecked": true,
+    "runtimeElapsedMs": 2874
+  },
+  "checks": [
+    {
+      "name": "isolated_application_port",
+      "pass": true
+    },
+    {
+      "name": "zero_turn_setup_ready",
+      "pass": true
+    },
+    {
+      "name": "existing_v1_lock_selected_before_upgrade",
+      "pass": true
+    },
+    {
+      "name": "explicit_upgrade_preserves_canonical_state_and_holds",
+      "pass": true
+    },
+    {
+      "name": "v1_and_v2_snapshots_coexist",
+      "pass": true
+    },
+    {
+      "name": "upgrade_receipt_replays_without_new_lock",
+      "pass": true
+    },
+    {
+      "name": "no_models_before_requested_drafting",
+      "pass": true
+    },
+    {
+      "name": "normal_input_builder_selected_v2",
+      "pass": true
+    },
+    {
+      "name": "fresh_request_and_epoch_preserve_old_v1_binding",
+      "pass": true
+    },
+    {
+      "name": "original_narration_reconstructed",
+      "pass": true
+    },
+    {
+      "name": "canonical_project_unchanged",
+      "pass": true
+    },
+    {
+      "name": "no_holds_released_or_borrowed",
+      "pass": true
+    },
+    {
+      "name": "old_and_new_epochs_fenced",
+      "pass": true
+    },
+    {
+      "name": "no_media_or_planning_side_effects",
+      "pass": true
+    },
+    {
+      "name": "original_accepted_section_unchanged",
+      "pass": true
+    },
+    {
+      "name": "one_acknowledged_model_start",
+      "pass": true
+    },
+    {
+      "name": "turn_completed",
+      "pass": true
+    },
+    {
+      "name": "one_successful_v2_draft_edit",
+      "pass": true
+    },
+    {
+      "name": "actual_narration_read_before_and_after_write",
+      "pass": true
+    },
+    {
+      "name": "two_new_draft_sections_with_mixed_source_intent",
+      "pass": true
+    },
+    {
+      "name": "new_sections_remain_unaccepted_without_audio_or_timing",
+      "pass": true
+    },
+    {
+      "name": "saved_narration_and_turn_survive_reopen",
+      "pass": true
+    }
+  ],
+  "setupChecks": [
+    {
+      "status": "ready",
+      "checkedAt": "2026-09-12T22:29:08.170Z",
+      "runtimeVersion": "0.153.4",
+      "model": "gpt-6-astra",
+      "checks": {
+        "binary": "passed",
+        "account": "passed",
+        "model": "passed",
+        "catalog": "passed",
+        "policy": "passed"
+      },
+      "disabledMcpCount": 5,
+      "disabledSkillCount": 22,
+      "issues": []
+    },
+    {
+      "status": "ready",
+      "checkedAt": "2026-09-12T22:29:19.003Z",
+      "runtimeVersion": "0.153.4",
+      "model": "gpt-6-astra",
+      "checks": {
+        "binary": "passed",
+        "account": "passed",
+        "model": "passed",
+        "catalog": "passed",
+        "policy": "passed"
+      },
+      "disabledMcpCount": 5,
+      "disabledSkillCount": 26,
+      "issues": []
+    }
+  ],
+  "rpcTimings": [
+    {
+      "method": "initialize",
+      "elapsedMs": 8983,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 27,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 96,
+      "errorCode": null
+    },
+    {
+      "method": "account/read",
+      "elapsedMs": 9,
+      "errorCode": null
+    },
+    {
+      "method": "model/list",
+      "elapsedMs": 5,
+      "errorCode": null
+    },
+    {
+      "method": "initialize",
+      "elapsedMs": 135,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 37,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 62,
+      "errorCode": null
+    },
+    {
+      "method": "initialize",
+      "elapsedMs": 119,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 23,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 76,
+      "errorCode": null
+    },
+    {
+      "method": "account/read",
+      "elapsedMs": 109,
+      "errorCode": null
+    },
+    {
+      "method": "model/list",
+      "elapsedMs": 3,
+      "errorCode": null
+    },
+    {
+      "method": "initialize",
+      "elapsedMs": 134,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 19,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 43,
+      "errorCode": null
+    },
+    {
+      "method": "initialize",
+      "elapsedMs": 759,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 38,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 105,
+      "errorCode": null
+    },
+    {
+      "method": "thread/start",
+      "elapsedMs": 1001,
+      "errorCode": null
+    },
+    {
+      "method": "mcpServerStatus/list",
+      "elapsedMs": 702,
+      "errorCode": null
+    },
+    {
+      "method": "turn/start",
+      "elapsedMs": 64,
+      "errorCode": null
+    }
+  ],
+  "persistenceAfterClose": {
+    "narrationVersion": 3,
+    "narrationRevisionId": "4bed6906-f0a6-490d-9053-3fe3a9b15e09",
+    "turnState": "completed",
+    "exactSavedStateAndTurnMatch": true
+  },
+  "cleanup": {
+    "nativeThreadArchived": true,
+    "archiveProcessExited": true,
+    "applicationClosed": true,
+    "allObservedNativeProcessesExited": true,
+    "observedNativeProcessCount": 5,
+    "complete": true
+  },
+  "localEvidence": {
+    "workspaceRelativeRoot": "work/openslate-live-probe/narration-v2-validation",
+    "liveFixture": "live-uv1tnH",
+    "liveReportSha256": "34a10a168830f6be27eaa48df2a5147927374d11d15ec0fa9126830812433bc5",
+    "preflightReportSha256": "6849e70667c990956a3ff30ab6faaf6226faee6975b8f4684cc7a37ac742053c",
+    "allowanceSha256": "0655d0af1a2f2dc5b41b41f53b921dc17ffe17c70c721004c27536716170f2e4",
+    "harnessSha256": "97c31d8a167f7a215e17858c73e1328410fad5de2d4bafccf3140fc4ae01261a"
+  },
+  "limitations": [
+    "One explicitly directed, short draft request; not general narration quality, stage selection, long-script coverage, or latency guarantee.",
+    "The HTTP request and upgrade used the actual application routes; this live experiment did not drive the browser.",
+    "No recording upload, speech generation, transcription, image attachment, canonical narration application, shot planning, or real media provider execution occurred.",
+    "Preflight under the outer sandbox was blocked by native filesystem permissions; a later zero-turn catalog timeout occurred during the initial high-concurrency suite. Normal permissions and the subsequently passing bounded-concurrency suite produced the successful preflight without increasing production deadlines.",
+    "Existing native sign-in was used by the installed runtime; the test did not read or copy personal credential files."
+  ]
+}

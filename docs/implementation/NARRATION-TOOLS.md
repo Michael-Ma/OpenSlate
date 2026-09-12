@@ -68,7 +68,7 @@ No database table/schema migration is needed: JSON invocation fields, existing c
 
 ## Verification and source
 
-The focused catalog/runtime/narration run passed **71 tests**, including 15 new tests for draft behavior, old-lock preservation, human-only acceptance, authority fences, compact large-script receipts, restart/reconciliation, path-free pagination, immutable catalog identity, actual stdio discovery and synthetic native catalog mismatch. Seven separate upgrade tests passed. Core/director/server builds passed. These fixtures make no real model/media API calls. Actual native V2 drafting and browser evidence are recorded separately when exercised; fake protocol tests do not establish model behavior.
+The focused catalog/runtime/narration run passed **71 tests**, including 15 new tests for draft behavior, old-lock preservation, human-only acceptance, authority fences, compact large-script receipts, restart/reconciliation, path-free pagination, immutable catalog identity, actual stdio discovery and synthetic native catalog mismatch. Seven separate upgrade tests passed. Core/director/server builds passed. These fixtures make no real model/media API calls. A subsequent [actual native V2 request](CODEX-NARRATION-V2-VALIDATION.md) passed 22 checks in 27.853 seconds with read/write/read and preserved human acceptance. [Guidance upgrades](DIRECTOR-TOOLS-UPGRADE.md) have separate browser evidence; fake protocol tests alone do not establish model behavior.
 
 - Catalog/schema: [core tools](../../packages/core/src/tools.ts).
 - Locks/input: [capability helpers](../../apps/server/src/application/director-capabilities.ts), [input builder](../../apps/server/src/application/director-input.ts).
