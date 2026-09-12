@@ -1,0 +1,365 @@
+{
+  "schemaVersion": 1,
+  "test": "built browser selected reference image discussion",
+  "recordedAt": "2026-09-12T23:00:33.744Z",
+  "codeCommit": "d4050de",
+  "runtimeVersion": "0.153.4",
+  "model": "gpt-6-astra",
+  "reasoningEffort": "low",
+  "nodeVersion": "24.15.0",
+  "precondition": {
+    "fullSuitePassed": 579,
+    "fullSuiteFailures": 0,
+    "fullSuiteSkips": 0,
+    "buildsAndTypechecksPassed": true
+  },
+  "projectId": "df9121e9-7ab4-4d30-87e7-a3255611b955",
+  "projectName": "Reference image discussion validation",
+  "browser": {
+    "endpoint": "http://127.0.0.1:3001",
+    "originPolicy": "unmodified production loopback port 3001; no proxy or origin normalization",
+    "message": {
+      "text": "Look at the attached reference image. Describe its visual direction and suggest how we could use it in the film. Ask me about any details you need. Discuss only; do not change the project or approve generation.",
+      "scopeIds": [
+        "df9121e9-7ab4-4d30-87e7-a3255611b955"
+      ],
+      "editing": false,
+      "images": [
+        {
+          "artifactId": "cca40372-f06c-4b19-b028-d35c26668c40",
+          "sha256": "7bfd9a0b6a391a394f84b8367ff453141781f0cdfb1e1b883eabebc17eba2fbc"
+        }
+      ]
+    },
+    "observedMessageRequests": 1,
+    "setupAndImport": "authenticated HTTP harness; no file picker"
+  },
+  "browserObservations": {
+    "recordedAt": "2026-09-12T23:01:05.479848+00:00",
+    "method": "Parent agent CUA inspection of the built application on the unmodified production origin",
+    "connect": {
+      "originalPreviewComplete": true,
+      "originalPreviewWidth": 960,
+      "originalPreviewHeight": 540,
+      "attachAndDiscussEnabled": true,
+      "originalImportHoldVisible": true
+    },
+    "action": {
+      "attachAndDiscussClicks": 1,
+      "refreshProjectClicksAfterCompletion": 1
+    },
+    "afterRefresh": {
+      "correctShapeColorLayoutDescriptionVisible": true,
+      "responsePresent": true,
+      "originalPreviewComplete": true,
+      "originalPreviewWidth": 960,
+      "originalPreviewHeight": 540,
+      "originalImportHoldVisible": true,
+      "readOnlyDiscussionNoteVisible": true
+    },
+    "browserWarnings": [],
+    "browserErrors": [],
+    "nativeFilePickerUsed": false
+  },
+  "source": {
+    "sha256": "7bfd9a0b6a391a394f84b8367ff453141781f0cdfb1e1b883eabebc17eba2fbc",
+    "byteLength": 2777,
+    "width": 960,
+    "height": 540,
+    "expectedVisual": "White background; red square on the left; tall blue rectangle on the right."
+  },
+  "projection": {
+    "id": "c5031385-594b-4316-8536-f0e92d2e08a7",
+    "images": [
+      {
+        "artifactId": "cca40372-f06c-4b19-b028-d35c26668c40",
+        "byteLength": 4815,
+        "mediaType": "image/jpeg",
+        "sha256": "7bfd9a0b6a391a394f84b8367ff453141781f0cdfb1e1b883eabebc17eba2fbc",
+        "thumbnailSha256": "5d96719e077e0d91522a6a18ee8907799b2bc51aba69cd9e9bf71859c1b7efbf"
+      }
+    ],
+    "projectId": "df9121e9-7ab4-4d30-87e7-a3255611b955",
+    "recipeDigest": "866798897adc12fbae707e1d68417a5b0f8c04a44e4d8e539fa1756aac1420de",
+    "requestId": "c5031385-594b-4316-8536-f0e92d2e08a7",
+    "selectionDigest": "9d07b6791bb0d62dc14bf61e295020d98cbe83199b2bcb79b629cf4df8efa52c",
+    "toolchainDigest": "00d01197255300c02122c783dd0126a9e7f47d6c6a19faafae2e6610efd071d3"
+  },
+  "projectedImageDetails": [
+    {
+      "sha256": "5d96719e077e0d91522a6a18ee8907799b2bc51aba69cd9e9bf71859c1b7efbf",
+      "byteLength": 4815,
+      "mediaType": "image/jpeg",
+      "width": 768,
+      "height": 432
+    }
+  ],
+  "request": {
+    "projectId": "df9121e9-7ab4-4d30-87e7-a3255611b955",
+    "requestId": "c5031385-594b-4316-8536-f0e92d2e08a7",
+    "turnId": "07c89286-1b72-4ba6-91ca-1026f5e27a28",
+    "epochId": "af564190-e07d-41e5-a306-7bd079e0cb26",
+    "inputDigest": "e8106a130e5f3d731e9319eae0e4cd7fa0fd4a9f218f5348aa0c767101410948",
+    "contextDigest": "5515f3a2fa970ff70bd476989fa6870a39ead550179ac400db6eddc5faef5665",
+    "toolContract": {
+      "digest": "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e",
+      "lockDigest": "80457bc9d08419693711a84760436e6f5cc3932e632630d056b818566a0c1c9a",
+      "lockId": "ded01cd9-2f47-4a52-b18c-34175bdc50d2",
+      "version": "2.0.0"
+    }
+  },
+  "native": {
+    "threadId": "01a097d8-bf27-7880-abfc-d092ed57efa8",
+    "turnId": "01a097d8-c749-7d73-94d2-d78925924c29",
+    "elapsedMs": 9914,
+    "timingScope": "CodexDirectorRuntime.run, including native thread/catalog setup and turn; excludes application setup/import and image projection",
+    "state": "completed",
+    "output": "**Visual direction:** A red square on the left and a taller, narrower blue rectangle on the right, against white. Flat, saturated colors, crisp edges, and generous negative space create a minimal, graphic composition. The contrasting proportions suggest two distinct presences without assigning them a fixed meaning.\n\n**Possible film uses:**\n- **Opening motif:** Introduce the shapes separately, with simple sliding or scaling motion.\n- **Visual metaphor:** Use their spacing and movement to suggest contrast, connection, or changing balance.\n- **Graphic system:** Carry the red/blue palette and rectangular framing into titles, transitions, or split-screen sequences.\n\nWhat is the film about, and would you like these shapes to appear literally or simply guide its visual style?\n\nDiscussion only—no project changes or generation approval.",
+    "toolInvocations": []
+  },
+  "dispatch": {
+    "allowanceId": "openslate-native-image-attachment-20260912",
+    "maximumStarts": 1,
+    "actualStarts": 1,
+    "priorHistoricalStarts": 18,
+    "historicalStarts": 19,
+    "reservedAt": "2026-09-12T22:59:21.486Z",
+    "acknowledgedAt": "2026-09-12T22:59:21.562Z",
+    "status": "exhausted",
+    "automaticConversationPosts": 0,
+    "automaticRetries": 0,
+    "runTimeoutMs": 90000,
+    "rpcTimeoutMs": 15000
+  },
+  "canonicalState": {
+    "before": "be4c33e1cdd782afcb83154768ce494636202c2112acf59bb697ec17ab16a464",
+    "after": "be4c33e1cdd782afcb83154768ce494636202c2112acf59bb697ec17ab16a464",
+    "unchanged": true
+  },
+  "unchangedRecords": {
+    "hold": 1,
+    "grant": 0,
+    "approval": 0,
+    "candidate": 0,
+    "attempt": 0,
+    "plan": 0,
+    "prepared": 0,
+    "artifact": 1,
+    "narration_state": 0,
+    "narration_segment": 0,
+    "narration_audio": 0,
+    "narration_cue": 0,
+    "narration_acceptance": 0,
+    "narration_revision": 0,
+    "narration_prepared": 0,
+    "narration_canonical": 0,
+    "narration_commit_receipt": 0
+  },
+  "mediaApiCalls": 0,
+  "checks": [
+    {
+      "name": "production_loopback_port_and_origin_policy",
+      "pass": true
+    },
+    {
+      "name": "zero_turn_native_setup_ready",
+      "pass": true
+    },
+    {
+      "name": "synthetic_reference_imported_through_authenticated_http",
+      "pass": true
+    },
+    {
+      "name": "only_disposable_project_exists",
+      "pass": true
+    },
+    {
+      "name": "no_model_starts_during_setup",
+      "pass": true
+    },
+    {
+      "name": "built_interface_contains_attachment_action",
+      "pass": true
+    },
+    {
+      "name": "derived_dimensions_are_bounded",
+      "pass": true
+    },
+    {
+      "name": "real_application_projection_frozen_before_native_start",
+      "pass": true
+    },
+    {
+      "name": "original_and_derived_refs_bound_into_input",
+      "pass": true
+    },
+    {
+      "name": "bounded_exact_thumbnail_bytes",
+      "pass": true
+    },
+    {
+      "name": "no_paths_in_attached_context",
+      "pass": true
+    },
+    {
+      "name": "exactly_one_browser_message_and_native_turn",
+      "pass": true
+    },
+    {
+      "name": "one_acknowledged_model_start",
+      "pass": true
+    },
+    {
+      "name": "native_turn_completed",
+      "pass": true
+    },
+    {
+      "name": "canonical_project_unchanged",
+      "pass": true
+    },
+    {
+      "name": "narration_and_all_media_review_authority_unchanged",
+      "pass": true
+    },
+    {
+      "name": "no_media_provider_submissions",
+      "pass": true
+    },
+    {
+      "name": "discussion_is_read_only_without_continuation",
+      "pass": true
+    },
+    {
+      "name": "current_epoch_fenced_after_completion",
+      "pass": true
+    },
+    {
+      "name": "original_png_identity_preserved",
+      "pass": true
+    },
+    {
+      "name": "single_saved_selection_and_projection",
+      "pass": true
+    },
+    {
+      "name": "no_mutating_application_tools",
+      "pass": true
+    },
+    {
+      "name": "saved_selection_projection_and_turn_survive_reopen",
+      "pass": true
+    }
+  ],
+  "setupChecks": [
+    {
+      "status": "ready",
+      "checkedAt": "2026-09-12T22:57:52.921Z",
+      "runtimeVersion": "0.153.4",
+      "model": "gpt-6-astra",
+      "checks": {
+        "binary": "passed",
+        "account": "passed",
+        "model": "passed",
+        "catalog": "passed",
+        "policy": "passed"
+      },
+      "disabledMcpCount": 5,
+      "disabledSkillCount": 22,
+      "issues": []
+    }
+  ],
+  "rpcTimings": [
+    {
+      "method": "initialize",
+      "elapsedMs": 10655,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 36,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 65,
+      "errorCode": null
+    },
+    {
+      "method": "account/read",
+      "elapsedMs": 9,
+      "errorCode": null
+    },
+    {
+      "method": "model/list",
+      "elapsedMs": 3,
+      "errorCode": null
+    },
+    {
+      "method": "initialize",
+      "elapsedMs": 154,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 25,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 41,
+      "errorCode": null
+    },
+    {
+      "method": "initialize",
+      "elapsedMs": 138,
+      "errorCode": null
+    },
+    {
+      "method": "config/read",
+      "elapsedMs": 26,
+      "errorCode": null
+    },
+    {
+      "method": "skills/list",
+      "elapsedMs": 64,
+      "errorCode": null
+    },
+    {
+      "method": "thread/start",
+      "elapsedMs": 1031,
+      "errorCode": null
+    },
+    {
+      "method": "mcpServerStatus/list",
+      "elapsedMs": 995,
+      "errorCode": null
+    },
+    {
+      "method": "turn/start",
+      "elapsedMs": 30,
+      "errorCode": null
+    }
+  ],
+  "cleanup": {
+    "complete": true,
+    "applicationClosed": true,
+    "nativeThreadArchived": true,
+    "archiveProcessExited": true,
+    "observedNativeProcessCount": 3,
+    "allObservedNativeProcessesExited": true
+  },
+  "localEvidence": {
+    "workspaceRelativeRoot": "work/openslate-live-probe/image-attachment-validation",
+    "fixture": "browser-rxrp3Z",
+    "reportSha256": "f0dcb656fb653fb098d56e159bb96671f575c9ba177f8a782361dff405254120",
+    "allowanceSha256": "08409c87dc6c5ace0c4a715cfeb28086bb7831522b16c3d94e873b05508b332b",
+    "harnessSha256": "0535fb46f8f27a6e081c5d7a6e7af73904a41c140862ca8b8c581088aaf45f16",
+    "browserObservationsSha256": "de674fd7485b9b0c4ea6055aecd0daaac444fc324effa9ba0ad8ae53286c5d25"
+  },
+  "limitations": [
+    "One simple synthetic image and one read-only discussion; not fine-detail recognition, broad visual reasoning, production footage or long-film quality.",
+    "PNG upload used authenticated HTTP; native file-picker interaction was not part of this experiment.",
+    "Only this request carried visual bytes; saved observations are advisory and later requests do not automatically reattach the image.",
+    "The installed native runtime used its existing sign-in; no personal credential file was read or copied by the harness."
+  ]
+}

@@ -28,6 +28,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Local image ingestion](implementation/IMAGE-INGESTION.md) | Full PNG validation, exact bytes and immutable publication |
 | [PNG reference library](implementation/PNG-REFERENCE-IMPORT.md) | Supplied-image import, conversational reference identity and verified browser preview |
 | [Director image attachments](implementation/DIRECTOR-IMAGE-ATTACHMENTS.md) | Explicit request selections, bounded thumbnails, immutable receipts and read-only discussion |
+| [Browser image discussion validation](implementation/CODEX-IMAGE-ATTACHMENT-VALIDATION.md) | One actual reference discussion, preserved state, refresh, native cleanup and exact identities |
 | [Media credentials](implementation/MEDIA-CREDENTIALS.md) | Backend environment aliases and separation from spending authority |
 | [Runtime trust decision](implementation/RUNTIME-TRUST-DECISION.md) | Accepted single-machine v0 boundary and pinned local native-runtime trust policy |
 | [Codex probe](implementation/CODEX-PROBE.md) | Pinned no-turn runtime evidence and baseline limitations |

@@ -2,7 +2,7 @@
 
 September 12, 2026. OpenSlate can attach explicitly selected, project-owned PNG references to a native director request. The library's **Attach and discuss** action sends a read-only request with the chosen image identity and hash. It does not continue an earlier edit, transfer its holds or authorize generation. Later messages retain saved observations but do not automatically attach image bytes again.
 
-This implementation has offline HTTP, persistence, native-input and real local image-process coverage. A built-browser/native model experiment is pending. The preceding [capability experiment](CODEX-CAPABILITY-VALIDATION.md) tested native image input with a synthetic host-selected fixture; it did not exercise this production library flow.
+This implementation has offline HTTP, persistence, native-input and real local image-process coverage. A [built-browser native discussion](CODEX-IMAGE-ATTACHMENT-VALIDATION.md) also passed: one explicit attachment, correct simple shape/color/layout observation, unchanged project and holds, and successful cleanup. The preceding [capability experiment](CODEX-CAPABILITY-VALIDATION.md) tested a synthetic host-selected fixture; the newer experiment exercised this production library flow.
 
 ## Request and input boundaries
 

@@ -4,7 +4,7 @@ An open-source video agent for turning a story into a finished film.
 
 OpenSlate is designed to plan scenes and shots, create reference assets, generate video takes, and assemble an editable timeline for rendering and post-processing.
 
-**Status: an early local studio with native Codex conversations and supplied-media workflows.** Plan and review shots, develop narration, import recordings/clips, accept exact narration and render a compatible local timeline. SQLite state, validated plans, durable jobs and human review remain application-owned. The demo uses fake generation; offline-tested GPT Image 2 and H3 transports are not yet connected to production execution or credentials. The full generated-film workflow remains in development. See [verified status](docs/implementation/STATUS.md).
+**Status: an early local studio with native Codex conversations and supplied-media workflows.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images, accept exact narration and render a compatible local timeline. SQLite state, validated plans, durable jobs and human review remain application-owned. The demo uses fake generation; offline-tested GPT Image 2 and H3 transports are not yet connected to production execution or credentials. The full generated-film workflow remains in development. See [verified status](docs/implementation/STATUS.md).
 
 ## Direction
 
@@ -60,6 +60,7 @@ Run `pnpm demo:headless` for a reproducible two-shot example. It generates clear
 | `pnpm check` | Build, run domain/API/SQLite tests and check TypeScript |
 | `pnpm test` | Build and run offline tests, including the fake integration demo |
 | `pnpm demo:headless` | Run the two-shot edit/restart demonstration without keys |
+| `pnpm probe:workflow` | Verify a 60-shot, six-minute plan, review batches and scoped edit/restart with fake media |
 | `pnpm probe:toolchain` | Check SQLite/schema and optional local FFmpeg H.264/AAC support |
 | `pnpm probe:launcher` | Check the built local launcher with temporary data; requires port 3001 to be free |
 | `pnpm probe:runtime --codex /absolute/path/to/codex` | Probe installed Codex with zero model turns |
@@ -70,6 +71,8 @@ Run `pnpm demo:headless` for a reproducible two-shot example. It generates clear
 The web build is written to `apps/web/dist`. Production loads a bounded snapshot of that directory: at most 256 entries, eight levels, 8 MiB per file and 32 MiB total. Only recognized web asset formats are served; hidden files, source maps and arbitrary data files are excluded, and symlinks are rejected. Missing API routes and missing assets never fall back to the interface. The local launcher is not a multi-host deployment service.
 
 Tests use isolated local databases and require permission to bind loopback ports. The native Codex probe test is opt-in through `OPENSLATE_CODEX_PROBE_BINARY`; normal CI does not require Codex or credentials. Supplied-media workflows require FFmpeg and ffprobe on PATH (or OPENSLATE_FFMPEG and OPENSLATE_FFPROBE). They provide authenticated local upload, narration review, clip playback and rendering of compatible plans. They do not call cloud media APIs.
+
+Recognized older databases receive a verified snapshot before a schema upgrade. Those snapshots contain database records, not the referenced media files. See [database migration and restore boundaries](docs/implementation/DATABASE-MIGRATIONS.md) before treating a metadata snapshot as a complete project backup.
 
 ## Repository
 
