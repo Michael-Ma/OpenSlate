@@ -1,0 +1,76 @@
+{
+  "date": "2026-09-12",
+  "runtimeVersion": "0.153.4",
+  "model": "gpt-6-astra",
+  "kind": "browser_native_local_controller",
+  "projectId": "7a6aa18e-c63e-4760-b708-d0dd80c91bba",
+  "actualModelStarts": 2,
+  "turns": [
+    {
+      "id": "da49e94d-1f48-4d72-a001-4846227f12fb",
+      "requestId": "da7b342d-d977-4679-91e9-2ce927b33ac7",
+      "state": "completed",
+      "dispatched": true,
+      "errorCode": null,
+      "elapsedMs": 14721,
+      "nativeThreadId": "01a094d6-d98e-7cc0-a5b1-bfb8f2174ee8"
+    },
+    {
+      "id": "b23ad033-4d59-49c2-9f02-d8d0b73777af",
+      "requestId": "b13d44b5-d8f8-4643-b989-97cbbfecee92",
+      "state": "completed",
+      "dispatched": true,
+      "errorCode": null,
+      "elapsedMs": 20488,
+      "nativeThreadId": "01a094dc-6626-71d2-b0cb-14167c551105"
+    }
+  ],
+  "brief": "A 150-second commercial about handmade leather boots built for daily wear and beautiful patina.",
+  "shots": 0,
+  "scenes": 0,
+  "activePlanId": null,
+  "counts": {
+    "native_model_start": 2,
+    "tool_invocation": 4,
+    "grant": 0,
+    "candidate": 0,
+    "attempt": 0,
+    "artifact": 0,
+    "approval": 0,
+    "director_question": 0
+  },
+  "toolResults": [
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    },
+    {
+      "tool": "prepare_change",
+      "state": "succeeded"
+    },
+    {
+      "tool": "apply_change",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded"
+    }
+  ],
+  "outputsPerTurn": [
+    {
+      "turnId": "da49e94d-1f48-4d72-a001-4846227f12fb",
+      "items": 3
+    },
+    {
+      "turnId": "b23ad033-4d59-49c2-9f02-d8d0b73777af",
+      "items": 1
+    }
+  ],
+  "limitations": [
+    "Ordinary conversational questions; not native structured input",
+    "First turn exposed aggregated-answer duplication; fixed and regression-tested before second turn",
+    "PATH npm launcher missing platform executable; default discovery now prefers app bundle",
+    "No real media generated; narration notes retained in conversation only"
+  ]
+}

@@ -242,7 +242,8 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
       "features.code_mode_host": true, "features.skip_host_skill_discovery": true,
       "skills.config": [...(Array.isArray(this.#options.policy.config["skills.config"])
-        ? this.#options.policy.config["skills.config"].filter(value => object(value).enabled === false) : []),
+        ? this.#options.policy.config["skills.config"].filter(value => object(value).enabled === false &&
+          !input.skills.some(skill => skill.path === object(value).path)) : []),
       ...input.skills.map(skill => ({ path: skill.path, enabled: true }))],
       [`mcp_servers.${SERVER}.command`]: process.execPath, [`mcp_servers.${SERVER}.args`]: [input.bridge.entrypoint],
       [`mcp_servers.${SERVER}.enabled`]: true, [`mcp_servers.${SERVER}.required`]: true,

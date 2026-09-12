@@ -7,11 +7,14 @@ import type { ActorContext, HealthResponse } from "@openslate/core";
 import { ToolInvocationService } from "./application/tool-invocations.js";
 import type { ProductionService } from "./application/service.js";
 import type { DirectorSupervisor } from "./application/director-supervisor.js";
+import type { LocalDirectorController, LocalDirectorSelection } from "./application/local-director.js";
 import type { ArtifactRecord, PlanRecord, ReviewSnapshot } from "./execution/engine.js";
 import { seedFixture } from "./demo.js";
 import type { DemoCommand } from "./application/fake-director.js";
 
-interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean; director?: DirectorSupervisor }
+interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+  director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
+  runtimeSettings?: LocalDirectorController }
 const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
@@ -21,6 +24,7 @@ export function createApp(options: AppOptions = {}) {
   const actors = new WeakMap<object, ActorContext>();
   const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
   const service = () => { invariant(options.service, "SERVICE_UNAVAILABLE", "Application storage is not configured"); return options.service; };
+  const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED"].includes(error.code) ? 403
@@ -53,13 +57,23 @@ export function createApp(options: AppOptions = {}) {
     service().store.getProject(request.params.projectId);
     return options.director?.status(request.params.projectId) ?? { mode: "offline", status: "not_connected", activeRequestId: null };
   });
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/setup", async request => {
+    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
+    return options.runtimeSettings.settings(request.params.projectId);
+  });
+  app.post<{ Params: { projectId: string }; Body: LocalDirectorSelection }>("/api/projects/:projectId/director/setup", {
+    schema: { body: object({ mode: { enum: ["fake", "native"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) },
+  }, async request => {
+    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
+    return options.runtimeSettings.configure(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
+  });
   app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; replyToReviewId?: string; replyToQuestionId?: string } }>("/api/projects/:projectId/messages", {
     schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, replyToReviewId: string, replyToQuestionId: string }, ["text"]) },
   }, async request => {
     if (request.body.replyToQuestionId) {
       invariant(options.director && !request.body.replyToReviewId && !request.body.scopeIds && !request.body.continuationRequestId && request.body.editing === undefined, "VALIDATION_ERROR", "Reply to one pending question using its original scope");
       const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.text, request.headers["idempotency-key"] as string | undefined ?? newId());
-      options.director.tick(); return { requestId: actor.requestId, status: "queued", director: options.director.options.mode };
+      options.director.tick(); return { requestId: actor.requestId, status: "queued", director: directorMode(request.params.projectId) };
     }
     const actor = service().store.transaction(() => {
       const actor = service().beginRequest(request.params.projectId, "local-user", request.body.text,
@@ -69,12 +83,12 @@ export function createApp(options: AppOptions = {}) {
     });
     if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, request.body.text);
     options.director?.tick();
-    return { requestId: actor.requestId, status: options.director ? "queued" : "recorded", director: options.director ? options.director.options.mode : "not_connected" };
+    return { requestId: actor.requestId, status: options.director ? "queued" : "recorded", director: directorMode(request.params.projectId) };
   });
   app.post<{ Params: { projectId: string }; Body: DemoCommand }>("/api/projects/:projectId/demo", {
     schema: { body: object({ action: { enum: ["create", "close_up", "wide"] }, shotId: string }, ["action"]) },
   }, async request => {
-    invariant(options.director?.options.mode === "fake", "ACTOR_DENIED", "The demo is available only with the offline fake director");
+    invariant(options.director && directorMode(request.params.projectId) === "fake", "ACTOR_DENIED", "The demo is available only with the offline fake director");
     const { projectId } = request.params;
     const key = request.headers["idempotency-key"] as string | undefined ?? newId();
     // Dedicated human demo command authorizes bounded fake slots. Ordinary chat never grants generation.

@@ -11,15 +11,15 @@ export class StudioApi {
   #controllers = new Set<AbortController>();
   constructor(token: string) { this.#token = token; }
   close() { for (const controller of this.#controllers) controller.abort(); this.#controllers.clear(); this.#token = ""; }
-  async request<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown; key?: string; signal?: AbortSignal } = {}): Promise<T> {
+  async request<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown; key?: string; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
     return this.#fetch(path, options, response => response.json() as Promise<T>);
   }
-  async #fetch<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown; key?: string; signal?: AbortSignal }, consume: (response: Response) => Promise<T>): Promise<T> {
+  async #fetch<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown; key?: string; signal?: AbortSignal; timeoutMs?: number }, consume: (response: Response) => Promise<T>): Promise<T> {
     if (!path.startsWith("/api/")) throw new ApiError("INVALID_PATH");
     const controller = new AbortController(); this.#controllers.add(controller);
     const abort = () => controller.abort(); options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) controller.abort();
-    const timer = setTimeout(abort, 15000);
+    const timer = setTimeout(abort, Math.min(90000, Math.max(1000, options.timeoutMs ?? 15000)));
     try {
       const response = await fetch(path, { method: options.method ?? "GET", credentials: "omit", redirect: "error", signal: controller.signal,
         headers: { authorization: `Bearer ${this.#token}`, ...(options.body === undefined ? {} : { "content-type": "application/json" }), ...(options.key ? { "idempotency-key": options.key } : {}) },

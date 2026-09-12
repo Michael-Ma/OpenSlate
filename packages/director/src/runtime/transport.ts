@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { CodexRuntimeLimits } from "./policy.js";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
 
-const METHODS = new Set(["initialize", "config/read", "skills/list", "mcpServerStatus/list", "thread/start", "thread/resume", "turn/start", "turn/interrupt"]);
+const METHODS = new Set(["initialize", "config/read", "skills/list", "account/read", "model/list", "mcpServerStatus/list", "thread/start", "thread/resume", "turn/start", "turn/interrupt"]);
 type Pending = { resolve(value: unknown): void; reject(error: RuntimeFault): void; dispose(): void };
 export interface RpcMessage { method: string; params: unknown; id?: string | number }
 export function timeout<T>(value: Promise<T>, ms: number, code: string): Promise<T> {
@@ -32,9 +32,13 @@ export class CodexTransport {
   #limits: CodexRuntimeLimits;
   #onMessage: (message: RpcMessage) => void;
   #secrets: readonly string[];
+  #methods: ReadonlySet<string>;
 
   constructor(options: { command: string; args: string[]; cwd: string; env: Record<string, string>; limits: CodexRuntimeLimits;
-    secrets: readonly string[]; onMessage(message: RpcMessage): void }) {
+    secrets: readonly string[]; allowedMethods?: readonly string[]; onMessage(message: RpcMessage): void }) {
+    requireRuntime(options.allowedMethods === undefined || options.allowedMethods.every(method => METHODS.has(method)),
+      "RUNTIME_METHOD_DENIED", "Native method is outside the runtime contract");
+    this.#methods = new Set(options.allowedMethods ?? METHODS);
     this.#limits = options.limits; this.#onMessage = options.onMessage;
     this.#secrets = options.secrets.filter(value => value.length > 0).sort((a, b) => b.length - a.length);
     this.failed = new Promise(resolve => { this.#resolveFailure = resolve; });
@@ -82,7 +86,7 @@ export class CodexTransport {
     this.send({ id, error: { code: -32601, message: "Interactive native requests are unavailable in this runtime" } });
   }
   request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
-    requireRuntime(METHODS.has(method), "RUNTIME_METHOD_DENIED", "Native method is outside the runtime contract");
+    requireRuntime(this.#methods.has(method), "RUNTIME_METHOD_DENIED", "Native method is outside the runtime contract");
     requireRuntime(!signal?.aborted, "RUNTIME_ABORTED", "Director run was cancelled");
     requireRuntime(this.#pending.size < 8, "RUNTIME_REQUEST_LIMIT", "Too many pending native requests");
     if (this.#failure) return Promise.reject(this.#failure);

@@ -142,6 +142,11 @@ export class Store {
       if (body.epochId !== null) reference("epoch", body.epochId);
       invariant(["queued", "running", "completed", "waiting_user", "interrupted", "unknown", "failed"].includes(String(body.state)), "VALIDATION_ERROR", "Invalid director turn state");
     }
+    if (kind === "native_model_start") {
+      reference("director_turn", id); reference("message", body.requestId); reference("epoch", body.epochId);
+      const turn = this.get<{ requestId: string; epochId: string }>("director_turn", id);
+      invariant(turn?.requestId === body.requestId && turn?.epochId === body.epochId, "SCOPE_DENIED", "Native dispatch reservation must match its application turn");
+    }
     if (["director_epoch_lock", "director_context", "skill_activation", "skill_read"].includes(kind)) {
       reference("message", body.requestId);
       reference("epoch", body.epochId);
@@ -173,7 +178,7 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "media_source", "media_import", "media_import_receipt", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
@@ -203,6 +208,12 @@ export class Store {
         const next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["candidateId", "ordinal", "nodeId", "specDigest", "fingerprint", "request", "workKey"])
           invariant(canonical(previous[field] ?? null) === canonical(next[field] ?? null), "IMMUTABLE_RECORD", `Attempt ${field} is immutable`);
+      }
+      if (kind === "media_render") {
+        const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
+        const mutable = new Set(["state", "ownerToken", "leaseUntil", "cancelRequested", "artifact", "finishedAt", "errorCode"]);
+        for (const field of new Set([...Object.keys(previous), ...Object.keys(next)])) if (!mutable.has(field))
+          invariant(canonical(previous[field] ?? null) === canonical(next[field] ?? null), "IMMUTABLE_RECORD", `Render ${field} is immutable`);
       }
       this.db.prepare("UPDATE entities SET body=?,version=version+1 WHERE kind=? AND id=?").run(encoded, kind, id);
       return JSON.parse(encoded) as T;

@@ -65,6 +65,8 @@ lines.on("line", line => {
     return respond(id, { config });
   }
   if (method === "skills/list") {
+    if (mode === "skills-config-dedup" && new Set(config.skills.config.map(skill => skill.path)).size !== config.skills.config.length)
+      return send({ id, error: { code: -1, message: "Duplicate skill configuration" } });
     const skills = JSON.parse(process.env.FIXTURE_SKILLS ?? "[]").map(skill => ({ ...skill, enabled: true }));
     if (mode === "skill-extra") skills.push({ name: "untrusted", path: "/fake/untrusted/SKILL.md", enabled: true });
     return respond(id, { data: [{ cwd: process.cwd(), skills, errors: mode === "skills-error" ? [{ message: "fixture error" }] : [] }] });

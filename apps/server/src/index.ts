@@ -8,9 +8,7 @@ import { createApp } from "./app.js";
 import { ProductionService } from "./application/service.js";
 import { Store } from "./persistence/store.js";
 import { Engine } from "./execution/engine.js";
-import { DirectorSupervisor } from "./application/director-supervisor.js";
-import { FakeWorkflowDirector } from "./application/fake-director.js";
-import { createDirectorInput } from "./application/director-input.js";
+import { LocalDirectorController } from "./application/local-director.js";
 
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
 mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -29,11 +27,9 @@ const store = new Store(join(directory, "openslate.sqlite"));
 const provider = new FakeProvider(join(directory, "fake-provider.sqlite"));
 const engine = new Engine(store, provider, { artifactDir: join(directory, "artifacts") });
 const service = new ProductionService(store, engine);
-// Native launch needs explicit local configuration and supervised integration validation.
-// The default is a transparent scripted runtime with zero external calls.
-const director = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake",
-  prepareInput: createDirectorInput(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), snapshotRoot: join(directory, "skill-snapshots"), endpoint: "http://127.0.0.1:3001" }) });
-const app = createApp({ service, director, localToken, logger: true });
+// Each project starts in demo mode until its user chooses and checks local Codex.
+const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001" });
+const app = createApp({ service, director, runtimeSettings: director, localToken, logger: true });
 let running = false;
 const timer = setInterval(() => {
   try { director.tick(); } catch (error) { app.log.error(error); }

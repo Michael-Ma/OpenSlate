@@ -32,6 +32,7 @@ export interface DirectorContextProjection {
   assistantMessages?: { id: string; requestId: string; turnId: string; text: string; phase: string }[];
   questions?: unknown[];
   holds: Hold[];
+  execution: { globallyPaused: boolean; scopedHoldSemantics: string };
   toolCalls: ToolSummary[];
   workflow: unknown;
   work: unknown;
@@ -119,6 +120,8 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       guard: { projectId, headVersion, revisionId, activePlanId, graphDigest: plan.graphDigest, capabilityLockId, domainCursor, dataDigest: "" },
       request: { id: request.id, scopeIds: request.scopeIds, editing: request.editing, state: request.state }, plan, profiles: lock.profiles,
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
+      execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,
+        scopedHoldSemantics: "Director pause creates a request-owned scope hold. Applying a matching plan releases that request's hold. This is separate from the human global pause. Read current context after mutations before describing execution state." },
       coverage: { sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts"], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
     };
     const itemsPage = (items: unknown[]): DirectorContextProjection => {

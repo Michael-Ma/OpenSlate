@@ -181,6 +181,18 @@ test('known bridge credentials are redacted at the application output boundary',
   assert.equal(f.store.list('director_output',f.project.id).length,1);
 });
 
+test('multiple native final items do not duplicate the aggregate answer',async t=>{
+  const f=fixture(t,async(input,{onEvent})=>{
+    for(const text of ['Choose a narration direction.','Share notes or upload a finished script.'])
+      await onEvent({...identity(input),kind:'assistant_message',text,phase:'final'});
+    return completed(input,'Choose a narration direction.\nShare notes or upload a finished script.');
+  });
+  f.enqueue();f.supervisor.tick();await f.supervisor.settle();
+  const answers=f.service.snapshot(f.project.id).conversation.filter(message=>message.role==='assistant');
+  assert.deepEqual(answers.map(message=>message.text),['Choose a narration direction.','Share notes or upload a finished script.']);
+  assert.equal(f.store.list('director_output',f.project.id).length,2);
+});
+
 test('lost tool completion is reconciled from the domain receipt without invoking apply again',async t=>{
   const f=fixture(t),turn=f.enqueue(),human={kind:'human',principalId:'human',requestId:turn.requestId};
   const bridge=f.service.openEpoch(f.project.id,human), actor=bridge.actor;

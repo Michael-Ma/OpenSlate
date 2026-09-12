@@ -16,6 +16,8 @@ interface Epoch { id: string; projectId: string; requestId: string; principalId:
 export interface DirectorOutput { id: string; projectId: string; requestId: string; turnId: string; text: string; phase: string }
 export interface SupervisorOptions {
   mode: "fake" | "native";
+  /** Local controllers may share one store while owning disjoint project sets. */
+  projectFilter?: (projectId: string) => boolean;
   prepareInput?: (turn: DirectorTurn, human: ActorContext, bridge: { actor: ActorContext; token: string }) => Promise<DirectorRunInput> | DirectorRunInput;
   now?: () => number; leaseMs?: number; owner?: string;
 }
@@ -89,6 +91,7 @@ export class DirectorSupervisor {
   tick(): void {
     if (this.closed) return;
     for (const project of this.service.store.listProjects()) {
+      if (this.options.projectFilter && !this.options.projectFilter(project.id)) continue;
       this.service.store.transaction(() => {
         const paused = this.service.store.get<{ paused: boolean }>("execution_control", project.id)?.paused;
         for (const turn of this.turns(project.id)) {
@@ -195,7 +198,15 @@ export class DirectorSupervisor {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
         if (turn.state !== "running" || turn.owner !== this.owner) return;
         const stale = abort.signal.aborted || service.store.get<Epoch>("epoch", turn.epochId!)?.state === "revoked";
-        if (!stale && result.status === "completed") this.output(turn, result.text.replaceAll(bridge.token, "[redacted]"), "final");
+        if (!stale && result.status === "completed") {
+          const text = result.text.replaceAll(bridge.token, "[redacted]");
+          const delivered = service.store.list<DirectorOutput>("director_output", claimed.projectId).filter(output => output.turnId === turn.id);
+          const finals = delivered.filter(output => output.phase === "final");
+          // Native results aggregate already delivered items. Keep those items in
+          // the audit without appending the same answer again as a third message.
+          const assembled = (finals.length ? finals : delivered).map(output => output.text).join("\n");
+          if (text !== assembled) this.output(turn, text, "final");
+        }
         this.terminal({ ...turn, dispatched: result.dispatched, nativeThreadId: result.nativeThreadId ?? turn.nativeThreadId, nativeTurnId: result.nativeTurnId ?? turn.nativeTurnId },
           result.status === "unknown" ? "unknown" : stale ? "interrupted" : pending ? "waiting_user" : result.status, result.error?.code ?? null);
         new ToolInvocationService(service).reconcileEpoch(claimed.projectId, turn.epochId!);
