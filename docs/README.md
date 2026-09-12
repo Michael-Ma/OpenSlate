@@ -25,6 +25,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Provider execution boundary](implementation/PROVIDER-EXECUTION.md) | Registered executor contracts, receipt identity, ingestion and recovery |
 | [Owned spool completions](implementation/SPOOL-COMPLETIONS.md) | Versioned completion receipts, local recovery, exact PNG ingestion and lease protection |
 | [Durable output storage](implementation/OUTPUT-SPOOL.md) | Owned receipt/spool identities, bounded streaming and crash recovery |
+| [Protected video downloading](implementation/VIDEO-DOWNLOAD.md) | Pinned HTTPS destination, bounded streams, cancellation and durable spool integration |
 | [Local image ingestion](implementation/IMAGE-INGESTION.md) | Full PNG validation, exact bytes and immutable publication |
 | [PNG reference library](implementation/PNG-REFERENCE-IMPORT.md) | Supplied-image import, conversational reference identity and verified browser preview |
 | [Director image attachments](implementation/DIRECTOR-IMAGE-ATTACHMENTS.md) | Explicit request selections, bounded thumbnails, immutable receipts and read-only discussion |
