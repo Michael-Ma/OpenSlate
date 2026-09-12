@@ -1,4 +1,4 @@
-/** Discovery boundary only; job submission and adapters are not implemented. */
+/** Discovery boundary; standalone cloud transports require application execution integration. */
 export interface VideoCapabilities {
   providerId: string;
   modelId: string;
@@ -13,3 +13,5 @@ export interface VideoProvider {
   capabilities(): Promise<VideoCapabilities>;
 }
 export * from "./fake.js";
+export * from "./minimax-h3.js";
+export * from "./openai-image.js";
