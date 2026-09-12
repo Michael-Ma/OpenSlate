@@ -2,30 +2,21 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import type { ArtifactRef, JsonObject, OperationKind } from "@openslate/core";
+import type { ArtifactRef } from "@openslate/core";
+import { registerExecutionProvider } from "./execution.js";
+import type { ExecutionOutcome, ExecutionOutput, ExecutionProvider, ExecutionRequest } from "./execution.js";
 
 export type FakeMode = "complete" | "pending" | "unknown_after_accept" | "technical_failure" | "reject_before_accept";
-export interface FakeRequest {
-  attemptId: string; nodeId: string; kind: OperationKind; fingerprint: string;
-  args: JsonObject; inputs: ArtifactRef[];
-}
-export interface FakeOutput {
-  port: string; kind: ArtifactRef["kind"]; mimeType: string; extension: string;
-  bytesBase64: string; sha256: string; fixture: true;
-}
-export type FakeOutcome =
-  | { type: "accepted"; taskId: string }
-  | { type: "completed"; taskId: string; outputs: FakeOutput[] }
-  | { type: "failed"; taskId: string; failureId: string; technical: true }
-  | { type: "rejected"; certainty: "not_accepted"; technical: true; failureId: string }
-  | { type: "unknown"; diagnostic: string };
+export type FakeRequest = ExecutionRequest;
+export type FakeOutput = ExecutionOutput & { fixture: true };
+export type FakeOutcome = ExecutionOutcome;
 
 interface JobRow { id: string; request: string; status: string; outputs: string; failure_id: string | null }
 
 /** Fault-injectable backend with durable acceptance evidence in a separate database.
  * submit intentionally does NOT deduplicate attempt IDs: tests can detect a blind resubmit.
  */
-export class FakeProvider {
+export class FakeProvider implements ExecutionProvider {
   readonly db: Database.Database;
   constructor(readonly path: string) {
     if (path !== ":memory:") mkdirSync(dirname(resolve(path)), { recursive: true });
@@ -42,6 +33,7 @@ export class FakeProvider {
       CREATE INDEX IF NOT EXISTS fake_attempt_lookup ON fake_jobs(attempt_id);
       CREATE TABLE IF NOT EXISTS fake_modes(node_id TEXT PRIMARY KEY, modes TEXT NOT NULL);
     `);
+    registerExecutionProvider(this, { adapter: "fake", version: "1" });
   }
 
   setMode(nodeId: string, mode: FakeMode | FakeMode[]): void {
@@ -61,7 +53,7 @@ export class FakeProvider {
   async submit(request: FakeRequest): Promise<FakeOutcome> {
     return this.db.transaction((): FakeOutcome => {
       const mode = this.nextMode(request.nodeId);
-      if (mode === "reject_before_accept") return { type: "rejected", certainty: "not_accepted", technical: true, failureId: randomUUID() };
+      if (mode === "reject_before_accept") return { type: "rejected", certainty: "not_accepted", technical: true, retryAllowed: true, failureId: randomUUID() };
       const taskId = randomUUID();
       const status = mode === "pending" ? "pending" : mode === "technical_failure" ? "failed" : "completed";
       const failureId = status === "failed" ? randomUUID() : null;
@@ -78,7 +70,7 @@ export class FakeProvider {
     const job = this.db.prepare("SELECT * FROM fake_jobs WHERE id=?").get(taskId) as JobRow | undefined;
     if (!job) return { type: "unknown", diagnostic: "No backend receipt found" };
     if (job.status === "pending") return { type: "accepted", taskId };
-    if (job.status === "failed") return { type: "failed", taskId, failureId: job.failure_id!, technical: true };
+    if (job.status === "failed") return { type: "failed", taskId, failureId: job.failure_id!, technical: true, retryAllowed: true };
     return { type: "completed", taskId, outputs: JSON.parse(job.outputs) as FakeOutput[] };
   }
 

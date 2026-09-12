@@ -13,5 +13,6 @@ export interface VideoProvider {
   capabilities(): Promise<VideoCapabilities>;
 }
 export * from "./fake.js";
+export * from "./execution.js";
 export * from "./minimax-h3.js";
 export * from "./openai-image.js";
