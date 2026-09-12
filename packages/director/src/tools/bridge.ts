@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { invariant, parseToolArguments } from "@openslate/core";
+import { invariant, parseToolArguments, toolCatalog } from "@openslate/core";
+import type { ToolContractVersion } from "@openslate/core";
 
 export interface BridgeLimits { requestBytes: number; responseBytes: number; timeoutMs: number; concurrency: number }
 export const BRIDGE_LIMITS: Readonly<BridgeLimits> = Object.freeze({ requestBytes: 3 * 1024 * 1024, responseBytes: 4 * 1024 * 1024, timeoutMs: 30_000, concurrency: 4 });
@@ -7,11 +8,13 @@ export interface ToolBridgeOptions {
   endpoint: string;
   projectId: string;
   credential: string;
+  /** Trusted launch configuration. Server authority still comes from the epoch's saved lock. */
+  toolContractVersion?: ToolContractVersion;
   /** May only tighten the production defaults. */
   limits?: Partial<BridgeLimits>;
 }
 export interface ToolBridgeResult { callId: string; isError: boolean; value: unknown }
-export interface ToolInvoker { call(name: string, input: unknown, signal?: AbortSignal): Promise<ToolBridgeResult> }
+export interface ToolInvoker { readonly toolContractVersion?: ToolContractVersion; call(name: string, input: unknown, signal?: AbortSignal): Promise<ToolBridgeResult> }
 
 function limit(value: number | undefined, maximum: number): number {
   const result = value ?? maximum;
@@ -21,12 +24,15 @@ function limit(value: number | undefined, maximum: number): number {
 
 /** Local transport only. It cannot issue authority or retry a possibly committed command. */
 export class ToolBridge implements ToolInvoker {
+  readonly #toolContractVersion: ToolContractVersion;
+  get toolContractVersion(): ToolContractVersion { return this.#toolContractVersion; }
   readonly #endpoint: string;
   readonly #credential: string;
   readonly #limits: { requestBytes: number; responseBytes: number; timeoutMs: number; concurrency: number };
   #active = 0;
 
   constructor(options: ToolBridgeOptions) {
+    this.#toolContractVersion = toolCatalog(options.toolContractVersion).version;
     let url: URL;
     try { url = new URL(options.endpoint); } catch { throw new Error("BRIDGE_ENDPOINT_INVALID"); }
     invariant(url.protocol === "http:" && url.hostname === "127.0.0.1" && url.pathname === "/" && !url.search && !url.hash && !url.username && !url.password,
@@ -44,7 +50,7 @@ export class ToolBridge implements ToolInvoker {
   }
 
   async call(name: string, input: unknown, signal?: AbortSignal): Promise<ToolBridgeResult> {
-    const parsed = parseToolArguments(name, input);
+    const parsed = parseToolArguments(name, input, this.toolContractVersion);
     const body = JSON.stringify(parsed.arguments);
     invariant(Buffer.byteLength(body) <= this.#limits.requestBytes, "TOOL_ARGUMENTS_TOO_LARGE", "Tool arguments exceed the bridge request limit");
     invariant(this.#active < this.#limits.concurrency, "BRIDGE_BUSY", "Bridge has no free request slot");

@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { toolCatalog } from "@openslate/core";
 import { ToolBridge } from "./bridge.js";
 import { runStdioToolBridge } from "./stdio.js";
 
@@ -7,8 +8,9 @@ export async function serveToolBridgeFromEnvironment(): Promise<void> {
   const endpoint = process.env.OPENSLATE_BRIDGE_ENDPOINT;
   const projectId = process.env.OPENSLATE_BRIDGE_PROJECT_ID;
   const credential = process.env.OPENSLATE_BRIDGE_CREDENTIAL;
+  const toolContractVersion = toolCatalog(process.env.OPENSLATE_BRIDGE_TOOL_CONTRACT).version;
   if (!endpoint || !projectId || !credential) throw new Error("BRIDGE_LAUNCH_CONFIG_MISSING");
-  await runStdioToolBridge({ bridge: new ToolBridge({ endpoint, projectId, credential }) });
+  await runStdioToolBridge({ toolContractVersion, bridge: new ToolBridge({ endpoint, projectId, credential, toolContractVersion }) });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

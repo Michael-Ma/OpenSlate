@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { canonical, DomainError, invariant, newId } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, newId } from "@openslate/core";
 import type { JsonObject, ProjectEvent, ProjectRecord } from "@openslate/core";
 
 interface EntityRow { body: string; project_id: string; version: number }
@@ -137,6 +137,32 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "image_import") reference("message", body.requestId);
+    if (kind === "image_import_receipt") {
+      reference("image_import", id);
+      const artifact = body.artifact as { artifactId?: unknown } | undefined;
+      reference("artifact", artifact?.artifactId);
+      const imported = this.get<{ artifactId: string }>("image_import", id)!;
+      invariant(imported.artifactId === artifact?.artifactId, "IDENTITY_MISMATCH", "Image receipt must match its import artifact identity");
+    }
+    if (kind === "execution_output_receipt") {
+      reference("attempt", body.attemptId);
+      const attempt = this.get<{ request: unknown }>("attempt", String(body.attemptId))!;
+      invariant(body.requestDigest === digest(attempt.request), "IDENTITY_MISMATCH", "Output receipt must bind its immutable attempt request");
+    }
+    if (kind === "execution_output_spool") {
+      reference("execution_output_receipt", body.receiptId);
+      const receipt = this.get<Record<string, unknown>>("execution_output_receipt", String(body.receiptId))!;
+      invariant(id === body.receiptId && body.attemptId === receipt.attemptId && body.requestDigest === receipt.requestDigest && body.port === receipt.port,
+        "IDENTITY_MISMATCH", "Output spool must match its receipt and attempt");
+    }
+    if (kind === "execution_output_slot") {
+      reference("execution_output_spool", body.spoolId);
+      const spool = this.get<Record<string, unknown>>("execution_output_spool", String(body.spoolId))!;
+      invariant(id === digest({ projectId, attemptId: body.attemptId, port: body.port }) && body.attemptId === spool.attemptId
+        && body.port === spool.port && body.storageId === spool.storageId && body.sha256 === spool.sha256 && body.byteLength === spool.byteLength,
+      "IDENTITY_MISMATCH", "Output slot must match its owned spool identity");
+    }
     if (kind === "director_turn") {
       reference("message", body.requestId);
       if (body.epochId !== null) reference("epoch", body.epochId);
@@ -178,7 +204,7 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "media_source", "media_import", "media_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
@@ -191,7 +217,7 @@ export class Store {
       if (kind === "tool_invocation") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
-        for (const field of ["requestId", "epochId", "callId", "tool", "argumentsDigest", "recovery"])
+        for (const field of ["requestId", "epochId", "callId", "tool", "argumentsDigest", "recovery", "toolContractVersion", "catalogDigest", "skillLockId"])
           invariant(canonical(previous[field] ?? null) === canonical(next[field] ?? null), "IMMUTABLE_RECORD", `Tool invocation ${field} is immutable`);
         if (previous.state !== "started") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed tool invocations are immutable");
       }

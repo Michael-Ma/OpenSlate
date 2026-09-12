@@ -1,7 +1,7 @@
 # OpenSlate — Detailed Technical Design
 
 **Version:** 0.8 · September 12, 2026
-**Status:** target technical design. A scripted conversation/review workspace, durable director supervisor, pinned local native adapter, narration draft service and supplied-media renderer now have working implementations. An actual native backend fixture has verified conversational question/restart/scoped-edit behavior. Native product configuration/browser wiring, structured pending-input, vision and complete narration/provider/render integration remain pending. Independent code-host/authentication isolation is unverified under the accepted local runtime trust policy. Consult [implementation status](../implementation/STATUS.md) for verified behavior rather than treating every design contract below as shipped.
+**Status:** target technical design with an integrated local workspace, per-project native setup, durable director supervisor, versioned narration tools, owned image/clip imports and local rendering. Native scoped conversations, images/questions and a synthetic six-minute render have separate recorded evidence. Real media dispatch, speech/transcription, portable restore and broader acceptance remain pending. Independent code-host/authentication isolation is unverified under the accepted local runtime trust policy. Consult [implementation status](../implementation/STATUS.md) before treating a design contract as shipped.
 
 The [architecture overview](../design/README.md) and [component overview](../design/COMPONENT-DESIGN.md) explain direction. This set defines implementation boundaries, records, interfaces, algorithms, failure handling and verification. Examples describe target contracts, not a stable public SDK. The [development plan](../design/IMPLEMENTATION-PLAN.md) orders the work after these designs.
 
@@ -35,7 +35,7 @@ flowchart TB
 | HTTP commands, trusted actors, transactions, events | [Application API](APPLICATION-API.md) | `apps/server/src/application`, `http`, `events` |
 | Codex adapter and context across requests | [Director runtime](DIRECTOR-RUNTIME.md) | `packages/director`; server supervisor |
 | AI stage selection and enforced production protocols | [Production workflow](PRODUCTION-WORKFLOW.md) | Core workflow contracts; server workflow service |
-| Skill locking, registration and five tools | [Skills and tools](SKILLS-TOOLS.md) | Director catalog/bridge; shared core contracts |
+| Skill locking, registration and versioned tools | [Skills and tools](SKILLS-TOOLS.md) | Director catalog/bridge; shared core contracts |
 | Restricted TypeScript and graph/change compilation | [Plan compiler](PLAN-COMPILER.md) | `packages/core/src/planning` |
 | Admission, scheduling, attempts, budgets, recovery | [Execution engine](EXECUTION-ENGINE.md) | Server executor modules; separate worker entry point |
 | Narration discovery, synthesis and cue changes | [Narration](NARRATION.md) | Core narration domain; director references; audio adapters |

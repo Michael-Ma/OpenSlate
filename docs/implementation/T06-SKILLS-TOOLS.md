@@ -1,6 +1,6 @@
 # T06 implementation: skills, tools and request context
 
-September 12, 2026. The skill/tool foundation now feeds a durable supervisor and a scripted browser conversation. The actual pinned local Codex adapter and supervisor have passed a live backend fixture across a conversational question, restart and scoped edit; native configuration/browser wiring is not enabled in the default app. See [the supervised workspace slice](CONVERSATION-WORKSPACE.md).
+September 12, 2026. This page records the original five-tool foundation and historical evidence. The local app now supports native configuration/browser conversations and a versioned six-tool narration contract with explicit upgrades; see [versioned narration tools](NARRATION-TOOLS.md) and [current implementation status](STATUS.md). Original catalogs and instruction packages remain available for existing locks.
 
 ## Ownership and flow
 

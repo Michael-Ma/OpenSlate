@@ -1,6 +1,6 @@
 # Canonical narration integration
 
-September 12, 2026. This document covers the implemented narration commit adapter and authenticated HTTP route plugin. The browser narration workspace is also implemented. Speech generation, transcription and model-facing narration proposal tools remain outside this slice.
+September 12, 2026. This document covers the implemented narration commit adapter, authenticated HTTP plugin and browser workspace. Versioned model-facing draft tools are described in [narration tools](NARRATION-TOOLS.md). Speech generation and transcription remain pending.
 
 ## Responsibility and flow
 

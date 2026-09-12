@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { setupLocalCodex, CodexDirectorRuntime, CODEX_RUNTIME_LIMITS } from "../dist/index.js";
 import { CodexTransport } from "../dist/runtime/transport.js";
+import { PROTOCOL_FIXTURE_LIMITS, waitForFixture } from "./fixture-timing.mjs";
 const entry = fileURLToPath(new URL("runtime-setup-fixture.mjs", import.meta.url));
 const fixture = async (t, scenario = "ready") => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "openslate-setup-")));
@@ -15,7 +16,7 @@ const fixture = async (t, scenario = "ready") => {
   const input = { command: { file: process.execPath, args: [entry] }, model: "gpt-6-astra", nativeHome, codexHome,
     directories: { projection: join(root, "workspace"), snapshots: join(root, "workspace/.agents/skills"), storage: join(root, "runtime") },
     env: { SETUP_FIXTURE_SCENARIO: scenario, SETUP_FIXTURE_LOG: join(root, "fixture.jsonl"), SETUP_FIXTURE_SKILL: join(codexHome, "skills/private/SKILL.md"),
-      SETUP_FIXTURE_MODEL: "gpt-6-astra" }, limits: { requestTimeoutMs: 350, shutdownGraceMs: 100 } };
+      SETUP_FIXTURE_MODEL: "gpt-6-astra" }, limits: { requestTimeoutMs: PROTOCOL_FIXTURE_LIMITS.requestTimeoutMs, shutdownGraceMs: PROTOCOL_FIXTURE_LIMITS.shutdownGraceMs } };
   const records = async () => { try { return (await readFile(input.env.SETUP_FIXTURE_LOG, "utf8")).trim().split("\n").filter(Boolean).map(JSON.parse); }
     catch (error) { if (error.code === "ENOENT") return []; throw error; } };
   return { input, records, root };
@@ -24,7 +25,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
   const f = await fixture(t); process.env.SETUP_PARENT_SECRET = "must-not-inherit";
   t.after(() => { delete process.env.SETUP_PARENT_SECRET; });
   const result = await setupLocalCodex(f.input);
-  assert.equal(result.readiness.status, "ready");
+  assert.equal(result.readiness.status, "ready", result.readiness.issues[0]?.code);
   assert.ok(Object.values(result.readiness.checks).every(check => check === "passed"));
   assert.equal(result.readiness.disabledMcpCount, 2); assert.equal(result.readiness.disabledSkillCount, 1);
   assert.equal(result.runtimeOptions.model, "gpt-6-astra");
@@ -90,8 +91,13 @@ test("cancellation before setup and during a native request remains bounded", as
   assert.equal(before.readiness.issues[0].code, "SETUP_ABORTED"); assert.deepEqual(await f.records(), []);
   const controller = new AbortController();
   const pending = setupLocalCodex(f.input, { signal: controller.signal });
-  const timer = setTimeout(() => controller.abort(), 120);
-  const result = await pending; clearTimeout(timer);
+  try {
+    await Promise.race([
+      waitForFixture(async () => (await f.records()).some(row => row.method === "initialize"), "the initialize request", controller.signal),
+      pending.then(result => { throw new Error(`Setup ended before the cancellation barrier: ${result.readiness.issues[0]?.code ?? result.readiness.status}`); }),
+    ]);
+  } finally { controller.abort(); }
+  const result = await pending;
   assert.equal(result.readiness.issues[0].code, "SETUP_ABORTED");
   for (const row of (await f.records()).filter(row => row.kind === "launch"))
     assert.throws(() => process.kill(row.pid, 0), error => error.code === "ESRCH");

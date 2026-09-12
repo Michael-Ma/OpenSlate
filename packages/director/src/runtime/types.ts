@@ -1,4 +1,5 @@
 import type { DirectorImageInput } from "./images.js";
+import type { ToolContractVersion } from "@openslate/core";
 export type { DirectorImageInput } from "./images.js";
 /** Application identities remain authoritative; native IDs are correlation hints only. */
 export interface DirectorRunIdentity {
@@ -13,6 +14,7 @@ export interface DirectorBridgeConfig {
   endpoint: string;
   projectId: string;
   credential: string;
+  toolContractVersion?: ToolContractVersion;
   /** Absolute path to OpenSlate's fixed stdio MCP entrypoint. */
   entrypoint: string;
 }

@@ -8,6 +8,8 @@ import { DirectorSupervisor } from "./director-supervisor.js";
 import { FakeWorkflowDirector } from "./fake-director.js";
 import { createDirectorInput } from "./director-input.js";
 import { directorInputDigest } from "./director-input-identity.js";
+import { DirectorToolSettings } from "./director-tools-upgrade.js";
+import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
@@ -31,9 +33,14 @@ export class LocalDirectorController {
   private readonly prepared = new Map<string, Promise<{ runtime: DirectorRuntime; input: ReturnType<typeof createDirectorInput>; readiness: Ready["readiness"] }>>();
   private readonly configuring = new Set<string>();
   readonly defaults: NonNullable<LocalDirectorOptions["defaults"]>;
+  private readonly toolSettings: DirectorToolSettings;
   constructor(readonly service: ProductionService, readonly config: LocalDirectorOptions) {
     this.setup = config.setup ?? setupLocalCodex;
     this.defaults = config.defaults ?? { binaryPath: this.findBinary(), model: "gpt-6-astra" };
+    this.toolSettings = new DirectorToolSettings(service, projectId => this.mode(projectId) === "native"
+      ? { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "native", projectId, "workspace", ".agents", "skills"), runtimeId: "codex-app-server" }
+      : { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), runtimeId: "fake-workflow-v1" },
+      projectId => this.configuring.has(projectId));
     const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint });
     this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: fakeInput });
     const proxy: DirectorRuntime = { id: "codex-app-server", start: async (input, options) => this.startNative(input, options) };
@@ -63,6 +70,13 @@ export class LocalDirectorController {
     const saved = this.service.store.get<SavedSelection>("project_director_selection", projectId);
     return { selection: saved?.selection ?? { mode: "fake" as const }, defaults: this.defaults, locked: this.locked(projectId),
       modelCalls: this.service.store.list("native_model_start", projectId).length };
+  }
+  tools(projectId: string) { return this.toolSettings.status(projectId); }
+  upgradeTools(projectId: string, input: DirectorToolsUpgrade, key: string) {
+    const result = this.toolSettings.upgrade(projectId, input, key);
+    const saved = this.service.store.get<SavedSelection>("project_director_selection", projectId);
+    if (saved) this.prepared.delete(digest({ projectId, selection: saved.selection }));
+    return result;
   }
   private locked(projectId: string): boolean { return this.service.store.list("director_turn", projectId).length > 0 || this.service.store.list("director_skill_lock", projectId).length > 0; }
   private validate(input: LocalDirectorSelection): LocalDirectorSelection {

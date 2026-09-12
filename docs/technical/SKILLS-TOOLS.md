@@ -1,9 +1,9 @@
 # Skills and tools technical design
 
-**Version:** 0.7 · September 11, 2026
-**Status:** target design with a verified foundation. Two instruction packages, exact snapshots/locks, explicit activation records, the fixed MCP bridge and durable tool invocations are implemented. Explicit native selections and two scoped edits are validated in a fixture; production activation/supervision remains pending; the [implementation breakdown](../implementation/T06-SKILLS-TOOLS.md) distinguishes shipped contracts from the broader design.
+**Version:** 0.8 · September 12, 2026
+**Status:** target design with integrated local supervision. Versioned instruction packages, exact snapshots/locks, explicit activation, the pinned MCP bridge and durable tool invocations run through the application supervisor. V1 keeps its five-tool catalog; V2 adds draft-only narration and removes direct canonical narration writes. Explicit project upgrades preserve old epoch bindings. See [versioned narration contracts](../implementation/NARRATION-TOOLS.md) and [current status](../implementation/STATUS.md) for verification and outstanding work.
 
-The current package manifest is `openslate.skill.json`; only declared Markdown/JSON instruction files are accepted. The internal bridge requires a stable `x-openslate-tool-call-id`, preparation returns a compact saved-proposal receipt, and `read_context` supplies bounded pages for full shot/scene/source/alias/grant/receipt evidence. Read-only calls do not invalidate their own pagination guard. Automatic recovery of unresolved director calls is not yet implemented. These concrete contracts are defined in `packages/core/src/tools.ts` and the server application modules.
+The current package manifest is `openslate.skill.json`; only declared Markdown/JSON instruction files are accepted. The internal bridge requires a stable `x-openslate-tool-call-id`, preparation returns a compact saved-proposal receipt, and `read_context` supplies bounded pages for shot/scene/source/alias/grant/receipt and narration evidence. Read-only calls do not invalidate their own pagination guard. After fencing an interrupted epoch, recovery uses exact domain receipts; absent evidence remains unresolved rather than repeating a side effect. These contracts live in `packages/core/src/tools.ts` and the server application modules.
 
 ## 1. Three separate extension mechanisms
 
@@ -29,7 +29,8 @@ The initial surface is deliberately complete but small:
 | Kind | Initial IDs |
 |---|---|
 | Skills | `production`, `plan-authoring` |
-| Tools | `read_context`, `prepare_change`, `apply_change`, `control_execution`, `inspect_artifact` |
+| V1 tools | `read_context`, `prepare_change`, `apply_change`, `control_execution`, `inspect_artifact` |
+| V2 addition | `revise_narration_draft`; V2 preparation excludes direct canonical narration fields |
 | Operations | Image, video, speech synthesis, transcription/alignment, timeline assembly, render |
 
 Narration, continuity, reference reuse, shot grammar, provider prompting, and editing examples are lazy references within those two skills. Additional operation handlers do not automatically require additional model tools.
@@ -156,7 +157,7 @@ Every video requires human approval covering the exact keyframe and current shot
 
 ## 7. Idempotency, lifecycle, and errors
 
-Register and validate descriptors at application startup, resolve their pinned implementations, then expose the fixed five-tool MCP catalog for the runtime session. Skill activation never adds tool names. Codex supports MCP allowlists and stdio/HTTP transports; OpenSlate owns contract compatibility and application authorization. Return promptly with persistent IDs instead of holding MCP calls open for long media work. [MCP integration](https://learn.chatgpt.com/docs/extend/mcp)
+Register and validate descriptors at application startup, resolve their pinned implementations, then expose the immutable catalog selected by the request's skill lock for the runtime session. Skill activation never adds tool names. Codex supports MCP allowlists and stdio/HTTP transports; OpenSlate owns contract compatibility and application authorization. Return promptly with persistent IDs instead of holding MCP calls open for long media work. [MCP integration](https://learn.chatgpt.com/docs/extend/mcp)
 
 Persist mutation receipts with their state changes in short transactions. After authenticating the current epoch, an authorized `apply_change` retry against the same prepared ID returns its existing receipt before attempting a new commit; a different payload cannot reuse that identity. The supervisor can reconcile old receipts through its own application authority after epoch revocation. New native call IDs do not create generation identities. Stable intents/grant slots survive fresh requests and session replacement. Control commands use service-issued identities and control revisions for equivalent replay protection.
 

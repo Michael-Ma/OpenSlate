@@ -8,13 +8,15 @@ import { dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PassThrough, Writable } from "node:stream";
-import { TOOL_NAMES, TOOL_DESCRIPTORS, TOOL_CATALOG_DIGEST, TOOL_CONTRACT_VERSION, parseToolArguments, changeProposalSchema, digest } from "@openslate/core";
+import { TOOL_NAMES, TOOL_DESCRIPTORS, TOOL_CATALOG_DIGEST, TOOL_CONTRACT_VERSION, parseToolArguments, changeProposalSchema, digest, toolCatalog } from "@openslate/core";
 import { ToolBridge, runStdioToolBridge, STDIO_LIMITS } from "../dist/tools/index.js";
 
 const entry = fileURLToPath(new URL("../dist/tools/mcp.js", import.meta.url));
 const code = expected => error => error.code === expected;
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
-async function bounded(promise, ms = 3000) { let timer; try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Fixture deadline exceeded")), ms); })]); } finally { clearTimeout(timer); } }
+// Real Node children load the schema catalog; allow startup headroom under the
+// bounded repository suite. Explicit transport deadline tests pass shorter limits.
+async function bounded(promise, ms = 10000) { let timer; try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Fixture deadline exceeded")), ms); })]); } finally { clearTimeout(timer); } }
 
 async function fixture(t, handler) {
   const calls = [], arrived = deferred();
@@ -36,6 +38,7 @@ async function childFixture(t, options) {
   const child = spawn(process.execPath, [entry], { cwd: tmpdir(), env: {
     PATH: dirname(process.execPath) + ":/usr/bin:/bin", HOME: tmpdir(),
     OPENSLATE_BRIDGE_ENDPOINT: options.endpoint, OPENSLATE_BRIDGE_PROJECT_ID: options.projectId, OPENSLATE_BRIDGE_CREDENTIAL: options.credential,
+    ...(options.toolContractVersion ? { OPENSLATE_BRIDGE_TOOL_CONTRACT: options.toolContractVersion } : {}),
   }, stdio: ["pipe", "pipe", "pipe"] });
   let counter = 0, buffer = "", stderr = ""; const pending = new Map();
   const exit = new Promise(resolve => child.once("exit", (code, signal) => {
@@ -67,6 +70,7 @@ async function childFixture(t, options) {
 
 test("five immutable descriptors share exact workflow grammar and a stable versioned digest", () => {
   assert.equal(TOOL_CONTRACT_VERSION, "1.0.0");
+  assert.equal(TOOL_CATALOG_DIGEST, "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec", "shipped v1 catalog remains byte-identical");
   assert.deepEqual(TOOL_DESCRIPTORS.map(tool => tool.name), TOOL_NAMES);
   assert.equal(new Set(TOOL_NAMES).size, 5);
   assert.deepEqual(TOOL_DESCRIPTORS.find(tool => tool.name === "prepare_change").inputSchema, changeProposalSchema);
@@ -76,6 +80,19 @@ test("five immutable descriptors share exact workflow grammar and a stable versi
   const parsed = parseToolArguments("prepare_change", proposal); proposal.creative.brief = "Mutated later";
   assert.equal(parsed.arguments.creative.brief, "Saved intent");
   assert.deepEqual(parseToolArguments("control_execution", { action: "pause" }), { name: "control_execution", arguments: { action: "pause" } });
+});
+
+test("versioned schemas add only draft narration while rejecting the alternate canonical write path", () => {
+  const catalog = toolCatalog("2.0.0"); assert.equal(catalog.names.length, 6);
+  assert.throws(() => toolCatalog("latest"), code("CAPABILITY_MISMATCH"));
+  const input = { expectedVersion: 0, patch: { add: [{ text: "Boots", textKind: "draft", language: "en", meaning: "Craft", source: { kind: "undecided" } }] } };
+  assert.deepEqual(parseToolArguments("revise_narration_draft", input, "2.0.0").arguments, input);
+  assert.throws(() => parseToolArguments("revise_narration_draft", input), code("NOT_FOUND"));
+  const old = { variant: "project", expectedHeadVersion: 0, creative: { narrationScript: "Original" } };
+  assert.deepEqual(parseToolArguments("prepare_change", old).arguments, old);
+  assert.throws(() => parseToolArguments("prepare_change", old, "2.0.0"), code("VALIDATION_ERROR"));
+  assert.throws(() => parseToolArguments("revise_narration_draft", { ...input, actor: "human" }, "2.0.0"), code("VALIDATION_ERROR"));
+  assert.throws(() => { catalog.descriptors[0].inputSchema.additionalProperties = true; }, TypeError);
 });
 
 test("tool parsing rejects forged authority, unknown tools, coercion, and empty preparation", () => {
@@ -183,6 +200,21 @@ test("actual stdio child negotiates, lists exact tools without HTTP, then forwar
   const page = await c.request("tools/call", { name: "read_context", arguments: { section: "plan", offset: 4096 } }).response;
   assert.equal(page.result.isError, false);
   assert.deepEqual(f.calls[1].body, { section: "plan", offset: 4096 });
+});
+
+test("v2 stdio child captures its exact catalog and forwards draft-only calls", async t => {
+  const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: "2.0.0" });
+  const initialized = await c.initialize(); assert.equal(initialized.result.serverInfo.version, "2.0.0");
+  assert.deepEqual((await c.request("tools/list", {}).response).result.tools, toolCatalog("2.0.0").descriptors);
+  const args = { expectedVersion: 0, patch: { add: [{ text: "Boots", textKind: "draft", language: "en", meaning: "Craft", source: { kind: "undecided" } }] } };
+  const call = await c.request("tools/call", { name: "revise_narration_draft", arguments: args }).response;
+  assert.equal(call.result.isError, false); assert.deepEqual(f.calls[0].body, args);
+  const denied = await c.request("tools/call", { name: "prepare_change", arguments: { variant: "project", expectedHeadVersion: 0, creative: { narrationSource: "uploaded" } } }).response;
+  assert.equal(denied.result.isError, true); assert.equal(f.calls.length, 1);
+  const options = { ...f.options, toolContractVersion: "2.0.0" }, bridge = new ToolBridge(options); options.toolContractVersion = "1.0.0";
+  assert.equal(bridge.toolContractVersion, "2.0.0");
+  assert.throws(() => { bridge.toolContractVersion = "1.0.0"; }, TypeError);
+  await assert.rejects(runStdioToolBridge({ bridge, toolContractVersion: "1.0.0" }), /STDIO_CATALOG_MISMATCH/);
 });
 
 test("MCP cancellation aborts waiting transport without claiming rollback and still serves pings", async t => {

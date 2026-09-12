@@ -1,6 +1,9 @@
 export { LocalMediaService } from "./local-media.js";
 export { LocalImageStore } from "./local-images.js";
 export type { ImageBytesInput, StoredImage } from "./local-images.js";
+export { ImageApplicationService, PNG_IMPORT_MAX_BYTES } from "./image-application.js";
+export type { ImportImageInput, ImportedImage, SuppliedImageArtifact } from "./image-application.js";
+export { registerImageRoutes } from "./image-routes.js";
 export { MediaApplicationService } from "./application.js";
 export { registerMediaRoutes } from "./routes.js";
 export type { OwnedMediaSource, RealVideoArtifact, RenderTarget, MediaRenderJob, MediaPreview, PrepareMediaRender, ImportVideoInput, ImportedVideo } from "./application-types.js";

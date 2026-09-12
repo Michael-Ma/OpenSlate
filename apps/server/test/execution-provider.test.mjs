@@ -167,15 +167,29 @@ test("ingestion cannot publish paths outside the artifact root or final symlinks
   }
 });
 
-test("asynchronous ingestion renews its owned lease and prevents a second worker from repeating it", async t => {
-  const f = setup(t, { count: 1, imagesOnly: true }); let ingestions = 0, entered;
+test("asynchronous ingestion renews its owned lease and prevents a second worker from repeating it", { timeout: 15000 }, async t => {
+  const f = setup(t, { count: 1, imagesOnly: true }); let ingestions = 0, entered, release;
   const started = new Promise(resolve => { entered = resolve; });
+  const barrier = new Promise(resolve => { release = resolve; });
   f.provider.submit = async request => ({ type: "completed", taskId: "slow-ingestion", outputs: fixtureOutputs(request) });
-  const outputIngestor = { async ingest(input) { ingestions++; entered(); await delay(400); return ingested(input); } };
-  const first = new Engine(f.store, f.provider, { artifactDir: f.artifactDir, leaseMs: 150, outputIngestor });
-  const second = new Engine(f.store, f.provider, { artifactDir: f.artifactDir, leaseMs: 150, outputIngestor });
-  const running = first.runReady(); await started; await delay(180);
-  assert.equal((await second.reconcile()).reconciled, 0); await running;
+  const outputIngestor = { async ingest(input) { ingestions++; entered(); await barrier; return ingested(input); } };
+  const first = new Engine(f.store, f.provider, { artifactDir: f.artifactDir, leaseMs: 3000, outputIngestor });
+  const second = new Engine(f.store, f.provider, { artifactDir: f.artifactDir, leaseMs: 3000, outputIngestor });
+  const running = first.runReady();
+  try {
+    await started;
+    const original = first.attempts(f.projectId)[0], deadline = Date.now() + 10000;
+    let protectedBeyondOriginalExpiry = false;
+    while (Date.now() < deadline) {
+      const current = first.attempts(f.projectId)[0], now = Date.now();
+      if (now >= original.leaseExpiresAt && current.leaseExpiresAt > original.leaseExpiresAt && current.leaseExpiresAt > now + 750) {
+        protectedBeyondOriginalExpiry = true; break;
+      }
+      await delay(50);
+    }
+    assert.ok(protectedBeyondOriginalExpiry, "ingestion must persist a renewed lease that remains current after its original expiry");
+    assert.equal((await second.reconcile()).reconciled, 0);
+  } finally { release(); await running; }
   assert.equal(ingestions, 1); assert.equal(first.attempts(f.projectId)[0].phase, "succeeded");
   assert.equal(first.outputs(f.projectId).length, 1);
 });

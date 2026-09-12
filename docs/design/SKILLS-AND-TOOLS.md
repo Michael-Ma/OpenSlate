@@ -1,7 +1,7 @@
 # OpenSlate — Skill and Tool Framework
 
-**Version:** 0.5 · September 10, 2026
-**Status:** proposed framework; no skills or tool implementations are added by this document.
+**Version:** 0.6 · September 12, 2026
+**Status:** architecture direction with implemented versioned packages, immutable locks, application supervision and explicit human upgrades. See [implementation status](../implementation/STATUS.md) and [narration tool contracts](../implementation/NARRATION-TOOLS.md) for verified scope.
 
 ## 1. Responsibilities and minimum scope
 
@@ -12,7 +12,7 @@ A **skill** supplies creative methods and plan-writing guidance. A **tool** is a
 ```mermaid
 flowchart LR
     Skills[Two skills and lazy references] --> Director[Codex director]
-    Director --> Tools[Five domain tools]
+    Director --> Tools[Versioned domain tools]
     Tools --> App[Application policy and change service]
     App --> Plan[Compiled operation graph]
     Plan --> Registry[Operation registry]
@@ -99,7 +99,7 @@ New projects can select a new approved catalog. Existing production runs keep th
 
 Running jobs keep their operation/provider implementation identity. Preserve the supported implementation until they finish, or pause dispatch and use an explicit compatible migration. A skill update alone never invalidates completed media. Only a resulting change to creative intent, effective inputs, or operation behavior can require new work.
 
-## 5. Five initial agent-facing tools
+## 5. Initial tools and the versioned narration extension
 
 | Tool | Main behavior | Boundary |
 |---|---|---|
@@ -108,6 +108,7 @@ Running jobs keep their operation/provider implementation identity. Preserve the
 | `apply_change` | Commit a prepared creative/plan change; admit work only for an executable plan under policy | Checks base revision, scope, decisions, work identities, and budget |
 | `control_execution` | Hold/resume a scope, pause director automation or dispatch, inspect control state | Cannot erase accepted provider work or silently release liabilities |
 | `inspect_artifact` | Return preview frames, media properties, and review evidence for known artifacts | Read-only inspection; actual modality support is validated |
+| `revise_narration_draft` (V2) | Save structured section text and intended narration source | No acceptance, audio attachment, canonical write or generation |
 
 The UI uses the same change/control services. V0 creative changes go through conversation; playback, shot selection for chat, review decisions, and pause controls are UI interactions. Every shot video needs human approval of its keyframe and current intent/settings; scene-level batch approval records exact coverage. A skill or autonomous quality check cannot grant this approval or authorize quality-driven regeneration. User approval, policy configuration, uploads, and setup are application routes; they need not all become model tools. The agent can ask for a decision but cannot call a tool to approve its own spending.
 
@@ -121,7 +122,7 @@ These tools use explicit typed variants for supported changes; `apply_change` is
 
 ## 6. Tool and operation registry lifecycle
 
-Each registered handler has a stable ID, contract version, input/output schema, permission scope, side-effect category, and execution/retry policy. Media operations additionally declare how inputs bind to artifacts and how their effects participate in dependency analysis. The six initial operation families are image generation, video generation, speech synthesis, transcription/alignment, timeline assembly, and rendering. The added narration paths use the existing five tools and production references; they do not require a new specialist skill or an agent tool for every API.
+Each registered handler has a stable ID, contract version, input/output schema, permission scope, side-effect category, and execution/retry policy. Media operations additionally declare how inputs bind to artifacts and how their effects participate in dependency analysis. The six initial operation families are image generation, video generation, speech synthesis, transcription/alignment, timeline assembly, and rendering. V2 adds one narration draft tool and a paged narration read view, while removing direct canonical narration fields from preparation. Human review remains separate. Additional APIs do not require a specialist skill or a new agent tool each.
 
 **Registration algorithm:** validate trusted descriptors at application startup; resolve compatibility with the capability lock; generate the MCP catalog and compiler operation catalog from those descriptors; verify that required handlers exist; expose only the project/action-allowed tool subset. The scheduler calls operation handlers directly through the registry.
 

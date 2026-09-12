@@ -79,6 +79,7 @@ lines.on("line", line => {
   }
   if (method === "mcpServerStatus/list") {
     const tools = Object.fromEntries(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"].map(name => [name, { name }]));
+    if (config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT === "2.0.0" && mode !== "catalog-legacy") tools.revise_narration_draft = { name: "revise_narration_draft" };
     if (mode === "catalog-extra") tools.extra = { name: "extra" };
     return respond(id, { data: [{ name: "openslate", runtimeStatus: "connected", tools }], nextCursor: null });
   }

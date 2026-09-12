@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "scenario": "Built browser PNG reference preview after authenticated HTTP fixture upload",
+  "projectId": "e9c2fcc4-e0c7-4218-a10f-93c11d9a1a7f",
+  "artifactId": "2b695f1b-ff3c-44e4-acf5-e7032dcec6c5",
+  "sha256": "12818a2d5e348eb0bf8e1fb1d4b6e545cc0377e0e3b3bc1c497519d8cd7338ea",
+  "byteLength": 626,
+  "width": 320,
+  "height": 180,
+  "httpUploadStatus": 200,
+  "exactBytesServed": true,
+  "browserNaturalDimensions": [
+    320,
+    180
+  ],
+  "browserImageComplete": true,
+  "authenticatedBlobPreview": true,
+  "previewAfterProjectRefresh": true,
+  "browserWarningsOrErrors": 0,
+  "readOnlyDatabaseReopen": true,
+  "origin": "supplied_image",
+  "fixture": false,
+  "modelCalls": 0,
+  "mediaApiCalls": 0,
+  "nativeFilePickerVerified": false
+}

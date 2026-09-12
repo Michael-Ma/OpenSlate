@@ -8,6 +8,7 @@ export interface NarrationSegment {
   accepted: { script: boolean; audio: boolean; timing: boolean };
 }
 export interface NarrationView {
+  capabilities?: { audioImport: boolean; audioPlayback: boolean };
   headVersion: number; revisionId: string;
   session: { id: string; requestId: string; state: "active" | "stale" } | null;
   snapshot: { state: { version: number }; segments: NarrationSegment[]; readiness: { gaps: Array<{ key: string; category: string }> } };

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "scenario": "Built browser explicit project guidance upgrade",
+  "projectId": "e9c2fcc4-e0c7-4218-a10f-93c11d9a1a7f",
+  "previousLockId": "42fe292e-db36-4547-ae28-573df1754839",
+  "installedLockId": "f08811f2-53d7-4000-9f09-736d32717169",
+  "previousVersion": "1.0.0",
+  "currentVersion": "2.0.0",
+  "canonicalDigest": "3473ef0166f8a0599adb0da4130168f9bc00ba204f9cfb941d0b91e3183028d1",
+  "canonicalUnchanged": true,
+  "oldLockUnchanged": true,
+  "browserButtonApplied": true,
+  "settingsReopenPassed": true,
+  "browserWarningsOrErrors": 0,
+  "modelCalls": 0,
+  "mediaApiCalls": 0,
+  "readOnlyDatabaseReopen": true
+}

@@ -1,10 +1,11 @@
 import { canonical, digest, invariant, workflowReadiness } from "@openslate/core";
 import type { ActorContext, CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
 import type { ProductionService } from "./service.js";
-import type { NarrationState, SegmentRevision } from "../narration/types.js";
+import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
+import { NarrationService } from "../narration/service.js";
 
 export const DIRECTOR_PROJECTION_LIMITS = Object.freeze({ bytes: 512 * 1024, records: 20, sourceCharacters: 64 * 1024, maximumOffset: 10_000_000 });
-export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts";
+export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts" | "narration";
 export interface DirectorContextQuery { section?: DirectorContextSection; offset?: number }
 interface Message { id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: string; contextDigest: string | null }
 interface Hold { id: string; scopeId: string; ownerId: string; active: boolean }
@@ -39,14 +40,15 @@ export interface DirectorContextProjection {
   work: unknown;
   assets?: unknown[];
   cues?: ProjectRecord["cues"];
-  narrationDraft?: { version: number; segments: unknown[]; authority: string };
+  narrationDraft?: { version: number; revisionId?: string | null; segments: unknown[]; readiness?: unknown; authority: string };
+  audioLibrary?: unknown[];
   coverage: Record<string, unknown>;
   source?: string;
 }
 function query(input: DirectorContextQuery): { section: DirectorContextSection; offset: number } {
   invariant(input && typeof input === "object" && !Array.isArray(input) && Object.keys(input).every(key => ["section", "offset"].includes(key)), "VALIDATION_ERROR", "Context query supports only section and offset");
   const section = input.section ?? "overview"; const offset = input.offset ?? 0;
-  invariant(["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts"].includes(section), "VALIDATION_ERROR", "Unknown context section");
+  invariant(["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration"].includes(section), "VALIDATION_ERROR", "Unknown context section");
   invariant(Number.isSafeInteger(offset) && offset >= 0 && offset <= DIRECTOR_PROJECTION_LIMITS.maximumOffset, "VALIDATION_ERROR", "Invalid context offset");
   return { section, offset };
 }
@@ -132,6 +134,27 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       base.guard.dataDigest = digest(items);
       return adaptive(offset, items.length, count => ({ ...base, items: items.slice(offset, offset + count), page: page(offset, count, items.length) }));
     };
+    if (section === "narration") {
+      const snapshot = new NarrationService(service).snapshot(projectId, actor);
+      const recording = (audio: NarrationAudio) => ({ id: audio.id, declaredOrigin: audio.declaredOrigin,
+        sha256: audio.media.sha256, samples: audio.media.probe.audio?.samples ?? null,
+        sampleRate: audio.media.probe.audio?.sampleRate ?? null, originEvidence: "human_declared_supplied_recording" });
+      const segments = snapshot.segments.map(({ entry, script, audio, cue, accepted }) => ({ entry, script, audio: audio ? recording(audio) : null, cue, accepted }));
+      const audioLibrary = service.store.list<NarrationAudio>("narration_audio", projectId).reverse().map(recording);
+      const gaps = snapshot.readiness.gaps;
+      const total = Math.max(segments.length, audioLibrary.length, gaps.length);
+      base.guard.dataDigest = digest({ state: snapshot.state, segments, audioLibrary, readiness: snapshot.readiness });
+      return adaptive(offset, total, count => ({ ...base,
+        narrationDraft: { version: snapshot.state.version, revisionId: snapshot.state.revisionId, segments: segments.slice(offset, offset + count),
+          readiness: { ...snapshot.readiness, gaps: gaps.slice(offset, offset + count) },
+          authority: "Draft text and source intent only. Recording metadata does not prove its words. Human exact script, audio and timing acceptance and reviewed canonical application remain separate. This tool cannot synthesize, transcribe, attach recordings or accept anything." },
+        audioLibrary: audioLibrary.slice(offset, offset + count), page: page(offset, count, total),
+        coverage: { ...base.coverage, narration: { pagination: "The same record window applies to segments, recordings and gaps. Follow nextOffset until null; compare guard/dataDigest across pages.",
+          segments: { total: segments.length, returned: segments.slice(offset, offset + count).length },
+          recordings: { total: audioLibrary.length, returned: audioLibrary.slice(offset, offset + count).length },
+          gaps: { total: gaps.length, returned: gaps.slice(offset, offset + count).length } } },
+      }));
+    }
     if (section === "aliases") return itemsPage(aliases);
     if (section === "plan") {
       base.guard.dataDigest = plan.sourceDigest ?? digest(null);

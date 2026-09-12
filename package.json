@@ -15,7 +15,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm build:packages && pnpm -r typecheck",
     "check": "pnpm test && pnpm -r typecheck",
-    "test": "pnpm build && node --test packages/core/test/*.test.mjs packages/providers/test/*.test.mjs packages/director/test/*.test.mjs apps/server/test/*.test.mjs apps/web/test/*.test.mjs",
+    "test": "pnpm build && node --test --test-concurrency=4 packages/core/test/*.test.mjs packages/providers/test/*.test.mjs packages/director/test/*.test.mjs apps/server/test/*.test.mjs apps/web/test/*.test.mjs",
     "demo:headless": "pnpm build && node apps/server/dist/demo.js",
     "probe:runtime": "pnpm build:packages && node packages/director/dist/probe/cli.js",
     "probe:launcher": "pnpm build && node apps/server/test/launcher-smoke.mjs",

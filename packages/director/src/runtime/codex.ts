@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { TOOL_NAMES } from "@openslate/core";
+import { toolCatalog } from "@openslate/core";
 import { normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
@@ -172,7 +172,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       nativeThreadId = thread.id;
       requireRuntime(object(opened.activePermissionProfile).id === config.policy.id, "RUNTIME_POLICY_MISMATCH", "Native runtime did not select the configured permission profile");
       requireRuntime(Array.isArray(opened.instructionSources) && opened.instructionSources.length === 0, "RUNTIME_INSTRUCTIONS_UNEXPECTED", "Unexpected inherited native instructions");
-      await this.catalog(transport, nativeThreadId, cancellation.signal);
+      await this.catalog(transport, nativeThreadId, input, cancellation.signal);
       emit({ ...base, kind: "runtime_started", nativeThreadId });
       await delivery; if (stopReason) throw stopReason;
       dispatched = true;
@@ -250,11 +250,16 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       ...input.skills.map(skill => ({ path: skill.path, enabled: true }))],
       [`mcp_servers.${SERVER}.command`]: process.execPath, [`mcp_servers.${SERVER}.args`]: [input.bridge.entrypoint],
       [`mcp_servers.${SERVER}.enabled`]: true, [`mcp_servers.${SERVER}.required`]: true,
-      [`mcp_servers.${SERVER}.env`]: { OPENSLATE_BRIDGE_ENDPOINT: input.bridge.endpoint, OPENSLATE_BRIDGE_PROJECT_ID: input.projectId, OPENSLATE_BRIDGE_CREDENTIAL: input.bridge.credential },
+      [`mcp_servers.${SERVER}.env`]: this.bridgeEnvironment(input),
     };
     for (const feature of DISABLED) config[`features.${feature}`] = false;
-    for (const tool of TOOL_NAMES) config[`mcp_servers.${SERVER}.tools.${tool}.approval_mode`] = "approve";
+    for (const tool of toolCatalog(input.bridge.toolContractVersion).names) config[`mcp_servers.${SERVER}.tools.${tool}.approval_mode`] = "approve";
     return config;
+  }
+  private bridgeEnvironment(input: DirectorRunInput): Record<string, string> {
+    return { OPENSLATE_BRIDGE_ENDPOINT: input.bridge.endpoint, OPENSLATE_BRIDGE_PROJECT_ID: input.projectId,
+      OPENSLATE_BRIDGE_CREDENTIAL: input.bridge.credential,
+      ...(input.bridge.toolContractVersion ? { OPENSLATE_BRIDGE_TOOL_CONTRACT: input.bridge.toolContractVersion } : {}) };
   }
   private async preflight(transport: CodexTransport, input: DirectorRunInput, signal?: AbortSignal): Promise<void> {
     const config = object(object(await transport.request("config/read", { cwd: this.#options.cwd, includeLayers: false }, signal)).config);
@@ -262,9 +267,8 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     requireRuntime(enabled.length === 1 && enabled[0]![0] === SERVER, "RUNTIME_CATALOG_UNEXPECTED", "Unexpected enabled native MCP server");
     const bridge = object(enabled[0]![1]);
     requireRuntime(bridge.command === process.execPath && contains(bridge.args, [input.bridge.entrypoint]) && bridge.required === true &&
-      equal(bridge.env, { OPENSLATE_BRIDGE_ENDPOINT: input.bridge.endpoint, OPENSLATE_BRIDGE_PROJECT_ID: input.projectId,
-        OPENSLATE_BRIDGE_CREDENTIAL: input.bridge.credential }) &&
-      TOOL_NAMES.every(name => object(object(bridge.tools)[name]).approval_mode === "approve"),
+      equal(bridge.env, this.bridgeEnvironment(input)) &&
+      toolCatalog(input.bridge.toolContractVersion).names.every(name => object(object(bridge.tools)[name]).approval_mode === "approve"),
     "RUNTIME_BRIDGE_MISMATCH", "Native bridge configuration differs from the fixed request binding");
     const policy = this.#options.policy;
     // Compare the complete selected profile: a subset check would admit unexpected grant roots.
@@ -282,7 +286,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     const key = (skill: { name: unknown; path: unknown }) => JSON.stringify([skill.name, skill.path]);
     requireRuntime(JSON.stringify(found.map(key).sort()) === JSON.stringify(input.skills.map(key).sort()), "RUNTIME_SKILLS_UNEXPECTED", "Native skill catalog differs from pinned input");
   }
-  private async catalog(transport: CodexTransport, threadId: string, signal?: AbortSignal): Promise<void> {
+  private async catalog(transport: CodexTransport, threadId: string, input: DirectorRunInput, signal?: AbortSignal): Promise<void> {
     for (let attempt = 0; attempt < 10; attempt++) {
       const response = object(await transport.request("mcpServerStatus/list", { threadId, detail: "toolsAndAuthOnly", limit: 100 }, signal));
       requireRuntime(!response.nextCursor && Array.isArray(response.data), "RUNTIME_CATALOG_UNEXPECTED", "Unexpected native MCP catalog pagination");
@@ -291,7 +295,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       const server = active[0];
       if (active.length === 1 && server?.runtimeStatus === "connected") {
         const names = Object.values(object(server.tools)).map(tool => object(tool).name).sort();
-        requireRuntime(JSON.stringify(names) === JSON.stringify([...TOOL_NAMES].sort()), "RUNTIME_CATALOG_UNEXPECTED", "Native MCP tool catalog differs from the fixed five tools"); return;
+        requireRuntime(JSON.stringify(names) === JSON.stringify([...toolCatalog(input.bridge.toolContractVersion).names].sort()), "RUNTIME_CATALOG_UNEXPECTED", "Native MCP tool catalog differs from the locked tools"); return;
       }
       await new Promise(resolve => setTimeout(resolve, 50));
     }

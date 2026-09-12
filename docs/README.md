@@ -14,11 +14,15 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Native question continuation](implementation/CODEX-QUESTION-CONTINUATION.md) | One live answer resumed from the exact persisted application question |
 | [Narration browser validation](implementation/NARRATION-BROWSER-VALIDATION.md) | Actual canonical review, supplied playback and project-switch recovery |
 | [Narration integration](implementation/NARRATION-INTEGRATION.md) | Drafts, recordings, exact acceptance and guarded canonical commit |
+| [Versioned narration tools](implementation/NARRATION-TOOLS.md) | Draft-only conversational writes, exact catalog locks and legacy compatibility |
+| [Project guidance upgrades](implementation/DIRECTOR-TOOLS-UPGRADE.md) | Explicit human upgrade, old-epoch preservation and browser evidence |
 | [Local media integration](implementation/MEDIA-INTEGRATION.md) | Owned uploads, render jobs, preview recovery and six-minute synthetic evidence |
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |
 | [Provider execution boundary](implementation/PROVIDER-EXECUTION.md) | Registered executor contracts, receipt identity, ingestion and recovery |
+| [Durable output storage](implementation/OUTPUT-SPOOL.md) | Owned receipt/spool identities, bounded streaming and crash recovery |
 | [Local image ingestion](implementation/IMAGE-INGESTION.md) | Full PNG validation, exact bytes and immutable publication |
+| [PNG reference library](implementation/PNG-REFERENCE-IMPORT.md) | Supplied-image import, conversational reference identity and verified browser preview |
 | [Media credentials](implementation/MEDIA-CREDENTIALS.md) | Backend environment aliases and separation from spending authority |
 | [Runtime trust decision](implementation/RUNTIME-TRUST-DECISION.md) | Accepted single-machine v0 boundary and pinned local native-runtime trust policy |
 | [Codex probe](implementation/CODEX-PROBE.md) | Pinned no-turn runtime evidence and baseline limitations |

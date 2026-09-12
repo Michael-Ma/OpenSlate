@@ -1,0 +1,33 @@
+{
+  "id": "production",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "files": [
+    "SKILL.md",
+    "references/current-contract.md",
+    "references/narration.md",
+    "references/continuity-review.md",
+    "references/stages/intake.md",
+    "references/stages/story.md",
+    "references/stages/scene_plan.md",
+    "references/stages/shot_plan.md",
+    "references/stages/narration.md",
+    "references/stages/storyboard.md",
+    "references/stages/video.md",
+    "references/stages/assembly.md",
+    "references/stages/review.md"
+  ],
+  "compatibility": {
+    "toolContract": "2.0.0",
+    "planLanguage": "1.0.0",
+    "workflowContract": "1.0.0"
+  },
+  "requiredToolIds": [
+    "read_context",
+    "prepare_change",
+    "apply_change",
+    "control_execution",
+    "inspect_artifact",
+    "revise_narration_draft"
+  ]
+}

@@ -1,11 +1,13 @@
 import type { Readable, Writable } from "node:stream";
-import { DomainError, TOOL_CONTRACT_VERSION, TOOL_DESCRIPTORS } from "@openslate/core";
+import { DomainError, toolCatalog } from "@openslate/core";
+import type { ToolContractVersion } from "@openslate/core";
 import { BRIDGE_LIMITS, type ToolInvoker } from "./bridge.js";
 
 export const MCP_PROTOCOL_VERSIONS = Object.freeze(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
 export const STDIO_LIMITS = Object.freeze({ frameBytes: BRIDGE_LIMITS.requestBytes + 4096, outputBytes: BRIDGE_LIMITS.responseBytes * 2 + 4096, concurrency: 4, requests: 4096, writeTimeoutMs: 5000 });
 export interface StdioToolBridgeOptions {
   bridge: ToolInvoker;
+  toolContractVersion?: ToolContractVersion;
   input?: Readable;
   output?: Writable;
   limits?: { frameBytes?: number; outputBytes?: number; concurrency?: number; requests?: number; writeTimeoutMs?: number };
@@ -16,6 +18,8 @@ const keyFor = (id: unknown) => JSON.stringify([typeof id, id]);
 
 /** Legacy MCP initialization and newline-delimited stdio; no resource, shell, or sampling surface. */
 export async function runStdioToolBridge(options: StdioToolBridgeOptions): Promise<void> {
+  const catalog = toolCatalog(options.toolContractVersion ?? options.bridge.toolContractVersion);
+  if (options.bridge.toolContractVersion && options.bridge.toolContractVersion !== catalog.version) throw new Error("STDIO_CATALOG_MISMATCH");
   const input = options.input ?? process.stdin, output = options.output ?? process.stdout;
   const limits = { ...STDIO_LIMITS, ...options.limits };
   for (const [name, value] of Object.entries(limits)) if (!Number.isSafeInteger(value) || value <= 0 || value > STDIO_LIMITS[name as keyof typeof STDIO_LIMITS]) throw new Error("STDIO_LIMIT_INVALID");
@@ -65,7 +69,7 @@ export async function runStdioToolBridge(options: StdioToolBridgeOptions): Promi
       initialized = true;
       await send({ jsonrpc: "2.0", id, result: {
         protocolVersion: MCP_PROTOCOL_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_PROTOCOL_VERSIONS[0],
-        capabilities: { tools: {} }, serverInfo: { name: "openslate", version: TOOL_CONTRACT_VERSION },
+        capabilities: { tools: {} }, serverInfo: { name: "openslate", version: catalog.version },
       } }); return;
     }
     if (value.method === "ping") { await send({ jsonrpc: "2.0", id, result: {} }); return; }
@@ -74,7 +78,7 @@ export async function runStdioToolBridge(options: StdioToolBridgeOptions): Promi
       if (Object.keys(params).some(key => !["cursor", "_meta"].includes(key)) || (params.cursor !== undefined && params.cursor !== null && params.cursor !== "")) {
         await rpcError(id, -32602, "Fixed catalog has no additional page"); return;
       }
-      await send({ jsonrpc: "2.0", id, result: { tools: TOOL_DESCRIPTORS } }); return;
+      await send({ jsonrpc: "2.0", id, result: { tools: catalog.descriptors } }); return;
     }
     if (value.method !== "tools/call") { await rpcError(id, -32601, "MCP method unavailable"); return; }
     if (typeof params.name !== "string" || Object.keys(params).some(key => !["name", "arguments", "_meta"].includes(key))) {

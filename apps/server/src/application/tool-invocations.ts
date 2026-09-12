@@ -1,6 +1,9 @@
-import { canonical, digest, DomainError, invariant, parseToolArguments } from "@openslate/core";
-import type { ActorContext, JsonValue, ToolName } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog } from "@openslate/core";
+import type { ActorContext, JsonValue, ToolName, ToolContractVersion } from "@openslate/core";
+import type { SkillCapabilityLock } from "@openslate/director";
 import type { ProductionService } from "./service.js";
+import { NarrationService } from "../narration/service.js";
+import type { NarrationSnapshot, ReviseSegments } from "../narration/types.js";
 
 export const TOOL_RESULT_MAX_BYTES = 1024 * 1024;
 export interface ToolInvocation {
@@ -10,39 +13,78 @@ export interface ToolInvocation {
   epochId: string;
   callId: string;
   tool: ToolName;
+  /** Absent on legacy V1 receipts only. An epoch's selection can never change. */
+  toolContractVersion?: ToolContractVersion;
+  catalogDigest?: string;
+  skillLockId?: string | null;
   argumentsDigest: string;
   state: "started" | "succeeded" | "failed" | "unresolved";
   result: JsonValue | null;
   resultDigest: string | null;
   error: { code: string; message: string } | null;
   /** Minimal domain correlation; credentials and full context never belong here. */
-  recovery?: { preparedId?: string; proposalDigest?: string };
+  recovery?: { preparedId?: string; proposalDigest?: string; narrationCommand?: { key: string; digest: string } };
+}
+
+/** Full text and media descriptors stay in domain storage and paged context, never this receipt. */
+function narrationReceipt(snapshot: NarrationSnapshot) {
+  const { state, readiness } = snapshot;
+  return { version: state.version, revisionId: state.revisionId, canonicalApplied: false,
+    segments: state.entries.map(entry => ({ segmentId: entry.segmentId, segmentRevisionId: entry.segmentRevisionId })),
+    readiness: { text: readiness.text, audio: readiness.audio, timing: readiness.timing,
+      gapCounts: Object.fromEntries([...new Set(readiness.gaps.map(gap => gap.category))].map(category => [category, readiness.gaps.filter(gap => gap.category === category).length])) },
+    next: "Read narration context; human review accepts exact script, recording and timing. No canonical state, grants or holds changed." };
 }
 
 /** Transport receipts supplement, but never replace, domain command/grant deduplication. */
 export class ToolInvocationService {
-  constructor(readonly service: ProductionService) {}
+  readonly narration: NarrationService;
+  constructor(readonly service: ProductionService) { this.narration = new NarrationService(service); }
+
+  private catalog(projectId: string, actor: ActorContext) {
+    invariant(actor.kind === "director", "ACTOR_DENIED", "A director epoch is required");
+    const binding = this.service.store.get<{ projectId: string; requestId: string; lockId: string }>("director_epoch_lock", actor.epochId);
+    // Earlier tool integrations did not persist a skill activation. They retain V1 only.
+    if (!binding) return { catalog: toolCatalog("1.0.0"), lockId: null };
+    invariant(binding.projectId === projectId && binding.requestId === actor.requestId, "CAPABILITY_MISMATCH", "Tool epoch lock belongs to different work");
+    const record = this.service.store.get<{ projectId: string; lock: SkillCapabilityLock }>("director_skill_lock", binding.lockId);
+    invariant(record?.projectId === projectId && record.lock.id === binding.lockId, "CAPABILITY_MISMATCH", "Tool skill lock is missing or belongs to another project");
+    const { lockDigest, ...body } = record.lock;
+    invariant(digest(body) === lockDigest, "CAPABILITY_MISMATCH", "Tool skill lock content changed");
+    const catalog = toolCatalog(record.lock.compatibility.toolContract);
+    invariant(record.lock.bindings.some(handler => handler.kind === "handler" && handler.id === (catalog.version === "1.0.0" ? "five-tools@1" : "director-tools@2") && handler.digest === catalog.digest),
+      "CAPABILITY_MISMATCH", "Tool implementation differs from its immutable lock");
+    return { catalog, lockId: binding.lockId };
+  }
 
   async invoke(projectId: string, actor: ActorContext, callId: string, tool: string, input: unknown): Promise<JsonValue> {
     invariant(actor.kind === "director", "ACTOR_DENIED", "Tool transport requires a director epoch");
     this.service.assertActor(projectId, actor);
     invariant(/^[A-Za-z0-9_-]{1,160}$/.test(callId), "VALIDATION_ERROR", "Invalid tool call identity");
-    const parsed = parseToolArguments(tool, input);
+    const selected = this.catalog(projectId, actor);
+    const parsed = parseToolArguments(tool, input, selected.catalog.version);
     const argumentHash = digest(parsed.arguments);
     const id = digest({ projectId, epochId: actor.epochId, callId });
     const store = this.service.store;
     const existing = store.transaction(() => {
       this.service.assertActor(projectId, actor);
+      invariant(canonical(this.catalog(projectId, actor)) === canonical(selected), "CAPABILITY_MISMATCH", "Tool catalog changed before invocation");
       const previous = store.get<ToolInvocation>("tool_invocation", id);
       if (previous) {
         invariant(previous.argumentsDigest === argumentHash && previous.tool === parsed.name && previous.requestId === actor.requestId,
           "IDEMPOTENCY_CONFLICT", "Tool call identity was already used for different work");
+        invariant((previous.toolContractVersion ?? "1.0.0") === selected.catalog.version &&
+          (!previous.catalogDigest || previous.catalogDigest === selected.catalog.digest) &&
+          (previous.skillLockId === undefined || previous.skillLockId === selected.lockId), "CAPABILITY_MISMATCH", "Receipt belongs to another tool contract");
         return previous;
       }
       const record: ToolInvocation = { id, projectId, requestId: actor.requestId, epochId: actor.epochId, callId,
-        tool: parsed.name, argumentsDigest: argumentHash, state: "started", result: null, resultDigest: null, error: null,
+        tool: parsed.name, toolContractVersion: selected.catalog.version, catalogDigest: selected.catalog.digest, skillLockId: selected.lockId,
+        argumentsDigest: argumentHash, state: "started", result: null, resultDigest: null, error: null,
         recovery: parsed.name === "apply_change" ? { preparedId: parsed.arguments.preparedId as string }
-          : parsed.name === "prepare_change" ? { proposalDigest: digest(parsed.arguments) } : {} };
+          : parsed.name === "prepare_change" ? { proposalDigest: digest(parsed.arguments) }
+          : parsed.name === "revise_narration_draft" ? { narrationCommand: { key: `director-tool:${id}`,
+            digest: digest({ action: "revise", expectedVersion: parsed.arguments.expectedVersion, arguments: parsed.arguments.patch }) } } : {} };
       store.insert("tool_invocation", id, projectId, record);
       store.appendEvent(projectId, "tool.started", { invocationId: id, callId, requestId: actor.requestId, tool: parsed.name });
       return null;
@@ -71,6 +113,8 @@ export class ToolInvocationService {
         case "apply_change": value = this.service.apply(projectId, actor, parsed.arguments.preparedId as string); break;
         case "inspect_artifact": value = this.service.inspectArtifact(projectId, actor, parsed.arguments.artifactId as string); break;
         case "control_execution": value = this.service.holdRequest(projectId, actor); break;
+        case "revise_narration_draft": value = narrationReceipt(this.narration.reviseSegments(projectId, actor,
+          parsed.arguments.expectedVersion as number, `director-tool:${id}`, parsed.arguments.patch as unknown as ReviseSegments)); break;
       }
     } catch (error) {
       // A rejected proposal can still have created a hold. "failed" means a known error,
@@ -115,6 +159,17 @@ export class ToolInvocationService {
           const prepared = store.list<{ id: string; requestId: string; epochId: string; proposalDigest: string }>("prepared", projectId)
             .find(row => row.requestId === call.requestId && row.epochId === epochId && row.proposalDigest === call.recovery!.proposalDigest);
           if (prepared) receipt = { preparedId: prepared.id, proposalDigest: prepared.proposalDigest };
+        }
+        if (call.tool === "revise_narration_draft" && call.toolContractVersion === "2.0.0" && call.recovery?.narrationCommand) {
+          const command = call.recovery.narrationCommand;
+          if (command.key === `director-tool:${call.id}`) {
+            const row = store.db.prepare("SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?")
+              .get(`${epoch.principalId}:${projectId}:${call.requestId}:narration`, command.key, command.digest) as { result: string } | undefined;
+            if (row) {
+              const snapshot = JSON.parse(row.result) as NarrationSnapshot;
+              if (snapshot.state.projectId === projectId) receipt = narrationReceipt(snapshot);
+            }
+          }
         }
         if (call.state === "started") this.finish(call.id, projectId, "unresolved", null, { code: "TOOL_CALL_UNRESOLVED", message: "Owning turn ended before its tool result was recorded" });
         store.insert("tool_reconciliation", call.id, projectId, { id: call.id, requestId: call.requestId, epochId,

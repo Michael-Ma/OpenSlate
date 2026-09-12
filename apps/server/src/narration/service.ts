@@ -24,7 +24,13 @@ export function sampleIntervalToFrames(atSample: number, durationSamples: number
  * methods are called by trusted host code, never by an agent-supplied actor tag.
  */
 export class NarrationService {
-  constructor(readonly production: ProductionService, readonly media: LocalMediaService) {}
+  constructor(readonly production: ProductionService, private readonly mediaService?: LocalMediaService) {}
+  get mediaAvailable(): boolean { return this.mediaService !== undefined; }
+  /** Draft work has no media-tool dependency; physical operations require a configured service. */
+  get media(): LocalMediaService {
+    invariant(this.mediaService, "MEDIA_NOT_CONFIGURED", "Local media tools must be configured for recording operations");
+    return this.mediaService;
+  }
   private get store() { return this.production.store; }
 
   /** Trusted authenticated host view only; model tools must use snapshot with an actor. */

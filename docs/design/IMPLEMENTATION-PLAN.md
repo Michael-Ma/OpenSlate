@@ -1,6 +1,6 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.13 · September 12, 2026
+**Version:** 0.14 · September 12, 2026
 **Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render and a native question-answer continuation passed. The single-process launcher has exclusive local installation ownership. GPT Image 2/H3 transports, the generic execution boundary, PNG validation and backend environment credentials are implemented offline; real media dispatch remains disconnected. See [current implementation status](../implementation/STATUS.md) for current counts, limits and remaining work.
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
@@ -9,7 +9,7 @@ This plan follows the [detailed component designs](../technical/README.md). The 
 
 Single-user, single-machine local application; user-configured model/credential profiles; up to 360 seconds of resolved output; uploaded or conversationally developed/generated narration; scene/shot plans and debug records; human-reviewed conditioning keyframes for every video shot; user-directed creative regeneration; bounded technical recovery; conversational creative edits and visual review/playback. Initial production integrations are Codex, GPT Image 2, H3 cloud and selected speech/transcription profiles. Same-machine Python H3 inference, ten/thirty-minute releases and a direct timeline editor follow later. V0 keeps the app, SQLite, media, workers and native Codex on one computer. Cloud providers remain external services; local deployment does not mean offline generation. Multi-host applications, remote GPU workers, distributed scheduling and shared-database deployment are outside v0.
 
-Two production skills, five agent tools and six worker operation families are sufficient. Development skills/plugins are separate and are not dependencies of the embedded director. No implementation slice should quietly expand this product scope.
+Two production skills and six worker operation families remain the initial structure. Tool contract V1 retains five tools; V2 adds one draft-only narration tool while removing direct canonical narration writes. Each request pins an exact immutable catalog. Development skills/plugins are separate and are not dependencies of the embedded director. No implementation slice should quietly expand this product scope.
 
 The AI proposes useful stages and missing information from user input; the application enforces registered contracts, current evidence and critical boundaries. Add one adaptable narrated-video recipe, with scope-specific progress and reusable outputs. Logical stages need not be separate model calls. T02A below introduces this workflow service before director integration; existing task IDs are preserved.
 
@@ -119,7 +119,7 @@ Show scope-specific stage readiness and proposed next work; distinguish hard blo
 
 **Design:** [Review UI](../technical/REVIEW-UI.md).
 
-### T06 — Codex director, skill lifecycle and five tools
+### T06 — Codex director, skill lifecycle and versioned tools
 
 **Dependencies:** T02A + T03, informed by T00. **Homes:** `packages/director`, server supervisor and application tool handlers; two `skills/` packages.
 
@@ -139,7 +139,7 @@ Add stage/gap assessment and focused task-prompt references, pinned with recipe/
 
 **Native supervisor result:** under the [accepted local policy](../implementation/RUNTIME-TRUST-DECISION.md), both remaining starts passed using the actual adapter, `DirectorSupervisor` and `createDirectorInput`. A conversational framing question was saved; after restarting the backend over the same SQLite database, the answer applied a shot-1 edit and matching plan while preserving shot 2, narration, story, motion and timing. The same skill lock was reactivated under a fresh epoch; the old bridge returned 403. No media attempts, artifacts, approvals or media API calls were created. This was not a native structured pending-input test. See [evidence](../implementation/CODEX-SUPERVISOR-VALIDATION.md).
 
-**Current follow-through:** Per-project native setup and two browser turns passed, including restart and brief-only editing. Two later capability turns brought the historical total to sixteen: the enabled pinned question feature emitted a persisted native question and the model correctly described a supplied PNG. Production image attachment, structured narration tool writes and broader stage/gap evaluation remain next. Further bounded live Codex tests are preapproved; historical experiment caps do not block a new recorded allowance. See [native capability evidence](../implementation/CODEX-CAPABILITY-VALIDATION.md).
+**Current follow-through:** Per-project native setup and two browser turns passed, including restart and brief-only editing. Two later capability turns brought the historical total to sixteen: the enabled pinned question feature emitted a persisted native question and the model correctly described a supplied PNG. Versioned structured narration writes and explicit project guidance upgrades are now implemented; production image attachment and broader stage/gap evaluation remain next. Further bounded live Codex tests are preapproved; historical experiment caps do not block a new recorded allowance. See [native capability evidence](../implementation/CODEX-CAPABILITY-VALIDATION.md).
 
 **Design:** [Director runtime](../technical/DIRECTOR-RUNTIME.md), [skills/tools](../technical/SKILLS-TOOLS.md).
 
@@ -153,7 +153,7 @@ Expose actual narration readiness to the workflow service; do not duplicate it w
 
 **Exit evidence:** complete upload, notes-to-script, partial audio and mixed-source cases progress without restarting the conversation. Text edits cannot falsely mutate recorded audio. A longer earlier sentence shifts later placements while preserving compatible video; changed duration/meaning renews affected review.
 
-**Implemented slice:** Immutable script/audio/cue revisions, partial/mixed source readiness, normalization and exact human acceptance now feed a guarded canonical commit with scoped shot impact. Authenticated session/upload/review routes and the browser panel are integrated. Commit keeps holds until a matching plan applies; user-declared generated audio is not internal generation provenance. Next: versioned conversational draft tools, ASR/TTS and transcript alignment. Source recordings are capped at 360 seconds. See [narration integration](../implementation/NARRATION-INTEGRATION.md).
+**Implemented slice:** Immutable script/audio/cue revisions, partial/mixed source readiness, normalization and exact human acceptance now feed a guarded canonical commit with scoped shot impact. Authenticated session/upload/review routes and the browser panel are integrated. Commit keeps holds until a matching plan applies; user-declared generated audio is not internal generation provenance. Versioned conversational draft writes now preserve independent human acceptance; ASR/TTS and transcript alignment remain next. Source recordings are capped at 360 seconds. See [narration integration](../implementation/NARRATION-INTEGRATION.md).
 
 **Design:** [Narration](../technical/NARRATION.md).
 
@@ -183,7 +183,7 @@ Real tests use explicit allowance and the user's configured credentials. A live 
 
 ### Current integration order
 
-The GPT Image 2 and MiniMax H3 transports have offline protocol/fault tests. The registered execution port retains exact fake/v1 compatibility; PNG ingestion and fixed backend credential aliases are available. Next connect durable spooled outputs and provider-specific receipt semantics, then real profiles, approved input transfer and explicit dispatch allowances. Synchronous images must not acquire invented remote task IDs; H3 locators must not masquerade as already measured artifacts. In parallel, extend narration through explicitly versioned tools and add owned image intake. The launcher and local installation guard are verified; migrations, portable export/paused restore and clean-install work remain. Live H3 stays deferred; other real media needs an explicit test allowance.
+The GPT Image 2 and MiniMax H3 transports have offline protocol/fault tests. The registered execution port retains exact fake/v1 compatibility; PNG ingestion and fixed backend credential aliases are available. The durable output receipt/spool store is implemented independently of dispatch. Next integrate versioned completion receipts and exact PNG ingestion into Engine, then add explicit raw-to-normalized video derivation, real profiles, approved input transfer and dispatch allowances. Synchronous images must not acquire invented remote task IDs; H3 locators must not masquerade as already measured artifacts. Versioned narration tools, explicit human guidance upgrades and the owned PNG reference library are implemented; their focused and browser evidence is linked from the status page. The launcher and local installation guard are verified; migrations, portable export/paused restore and clean-install work remain. Live H3 stays deferred; other real media needs an explicit test allowance.
 
 ## 6. Later extensions
 

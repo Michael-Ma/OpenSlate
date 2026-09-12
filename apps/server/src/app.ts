@@ -13,6 +13,7 @@ import { seedFixture } from "./demo.js";
 import type { DemoCommand } from "./application/fake-director.js";
 import { registerNarrationRoutes } from "./narration/routes.js";
 import { registerMediaRoutes } from "./media/routes.js";
+import { registerImageRoutes } from "./media/image-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
@@ -20,6 +21,7 @@ interface AppOptions { service?: ProductionService; localToken?: string; logger?
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
   runtimeSettings?: LocalDirectorController;
   narrationRoutes?: Parameters<typeof registerNarrationRoutes>[1];
+  imageRoutes?: Parameters<typeof registerImageRoutes>[1];
   mediaRoutes?: Parameters<typeof registerMediaRoutes>[1] }
 const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
@@ -60,6 +62,7 @@ export function createApp(options: AppOptions = {}) {
   options.webAssets?.register(app);
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
+  if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
   app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
   app.post<{ Body: { name: string } }>("/api/projects", { schema: { body: object({ name: string }, ["name"]) } }, async request =>
     service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => service().createProject(request.body.name)));
@@ -71,6 +74,16 @@ export function createApp(options: AppOptions = {}) {
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/setup", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.settings(request.params.projectId);
+  });
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/tools", async request => {
+    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
+    return options.runtimeSettings.tools(request.params.projectId);
+  });
+  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
+    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { const: "2.0.0" } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
+  }, async request => {
+    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
+    return options.runtimeSettings.upgradeTools(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
   app.post<{ Params: { projectId: string }; Body: LocalDirectorSelection }>("/api/projects/:projectId/director/setup", {
     schema: { body: object({ mode: { enum: ["fake", "native"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) },

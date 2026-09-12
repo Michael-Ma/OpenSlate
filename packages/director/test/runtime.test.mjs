@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomBytes } from "node:crypto";
 import { CodexDirectorRuntime, FakeDirectorRuntime } from "../dist/index.js";
+import { FIXTURE_DEADLINE_MS, PROTOCOL_FIXTURE_LIMITS } from "./fixture-timing.mjs";
 
 const entry = fileURLToPath(new URL("runtime-fixture.mjs", import.meta.url));
 const bridgeEntry = fileURLToPath(new URL("../dist/tools/mcp.js", import.meta.url));
@@ -14,7 +15,7 @@ const code = expected => error => error.code === expected;
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const deadline = async promise => {
   let timer;
-  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Fixture timed out")), 6000); })]); }
+  try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Fixture timed out")), FIXTURE_DEADLINE_MS); })]); }
   finally { clearTimeout(timer); }
 };
 
@@ -31,7 +32,7 @@ async function fixture(t, scenario = "complete", overrides = {}) {
     // Local native trust is explicit; fake protocol tests are not independent isolation proof.
     policy: { mode: "local", id: "fixture", runtimeVersion: "0.153.4",
       config: { default_permissions: "fixture", permissions: { fixture: { network: { enabled: false }, filesystem: { "/": "none" } } } } },
-    limits: { requestTimeoutMs: 500, runTimeoutMs: 2500, interruptGraceMs: 100, shutdownGraceMs: 100, eventTimeoutMs: 100 },
+    limits: { ...PROTOCOL_FIXTURE_LIMITS },
     ...overrides };
   const records = async () => { try { return (await readFile(options.env.FIXTURE_LOG, "utf8")).trim().split("\n").filter(Boolean).map(JSON.parse); }
     catch (error) { if (error.code === "ENOENT") return []; throw error; } };
@@ -64,7 +65,7 @@ test("fixed launch, exact skills, canonical context and complete lifecycle are m
   const promise = f.runtime.start(f.input, { onEvent: event => { events.push(event); } });
   f.input.bridge.credential = randomBytes(32).toString("base64url");
   const result = await deadline(promise);
-  assert.equal(result.status, "completed"); assert.equal(result.text, "Prepared safely. 你好 🟢");
+  assert.equal(result.status, "completed", result.error?.code); assert.equal(result.text, "Prepared safely. 你好 🟢");
   assert.equal(result.dispatched, true); assert.equal(result.turnId, f.input.turnId);
   assert.deepEqual(events.map(event => event.kind), ["runtime_started", "turn_started", "assistant_message"]);
   for (const event of events) assert.equal(event.epochId, f.input.epochId);
@@ -74,6 +75,16 @@ test("fixed launch, exact skills, canonical context and complete lifecycle are m
   assert.deepEqual(starts[0].params.input, [{ type: "text", text: f.input.text }, { type: "skill", ...f.input.skills[0] }]);
   assert.equal(starts[0].params.additionalContext.openslate.value, f.input.context);
   assert.equal(starts[0].params.permissions, "fixture"); assert.equal(starts[0].params.approvalPolicy, "never");
+});
+
+test("v2 native launch discovers six locked tools and rejects an advertised legacy catalog", async t => {
+  const f = await fixture(t), input = { ...f.input, bridge: { ...f.input.bridge, toolContractVersion: "2.0.0" } };
+  assert.equal((await deadline(f.runtime.start(input))).status, "completed");
+  const records = await f.records(); const config = records.find(row => row.method === "config/read"); assert.ok(config);
+  const legacy = await fixture(t, "catalog-legacy"); legacy.input.bridge.toolContractVersion = "2.0.0";
+  const failed = await deadline(legacy.runtime.start(legacy.input));
+  assert.equal(failed.status, "failed"); assert.equal(failed.dispatched, false); assert.equal(failed.error.code, "RUNTIME_CATALOG_UNEXPECTED");
+  assert.equal((await legacy.records()).some(row => row.method === "turn/start"), false);
 });
 
 for (const scenario of ["version-wrong", "missing-result", "skill-extra", "skills-error", "catalog-extra", "instructions-extra", "bridge-wrong", "permissions-wrong", "permissions-expanded", "permissions-defaults-expanded", "permissions-defaults-unknown"]) {
@@ -125,7 +136,7 @@ test("abort before dispatch launches nothing", async t => {
 test("abort after dispatch confirms interruption and rejects concurrent project runs", async t => {
   const f = await fixture(t, "hang"), controller = new AbortController(), started = deferred();
   const promise = f.runtime.start(f.input, { signal: controller.signal, onEvent: event => { if (event.kind === "turn_started") started.resolve(); } });
-  await deadline(started.promise);
+  await deadline(Promise.race([started.promise, promise.then(result => { throw new Error(`Fixture ended before turn_started: ${result.error?.code ?? result.status}`); })]));
   await assert.rejects(f.runtime.start(f.input), code("RUNTIME_BUSY"));
   controller.abort(); const result = await deadline(promise);
   assert.equal(result.status, "interrupted"); assert.equal(result.dispatched, true);

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { CodexDirectorRuntime, DIRECTOR_IMAGE_LIMITS } from "../dist/index.js";
 import { prepareDirectorImages } from "../dist/runtime/images.js";
+import { PROTOCOL_FIXTURE_LIMITS } from "./fixture-timing.mjs";
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/mgAAAAASUVORK5CYII=", "base64");
 async function fixture(t, scenario = "complete") {
@@ -20,7 +21,7 @@ async function fixture(t, scenario = "complete") {
   const runtime = new CodexDirectorRuntime({ command: { file: process.execPath, args: [fileURLToPath(new URL("runtime-fixture.mjs", import.meta.url))] },
     cwd: root, model: "fake-model", env: { FIXTURE_SCENARIO: scenario, FIXTURE_LOG: log }, runtimeVersion: "0.153.4",
     policy: { mode: "local", id: "fixture", runtimeVersion: "0.153.4", config: { default_permissions: "fixture", permissions: { fixture: { filesystem: { "/": "none" }, network: { enabled: false } } } } },
-    limits: { requestTimeoutMs: 500, runTimeoutMs: 2500, shutdownGraceMs: 100, interruptGraceMs: 100 } });
+    limits: { ...PROTOCOL_FIXTURE_LIMITS } });
   return { root, path, image, input, runtime, log };
 }
 test("verified thumbnail bytes are frozen into native image inputs", async t => {
@@ -29,7 +30,7 @@ test("verified thumbnail bytes are frozen into native image inputs", async t => 
   await writeFile(f.path, "changed after preparation");
   assert.deepEqual(prepared, [{ type: "image", url: `data:image/png;base64,${png.toString("base64")}` }]);
   await writeFile(f.path, png);
-  const result = await f.runtime.start(f.input); assert.equal(result.status, "completed");
+  const result = await f.runtime.start(f.input); assert.equal(result.status, "completed", result.error?.code);
   const requests = (await readFile(f.log, "utf8")).trim().split("\n").map(JSON.parse);
   const started = requests.find(row => row.method === "turn/start");
   assert.deepEqual(started.params.input, [{ type: "text", text: f.input.text }, ...prepared]);

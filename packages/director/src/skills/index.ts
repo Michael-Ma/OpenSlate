@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { constants, chmodSync, closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep, posix } from "node:path";
-import { DomainError, TOOL_NAMES, canonical, digest, invariant, newId } from "@openslate/core";
+import { DomainError, ALL_TOOL_NAMES, canonical, digest, invariant, newId } from "@openslate/core";
 import type { ToolName } from "@openslate/core";
 
 export const SKILL_LIMITS = Object.freeze({ packages: 32, files: 64, fileBytes: 256 * 1024, manifestBytes: 16 * 1024, snapshotBytes: 32 * 1024, packageBytes: 2 * 1024 * 1024, pathBytes: 192, pathDepth: 8, jsonDepth: 32, jsonValues: 10000, bindings: 128, prompts: 128 });
-export const SKILL_TOOL_IDS = TOOL_NAMES;
+export const SKILL_TOOL_IDS = ALL_TOOL_NAMES;
 export type SkillToolId = ToolName;
 export interface SkillCompatibility { toolContract: string; planLanguage: string; workflowContract: string }
 export interface SkillManifest {

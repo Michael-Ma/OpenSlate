@@ -24,12 +24,24 @@ let inputDir, wave;
 before(async () => { inputDir = await mkdtemp(join(tmpdir(), 'openslate-narration-http-input-')); const path = join(inputDir, 'wave.wav'); await promisify(execFile)(ffmpeg, ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=530:sample_rate=44100:duration=1', '-c:a', 'pcm_s16le', path], { timeout: 15000 }); wave = await readFile(path); });
 after(async () => rm(inputDir, { recursive: true, force: true }));
 const draft = { text: 'Built with care', textKind: 'draft', language: 'en', meaning: 'Handmade construction', source: { kind: 'uploaded' } };
-async function fixture(t) {
+test('narration writing and human script acceptance work with no configured media service', async t => {
+  const f = await fixture(t, { withMedia: false });
+  const view = (await f.request()).json(); assert.deepEqual(view.capabilities, { audioImport: false, audioPlayback: false });
+  await f.start();
+  const added = await f.edit('/segments', { patch: { add: [draft] } }); assert.equal(added.statusCode, 200, added.body);
+  const segment = f.view().segments[0];
+  const accepted = await f.edit('/acceptances', { kind: 'script', targets: [segment.script.id] }); assert.equal(accepted.statusCode, 200, accepted.body);
+  assert.equal(f.view().segments[0].accepted.script, true); assert.equal(f.view().segments[0].accepted.audio, false);
+  const uploaded = await f.upload(); assert.equal(uploaded.json().error.code, 'NARRATION_MEDIA_UNAVAILABLE');
+  assert.equal(f.store.list('narration_audio', f.project.id).length, 0); assert.deepEqual(await readdir(f.uploadDirectory), []);
+  assert.equal(f.store.getProject(f.project.id).headVersion, 0); assert.equal(f.provider.acceptedCount(), 0);
+});
+async function fixture(t, { withMedia = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'openslate-narration-http-')), uploadDirectory = join(dir, 'uploads'); await mkdir(uploadDirectory);
   const store = new Store(join(dir, 'db.sqlite')), provider = new FakeProvider(join(dir, 'fake.sqlite')), engine = new Engine(store, provider, { artifactDir: join(dir, 'artifacts') });
   const production = new ProductionService(store, engine), project = production.createProject('Narration upload review');
   const media = new LocalMediaService({ rootDir: join(dir, 'media'), allowedInputRoots: [uploadDirectory], ffmpegPath: ffmpeg, ffprobePath: ffprobe });
-  const narration = new NarrationService(production, media), canonical = new NarrationCanonicalService(narration), app = createApp({ service: production, localToken: token });
+  const narration = new NarrationService(production, withMedia ? media : undefined), canonical = new NarrationCanonicalService(narration), app = createApp({ service: production, localToken: token });
   registerNarrationRoutes(app, { production, narration, canonical, uploadDirectory }); await app.ready();
   const f = { dir, uploadDirectory, store, provider, engine, production, project, media, narration, canonical, app, session: null };
   f.request = (suffix = '', body, extras = {}) => app.inject({ method: body === undefined ? 'GET' : 'POST', url: `/api/projects/${project.id}/narration${suffix}`, ...(body === undefined ? {} : { payload: body }), ...extras,

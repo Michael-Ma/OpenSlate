@@ -26,7 +26,7 @@ export interface Attempt {
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
-  origin?: "supplied_video" | "local_render" | "narration_audio";
+  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio";
 }
 interface Reservation { id: string; projectId: string; attemptId: string; micros: string; state: "reserved" | "charged" | "released" }
 interface Hold { id: string; projectId: string; scopeId: string; ownerId: string; active: boolean }

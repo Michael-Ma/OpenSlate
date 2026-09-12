@@ -9,7 +9,7 @@ import { ProductionService } from "./application/service.js";
 import { Store } from "./persistence/store.js";
 import { Engine } from "./execution/engine.js";
 import { LocalDirectorController } from "./application/local-director.js";
-import { LocalMediaService, MediaApplicationService } from "./media/index.js";
+import { ImageApplicationService, LocalImageStore, LocalMediaService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from "./media/index.js";
 import { NarrationService, NarrationCanonicalService } from "./narration/index.js";
 import { ManagedUploadStore } from "./narration/managed-upload.js";
 import { assertWebDataSeparation, loadWebAssets } from "./web-assets.js";
@@ -52,12 +52,15 @@ const findMediaTool = (name: string, override?: string) => {
 };
 const ffmpegPath = findMediaTool("ffmpeg", process.env.OPENSLATE_FFMPEG), ffprobePath = findMediaTool("ffprobe", process.env.OPENSLATE_FFPROBE);
 const localMedia = ffmpegPath && ffprobePath ? new LocalMediaService({ rootDir: join(directory, "media"), allowedInputRoots: [uploadDirectory], ffmpegPath, ffprobePath }) : null;
-const narration = localMedia ? new NarrationService(service, localMedia) : null;
+const narration = new NarrationService(service, localMedia ?? undefined);
+const imageStore = ffmpegPath && ffprobePath ? new LocalImageStore({ rootDir: join(engine.artifactDir, "images"), ffmpegPath, ffprobePath }) : null;
 // Each project starts in demo mode until its user chooses and checks local Codex.
 const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001" });
 const app = createApp({ service, director, runtimeSettings: director, localToken, logger: true,
   ...(webAssets ? { webAssets } : {}),
-  ...(narration ? { narrationRoutes: { production: service, narration, canonical: new NarrationCanonicalService(narration), uploadDirectory } } : {}),
+  imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
+    uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },
+  narrationRoutes: { production: service, narration, canonical: new NarrationCanonicalService(narration), uploadDirectory },
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
 let running = false;
 const timer = setInterval(() => {

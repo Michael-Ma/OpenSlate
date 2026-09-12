@@ -47,7 +47,7 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     const recordings = store.list<NarrationAudio>("narration_audio", projectId).reverse();
     invariant(audioOffset <= recordings.length, "VALIDATION_ERROR", "Recording library offset is beyond its current size");
     const audioLibrary = recordings.slice(audioOffset, audioOffset + 400).map(({ id, declaredOrigin, media }) => ({ id, declaredOrigin, media }));
-    return { audioLibrary, coverage: { audioLibrary: { offset: audioOffset, returned: audioLibrary.length, total: recordings.length, nextOffset: audioOffset + audioLibrary.length < recordings.length ? audioOffset + audioLibrary.length : null } }, headVersion: project.headVersion, revisionId: project.revisionId, snapshot: narration.workspaceSnapshot(projectId), canonical: canonical.workspaceCurrent(projectId), session: selectedSession(projectId) };
+    return { capabilities: { audioImport: narration.mediaAvailable, audioPlayback: narration.mediaAvailable }, audioLibrary, coverage: { audioLibrary: { offset: audioOffset, returned: audioLibrary.length, total: recordings.length, nextOffset: audioOffset + audioLibrary.length < recordings.length ? audioOffset + audioLibrary.length : null } }, headVersion: project.headVersion, revisionId: project.revisionId, snapshot: narration.workspaceSnapshot(projectId), canonical: canonical.workspaceCurrent(projectId), session: selectedSession(projectId) };
   });
 
   app.register(async scoped => {
@@ -115,6 +115,7 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
       bodyLimit: uploads.maxBytes,
       schema: { querystring: object({ sessionId: id, declaredOrigin: { enum: ["uploaded", "generated"] } }, ["sessionId", "declaredOrigin"]) },
     }, async request => {
+      invariant(narration.mediaAvailable, "NARRATION_MEDIA_UNAVAILABLE", "Recording import requires local FFmpeg and ffprobe");
       invariant(request.headers["content-type"]?.split(";")[0] === "application/octet-stream", "VALIDATION_ERROR", "Upload recording bytes as application/octet-stream");
       const { projectId } = request.params, { sessionId, declaredOrigin } = request.query, commandKey = key(request), actor = actorFor(projectId, sessionId);
       const identity = digest({ projectId, sessionId, commandKey });
