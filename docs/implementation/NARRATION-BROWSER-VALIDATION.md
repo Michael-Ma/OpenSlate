@@ -12,6 +12,7 @@ September 12, 2026. A separate local application database and browser session ex
 6. Imported a six-second 640×360 synthetic clip through the authenticated HTTP route under the same active edit. The browser displayed its owned clip entry and loaded a verified playback blob and save link.
 7. Browser media elements reported six-second durations, ready state 4 and no decoding errors; video dimensions were 640×360.
 8. After the shared pending-request registry fixes, prepared a fresh narration review, switched to a second project and returned. The exact completed preparation and its decision controls were restored.
+9. Restarted into the built single-process launcher at port 3001 and reopened the persisted project. An unsaved script edit and, separately, an unsaved recording-end change disabled review. Each revert restored the saved values and review eligibility. Audio/video blobs still decoded six seconds with ready state 4 and no media errors under the production content policy; browser error/warning collection was empty.
 
 The project had one section and no shots or executable timeline. This checks narration intake, exact review, canonical commit, local import and playback. Render authority and physical timeline resolution are covered by separate HTTP/application tests and the [six-minute local render](MEDIA-INTEGRATION.md).
 

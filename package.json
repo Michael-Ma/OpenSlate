@@ -9,6 +9,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
+    "start": "node apps/server/dist/index.js --serve-web",
     "dev": "pnpm build:packages && pnpm --parallel --filter './apps/*' dev",
     "build:packages": "pnpm --filter './packages/*' -r build",
     "build": "pnpm -r build",
@@ -17,6 +18,7 @@
     "test": "pnpm build && node --test packages/core/test/*.test.mjs packages/providers/test/*.test.mjs packages/director/test/*.test.mjs apps/server/test/*.test.mjs apps/web/test/*.test.mjs",
     "demo:headless": "pnpm build && node apps/server/dist/demo.js",
     "probe:runtime": "pnpm build:packages && node packages/director/dist/probe/cli.js",
+    "probe:launcher": "pnpm build && node apps/server/test/launcher-smoke.mjs",
     "probe:toolchain": "pnpm build && node apps/server/dist/toolchain-probe.js"
   },
   "devDependencies": {

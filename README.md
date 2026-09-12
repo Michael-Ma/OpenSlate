@@ -29,14 +29,23 @@ Prerequisites: Node.js 24 and pnpm 10.33.0. If needed, install pnpm with `npm in
 git clone https://github.com/Michael-Ma/OpenSlate.git
 cd OpenSlate
 pnpm install
-pnpm dev
+pnpm build
+pnpm start
 ```
 
-Open [the local app](http://127.0.0.1:5173). The API runs at [the health endpoint](http://127.0.0.1:3001/api/health). Both bind to loopback; the development app proxies `/api` to the server. Stop them with Ctrl+C.
+Open [the local app](http://127.0.0.1:3001). One process serves the built interface and API on loopback. Startup prints the absolute data directory and local token file location, without printing the token itself. Paste that file's token into the connection screen. Stop with Ctrl+C.
 
-The default app and fake demo require no API keys, Codex installation, FFmpeg, or GPU. They make no paid generation calls. Shared packages are built before development starts; restart `pnpm dev` after editing those packages.
+For development, use `pnpm dev` and open [the development interface](http://127.0.0.1:5173). Vite proxies `/api` to the local service on port 3001. Shared packages build before development starts; restart `pnpm dev` after editing them. Production serves the bundle captured at startup; rebuild and restart to use changed interface files.
 
-The server stores local state in `.openslate/` relative to its working directory, or `OPENSLATE_DATA_DIR`. It creates a private `local-session.token` there unless `OPENSLATE_LOCAL_TOKEN` is configured. With `pnpm dev`, the default file is `apps/server/.openslate/local-session.token`. Paste this local token into the connection screen. It stays in tab memory and must be entered again after a full reload. Protected routes require bearer authentication; only the health endpoint is public. No model-credential saving API is enabled.
+The default app and fake demo require no API keys, Codex installation, FFmpeg, or GPU. They make no paid generation calls.
+
+The server stores local state in `.openslate/` relative to its working directory, or `OPENSLATE_DATA_DIR`. Root-level `pnpm start` defaults to `<repository>/.openslate/`; `pnpm dev` and the filtered server start default to `<repository>/apps/server/.openslate/`. Set the same explicit directory when switching launch modes to retain the same projects:
+
+```sh
+OPENSLATE_DATA_DIR=/absolute/path/to/openslate-data pnpm start
+```
+
+The service creates a private `local-session.token` in that directory unless `OPENSLATE_LOCAL_TOKEN` is configured. The browser keeps this token in tab memory; enter it again after a full reload. The built interface and health endpoint are public on loopback; project/media APIs and director tools require their appropriate bearer tokens. Host and Origin checks also apply to the built interface. No model-credential saving API is enabled. Keep the data directory separate from `apps/web/dist`, which contains public build output.
 
 Create a project and choose its director. Native Codex setup checks the pinned local installation using its existing sign-in, without starting a model conversation. To try the offline workflow, close setup or choose Demo, then select **Create a 2-shot demo**. Inspect and select the keyframes, then approve the selection to release their sample videos. Use a shot's **Discuss** action and the demo framing choices to exercise a scoped change. In demo mode, ordinary chat receives canned guidance. Native mode handles live conversations through the validated application tools. The application preserves the previous preview during a revision. All sample outputs are explicitly fake.
 
@@ -47,16 +56,20 @@ Run `pnpm demo:headless` for a reproducible two-shot example. It generates clear
 | Command | Purpose |
 |---|---|
 | `pnpm dev` | Start the web app and API in development |
+| `pnpm start` | Serve the built interface and API at `127.0.0.1:3001` |
 | `pnpm check` | Build, run domain/API/SQLite tests and check TypeScript |
 | `pnpm test` | Build and run offline tests, including the fake integration demo |
 | `pnpm demo:headless` | Run the two-shot edit/restart demonstration without keys |
 | `pnpm probe:toolchain` | Check SQLite/schema and optional local FFmpeg H.264/AAC support |
+| `pnpm probe:launcher` | Check the built local launcher with temporary data; requires port 3001 to be free |
 | `pnpm probe:runtime --codex /absolute/path/to/codex` | Probe installed Codex with zero model turns |
 | `pnpm build` | Produce library/API output and the web bundle |
 | `pnpm typecheck` | Build shared packages and check TypeScript |
-| `pnpm --filter @openslate/server start` | Start the built API after `pnpm build` |
+| `pnpm --filter @openslate/server start` | Start the built interface/API from the server directory |
 
-The web build is written to `apps/web/dist`; production serving is not wired yet. Tests use isolated local databases and require permission to bind loopback ports. The native Codex probe test is opt-in through `OPENSLATE_CODEX_PROBE_BINARY`; normal CI does not require Codex or credentials. Supplied-media workflows require FFmpeg and ffprobe on PATH (or OPENSLATE_FFMPEG and OPENSLATE_FFPROBE). They provide authenticated local upload, narration review, clip playback and rendering of compatible plans. They do not call cloud media APIs.
+The web build is written to `apps/web/dist`. Production loads a bounded snapshot of that directory: at most 256 entries, eight levels, 8 MiB per file and 32 MiB total. Only recognized web asset formats are served; hidden files, source maps and arbitrary data files are excluded, and symlinks are rejected. Missing API routes and missing assets never fall back to the interface. The local launcher is not a multi-host deployment service.
+
+Tests use isolated local databases and require permission to bind loopback ports. The native Codex probe test is opt-in through `OPENSLATE_CODEX_PROBE_BINARY`; normal CI does not require Codex or credentials. Supplied-media workflows require FFmpeg and ffprobe on PATH (or OPENSLATE_FFMPEG and OPENSLATE_FFPROBE). They provide authenticated local upload, narration review, clip playback and rendering of compatible plans. They do not call cloud media APIs.
 
 ## Repository
 

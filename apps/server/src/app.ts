@@ -13,8 +13,10 @@ import { seedFixture } from "./demo.js";
 import type { DemoCommand } from "./application/fake-director.js";
 import { registerNarrationRoutes } from "./narration/routes.js";
 import { registerMediaRoutes } from "./media/routes.js";
+import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+  webAssets?: WebAssets;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
   runtimeSettings?: LocalDirectorController;
   narrationRoutes?: Parameters<typeof registerNarrationRoutes>[1];
@@ -27,6 +29,8 @@ export function createApp(options: AppOptions = {}) {
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const actors = new WeakMap<object, ActorContext>();
   const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
+  const eventStreams = new Set<() => void>();
+  app.addHook("preClose", async () => { for (const close of eventStreams) close(); });
   const service = () => { invariant(options.service, "SERVICE_UNAVAILABLE", "Application storage is not configured"); return options.service; };
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   app.setErrorHandler((error, _request, reply) => {
@@ -44,7 +48,7 @@ export function createApp(options: AppOptions = {}) {
     invariant(!origin || ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"].includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
     const commandKey = request.headers["idempotency-key"];
     invariant(commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
-    if (request.routeOptions.url === "/api/health") return;
+    if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
     const bearer = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{20,256})$/)?.[1];
     invariant(bearer, "AUTH_REQUIRED", "A local session or director bridge token is required");
     if (request.routeOptions.url?.startsWith("/internal/")) {
@@ -53,6 +57,7 @@ export function createApp(options: AppOptions = {}) {
     } else invariant(options.localToken && timingSafeEqual(Buffer.from(digest(bearer)), Buffer.from(digest(options.localToken))), "AUTH_REQUIRED", "Invalid local session token");
   });
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
+  options.webAssets?.register(app);
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
@@ -176,7 +181,9 @@ export function createApp(options: AppOptions = {}) {
       } catch { reply.raw.end(); }
     };
     const timer = setInterval(pump, 1000);
-    reply.raw.on("close", () => { closed = true; clearInterval(timer); });
+    const close = () => { if (closed) return; closed = true; clearInterval(timer); eventStreams.delete(close); reply.raw.end(); };
+    eventStreams.add(close);
+    reply.raw.on("close", close);
     pump();
   });
   app.post<{ Params: { projectId: string; tool: string }; Body: Record<string, unknown> }>("/internal/projects/:projectId/tools/:tool", async request => {

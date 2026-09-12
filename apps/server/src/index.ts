@@ -12,8 +12,17 @@ import { LocalDirectorController } from "./application/local-director.js";
 import { LocalMediaService, MediaApplicationService } from "./media/index.js";
 import { NarrationService, NarrationCanonicalService } from "./narration/index.js";
 import { ManagedUploadStore } from "./narration/managed-upload.js";
+import { assertWebDataSeparation, loadWebAssets } from "./web-assets.js";
 
+const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
+const webDirectory = fileURLToPath(new URL("../../web/dist/", import.meta.url));
+if (serveWeb) assertWebDataSeparation(webDirectory, directory);
+// Validate the production build before creating local application state.
+const webAssets = serveWeb ? (() => {
+  try { return loadWebAssets(webDirectory); }
+  catch (error) { throw new Error("OpenSlate could not load its built interface. Run pnpm build first, then pnpm start.", { cause: error }); }
+})() : undefined;
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const tokenPath = join(directory, "local-session.token");
 let localToken = process.env.OPENSLATE_LOCAL_TOKEN;
@@ -42,6 +51,7 @@ const narration = localMedia ? new NarrationService(service, localMedia) : null;
 // Each project starts in demo mode until its user chooses and checks local Codex.
 const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001" });
 const app = createApp({ service, director, runtimeSettings: director, localToken, logger: true,
+  ...(webAssets ? { webAssets } : {}),
   ...(narration ? { narrationRoutes: { production: service, narration, canonical: new NarrationCanonicalService(narration), uploadDirectory } } : {}),
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
 let running = false;
@@ -51,7 +61,13 @@ const timer = setInterval(() => {
   running = true;
   void engine.reconcile().then(() => engine.runReady()).catch(error => app.log.error(error)).finally(() => { running = false; });
 }, 500);
-app.addHook("onClose", async () => { clearInterval(timer); await director.close(); while (running) await new Promise(resolve => setTimeout(resolve, 10)); store.close(); provider.close(); });
-for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void app.close().catch(error => { app.log.error(error); process.exitCode = 1; }); });
-try { await app.listen({ host: "127.0.0.1", port: 3001 }); }
-catch (error) { clearInterval(timer); app.log.error(error); await app.close(); process.exitCode = 1; }
+app.addHook("preClose", async () => { clearInterval(timer); await director.close(); });
+app.addHook("onClose", async () => { while (running) await new Promise(resolve => setTimeout(resolve, 10)); store.close(); provider.close(); });
+let closing: Promise<void> | undefined;
+const close = () => closing ??= app.close();
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close().catch(error => { app.log.error(error); process.exitCode = 1; }); });
+try {
+  await app.listen({ host: "127.0.0.1", port: 3001 });
+  process.stdout.write(`\nOpenSlate ${serveWeb ? "is ready" : "API is ready"} at http://127.0.0.1:3001${serveWeb ? "" : "/api/health"}\nLocal data: ${directory}\n${process.env.OPENSLATE_LOCAL_TOKEN ? "Local session token: provided by OPENSLATE_LOCAL_TOKEN" : `Local session token file: ${tokenPath}`}\n${serveWeb ? "Paste the local session token into the connection screen.\n" : "Open the development interface at http://127.0.0.1:5173\n"}Stop with Ctrl+C.\n\n`);
+}
+catch (error) { clearInterval(timer); app.log.error(error); await close(); process.exitCode = 1; }
