@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, existsSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, readFileSync, unlinkSync, constants, fstatSync, realpathSync } from "node:fs";
+import { mkdirSync, existsSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, readFileSync, unlinkSync, constants, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { open } from "node:fs/promises";
 import { DEFAULT_PROFILES, DomainError, digest, effectiveNodeDigest, invariant, moneyMicros, newId, shotIntentDigest } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, ProjectRecord, ProviderProfile } from "@openslate/core";
-import { assertExecutionProfile, assertExecutionRequest, executionFailureSource, executionIdentity, fixtureOutputs, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
-import type { ExecutionOutcome, ExecutionOutput, ExecutionProvider, ExecutionRequest } from "@openslate/providers";
+import { assertExecutionProfile, assertExecutionRequest, executionFailureSource, executionIdentity, executionTaskId, fixtureOutputs, isSpoolCompletion, isSpoolOutput, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
+import type { ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
+import { ExecutionOutputStore } from "./output-store.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
@@ -27,6 +29,8 @@ export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
   origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio";
+  outputReceiptId?: string; outputSpoolId?: string; byteLength?: number;
+  width?: number; height?: number; validationDigest?: string;
 }
 interface Reservation { id: string; projectId: string; attemptId: string; micros: string; state: "reserved" | "charged" | "released" }
 interface Hold { id: string; projectId: string; scopeId: string; ownerId: string; active: boolean }
@@ -38,7 +42,7 @@ export interface ReviewSnapshot {
 interface Evidence { id: string; projectId: string; attemptId: string; outcome: ExecutionOutcome; outcomeDigest: string; recordedAt: string }
 /** Trusted host hook: decode/probe and publish immutable bytes before returning their exact record. */
 export interface ExecutionOutputIngestor {
-  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<ExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord> | ArtifactRecord;
+  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<IngestibleExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord> | ArtifactRecord;
 }
 interface ResolvedInputs { artifacts: ArtifactRef[]; fingerprint: string }
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
@@ -52,9 +56,11 @@ export class Engine {
   readonly leaseMs: number;
   readonly defaultBudgetMicros: string;
   readonly outputIngestor: ExecutionOutputIngestor | undefined;
+  readonly outputStore: ExecutionOutputStore | undefined;
   constructor(readonly store: Store, readonly provider: ExecutionProvider, options: {
     artifactDir: string; profiles?: ProviderProfile[]; budgetMicros?: string; workerId?: string; leaseMs?: number;
     outputIngestor?: ExecutionOutputIngestor;
+    outputStore?: ExecutionOutputStore;
   }) {
     executionIdentity(provider);
     this.workerId = options.workerId ?? newId();
@@ -63,6 +69,8 @@ export class Engine {
     this.leaseMs = options.leaseMs ?? 30_000;
     this.defaultBudgetMicros = options.budgetMicros ?? "1000000";
     this.outputIngestor = options.outputIngestor;
+    invariant(!options.outputStore || options.outputStore.store === store, "OUTPUT_STORE_CONFIGURATION", "Executor and output storage must share the same application store");
+    this.outputStore = options.outputStore;
     moneyMicros(this.defaultBudgetMicros);
     mkdirSync(this.artifactDir, { recursive: true });
   }
@@ -239,8 +247,18 @@ export class Engine {
       let outcome: ExecutionOutcome;
       assertExecutionRequest(this.provider, attempt.request);
       const completed = this.store.list<Evidence>("execution_evidence", attempt.projectId).find(item => item.attemptId === attempt.id
-        && item.outcome.type === "completed" && (!attempt.taskId || item.outcome.taskId === attempt.taskId));
+        && item.outcome.type === "completed" && item.outcomeDigest === digest(item.outcome)
+        && (!attempt.taskId || executionTaskId(item.outcome) === attempt.taskId) && this.completionBound(attempt, item.outcome));
+      let recovered: ExecutionSpoolCompletion | null = null;
+      if (!completed && this.outputStore) {
+        try { recovered = await this.withLease(attempt, signal => this.outputStore!.recoverCompletion(attempt.projectId, attempt.id, { signal })); }
+        catch {
+          await this.handle(attempt, { type: "unknown", diagnostic: "Owned output recovery requires attention" }); reconciled++; return;
+        }
+        if (!this.owns(attempt)) return;
+      }
       if (completed) outcome = completed.outcome;
+      else if (recovered) outcome = recovered;
       else if (attempt.candidateId === null) outcome = { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) };
       else {
         try { outcome = attempt.taskId ? await this.provider.poll(attempt.taskId) : await this.provider.lookup(attempt.id); }
@@ -408,20 +426,27 @@ export class Engine {
     const current = this.store.get<Attempt>("attempt", attempt.id);
     return current && !TERMINAL.has(current.phase) && current.leaseOwner === this.workerId && current.leaseEpoch === attempt.leaseEpoch && current.leaseExpiresAt > Date.now() ? current : null;
   }
+  private completionBound(attempt: Attempt, outcome: ExecutionOutcome): boolean {
+    if (!isSpoolCompletion(outcome)) return true;
+    try { this.outputStore?.assertCompletion(attempt.projectId, attempt.id, outcome); return this.outputStore !== undefined; }
+    catch { return false; }
+  }
   private async handle(attempt: Attempt, observation: ExecutionOutcome): Promise<void> {
     assertExecutionRequest(this.provider, attempt.request);
     const observed = normalizeExecutionOutcome(observation, attempt.request);
     let outcome = observed;
+    // A receipt from another request cannot lend its vendor identity to this attempt.
+    if (!this.completionBound(attempt, observed)) outcome = { type: "unknown", diagnostic: "Completion has no matching owned output receipt" };
     const owns = this.store.transaction(() => {
       const outcomeDigest = digest(observed);
       if (!this.store.list<Evidence>("execution_evidence", attempt.projectId).some(item => item.attemptId === attempt.id && item.outcomeDigest === outcomeDigest))
         this.store.insert("execution_evidence", newId(), attempt.projectId, { attemptId: attempt.id, outcome: observed, outcomeDigest, recordedAt: new Date().toISOString() });
       const current = this.owns(attempt); if (!current) return false;
       // A provider receipt cannot replace an already accepted task identity, including during recovery.
-      if (current.taskId && (("taskId" in outcome && outcome.taskId !== current.taskId) || outcome.type === "rejected"))
+      if (current.taskId && ((("taskId" in outcome || isSpoolCompletion(outcome)) && executionTaskId(outcome) !== current.taskId) || outcome.type === "rejected"))
         outcome = { type: "unknown", diagnostic: "Provider observation conflicts with accepted task identity" };
       if (outcome.type === "completed") {
-        this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting", taskId: outcome.taskId }); return true;
+        this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting", taskId: executionTaskId(outcome) }); return true;
       }
       const phase: AttemptPhase = outcome.type === "accepted" ? "remote_pending" : outcome.type === "unknown" ? "submission_unknown" : "failed";
       const failure = outcome.type === "failed" || outcome.type === "rejected"
@@ -440,12 +465,13 @@ export class Engine {
     if (!outputs) return;
     this.store.transaction(() => {
       const current = this.owns(attempt); if (!current) return;
+      if (isSpoolCompletion(completed)) this.outputStore!.assertCompletion(current.projectId, current.id, completed);
       const mapped: Record<string, ArtifactRef> = {};
       for (const { output, record } of outputs) {
         this.store.insert("artifact", record.id, attempt.projectId, record); mapped[output.port] = record.artifact;
         this.store.appendEvent(attempt.projectId, "artifact.published", { artifactId: record.id, attemptId: attempt.id, fixture: record.fixture });
       }
-      const finished: Attempt = { ...current, phase: "succeeded", outputs: mapped, taskId: completed.taskId, leaseExpiresAt: 0 };
+      const finished: Attempt = { ...current, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
       this.store.put("attempt", current.id, current.projectId, finished); this.setReservation(current, "charged");
       const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
       if (binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
@@ -467,7 +493,7 @@ export class Engine {
     this.store.put("reservation", reservation.id, reservation.projectId, { ...reservation, state });
   }
 
-  private async ingestOutputs(attempt: Attempt, descriptors: ExecutionOutput[]): Promise<{ output: ExecutionOutput; record: ArtifactRecord }[] | null> {
+  private async withLease<T>(attempt: Attempt, operation: (signal: AbortSignal) => Promise<T>): Promise<T | null> {
     const controller = new AbortController();
     const renew = (): void => {
       try {
@@ -481,40 +507,58 @@ export class Engine {
     renew();
     const timer = setInterval(renew, Math.max(1, Math.floor(this.leaseMs / 3))); timer.unref();
     try {
-      const outputs: { output: ExecutionOutput; record: ArtifactRecord }[] = [];
-      for (const output of descriptors) {
-        if (controller.signal.aborted) return null;
-        const received = this.outputIngestor ? await this.outputIngestor.ingest({ attempt: structuredClone(attempt),
-          output: structuredClone(output), artifactDir: this.artifactDir, signal: controller.signal }) : this.materializeFixture(attempt, output);
-        if (controller.signal.aborted) return null;
-        const record = structuredClone(received);
-        this.validateIngested(attempt, output, record);
-        outputs.push({ output, record });
-      }
-      return outputs;
+      if (controller.signal.aborted) return null;
+      const result = await operation(controller.signal);
+      return controller.signal.aborted ? null : result;
     } finally { clearInterval(timer); controller.abort(); }
   }
 
-  private validateIngested(attempt: Attempt, output: ExecutionOutput, record: ArtifactRecord): void {
+  private async ingestOutputs(attempt: Attempt, descriptors: IngestibleExecutionOutput[]): Promise<{ output: IngestibleExecutionOutput; record: ArtifactRecord }[] | null> {
+    return this.withLease(attempt, async signal => {
+      const outputs: { output: IngestibleExecutionOutput; record: ArtifactRecord }[] = [];
+      for (const output of descriptors) {
+        if (signal.aborted) return [];
+        const received = this.outputIngestor ? await this.outputIngestor.ingest({ attempt: structuredClone(attempt),
+          output: structuredClone(output), artifactDir: this.artifactDir, signal }) : this.materializeFixture(attempt, output);
+        if (signal.aborted) return [];
+        const record = structuredClone(received);
+        await this.validateIngested(attempt, output, record, signal);
+        outputs.push({ output, record });
+      }
+      return outputs;
+    });
+  }
+
+  private async validateIngested(attempt: Attempt, output: IngestibleExecutionOutput, record: ArtifactRecord, signal: AbortSignal): Promise<void> {
     invariant(typeof record?.id === "string" && record.id.length > 0 && record.projectId === attempt.projectId && record.attemptId === attempt.id
       && record.artifact?.artifactId === record.id && record.artifact.sha256 === output.sha256 && record.artifact.kind === output.kind
       && record.mimeType === output.mimeType && record.fixture === output.fixture && typeof record.path === "string" && isAbsolute(record.path)
       && (record.physicalDurationSeconds === null || (Number.isFinite(record.physicalDurationSeconds) && record.physicalDurationSeconds > 0)),
     "INVALID_PROVIDER_OUTPUT", "Ingested artifact does not match the admitted output identity");
+    if (isSpoolOutput(output)) invariant(record.outputReceiptId === output.storage.spoolId && record.outputSpoolId === output.storage.spoolId
+      && record.byteLength === output.byteLength, "INVALID_PROVIDER_OUTPUT", "Ingested artifact lost its exact spool provenance");
     const root = realpathSync(this.artifactDir), path = realpathSync(record.path), rel = relative(root, path);
     invariant(rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel),
       "INVALID_PROVIDER_OUTPUT", "Ingested artifact is outside the owned artifact directory");
-    const fd = openSync(record.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const file = await open(record.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
-      const stat = fstatSync(fd);
-      invariant(stat.isFile() && stat.size > 0 && stat.size <= MAX_EXECUTION_OUTPUT_BYTES,
+      const stat = await file.stat(), maxBytes = isSpoolOutput(output) ? EXECUTION_SPOOL_LIMITS[output.kind] : MAX_EXECUTION_OUTPUT_BYTES;
+      invariant(stat.isFile() && stat.size > 0 && stat.size <= maxBytes && (!isSpoolOutput(output) || stat.size === output.byteLength),
         "INVALID_PROVIDER_OUTPUT", "Ingested artifact exceeds the execution byte limit");
-      const bytes = readFileSync(fd);
-      invariant(bytes.length === stat.size && createHash("sha256").update(bytes).digest("hex") === output.sha256,
+      const hash = createHash("sha256"), buffer = Buffer.alloc(1024 * 1024); let size = 0;
+      for (;;) {
+        invariant(!signal.aborted, "OUTPUT_STORE_CANCELLED", "Artifact verification cancelled");
+        const read = await file.read(buffer, 0, buffer.length, null); if (!read.bytesRead) break;
+        size += read.bytesRead; invariant(size <= stat.size && size <= maxBytes, "ARTIFACT_CORRUPT", "Ingested artifact grew during verification");
+        hash.update(buffer.subarray(0, read.bytesRead));
+      }
+      invariant(size === stat.size && hash.digest("hex") === output.sha256,
         "ARTIFACT_CORRUPT", "Ingested artifact bytes differ from the completion receipt");
-    } finally { closeSync(fd); }
+    } finally { await file.close(); }
+    invariant(!signal.aborted, "OUTPUT_STORE_CANCELLED", "Artifact verification cancelled");
   }
-  private materializeFixture(attempt: Attempt, output: ExecutionOutput): ArtifactRecord {
+  private materializeFixture(attempt: Attempt, output: IngestibleExecutionOutput): ArtifactRecord {
+    invariant(!isSpoolOutput(output), "INVALID_PROVIDER_OUTPUT", "Default ingestion cannot materialize owned provider spools");
     invariant(output.fixture === true && /^[a-f0-9]{64}$/.test(output.sha256) && /^(svg|wav|mp4|json)$/.test(output.extension), "INVALID_PROVIDER_OUTPUT", "Default ingestion accepts only fixture descriptors");
     invariant(output.bytesBase64.length <= Math.ceil(2_000_000 / 3) * 4, "INVALID_PROVIDER_OUTPUT", "Fixture output exceeds its byte limit");
     const bytes = Buffer.from(output.bytesBase64, "base64");

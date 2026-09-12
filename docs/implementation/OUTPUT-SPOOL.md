@@ -1,6 +1,6 @@
 # Durable provider output storage
 
-September 12, 2026. `apps/server/src/execution/output-store.ts` implements a standalone application-owned output spool. It stores small immutable receipts in SQLite and byte streams in private files. **It is not wired to provider dispatch, executor outcomes, artifact publication, or the browser.** Real providers remain disabled and unregistered. No provider or downloader is called by this component.
+September 12, 2026. `apps/server/src/execution/output-store.ts` implements an application-owned output spool. It stores small immutable receipts in SQLite and byte streams in private files. Engine can explicitly consume its [V2 completions and exact PNG ingestion](SPOOL-COMPLETIONS.md); the launcher has not enabled that optional path. Real providers remain disabled and unregistered. No provider or downloader is called by this component.
 
 ## Boundary and records
 
@@ -81,4 +81,4 @@ pnpm --filter @openslate/server build
 node --test apps/server/test/output-store.test.mjs apps/server/test/persistence.test.mjs
 ```
 
-Next integration must extend normalized executor receipts to distinguish application receipts from nullable vendor tasks and consume verified spool descriptors. Historical inline fake evidence must remain readable. Real model/profile activation, safe downloading, measured media ingestion, exact human review, and paid-call allowances remain separate work.
+The [additive V2 completion boundary](SPOOL-COMPLETIONS.md) now distinguishes application receipts from nullable vendor tasks and consumes the exact winning slot, with legacy evidence preserved. Real model/profile activation, safe downloading, generated-video normalization, and paid-call allowances remain separate work.

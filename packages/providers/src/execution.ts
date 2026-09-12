@@ -13,9 +13,21 @@ export interface ExecutionOutput {
   port: string; kind: ArtifactRef["kind"]; mimeType: string; extension: string;
   bytesBase64: string; sha256: string; fixture: boolean;
 }
+/** Small owned-byte descriptor. Raw bytes and protected vendor locators stay outside execution evidence. */
+export interface ExecutionSpoolOutput {
+  port: "image" | "video"; kind: "image" | "video"; mimeType: "image/png" | "video/mp4";
+  extension: "png" | "mp4"; sha256: string; byteLength: number; fixture: false;
+  storage: { type: "spool"; spoolId: string };
+}
+export interface ExecutionSpoolCompletion {
+  type: "completed"; version: 2; receiptId: string; vendorTaskId: string | null;
+  outputs: [ExecutionSpoolOutput];
+}
+export type IngestibleExecutionOutput = ExecutionOutput | ExecutionSpoolOutput;
 export type ExecutionOutcome =
   | { type: "accepted"; taskId: string }
   | { type: "completed"; taskId: string; outputs: ExecutionOutput[] }
+  | ExecutionSpoolCompletion
   | { type: "failed"; taskId: string; failureId: string; technical: boolean; retryAllowed?: boolean }
   | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed?: boolean }
   | { type: "unknown"; diagnostic: string; taskId?: string };
@@ -67,12 +79,40 @@ const object = (value: unknown): value is Record<string, unknown> =>
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,255}$/.test(value);
 const exact = (value: Record<string, unknown>, fields: string[]): boolean => Object.keys(value).every(key => fields.includes(key));
 export const MAX_EXECUTION_OUTPUT_BYTES = 64 * 1024 * 1024;
+export const EXECUTION_SPOOL_LIMITS = Object.freeze({ image: 32 * 1024 * 1024, video: 256 * 1024 * 1024 });
+export function isSpoolCompletion(value: ExecutionOutcome): value is ExecutionSpoolCompletion {
+  return value.type === "completed" && "version" in value && value.version === 2;
+}
+export function isSpoolOutput(value: IngestibleExecutionOutput): value is ExecutionSpoolOutput { return "storage" in value; }
+/** Diagnostic request IDs are never returned here. */
+export function executionTaskId(value: ExecutionOutcome): string | null {
+  return isSpoolCompletion(value) ? value.vendorTaskId : "taskId" in value ? value.taskId ?? null : null;
+}
+
+function normalizeSpoolCompletion(value: Record<string, unknown>, request?: ExecutionRequest): ExecutionSpoolCompletion | null {
+  const hash = (item: unknown): item is string => typeof item === "string" && /^[a-f0-9]{64}$/.test(item);
+  if (!exact(value, ["type", "version", "receiptId", "vendorTaskId", "outputs"]) || value.version !== 2
+    || !hash(value.receiptId) || !(value.vendorTaskId === null || id(value.vendorTaskId))
+    || !Array.isArray(value.outputs) || value.outputs.length !== 1) return null;
+  const output = value.outputs[0];
+  if (!object(output) || !exact(output, ["port", "kind", "mimeType", "extension", "sha256", "byteLength", "fixture", "storage"])
+    || !((output.port === "image" && output.kind === "image" && output.mimeType === "image/png" && output.extension === "png")
+      || (output.port === "video" && output.kind === "video" && output.mimeType === "video/mp4" && output.extension === "mp4"))
+    || !hash(output.sha256) || !Number.isSafeInteger(output.byteLength) || Number(output.byteLength) <= 0
+    || Number(output.byteLength) > EXECUTION_SPOOL_LIMITS[output.kind as "image" | "video"] || output.fixture !== false
+    || !object(output.storage) || !exact(output.storage, ["type", "spoolId"]) || output.storage.type !== "spool"
+    || output.storage.spoolId !== value.receiptId || (request && request.kind !== output.kind)) return null;
+  return structuredClone(value) as unknown as ExecutionSpoolCompletion;
+}
 
 /** Validate and copy normalized adapter observations before saving immutable evidence. */
 export function normalizeExecutionOutcome(value: unknown, request?: ExecutionRequest): ExecutionOutcome {
   const invalid = (): ExecutionOutcome => ({ type: "unknown", diagnostic: "Invalid execution provider observation",
-    ...(object(value) && ["accepted", "completed", "failed", "unknown"].includes(String(value.type)) && id(value.taskId) ? { taskId: value.taskId } : {}) });
+    ...(object(value) && value.type === "completed" && "version" in value
+      ? value.version === 2 && !("taskId" in value) && id(value.vendorTaskId) ? { taskId: value.vendorTaskId } : {}
+      : object(value) && ["accepted", "completed", "failed", "unknown"].includes(String(value.type)) && id(value.taskId) ? { taskId: value.taskId } : {}) });
   if (!object(value)) return invalid();
+  if (value.type === "completed" && "version" in value) return normalizeSpoolCompletion(value, request) ?? invalid();
   if (value.type === "unknown") return exact(value, ["type", "diagnostic", "taskId"]) && typeof value.diagnostic === "string"
     && value.diagnostic.length <= 512 && (value.taskId === undefined || id(value.taskId))
     ? { type: "unknown", diagnostic: value.diagnostic, ...(id(value.taskId) ? { taskId: value.taskId } : {}) } : invalid();

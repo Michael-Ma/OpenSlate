@@ -3,7 +3,7 @@ import { constants, closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdir
 import { chmod, link, lstat, mkdtemp, open, rm, statfs } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
-import type { ExecutionIdentity } from "@openslate/providers";
+import type { ExecutionIdentity, ExecutionSpoolCompletion, ExecutionSpoolOutput } from "@openslate/providers";
 import type { Attempt } from "./engine.js";
 import { Store } from "../persistence/store.js";
 
@@ -243,6 +243,64 @@ export class ExecutionOutputStore {
     const spool = await this.recover(projectId, receiptId, options);
     invariant(spool, "OUTPUT_NOT_READY", "Output bytes are not durably available");
     return { spool, path: join(this.rootDir, "blobs", spool.blobKey) };
+  }
+
+  /** Rebuild only the exact winning slot; no receipt scan, remote lookup, or new generation. */
+  async recoverCompletion(projectId: string, attemptId: string, options: { signal?: AbortSignal } = {}): Promise<ExecutionSpoolCompletion | null> {
+    const signal = options.signal; stopped(signal);
+    const attempt = this.store.get<Attempt>("attempt", attemptId);
+    invariant(attempt?.projectId === projectId, "SCOPE_DENIED", "Attempt is outside this project");
+    const port = attempt.request.kind;
+    if (port !== "image" && port !== "video") return null;
+    const active = activeWriters.get(this.rootDir) ?? 0;
+    invariant(active < OUTPUT_STORE_LIMITS.concurrentWriters, "OUTPUT_STORE_BUSY", "Two output storage operations are already active");
+    activeWriters.set(this.rootDir, active + 1);
+    try {
+      const id = digest({ projectId, attemptId, port });
+      const slot = await this.readJson<OutputSlot>(join(this.rootDir, "slots", `${id}.json`));
+      if (!slot) { invariant(!this.store.get("execution_output_slot", id), "OUTPUT_STORE_CORRUPT", "Winning output lost its durable slot"); stopped(signal); return null; }
+      invariant(slot.id === id && slot.projectId === projectId && slot.attemptId === attemptId && slot.port === port
+        && slot.storageId === this.storageId && typeof slot.spoolId === "string" && HASH.test(slot.spoolId),
+      "OUTPUT_STORE_CORRUPT", "Winning output slot belongs to a different request or storage root");
+      await this.recoverInternal(projectId, slot.spoolId, signal);
+      stopped(signal);
+      return this.completion(projectId, attemptId, slot.spoolId);
+    } finally {
+      const remaining = (activeWriters.get(this.rootDir) ?? 1) - 1;
+      if (remaining === 0) activeWriters.delete(this.rootDir); else activeWriters.set(this.rootDir, remaining);
+    }
+  }
+
+  /** Validate small durable references before admitting completion evidence to ingestion. */
+  assertCompletion(projectId: string, attemptId: string, completion: ExecutionSpoolCompletion): void {
+    invariant(canonical(completion) === canonical(this.completion(projectId, attemptId, completion.receiptId)),
+      "OUTPUT_RECEIPT_CONFLICT", "Execution completion differs from the exact winning output receipt");
+  }
+
+  async resolveOutput(projectId: string, attemptId: string, output: ExecutionSpoolOutput, options: { signal?: AbortSignal } = {}): Promise<{ spool: OutputSpool; path: string }> {
+    const observed = structuredClone(output), signal = options.signal;
+    const completion = this.completion(projectId, attemptId, observed.storage.spoolId);
+    invariant(canonical(completion.outputs[0]) === canonical(observed), "OUTPUT_RECEIPT_CONFLICT", "Output descriptor differs from its winning spool");
+    const owned = await this.resolveOwned(projectId, completion.receiptId, signal ? { signal } : {});
+    this.assertCompletion(projectId, attemptId, completion); stopped(signal);
+    return owned;
+  }
+
+  private completion(projectId: string, attemptId: string, receiptId: string): ExecutionSpoolCompletion {
+    const receipt = this.receipt(projectId, receiptId), attempt = this.attempt(projectId, attemptId, receipt.requestDigest);
+    invariant(receipt.attemptId === attemptId && receipt.kind === attempt.request.kind && receipt.port === receipt.kind
+      && canonical(receipt.execution) === canonical(attempt.request.execution ?? { adapter: "fake", version: "1" })
+      && (!attempt.taskId || receipt.vendorTaskId === attempt.taskId), "OUTPUT_RECEIPT_CONFLICT", "Completion receipt does not match its admitted operation or accepted task");
+    const spool = this.store.get<OutputSpool>("execution_output_spool", receiptId);
+    invariant(spool && canonical(spool) === canonical(this.descriptor(receipt, spool.sha256, spool.byteLength)),
+      "OUTPUT_STORE_CORRUPT", "Execution completion lacks its exact durable spool");
+    const id = digest({ projectId, attemptId, port: receipt.port }), slot = this.store.get<OutputSlot>("execution_output_slot", id);
+    invariant(canonical(slot) === canonical({ id, projectId, version: 1, storageId: this.storageId, attemptId,
+      port: receipt.port, spoolId: spool.id, sha256: spool.sha256, byteLength: spool.byteLength }),
+    "OUTPUT_SLOT_CONFLICT", "Execution requires the exact first completed attempt/output slot");
+    return { type: "completed", version: 2, receiptId, vendorTaskId: receipt.vendorTaskId,
+      outputs: [{ port: receipt.port, kind: receipt.kind, mimeType: receipt.mimeType, extension: receipt.kind === "image" ? "png" : "mp4",
+        sha256: spool.sha256, byteLength: spool.byteLength, fixture: false, storage: { type: "spool", spoolId: spool.id } }] };
   }
 
   private attempt(projectId: string, attemptId: string, requestDigest: string): Attempt {
