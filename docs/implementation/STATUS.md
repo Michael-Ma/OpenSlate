@@ -59,7 +59,7 @@ flowchart LR
 | T10 H3 cloud | Standalone H3/H3-Max first/last-frame transport, capabilities, one-shot submit, receipt polling/reconciliation | Engine/profile/keyframe transfer, credentials, owned output download and keyed short production |
 | T11 integrated revisions | Scoped execution reuse, scripted browser edits, native scoped planning, narration impact and stale-render protection | Real end-to-end narration/story/frame/take/trim revision campaign |
 | T12 six-minute acceptance | Synthetic 720p six-minute render, 64 cuts/cues, reversed ranges, decoded content and sampled resources | Real 150-second boots commercial, generated six-minute workload, cost/latency/recovery campaign |
-| T13 release packaging | Built single-process local launcher, bounded static serving, clean event-stream shutdown, backend environment credential resolver | Installation ownership, credential configuration, migrations/export/import and clean-install verification |
+| T13 release packaging | Built single-process local launcher, exclusive installation ownership, bounded static serving, clean event-stream shutdown, backend environment credential resolver | Credential configuration, migrations/export/import and clean-install verification |
 
 These are implemented slices, not completion of every task's eventual exit criteria. Projects remain explicitly labeled demos until native Codex is selected. Only fake/v1 is registered with the execution port; real transports remain disconnected.
 

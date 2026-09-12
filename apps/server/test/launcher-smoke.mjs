@@ -36,6 +36,31 @@ try {
   const projects = await request("/api/projects", { headers }); assert.deepEqual((await projects.json()).projects, []);
   const created = await request("/api/projects", { method: "POST", headers: { ...headers, "content-type": "application/json", "idempotency-key": "launcher-smoke-project" }, body: JSON.stringify({ name: "Local launcher smoke" }) });
   assert.equal(created.status, 200); const project = await created.json();
+  const beforeDuplicate = await (await request(`/api/projects/${project.id}`, { headers })).json();
+  const ownerPath = join(data, "installation-owner.sqlite"), ownerBefore = statSync(ownerPath);
+  // The invalid token override proves the duplicate is refused before credentials,
+  // project storage or worker recovery are reached, rather than just failing to bind the port.
+  const duplicate = spawn(process.execPath, [join(repository, "apps/server/dist/index.js"), "--serve-web"], {
+    cwd: repository, env: { ...env, OPENSLATE_LOCAL_TOKEN: "invalid" }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let duplicateOutput = "", duplicateExit;
+  duplicate.stdout.on("data", value => { duplicateOutput += value.toString(); });
+  duplicate.stderr.on("data", value => { duplicateOutput += value.toString(); });
+  const duplicateDone = new Promise((resolve, reject) => { duplicate.once("error", reject); duplicate.once("exit", (code, signal) => { duplicateExit = { code, signal }; resolve(duplicateExit); }); });
+  const duplicateDeadline = setTimeout(() => duplicate.kill("SIGKILL"), 5000);
+  try {
+    await duplicateDone;
+    assert.deepEqual(duplicateExit, { code: 1, signal: null }, duplicateOutput);
+    assert.match(duplicateOutput, /INSTALLATION_IN_USE/);
+    assert.ok(!duplicateOutput.includes("EADDRINUSE") && !duplicateOutput.includes("CONFIGURATION_ERROR") && !duplicateOutput.includes("is ready"));
+  } finally { clearTimeout(duplicateDeadline); if (!duplicateExit) { duplicate.kill("SIGKILL"); await duplicateDone.catch(() => {}); } }
+  const ownerAfter = statSync(ownerPath);
+  assert.equal(ownerAfter.dev, ownerBefore.dev); assert.equal(ownerAfter.ino, ownerBefore.ino);
+  assert.equal(child.exitCode, null); assert.equal(child.signalCode, null);
+  assert.equal((await request("/api/health")).status, 200);
+  const afterDuplicate = await (await request(`/api/projects/${project.id}`, { headers })).json();
+  assert.deepEqual(afterDuplicate.project, beforeDuplicate.project); assert.equal(afterDuplicate.cursor, beforeDuplicate.cursor);
+  assert.equal(readFileSync(tokenPath, "utf8").trim(), token);
   const controller = new AbortController();
   const events = await fetch(`http://127.0.0.1:3001/api/projects/${project.id}/events`, { headers, signal: controller.signal });
   assert.equal(events.status, 200); const reader = events.body.getReader(); await reader.read();
@@ -44,7 +69,12 @@ try {
   assert.deepEqual(exit, { code: 0, signal: null }, output);
   const shutdownMs = Math.round(performance.now() - start);
   assert.ok(shutdownMs < 5000, `Shutdown exceeded five seconds: ${shutdownMs}`);
-  report = { status: "passed", launcher: "built single process on 127.0.0.1:3001", bundle: true, protectedApi: true, tokenFileMode: "0600", tokenPrinted: false, authenticatedProject: true, openEventStreamClosed: true, shutdownMs, modelCalls: 0, mediaApiCalls: 0 };
+  const { acquireInstallationOwner } = await import("../dist/persistence/installation-owner.js");
+  const nextOwner = acquireInstallationOwner(data); nextOwner.close();
+  assert.equal(statSync(ownerPath).ino, ownerBefore.ino);
+  report = { status: "passed", launcher: "built single process on 127.0.0.1:3001", bundle: true, protectedApi: true, tokenFileMode: "0600", tokenPrinted: false, authenticatedProject: true,
+    duplicateInstallationDeniedBeforeTokenRead: true, firstInstallationStayedHealthy: true, ownershipInodePreserved: true, ownershipReleasedAfterShutdown: true,
+    openEventStreamClosed: true, shutdownMs, modelCalls: 0, mediaApiCalls: 0 };
 } finally {
   clearTimeout(deadline); if (!exit) { child.kill("SIGKILL"); await completion.catch(() => {}); }
   // Immutable skill snapshots have read-only directories; only this probe's temporary tree is released.

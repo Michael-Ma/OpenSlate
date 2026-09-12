@@ -13,6 +13,7 @@ import { LocalMediaService, MediaApplicationService } from "./media/index.js";
 import { NarrationService, NarrationCanonicalService } from "./narration/index.js";
 import { ManagedUploadStore } from "./narration/managed-upload.js";
 import { assertWebDataSeparation, loadWebAssets } from "./web-assets.js";
+import { acquireInstallationOwner } from "./persistence/installation-owner.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
@@ -24,6 +25,10 @@ const webAssets = serveWeb ? (() => {
   catch (error) { throw new Error("OpenSlate could not load its built interface. Run pnpm build first, then pnpm start.", { cause: error }); }
 })() : undefined;
 mkdirSync(directory, { recursive: true, mode: 0o700 });
+// Acquire before opening project state, creating credentials, or recovering workers.
+const installation = acquireInstallationOwner(directory);
+const releaseInstallation = () => installation.close();
+process.once("exit", releaseInstallation);
 const tokenPath = join(directory, "local-session.token");
 let localToken = process.env.OPENSLATE_LOCAL_TOKEN;
 if (!localToken) {
@@ -62,7 +67,11 @@ const timer = setInterval(() => {
   void engine.reconcile().then(() => engine.runReady()).catch(error => app.log.error(error)).finally(() => { running = false; });
 }, 500);
 app.addHook("preClose", async () => { clearInterval(timer); await director.close(); });
-app.addHook("onClose", async () => { while (running) await new Promise(resolve => setTimeout(resolve, 10)); store.close(); provider.close(); });
+app.addHook("onClose", async () => {
+  while (running) await new Promise(resolve => setTimeout(resolve, 10));
+  store.close(); provider.close();
+  installation.close(); process.off("exit", releaseInstallation);
+});
 let closing: Promise<void> | undefined;
 const close = () => closing ??= app.close();
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close().catch(error => { app.log.error(error); process.exitCode = 1; }); });
