@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { MiniMaxH3Provider, MINIMAX_H3_LIMITS } from "../dist/minimax-h3.js";
+import { MiniMaxH3Provider, MINIMAX_H3_LIMITS, describeMiniMaxH3Request, miniMaxH3MetadataDigest } from "../dist/minimax-h3.js";
 
 const apiKey = "fixture-secret-never-log";
 const taskId = "424010985738629";
@@ -17,6 +17,22 @@ function fixture(handler = () => json({ task_id: taskId }), options = {}) {
     ...options, fetch: async (...args) => { calls.push(args); return handler(...args); } });
   return { provider, calls };
 }
+test("H3 descriptions separate reproducible metadata from the exact serialized wire body", async () => {
+  const value = describeMiniMaxH3Request("MiniMax-H3", request), refreshed = { ...request, firstFrame: { ...image, url: "https://assets.example.test/updated-signature" } };
+  const changed = describeMiniMaxH3Request("MiniMax-H3", refreshed);
+  assert.equal(value.requestDigest, miniMaxH3MetadataDigest(request.prompt, value));
+  assert.equal(value.requestDigest, miniMaxH3MetadataDigest(request.prompt, { ...value, firstFrame: Object.fromEntries(Object.entries(value.firstFrame).reverse()) }));
+  assert.equal(value.requestDigest, changed.requestDigest); assert.notEqual(value.bodySha256, changed.bodySha256);
+  assert.equal(JSON.stringify(value).includes("signature"), false);
+  const f = fixture(); await f.provider.submit(request, { expectedBodySha256: value.bodySha256 });
+  assert.equal(hash(f.calls[0][1].body), value.bodySha256);
+  assert.notEqual(describeMiniMaxH3Request("MiniMax-H3", { ...request, prompt: "Changed" }).requestDigest, value.requestDigest);
+});
+test("a changed H3 wire body is rejected before HTTP when a durable body digest was supplied", async () => {
+  const f = fixture(), value = describeMiniMaxH3Request("MiniMax-H3", request);
+  const result = await f.provider.submit({ ...request, prompt: "Changed after preparation" }, { expectedBodySha256: value.bodySha256 });
+  assert.equal(result.kind, "rejected"); assert.equal(result.error.code, "H3_REQUEST_DIGEST_MISMATCH"); assert.equal(f.calls.length, 0);
+});
 test("construction/discovery is offline and capabilities distinguish exact models", async () => {
   const standard = fixture(), fast = fixture(undefined, { model: "MiniMax-H3-Max" });
   const a = await standard.provider.capabilities(), b = await fast.provider.capabilities();

@@ -49,6 +49,14 @@ The service creates a private `local-session.token` in that directory unless `OP
 
 Create a project and choose its director. Native Codex setup checks the pinned local installation using its existing sign-in, without starting a model conversation. To try the offline workflow, close setup or choose Demo, then select **Create a 2-shot demo**. Inspect and select the keyframes, then approve the selection to release their sample videos. Use a shot's **Discuss** action and the demo framing choices to exercise a scoped change. In demo mode, ordinary chat receives canned guidance. Native mode handles live conversations through the validated application tools. The application preserves the previous preview during a revision. All sample outputs are explicitly fake.
 
+New projects can also select installed keyframe/video models under **Media models**. To add planning choices, point the local server at a provider catalog:
+
+```sh
+OPENSLATE_PROVIDER_CONFIG=/absolute/path/to/provider-profiles.json pnpm start
+```
+
+Use [the example catalog](examples/provider-profiles.example.json) as a template. Its prices are **illustrative configured estimates, not verified vendor pricing**; replace them with your own estimates and revise profile versions when changing definitions. Keep API keys out of this file. The project saves the exact selected definitions; later installation changes do not replace them. Unselected kinds keep demo profiles. This release exposes catalog selection and credential-presence status for planning, but the launcher still enables only fake generation. Selecting a model or configuring a key does not start paid media calls. See [catalog contracts](docs/implementation/PROVIDER-CATALOG.md).
+
 Run `pnpm demo:headless` for a reproducible two-shot example. It generates clearly labeled fake keyframes and one-second placeholder clips, simulates exact human reviews, edits only one shot, then restarts during an uncertain submission. It prints a new temporary output directory, preview path and JSON summary. A successful run records six fake accepts and zero duplicate accepts. This is an execution proof, not a finished film or a quality sample.
 
 ## Commands

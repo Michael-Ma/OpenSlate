@@ -11,6 +11,10 @@ import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution
 import type { Attempt, ArtifactRecord } from "../execution/engine.js";
 import { assertImageExecutionDispatch, assertImageExecutionMapping, assertImageExecutionResult } from "../execution/openai-image-receipts.js";
 import type { ImageExecutionDispatch, ImageExecutionMapping, ImageExecutionResult } from "../execution/openai-image-receipts.js";
+import { assertH3ExecutionMapping, assertH3ExecutionDispatch, assertH3ExecutionSubmit, assertH3ExecutionObservation, assertH3PollSchedule } from "../execution/minimax-h3-receipts.js";
+import type { H3ExecutionMapping, H3ExecutionDispatch, H3ExecutionSubmit, H3ExecutionObservation, H3PollSchedule } from "../execution/minimax-h3-receipts.js";
+import { assertExternalAllowance, assertExternalAllowanceConsumption, assertExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
+import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -118,6 +122,29 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "external_allowance") {
+      reference("message", body.requestId);
+      const allowance = { ...body, id, projectId } as unknown as ExternalAllowance;
+      assertExternalAllowance(allowance, this.get<AllowanceHumanRequest>("message", String(body.requestId))!);
+      for (const selected of allowance.selections) {
+        reference("candidate", selected.candidateId);
+        const candidate = this.get<{ nodeId: string }>("candidate", selected.candidateId)!;
+        invariant(candidate.nodeId === selected.nodeId, "ALLOWANCE_INVALID", "Allowance candidate must belong to its selected node");
+      }
+    }
+    if (kind === "external_allowance_revocation") {
+      reference("message", body.requestId); reference("external_allowance", body.allowanceId);
+      assertExternalAllowanceRevocation({ ...body, id, projectId } as unknown as ExternalAllowanceRevocation,
+        this.get<ExternalAllowance>("external_allowance", String(body.allowanceId))!, this.get<AllowanceHumanRequest>("message", String(body.requestId))!);
+    }
+    if (kind === "external_allowance_consumption") {
+      reference("attempt", id); reference("external_allowance", body.allowanceId);
+      const attempt = this.get<Attempt>("attempt", id)!;
+      reference("reservation", attempt.reservationId);
+      assertExternalAllowanceConsumption({ ...body, id, projectId } as unknown as ExternalAllowanceConsumption,
+        this.get<ExternalAllowance>("external_allowance", String(body.allowanceId))!, attempt,
+        this.get("reservation", attempt.reservationId!)!);
+    }
     if (kind === "request_image_selection") {
       reference("message", id);
       invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 4 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
@@ -186,6 +213,35 @@ export class Store {
         const outputId = result.observation?.kind === "completed" ? result.observation.outputReceiptId : undefined;
         if (outputId !== undefined) reference("execution_output_receipt", outputId);
         assertImageExecutionResult(attempt, mapping, dispatch, result, outputId ? this.get("execution_output_receipt", outputId) : undefined);
+      }
+    }
+    if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation", "h3_poll_schedule"].includes(kind)) {
+      reference("attempt", body.attemptId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      const mapping = this.get<H3ExecutionMapping>("h3_execution_mapping", attempt.id), dispatch = this.get<H3ExecutionDispatch>("h3_execution_dispatch", attempt.id);
+      const submit = this.get<H3ExecutionSubmit>("h3_execution_submit", attempt.id), value = { ...body, id, projectId };
+      if (kind === "h3_execution_mapping") {
+        invariant(!submit || !!mapping, "H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a mapping");
+        assertH3ExecutionMapping(attempt, value as unknown as H3ExecutionMapping); reference("artifact", body.firstFrameArtifactId);
+      } else if (kind === "h3_execution_dispatch") {
+        reference("h3_execution_mapping", attempt.id);
+        invariant(!submit || !!dispatch, "H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a dispatch");
+        assertH3ExecutionDispatch(attempt, mapping!, value as unknown as H3ExecutionDispatch);
+      } else if (kind === "h3_execution_submit") assertH3ExecutionSubmit(attempt, mapping, dispatch, value as unknown as H3ExecutionSubmit);
+      else {
+        reference("h3_execution_mapping", attempt.id); reference("h3_execution_dispatch", attempt.id); reference("h3_execution_submit", attempt.id);
+        if (kind === "h3_execution_observation") {
+          const observation = value as unknown as H3ExecutionObservation, outputId = observation.observation?.kind === "completed" ? observation.observation.outputReceiptId : undefined;
+          if (outputId !== undefined) reference("execution_output_receipt", outputId);
+          assertH3ExecutionObservation(attempt, mapping!, dispatch!, submit!, observation, outputId ? this.get("execution_output_receipt", outputId) : undefined);
+        } else {
+          const schedule = value as unknown as H3PollSchedule; assertH3PollSchedule(attempt, submit!, schedule);
+          if (schedule.lastObservationId !== null) {
+            reference("h3_execution_observation", schedule.lastObservationId);
+            invariant(this.get<H3ExecutionObservation>("h3_execution_observation", schedule.lastObservationId)!.attemptId === attempt.id,
+              "H3_EXECUTION_CONFLICT", "Polling schedule cannot adopt another attempt's observation");
+          }
+        }
       }
     }
     if (kind === "video_derivation_intent") {
@@ -257,6 +313,16 @@ export class Store {
       if (!old) return this.insert(kind, id, projectId, body);
       invariant(old.project_id === projectId, "SCOPE_DENIED", "Cannot move records between projects");
       const encoded = this.checkedBody(kind, id, projectId, body);
+      if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "H3 execution receipts are immutable");
+      if (kind === "h3_poll_schedule") {
+        const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
+        for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "H3 poll identity and host policy are immutable");
+        invariant(Number(next.count) >= Number(previous.count), "H3_EXECUTION_CONFLICT", "H3 poll backoff cannot rewind");
+      }
+      if (["external_allowance", "external_allowance_revocation", "external_allowance_consumption"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {

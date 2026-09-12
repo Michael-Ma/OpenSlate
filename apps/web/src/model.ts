@@ -1,4 +1,5 @@
 export interface Artifact { artifactId: string; sha256: string; kind: "image" | "video" | "audio" | "data" }
+export type ArtifactFixture = boolean | null;
 export interface Shot { id: string; revisionId: string; sceneId: string; purpose: string; action: string; framing: string; motion: string; desiredFrames: number; imagePrompt: string; videoPrompt: string; cueId: string | null }
 export interface ProjectSummary { id: string; name: string; headVersion: number; activePlanId: string | null; shotCount?: number }
 export interface ConversationMessage { id: string; role: "user" | "assistant"; text: string; state?: string; requestId?: string }
@@ -8,8 +9,8 @@ export interface ProjectSnapshot {
   messages: { id: string; text: string; state?: string; requestId?: string; editing?: boolean; scopeIds?: string[] }[];
   conversation?: ConversationMessage[];
   questions?: PendingQuestion[];
-  previousPreviews?: { artifact: Artifact; nodeId: string; fixture: boolean }[];
-  outputs: { nodeId: string; candidateId: string | null; port: string; artifact: Artifact; fixture: boolean }[];
+  previousPreviews?: { artifact: Artifact; nodeId: string; fixture?: ArtifactFixture }[];
+  outputs: { nodeId: string; candidateId: string | null; port: string; artifact: Artifact; fixture?: ArtifactFixture }[];
   attempts: { id: string; nodeId: string; phase: string; createdAt?: string }[];
   holds: { id: string; scopeId: string; ownerId: string; active: boolean }[];
   control?: { paused: boolean };
@@ -17,7 +18,7 @@ export interface ProjectSnapshot {
   workflow?: { narration?: { inputState?: string } };
   cursor: number;
 }
-export interface ReviewMember { videoNodeId: string; shotId: string; keyframe: Artifact | null; approvalDigest: string | null; ready: boolean; approved?: boolean; motionPrompt?: string; durationFrames?: number; profileLabel?: string }
+export interface ReviewMember { videoNodeId: string; shotId: string; keyframe: Artifact | null; keyframeFixture?: ArtifactFixture; approvalDigest: string | null; ready: boolean; approved?: boolean; motionPrompt?: string; durationFrames?: number; profileLabel?: string }
 export interface ReviewSnapshot { id: string | null; planId: string | null; projectId?: string; headVersion: number; revisionId: string; members: ReviewMember[] }
 export interface DirectorStatus { mode: "offline" | "fake" | "native"; status: "idle" | "running" | "waiting_user" | "error" | "not_connected"; message?: string; activeRequestId?: string | null; imageAttachmentsAvailable?: boolean }
 export type MessageBody = { text: string; scopeIds: string[]; editing: boolean; continuationRequestId?: string; images?: { artifactId: string; sha256: string }[] } | { text: string; replyToQuestionId: string };
@@ -45,10 +46,12 @@ export function makeImageDiscussion(projectId: string, artifact: Artifact, key: 
 export function previewOutput(snapshot: ProjectSnapshot) {
   const render = snapshot.plan?.nodes?.find(node => node.kind === "render");
   const current = snapshot.outputs.find(output => output.nodeId === render?.id && output.artifact.kind === "video");
-  if (current) return { artifact: current.artifact, previous: false };
+  if (current) return { artifact: current.artifact, previous: false, fixture: artifactFixture(current.fixture) };
   const previous = snapshot.previousPreviews?.find(output => output.artifact.kind === "video");
-  return previous ? { artifact: previous.artifact, previous: true } : null;
+  return previous ? { artifact: previous.artifact, previous: true, fixture: artifactFixture(previous.fixture) } : null;
 }
+/** Missing historical metadata is unknown, never evidence that a preview is real. */
+export function artifactFixture(value: unknown): ArtifactFixture { return typeof value === "boolean" ? value : null; }
 export function reviewIdentity(review: ReviewSnapshot | null): string {
   if (!review) return "none";
   return JSON.stringify({ planId: review.planId, headVersion: review.headVersion, revisionId: review.revisionId,

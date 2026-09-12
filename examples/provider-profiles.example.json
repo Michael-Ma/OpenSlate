@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "label": "GPT Image 2 · medium keyframes",
+      "profile": {
+        "id": "openai-keyframes-medium",
+        "revision": "example-1",
+        "kind": "image",
+        "adapter": "openai-image",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "gpt-image-2-2026-04-21",
+          "settings": { "width": 1024, "height": 1024, "quality": "medium" }
+        },
+        "maxConcurrency": 2,
+        "unitCostMicros": "100000",
+        "maxRetries": 0
+      }
+    },
+    {
+      "label": "MiniMax H3 · 768P video",
+      "profile": {
+        "id": "minimax-video-768p",
+        "revision": "example-1",
+        "kind": "video",
+        "adapter": "minimax-h3",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "MiniMax-H3",
+          "settings": { "resolution": "768P" }
+        },
+        "maxConcurrency": 2,
+        "unitCostMicros": "1000000",
+        "maxRetries": 0,
+        "minFrames": 120,
+        "maxFrames": 450
+      }
+    }
+  ]
+}

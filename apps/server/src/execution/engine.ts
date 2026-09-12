@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, existsSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, readFileSync, unlinkSync, constants, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mkdirSync, readFileSync, constants, realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { open } from "node:fs/promises";
 import { DEFAULT_PROFILES, DomainError, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, ProjectRecord, ProviderProfile } from "@openslate/core";
@@ -8,6 +8,7 @@ import { ExecutionRegistry, executionFailureSource, executionIdentity, execution
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { ExecutionOutputStore } from "./output-store.js";
+import { materializeFixtureOutput } from "./fixture-ingester.js";
 import { assertNormalizedVideoIngestion } from "./video-derivation.js";
 import type { NormalizedVideoIngestion, VideoDerivationIntent } from "./video-derivation.js";
 
@@ -50,8 +51,10 @@ export interface ExecutionOutputIngestor {
 interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedVideoIngestion }
 interface ResolvedInputs { artifacts: ArtifactRef[]; fingerprint: string }
 export interface ExternalExecutionAdmission {
-  /** Trusted synchronous policy; check readiness and consume allowance in this admission transaction. */
+  /** Trusted synchronous policy; check readiness and select allowance in this admission transaction. */
   authorize(input: { attemptId: string; projectId: string; nodeId: string; candidateId: string; profile: Readonly<ProviderProfile>; estimatedMicros: string }): { allowanceId: string };
+  /** Record exact consumption after attempt and reservation insertion, before the same transaction commits. */
+  recordAdmission?(attempt: Readonly<Attempt>): void;
 }
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
@@ -78,6 +81,8 @@ export class Engine {
     this.registry = provider instanceof ExecutionRegistry ? provider : new ExecutionRegistry([provider]);
     this.externalAdmission = options.externalAdmission;
     invariant(!options.externalAdmission || (typeof options.externalAdmission.authorize === "function" && options.externalAdmission.authorize.constructor.name !== "AsyncFunction"), "ASYNC_TRANSACTION", "External admission policy must be synchronous");
+    invariant(!options.externalAdmission?.recordAdmission || (typeof options.externalAdmission.recordAdmission === "function"
+      && options.externalAdmission.recordAdmission.constructor.name !== "AsyncFunction"), "ASYNC_TRANSACTION", "Admission recording must be synchronous");
     this.providerTimeoutMs = options.providerTimeoutMs ?? 600000;
     invariant(Number.isSafeInteger(this.providerTimeoutMs) && this.providerTimeoutMs >= 10 && this.providerTimeoutMs <= 600000, "PROVIDER_CONFIGURATION_INVALID", "Provider operation deadline must be bounded");
     this.workerId = options.workerId ?? newId();
@@ -455,6 +460,10 @@ export class Engine {
       };
       this.store.insert("attempt", id, projectId, attempt);
       if (reservationId) this.store.insert("reservation", reservationId, projectId, { attemptId: id, micros: cost.toString(), state: "reserved" });
+      if (externalAllowanceId && this.externalAdmission?.recordAdmission) {
+        const recorded = this.externalAdmission.recordAdmission(structuredClone(attempt)) as unknown;
+        invariant(!(recorded && typeof (recorded as { then?: unknown }).then === "function"), "ASYNC_TRANSACTION", "Admission recording cannot return a promise");
+      }
       this.store.appendEvent(projectId, "attempt.state_changed", { attemptId: id, phase: "submitting", nodeId }); return attempt;
     });
   }
@@ -594,7 +603,7 @@ export class Engine {
       for (const output of descriptors) {
         if (signal.aborted) return [];
         const received = this.outputIngestor ? await this.outputIngestor.ingest({ attempt: structuredClone(attempt),
-          output: structuredClone(output), artifactDir: this.artifactDir, signal }) : this.materializeFixture(attempt, output);
+          output: structuredClone(output), artifactDir: this.artifactDir, signal }) : materializeFixtureOutput({ attempt, output, artifactDir: this.artifactDir, signal });
         if (signal.aborted) return [];
         const snapshot = structuredClone(received);
         const normalized = "type" in snapshot && snapshot.type === "normalized_video" ? snapshot : undefined;
@@ -643,25 +652,5 @@ export class Engine {
         "ARTIFACT_CORRUPT", "Ingested artifact bytes differ from the completion receipt");
     } finally { await file.close(); }
     invariant(!signal.aborted, "OUTPUT_STORE_CANCELLED", "Artifact verification cancelled");
-  }
-  private materializeFixture(attempt: Attempt, output: IngestibleExecutionOutput): ArtifactRecord {
-    invariant(!isSpoolOutput(output), "INVALID_PROVIDER_OUTPUT", "Default ingestion cannot materialize owned provider spools");
-    invariant(output.fixture === true && /^[a-f0-9]{64}$/.test(output.sha256) && /^(svg|wav|mp4|json)$/.test(output.extension), "INVALID_PROVIDER_OUTPUT", "Default ingestion accepts only fixture descriptors");
-    invariant(output.bytesBase64.length <= Math.ceil(2_000_000 / 3) * 4, "INVALID_PROVIDER_OUTPUT", "Fixture output exceeds its byte limit");
-    const bytes = Buffer.from(output.bytesBase64, "base64");
-    invariant(bytes.length > 0 && bytes.length <= 2_000_000 && bytes.toString("base64") === output.bytesBase64
-      && createHash("sha256").update(bytes).digest("hex") === output.sha256, "INVALID_PROVIDER_OUTPUT", "Fixture output digest mismatch");
-    const directory = join(this.artifactDir, attempt.projectId); mkdirSync(directory, { recursive: true });
-    const rootDirectory = openSync(this.artifactDir, "r"); try { fsyncSync(rootDirectory); } finally { closeSync(rootDirectory); }
-    const path = join(directory, `${output.sha256}.${output.extension}`);
-    if (!existsSync(path)) {
-      const temporary = join(directory, `${newId()}.partial`); const fd = openSync(temporary, "wx");
-      try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
-      try { renameSync(temporary, path); const dir = openSync(directory, "r"); try { fsyncSync(dir); } finally { closeSync(dir); } }
-      finally { if (existsSync(temporary)) unlinkSync(temporary); }
-    }
-    invariant(createHash("sha256").update(readFileSync(path)).digest("hex") === output.sha256, "ARTIFACT_CORRUPT", "Published artifact hash mismatch");
-    const id = newId();
-    return { id, projectId: attempt.projectId, artifact: { artifactId: id, sha256: output.sha256, kind: output.kind }, path, mimeType: output.mimeType, fixture: output.fixture, attemptId: attempt.id, physicalDurationSeconds: output.kind === "video" || output.kind === "audio" ? 1 : null };
   }
 }

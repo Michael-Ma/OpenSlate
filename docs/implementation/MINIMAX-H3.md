@@ -1,6 +1,6 @@
 # MiniMax H3 cloud transport
 
-September 12, 2026. `packages/providers/src/minimax-h3.ts` implements a standalone transport adapter. It is **not connected to the execution engine or application**, and no real H3 request has been made. The user's API key, account access, embedded-image acceptance, output quality and billing remain unverified.
+September 12, 2026. `packages/providers/src/minimax-h3.ts` implements a standalone transport adapter. A separate opt-in [application execution bridge](MINIMAX-H3-EXECUTION.md) is implemented offline; the launcher still does not activate H3, and no real H3 request has been made. The user's API key, account access, embedded-image acceptance, output quality and billing remain unverified.
 
 ## Contract and supported slice
 
@@ -52,7 +52,7 @@ Before enabling a live profile, the host must provide:
 4. Immediate receipt persistence and scheduled polling with shared throttling/backoff. Do not assume missing task history proves absence or frees uncertain liability.
 5. Bounded output ingestion with destination/redirect checks, no API bearer forwarding to a CDN, immutable storage and measured media validation. A successful query is not an artifact or current shot selection.
 
-The existing engine currently expects the fake provider's contracts; no claim is made that this module can simply replace it. No shared contracts, pricing card, downloader, engine handler, UI setting or provider registration was added by this slice.
+The standalone transport cannot simply replace Engine's execution contract. The subsequent [H3 execution bridge](MINIMAX-H3-EXECUTION.md) implements the request mapping, single-POST marker, task receipts, durable polling cooldown and protected output ingestion boundary. It remains an explicit host component with no default activation or claim of live compatibility.
 
 ## Offline verification
 

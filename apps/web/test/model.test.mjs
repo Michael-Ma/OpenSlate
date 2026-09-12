@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeImageDiscussion, makeMessageCommand, makeQuestionReply, reviewIdentity, reviewMatchesProject, approvalPayload, previewOutput, conversation, pollingDelay, durationLabel, errorMessage } from '../src/model.ts';
+import { artifactFixture, makeImageDiscussion, makeMessageCommand, makeQuestionReply, reviewIdentity, reviewMatchesProject, approvalPayload, previewOutput, conversation, pollingDelay, durationLabel, errorMessage } from '../src/model.ts';
 
 const artifact = (id = 'frame-1', sha = 'a'.repeat(64)) => ({ artifactId: id, sha256: sha, kind: 'image' });
 const project = () => ({ id: 'project', name: 'Boots', activePlanId: 'plan', headVersion: 3, revisionId: 'revision', shots: [{ id: 'shot-1' }, { id: 'shot-2' }] });
@@ -63,10 +63,28 @@ test('approval fails for missing display bytes, undecodable frames, incomplete t
 });
 test('a previous assembled preview remains available until its replacement is ready, including reload', () => {
   const state = snapshot(); const previous = { nodeId: 'old-render', artifact: { ...artifact('previous'), kind: 'video' }, fixture: true }; state.previousPreviews = [previous];
-  assert.deepEqual(previewOutput(JSON.parse(JSON.stringify(state))), { artifact: previous.artifact, previous: true });
+  assert.deepEqual(previewOutput(JSON.parse(JSON.stringify(state))), { artifact: previous.artifact, previous: true, fixture: true });
   state.outputs = [{ nodeId: 'render', artifact: { ...artifact('latest'), kind: 'video' } }];
-  assert.deepEqual(previewOutput(state), { artifact: state.outputs[0].artifact, previous: false });
+  assert.deepEqual(previewOutput(state), { artifact: state.outputs[0].artifact, previous: false, fixture: null });
   assert.equal(previewOutput(snapshot()), null);
+});
+test('fixture display metadata is strict and preserved for the exact selected current or previous video', () => {
+  assert.equal(artifactFixture(true), true); assert.equal(artifactFixture(false), false);
+  for (const value of [undefined, null, 'false', 'true', 0, 1, {}, []]) assert.equal(artifactFixture(value), null);
+  for (const fixture of [true, false, undefined]) {
+    const state = snapshot(); state.previousPreviews = [{ nodeId: 'old-render', artifact: { ...artifact('old'), kind: 'video' }, fixture }];
+    assert.equal(previewOutput(state).fixture, artifactFixture(fixture));
+    state.outputs = [{ nodeId: 'other-shot', artifact: { ...artifact('other'), kind: 'video' }, fixture: !fixture },
+      { nodeId: 'render', artifact: { ...artifact('current'), kind: 'video' }, fixture }];
+    assert.equal(previewOutput(state).artifact.artifactId, 'current'); assert.equal(previewOutput(state).fixture, artifactFixture(fixture));
+  }
+});
+test('display-only fixture metadata does not invalidate review identity or exact approval payload', () => {
+  const current = review(), identity = reviewIdentity(current), expected = approvalPayload(current, ['video-1'], displayed, identity);
+  for (const fixture of [true, false, null]) {
+    current.members[0].keyframeFixture = fixture;
+    assert.equal(reviewIdentity(current), identity); assert.deepEqual(approvalPayload(current, ['video-1'], displayed, identity), expected);
+  }
 });
 test('persisted conversation order is kept, including responses and unanswered requests', () => {
   const state = snapshot(); state.conversation = [{ id: 'a', role: 'user', text: 'Edit' }, { id: 'b', role: 'assistant', text: 'Which shot?' }, { id: 'c', role: 'user', text: 'Shot 1' }];

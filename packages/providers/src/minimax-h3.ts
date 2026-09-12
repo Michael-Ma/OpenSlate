@@ -30,7 +30,16 @@ export interface MiniMaxH3Options {
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
 }
-export interface MiniMaxH3CallOptions { signal?: AbortSignal }
+export interface MiniMaxH3CallOptions { signal?: AbortSignal; expectedBodySha256?: string }
+export interface MiniMaxH3ImageDescription {
+  sha256: string; width: number; height: number; byteLength: number; mediaType: MiniMaxH3ImageType;
+  transport: "data_url" | "https_url";
+}
+export interface MiniMaxH3Description {
+  adapterVersion: string; model: MiniMaxH3Model; durationSeconds: number; resolution: MiniMaxH3Resolution;
+  firstFrame: MiniMaxH3ImageDescription; lastFrame?: MiniMaxH3ImageDescription;
+  requestDigest: string; bodySha256: string;
+}
 export interface MiniMaxH3Diagnostic {
   code: string;
   category: "invalid_input" | "auth" | "quota" | "policy" | "throttled" | "transport" | "protocol" | "aborted" | "provider_failure";
@@ -93,6 +102,43 @@ function validateImage(value: unknown): asserts value is MiniMaxH3Image {
   } else requireValue(httpsUrl(value.url), "Image transport must use an explicit HTTPS URL");
 }
 
+function wireBody(model: MiniMaxH3Model, request: MiniMaxH3Request): string {
+  const content: unknown[] = [{ type: "text", text: request.prompt },
+    { type: "image_url", image_url: { url: request.firstFrame.url }, role: "first_frame" }];
+  if (request.lastFrame) content.push({ type: "image_url", image_url: { url: request.lastFrame.url }, role: "last_frame" });
+  return JSON.stringify({ model, content, resolution: request.resolution, duration: request.durationSeconds, ratio: "adaptive" });
+}
+function validateRequest(model: MiniMaxH3Model, input: unknown): MiniMaxH3Request {
+  requireValue(models.includes(model), "Select an exact supported H3 model");
+  requireValue(exact(input, ["prompt", "durationSeconds", "resolution", "firstFrame", "lastFrame"]), "Unsupported H3 request fields");
+  requireValue(typeof input.prompt === "string" && input.prompt.trim().length > 0 && Buffer.byteLength(input.prompt) <= MINIMAX_H3_LIMITS.promptBytes,
+    "Supply a nonempty prompt within the adapter byte limit");
+  requireValue(Number.isInteger(input.durationSeconds) && Number(input.durationSeconds) >= (model === "MiniMax-H3" ? 4 : 5)
+    && Number(input.durationSeconds) <= 15 && resolutions(model).includes(input.resolution as MiniMaxH3Resolution), "Unsupported model duration or resolution");
+  validateImage(input.firstFrame); if (input.lastFrame !== undefined) validateImage(input.lastFrame);
+  const request = structuredClone(input) as unknown as MiniMaxH3Request;
+  requireValue(Buffer.byteLength(wireBody(model, request)) <= MINIMAX_H3_LIMITS.requestBytes, "H3 request exceeds the byte limit");
+  return request;
+}
+/** Reproducible metadata identity; deliberately excludes embedded bytes and protected URLs. */
+export function miniMaxH3MetadataDigest(prompt: string, description: Omit<MiniMaxH3Description, "requestDigest" | "bodySha256">): string {
+  const image = (value: MiniMaxH3ImageDescription) => ({ sha256: value.sha256, width: value.width, height: value.height,
+    byteLength: value.byteLength, mediaType: value.mediaType, transport: value.transport });
+  return createHash("sha256").update(JSON.stringify({ adapterVersion: description.adapterVersion, model: description.model,
+    prompt, durationSeconds: description.durationSeconds, resolution: description.resolution, ratio: "adaptive",
+    firstFrame: image(description.firstFrame), ...(description.lastFrame ? { lastFrame: image(description.lastFrame) } : {}) })).digest("hex");
+}
+/** Validates exact inputs without a credential or network call. Body SHA binds the actual serialized POST. */
+export function describeMiniMaxH3Request(model: MiniMaxH3Model, input: MiniMaxH3Request): MiniMaxH3Description {
+  const request = validateRequest(model, input);
+  const image = ({ url, sha256, width, height, byteLength, mediaType }: MiniMaxH3Image): MiniMaxH3ImageDescription =>
+    ({ sha256, width, height, byteLength, mediaType, transport: url.startsWith("data:") ? "data_url" : "https_url" });
+  const description = { adapterVersion: MINIMAX_H3_ADAPTER_VERSION, model, durationSeconds: request.durationSeconds,
+    resolution: request.resolution, firstFrame: image(request.firstFrame), ...(request.lastFrame ? { lastFrame: image(request.lastFrame) } : {}) };
+  return { ...description, requestDigest: miniMaxH3MetadataDigest(request.prompt, description),
+    bodySha256: createHash("sha256").update(wireBody(model, request)).digest("hex") };
+}
+
 /** A single-call transport. Durable admission, retries, polling schedules and ingestion belong to the host. */
 export class MiniMaxH3Provider {
   readonly id = "minimax-h3-v2";
@@ -117,26 +163,17 @@ export class MiniMaxH3Provider {
       queryWindowDays: 7, adapterVersion: MINIMAX_H3_ADAPTER_VERSION };
   }
   validate(input: unknown): MiniMaxH3Request {
-    requireValue(exact(input, ["prompt", "durationSeconds", "resolution", "firstFrame", "lastFrame"]), "Unsupported H3 request fields");
-    requireValue(typeof input.prompt === "string" && input.prompt.trim().length > 0 && Buffer.byteLength(input.prompt) <= MINIMAX_H3_LIMITS.promptBytes,
-      "Supply a nonempty prompt within the adapter byte limit");
-    requireValue(Number.isInteger(input.durationSeconds) && Number(input.durationSeconds) >= (this.model === "MiniMax-H3" ? 4 : 5) &&
-      Number(input.durationSeconds) <= 15 && resolutions(this.model).includes(input.resolution as MiniMaxH3Resolution), "Unsupported model duration or resolution");
-    validateImage(input.firstFrame); if (input.lastFrame !== undefined) validateImage(input.lastFrame);
-    const request = structuredClone(input) as unknown as MiniMaxH3Request;
-    requireValue(Buffer.byteLength(this.body(request)) <= MINIMAX_H3_LIMITS.requestBytes, "H3 request exceeds the byte limit");
-    return request;
+    return validateRequest(this.model, input);
   }
   private body(request: MiniMaxH3Request): string {
-    const content: unknown[] = [{ type: "text", text: request.prompt },
-      { type: "image_url", image_url: { url: request.firstFrame.url }, role: "first_frame" }];
-    if (request.lastFrame) content.push({ type: "image_url", image_url: { url: request.lastFrame.url }, role: "last_frame" });
-    return JSON.stringify({ model: this.model, content, resolution: request.resolution, duration: request.durationSeconds, ratio: "adaptive" });
+    return wireBody(this.model, request);
   }
   async submit(input: MiniMaxH3Request, options: MiniMaxH3CallOptions = {}): Promise<MiniMaxH3SubmitResult> {
     let body: string;
     try { body = this.body(this.validate(input)); }
     catch { return { kind: "rejected", certainty: "not_accepted", error: { code: "H3_REQUEST_INVALID", category: "invalid_input" } }; }
+    if (options.expectedBodySha256 !== undefined && options.expectedBodySha256 !== createHash("sha256").update(body).digest("hex"))
+      return { kind: "rejected", certainty: "not_accepted", error: { code: "H3_REQUEST_DIGEST_MISMATCH", category: "invalid_input" } };
     if (options.signal?.aborted) return { kind: "rejected", certainty: "not_accepted", error: { code: "H3_ABORTED_BEFORE_DISPATCH", category: "aborted" } };
     const response = await this.request("POST", "/v2/video_generation", body, options.signal);
     if (!response.ok) return { kind: "unknown", error: response.error };

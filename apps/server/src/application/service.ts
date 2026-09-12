@@ -6,7 +6,7 @@ import {
   STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, TOOL_NAMES,
 } from "@openslate/core";
 import type {
-  ActorContext, ChangeProposal, CompiledPlan, NodeImpact, OperationKind, ProjectRecord,
+  ActorContext, ArtifactRef, ChangeProposal, CompiledPlan, NodeImpact, OperationKind, ProjectRecord,
   ProviderProfile, ShotRecord, StageRequirement,
 } from "@openslate/core";
 import { Store } from "../persistence/store.js";
@@ -14,6 +14,8 @@ import { Engine } from "../execution/engine.js";
 import type { ArtifactRecord } from "../execution/engine.js";
 import { projectDirectorContext } from "./context-projection.js";
 import type { DirectorContextQuery } from "./context-projection.js";
+import { selectedProviderProfiles } from "./provider-catalog.js";
+import type { InstalledProviderSelection } from "./provider-catalog.js";
 
 interface RequestRecord { id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
@@ -38,8 +40,9 @@ export { TOOL_NAMES } from "@openslate/core";
 export class ProductionService {
   constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES) {}
 
-  createProject(name: string): ProjectRecord {
+  createProject(name: string, selection?: InstalledProviderSelection): ProjectRecord {
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
+    const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
     return this.store.transaction(() => {
       const project: ProjectRecord = {
         id: newId(), revisionId: newId(), headVersion: 0, name, brief: "", story: "", scenes: [],
@@ -47,7 +50,9 @@ export class ProductionService {
         shots: [], cues: [], artifacts: [], activePlanId: null,
       };
       this.store.createProject(project);
-      this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: this.profiles, recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES });
+      this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: selected?.profiles ?? this.profiles,
+        recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES,
+        ...(selected ? { providerSelection: selected.provenance } : {}) });
       this.store.insert("project_revision", project.revisionId, project.id, { project });
       this.store.appendEvent(project.id, "project.created", { revisionId: project.revisionId });
       return project;
@@ -290,6 +295,13 @@ export class ProductionService {
 
   readContext(projectId: string, actor: ActorContext, query: DirectorContextQuery = {}) { return projectDirectorContext(this, projectId, actor, query); }
 
+  /** Display metadata only: never infer fixture status from a director, profile, or unmatched record. */
+  artifactFixture(projectId: string, artifact: ArtifactRef): boolean | null {
+    const record = this.store.get<ArtifactRecord>("artifact", artifact.artifactId);
+    return record?.projectId === projectId && record.id === artifact.artifactId && record.artifact?.artifactId === artifact.artifactId
+      && record.artifact.kind === artifact.kind && record.artifact.sha256 === artifact.sha256 && typeof record.fixture === "boolean" ? record.fixture : null;
+  }
+
   snapshot(projectId: string) {
     return this.store.transaction(() => {
       const project = this.store.getProject(projectId);
@@ -315,7 +327,7 @@ export class ProductionService {
       plan: plan ? { id: plan.id, graphDigest: plan.compiled.graphDigest, canonicalSource: plan.compiled.canonicalSource, nodes: plan.compiled.nodes } : null,
       questions: this.store.list("director_question", projectId),
       previousPreviews: this.engine.attempts(projectId).filter(attempt => attempt.request.kind === "render" && attempt.phase === "succeeded")
-        .reverse().flatMap(attempt => Object.values(attempt.outputs).map(artifact => ({ artifact, nodeId: attempt.nodeId, fixture: true }))).slice(0, 3),
+        .reverse().flatMap(attempt => Object.values(attempt.outputs).map(artifact => ({ artifact, nodeId: attempt.nodeId, fixture: this.artifactFixture(projectId, artifact) }))).slice(0, 3),
       reconciliations: this.store.list("tool_reconciliation", projectId),
       toolCalls: this.store.list<{ id: string; requestId: string; epochId: string; callId: string; tool: string; state: string; resultDigest: string | null }>("tool_invocation", projectId).slice(-20)
         .map(({ id, requestId, epochId, callId, tool, state, resultDigest }) => ({ id, requestId, epochId, callId, tool, state, resultDigest })),

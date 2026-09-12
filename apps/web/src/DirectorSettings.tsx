@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import type { StudioApi } from "./api";
 import { errorText } from "./components";
 import { DirectorToolsSettings } from "./DirectorToolsSettings";
+import { ProjectProviderSummary } from "./ProviderSettings";
 
 interface Selection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
 interface Settings { selection: Selection; defaults: Omit<Selection, "mode">; locked: boolean; modelCalls: number }
@@ -53,6 +54,7 @@ export function DirectorSettings({ api, projectId, close, changed }: { api: Stud
         {pending && !busy && <button type="button" className="text-button" onClick={() => setPending(null)}>Edit setup choices</button>}
       </form>}
     <DirectorToolsSettings key={projectId} api={api} projectId={projectId} />
+    <ProjectProviderSummary key={`providers:${projectId}`} api={api} projectId={projectId} />
     {saved && <p role="status">Director ready. You can start the conversation.</p>}{error && <p role="alert" className="form-error">{error}</p>}
     {settings && <p className="field-help">Recorded conversation attempts: {settings.modelCalls}. This includes attempts reserved before dispatch; it is not a billing count.</p>}
   </section></div>;

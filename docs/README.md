@@ -22,11 +22,15 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Six-minute workflow probe](implementation/SIX-MINUTE-WORKFLOW.md) | Sixty shots, exact batch review, one-shot reuse and uncertain-job restart using fake media |
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |
+| [H3 application execution](implementation/MINIMAX-H3-EXECUTION.md) | Exact reviewed PNG transfer, one POST, durable polling and protected output recovery |
+| [External spending allowances](implementation/EXTERNAL-SPENDING-ALLOWANCES.md) | Human candidate/profile limits, permanent admission consumption and revocation |
 | [Provider execution boundary](implementation/PROVIDER-EXECUTION.md) | Registered executor contracts, receipt identity, ingestion and recovery |
 | [Frozen provider routing](implementation/PROVIDER-ROUTING.md) | Immutable adapter catalog, pinned profiles, separate spending admission and provider-call leases |
+| [Installed model catalog](implementation/PROVIDER-CATALOG.md) | Trusted profile definitions, local readiness and immutable new-project selection |
 | [Image execution bridge](implementation/OPENAI-IMAGE-EXECUTION.md) | Exact admitted image requests, durable single dispatch and response recovery |
 | [Owned spool completions](implementation/SPOOL-COMPLETIONS.md) | Versioned completion receipts, local recovery, exact PNG ingestion and lease protection |
 | [Generated video normalization](implementation/GENERATED-VIDEO-DERIVATION.md) | Separate raw/normalized identities, measured frames and durable derivation recovery |
+| [Media ingestion composition](implementation/INGESTION-COMPOSITION.md) | Deliberate PNG/video/fixture routing and a generated-take local-render proof |
 | [Durable output storage](implementation/OUTPUT-SPOOL.md) | Owned receipt/spool identities, bounded streaming and crash recovery |
 | [Protected video downloading](implementation/VIDEO-DOWNLOAD.md) | Pinned HTTPS destination, bounded streams, cancellation and durable spool integration |
 | [Local image ingestion](implementation/IMAGE-INGESTION.md) | Full PNG validation, exact bytes and immutable publication |

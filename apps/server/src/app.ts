@@ -17,8 +17,10 @@ import { registerNarrationRoutes } from "./narration/routes.js";
 import { registerMediaRoutes } from "./media/routes.js";
 import { registerImageRoutes } from "./media/image-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
+import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./application/provider-catalog.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+  providerCatalog?: InstalledProviderCatalog;
   webAssets?: WebAssets;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
   runtimeSettings?: LocalDirectorController;
@@ -36,6 +38,8 @@ export function createApp(options: AppOptions = {}) {
   const eventStreams = new Set<() => void>();
   app.addHook("preClose", async () => { for (const close of eventStreams) close(); });
   const service = () => { invariant(options.service, "SERVICE_UNAVAILABLE", "Application storage is not configured"); return options.service; };
+  let defaultProviderCatalog: InstalledProviderCatalog | undefined;
+  const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
@@ -66,8 +70,22 @@ export function createApp(options: AppOptions = {}) {
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
   app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
-  app.post<{ Body: { name: string } }>("/api/projects", { schema: { body: object({ name: string }, ["name"]) } }, async request =>
-    service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => service().createProject(request.body.name)));
+  app.get("/api/providers", async () => providerCatalog().view());
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
+    const project = service().store.getProject(request.params.projectId);
+    const lock = service().store.get<{ projectId: string; profiles: unknown; providerSelection?: unknown }>("capability_lock", project.capabilityLockId);
+    invariant(lock?.projectId === project.id, "PROVIDER_CATALOG_INVALID", "The project provider lock is unavailable");
+    return providerCatalog().projectView(lock.profiles, lock.providerSelection);
+  });
+  app.post<{ Body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
+    schema: { body: { ...object({ name: string, expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string } }, ["name"]),
+      dependencies: { expectedCatalogDigest: ["profileIds"], profileIds: ["expectedCatalogDigest"] } } },
+  }, async request => service().store.command("local-user:create-project", request.headers["idempotency-key"] as string | undefined ?? newId(), digest(request.body), () => {
+    // Resolve only for a new command: a replay must not adopt or reject a later installation catalog.
+    const selection = request.body.profileIds ? providerCatalog().select(request.body.expectedCatalogDigest!, request.body.profileIds) : undefined;
+    return service().createProject(request.body.name, selection);
+  }));
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director", async request => {
     service().store.getProject(request.params.projectId);
@@ -123,6 +141,10 @@ export function createApp(options: AppOptions = {}) {
     const key = request.headers["idempotency-key"] as string | undefined ?? newId();
     // Dedicated human demo command authorizes bounded fake slots. Ordinary chat never grants generation.
     const result = service().store.command(`local-user:${projectId}:demo`, key, digest(request.body), () => {
+      const before = service().store.getProject(projectId);
+      const lock = service().store.get<{ projectId: string; profiles: unknown }>("capability_lock", before.capabilityLockId);
+      invariant(lock?.projectId === projectId, "DEMO_PROVIDER_MISMATCH", "The project provider lock is unavailable");
+      assertDemoProviderProfiles(lock.profiles);
       if (request.body.action === "create") seedFixture(service(), join(service().engine.artifactDir, projectId), projectId);
       const project = service().store.getProject(projectId);
       invariant(project.shots.length === 2 && project.brief === "A deliberately fake leather-boots commercial integration fixture", "DEMO_PROJECT_REQUIRED", "Use the dedicated two-shot fixture project");
@@ -149,7 +171,8 @@ export function createApp(options: AppOptions = {}) {
     const approvals = service().store.list<{ videoNodeId: string; approvalDigest: string }>("approval", projectId);
     return { ...cached.snapshot, headVersion: project.headVersion, revisionId: project.revisionId, members: cached.snapshot.members.map(member => {
       const node = plan.compiled.nodes.find(node => node.id === member.videoNodeId)!;
-      return { ...member, approved: approvals.some(approval => approval.videoNodeId === member.videoNodeId && approval.approvalDigest === member.approvalDigest), motionPrompt: node.args.prompt, durationFrames: node.args.durationFrames, profileLabel: node.profileId };
+      return { ...member, keyframeFixture: member.keyframe ? service().artifactFixture(projectId, member.keyframe) : null,
+        approved: approvals.some(approval => approval.videoNodeId === member.videoNodeId && approval.approvalDigest === member.approvalDigest), motionPrompt: node.args.prompt, durationFrames: node.args.durationFrames, profileLabel: node.profileId };
     }) };
   });
   app.get<{ Params: { projectId: string; artifactId: string } }>("/api/projects/:projectId/artifacts/:artifactId/content", async (request, reply) => {

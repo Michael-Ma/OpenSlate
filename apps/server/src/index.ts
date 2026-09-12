@@ -14,10 +14,14 @@ import { NarrationService, NarrationCanonicalService } from "./narration/index.j
 import { ManagedUploadStore } from "./narration/managed-upload.js";
 import { assertWebDataSeparation, loadWebAssets } from "./web-assets.js";
 import { acquireInstallationOwner } from "./persistence/installation-owner.js";
+import { InstalledProviderCatalog, readInstalledProviderConfiguration } from "./application/provider-catalog.js";
+import { EnvironmentMediaCredentials } from "./application/provider-credentials.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
 const webDirectory = fileURLToPath(new URL("../../web/dist/", import.meta.url));
+const providerConfiguration = process.env.OPENSLATE_PROVIDER_CONFIG
+  ? readInstalledProviderConfiguration(resolve(process.env.OPENSLATE_PROVIDER_CONFIG)) : undefined;
 if (serveWeb) assertWebDataSeparation(webDirectory, directory);
 // Validate the production build before creating local application state.
 const webAssets = serveWeb ? (() => {
@@ -54,9 +58,13 @@ const ffmpegPath = findMediaTool("ffmpeg", process.env.OPENSLATE_FFMPEG), ffprob
 const localMedia = ffmpegPath && ffprobePath ? new LocalMediaService({ rootDir: join(directory, "media"), allowedInputRoots: [uploadDirectory], ffmpegPath, ffprobePath }) : null;
 const narration = new NarrationService(service, localMedia ?? undefined);
 const imageStore = ffmpegPath && ffprobePath ? new LocalImageStore({ rootDir: join(engine.artifactDir, "images"), ffmpegPath, ffprobePath }) : null;
+// Catalog selection is available for planning. The launcher still registers only
+// fake execution and installs no external admission policy or paid-media worker.
+const providerCatalog = new InstalledProviderCatalog({ ...(providerConfiguration === undefined ? {} : { configuration: providerConfiguration }),
+  registry: engine.registry, credentials: new EnvironmentMediaCredentials(), mediaTools: { image: !!imageStore, video: !!localMedia } });
 // Each project starts in demo mode until its user chooses and checks local Codex.
 const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
-const app = createApp({ service, director, runtimeSettings: director, localToken, logger: true,
+const app = createApp({ service, director, runtimeSettings: director, providerCatalog, localToken, logger: true,
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },
