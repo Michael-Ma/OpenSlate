@@ -116,9 +116,16 @@ export interface CompiledPlan {
   gates: ReviewGate[];
 }
 
+export interface LocalExecutionIdentity {
+  readonly adapter: "local-media";
+  readonly version: "1";
+}
+
 export interface CompileContext {
   project: ProjectRecord;
   profiles: ProviderProfile[];
+  /** Trusted host selection, never supplied through the planning language. Omission preserves legacy assembly. */
+  localExecution?: LocalExecutionIdentity;
   /** Existing symbolic aliases survive source edits. Missing aliases allocate once per prepare. */
   logicalIds: Record<string, Id>;
   allocateId: () => Id;

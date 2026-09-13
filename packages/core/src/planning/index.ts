@@ -2,6 +2,7 @@ import { parse } from "@babel/parser";
 import { Worker } from "node:worker_threads";
 import { canonical, digest, DomainError, invariant } from "../common.js";
 import { providerProfileArguments } from "../provider-profile.js";
+import { snapshotLocalExecution } from "../local-execution.js";
 import type {
   ArtifactRef, CompileContext, CompiledPlan, CueRecord, InputBinding, InputSource, JsonObject,
   JsonValue, NodeImpact, OperationKind, PlanNode, ProviderProfile, ReviewGate, ShotRecord,
@@ -131,6 +132,8 @@ function boundAst(root: Ast): void {
 
 /** Pure synchronous compiler. Production callers use compilePlanIsolated for a hard deadline. */
 export function compilePlan(sourceText: string, context: CompileContext): CompiledPlan {
+  const selectedLocalExecution = context.localExecution;
+  const localExecution = selectedLocalExecution === undefined ? undefined : snapshotLocalExecution(selectedLocalExecution);
   preflight(sourceText);
   invariant(Number.isSafeInteger(context.project.maxFrames) && context.project.maxFrames > 0 && context.project.maxFrames <= 10800, "DURATION_LIMIT", "Project cap must be positive and no more than six minutes at 30 fps");
   let file: Ast;
@@ -181,6 +184,7 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
     invariant(prompt === (kind === "image" ? shot.imagePrompt : shot.videoPrompt), "STALE_PROMPT_INTENT", `${kind} prompt differs from the accepted shot prompt`);
   };
   const makeNode = (alias: string, kind: OperationKind, shot: ShotRecord | null, profile: ProviderProfile | null, nodeArgs: JsonObject, inputs: InputBinding[], requires: string[] = []): Ref => {
+    if (localExecution && (kind === "timeline" || kind === "render")) nodeArgs = { ...nodeArgs, localExecution: Object.freeze({ ...localExecution }) };
     invariant(planNodes.length < PLAN_LIMITS.nodes, "PLAN_LIMIT", "Plan has too many operations");
     const node: PlanNode = { id: idFor(alias), alias, kind, shotId: shot?.id ?? null, shotRevisionId: shot?.revisionId ?? null, profileId: profile?.id ?? null, args: nodeArgs, inputs, requires, intentDigest: intentFor(shot, kind), specDigest: "" };
     // A symbolic recipe includes upstream semantics, not newly allocated node/artifact IDs.
@@ -383,10 +387,13 @@ export function diffPlans(oldPlan: CompiledPlan | null, next: CompiledPlan): Nod
 
 /** A fixed trusted module parses untrusted source in a disposable, resource-bounded worker. */
 export async function compilePlanIsolated(sourceText: string, context: CompileContext): Promise<CompiledPlan> {
+  const selectedLocalExecution = context.localExecution;
+  const localExecution = selectedLocalExecution === undefined ? undefined : snapshotLocalExecution(selectedLocalExecution);
   preflight(sourceText);
   const initialIds = { ...context.logicalIds };
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./worker.js", import.meta.url), { workerData: { source: sourceText, project: context.project, profiles: context.profiles, logicalIds: initialIds }, resourceLimits: { maxOldGenerationSizeMb: 64, stackSizeMb: 4 } });
+    const worker = new Worker(new URL("./worker.js", import.meta.url), { workerData: { source: sourceText, project: context.project, profiles: context.profiles, logicalIds: initialIds,
+      ...(localExecution ? { localExecution } : {}) }, resourceLimits: { maxOldGenerationSizeMb: 64, stackSizeMb: 4 } });
     let settled = false;
     const finish = (error?: unknown, result?: CompiledPlan): void => { if (settled) return; settled = true; clearTimeout(timer); void worker.terminate(); if (error) reject(error); else resolve(result!); };
     const timer = setTimeout(() => finish(new DomainError("PLAN_LIMIT", "Plan compilation exceeded its deadline")), PLAN_LIMITS.timeoutMs);
@@ -395,6 +402,9 @@ export async function compilePlanIsolated(sourceText: string, context: CompileCo
     worker.on("message", (message: { ok: boolean; plan?: CompiledPlan; logicalIds?: Record<string, string>; error?: { code: string; message: string; details?: unknown } }) => {
       if (!message.ok) { finish(new DomainError(message.error?.code ?? "COMPILER_FAILED", message.error?.message ?? "Compilation failed", message.error?.details)); return; }
       try {
+        // Structured cloning drops object freezing; restore the captured identity's immutability.
+        if (localExecution) for (const node of message.plan!.nodes) if (node.kind === "timeline" || node.kind === "render")
+          node.args.localExecution = Object.freeze({ ...snapshotLocalExecution(node.args.localExecution) });
         for (const [alias, id] of Object.entries(message.logicalIds!)) invariant(!Object.hasOwn(context.logicalIds, alias) || context.logicalIds[alias] === id, "REVISION_CONFLICT", "Logical identity mapping changed during compilation");
         for (const [alias, id] of Object.entries(message.logicalIds!)) if (!Object.hasOwn(context.logicalIds, alias)) Object.defineProperty(context.logicalIds, alias, { value: id, enumerable: true, writable: true, configurable: true });
         finish(undefined, message.plan!);

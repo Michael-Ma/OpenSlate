@@ -23,6 +23,11 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |
 | [H3 application execution](implementation/MINIMAX-H3-EXECUTION.md) | Exact reviewed PNG transfer, one POST, durable polling and protected output recovery |
+| [Human spending review](implementation/SPENDING-REVIEW.md) | Exact browser allowance/revocation, separate project-budget review and actual browser evidence |
+| [Allowance HTTP](implementation/ALLOWANCE-HTTP.md) | Authenticated purpose-bound commands, durable replay and paginated coverage |
+| [Project budget revisions](implementation/PROJECT-BUDGET.md) | Independent audited cap changes with revision and value checks |
+| [Shared timeline capture](implementation/TIMELINE-CAPTURE.md) | Exact SQL source/audio resolution reused by human and future automatic rendering |
+| [Trusted local assembly identity](implementation/LOCAL-EXECUTION-IDENTITY.md) | Optional host-only compiler identity with exact legacy compatibility |
 | [External spending allowances](implementation/EXTERNAL-SPENDING-ALLOWANCES.md) | Human candidate/profile limits, permanent admission consumption and revocation |
 | [Provider execution boundary](implementation/PROVIDER-EXECUTION.md) | Registered executor contracts, receipt identity, ingestion and recovery |
 | [Frozen provider routing](implementation/PROVIDER-ROUTING.md) | Immutable adapter catalog, pinned profiles, separate spending admission and provider-call leases |
