@@ -4,6 +4,9 @@ import { ProtectedVideoDownloader } from "../execution/video-download.js";
 export interface MediaExecutionConfiguration {
   image: boolean;
   h3: boolean;
+  /** Omission preserves trusted pre-audio programmatic callers; environment parsing returns explicit booleans. */
+  speech?: boolean;
+  transcription?: boolean;
   h3DownloadHosts: readonly string[];
 }
 
@@ -15,6 +18,7 @@ export function readMediaExecutionConfiguration(environment: Readonly<Record<str
     return value === "1";
   };
   const image = enabled("OPENSLATE_ENABLE_IMAGE_GENERATION"), h3 = enabled("OPENSLATE_ENABLE_H3_GENERATION");
+  const speech = enabled("OPENSLATE_ENABLE_SPEECH_GENERATION"), transcription = enabled("OPENSLATE_ENABLE_TRANSCRIPTION");
   const raw = environment.OPENSLATE_H3_DOWNLOAD_HOSTS;
   invariant(raw === undefined || raw.length <= 8192, "MEDIA_EXECUTION_CONFIGURATION", "Output host configuration is too large");
   const hosts = raw ? raw.split(",").map(host => host.trim()) : [];
@@ -23,5 +27,5 @@ export function readMediaExecutionConfiguration(environment: Readonly<Record<str
     // Constructor validation is local only. No DNS query or network request occurs.
     new ProtectedVideoDownloader({ allowedHosts: hosts });
   }
-  return Object.freeze({ image, h3, h3DownloadHosts: Object.freeze([...hosts]) });
+  return Object.freeze({ image, h3, speech, transcription, h3DownloadHosts: Object.freeze([...hosts]) });
 }

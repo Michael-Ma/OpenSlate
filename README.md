@@ -4,7 +4,7 @@ An open-source video agent for turning a story into a finished film.
 
 OpenSlate is designed to plan scenes and shots, create reference assets, generate video takes, and assemble an editable timeline for rendering and post-processing.
 
-**Status: an early local studio with native Codex conversations, supplied-media workflows and opt-in media generation.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images and accept exact narration. Explicitly enabled image/H3 bridges use saved profiles, human spending allowances and keyframe review; real local assembly produces a compatible timeline export. The default remains a fake demo. The complete generation path has been verified with injected provider responses and real local rendering; live media validation is still pending. See [verified status](docs/implementation/STATUS.md).
+**Status: an early local studio with native Codex conversations, supplied-media workflows and opt-in media generation.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images and accept exact narration. Explicitly enabled image/H3 bridges use saved profiles, human spending allowances and keyframe review; real local assembly produces a compatible timeline export. Speech/transcription configuration, separate recording/transcript review and audio cost summaries are implemented; ordinary conversational audio generation still needs the next planning/review integration. The default remains a fake demo. The complete generation path has been verified with injected provider responses and real local rendering; live media validation is still pending. See [verified status](docs/implementation/STATUS.md).
 
 ## Direction
 
@@ -112,7 +112,7 @@ apps/web/             React conversation, storyboard, review and playback worksp
 apps/server/          Application, director supervisor, SQLite, execution and local media
 packages/core/        Domain contracts, workflow predicates and bounded plan compiler
 packages/director/    Skill locks, MCP bridge, fake/native runtime ports and probes
-packages/providers/   Fake provider and offline-tested image/H3 transports
+packages/providers/   Fake provider and offline-tested image/video/audio transports
 skills/               Production and plan-authoring instruction packages
 workers/h3-python/    Future local inference boundary
 docs/                 Documentation index and design files

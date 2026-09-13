@@ -1,12 +1,70 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewSpending, spendingReviewCurrent, spendingMoney, spendingPage, revokeSpending, budgetCommand, canSelectSpending, spendingWorkStatus, spendingAllowanceStatus } from '../src/spending-model.ts';
+import { reviewSpending, spendingReviewCurrent, spendingMoney, spendingPage, revokeSpending, budgetCommand, canSelectSpending, spendingWorkStatus, spendingAllowanceStatus, spendingAudioSummary, spendingModelSettings, spendingOperationLabel } from '../src/spending-model.ts';
 import { pendingCommandsFor } from '../src/pending-command.ts';
 const hash = letter=>letter.repeat(64);
 const candidate = (index,extra={})=>({ candidateId:`candidate-${index}`,nodeId:`node-${index}`,specDigest:hash('a'),alias:`Frame ${index}`,operation:'image',
   profileId:'image-profile',profileRevision:'version-1',profileDigest:hash('b'),profileDefinitionDigest:hash('c'),estimatedMicros:'100001',selectionCurrent:true,suggestedForIssue:true,
   providerDisplay:{id:'image-profile',revision:'version-1',adapter:'openai-image',model:'gpt-image-2',settings:{width:1024,height:1024,quality:'medium'},definitionDigest:hash('c')},...extra });
 const state = (extra={})=>({projectId:'project',candidates:[candidate(1),candidate(2)],...extra});
+const audioCandidate = (operation='speech',extra={})=>candidate(1,{operation,profileId:'audio-profile',profileRevision:'v1',unavailableCode:null,
+  providerDisplay:{id:'audio-profile',revision:'v1',adapter:operation==='speech'?'openai-speech':'openai-transcription',model:operation==='speech'?'gpt-4o-mini-tts-2025-12-15':'whisper-1',settings:{},definitionDigest:hash('c')},
+  audioDisplay:operation==='speech'?{operation,voice:'coral',textBytes:52,instructionsPresent:true}:{operation,language:null,timing:'word'},audioUnavailableCode:null,...extra});
+test('fixed speech and transcription cost reviews preserve exact summaries without changing approval payloads',()=>{
+  for(const operation of ['speech','transcription']) {
+    const current=audioCandidate(operation), source=state({candidates:[current]});
+    assert.equal(canSelectSpending(current),true);
+    const review=reviewSpending(source,[current.candidateId],'audio-exact',1000);
+    assert.deepEqual(review.audioDisplays,[current.audioDisplay]); assert.notEqual(review.audioDisplays[0],current.audioDisplay);
+    assert.equal(review.body.maxAttempts,1); assert.equal(review.body.maxEstimatedMicros,current.estimatedMicros);
+    assert.deepEqual(Object.keys(review.command.body).sort(),['expiresAt','maxAttempts','maxEstimatedMicros','profileDefinitionDigest','profileDigest','selections']);
+    assert.equal(spendingReviewCurrent(review,source,1001),true);
+    current.audioDisplay=operation==='speech'?{...current.audioDisplay,voice:'onyx'}:{...current.audioDisplay,language:'en'};
+    assert.equal(spendingReviewCurrent(review,source,1001),false);
+    assert.equal(review.audioDisplays[0][operation==='speech'?'voice':'language'],operation==='speech'?'coral':null);
+  }
+});
+test('unsupported or mismatched audio options stay unselectable even with optimistic selection flags',()=>{
+  for(const operation of ['speech','transcription']) for(const change of [
+    {audioDisplay:null}, {audioUnavailableCode:'AUDIO_OPERATION_UNSUPPORTED'}, {audioUnavailableCode:'AUDIO_PROFILE_UNAVAILABLE'},
+    {providerDisplay:{...audioCandidate(operation).providerDisplay,adapter:'openai-image'}}, {providerDisplay:null},
+    {audioDisplay:operation==='speech'?{operation,voice:'/private/key',textBytes:1,instructionsPresent:false}:{operation,language:'https://private.example',timing:'word'}},
+    {audioDisplay:operation==='speech'?{operation,voice:'coral',textBytes:0,instructionsPresent:false}:{operation,language:null,timing:'segment'}},
+    {audioDisplay:audioCandidate(operation==='speech'?'transcription':'speech').audioDisplay}, {matchingAllowanceCount:1},
+    {suggestedForIssue:false,workState:'uncertain'}, {unavailableCode:'RESTORED_AUTHORITY_REQUIRES_NEW'}]) {
+    const current=audioCandidate(operation,change); assert.equal(canSelectSpending(current),false);
+    assert.throws(()=>reviewSpending(state({candidates:[current]}),[current.candidateId],'bad-audio'));
+  }
+  assert.match(spendingWorkStatus(audioCandidate('speech',{audioUnavailableCode:'AUDIO_PROFILE_UNAVAILABLE'})),/model details unavailable/);
+  assert.match(spendingWorkStatus(audioCandidate('transcription',{audioUnavailableCode:'AUDIO_OPERATION_UNSUPPORTED'})),/unsupported or unavailable/);
+});
+test('audio summary wording distinguishes an automatic language choice, fixed output and optional instructions',()=>{
+  assert.equal(spendingAudioSummary(audioCandidate()),'Voice: coral · Delivery instructions included');
+  assert.equal(spendingAudioSummary({audioDisplay:{...audioCandidate().audioDisplay,instructionsPresent:false}}),'Voice: coral');
+  assert.equal(spendingAudioSummary(audioCandidate('transcription')),'Language: automatic detection · Word timestamps');
+  assert.equal(spendingAudioSummary({audioDisplay:{operation:'transcription',language:'fr',timing:'word'}}),'Language: fr · Word timestamps');
+  assert.equal(spendingModelSettings(audioCandidate().providerDisplay),'Speech recording · WAV · normal speed');
+  assert.equal(spendingModelSettings(audioCandidate('transcription').providerDisplay),'Transcription · word timestamps');
+  assert.equal(spendingOperationLabel('speech'),'speech recording'); assert.equal(spendingOperationLabel('image'),'keyframe');
+});
+test('mixed audio voices remain separately frozen while mixed operations and profiles cannot share cost review',()=>{
+  const a=audioCandidate(), b=audioCandidate('speech',{candidateId:'candidate-2',nodeId:'node-2',audioDisplay:{...a.audioDisplay,voice:'onyx'}});
+  const review=reviewSpending(state({candidates:[a,b]}),[a.candidateId,b.candidateId],'two-voices',1000);
+  assert.deepEqual(review.audioDisplays.map(row=>row.voice),['coral','onyx']); assert.equal(review.body.maxAttempts,2);
+  const asr=audioCandidate('transcription',{candidateId:'candidate-2',nodeId:'node-2'});
+  assert.throws(()=>reviewSpending(state({candidates:[a,asr]}),[a.candidateId,asr.candidateId],'mixed'));
+});
+test('an uncertain audio allowance request replays its captured selection after model options change',async()=>{
+  const api={}, registry=pendingCommandsFor(api,'spending'), current=audioCandidate('transcription');
+  const review=reviewSpending(state({candidates:[current]}),[current.candidateId],'one-audio-command',1000);
+  await registry.run('project',review.command,async()=>{throw new Error('lost response');},()=>true);
+  current.specDigest=hash('e'); current.audioDisplay.language='zh';
+  const restored=pendingCommandsFor(api,'spending').snapshot('project').command;
+  assert.deepEqual(restored,review.command); assert.equal(restored.body.selections[0].specDigest,hash('a'));
+  assert.equal(spendingReviewCurrent(review,state({candidates:[current]}),1001),false);
+  await registry.run('project',restored,async command=>{assert.equal(command.key,'one-audio-command');return {allowance:{id:'saved'}};},()=>true);
+  assert.equal(registry.snapshot('project').command,null);
+});
 test('restored work cannot be selected or retain a pending cost review while historical allowances remain revocable',()=>{
   const source=state(), review=reviewSpending(source,['candidate-1'],'before-restore',1000);
   const restored=candidate(1,{selectionCurrent:false,suggestedForIssue:false,unavailableCode:'RESTORED_AUTHORITY_REQUIRES_NEW',workState:'unattempted',matchingAllowanceCount:0});

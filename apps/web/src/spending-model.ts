@@ -1,15 +1,18 @@
 import type { PendingCommand } from "./pending-command";
 
-export interface SpendingProviderDisplay {
-  id: string; revision: string; adapter: "openai-image" | "minimax-h3"; model: string; definitionDigest: string;
-  settings: { width: number; height: number; quality: string } | { resolution: string };
-}
-export interface AllowanceWork {
+export type SpendingProviderDisplay = { id: string; revision: string; model: string; definitionDigest: string } & (
+  { adapter: "openai-image"; settings: { width: number; height: number; quality: string } }
+  | { adapter: "minimax-h3"; settings: { resolution: string } }
+  | { adapter: "openai-speech" | "openai-transcription"; settings: Record<string, never> });
+export type SpendingAudioDisplay = { operation: "speech"; voice: string; textBytes: number; instructionsPresent: boolean }
+  | { operation: "transcription"; language: string | null; timing: "word" };
+interface AudioDetails { audioDisplay?: SpendingAudioDisplay | null; audioUnavailableCode?: string | null }
+export interface AllowanceWork extends AudioDetails {
   candidateId: string; nodeId: string; specDigest: string; alias: string | null; shotId: string | null;
-  operation: "image" | "video" | null; current: boolean; historyAvailable: boolean;
+  operation: "image" | "video" | "speech" | "transcription" | null; current: boolean; historyAvailable: boolean;
 }
 
-export interface SpendingCandidate {
+export interface SpendingCandidate extends AudioDetails {
   candidateId: string; nodeId: string; specDigest: string; alias: string; shotId: string | null; operation: string;
   profileId: string | null; profileRevision: string | null; profileDigest: string | null; profileDefinitionDigest: string | null;
   estimatedMicros: string | null; selectionCurrent: boolean; suggestedForIssue: boolean; unavailableCode: string | null;
@@ -43,6 +46,7 @@ interface IssueBody {
 export interface SpendingReview {
   projectId: string; profileId: string; operation: string; unitMicros: string;
   labels: string[]; providerDisplay: SpendingProviderDisplay; body: IssueBody; command: PendingCommand;
+  audioDisplays?: SpendingAudioDisplay[];
 }
 const hash = (value: string | null): value is string => !!value && /^[a-f0-9]{64}$/.test(value);
 const id = (value: string): boolean => /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
@@ -56,8 +60,12 @@ export function spendingMoney(value: string): string {
   return `$${whole}.${fraction} USD`;
 }
 export function canSelectSpending(candidate: SpendingCandidate): boolean {
-  return candidate.unavailableCode !== "RESTORED_AUTHORITY_REQUIRES_NEW" && candidate.selectionCurrent && candidate.suggestedForIssue && ["image", "video"].includes(candidate.operation)
+  const expected = { image: "openai-image", video: "minimax-h3", speech: "openai-speech", transcription: "openai-transcription" }[candidate.operation];
+  const audio = candidate.operation === "speech" || candidate.operation === "transcription";
+  return candidate.unavailableCode !== "RESTORED_AUTHORITY_REQUIRES_NEW" && candidate.selectionCurrent && candidate.suggestedForIssue && !!expected
+    && (!audio || !candidate.audioUnavailableCode && validAudioDisplay(candidate.audioDisplay) && candidate.audioDisplay.operation === candidate.operation)
     && (candidate.matchingAllowanceCount ?? 0) === 0 && !!candidate.providerDisplay
+    && candidate.providerDisplay.adapter === expected
     && candidate.providerDisplay.definitionDigest === candidate.profileDefinitionDigest && candidate.providerDisplay.id === candidate.profileId
     && candidate.providerDisplay.revision === candidate.profileRevision;
 }
@@ -68,6 +76,8 @@ export function spendingWorkStatus(candidate: SpendingCandidate): string {
     if (candidate.workState === "in_progress") return "Restored work in progress · existing results can be recovered";
     return "Restored work · request a new take with fresh approval";
   }
+  if (candidate.audioUnavailableCode) return spendingAudioSummary(candidate);
+  if (!candidate.providerDisplay) return "Saved model details unavailable · refresh or request new work";
   return (candidate.matchingAllowanceCount ?? 0) > 0 ? "Matching allowance recorded; remaining limits are shared."
     : canSelectSpending(candidate) ? "Available for cost review" : candidate.workState === "uncertain" ? "Outcome uncertain · waiting for recovery"
       : candidate.workState === "completed" ? "Completed" : candidate.workState === "in_progress" ? "Already in progress" : "Not available for another attempt";
@@ -76,7 +86,28 @@ export function spendingAllowanceStatus(allowance: SpendingAllowance): string {
   return allowance.status === "restored_history" ? "Restored history · cannot start new work" : allowance.status.replaceAll("_", " ");
 }
 export function spendingModelSettings(display: SpendingProviderDisplay): string {
-  return "resolution" in display.settings ? display.settings.resolution : `${display.settings.width} × ${display.settings.height} · ${display.settings.quality}`;
+  if (display.adapter === "openai-speech") return "Speech recording · WAV · normal speed";
+  if (display.adapter === "openai-transcription") return "Transcription · word timestamps";
+  return display.adapter === "minimax-h3" ? display.settings.resolution : `${display.settings.width} × ${display.settings.height} · ${display.settings.quality}`;
+}
+function validAudioDisplay(value: SpendingAudioDisplay | null | undefined): value is SpendingAudioDisplay {
+  if (!value || typeof value !== "object") return false;
+  return value.operation === "speech" ? typeof value.voice === "string" && /^[a-z]{1,32}$/.test(value.voice)
+    && Number.isSafeInteger(value.textBytes) && value.textBytes > 0 && typeof value.instructionsPresent === "boolean"
+    : value.operation === "transcription" && value.timing === "word" && (value.language === null || typeof value.language === "string" && /^[a-z]{2}$/.test(value.language));
+}
+function audioKey(value: SpendingAudioDisplay): string {
+  return JSON.stringify(value.operation === "speech" ? [value.operation, value.voice, value.textBytes, value.instructionsPresent] : [value.operation, value.language, value.timing]);
+}
+export function spendingAudioSummary(details: AudioDetails): string {
+  if (details.audioUnavailableCode === "AUDIO_PROFILE_UNAVAILABLE") return "Saved audio model details unavailable";
+  if (details.audioUnavailableCode || !validAudioDisplay(details.audioDisplay)) return "Saved audio options are unsupported or unavailable";
+  const audio = details.audioDisplay;
+  return audio.operation === "speech" ? `Voice: ${audio.voice}${audio.instructionsPresent ? " · Delivery instructions included" : ""}`
+    : `Language: ${audio.language === null ? "automatic detection" : audio.language} · Word timestamps`;
+}
+export function spendingOperationLabel(operation: string | null): string {
+  return operation === "image" ? "keyframe" : operation === "speech" ? "speech recording" : operation === "transcription" ? "transcription" : operation ?? "work";
 }
 /** Capture the exact visible work once; refreshing the page cannot widen an approval or retry. */
 export function reviewSpending(state: SpendingState, candidateIds: string[], key: string, now = Date.now()): SpendingReview {
@@ -97,14 +128,17 @@ export function reviewSpending(state: SpendingState, candidateIds: string[], key
     maxAttempts: candidates.length, maxEstimatedMicros: total, expiresAt: new Date(now + 24 * 60 * 60 * 1000).toISOString() };
   return { projectId: state.projectId, profileId: first.profileId, operation: first.operation, unitMicros, providerDisplay: structuredClone(first.providerDisplay!),
     labels: candidates.map(candidate => candidate.alias), body,
+    ...((first.operation === "speech" || first.operation === "transcription") ? { audioDisplays: candidates.map(candidate => structuredClone(candidate.audioDisplay!)) } : {}),
     command: { path: `/api/projects/${encodeURIComponent(state.projectId)}/spending/allowances`, key, body: structuredClone(body) } };
 }
 export function spendingReviewCurrent(review: SpendingReview, state: SpendingState | null, now = Date.now()): boolean {
   if (!state || review.projectId !== state.projectId || Date.parse(review.body.expiresAt) <= now) return false;
-  return review.body.selections.every(selected => state.candidates.some(candidate => canSelectSpending(candidate)
+  return review.body.selections.every((selected, index) => state.candidates.some(candidate => canSelectSpending(candidate)
     && candidate.candidateId === selected.candidateId && candidate.nodeId === selected.nodeId && candidate.specDigest === selected.specDigest
     && candidate.profileDigest === review.body.profileDigest && candidate.profileDefinitionDigest === review.body.profileDefinitionDigest
-    && candidate.estimatedMicros === review.unitMicros && candidate.operation === review.operation));
+    && candidate.estimatedMicros === review.unitMicros && candidate.operation === review.operation
+    && (!(review.operation === "speech" || review.operation === "transcription") || !!review.audioDisplays?.[index]
+      && !!candidate.audioDisplay && audioKey(candidate.audioDisplay) === audioKey(review.audioDisplays[index]!))));
 }
 export function revokeSpending(projectId: string, allowanceId: string, key: string): PendingCommand {
   if (!id(projectId) || !id(allowanceId) || !key) throw new Error("Choose a saved allowance to revoke.");

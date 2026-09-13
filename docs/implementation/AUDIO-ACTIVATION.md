@@ -1,6 +1,6 @@
 # Audio activation and narration planning
 
-September 12, 2026. **Planned follow-through, not implemented activation.** The speech/transcription bridges and unreviewed transcript publication are implemented offline. Human recording attachment is implemented; [transcript review/adoption](TRANSCRIPT-REVIEW-ADOPTION.md) is implemented and verified offline. This sequence connects those components to ordinary local use without requiring media API keys during development.
+September 12, 2026. **Slice 1 implemented and verified offline; ordinary audio creation remains planned.** The speech/transcription bridges and unreviewed transcript publication are implemented offline. Human recording attachment is implemented; [transcript review/adoption](TRANSCRIPT-REVIEW-ADOPTION.md) is implemented and verified offline. This sequence connects those components to ordinary local use without requiring media API keys during development.
 
 ## End-to-end paths
 
@@ -27,9 +27,9 @@ The director identifies the next useful operation from saved readiness and the u
 
 ## Implementation slices
 
-### 1. Explicit local audio configuration
+### 1. Explicit local audio configuration — implemented
 
-Extend the installed provider catalog and runtime composition with independently disabled-by-default speech and transcription switches. Reuse the existing backend `openai-media` credential reference and fixed version-one adapter contracts. Add no credentials to project locks, events, browser payloads or backups. A configured profile, registered adapter, available local tools, present key, human generation grant and spending allowance remain distinct facts.
+The implementation extends the installed provider catalog and runtime composition with independently disabled-by-default speech and transcription switches. Reuse the existing backend `openai-media` credential reference and fixed version-one adapter contracts. Add no credentials to project locks, events, browser payloads or backups. A configured profile, registered adapter, available local tools, present key, human generation grant and spending allowance remain distinct facts.
 
 The first supported profiles must match the implemented transports exactly: the speech model/voice/options exported by the pinned provider package, and `whisper-1` with word timestamps for transcription. Unsupported settings fail during configuration or proposal review, before consuming an allowance. Estimates are explicitly supplied by the host and remain estimates; do not label them verified prices.
 
@@ -37,9 +37,9 @@ Compose speech with complete audio ingestion and transcription with owned deriva
 
 Extend the existing spending projection and browser eligibility rules as part of activation: they currently describe image/video work only. Audio needs safe model, voice/language, operation and estimate summaries, including historical unavailable-profile handling. Catalog registration alone would otherwise advertise work the normal review UI cannot authorize. Configuration support can land independently with switches off, but ordinary audio generation is incomplete until generation review and owned-source planning are connected.
 
-### 2. Resume local preparation without repeating paid submission
+### 2. Resume local preparation without repeating paid submission — next
 
-Resolve shared-normalizer contention before enabling concurrent narration batches. The current transcription bridge records a definite `not_dispatched` failure for a busy preparation worker, consuming that attempt's start allowance. That behavior is documented; it must not silently become an uncertain provider outcome.
+Follow the reviewed [preparation waiting protocol](AUDIO-PREPARATION-WAITING.md) to resolve shared-normalizer contention before enabling concurrent narration batches. The current transcription bridge records a definite `not_dispatched` failure for a busy preparation worker, consuming that attempt's start allowance. That behavior is documented; it must not silently become an uncertain provider outcome.
 
 Add a narrow application-owned pre-submit waiting protocol, with explicit durable evidence that no dispatch marker or provider result exists. Resume the same admitted attempt and reservation under a fresh original lease; consume no second allowance start and create no additional generation grant. A crash, expired lease or missing proof cannot be interpreted as permission to repeat a POST. Ordinary provider `lookup` remains read-only and never submits. Restored attempts retain their permanent first-submission fence.
 
@@ -70,3 +70,15 @@ Expose preparation through a deliberate new tool-contract version, with an expli
 Use injected HTTP with actual application admission, normalization, derivative creation, candidate publication and human review. Cover uploaded audio with no script, generated narration from saved drafts, mixed source sections, missing setup, unchanged input reuse, a scoped text edit, original-request cancellation and restart. Verify no new paid call on ambiguous submission or completed recovery, and no automatic acceptance, quality retry or hold release.
 
 Run the built local app with synthetic media and keys removed. Add bounded live Codex checks only when new tool or workflow behavior warrants them; those checks are already approved for this task. H3 validation remains deferred until its API key is supplied. Any real speech, transcription or image validation still requires an explicit finite test allowance. None of these prerequisites blocks implementing or verifying the local application flow with injected providers.
+
+## Implemented configuration contracts and evidence
+
+`OPENSLATE_ENABLE_SPEECH_GENERATION` and `OPENSLATE_ENABLE_TRANSCRIPTION` are independent strict 0/1 switches. Both default off. Profiles use `configuration:{model,settings:{}}`, no video frame bounds and the existing `openai-media` credential reference. The pinned speech package currently supports its exported dated model plus the matching alias; transcription is `whisper-1` with word timing. Supported speech text/voice/instructions and byte bounds come from that local transport contract, not inferred vendor pricing or token counts.
+
+The shared `audio-preflight` module copies bounded plain data without invoking accessors, validates the complete profile definition and exact compiled arguments, and reuses the same speech/transcription option kernels as the final bridge. The runtime invokes it in the admission transaction before durable allowance authorization. It performs no source IO, arity/ownership validation, key read or authority write; existing compiler, Engine and bridge checks retain those responsibilities.
+
+The complete checkout passes **1,347 tests**, including 41 additions, with all builds/typechecks and the installed no-turn Codex probe. All 316 captured source/test/configuration/style files remained unchanged during verification. Focused suites include eight runtime integration/recovery checks, 64 preflight/bridge checks, 22 receipt/backup-adjacent checks, 32 configuration/catalog/selector checks and 23 spending checks; these counts overlap. Independent reviews found no correctness blockers.
+
+Actual runtime tests used injected speech/transcription HTTP with real local normalization and derivative creation. Two exact allowances led to two succeeded attempts and one unreviewed transcript candidate, with no narration acceptance; reopen repeated no HTTP or conversion. A retained speech spool also recovered after synthetic local contention without a second POST or consumed start. Unsupported speech options or transcription granularity failed before consuming their allowances.
+
+The built browser displayed both audio operation summaries, saved one bounded synthetic speech allowance, selected both audio profiles for a new project and preserved the choices/history across a real server restart and page reload. Keys were absent and all generation switches were off; no native or media API calls occurred. The post-reopen console was clear and the narrow layout remained readable. An independent 25-check audit confirmed exact read-only snapshots, one purpose-bound spending request/allowance, unchanged existing content and authority, exact new-project model locks and all four SQL tables unchanged after restart. Both owned launcher runs exited cleanly. These checks do not establish real speech quality, recognition accuracy, vendor billing or the ordinary conversational creation path. See [sanitized evidence](audio-activation-evidence.json).

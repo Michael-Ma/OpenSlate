@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { DEFAULT_PROFILES, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, TOOL_NAMES } from "../../../packages/core/dist/index.js";
-import { ExecutionRegistry, FakeProvider, OPENAI_IMAGE_MODEL, registerExecutionProvider } from "../../../packages/providers/dist/index.js";
-import { InstalledProviderCatalog, readInstalledProviderConfiguration, selectedProviderProfiles } from "../dist/application/provider-catalog.js";
+import { DEFAULT_PROFILES, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, TOOL_NAMES, canonical, digest } from "../../../packages/core/dist/index.js";
+import { ExecutionRegistry, FakeProvider, OPENAI_IMAGE_MODEL, OPENAI_SPEECH_MODEL, OPENAI_TRANSCRIPTION_MODEL, registerExecutionProvider } from "../../../packages/providers/dist/index.js";
+import { InstalledProviderCatalog, profilePolicy, readInstalledProviderConfiguration, selectedProviderProfiles } from "../dist/application/provider-catalog.js";
 import { EnvironmentMediaCredentials } from "../dist/application/provider-credentials.js";
 import { ProductionService } from "../dist/application/service.js";
 import { Engine } from "../dist/execution/engine.js";
@@ -19,6 +19,10 @@ const image = () => ({ label: "Configured image", profile: { id: "image-pinned",
   configuration: { model: OPENAI_IMAGE_MODEL, settings: { width: 1024, height: 1024, quality: "medium" } }, maxConcurrency: 2, unitCostMicros: "123456", maxRetries: 0 } });
 const video = () => ({ label: "Configured video", profile: { id: "video-pinned", revision: "video-config-1", kind: "video", adapter: "minimax-h3", executionVersion: "1",
   configuration: { model: "MiniMax-H3", settings: { resolution: "768P" } }, maxConcurrency: 1, unitCostMicros: "654321", maxRetries: 0, minFrames: 120, maxFrames: 450 } });
+const speech = () => ({ label: "Configured speech", profile: { id: "speech-pinned", revision: "speech-config-1", kind: "speech", adapter: "openai-speech", executionVersion: "1",
+  configuration: { model: OPENAI_SPEECH_MODEL, settings: {} }, maxConcurrency: 1, unitCostMicros: "10000", maxRetries: 0 } });
+const transcription = () => ({ label: "Configured transcription", profile: { id: "transcription-pinned", revision: "transcription-config-1", kind: "transcription", adapter: "openai-transcription", executionVersion: "1",
+  configuration: { model: OPENAI_TRANSCRIPTION_MODEL, settings: {} }, maxConcurrency: 1, unitCostMicros: "20000", maxRetries: 0 } });
 const configuration = (...profiles) => ({ version: 1, profiles });
 function fixture(t, config = configuration(image(), video()), extra = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-provider-catalog-")), store = new Store(join(directory, "store.sqlite"));
@@ -134,6 +138,82 @@ test("registered execution and present dependencies still do not activate real g
     mediaTools: { image: true, video: false }, credentials: new EnvironmentMediaCredentials(() => credential) });
   const row = catalog.view().profiles.at(-1); assert.equal(row.readiness.registered, true); assert.equal(row.readiness.mediaTools.available, true);
   assert.equal(row.readiness.credential.present, true); assert.equal(row.readiness.spendingPermissionRequired, true); assert.equal(row.readiness.realExecutionEnabled, false);
+});
+
+test("audio catalog profiles use exact transport preflight and preserve legacy default catalog bytes", () => {
+  const defaultCatalog = new InstalledProviderCatalog(), originalProfiles = canonical(DEFAULT_PROFILES);
+  assert.equal(defaultCatalog.digest, digest({ version: 1, profiles: DEFAULT_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile })) }));
+  for (const definition of [speech(), { ...speech(), profile: { ...speech().profile, configuration: { model: "gpt-4o-mini-tts", settings: {} } } }, transcription()]) {
+    const catalog = new InstalledProviderCatalog({ configuration: configuration(definition) }), row = catalog.view().profiles.at(-1);
+    assert.deepEqual(row.profile, definition.profile); assert.deepEqual(profilePolicy(row.profile), { credential: "openai-media", media: "audio", fixture: false });
+    assert.equal(row.definitionDigest, digest(definition.profile)); assert.equal(row.estimatedCost.actualVendorPriceVerified, false);
+    assert.equal(row.readiness.enabledByHost, false); assert.equal(row.readiness.spendingPermissionRequired, true);
+    assert.equal(canonical(defaultCatalog.view().profiles.map(value => value.profile)), originalProfiles);
+  }
+});
+
+test("audio profile configuration cannot hide voice, language, frame ranges, custom settings or another mapping", () => {
+  for (const create of [speech, transcription]) for (const change of [
+    profile => { profile.configuration.settings.voice = "coral"; }, profile => { profile.configuration.settings.instructions = "whisper"; },
+    profile => { profile.configuration.settings.language = "en"; }, profile => { profile.configuration.settings.timing = "word"; },
+    profile => { profile.configuration.settings.response_format = "wav"; }, profile => { profile.configuration.settings.apiKey = credential; },
+    profile => { delete profile.configuration.settings; }, profile => { profile.configuration.settings = null; },
+    profile => { profile.configuration.model = "unsupported"; }, profile => { profile.kind = "video"; },
+    profile => { profile.executionVersion = "2"; }, profile => { profile.minFrames = 30; }, profile => { profile.maxFrames = 10800; },
+    profile => { profile.minFrames = undefined; }, profile => { profile.maxRetries = 4; },
+  ]) {
+    const value = create(); change(value.profile);
+    assert.throws(() => new InstalledProviderCatalog({ configuration: configuration(value) }), error => error.code === "PROVIDER_CATALOG_INVALID" && !error.message.includes(credential));
+  }
+});
+
+test("audio readiness requires its own enabled route, registration, tools and credential without provider calls", () => {
+  let calls = 0;
+  const port = adapter => registerExecutionProvider({ submit: async () => { calls++; throw Error("No calls"); }, lookup: async () => { calls++; throw Error("No calls"); }, poll: async () => { calls++; throw Error("No calls"); } }, { adapter, version: "1" });
+  const registry = new ExecutionRegistry([port("openai-speech"), port("openai-transcription")]), enabled = [{ adapter: "openai-speech", version: "1" }];
+  const tools = { image: true, video: true, audio: true }, keys = new EnvironmentMediaCredentials(() => credential);
+  const options = { configuration: configuration(speech(), transcription()), registry, mediaTools: tools, credentials: keys, enabledExecutions: enabled };
+  const catalog = new InstalledProviderCatalog(options), rows = catalog.view().profiles.slice(-2);
+  assert.equal(rows[0].readiness.realExecutionEnabled, true); assert.equal(rows[1].readiness.realExecutionEnabled, false);
+  assert.deepEqual(rows[0].readiness.mediaTools, { required: true, available: true });
+  assert.deepEqual(rows[0].readiness.credential, { required: true, present: true, backendUnavailable: false, apiValidated: false });
+  for (const override of [{ enabledExecutions: [] }, { registry: undefined }, { mediaTools: { image: true, video: true } },
+    { credentials: new EnvironmentMediaCredentials(() => undefined) }, { credentials: new EnvironmentMediaCredentials(() => { throw Error(credential); }) }]) {
+    const view = new InstalledProviderCatalog({ ...options, ...override }).view();
+    assert.equal(view.profiles.at(-2).readiness.realExecutionEnabled, false); assert.equal(JSON.stringify(view).includes(credential), false);
+  }
+  const both = new InstalledProviderCatalog({ ...options, enabledExecutions: [...enabled, { adapter: "openai-transcription", version: "1" }] });
+  assert.equal(both.view().profiles.at(-1).readiness.realExecutionEnabled, true);
+  tools.audio = false; enabled[0].adapter = "openai-transcription";
+  assert.equal(catalog.view().profiles.at(-2).readiness.realExecutionEnabled, true, "caller mutation cannot change captured readiness configuration");
+  assert.equal(calls, 0);
+});
+
+test("at most four exact unique external identities may be enabled and none enable unrelated routes", () => {
+  const all = ["openai-image", "minimax-h3", "openai-speech", "openai-transcription"].map(adapter => ({ adapter, version: "1" }));
+  assert.doesNotThrow(() => new InstalledProviderCatalog({ enabledExecutions: all }));
+  for (const invalid of [[...all, all[0]], [all[2], all[2]], [{ adapter: "openai-speech", version: "2" }],
+    [{ adapter: "openai-transcription", version: "1", key: credential }], [{ adapter: "openai-speech-v1", version: "1" }]]) {
+    assert.throws(() => new InstalledProviderCatalog({ enabledExecutions: invalid }), { code: "PROVIDER_CATALOG_INVALID" });
+  }
+});
+
+test("human audio model selection saves exact immutable locks without authority and catalog replacement cannot alter replay", async t => {
+  const f = fixture(t, configuration(speech(), transcription())), old = f.service.createProject("Default"), oldBytes = canonical(lock(f, old));
+  const body = { name: "Audio project", expectedCatalogDigest: f.catalog.digest, profileIds: ["speech-pinned", "transcription-pinned"] };
+  const created = await f.req("POST", "/api/projects", body, "audio-project-once"); assert.equal(created.statusCode, 200, created.body);
+  const project = created.json(), saved = lock(f, project), savedBytes = canonical(saved);
+  assert.deepEqual(saved.profiles, [...DEFAULT_PROFILES.slice(0, 2), speech().profile, transcription().profile]);
+  assert.equal(canonical(lock(f, old)), oldBytes); untouchedAuthority(f, project.id); assert.equal(f.readNames.length, 0);
+  const changes = f.store.db.prepare("SELECT total_changes() AS n").get().n;
+  const projection = await f.req("GET", `/api/projects/${project.id}/providers`); assert.equal(projection.statusCode, 200, projection.body);
+  assert.deepEqual(projection.json().profiles.map(value => value.profile), saved.profiles);
+  for (const row of projection.json().profiles.slice(-2)) { assert.equal(row.projectExecution.compatible, true); assert.equal(row.readiness.realExecutionEnabled, false); }
+  assert.equal(f.store.db.prepare("SELECT total_changes() AS n").get().n, changes);
+  const replacement = f.appFor(f.catalogs({ configuration: configuration() }));
+  const replay = await f.req("POST", "/api/projects", body, "audio-project-once", replacement);
+  assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), project); assert.equal(canonical(lock(f, project)), savedBytes);
+  assert.equal((await f.req("POST", "/api/projects", body, "audio-project-new", replacement)).statusCode, 409); untouchedAuthority(f, project.id);
 });
 
 test("project provider HTTP separates installation readiness from immutable local assembly compatibility without writes", async t => {

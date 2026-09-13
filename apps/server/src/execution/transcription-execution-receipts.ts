@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import { describeOpenAITranscriptionRequest, validateOpenAITranscriptionOptions } from "@openslate/providers";
+import { describeOpenAITranscriptionRequest } from "@openslate/providers";
 import type { ExecutionRequest, OpenAITranscriptionDescription, OpenAITranscriptionOutcome, OpenAITranscriptionRequest, OpenAITranscriptionResult } from "@openslate/providers";
 import type { Attempt } from "./engine.js";
 import { assertOutputReceiptIdentity } from "./output-store.js";
 import type { OutputReceipt } from "./output-store.js";
 import { assertTranscriptionAudioReceipt, assertTranscriptionAudioSource, transcriptionAudioId, transcriptionAudioInput } from "./transcription-audio.js";
 import type { TranscriptionAudioIntent, TranscriptionAudioReceipt } from "./transcription-audio.js";
+import { transcriptionOperationOptions } from "./audio-preflight.js";
 
 export const TRANSCRIPTION_EXECUTION_PARSER = Object.freeze({ adapter: "openai-transcription-v1", version: 1,
   maxResponseBytes: 4 * 1024 ** 2, maxTextBytes: 256 * 1024, maxWords: 8192, maxWordBytes: 1024 } as const);
@@ -62,15 +63,10 @@ function base(attempt: Attempt, value: Identity, extras: string[]): void {
 export function transcriptionExecutionOptions(input: ExecutionRequest): Pick<OpenAITranscriptionRequest, "model" | "language" | "timing"> {
   const request = structuredClone(input);
   transcriptionFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "externalAllowanceId"]);
-  transcriptionFields(request.args, ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "language", "timing", "settings"]);
-  transcriptionFields(request.profile!.configuration, ["model", "settings"]);
-  transcriptionFields(request.profile!.configuration.settings, []); transcriptionFields(request.args.settings, []);
   fail(request.kind === "transcription" && request.execution?.adapter === "openai-transcription" && request.execution.version === "1"
     && request.inputs.length === 1 && request.inputs[0]?.kind === "audio" && typeof request.args.language === "string",
   "Transcription requires exactly one audio input, explicit language choice and no custom settings");
-  const options = { model: request.profile!.configuration.model, language: request.args.language === "auto" ? null : request.args.language,
-    timing: request.args.timing } as Pick<OpenAITranscriptionRequest, "model" | "language" | "timing">;
-  validateOpenAITranscriptionOptions(options); return options;
+  return transcriptionOperationOptions(request.profile!.configuration, request.args);
 }
 export function prepareTranscriptionExecutionRequest(input: ExecutionRequest, preparation: TranscriptionExecutionPreparation, bytes: Uint8Array): {
   request: OpenAITranscriptionRequest; description: OpenAITranscriptionDescription;

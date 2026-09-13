@@ -7,7 +7,7 @@ import { allowanceUsage, currentAllowanceSelection } from "../execution/durable-
 import type { ExternalAllowance, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
 import { MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS } from "../execution/external-allowance-records.js";
 import { projectBudgetSnapshot } from "./project-budget.js";
-import { spendingHistoryDisplay, spendingProviderDisplay } from "./spending-display.js";
+import { spendingAudioDetails, spendingHistoryDisplay, spendingProviderDisplay } from "./spending-display.js";
 
 export const SPENDING_PAGE_LIMITS = Object.freeze({ candidates: 100, allowances: 40 });
 const coverage = (offset: number, returned: number, total: number) => ({ offset, returned, total, nextOffset: offset + returned < total ? offset + returned : null });
@@ -30,13 +30,16 @@ export function projectSpendingProjection(service: ProductionService, projectId:
           catch { /* Keep an incompatible saved external selection visible without offering it. */ }
         } else if (binding.node.args.adapter === "fake") return [];
         const selection = { candidateId: binding.candidateId!, nodeId: binding.id, specDigest: binding.node.specDigest };
+        const audioDetails = binding.node.kind === "speech" || binding.node.kind === "transcription" ? spendingAudioDetails(profile, binding.node) : undefined;
         let profileDigest: string | null = null, profileDefinitionDigest: string | null = null, estimatedMicros: string | null = null;
         let selectionCurrent = false, unavailableCode: string | null = null;
         try {
           if (!profile) throw new DomainError("ALLOWANCE_PROFILE_MISMATCH", "Pinned profile is unavailable");
           const args = providerProfileArguments(profile); profileDigest = typeof args.profileDigest === "string" ? args.profileDigest : null;
           profileDefinitionDigest = digest(profile); estimatedMicros = moneyMicros(profile.unitCostMicros).toString();
-          currentAllowanceSelection(store, projectId, selection, profileDigest ?? "", profileDefinitionDigest); selectionCurrent = true;
+          currentAllowanceSelection(store, projectId, selection, profileDigest ?? "", profileDefinitionDigest);
+          if (audioDetails?.audioUnavailableCode) throw new DomainError(audioDetails.audioUnavailableCode, "Saved audio options are unavailable for cost review");
+          selectionCurrent = true;
         } catch (error) { if (!(error instanceof DomainError)) throw error; unavailableCode = error.code; }
         const candidate = store.get<Candidate>("candidate", selection.candidateId);
         if (service.recovery.isImported(projectId, "candidate", selection.candidateId)
@@ -52,6 +55,7 @@ export function projectSpendingProjection(service: ProductionService, projectId:
         return [{ ...selection, alias: binding.node.alias, shotId: binding.node.shotId ?? null, operation: binding.node.kind,
           profileId: binding.node.profileId ?? null, profileRevision: profile?.revision ?? null, profileDigest, profileDefinitionDigest,
           providerDisplay: spendingProviderDisplay(profile, profileDefinitionDigest),
+          ...(audioDetails ?? {}),
           estimatedMicros, selectionCurrent, unavailableCode, workState,
           suggestedForIssue: selectionCurrent && (workState === "unattempted" || retryPermitted), matchingAllowanceCount: 0,
           latestAttempt: latest ? { id: latest.id, phase: latest.phase, ordinal: latest.ordinal, retryPermitted } : null }];
@@ -90,7 +94,7 @@ export function projectSpendingProjection(service: ProductionService, projectId:
     const allowances = projectedAllowances.slice(allowanceOffset, allowanceOffset + SPENDING_PAGE_LIMITS.allowances);
     return { version: 1 as const, projectId, revisionId: project.revisionId, headVersion: project.headVersion, planId: project.activePlanId,
       currency: "USD" as const, projectBudget: projectBudgetSnapshot(service, projectId),
-      notice: "Amounts are configured estimates, not guaranteed provider bills. Spending permission does not approve keyframes or retry uncertain work.",
+      notice: "Amounts are configured estimates, not guaranteed provider bills. Spending permission does not approve creative work, accept narration, enable a provider or retry uncertain work.",
       limits: { maxSelections: 800, maxAttempts: 10000, maxLifetimeMs: MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS },
       candidates: selectedCandidates, allowances,
       coverage: { candidates: coverage(candidateOffset, selectedCandidates.length, candidates.length),

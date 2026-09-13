@@ -5,7 +5,7 @@ import type { StudioApi } from "./api";
 import { errorText } from "./components";
 import { pendingCommandsFor } from "./pending-command";
 import type { PendingCommand } from "./pending-command";
-import { budgetCommand, canSelectSpending, reviewSpending, revokeSpending, spendingAllowanceStatus, spendingModelSettings, spendingMoney, spendingPage, spendingReviewCurrent, spendingWorkStatus } from "./spending-model";
+import { budgetCommand, canSelectSpending, reviewSpending, revokeSpending, spendingAllowanceStatus, spendingAudioSummary, spendingModelSettings, spendingMoney, spendingOperationLabel, spendingPage, spendingReviewCurrent, spendingWorkStatus } from "./spending-model";
 import type { SpendingCandidate, SpendingReview, SpendingState } from "./spending-model";
 import type { ProjectSnapshot } from "./model";
 import "./spending.css";
@@ -74,13 +74,13 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
   const page = (kind: "candidates" | "allowances", next: number) => { setSelected([]); setReview(null); setOffsets(value => ({ ...value, [kind]: next })); };
   const rowLabel = (candidate: SpendingCandidate) => {
     const shotIndex = snapshot.project.shots.findIndex(shot => shot.id === candidate.shotId);
-    return `${shotIndex >= 0 ? `Shot ${shotIndex + 1}` : candidate.alias} · ${candidate.operation === "image" ? "keyframe" : candidate.operation}`;
+    return `${shotIndex >= 0 ? `Shot ${shotIndex + 1}` : candidate.alias} · ${spendingOperationLabel(candidate.operation)}`;
   };
   if (state && !state.coverage.candidates.total && !state.coverage.allowances.total && !slot.command && !slot.error && !review && !slot.lastSuccess) return null;
   return <section className="spending-panel" aria-labelledby="spending-title">
     <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">Review generation costs</h3></div><button className="text-button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)}>Refresh costs</button></div>
-    <p>Approve spending for specific work. Keyframe review remains a separate step before video generation.</p>
-    <p className="spending-disabled">Generation also requires an enabled, ready provider and sufficient project budget. An allowance does not enable a provider or approve a keyframe.</p>
+    <p>Approve spending for specific work. Permission to generate the exact creative work remains separate, as does keyframe review before video generation.</p>
+    <p className="spending-disabled">Generation also requires enabled provider configuration, available local tools, a configured API key and sufficient project budget. An allowance does not provide that setup, accept narration or authorize a new creative change.</p>
     {!!(loadError || reviewError || slot.error) && <p role="alert" className="form-error">{loadError || reviewError || errorText(slot.error)}</p>}
     {!state && !loadError && <p role="status">Loading current work and saved allowances…</p>}
     {slot.command && <div className="notice warning"><span>{slot.running ? "Saving your exact spending request…" : "The result was not confirmed. Retry the saved request to check its outcome."}</span>{!slot.running && <button disabled={recoveryReadOnly} onClick={() => execute(slot.command!)}>Retry same spending action</button>}</div>}
@@ -92,6 +92,7 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
         {state.candidates.filter(candidate => candidate.profileId === profileId).map(candidate => <label key={candidate.candidateId} className="spending-work">
           <input type="checkbox" checked={selected.includes(candidate.candidateId)} disabled={!canSelectSpending(candidate) || !!selectedProfile && selectedProfile !== profileId} onChange={() => select(candidate)} />
           <span><strong>{rowLabel(candidate)}</strong>{candidate.providerDisplay && <small>{spendingModelSettings(candidate.providerDisplay)} · profile {candidate.providerDisplay.id} ({candidate.providerDisplay.revision})</small>}<small>{candidate.estimatedMicros !== null ? `${spendingMoney(candidate.estimatedMicros)} configured estimate / attempt` : "Estimate unavailable"}</small>
+            {candidate.audioDisplay && <small>{spendingAudioSummary(candidate)}</small>}
             <small>{spendingWorkStatus(candidate)}</small></span>
         </label>)}
       </fieldset>)}
@@ -106,7 +107,7 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
     {review && <div className="spending-review" aria-labelledby="allowance-review-title"><h4 id="allowance-review-title">Approve this spending allowance</h4>
       <p><strong>{review.providerDisplay.model}</strong> · {spendingModelSettings(review.providerDisplay)} · {spendingMoney(review.unitMicros)} configured estimate per attempt</p>
       <p>Saved profile: {review.providerDisplay.id} ({review.providerDisplay.revision})</p>
-      <ul>{review.labels.map((label, index) => <li key={index}>{label}</li>)}</ul>
+      <ul>{review.labels.map((label, index) => <li key={index}>{label}{review.audioDisplays?.[index] && <span> · {spendingAudioSummary({ audioDisplay: review.audioDisplays[index] })}</span>}</li>)}</ul>
       <p>Up to <strong>{review.body.maxAttempts} generation {review.body.maxAttempts === 1 ? "start" : "starts"}</strong>, with a total configured estimate of <strong>{spendingMoney(review.body.maxEstimatedMicros)}</strong>. Expires {new Date(review.body.expiresAt).toLocaleString()}.</p>
       <p>These are configured estimates, not guaranteed provider bills. Every admitted attempt uses a start and its estimate, even if it later fails. This does not permit replacing a result for quality reasons.</p>
       {!confirmed && !busy && <p role="alert">The selected work is no longer current or could not be refreshed. Return to selection before approving.</p>}
@@ -116,7 +117,8 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
     {!!state?.allowances.length && <details className="spending-history" open><summary>Saved allowances · {state.coverage.allowances.total}</summary>
       {state.allowances.map(allowance => <div key={allowance.id}><strong>{allowance.providerDisplay?.model ?? "Historical model details unavailable"} · {spendingAllowanceStatus(allowance)}</strong>
         {allowance.providerDisplay && <p>{spendingModelSettings(allowance.providerDisplay)} · profile {allowance.providerDisplay.id} ({allowance.providerDisplay.revision})</p>}
-        <ul>{allowance.work.map(work => <li key={work.candidateId}>{work.historyAvailable ? `${work.alias} · ${work.operation === "image" ? "keyframe" : work.operation ?? "work"}${work.current ? "" : " · historical work"}` : "Historical work details unavailable"}</li>)}</ul>
+        <ul>{allowance.work.map(work => <li key={work.candidateId}>{work.historyAvailable ? `${work.alias} · ${spendingOperationLabel(work.operation)}${work.current ? "" : " · historical work"}` : "Historical work details unavailable"}
+          {(work.operation === "speech" || work.operation === "transcription") && <span> · {spendingAudioSummary(work)}</span>}</li>)}</ul>
         <p>Recorded {new Date(allowance.createdAt).toLocaleString()} · allowance {allowance.id.slice(0, 8)}</p>
         <p>{allowance.usedAttempts} / {allowance.maxAttempts} starts used · {spendingMoney(allowance.usedEstimatedMicros)} / {spendingMoney(allowance.maxEstimatedMicros)} configured estimate used</p>
         {allowance.restoredHistory && <p>This saved allowance cannot authorize new work. Recorded usage and existing results remain in history.</p>}

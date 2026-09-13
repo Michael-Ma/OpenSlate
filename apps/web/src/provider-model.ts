@@ -11,6 +11,22 @@ export interface ProviderView {
 export interface ProviderCatalogView { catalogDigest: string; defaults: string[]; profiles: ProviderView[]; realExecutionEnabled: boolean; notice: string }
 export interface ProviderSelection { expectedCatalogDigest: string; profileIds: string[] }
 export interface NewProjectCommand { key: string; body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }
+export const PROVIDER_KIND_CHOICES = Object.freeze([
+  Object.freeze({ kind: "image" as const, label: "Keyframes" }), Object.freeze({ kind: "video" as const, label: "Video" }),
+  Object.freeze({ kind: "speech" as const, label: "Narration voice" }), Object.freeze({ kind: "transcription" as const, label: "Speech recognition" }),
+]);
+export function selectedProviderForKind(catalog: ProviderCatalogView, selection: ProviderSelection | null, kind: ProviderKind): ProviderView | undefined {
+  return catalog.profiles.find(provider => provider.profile?.kind === kind && selection?.profileIds.includes(provider.id))
+    ?? catalog.profiles.find(provider => provider.profile?.kind === kind && catalog.defaults.includes(provider.id));
+}
+/** Changing one operation preserves every other displayed choice, including older partial selections. */
+export function providerSelectionForKind(catalog: ProviderCatalogView, selection: ProviderSelection | null, kind: ProviderKind, id: string): ProviderSelection | null {
+  if (selection && selection.expectedCatalogDigest !== catalog.catalogDigest
+    || !catalog.profiles.some(provider => provider.id === id && provider.profile?.kind === kind)) throw new Error("Refresh the model choices before selecting this provider.");
+  const profileIds = PROVIDER_KIND_CHOICES.map(choice => choice.kind === kind ? id : selectedProviderForKind(catalog, selection, choice.kind)?.id)
+    .filter((value): value is string => value !== undefined);
+  return profileIds.every(value => catalog.defaults.includes(value)) ? null : { expectedCatalogDigest: catalog.catalogDigest, profileIds };
+}
 
 export function projectCreationCommand(name: string, key: string, selection: ProviderSelection | null): NewProjectCommand {
   if (!name.trim() || name.trim().length > 160 || !key) throw new Error("Provide a project name and retry identity.");

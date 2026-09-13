@@ -1,6 +1,6 @@
 # Opt-in media execution
 
-The local launcher composes application-owned image/H3 bridges, spending admission, output storage, ingestion and real local assembly through one runtime factory. External generation is **off by default**. Installing a model profile or configuring a key does not enable a provider or issue spending permission.
+The local launcher composes application-owned image/H3/speech/transcription bridges, spending admission, output storage, ingestion and real local assembly through one runtime factory. External generation is **off by default**. Installing a model profile or configuring a key does not enable a provider or issue spending permission.
 
 The trusted startup switches are independent:
 
@@ -8,9 +8,11 @@ The trusted startup switches are independent:
 |---|---|
 | `OPENSLATE_ENABLE_IMAGE_GENERATION=1` | Register the image execution bridge and enable its admission path |
 | `OPENSLATE_ENABLE_H3_GENERATION=1` | Register the H3 bridge, durable polling and protected downloading |
+| `OPENSLATE_ENABLE_SPEECH_GENERATION=1` | Register the speech bridge with complete audio ingestion |
+| `OPENSLATE_ENABLE_TRANSCRIPTION=1` | Register exact word transcription with owned derivative preparation and candidate ingestion |
 | `OPENSLATE_H3_DOWNLOAD_HOSTS` | Comma-separated exact lowercase output hostnames; required for H3 |
 | `OPENSLATE_PROVIDER_CONFIG` | Existing bounded JSON model/profile configuration |
-| `OPENSLATE_OPENAI_API_KEY` | Existing backend credential for the image provider |
+| `OPENSLATE_OPENAI_API_KEY` | Existing shared backend credential for image, speech and transcription |
 | `OPENSLATE_MINIMAX_API_KEY` | Existing backend credential for H3 |
 
 Only `1` enables a generation switch. Omitted, empty and `0` mean disabled; ambiguous values fail configuration validation. Output hosts cannot be wildcards, URLs, IP addresses or host/port strings. They must be established for the user's provider account; the repository does not invent a universal CDN hostname. Validation performs no DNS query. Download-time checks still require HTTPS, public pinned IPv4, bounded bytes and no redirects or credentials.
@@ -19,13 +21,15 @@ Enabled generation requires executable local FFmpeg and ffprobe. Missing media k
 
 ## Composition and saved projects
 
-The fake provider stays installed for default demo projects. One shared local media service owns uploads, narration normalization, generated-video normalization and rendering. The output spool's owned blob directory is included among its trusted import roots. Exact image/video ingestion uses dedicated handlers; fixture ingestion retains fixture provenance. Construction creates only local storage/configuration objects and performs no network call or generation-authority write.
+The fake provider stays installed for default demo projects. One shared local media service owns uploads, narration normalization, generated-video normalization and rendering. The output spool's owned blob directory is included among its trusted import roots. Exact image/video/audio/transcript ingestion uses dedicated handlers; fixture ingestion retains fixture provenance. Construction creates only local storage/configuration objects and performs no network call or generation-authority write.
 
 With local tools available, real local assembly remains installed even when cloud generation is disabled, so previously rendered production work can still be verified and reused. When H3 is enabled, **new projects that select an external video profile** receive the exact local assembly pin. Default fake projects and image-only external selections with fake video retain their previous demo behavior. Existing project locks are never rewritten by startup configuration.
 
 An older externally configured project without a local assembly pin cannot start H3 work through this launcher. Admission reports that the saved execution mode needs an explicit upgrade, before consuming an allowance or submitting video. Creating a new production project is currently the supported path; an in-place human-reviewed local execution upgrade is separate work. A key or environment switch cannot silently reinterpret an old plan.
 
 An enabled, ready provider still needs an exact current candidate/grant, any required human keyframe review, project budget capacity and an unexpired human allowance. Admission permanently consumes that allowance's start/configured-estimate capacity in the same transaction as the attempt and reservation. A previously saved valid allowance can become usable when its provider becomes ready; toggling startup configuration does not create a new allowance or extend its expiry. Known/unknown submissions retain their existing reconciliation rules and are never blindly resubmitted.
+
+Audio option preflight runs synchronously in admission before any start or reservation is consumed. The exact fixed speech text/voice/instructions or word-transcription language/options must match the saved profile. This does not replace source ownership checks at preparation and ingestion. Both audio switches default off; old programmatic configuration without those fields remains disabled. Completed recovery with its route installed uses retained evidence without resolving a new key or consuming an allowance. Disabling a route leaves its unfinished attempts blocked on missing registration, as for image/video; it does not authorize a recovery POST. Ordinary conversational audio planning and human generation review remain separate follow-through. See [audio activation](AUDIO-ACTIVATION.md).
 
 ## Validation scope
 

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Independent audio configuration, pure option preflight, runtime composition and browser model/spending review",
+  "fullCheckout": {
+    "passed": 1347,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 41,
+    "durationMilliseconds": 100566.508667,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "unchangedSourceTestConfigurationAndStyleFiles": 316
+  },
+  "focusedVerification": {
+    "runtime": 8,
+    "preflightAndBridges": 64,
+    "receiptAuthorityAndBackup": 22,
+    "configurationCatalogAndSelectors": 32,
+    "spendingProjectionAndBrowserModel": 23,
+    "note": "Focused suites overlap with the full checkout; counts are not added together."
+  },
+  "runtimeProof": {
+    "providers": "injected speech and transcription HTTP only",
+    "media": "real local normalization and 16 kHz derivative from synthetic PCM",
+    "completePipeline": {
+      "attempts": 2,
+      "consumedAllowances": 2,
+      "speechResponses": 1,
+      "transcriptionResponses": 1,
+      "normalizations": 1,
+      "derivatives": 1,
+      "unreviewedTranscriptCandidates": 1,
+      "repeatedWorkAfterReopen": 0
+    },
+    "recovery": "Retained speech spool recovered after synthetic local MEDIA_BUSY with no second POST or allowance consumption",
+    "preflight": "Unsupported voice, oversized text and unsupported transcription timing blocked before consuming the selected allowance"
+  },
+  "browser": {
+    "generationSwitches": "all off",
+    "mediaKeys": "absent",
+    "nativeStarts": 0,
+    "mediaCalls": 0,
+    "issuedSpeechAllowance": {
+      "starts": 1,
+      "configuredEstimateMicros": "100",
+      "startsConsumed": 0
+    },
+    "createdProjectProfiles": [
+      "fake image",
+      "fake video",
+      "exact configured speech",
+      "exact configured transcription"
+    ],
+    "reopen": "Same installation, real server restart, page reload and reconnect preserve exact profiles and speech allowance history",
+    "consoleWarningsOrErrorsAfterReopen": 0,
+    "layout": "Audio operation and historical allowance details visually inspected in current narrow viewport",
+    "cleanup": "Both owned launcher runs exited successfully; temporary tab closed",
+    "independentAudit": {
+      "passed": 25,
+      "failed": 0,
+      "readOnlyReviewCreatedState": false,
+      "originalEntitiesAndProjectContentPreserved": true,
+      "allFourSqlTablesExactAfterRestart": true,
+      "note": "Independent audit compares saved snapshots and the closed database; browser gestures and console checks were root-observed, not independently replayed."
+    }
+  },
+  "independentReview": {
+    "correctnessFindings": [],
+    "nonblockingWordingFollowup": "Consider Narration model instead of Narration voice for the speech model selector; voice itself remains an operation argument."
+  },
+  "limitations": [
+    "Real provider access, prices, billing, speech quality and recognition quality remain unverified",
+    "Ordinary conversational audio generation review, owned draft-source planning and chunk proposals remain unimplemented",
+    "Busy transcription preparation currently fails definitively before POST; the next waiting protocol will preserve the same consumed attempt",
+    "Browser test issued a synthetic allowance with routes disabled; actual provider composition was exercised separately by injected runtime tests"
+  ],
+  "mediaApiCalls": 0,
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "pushed": false,
+  "next": "Application-owned pre-submit transcription preparation waiting, then owned-source planning and purpose-bound generation review"
+}

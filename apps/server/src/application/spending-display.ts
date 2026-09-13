@@ -1,21 +1,30 @@
 import { canonical, digest, providerProfileArguments } from "@openslate/core";
-import type { ProviderProfile } from "@openslate/core";
+import type { PlanNode, ProviderProfile } from "@openslate/core";
 import type { AllowanceSelection, ExternalAllowance } from "../execution/external-allowance-records.js";
 import type { PlanRecord } from "../execution/engine.js";
 import { profilePolicy } from "./provider-catalog.js";
+import { assertAudioOperationOptions, preflightAudioProfile } from "../execution/audio-preflight.js";
 
 interface DisplayIdentity { id: string; revision: string; definitionDigest: string }
 export type SpendingProviderDisplay = DisplayIdentity & (
   { adapter: "openai-image"; model: string; settings: { width: number; height: number; quality: string } }
   | { adapter: "minimax-h3"; model: string; settings: { resolution: string } }
+  | { adapter: "openai-speech" | "openai-transcription"; model: string; settings: Record<string, never> }
 );
+export type SpendingAudioDisplay = { operation: "speech"; voice: string; textBytes: number; instructionsPresent: boolean }
+  | { operation: "transcription"; language: string | null; timing: "word" };
+export interface SpendingAudioDetails {
+  audioDisplay: SpendingAudioDisplay | null;
+  audioUnavailableCode: "AUDIO_PROFILE_UNAVAILABLE" | "AUDIO_OPERATION_UNSUPPORTED" | null;
+}
 export interface SpendingWorkDisplay extends AllowanceSelection {
-  alias: string | null; shotId: string | null; operation: "image" | "video" | null;
+  alias: string | null; shotId: string | null; operation: "image" | "video" | "speech" | "transcription" | null;
   current: boolean; historyAvailable: boolean;
+  audioDisplay?: SpendingAudioDisplay | null; audioUnavailableCode?: SpendingAudioDetails["audioUnavailableCode"];
 }
 interface RetainedLock { projectId: string; profiles: unknown }
-interface RetainedProfile { canonical: string; profileDigest: string; display: SpendingProviderDisplay }
-interface RetainedWork { alias: string; shotId: string | null; operation: "image" | "video"; profileDigest: string }
+interface RetainedProfile { canonical: string; profileDigest: string; display: SpendingProviderDisplay; profile: ProviderProfile }
+interface RetainedWork { alias: string; shotId: string | null; operation: "image" | "video" | "speech" | "transcription"; profileDigest: string; audioNode?: PlanNode }
 const hash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const label = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 160
@@ -28,6 +37,12 @@ export function spendingProviderDisplay(value: unknown, expectedDefinitionDigest
   try {
     if (!hash(expectedDefinitionDigest)) return null;
     const profile = structuredClone(value) as ProviderProfile;
+    if (profile?.adapter === "openai-speech" || profile?.adapter === "openai-transcription") {
+      const checked = preflightAudioProfile(profile);
+      if (checked.definitionDigest !== expectedDefinitionDigest) return null;
+      return { id: checked.id, revision: checked.revision, definitionDigest: expectedDefinitionDigest,
+        adapter: profile.adapter, model: checked.model, settings: {} };
+    }
     const policy = profilePolicy(profile);
     if (policy.fixture || digest(profile) !== expectedDefinitionDigest) return null;
     const identity = { id: profile.id, revision: profile.revision, definitionDigest: expectedDefinitionDigest };
@@ -38,6 +53,20 @@ export function spendingProviderDisplay(value: unknown, expectedDefinitionDigest
       settings: { resolution: settings!.resolution as string } };
     return null;
   } catch { return null; }
+}
+
+/** Exact saved options only. Text, instructions, source paths and arbitrary settings never enter spending payloads. */
+export function spendingAudioDetails(profile: unknown, node: PlanNode): SpendingAudioDetails {
+  try { preflightAudioProfile(profile); }
+  catch { return { audioDisplay: null, audioUnavailableCode: "AUDIO_PROFILE_UNAVAILABLE" }; }
+  try {
+    const value = assertAudioOperationOptions(profile as ProviderProfile, node.args);
+    if (value.kind !== node.kind || node.inputs.length !== (value.kind === "speech" ? 0 : 1)) throw new Error("Invalid operation shape");
+    const audioDisplay: SpendingAudioDisplay = value.kind === "speech"
+      ? { operation: "speech", voice: value.voice, textBytes: value.textBytes, instructionsPresent: value.instructionBytes > 0 }
+      : { operation: "transcription", language: value.language, timing: value.timing };
+    return { audioDisplay, audioUnavailableCode: null };
+  } catch { return { audioDisplay: null, audioUnavailableCode: "AUDIO_OPERATION_UNSUPPORTED" }; }
 }
 
 /** Index only retained same-project evidence. Conflicting histories remain explicitly unavailable. */
@@ -51,7 +80,7 @@ export function spendingHistoryDisplay(projectId: string, locks: readonly Retain
         if (!display) continue;
         const encoded = canonical(value), prior = profiles.get(definitionDigest);
         if (profiles.has(definitionDigest) && (prior === null || prior!.canonical !== encoded)) { profiles.set(definitionDigest, null); continue; }
-        profiles.set(definitionDigest, { canonical: encoded, profileDigest: String(providerProfileArguments(value).profileDigest), display });
+        profiles.set(definitionDigest, { canonical: encoded, profileDigest: String(providerProfileArguments(value).profileDigest), display, profile: structuredClone(value) });
       } catch { /* Missing or unsupported retained definitions supply no display identity. */ }
     }
   }
@@ -60,9 +89,10 @@ export function spendingHistoryDisplay(projectId: string, locks: readonly Retain
     for (const node of plan.compiled.nodes) {
       if (!id(node.id) || !hash(node.specDigest)) continue;
       const key = nodeKey({ nodeId: node.id, specDigest: node.specDigest });
-      const value: RetainedWork | null = (node.kind === "image" || node.kind === "video") && label(node.alias)
+      const value: RetainedWork | null = ["image", "video", "speech", "transcription"].includes(node.kind) && label(node.alias)
         && (node.shotId === null || id(node.shotId)) && hash(node.args?.profileDigest)
-        ? { alias: node.alias, shotId: node.shotId, operation: node.kind, profileDigest: node.args.profileDigest } : null;
+        ? { alias: node.alias, shotId: node.shotId, operation: node.kind as RetainedWork["operation"], profileDigest: node.args.profileDigest,
+          ...((node.kind === "speech" || node.kind === "transcription") ? { audioNode: structuredClone(node) } : {}) } : null;
       if (work.has(key) && canonical(work.get(key)) !== canonical(value)) work.set(key, null);
       else work.set(key, value);
     }
@@ -76,7 +106,8 @@ export function spendingHistoryDisplay(projectId: string, locks: readonly Retain
       const found = allowance.projectId === projectId ? work.get(nodeKey(selection)) : null;
       const saved = found?.profileDigest === allowance.profileDigest ? found : null;
       return { ...selection, alias: saved?.alias ?? null, shotId: saved?.shotId ?? null, operation: saved?.operation ?? null,
-        current: allowance.projectId === projectId && current.has(selectionKey(selection)), historyAvailable: !!saved };
+        current: allowance.projectId === projectId && current.has(selectionKey(selection)), historyAvailable: !!saved,
+        ...(saved?.audioNode ? spendingAudioDetails(providerDisplay ? retained?.profile : undefined, saved.audioNode) : {}) };
     }) };
   };
 }

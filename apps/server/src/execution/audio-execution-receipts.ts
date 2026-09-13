@@ -1,10 +1,10 @@
 import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import { describeOpenAISpeechWireRequest } from "@openslate/providers";
 import type { ExecutionRequest, OpenAISpeechDescription, OpenAISpeechOutcome, OpenAISpeechRequest } from "@openslate/providers";
 import type { Attempt } from "./engine.js";
 import { assertOutputReceiptIdentity } from "./output-store.js";
 import type { OutputReceipt } from "./output-store.js";
+import { prepareSpeechOperationOptions } from "./audio-preflight.js";
 
 interface Identity { id: string; projectId: string; version: 1; attemptId: string; requestDigest: string }
 export interface SpeechExecutionMapping extends Identity {
@@ -44,13 +44,9 @@ function base(attempt: Attempt, value: Identity, extras: string[]): void {
 export function prepareSpeechExecutionRequest(input: ExecutionRequest): { request: OpenAISpeechRequest; description: OpenAISpeechDescription; bodyByteLength: number } {
   const request = structuredClone(input);
   speechFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "externalAllowanceId"]);
-  speechFields(request.args, ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "text", "voice", "instructions", "settings"]);
-  speechFields(request.profile!.configuration, ["model", "settings"]); speechFields(request.profile!.configuration.settings, []); speechFields(request.args.settings, []);
   invariant(request.kind === "speech" && request.execution?.adapter === "openai-speech" && request.execution.version === "1"
     && request.inputs.length === 0, "SPEECH_EXECUTION_CONFLICT", "Speech has no media inputs or custom transport overrides");
-  const prepared = { model: request.profile!.configuration.model, text: request.args.text, voice: request.args.voice, instructions: request.args.instructions } as OpenAISpeechRequest;
-  const { description, bodyByteLength } = describeOpenAISpeechWireRequest(prepared);
-  return { request: prepared, description, bodyByteLength };
+  return prepareSpeechOperationOptions(request.profile!.configuration, request.args);
 }
 
 export function assertSpeechExecutionProfile(profile: ProviderProfile, attempt: Attempt): void {

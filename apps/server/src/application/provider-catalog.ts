@@ -3,6 +3,7 @@ import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerPr
 import type { ProviderProfile } from "@openslate/core";
 import { describeOpenAIImageRequest } from "@openslate/providers";
 import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality } from "@openslate/providers";
+import { preflightAudioProfile } from "../execution/audio-preflight.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 import type { MediaCredentialId } from "./provider-credentials.js";
 
@@ -26,7 +27,7 @@ function label(value: unknown): value is string {
     && !/\b[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^(?:\/|~\/)/.test(value);
 }
 /** Pure fixed-profile validation; does not inspect credentials, readiness or registration. */
-export function profilePolicy(profile: ProviderProfile): { credential: MediaCredentialId | null; media: "image" | "video" | null; fixture: boolean } {
+export function profilePolicy(profile: ProviderProfile): { credential: MediaCredentialId | null; media: "image" | "video" | "audio" | null; fixture: boolean } {
   exact(profile, ["id", "revision", "kind", "adapter", "executionVersion", "configuration", "maxConcurrency", "unitCostMicros", "maxRetries", "minFrames", "maxFrames"]);
   providerProfileArguments(profile);
   invariant(integer(profile.maxConcurrency, 1, 64) && integer(profile.maxRetries, 0, 3) && typeof profile.unitCostMicros === "string",
@@ -40,6 +41,11 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
   invariant(profile.executionVersion === "1", "PROVIDER_CATALOG_INVALID", "Unsupported execution mapping version");
   exact(profile.configuration, ["model", "settings"]);
   const configuration = profile.configuration;
+  if (profile.adapter === "openai-speech" || profile.adapter === "openai-transcription") {
+    // Shared pure preflight owns the exact model/profile contract. Voice, instructions and language remain reviewed operation inputs.
+    preflightAudioProfile(profile);
+    return { credential: "openai-media", media: "audio", fixture: false };
+  }
   if (profile.adapter === "openai-image") {
     invariant(profile.kind === "image" && profile.minFrames === undefined && profile.maxFrames === undefined,
       "PROVIDER_CATALOG_INVALID", "The image mapping requires an image profile without video duration limits");
@@ -48,7 +54,7 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
       width: configuration.settings.width as number, height: configuration.settings.height as number, quality: configuration.settings.quality as OpenAIImageQuality });
     return { credential: "openai-media", media: "image", fixture: false };
   }
-  invariant(profile.adapter === "minimax-h3" && profile.kind === "video", "PROVIDER_CATALOG_INVALID", "Only installed fixed image/video mappings may be configured");
+  invariant(profile.adapter === "minimax-h3" && profile.kind === "video", "PROVIDER_CATALOG_INVALID", "Only installed fixed media mappings may be configured");
   exact(configuration.settings, ["resolution"]);
   const model = configuration.model, minimum = model === "MiniMax-H3" ? 120 : 150;
   invariant((model === "MiniMax-H3" || model === "MiniMax-H3-Max")
@@ -99,20 +105,20 @@ export class InstalledProviderCatalog {
   readonly #definitions: Definition[];
   readonly #registry: ExecutionRegistry | undefined;
   readonly #credentials: EnvironmentMediaCredentials;
-  readonly #mediaTools: Readonly<{ image: boolean; video: boolean }>;
+  readonly #mediaTools: Readonly<{ image: boolean; video: boolean; audio: boolean }>;
   readonly #enabledExecutions: ReadonlySet<string>;
   readonly #digest: string;
   get digest(): string { return this.#digest; }
   constructor(options: { configuration?: unknown; registry?: ExecutionRegistry; credentials?: EnvironmentMediaCredentials;
-    mediaTools?: { image: boolean; video: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
+    mediaTools?: { image: boolean; video: boolean; audio?: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
     const configuration = options.configuration === undefined ? { version: 1 as const, profiles: [] } : validateConfiguration(options.configuration);
     this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles];
     this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
-    this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true });
+    this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
     const enabled = options.enabledExecutions ?? [];
-    invariant(Array.isArray(enabled) && enabled.length <= 2 && enabled.every(value => object(value)
-      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "minimax-h3"].includes(value.adapter) && value.version === "1"),
+    invariant(Array.isArray(enabled) && enabled.length <= 4 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "minimax-h3", "openai-speech", "openai-transcription"].includes(value.adapter) && value.version === "1"),
     "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
     this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
     invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");

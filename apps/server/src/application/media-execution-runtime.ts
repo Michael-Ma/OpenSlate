@@ -5,15 +5,22 @@ import { ExecutionRegistry } from "@openslate/providers";
 import type { ExecutionIdentity, ExecutionProvider, FakeProvider } from "@openslate/providers";
 import type { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
-import type { ExternalExecutionAdmission } from "../execution/engine.js";
+import type { ExternalExecutionAdmission, NodeBinding } from "../execution/engine.js";
+import { assertAudioOperationOptions } from "../execution/audio-preflight.js";
 import { ExecutionOutputStore } from "../execution/output-store.js";
 import { ExecutionIngestionRouter } from "../execution/ingestion-router.js";
 import { SpoolImageIngestor } from "../execution/spool-image-ingester.js";
 import { SpoolVideoIngestor } from "../execution/spool-video-ingester.js";
+import { SpoolAudioIngestor } from "../execution/spool-audio-ingester.js";
+import { SpoolTranscriptIngestor } from "../execution/spool-transcript-ingestor.js";
+import { TranscriptionAudioService } from "../execution/transcription-audio-service.js";
+import { TranscriptionAudioStore } from "../media/transcription-audio-store.js";
 import { LocalMediaExecutor } from "../execution/local-media-executor.js";
 import { DurableExternalAdmission } from "../execution/durable-external-admission.js";
 import { OpenAIImageExecution } from "../execution/openai-image-execution.js";
 import { MiniMaxH3Execution } from "../execution/minimax-h3-execution.js";
+import { OpenAISpeechExecution } from "../execution/openai-speech-execution.js";
+import { OpenAITranscriptionExecution } from "../execution/openai-transcription-execution.js";
 import { ProtectedVideoDownloader } from "../execution/video-download.js";
 import type { VideoDownloadOptions } from "../execution/video-download.js";
 import { LocalImageStore, LocalMediaService } from "../media/index.js";
@@ -29,6 +36,7 @@ export interface MediaExecutionRuntimeOptions {
   credentials?: EnvironmentMediaCredentials; providerConfiguration?: unknown;
   /** Trusted host/test dependencies only; never populated from a browser or model request. */
   transport?: { imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch;
+    speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch;
     download?: Pick<VideoDownloadOptions, "lookup" | "request"> };
 }
 function executable(path: string | null): path is string {
@@ -39,10 +47,14 @@ function executable(path: string | null): path is string {
 /** One local installation. Construction performs no network, generation or authority writes. */
 export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOptions) {
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
-  const configuration = structuredClone(options.configuration);
-  invariant(typeof configuration.image === "boolean" && typeof configuration.h3 === "boolean" && Array.isArray(configuration.h3DownloadHosts),
+  const captured = structuredClone(options.configuration);
+  const configuration = { ...captured, speech: captured.speech === undefined ? false : captured.speech,
+    transcription: captured.transcription === undefined ? false : captured.transcription };
+  invariant(typeof configuration.image === "boolean" && typeof configuration.h3 === "boolean"
+    && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && Array.isArray(configuration.h3DownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
-  const enabled = configuration.image || configuration.h3, haveTools = executable(ffmpegPath) && executable(ffprobePath);
+  const enabled = configuration.image || configuration.h3 || configuration.speech || configuration.transcription,
+    haveTools = executable(ffmpegPath) && executable(ffprobePath);
   invariant(!enabled || haveTools, "MEDIA_EXECUTION_TOOLS_REQUIRED", "Enabled media generation requires executable FFmpeg and ffprobe on this computer");
   const credentials = options.credentials ?? new EnvironmentMediaCredentials();
   const directory = resolve(options.dataDirectory), artifactDir = join(directory, "artifacts"), uploadDirectory = join(directory, "uploads");
@@ -54,6 +66,8 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   const localMedia = haveTools ? new LocalMediaService({ rootDir: join(directory, "media"),
     allowedInputRoots: [uploadDirectory, join(outputStore.rootDir, "blobs")], ffmpegPath: ffmpegPath!, ffprobePath: ffprobePath! }) : null;
   const imageStore = haveTools ? new LocalImageStore({ rootDir: join(artifactDir, "images"), ffmpegPath: ffmpegPath!, ffprobePath: ffprobePath! }) : null;
+  // Ingestion remains available for already retained outputs independently of new-submit switches.
+  const transcriptionFiles = localMedia ? new TranscriptionAudioStore({ rootDir: join(directory, "audio-derivatives") }) : null;
   const providers: ExecutionProvider[] = [fakeProvider], enabledExecutions: ExecutionIdentity[] = [];
   if (configuration.image) {
     providers.push(new OpenAIImageExecution({ store, outputStore, artifactRoot: artifactDir, credentials,
@@ -65,6 +79,17 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       ...(options.transport?.h3Fetch ? { fetch: options.transport.h3Fetch } : {}) }));
     enabledExecutions.push({ adapter: "minimax-h3", version: "1" });
   }
+  if (configuration.speech) {
+    providers.push(new OpenAISpeechExecution({ store, outputStore, credentials,
+      ...(options.transport?.speechFetch ? { fetch: options.transport.speechFetch } : {}) }));
+    enabledExecutions.push({ adapter: "openai-speech", version: "1" });
+  }
+  if (configuration.transcription) {
+    providers.push(new OpenAITranscriptionExecution({ store, outputStore, credentials,
+      preparation: new TranscriptionAudioService(store, localMedia!, transcriptionFiles!),
+      ...(options.transport?.transcriptionFetch ? { fetch: options.transport.transcriptionFetch } : {}) }));
+    enabledExecutions.push({ adapter: "openai-transcription", version: "1" });
+  }
   const registry = new ExecutionRegistry(providers);
   const durable = new DurableExternalAdmission(store, profile => {
     const policy = profilePolicy(profile); registry.forProfile(profile);
@@ -74,6 +99,13 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   });
   const externalAdmission: ExternalExecutionAdmission = {
     authorize(input) {
+      if (input.profile.adapter === "openai-speech" || input.profile.adapter === "openai-transcription") {
+        const binding = store.get<NodeBinding>("node_binding", input.nodeId);
+        invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId,
+          "ALLOWANCE_SELECTION_STALE", "Audio preflight requires the exact current candidate");
+        // Pure option validation precedes consumption. Durable admission below rechecks the full active selection.
+        assertAudioOperationOptions(input.profile, binding.node.args);
+      }
       if (input.profile.adapter === "minimax-h3") {
         const project = store.getProject(input.projectId), lock = store.get<{ projectId: string; localExecution?: unknown }>("capability_lock", project.capabilityLockId);
         let pinned = false;
@@ -86,11 +118,13 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   };
   const engine = new Engine(store, registry, { artifactDir, outputStore,
     outputIngestor: new ExecutionIngestionRouter({ ...(imageStore ? { image: new SpoolImageIngestor(outputStore, imageStore) } : {}),
-      ...(localMedia ? { video: new SpoolVideoIngestor(outputStore, localMedia, { rootDir: join(directory, "video-derivations") }) } : {}) }),
+      ...(localMedia ? { video: new SpoolVideoIngestor(outputStore, localMedia, { rootDir: join(directory, "video-derivations") }),
+        audio: new SpoolAudioIngestor(outputStore, localMedia, { rootDir: join(directory, "audio-derivations") }),
+        transcription: new SpoolTranscriptIngestor(outputStore, localMedia, transcriptionFiles!, { artifactDir }) } : {}) }),
     ...(enabled ? { externalAdmission } : {}),
     ...(localMedia ? { localExecution: new LocalMediaExecutor(store, localMedia, { artifactDir }) } : {}) });
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
-    registry, credentials, enabledExecutions, mediaTools: { image: !!imageStore, video: !!localMedia } });
+    registry, credentials, enabledExecutions, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
   const productionOptions: ProductionServiceOptions = configuration.h3
     ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video" } : {};
   return { engine, localMedia, imageStore, outputStore, allowances: new ExternalAllowanceService(store), providerCatalog, uploadDirectory, productionOptions };
