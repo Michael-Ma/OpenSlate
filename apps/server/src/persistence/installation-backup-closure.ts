@@ -24,6 +24,7 @@ import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
 import type { BackupFile } from "./installation-backup.js";
+import { assertGeneratedCanonicalNarrationSegment, assertGeneratedNarrationAudio, resolveGeneratedNarrationAudio } from "../narration/generated-audio.js";
 
 type RecordValue = Record<string, any>;
 const object = (value: unknown): value is RecordValue => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -86,6 +87,22 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       },
     };
     const checkedSpeech = new Set<string>();
+    const checkedGeneratedNarration = new Map<string, string>();
+    const generatedNarration = async (value: RecordValue): Promise<void> => {
+      assertGeneratedNarrationAudio(speechReader, value.projectId, value);
+      const identity = digest(value), previous = checkedGeneratedNarration.get(value.id);
+      if (previous) { fail(previous === identity, "Generated narration provenance changed during backup"); return; }
+      const resolved = resolveGeneratedNarrationAudio(speechReader, value.projectId, value.id);
+      await source(value.media); artifact(resolved.artifact);
+      const intent = resolved.derivationIntent;
+      const raw = await inspectPcmWave(join(bundle, "media", "blobs", `${intent.rawSha256}.source`), intent.rawByteLength);
+      const normalized = await inspectPcmWave(join(bundle, "media", "blobs", `${value.media.sha256}.wav`), value.media.byteLength);
+      fail(raw.sha256 === intent.rawSha256 && raw.byteLength === intent.rawByteLength && canonical(raw.pcm) === canonical(intent.rawPcm), "Generated narration original PCM differs");
+      fail(normalized.sha256 === value.media.sha256 && normalized.byteLength === value.media.byteLength && normalized.pcm.sampleRate === 48000
+        && normalized.pcm.channels === 2 && normalized.pcm.bitsPerSample === 16 && normalized.pcm.sampleCount === resolved.derivationReceipt.normalizedSamples,
+      "Generated narration normalized PCM differs");
+      checkedGeneratedNarration.set(value.id, identity);
+    };
     const speechRecords = (attemptId: string) => {
       if (checkedSpeech.has(attemptId)) return;
       const attempt = get("attempt", attemptId) as Attempt;
@@ -265,7 +282,26 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
             origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }), "Generated audio source lost its exact provenance");
         }
       }
-      else if (row.kind === "narration_audio") await source(value.media);
+      else if (row.kind === "narration_audio") {
+        if (Object.hasOwn(value, "originEvidence") || Object.hasOwn(value, "generation")) await generatedNarration(value);
+        else await source(value.media);
+      } else if (row.kind === "narration_prepared") {
+        for (const view of value.snapshot?.segments ?? []) {
+          const saved = view.audio ? speechReader.get<RecordValue>("narration_audio", view.audio.id) : undefined;
+          if (!view.audio || !(Object.hasOwn(view.audio, "originEvidence") || Object.hasOwn(view.audio, "generation") || saved && Object.hasOwn(saved, "generation"))) continue;
+          fail(canonical(get("narration_audio", view.audio.id)) === canonical(view.audio), "Prepared generated narration differs from its saved recording");
+          await generatedNarration(view.audio);
+        }
+      } else if (row.kind === "narration_canonical") {
+        for (const segment of value.segments ?? []) {
+          const provenance = segment.provenance;
+          const saved = provenance ? speechReader.get<RecordValue>("narration_audio", provenance.audioId) : undefined;
+          if (!provenance || provenance.originEvidence === "human_declared_supplied_recording" && !Object.hasOwn(provenance, "generation") && !(saved && Object.hasOwn(saved, "generation"))) continue;
+          assertGeneratedCanonicalNarrationSegment(speechReader, value.projectId, segment,
+            { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
+          const audio = get("narration_audio", provenance.audioId); await generatedNarration(audio);
+        }
+      }
       else if (row.kind === "media_render") { await renderManifest(value.manifest); if (value.artifact) {
         const saved = get("artifact", value.artifact.artifactId); fail(canonical(saved.artifact) === canonical(value.artifact), "Render artifact identity differs"); }
       }

@@ -1,5 +1,5 @@
 import type { ArtifactRef, CueRecord, ProjectRecord, StageRequirement } from "@openslate/core";
-import type { NarrationProjection, NarrationSnapshot } from "./types.js";
+import type { GeneratedNarrationEvidence, NarrationProjection, NarrationSnapshot } from "./types.js";
 
 export interface NarrationShotMapping { shotId: string; segmentId: string | null }
 export interface PrepareNarrationCommit {
@@ -28,18 +28,24 @@ export interface PreparedNarrationCommit {
   stages: StageRequirement[];
   stageVersions: Record<string, number>;
 }
-export interface CanonicalNarrationSegment {
-  segmentId: string; segmentRevisionId: string; cue: CueRecord;
-  frameCoverage: NarrationProjection["segments"][number]["frameCoverage"];
-  audioPlacement: NarrationProjection["segments"][number]["audioPlacement"];
-  provenance: {
+export interface SuppliedNarrationProvenance {
     audioId: string;
     declaredOrigin: "uploaded" | "generated";
     /** Uploaded files declared generated are not provider-generation evidence. */
     originEvidence: "human_declared_supplied_recording";
     scriptAcceptanceId: string; audioAcceptanceId: string; timingAcceptanceId: string;
     originalSha256: string; toolchainDigest: string;
-  };
+}
+export interface GeneratedNarrationProvenance {
+  audioId: string; originEvidence: "verified_generated_audio"; generation: GeneratedNarrationEvidence;
+  scriptAcceptanceId: string; audioAcceptanceId: string; timingAcceptanceId: string;
+  originalSha256: string; toolchainDigest: string;
+}
+export interface CanonicalNarrationSegment {
+  segmentId: string; segmentRevisionId: string; cue: CueRecord;
+  frameCoverage: NarrationProjection["segments"][number]["frameCoverage"];
+  audioPlacement: NarrationProjection["segments"][number]["audioPlacement"];
+  provenance: SuppliedNarrationProvenance | GeneratedNarrationProvenance;
 }
 export interface CanonicalNarration {
   id: string; projectId: string; projectRevisionId: string; headVersion: number;

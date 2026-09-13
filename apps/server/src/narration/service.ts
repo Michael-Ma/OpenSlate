@@ -3,6 +3,13 @@ import type { ActorContext } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
 import type { LocalMediaService } from "../media/index.js";
 import type { NarrationAcceptance, NarrationAudio, NarrationCue, NarrationEntry, NarrationGap, NarrationImpact, NarrationProjection, NarrationReadiness, NarrationSegmentView, NarrationSnapshot, NarrationState, ReviseSegments, SegmentDraft, SegmentRevision } from "./types.js";
+import { isVerifiedGeneratedNarrationAudio, narrationAudioOrigin, resolveGeneratedNarrationAudio, verifyGeneratedNarrationAudio } from "./generated-audio.js";
+import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
+
+export interface AttachGeneratedNarrationAudio {
+  expectedVersion: number; segmentId: string; segmentRevisionId: string;
+  artifactId: string; artifactDigest: string; generationEvidenceDigest: string; key: string;
+}
 
 const MAX_SAMPLES = 48000 * 360;
 function integer(value: number, min: number, max: number): void { invariant(Number.isSafeInteger(value) && value >= min && value <= max, "NARRATION_INVALID_INPUT", "Invalid sample coordinate or version"); }
@@ -102,10 +109,62 @@ export class NarrationService {
     return this.mutate(projectId, actor, expectedVersion, key, "bind", { segmentId, audioId }, state => {
       const entry = this.entry(state, segmentId), script = this.record<SegmentRevision>("narration_segment", entry.segmentRevisionId, projectId);
       const audio = this.record<NarrationAudio>("narration_audio", audioId, projectId);
-      invariant(script.source.kind === audio.declaredOrigin, "NARRATION_SOURCE_UNDECIDED", "Select the recording source before binding its audio");
+      invariant(!isVerifiedGeneratedNarrationAudio(audio), "NARRATION_GENERATED_ATTACHMENT_REQUIRED", "Use the exact human generated-recording selection action");
+      invariant(script.source.kind === narrationAudioOrigin(audio), "NARRATION_SOURCE_UNDECIDED", "Select the recording source before binding its audio");
       if (entry.audioId === audioId) return;
       entry.audioId = audioId; entry.cueId = null; entry.audioAcceptanceId = entry.timingAcceptanceId = null;
     });
+  }
+
+  /** Select an existing generated take. Generation evidence does not accept its words or timing. */
+  async attachGeneratedAudio(projectId: string, human: ActorContext, input: AttachGeneratedNarrationAudio, options: { signal?: AbortSignal } = {}): Promise<NarrationSnapshot> {
+    const signal = options.signal; human = structuredClone(human); input = structuredClone(input);
+    const stopped = () => invariant(!signal?.aborted, "NARRATION_CANCELLED", "Generated recording selection was cancelled");
+    this.authority(projectId, human, true); stopped();
+    invariant(input && Object.keys(input).sort().join("\0") === ["expectedVersion", "segmentId", "segmentRevisionId", "artifactId", "artifactDigest", "generationEvidenceDigest", "key"].sort().join("\0"),
+      "NARRATION_INVALID_INPUT", "Choose one exact generated recording for a saved section");
+    integer(input.expectedVersion, 0, Number.MAX_SAFE_INTEGER);
+    for (const value of [input.segmentId, input.segmentRevisionId, input.artifactId, input.key]) text(value, 160);
+    for (const value of [input.artifactDigest, input.generationEvidenceDigest]) invariant(typeof value === "string" && /^[a-f0-9]{64}$/.test(value), "NARRATION_INVALID_INPUT", "Generated recording identity is invalid");
+    const { expectedVersion, key, ...selection } = input, action = "attach_generated_audio";
+    const replay = this.store.commandReplay<NarrationSnapshot>(`${human.principalId}:${projectId}:${human.requestId}:narration`, key,
+      digest({ action, expectedVersion, arguments: selection }));
+    if (replay) return replay.result;
+    const section = (state: NarrationState) => {
+      invariant(state.version === expectedVersion, "REVISION_CONFLICT", "Narration changed before this recording was selected");
+      const entry = this.entry(state, selection.segmentId);
+      invariant(entry.segmentRevisionId === selection.segmentRevisionId, "REVISION_CONFLICT", "This narration section changed before recording selection");
+      const script = this.record<SegmentRevision>("narration_segment", entry.segmentRevisionId, projectId);
+      invariant(script.source.kind === "generated", "NARRATION_SOURCE_UNDECIDED", "Choose generated audio for this section before attaching the recording");
+      return entry;
+    };
+    section(this.read(projectId).state);
+    const resolve = () => {
+      const value = resolveGeneratedNarrationAudio(this.store, projectId, selection.artifactId);
+      invariant(value.artifactDigest === selection.artifactDigest && value.generationEvidenceDigest === selection.generationEvidenceDigest,
+        "NARRATION_GENERATED_IDENTITY_CHANGED", "The selected generated recording evidence changed");
+      return value;
+    };
+    const selected = resolve();
+    await this.verifyGeneratedAudio(selected, signal);
+    stopped(); this.authority(projectId, human, true);
+    // mutate fences authority, then resolves concurrent successful replay before current-version checks.
+    return this.mutate(projectId, human, expectedVersion, key, action, selection, state => {
+      stopped(); this.authority(projectId, human, true);
+      const entry = section(state), current = resolve();
+      invariant(digest(current.audio) === digest(selected.audio), "NARRATION_GENERATED_IDENTITY_CHANGED", "Generated recording changed during verification");
+      const existing = this.store.get<NarrationAudio>("narration_audio", selection.artifactId);
+      invariant(!existing || digest(existing) === digest(current.audio), "NARRATION_INTEGRITY_ERROR", "This recording identity already has different provenance");
+      if (!existing) this.store.insert("narration_audio", current.audio.id, projectId, current.audio);
+      if (entry.audioId !== current.audio.id) {
+        entry.audioId = current.audio.id; entry.cueId = null; entry.audioAcceptanceId = entry.timingAcceptanceId = null;
+      }
+      this.store.appendEvent(projectId, "narration.generated_audio_attached", { ...selection, requestId: human.requestId });
+    });
+  }
+
+  private verifyGeneratedAudio(selected: ResolvedGeneratedNarrationAudio, signal?: AbortSignal): Promise<ResolvedGeneratedNarrationAudio> {
+    return verifyGeneratedNarrationAudio(this.store, this.media, { artifactDir: this.production.engine.artifactDir }, selected, signal ? { signal } : {});
   }
 
   recordHumanCue(projectId: string, human: ActorContext, expectedVersion: number, key: string, input: { segmentId: string; startSample: number; endSample: number }): NarrationSnapshot {

@@ -3,6 +3,7 @@ import type { ActorContext, CompiledPlan, ProjectRecord, ProviderProfile } from 
 import type { ProductionService } from "./service.js";
 import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
 import { NarrationService } from "../narration/service.js";
+import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from "../narration/generated-audio.js";
 import { projectApplicationCapabilities } from "./application-capabilities.js";
 import type { DirectorApplicationCapabilities } from "./application-capabilities.js";
 
@@ -141,7 +142,12 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     };
     if (section === "narration") {
       const snapshot = new NarrationService(service).snapshot(projectId, actor);
-      const recording = (audio: NarrationAudio) => ({ id: audio.id, declaredOrigin: audio.declaredOrigin,
+      const recording = (audio: NarrationAudio) => isVerifiedGeneratedNarrationAudio(audio) ? (() => {
+        const summary = summarizeGeneratedNarrationAudio(audio);
+        return { id: audio.id, sha256: audio.media.sha256, samples: audio.media.probe.audio?.samples ?? null,
+          sampleRate: audio.media.probe.audio?.sampleRate ?? null, originEvidence: summary.originEvidence,
+          generation: summary.generation, selection: summary.selection };
+      })() : ({ id: audio.id, declaredOrigin: audio.declaredOrigin,
         sha256: audio.media.sha256, samples: audio.media.probe.audio?.samples ?? null,
         sampleRate: audio.media.probe.audio?.sampleRate ?? null, originEvidence: "human_declared_supplied_recording" });
       const segments = snapshot.segments.map(({ entry, script, audio, cue, accepted }) => ({ entry, script, audio: audio ? recording(audio) : null, cue, accepted }));

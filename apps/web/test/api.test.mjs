@@ -41,6 +41,16 @@ test('artifact preview has an explicit bounded byte limit', async () => {
   const api = new StudioApi('fixture');
   await assert.rejects(api.artifact('project', { artifactId: 'large', sha256: '', kind: 'video' }, new AbortController().signal), error => error.code === 'ARTIFACT_TOO_LARGE'); api.close();
 });
+test('an existing generated WAV uses the authenticated artifact path before narration attachment and verifies its exact hash', async () => {
+  const bytes = new TextEncoder().encode('offline synthetic WAV bytes'), calls = [];
+  globalThis.fetch = async (path, options) => { calls.push({ path, options }); return new Response(bytes, { headers: { 'content-type': 'audio/wav' } }); };
+  const api = new StudioApi('fixture'), sha256 = createHash('sha256').update(bytes).digest('hex');
+  const url = await api.artifact('project', { artifactId: 'existing-take', sha256, kind: 'audio' }, new AbortController().signal);
+  assert.equal(calls[0].path, '/api/projects/project/artifacts/existing-take/content'); assert.equal(calls[0].options.method, 'GET');
+  assert.equal(calls[0].options.headers.authorization, 'Bearer fixture'); assert.equal(calls[0].options.body, undefined);
+  assert.match(url, /^blob:/); URL.revokeObjectURL(url);
+  await assert.rejects(api.artifact('project', { artifactId: 'existing-take', sha256: 'f'.repeat(64), kind: 'audio' }, new AbortController().signal), error => error.code === 'ARTIFACT_CHANGED'); api.close();
+});
 test('transport exposes safe failure codes without reflecting server text or tokens', async () => {
   globalThis.fetch = async () => Response.json({ error: { code: 'QUESTION_STALE', message: 'do not show raw server secret' } }, { status: 409 });
   const api = new StudioApi('fixture');

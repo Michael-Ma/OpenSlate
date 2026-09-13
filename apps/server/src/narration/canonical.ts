@@ -4,6 +4,8 @@ import type { NarrationService } from "./service.js";
 import type { NarrationAcceptance, NarrationSnapshot } from "./types.js";
 import type { CanonicalNarration, CanonicalNarrationArtifact, NarrationCommitReceipt, NarrationShotImpact, NarrationShotMapping, PreparedNarrationCommit, PrepareNarrationCommit } from "./canonical-types.js";
 import { installNarrationAudio } from "./verified-audio.js";
+import { assertGeneratedNarrationAudio, createGeneratedNarrationProvenance, isVerifiedGeneratedNarrationAudio, narrationAudioOrigin, resolveGeneratedNarrationAudio, verifyGeneratedNarrationAudio } from "./generated-audio.js";
+import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
 
 interface StageBinding extends StageRequirement { id: string; projectId: string; inputDigest: string; outputDigest: string; bindingVersion: number; progressVersion: number; contractDigest: string }
 const stageId = (projectId: string, stage: StageRequirement) => digest({ projectId, stageId: stage.stageId, scopeId: stage.scopeId });
@@ -104,12 +106,25 @@ export class NarrationCanonicalService {
     invariant(!this.store.db.inTransaction, "ASYNC_TRANSACTION", "Narration artifact verification must run outside SQLite transactions");
     const sources = [...new Map(prepared.projection.segments.map(segment => [segment.audioPlacement.source.artifactId, segment.audioPlacement.source])).values()];
     const artifacts: CanonicalNarrationArtifact[] = [];
-    for (const source of sources) artifacts.push(await installNarrationAudio(this.narration.media, this.production.engine.artifactDir, projectId, source));
+    const generated: ResolvedGeneratedNarrationAudio[] = [];
+    for (const source of sources) {
+      const audio = prepared.snapshot.segments.find(view => view.audio?.id === source.artifactId)?.audio;
+      if (audio && isVerifiedGeneratedNarrationAudio(audio)) {
+        assertGeneratedNarrationAudio(this.store, projectId, audio);
+        const resolved = resolveGeneratedNarrationAudio(this.store, projectId, audio.id);
+        generated.push(await verifyGeneratedNarrationAudio(this.store, this.narration.media, { artifactDir: this.production.engine.artifactDir }, resolved));
+      } else artifacts.push(await installNarrationAudio(this.narration.media, this.production.engine.artifactDir, projectId, source));
+    }
     return this.store.transaction(() => {
       this.authority(projectId, actor);
       const replay = this.store.get<NarrationCommitReceipt>("narration_commit_receipt", preparedId);
       if (replay) return replay;
       this.checkCurrent(prepared, actor);
+      for (const selected of generated) {
+        const current = resolveGeneratedNarrationAudio(this.store, projectId, selected.audio.id);
+        invariant(digest(current.audio) === digest(selected.audio) && current.artifactDigest === selected.artifactDigest,
+          "NARRATION_INTEGRITY_ERROR", "Generated narration provenance changed during canonical verification");
+      }
       for (const artifact of artifacts) {
         const existing = this.store.get<CanonicalNarrationArtifact>("artifact", artifact.id);
         invariant(!existing || (existing.projectId === projectId && digest(existing.artifact) === digest(artifact.artifact) && existing.path === artifact.path && existing.mimeType === artifact.mimeType),
@@ -125,7 +140,10 @@ export class NarrationCanonicalService {
         shotMappings: prepared.shotMappings.filter(mapping => mapping.segmentId !== null),
         segments: prepared.projection.segments.map(segment => {
           const view = prepared.snapshot.segments.find(view => view.entry.segmentId === segment.segmentId)!;
-          return { ...segment, provenance: { audioId: view.audio!.id, declaredOrigin: view.audio!.declaredOrigin, originEvidence: "human_declared_supplied_recording",
+          const audio = view.audio!;
+          if (isVerifiedGeneratedNarrationAudio(audio)) return { ...segment, provenance: createGeneratedNarrationProvenance(audio, {
+            scriptAcceptanceId: view.entry.scriptAcceptanceId!, audioAcceptanceId: view.entry.audioAcceptanceId!, timingAcceptanceId: view.entry.timingAcceptanceId! }) };
+          return { ...segment, provenance: { audioId: audio.id, declaredOrigin: audio.declaredOrigin, originEvidence: "human_declared_supplied_recording",
             scriptAcceptanceId: view.entry.scriptAcceptanceId!, audioAcceptanceId: view.entry.audioAcceptanceId!, timingAcceptanceId: view.entry.timingAcceptanceId!,
             originalSha256: view.audio!.media.originalSha256, toolchainDigest: view.audio!.media.toolchainDigest } };
         }) };
@@ -172,6 +190,7 @@ export class NarrationCanonicalService {
     for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed after preparation");
   }
   private verifyAcceptances(projectId: string, snapshot: NarrationSnapshot): void {
+    for (const view of snapshot.segments) if (view.audio && isVerifiedGeneratedNarrationAudio(view.audio)) assertGeneratedNarrationAudio(this.store, projectId, view.audio);
     for (const view of snapshot.segments) for (const kind of ["script", "audio", "timing"] as const) {
       const id = kind === "script" ? view.entry.scriptAcceptanceId : kind === "audio" ? view.entry.audioAcceptanceId : view.entry.timingAcceptanceId;
       const acceptance = id ? this.store.get<NarrationAcceptance>("narration_acceptance", id) : undefined;
@@ -194,7 +213,7 @@ export class NarrationCanonicalService {
     return [...mappings].map(([shotId, segmentId]) => ({ shotId, segmentId })).sort((a, b) => a.shotId.localeCompare(b.shotId));
   }
   private source(snapshot: NarrationSnapshot): ProjectRecord["narration"]["source"] {
-    const origins = new Set(snapshot.segments.map(segment => segment.audio!.declaredOrigin));
+    const origins = new Set(snapshot.segments.map(segment => narrationAudioOrigin(segment.audio!)));
     return origins.size > 1 ? "mixed" : origins.has("generated") ? "generated" : "uploaded";
   }
   private bindStages(prepared: PreparedNarrationCommit, project: ProjectRecord): void {

@@ -30,7 +30,8 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Six-minute workflow probe](implementation/SIX-MINUTE-WORKFLOW.md) | Sixty shots, exact batch review, one-shot reuse and uncertain-job restart using fake media |
 | [Speech application execution](implementation/OPENAI-SPEECH-EXECUTION.md) | Exact consumed approval, one-use speech dispatch and complete unadopted audio recovery |
 | [Transcription application execution](implementation/OPENAI-TRANSCRIPTION-EXECUTION.md) | Exact owned upload and consumed approval, one-use dispatch, raw JSON recovery and backup closure |
-| [Generated narration attachment plan](implementation/GENERATED-NARRATION-ATTACHMENT.md) | Next human selection of verified generated audio, preserving legacy recording and canonical provenance |
+| [Generated narration attachment](implementation/GENERATED-NARRATION-ATTACHMENT.md) | Verified human selection, exact canonical generation history, browser review and restart evidence |
+| [Transcript review and adoption plan](implementation/TRANSCRIPT-REVIEW-ADOPTION.md) | Next bounded word review and separate human writing/timing selections, preserving candidate history |
 | [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration linked |
 | [Unreviewed transcript candidates](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, atomic publication and backup recovery; human adoption remains separate |
 | [Transcription audio preparation](implementation/TRANSCRIPTION-AUDIO-PREPARATION.md) | Verified complete-source 16 kHz derivative, six-minute recovery, parser and timing helper |

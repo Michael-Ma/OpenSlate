@@ -149,6 +149,11 @@ test("saved speech profiles and generated voice selections cannot enable absent 
   assert.equal(capabilities.suppliedRecordings.implemented, true); assert.equal(capabilities.suppliedRecordings.hostReadiness, "not_evaluated");
   assert.deepEqual(capabilities.suppliedRecordings.origins, ["uploaded", "externally_generated"]);
   assert.equal(capabilities.suppliedRecordings.provenance, "human_declared_not_provider_verified");
+  assert.equal(view.applicationCapabilities.version, 2);
+  assert.deepEqual(capabilities.generatedRecordingAttachment, original.applicationCapabilities.narration.generatedRecordingAttachment);
+  assert.equal(capabilities.generatedRecordingAttachment.workflow, "human_select_existing_verified_recording");
+  assert.equal(capabilities.generatedRecordingAttachment.createsAudio, false); assert.equal(capabilities.generatedRecordingAttachment.toolAvailable, false);
+  assert.equal(capabilities.generatedRecordingAttachment.hostReadiness, "not_evaluated");
   assert.equal(new NarrationService(f.service).mediaAvailable, false, "implementation support does not assert configured media tools");
   assert.deepEqual(view.applicationCapabilities, original.applicationCapabilities);
   assert.equal(view.guard.applicationCapabilitiesDigest, original.guard.applicationCapabilitiesDigest);
@@ -162,12 +167,26 @@ test("mutating returned narration capabilities cannot change later context or du
   first.applicationCapabilities.narration.speechSynthesis.available = true;
   first.applicationCapabilities.narration.suppliedRecordings.origins.push("invented");
   first.applicationCapabilities.narration.generatedSourceIntent.guidance = "Synthesis is ready";
+  first.applicationCapabilities.narration.generatedRecordingAttachment.createsAudio = true;
   first.guard.applicationCapabilitiesDigest = digest(first.applicationCapabilities);
   const next = f.read({ section: "narration" });
   assert.deepEqual(next.applicationCapabilities, expected);
   assert.equal(next.guard.applicationCapabilitiesDigest, digest(expected));
   assert.notEqual(next.guard.applicationCapabilitiesDigest, first.guard.applicationCapabilitiesDigest);
   assert.equal(f.store.db.prepare("SELECT total_changes() AS count").get().count, before);
+});
+
+test("legacy narration summaries keep human-declared external origin byte-for-byte", t => {
+  const f = setup(t), audioId = newId();
+  // Existing supplied-recording metadata is deliberately not promoted to provider evidence by a read.
+  const audio = { id: audioId, projectId: f.project.id, declaredOrigin: "generated", requestId: f.human.requestId,
+    media: { artifactId: audioId, sha256: "a".repeat(64), probe: { audio: { samples: 48000, sampleRate: 48000 } } } };
+  f.store.insert("narration_audio", audioId, f.project.id, audio);
+  const body = canonical(f.store.get("narration_audio", audioId)), before = f.store.db.prepare("SELECT total_changes() AS n").get().n;
+  const page = f.read({ section: "narration" });
+  assert.equal(canonical(page.audioLibrary[0]), canonical({ id: audioId, declaredOrigin: "generated", sha256: "a".repeat(64), samples: 48000, sampleRate: 48000, originEvidence: "human_declared_supplied_recording" }));
+  assert.equal(canonical(f.store.get("narration_audio", audioId)), body);
+  assert.equal(f.store.db.prepare("SELECT total_changes() AS n").get().n, before);
 });
 
 test("all shot, scene and historical alias pages remain retrievable without silent clipping", async t => {

@@ -36,6 +36,9 @@ import { assertLocalExecutionDispatch, assertLocalExecutionIntent, assertLocalEx
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent } from "../execution/local-execution.js";
 import { assertRecoveryFence, assertRecoveryReceipt, assertRecoveryRelease, recoveryBodyHash } from "./recovery-records.js";
 import type { InstallationRecoveryRow, RecoveryFence, RecoveryReceipt, RecoveryReleaseReceipt } from "./recovery-records.js";
+import { assertGeneratedCanonicalNarrationSegment, assertGeneratedNarrationAudio } from "../narration/generated-audio.js";
+import type { CanonicalNarration, PreparedNarrationCommit } from "../narration/canonical-types.js";
+import type { NarrationAudio } from "../narration/types.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -143,6 +146,30 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "narration_audio" && (Object.hasOwn(body, "originEvidence") || Object.hasOwn(body, "generation"))) {
+      const audio = { ...body, id, projectId };
+      assertGeneratedNarrationAudio(this, projectId, audio);
+      reference("artifact", id); reference("media_source", id);
+    }
+    if (kind === "narration_prepared") {
+      const prepared = body as unknown as PreparedNarrationCommit;
+      for (const view of prepared.snapshot?.segments ?? []) {
+        const saved = view.audio ? this.get<NarrationAudio>("narration_audio", view.audio.id) : undefined;
+        if (!view.audio || !(Object.hasOwn(view.audio, "originEvidence") || Object.hasOwn(view.audio, "generation") || saved && Object.hasOwn(saved, "generation"))) continue;
+        reference("narration_audio", view.audio.id); assertGeneratedNarrationAudio(this, projectId, view.audio);
+        invariant(canonical(saved) === canonical(view.audio), "NARRATION_INTEGRITY_ERROR", "Prepared generated recording differs from its saved provenance");
+      }
+    }
+    if (kind === "narration_canonical") {
+      const value = body as unknown as CanonicalNarration;
+      for (const segment of value.segments ?? []) {
+        const provenance = segment.provenance;
+        const saved = provenance ? this.get<NarrationAudio>("narration_audio", provenance.audioId) : undefined;
+        if (!provenance || provenance.originEvidence === "human_declared_supplied_recording" && !Object.hasOwn(provenance, "generation") && !(saved && Object.hasOwn(saved, "generation"))) continue;
+        assertGeneratedCanonicalNarrationSegment(this, projectId, segment,
+          { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
+      }
+    }
     if (kind === "installation_recovery_fence") {
       const fence = { ...body, id, projectId } as unknown as RecoveryFence; assertRecoveryFence(fence);
       reference(fence.kind, fence.recordId);
@@ -590,14 +617,19 @@ export class Store {
       .map(row => JSON.parse(row.body) as ProjectEvent);
   }
 
+  /** Read an exact completed command without beginning new asynchronous work. Caller owns authorization. */
+  commandReplay<T>(actorScope: string, key: string, requestDigest: string): { result: T } | undefined {
+    const old = this.db.prepare("SELECT digest,result FROM commands WHERE actor_scope=? AND key=?").get(actorScope, key) as { digest: string; result: string } | undefined;
+    if (!old) return undefined;
+    invariant(old.digest === requestDigest, "IDEMPOTENCY_CONFLICT", "Command key was used with different content");
+    return { result: JSON.parse(old.result) as T };
+  }
+
   command<T>(actorScope: string, key: string, requestDigest: string, fn: () => T): T {
     invariant(fn.constructor.name !== "AsyncFunction", "ASYNC_TRANSACTION", "Command mutations must be synchronous");
     return this.transaction(() => {
-      const old = this.db.prepare("SELECT digest,result FROM commands WHERE actor_scope=? AND key=?").get(actorScope, key) as { digest: string; result: string } | undefined;
-      if (old) {
-        invariant(old.digest === requestDigest, "IDEMPOTENCY_CONFLICT", "Command key was used with different content");
-        return JSON.parse(old.result) as T;
-      }
+      const old = this.commandReplay<T>(actorScope, key, requestDigest);
+      if (old) return old.result;
       const result = fn();
       this.db.prepare("INSERT INTO commands(actor_scope,key,digest,result) VALUES(?,?,?,?)").run(actorScope, key, requestDigest, canonical(result));
       return result;

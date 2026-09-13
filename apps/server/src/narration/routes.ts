@@ -10,10 +10,13 @@ import type { NarrationCanonicalService } from "./canonical.js";
 import type { NarrationShotMapping } from "./canonical-types.js";
 import type { NarrationAudio, ReviseSegments } from "./types.js";
 import { ManagedUploadStore } from "./managed-upload.js";
+import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from "./generated-audio.js";
+import { projectGeneratedRecordings } from "./generated-recording-projection.js";
 
 interface Session { id: string; projectId: string; requestId: string; principalId: "local-user" }
 interface Params { projectId: string }
 const id = { type: "string", minLength: 1, maxLength: 160 };
+const sha256 = { type: "string", pattern: "^[a-f0-9]{64}$" };
 const version = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
 const samples = { type: "integer", minimum: 0, maximum: 48000 * 360 };
 const object = (properties: object, required: string[]) => ({ type: "object", properties, required, additionalProperties: false });
@@ -46,8 +49,11 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     const project = store.getProject(projectId);
     const recordings = store.list<NarrationAudio>("narration_audio", projectId).reverse();
     invariant(audioOffset <= recordings.length, "VALIDATION_ERROR", "Recording library offset is beyond its current size");
-    const audioLibrary = recordings.slice(audioOffset, audioOffset + 400).map(({ id, declaredOrigin, media }) => ({ id, declaredOrigin, media }));
-    return { capabilities: { audioImport: narration.mediaAvailable, audioPlayback: narration.mediaAvailable }, audioLibrary, coverage: { audioLibrary: { offset: audioOffset, returned: audioLibrary.length, total: recordings.length, nextOffset: audioOffset + audioLibrary.length < recordings.length ? audioOffset + audioLibrary.length : null } }, headVersion: project.headVersion, revisionId: project.revisionId, snapshot: narration.workspaceSnapshot(projectId), canonical: canonical.workspaceCurrent(projectId), session: selectedSession(projectId) };
+    const audioLibrary = recordings.slice(audioOffset, audioOffset + 400).map(audio => isVerifiedGeneratedNarrationAudio(audio) ? summarizeGeneratedNarrationAudio(audio) : { id: audio.id, declaredOrigin: audio.declaredOrigin, media: audio.media });
+    const snapshot = narration.workspaceSnapshot(projectId);
+    return { capabilities: { audioImport: narration.mediaAvailable, audioPlayback: narration.mediaAvailable }, audioLibrary, coverage: { audioLibrary: { offset: audioOffset, returned: audioLibrary.length, total: recordings.length, nextOffset: audioOffset + audioLibrary.length < recordings.length ? audioOffset + audioLibrary.length : null } }, headVersion: project.headVersion, revisionId: project.revisionId,
+      snapshot: { ...snapshot, segments: snapshot.segments.map(segment => segment.audio && isVerifiedGeneratedNarrationAudio(segment.audio) ? { ...segment, audio: summarizeGeneratedNarrationAudio(segment.audio) } : segment) },
+      canonical: canonical.workspaceCurrent(projectId), session: selectedSession(projectId) };
   });
 
   app.register(async scoped => {
@@ -55,6 +61,9 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     // Authentication inherited from createApp runs before a handler consumes this stream.
     scoped.addContentTypeParser("application/octet-stream", (_request, payload, done) => done(null, payload));
     scoped.get<{ Params: Params; Querystring: { audioOffset?: string } }>(base, { schema: { querystring: object({ audioOffset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" } }, []) } }, async request => view(request.params.projectId, Number(request.query.audioOffset ?? 0)));
+    scoped.get<{ Params: Params; Querystring: { offset?: string; expectedDigest?: string } }>(`${base}/generated-recordings`, {
+      schema: { querystring: object({ offset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" }, expectedDigest: sha256 }, []) },
+    }, async request => projectGeneratedRecordings(store, request.params.projectId, Number(request.query.offset ?? 0), request.query.expectedDigest));
     scoped.get<{ Params: Params & { audioId: string } }>(`${base}/audio/:audioId/content`, async (request, reply) => {
       const recording = store.get<NarrationAudio>("narration_audio", request.params.audioId);
       invariant(recording?.projectId === request.params.projectId, "NOT_FOUND", "Recording does not belong to this project");
@@ -91,6 +100,15 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     scoped.post<{ Params: Params; Body: { sessionId: string; expectedVersion: number; segmentId: string; audioId: string } }>(`${base}/bindings`, {
       schema: { body: edit({ segmentId: id, audioId: id }, ["segmentId", "audioId"]) },
     }, async request => { const b = request.body; return narration.bindAudio(request.params.projectId, actorFor(request.params.projectId, b.sessionId), b.expectedVersion, key(request), b.segmentId, b.audioId); });
+    scoped.post<{ Params: Params; Body: { sessionId: string; expectedVersion: number; segmentId: string; segmentRevisionId: string; artifactId: string; artifactDigest: string; generationEvidenceDigest: string } }>(`${base}/generated-audio-bindings`, {
+      schema: { body: edit({ segmentId: id, segmentRevisionId: id, artifactId: id, artifactDigest: sha256, generationEvidenceDigest: sha256 }, ["segmentId", "segmentRevisionId", "artifactId", "artifactDigest", "generationEvidenceDigest"]) },
+    }, async (request, reply) => {
+      const { sessionId, ...input } = request.body, actor = actorFor(request.params.projectId, sessionId), commandKey = key(request);
+      const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
+      request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
+      try { return await narration.attachGeneratedAudio(request.params.projectId, actor, { ...input, key: commandKey }, { signal: abort.signal }); }
+      finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
+    });
     scoped.post<{ Params: Params; Body: { sessionId: string; expectedVersion: number; segmentId: string; startSample: number; endSample: number } }>(`${base}/cues`, {
       schema: { body: edit({ segmentId: id, startSample: samples, endSample: samples }, ["segmentId", "startSample", "endSample"]) },
     }, async request => { const b = request.body; return narration.recordHumanCue(request.params.projectId, actorFor(request.params.projectId, b.sessionId), b.expectedVersion, key(request), { segmentId: b.segmentId, startSample: b.startSample, endSample: b.endSample }); });

@@ -10,11 +10,33 @@ export interface SegmentDraft {
   source: SourceChoice;
 }
 export interface SegmentRevision extends SegmentDraft { id: string; segmentId: string; projectId: string }
-export interface NarrationAudio {
+export interface SuppliedNarrationAudio {
   id: string; projectId: string; media: SuppliedMedia;
   /** A human-declared origin for an already supplied recording; not provider evidence. */
   declaredOrigin: "uploaded" | "generated";
   requestId: string;
+}
+/** Exact historical provider/normalization evidence; no current binding or mutable lease is hashed. */
+export interface GeneratedNarrationEvidence {
+  version: 1; adapter: "openai-speech"; executionVersion: "1";
+  model: string; voice: string;
+  artifactId: string; artifactDigest: string; artifactRecordDigest: string;
+  attemptId: string; requestDigest: string; reservationId: string; reservationDigest: string;
+  mappingDigest: string; dispatchDigest: string; resultDigest: string;
+  outputReceiptId: string; outputReceiptDigest: string; outputSpoolId: string; outputSpoolDigest: string;
+  derivationId: string; derivationIntentDigest: string; derivationReceiptDigest: string;
+  sourceDescriptorId: string; sourceDigest: string; normalizedSamples: number;
+}
+/** An existing OpenSlate output, not an upload or a human-declared external recording. */
+export interface VerifiedGeneratedNarrationAudio {
+  id: string; projectId: string; media: SuppliedMedia;
+  originEvidence: "verified_generated_audio"; generation: GeneratedNarrationEvidence;
+}
+export type NarrationAudio = SuppliedNarrationAudio | VerifiedGeneratedNarrationAudio;
+export interface GeneratedNarrationSummary {
+  id: string; media: SuppliedMedia; originEvidence: "verified_generated_audio";
+  selection: { artifactDigest: string; generationEvidenceDigest: string };
+  generation: { adapter: "openai-speech"; version: "1"; model: string; voice: string };
 }
 export interface NarrationCue {
   id: string; projectId: string; segmentRevisionId: string; audioId: string;

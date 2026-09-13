@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Human attachment of existing verified generated audio, exact canonical provenance and restart recovery",
+  "fullCheckout": {
+    "passed": 1260,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 43,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "durationMilliseconds": 728001.774208,
+    "unchangedSourceAndTestFilesDuringCheck": 289
+  },
+  "focusedVerification": {
+    "generatedAudioHelpers": { "passed": 11, "failed": 0 },
+    "domainAndBackup": { "passed": 20, "failed": 0 },
+    "adjacentDomainAndBackup": { "passed": 65, "failed": 0 },
+    "clipLibraryAndGeneratedHttp": { "passed": 10, "failed": 0 },
+    "note": "Focused suites overlap; counts are not summed into the full checkout total."
+  },
+  "browser": {
+    "fixture": "Actual Engine with injected speech/transcription responses and real local audio normalization; default fake launcher",
+    "audio": { "kind": "synthetic tone with silence", "durationSeconds": 6, "sampleRate": 48000, "channels": 2, "samples": 288000 },
+    "actions": [
+      "Preview the exact completed recording before attachment",
+      "Create an unaccepted generated-source narration draft",
+      "Attach the exact selected recording through the authenticated human action",
+      "Accept script, recording and timing separately",
+      "Review and apply canonical narration",
+      "Reopen the same installation and verify saved narration and preview"
+    ],
+    "firstPreview": { "durationSeconds": 6, "readyState": 4, "mediaError": null },
+    "independentAudit": { "passed": 21, "failed": 0 },
+    "httpReplay": { "passed": 3, "failed": 0 },
+    "reopen": { "passed": 6, "failed": 0, "playerDurationLabel": "0:06", "consoleWarningsOrErrors": 0 },
+    "preserved": [
+      "Original generated artifact and all generation/allowance/transcript records",
+      "Five captured managed media/artifact files across attachment, acceptance, apply and reopen",
+      "Exact original and normalized source provenance",
+      "Independent script/audio/timing acceptance identities",
+      "Unreviewed transcript candidate history",
+      "Existing plan and request-owned editing hold"
+    ],
+    "rawSpools": "Both raw speech and transcription blobs verified against their retained output hashes",
+    "cleanup": "Both owned launcher runs exited successfully; temporary browser tab closed",
+    "limitations": [
+      "Synthetic tone and injected transcripts are not real speech, recognition or quality evidence",
+      "The browser fixture has no shots; scoped shot preservation is covered in domain tests",
+      "Before/after filesystem snapshots cover five managed media/artifact files, not the whole installation",
+      "One reopened numeric media inspection timed out before browser command dispatch; the visible six-second player verified duration instead"
+    ]
+  },
+  "independentReview": {
+    "findingsFixed": [
+      "Generated audio was incorrectly displayed as a supplied zero-second clip; HTTP/UI now filter video sources while retaining generated video",
+      "Copied generated canonical cue content/geometry could differ from accepted records; shared validator reconstructs the exact saved section",
+      "Generated canonical acceptance could lack its human request evidence; exact request/principal/scope closure is now required",
+      "Generated canonical provenance cannot be removed by relabeling the record as supplied"
+    ],
+    "originalCanonicalProbeAfterFix": { "passed": 1, "failed": 0, "bothAlteredCasesRejected": true }
+  },
+  "mediaApiCalls": 0,
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "paidAudioActivation": false,
+  "automaticAcceptance": false,
+  "pushed": false,
+  "next": "Paged transcript review and separate human adoption of recognized words or source timing"
+}

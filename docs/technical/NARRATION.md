@@ -1,7 +1,7 @@
 # Narration and timed story development
 
 **Version:** 0.7 · September 12, 2026
-**Status:** broader target design. Drafts, supplied-audio import, independent exact acceptance and scoped revision impact are implemented. A separate canonical service now applies accepted narration under request/version checks, retaining holds until a compatible plan. Authenticated routes and browser review/playback are integrated. Versioned conversational draft tools, synthesis, transcription and alignment remain pending. See [implemented contracts](../implementation/NARRATION-INTEGRATION.md) and [browser evidence](../implementation/NARRATION-BROWSER-VALIDATION.md).
+**Status:** broader target design. Drafts, supplied-audio import, versioned conversational draft tools, independent exact acceptance and scoped revision impact are implemented. A canonical service applies accepted narration under request/version checks, retaining holds until a compatible plan. Authenticated routes and browser review/playback now include [verified generated-recording selection](../implementation/GENERATED-NARRATION-ATTACHMENT.md), preserving actual generation history. Explicit speech/transcription bridges and unreviewed candidates pass offline tests; paid audio activation, [transcript review/adoption](../implementation/TRANSCRIPT-REVIEW-ADOPTION.md) and automatic alignment remain pending. See [implemented contracts](../implementation/NARRATION-INTEGRATION.md) and [supplied-recording browser evidence](../implementation/NARRATION-BROWSER-VALIDATION.md).
 
 ## Responsibility and boundaries
 

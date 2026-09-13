@@ -79,6 +79,29 @@ test("authenticated binary uploads reuse one explicit import session and GET cre
   assert.equal(f.store.list("hold", f.project.id).find(h => h.ownerId === requestId).active, false);
 });
 
+test("clip library excludes audio while retaining both supplied and generated video sources", async t => {
+  const f = await fixture(t); assert.equal((await f.upload()).statusCode, 200);
+  const original = f.store.list("media_source", f.project.id)[0];
+  // Classification fixture only: no claim these extra metadata rows were generated or ingested.
+  const installMetadata = (id, kind, origin) => {
+    const source = { ...original.source, artifactId: id, kind };
+    if (kind === "audio") source.probe = { durationSeconds: 1, audio: { samples: 48000, sampleRate: 48000, channels: 2 } };
+    const body = { id, projectId: f.project.id, source, origin, attemptId: "projection-fixture", derivationId: "projection-fixture" };
+    f.store.db.prepare("INSERT INTO entities(kind,id,project_id,body) VALUES('media_source',?,?,?)").run(id, f.project.id, JSON.stringify(body));
+    return source;
+  };
+  installMetadata("generated-audio", "audio", "generated_audio");
+  installMetadata("other-audio", "audio", "generated_video");
+  const video = installMetadata("generated-video", "video", "generated_video");
+  const changes = f.store.db.prepare("SELECT total_changes() AS n").get().n;
+  const response = await f.request("GET", f.path); assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json().sources.map(source => source.artifactId), [original.source.artifactId, video.artifactId]);
+  assert.ok(response.json().sources.every(source => source.kind === "video" && source.frames === 30));
+  assert.equal(f.store.db.prepare("SELECT total_changes() AS n").get().n, changes);
+  assert.equal(f.store.list("media_source", f.project.id).length, 4, "projection does not delete audio provenance");
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
 test("render HTTP returns a job, survives synchronous admission failure, and explicit replay can start it", async t => {
   const f = await fixture(t); assert.equal((await f.upload()).statusCode, 200); const body = f.install();
   const original = f.media.run.bind(f.media); let calls = 0;

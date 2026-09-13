@@ -10,7 +10,7 @@ import type { PendingCommand } from "./pending-command";
 import "./media.css";
 
 interface Job { id: string; state: string; artifact: Artifact | null; errorCode: string | null; totalFrames: number; canRun: boolean; canRecover: boolean }
-interface MediaState { jobs: Job[]; preview: { artifact: Artifact; renderJobId: string } | null; sources: { artifactId: string; sha256: string; frames: number; byteLength: number }[] }
+interface MediaState { jobs: Job[]; preview: { artifact: Artifact; renderJobId: string } | null; sources: { artifactId: string; sha256: string; kind: "video" | "audio"; frames: number; byteLength: number }[] }
 
 
 function OwnedPlayback({ api, projectId, artifact }: { api: StudioApi; projectId: string; artifact: Artifact }) {
@@ -63,6 +63,7 @@ function MediaWorkspace({ api, snapshot, onChanged, onContinue }: MediaPanelProp
       error => !(error instanceof ApiError) || ["NETWORK_ERROR", "INTERNAL_ERROR", "REQUEST_FAILED"].includes(error.code));
   }
   const run = (path: string, body: unknown = {}) => void execute({ path, body, key: crypto.randomUUID() });
+  const clips = state?.sources.filter(source => source.kind === "video") ?? [];
   const show = selected ?? state?.preview?.artifact;
   return <section className="media-panel" aria-labelledby="local-media-title">
     <div className="media-heading"><div><span className="eyebrow">SUPPLIED CLIPS & EXPORT</span><h3 id="local-media-title">Bring your footage together</h3></div><span className="tag">Local rendering</span></div>
@@ -78,8 +79,8 @@ function MediaWorkspace({ api, snapshot, onChanged, onContinue }: MediaPanelProp
       {currentImportRequest && <label className="check-row"><input type="checkbox" checked={reuse} disabled={recoveryReadOnly || busy || !!pending} onChange={event => setReuse(event.target.checked)} />Add this clip to the current edit</label>}
       <button className="button small" disabled={recoveryReadOnly || busy || !!pending || !file}>{busy ? "Working…" : "Import clip"}</button>
     </form>
-    {!!state?.sources.length && <div className="supplied-clips">{state.sources.map((source, index) => <button key={source.artifactId} className="supplied-clip" onClick={() => setSelected({ artifactId: source.artifactId, sha256: source.sha256, kind: "video" })}><strong>Clip {index + 1}</strong><span>{durationLabel(source.frames)} · {(source.byteLength / 1048576).toFixed(1)} MiB</span><small>Preview</small></button>)}</div>}
-    {!!state?.sources.length && currentImportRequest && onContinue && <button className="text-button" disabled={recoveryReadOnly || busy || !!pending} onClick={() => onContinue(currentImportRequest)}>Discuss these clips with OpenSlate</button>}
+    {!!clips.length && <div className="supplied-clips">{clips.map((source, index) => <button key={source.artifactId} className="supplied-clip" onClick={() => setSelected({ artifactId: source.artifactId, sha256: source.sha256, kind: "video" })}><strong>Clip {index + 1}</strong><span>{durationLabel(source.frames)} · {(source.byteLength / 1048576).toFixed(1)} MiB</span><small>Preview</small></button>)}</div>}
+    {!!clips.length && currentImportRequest && onContinue && <button className="text-button" disabled={recoveryReadOnly || busy || !!pending} onClick={() => onContinue(currentImportRequest)}>Discuss these clips with OpenSlate</button>}
     <div className="render-controls"><button className="button primary" disabled={recoveryReadOnly || busy || !!pending || !renderNode || !state} onClick={() => renderNode && run(`${base}/renders`, { expectedHeadVersion: snapshot.project.headVersion, renderNodeId: renderNode.id })}>Render current plan</button><p>{renderNode ? "Uses the current clips and accepted narration. Pending edits and pause still apply." : "A timeline plan is needed before rendering."}</p></div>
     {show && <><div className="playback-heading"><h4>{selected ? "Selected video" : "Current rendered preview"}</h4>{selected && <button className="text-button" onClick={() => setSelected(null)}>Show current preview</button>}</div><OwnedPlayback key={show.artifactId} api={api} projectId={projectId} artifact={show} /></>}
     {!!state?.jobs.length && <details><summary>Render history · {state.jobs.length}</summary><div className="render-jobs">{state.jobs.map(job => <div key={job.id}><strong>{job.state.replaceAll("_", " ")} · {durationLabel(job.totalFrames)}</strong>{job.errorCode && <p>{errorText(new ApiError(job.errorCode))}</p>}<div className="render-actions">

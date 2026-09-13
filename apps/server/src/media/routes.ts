@@ -65,7 +65,7 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
     scope.get<{ Params: ProjectParams }>("/api/projects/:projectId/media", async request => {
       const { projectId } = request.params, state = media.workspaceSnapshot(projectId);
       return { jobs: state.jobs.slice(-40).reverse().map(summary), preview: state.preview,
-        sources: production.store.list<OwnedMediaSource>("media_source", projectId).map(record => ({ artifactId: record.source.artifactId, sha256: record.source.sha256,
+        sources: production.store.list<OwnedMediaSource>("media_source", projectId).filter(record => record.source.kind === "video").map(record => ({ artifactId: record.source.artifactId, sha256: record.source.sha256,
           kind: record.source.kind, frames: record.source.probe.video?.frames ?? null, byteLength: record.source.byteLength, fixture: false })) };
     });
     scope.post<{ Params: ProjectParams; Querystring: { expectedHeadVersion: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/media/uploads", {
