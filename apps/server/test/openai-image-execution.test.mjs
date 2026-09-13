@@ -246,6 +246,70 @@ test("lease replacement during PNG preparation fails closed before the dispatch 
   await assert.rejects(running, { code: "IMAGE_EXECUTION_NOT_DISPATCHABLE" }); assert.equal(f.calls.http, 0); assert.equal(rows(f, "image_execution_dispatch").length, 0);
 });
 
+test("stale local image preparation failures cannot close a replacement worker's admission", async t => {
+  for (const failure of ["invalid-input", "cancelled", "expired"]) {
+    const f = fixture(t, { images: [bytes] }), prepare = f.bridge.prepare.bind(f.bridge), controller = new AbortController();
+    let entered, release; const started = new Promise(resolve => { entered = resolve; }), barrier = new Promise(resolve => { release = resolve; });
+    f.bridge.prepare = async (...args) => { const result = await prepare(...args); entered(); await barrier;
+      if (failure !== "cancelled") throw Error("controlled local preparation failure"); return result; };
+    const running = f.bridge.submit(f.request, { ...context(f), signal: controller.signal }); await started;
+    const current = f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt,
+      ...(failure === "expired" ? { leaseExpiresAt: 0 } : { leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1, leaseExpiresAt: Date.now() + 30000 }) });
+    if (failure === "cancelled") controller.abort(); release();
+    const outcome = await running;
+    assert.equal(rows(f, "image_execution_result").length, 0, failure); assert.equal(rows(f, "image_execution_dispatch").length, 0, failure);
+    assert.equal(outcome.type, "unknown", failure);
+    assert.equal(f.store.get("reservation", current.reservationId).state, "reserved"); assert.deepEqual(f.calls, { http: 0, credentials: 0 });
+    const replacement = f.store.put("attempt", current.id, f.project.id, { ...current, leaseOwner: "replacement", leaseEpoch: current.leaseEpoch + 1, leaseExpiresAt: Date.now() + 30000 });
+    f.bridge.prepare = prepare;
+    assert.equal((await f.bridge.submit(f.request, { expectedLease: { owner: replacement.leaseOwner, epoch: replacement.leaseEpoch } })).type, "completed");
+    assert.equal(f.calls.http, 1); assert.equal(rows(f, "image_execution_result")[0].observation.kind, "completed");
+  }
+});
+
+test("credential failure after image lease takeover cannot publish a terminal local result", async t => {
+  let first = true;
+  const f = fixture(t, { credential: () => { if (!first) return key; first = false;
+    f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1 }); return undefined; } });
+  const outcome = await f.bridge.submit(f.request, context(f));
+  assert.equal(rows(f, "image_execution_result").length, 0); assert.equal(rows(f, "image_execution_dispatch").length, 0); assert.equal(f.calls.http, 0);
+  assert.equal(outcome.type, "unknown");
+  const current = f.store.get("attempt", f.attempt.id);
+  assert.equal((await f.bridge.submit(f.request, { expectedLease: { owner: current.leaseOwner, epoch: current.leaseEpoch } })).type, "completed");
+  assert.equal(f.calls.http, 1);
+});
+
+test("a stale image preparation failure replays a replacement's existing marker or completion", async t => {
+  for (const complete of [false, true]) {
+    let prepared, failPreparation, dispatched, finishHttp;
+    const ready = new Promise(resolve => { prepared = resolve; }), preparationBarrier = new Promise(resolve => { failPreparation = resolve; });
+    const posted = new Promise(resolve => { dispatched = resolve; }), httpBarrier = new Promise(resolve => { finishHttp = resolve; });
+    const f = fixture(t, { fetch: async () => { dispatched(); await httpBarrier; return response(); } }), prepare = f.bridge.prepare.bind(f.bridge);
+    f.bridge.prepare = async (...args) => { await prepare(...args); prepared(); await preparationBarrier; throw Error("old local failure"); };
+    const old = f.bridge.submit(f.request, context(f)); await ready;
+    const current = f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1 });
+    const second = new OpenAIImageExecution({ store: f.store, outputStore: f.outputs, artifactRoot: f.artifactRoot, credentials: f.credentials, fetch: f.fetch });
+    const replacement = second.submit(f.request, { expectedLease: { owner: current.leaseOwner, epoch: current.leaseEpoch } }); await posted;
+    let result;
+    try {
+      if (complete) { finishHttp(); result = await replacement; }
+      failPreparation(); const stale = await old; assert.equal(stale.type, complete ? "completed" : "unknown");
+      if (complete) assert.deepEqual(stale, result); else assert.equal(rows(f, "image_execution_result").length, 0);
+    } finally { failPreparation(); finishHttp(); await replacement; }
+    assert.equal(rows(f, "image_execution_result")[0].observation.kind, "completed"); assert.equal(f.calls.http, 1);
+  }
+});
+
+test("actual image observations remain durable after lease loss during the POST", async t => {
+  const f = fixture(t, { fetch: async () => {
+    f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1 }); return response();
+  } });
+  const completed = await f.bridge.submit(f.request, context(f)); assert.equal(completed.type, "completed");
+  assert.equal(rows(f, "image_execution_result")[0].observation.kind, "completed");
+  assert.equal(rows(f, "execution_output_receipt").length, 1); assert.equal(rows(f, "image_execution_dispatch").length, 1); assert.equal(f.calls.http, 1);
+  assert.deepEqual(await f.bridge.submit(f.request), completed); assert.equal(f.calls.http, 1);
+});
+
 test("first dispatch requires the original caller lease and cannot adopt a replacement lease at entry", async t => {
   const f = fixture(t);
   await assert.rejects(f.bridge.submit(f.request), { code: "IMAGE_EXECUTION_NOT_DISPATCHABLE" });

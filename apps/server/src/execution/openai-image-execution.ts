@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
-import { canonical, digest, invariant } from "@openslate/core";
+import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { assertExecutionRequest, describeOpenAIImageRequest, OPENAI_IMAGE_MODEL, OpenAIImageAdapter, registerExecutionProvider } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, OpenAIImageInput, OpenAIImageModel, OpenAIImageQuality, OpenAIImageRequest } from "@openslate/providers";
 import { EnvironmentMediaCredentials } from "../application/provider-credentials.js";
@@ -57,7 +57,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
         return this.#store.insert("image_execution_mapping", attempt.id, attempt.projectId, value);
       });
     } catch {
-      return this.notDispatched(attempt, signal?.aborted ? "LOCAL_CANCELLED" : "LOCAL_INPUT_INVALID", signal);
+      return this.notDispatched(attempt, expectedLease, signal?.aborted ? "LOCAL_CANCELLED" : "LOCAL_INPUT_INVALID", signal);
     }
     // Another worker may have claimed the dispatch during the awaited file reads.
     if (this.hasDispatchOrResult(attempt.id)) return this.recover(attempt, signal);
@@ -67,7 +67,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
       transport = new OpenAIImageAdapter({ apiKey: this.#credentials.resolve("openai-media"),
         ...(this.#fetch ? { fetch: this.#fetch } : {}), ...(this.#timeoutMs === undefined ? {} : { timeoutMs: this.#timeoutMs }) });
     } catch {
-      return this.notDispatched(attempt, signal?.aborted ? "LOCAL_CANCELLED" : "LOCAL_CREDENTIAL_UNAVAILABLE", signal);
+      return this.notDispatched(attempt, expectedLease, signal?.aborted ? "LOCAL_CANCELLED" : "LOCAL_CREDENTIAL_UNAVAILABLE", signal);
     }
     const claimed = this.#store.transaction(() => {
       if (this.hasDispatchOrResult(attempt.id)) return false;
@@ -161,9 +161,13 @@ export class OpenAIImageExecution implements ExecutionProvider {
     return this.#store.insert("image_execution_result", attempt.id, attempt.projectId, { ...this.identity(attempt),
       mappingDigest: mapping ? digest(mapping) : null, dispatchDigest: dispatch ? digest(dispatch) : null, observation });
   }
-  private async notDispatched(attempt: Attempt, code: Extract<ImageExecutionObservation, { kind: "not_dispatched" }>["code"], signal?: AbortSignal): Promise<ExecutionOutcome> {
+  private async notDispatched(attempt: Attempt, expectedLease: ExecutionCallOptions["expectedLease"], code: Extract<ImageExecutionObservation, { kind: "not_dispatched" }>["code"], signal?: AbortSignal): Promise<ExecutionOutcome> {
     this.#store.transaction(() => {
-      if (!this.hasDispatchOrResult(attempt.id)) this.saveResult(attempt, { kind: "not_dispatched", code });
+      if (this.hasDispatchOrResult(attempt.id)) return;
+      // A local failure describes only this worker. It cannot close a replacement worker's still-open admission.
+      try { this.dispatchable(attempt, expectedLease); }
+      catch (error) { if (error instanceof DomainError && error.code === "IMAGE_EXECUTION_NOT_DISPATCHABLE") return; throw error; }
+      this.saveResult(attempt, { kind: "not_dispatched", code });
     });
     return this.recover(attempt, signal);
   }

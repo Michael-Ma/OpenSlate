@@ -1,6 +1,6 @@
 # OpenAI image application execution
 
-This is an **offline-tested bridge**, not a production activation. The local launcher still registers fake execution only. No real image API request has been made by this validation, and no credential is read from the contributor's environment by its fixtures.
+This is an **offline-tested bridge**. The local launcher supports explicit opt-in activation; generation defaults to fake. No real image API request has been made by this validation, and no credential is read from the contributor's environment by its fixtures. See [launcher activation](MEDIA-EXECUTION-LAUNCHER.md).
 
 `OpenAIImageExecution` connects the registered `openai-image/1` execution contract to the standalone [GPT Image transport](OPENAI-IMAGE.md), the environment credential resolver, and the [owned output store](SPOOL-COMPLETIONS.md). The application remains responsible for human grants, candidate admission, spending permission, leases, exact artifact ingestion, and current-output selection.
 
@@ -47,7 +47,7 @@ Three immutable same-project record families bind the lifecycle:
 
 The dispatch transaction checks the original caller's lease and current reserved state. Concurrent callers can produce only one marker. A caller that sees a marker or result performs recovery immediately, without resolving another credential or sending another POST. Native/provider diagnostic request IDs are kept only as receipt evidence: they never become a vendor task ID or a polling target.
 
-Credential resolution happens after local preparation and before claiming the marker. Missing credentials, cancelled preparation and invalid local inputs can therefore produce a definite `not_dispatched` result. That result is final for the attempt even if configuration later changes. The module never automatically retries it. A new application-authorized request can use corrected configuration.
+Credential resolution happens after local preparation and before claiming the marker. Missing credentials, cancelled preparation and invalid local inputs can therefore produce a definite `not_dispatched` result. Its publication transaction must still hold the original unexpired submitting lease and reserved liability. An obsolete worker cannot record a terminal local failure after a replacement takes over; it recovers any existing marker/result or returns unknown. That result is final for the attempt even if configuration later changes. The module never automatically retries it. A new application-authorized request can use corrected configuration.
 
 A completed provider result and its `execution_output_receipt` are committed together before any asynchronous spool write. The result retains exact output metadata, declared usage, optional reported model and the sanitized diagnostic receipt. It never retains a bearer credential, vendor error text, request body, host path or inline output bytes. Usage is evidence; it does not establish actual billing or update the estimate used by the Engine reservation.
 
@@ -63,4 +63,6 @@ The focused run passed **81 tests with zero failures/skips**, including 20 new b
 
 Source: `apps/server/src/execution/openai-image-execution.ts`, `openai-image-receipts.ts`; focused tests: `apps/server/test/openai-image-execution.test.mjs`.
 
-Remaining activation work includes a trusted installed profile catalog, explicit human profile/spending selection, credential readiness, a durable allowance policy, launcher wiring and an explicitly allowed real-media validation. The bridge adds no UI, network endpoint, automatic worker activation, image resizing or new retry policy.
+September 12 follow-up: six additional image/H3 race regressions and both complete bridge suites passed **49/49**, independently repeated after provider/server builds. Before the fix, controlled image preparation and credential failures each incorrectly installed one terminal result after lease loss. The image bridge now fences those writes. H3 already enforced the boundary; its production code was unchanged. The tests also verify recovery of a replacement worker's marker/result and retention of actual late provider observations. All responses were injected; no media calls occurred.
+
+Installed profiles, explicit human spending allowances and opt-in launcher wiring are now implemented separately. An explicitly allowed real-media validation remains pending. This bridge does not resize images or introduce automatic generation retries.

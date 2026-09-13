@@ -179,6 +179,47 @@ test("missing credentials are a recorded pre-dispatch rejection with no replacem
   assert.equal(rows(f, "h3_execution_submit")[0].observation.code, "LOCAL_CREDENTIAL_UNAVAILABLE"); assert.equal(f.calls.post, 0);
 });
 
+test("H3 already fences stale local preparation and credential failures before terminal publication", async t => {
+  for (const failure of ["preparation", "cancelled", "credential"]) {
+    let firstCredential = true;
+    const f = fixture(t, { credential: () => {
+      if (failure !== "credential" || !firstCredential) return key; firstCredential = false;
+      f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1 }); return undefined;
+    } });
+    const controller = new AbortController(), prepare = f.bridge.prepare.bind(f.bridge);
+    let entered, release; const started = new Promise(resolve => { entered = resolve; }), barrier = new Promise(resolve => { release = resolve; });
+    if (failure !== "credential") f.bridge.prepare = async (...args) => { const result = await prepare(...args); entered(); await barrier;
+      if (failure === "preparation") throw Error("controlled local failure"); return result; };
+    const running = f.bridge.submit(f.request, { ...context(f), signal: controller.signal });
+    // Attach the rejection handler before a deliberately synchronous credential failure can settle.
+    const rejected = assert.rejects(running, { code: "H3_EXECUTION_NOT_DISPATCHABLE" });
+    if (failure !== "credential") {
+      await started;
+      f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1 });
+      if (failure === "cancelled") controller.abort(); release();
+    }
+    await rejected; assert.equal(rows(f, "h3_execution_submit").length, 0); assert.equal(rows(f, "h3_execution_dispatch").length, 0); assert.equal(f.calls.post, 0);
+    assert.equal(f.store.get("reservation", f.attempt.reservationId).state, "reserved");
+    f.bridge.prepare = prepare; const current = f.store.get("attempt", f.attempt.id);
+    assert.deepEqual(await f.bridge.submit(f.request, { expectedLease: { owner: current.leaseOwner, epoch: current.leaseEpoch } }), { type: "accepted", taskId });
+    assert.equal(f.calls.post, 1);
+  }
+});
+
+test("stale H3 local failure replays a replacement's actual acceptance without overwriting it", async t => {
+  const f = fixture(t), prepare = f.bridge.prepare.bind(f.bridge);
+  let entered, release; const started = new Promise(resolve => { entered = resolve; }), barrier = new Promise(resolve => { release = resolve; });
+  f.bridge.prepare = async (...args) => { await prepare(...args); entered(); await barrier; throw Error("old preparation failed"); };
+  const running = f.bridge.submit(f.request, context(f)); await started;
+  const current = f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1 });
+  const replacement = new MiniMaxH3Execution(f.bridgeOptions);
+  let accepted;
+  try { accepted = await replacement.submit(f.request, { expectedLease: { owner: current.leaseOwner, epoch: current.leaseEpoch } }); }
+  finally { release(); }
+  assert.deepEqual(await running, accepted); assert.deepEqual(accepted, { type: "accepted", taskId });
+  assert.equal(rows(f, "h3_execution_submit")[0].observation.kind, "accepted"); assert.equal(f.calls.post, 1);
+});
+
 test("durable known-task polling respects cooldown and capped exponential backoff across instances", async t => {
   const f = fixture(t); await f.bridge.submit(f.request, context(f));
   const otherStore = new Store(f.path); t.after(() => otherStore.close());
