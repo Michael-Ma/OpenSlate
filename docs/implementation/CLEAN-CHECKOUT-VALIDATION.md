@@ -14,13 +14,13 @@ These are observations on this host, not performance guarantees. The probe/demo 
 
 ## What the launcher proved
 
-The built process served the interface and JavaScript bundle on loopback. Health was public, project access required the local token, and an authenticated request created a project. The new token file had mode0600 and the token itself was absent from logs. A duplicate launcher failed before token handling while the original retained its project, event cursor and token. The same installation-owner inode survived, and ownership was reacquired after shutdown. An open event stream closed with the process; the first run shut down in7ms.
+The built process served the interface and JavaScript bundle on loopback. Health was public, project access required the local token, and an authenticated request created a project. The new token file had mode 0600 and the token itself was absent from logs. A duplicate launcher failed before token handling while the original retained its project, event cursor and token. The same installation-owner inode survived, and ownership was reacquired after shutdown. An open event stream closed with the process; the first run shut down in 7 ms.
 
 The same checks passed with explicit nonexistent FFmpeg/ffprobe paths, so this default launcher path did not depend on those tools. Native Codex was never selected. The headless fixture recorded four initial fake accepts, two after an edit, zero duplicates across uncertain-submission recovery, and exact reuse of the other shot. Its one-second placeholder preview is not the planned film. Private demo evidence was retained outside the system temporary directory.
 
 ## Installation conditions and limits
 
-This was macOS arm64 with Node24.15.0 and pnpm10.33.0. The SQLite dependency's installation invoked node-gyp11.5.0, Python3.11.4 and make; an Xcode developer toolchain and Node build caches already existed. Thus the test establishes fresh source/dependency installation on this configured Mac, not an installation on a bare operating system. No signed desktop bundle, Linux or Windows environment was tested. This was an export of a local commit, not a remote GitHub clone; these milestones remain unpushed.
+This was macOS arm64 with Node 24.15.0 and pnpm 10.33.0. The SQLite dependency's installation invoked node-gyp 11.5.0, Python 3.11.4 and make; an Xcode developer toolchain and Node build caches already existed. Thus the test establishes fresh source/dependency installation on this configured Mac, not an installation on a bare operating system. No signed desktop bundle, Linux or Windows environment was tested. This was an export of a local commit, not a remote GitHub clone; these milestones remain unpushed.
 
 Two setup failures are retained in the private evidence. The harness initially supplied an unsupported pnpm userconfig command argument; changing it to `npm_config_userconfig` corrected the harness. A subsequent offline-cache install could not find a locked tarball. The successful check used a separate empty package cache and a normal public-registry install. This does not establish a fully offline installer.
 

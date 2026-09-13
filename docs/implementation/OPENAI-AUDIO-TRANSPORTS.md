@@ -1,10 +1,10 @@
 # OpenAI audio transports
 
-September 12, 2026. **Accepted implementation plan; transports are in progress.** This document does not establish account access, live audio generation or an enabled application workflow. Protocol facts were checked against the linked official documentation.
+September 12, 2026. **Standalone transports implemented and tested with injected HTTP.** This document does not establish account access, live audio generation or an enabled application workflow. Protocol facts were checked against the linked official documentation.
 
 ## First slice
 
-Add two standalone, injected-HTTP transports in `packages/providers`: OpenAI speech generation and timestamp transcription. Follow the separation already used by `OpenAIImageAdapter`: a pure request description, one bounded POST, a sanitized receipt and a discriminated outcome. They do not implement or register `ExecutionProvider`, create application attempts, obtain allowances, write files or change narration.
+The providers package now exports two standalone, injected-HTTP transports in `packages/providers`: OpenAI speech generation and timestamp transcription. Follow the separation already used by `OpenAIImageAdapter`: a pure request description, one bounded POST, a sanitized receipt and a discriminated outcome. They do not implement or register `ExecutionProvider`, create application attempts, obtain allowances, write files or change narration.
 
 Use explicit `gpt-4o-mini-tts` / `gpt-4o-mini-tts-2025-12-15` speech identities and `whisper-1` timestamp transcription. Export a recommended pinned speech snapshot constant, but never rewrite an explicitly requested alias into that snapshot or silently switch models. Built-in voices only. No prices, automatic retry, custom voices, realtime sessions, Files API, arbitrary endpoints, remote URL inputs, forced alignment or creative regeneration in this slice.
 
@@ -31,7 +31,7 @@ Only the description and transport boxes are implementation scope now. The diagr
 
 ## Exact proposed contracts
 
-These are target contracts; final exported names and verification will be recorded when implementation is complete. Both constructors take trusted `apiKey`, optional injected `fetch`, and limits that may only lower fixed maximums. Invalid credentials/options fail before transport use; keys remain private fields and never enter a description or receipt.
+The common public contracts below are exported as types; the HTTP helper remains internal to the package. Both constructors take trusted `apiKey`, optional injected `fetch`, and limits that may only lower fixed maximums. Invalid credential formats/options fail before transport use; keys remain private fields and never enter a description or receipt.
 
 ```ts
 interface AudioSubmitContext {
@@ -100,7 +100,7 @@ Transport timestamps remain in seconds relative to the exact derivative. The fut
 
 ## Bounds, uncertainty and cancellation
 
-Proposed hard maximums, lowerable by trusted host: 25,000,000-byte transcription input; 32 MiB speech response; 4 MiB transcription JSON; 64 KiB error body; 256 KiB transcript text; 8,192 word entries with at most 1,024 UTF-8 bytes per word; 120-second speech and 180-second transcription deadlines. Multipart body adds a separately checked maximum 16 KiB overhead. These are OpenSlate restrictions, not vendor maxima.
+Enforced hard maximums, lowerable by trusted host: 25,000,000-byte transcription input; 32 MiB speech response; 4 MiB transcription JSON; 64 KiB error body; 256 KiB transcript text; 8,192 word entries with at most 1,024 UTF-8 bytes per word; 120-second speech and 180-second transcription deadlines. Multipart body adds a separately checked maximum 16 KiB overhead. These are OpenSlate restrictions, not vendor maxima.
 
 Read response streams incrementally with observed-byte bounds, regardless of `Content-Length`; reject oversized declared lengths before allocation. Validate MIME and bounded RIFF/WAVE signature for speech, then leave full waveform decode to ingestion. Do not mistake a header-only WAV for verified playable narration. If the response contains JSON/error content in an audio-success response, preserve uncertainty. Avoid one allocation per one-byte stream chunk: use bounded growing storage or compact fixed blocks so a byte cap also bounds bookkeeping.
 
@@ -143,3 +143,17 @@ Focused tests must cover:
 7. Future application tests are separately required: no submit without exact allowance/original lease, crash after raw publication before SQL, unknown restart with no repeat POST, normalization/mapping recovery, stale target/historical result, restored authority denial and unchanged existing human acceptance.
 
 Self-review: protocol limits are distinguished from host restrictions; the unverified tokenizer is explicit; source/derivative/result identities stay separate; timestamp quality is not mistaken for transport rejection or approval; no synchronous task ID is invented; current application capabilities are not overstated. The offline transport subset is within the authorized development scope. Keys, a finite live audio test allowance, model/tokenizer conformance and production bridge readiness remain later validation requirements.
+
+## Implemented surface and verification
+
+`@openslate/providers` exports `OpenAISpeechAdapter`, `describeOpenAISpeechRequest`, pinned speech model/voices/byte-policy constants, `OpenAITranscriptionAdapter`, `describeOpenAITranscriptionRequest`, the timestamp model constant and their typed request/description/result contracts. `AudioSubmitContext`, receipt and outcome are shared public types; the transport helper is not a public value export. Neither adapter is registered with Engine or the launcher.
+
+Speech accepts the exact supported model identity and built-in voice with WAV/audio/speed 1 fixed. Its binary response reports no usage or resolved model, so both remain null. A RIFF/WAVE signature is sufficient only for a raw transport result: even a header-only response still needs complete local decoding before it can become usable narration. A future ingester must preserve malformed paid raw output and fail local validation without buying another response.
+
+Timestamp transcription uses exact `whisper-1` multipart requests. Tests include a stable v1 wire digest and independent parsing with standard `Request.formData()`, including the `timestamp_granularities[]` field, filename, MIME and original audio bytes. The strict PCM input accepts one 16-byte `fmt` and one nonempty `data` chunk, at most 128 chunks and 64 KiB ancillary bytes. It rejects unknown-length, malformed and forged typed-array inputs locally. Returned words preserve provider order and times; overlap is checked against the maximum prior endpoint so nested overlaps remain visible. Whitespace-only text comparison can flag a text/word mismatch, without rewriting either. An explicitly reported supported duration-usage object is retained; missing/unsupported usage is null, never a billing estimate.
+
+All **45 focused audio tests** passed: 25 transcription, 8 speech and 12 shared HTTP. They cover zero-call validation, exact snapshots/digests, Unicode limits, bounded responses, one POST, rejection versus uncertain outcomes, missing/contradictory metadata, timing quality issues, original-signal mutation and cleanup. Reading yields periodically so an immediate stream of tiny or empty chunks cannot starve cancellation. Independent review reproduced a cancellation race after the final awaited operation; the transport now rechecks at that handoff and a permanent regression preserves the fix. Three additional independent helper probes passed.
+
+The complete checkout passed **948 tests, zero failures/skips**, all builds and typechecks, including the installed Codex probe with no model turn. No audio/image/video API call was made. These are transport and application-regression checks, not provider-account access, audible speech quality, timestamp accuracy, live token conformance or an enabled narration-generation workflow.
+
+Next implement owned raw audio/data output storage, measured generated-audio normalization and provenance, followed by transcription derivatives and reviewable transcript candidates. Paid application admission, narration chunk planning, human adoption and live media validation remain subsequent work.
