@@ -103,7 +103,7 @@ pnpm installation restore --backup /absolute/path/to/backups/openslate-backup --
 OPENSLATE_DATA_DIR=/absolute/path/to/openslate-data pnpm start
 ```
 
-If interrupted, repeat the exact restore command with the same bundle. The launcher refuses an unfinished restore. On successful startup, enter the newly created local token and inspect the recovery summary, saved projects and previews. Select **Review release**, then **Finish recovery review** when ready. Release keeps each project paused, while existing job results may now be recovered. Restored unused permissions cannot start new generation. Use a fresh conversation and new spending review for new work. Work after the backup may be absent, and uncertain provider submissions remain unresolved. See [recovery contracts and verification](docs/implementation/INSTALLATION-RECOVERY.md).
+If interrupted, repeat the exact restore command with the same bundle. The launcher refuses an unfinished restore. On successful startup, enter the local token (newly generated when `OPENSLATE_LOCAL_TOKEN` is unset) and inspect the recovery summary, saved projects and previews. Select **Review release**, then **Finish recovery review** when ready. Release keeps each project paused, while existing job results may now be recovered. Restored unused permissions cannot start new generation. Use a fresh conversation and new spending review for new work. Work after the backup may be absent, and uncertain provider submissions remain unresolved. See [recovery contracts and verification](docs/implementation/INSTALLATION-RECOVERY.md).
 
 ## Repository
 

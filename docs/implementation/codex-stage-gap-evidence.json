@@ -1,0 +1,274 @@
+{
+  "version": 1,
+  "assessedAt": "2026-09-13T02:23:13.507Z",
+  "codeCommit": "1db5bcff80142c0499c8b983d0b753ab8f42d804",
+  "runtime": {
+    "version": "0.153.4",
+    "model": "gpt-6-astra",
+    "reasoningEffort": "low",
+    "perTurnDeadlineMs": 90000
+  },
+  "allowance": {
+    "maxStarts": 2,
+    "actualStarts": 2,
+    "priorHistoricalStarts": 21,
+    "historicalStartsAfter": 23,
+    "knownAndClean": true,
+    "harnessDigest": "29fc9d20728c36499ac311681ea36d68f918452a7278cffd0d52190ed98d9bd4",
+    "ledgerSha256": "5de91d513f4003443f71fc224eaa59f43c099f38e2f1ec6838c75aba486261f0"
+  },
+  "mediaApiCalls": 0,
+  "cases": [
+    {
+      "id": "triage",
+      "originalReportSha256": "cc74b8a6275241285bf2ca258670cabb3c9886d6fc249799524424684a1bcdae",
+      "elapsedMs": 16887,
+      "setupElapsedMs": 1955,
+      "actualNativeStarts": 1,
+      "transportStarts": 1,
+      "harnessChecks": 18,
+      "independentChecks": 16,
+      "requestText": "I want to make a 2–3 minute leather boots commercial from what we have saved. I like the opening and have approved it, but the rest is only an outline. I am unsure whether to record the narration myself or have OpenSlate voice it. Help me understand what we need next before spending on video, and ask me the single most useful choice to get unstuck. For now, just discuss it with me; keep the saved work as it is.",
+      "responseText": "I’ve checked the saved narration and left everything unchanged.\n\nYour opening has **script approval**:\n> “Some things are made for the long road. Step into a pair built to go with you.”\n\nThe craftsmanship middle and closing invitation are still outlines. No narration audio or approved timing is saved yet.\n\n**Before spending on video:**\n1. Finish and approve the middle and closing, preserving the opening and avoiding unsupported product claims.\n2. Record or generate narration, then review the audio and measured timing to establish the 2–3 minute pace.\n3. Plan shots around that timing and obtain your approval of each exact conditioning image before video generation.\n\nRecording yourself offers a personal, distinctive delivery but requires recording and possible retakes. OpenSlate voicing avoids microphone work but requires choosing a voice and reviewing its delivery. The current setup uses **fake test providers**, so production voice/video generation would require production-capable configuration.\n\n**Would you prefer the commercial to sound personally told by you, or performed by an OpenSlate-generated narrator?**",
+      "questionForm": "assistant_text_only",
+      "toolTrace": [
+        {
+          "tool": "read_context",
+          "section": "narration",
+          "state": "succeeded"
+        }
+      ],
+      "narrationVersionBefore": 2,
+      "narrationVersionAfter": 2,
+      "canonicalDigestBefore": "b7e8ce5e2b3e44dc0c172b7a2193637efd3bfb7045f17b40e789596f4d5f5baf",
+      "canonicalDigestAfter": "b7e8ce5e2b3e44dc0c172b7a2193637efd3bfb7045f17b40e789596f4d5f5baf",
+      "cleanupComplete": true
+    },
+    {
+      "id": "closing",
+      "originalReportSha256": "295c50c6f2f0e3585c7a1bb2d6dba35daf35ea68e1dbe481975b3ac61c13ad1e",
+      "elapsedMs": 27734,
+      "setupElapsedMs": 1970,
+      "actualNativeStarts": 1,
+      "transportStarts": 1,
+      "harnessChecks": 21,
+      "independentChecks": 17,
+      "requestText": "For our 2–3 minute leather boots commercial, finish only the rough closing we have saved. Make it two short, warm English sentences inviting people to take the next step, without making durability guarantees or adding a discount. I want OpenSlate to voice that closing eventually, but I have not chosen a voice yet. Save it as a draft for me to review. Keep my approved opening and the craftsmanship outline exactly as they are. What will I still need to decide or supply before we can make the video?",
+      "responseText": "Saved only the closing as a draft for review:\n\n> Slip into these leather boots and take your next step. Wherever you’re headed, make the journey your own.\n\nYour approved opening—including its approval—and craftsmanship outline remain unchanged. The closing is marked for eventual OpenSlate voicing, with voice and speech profile unselected. No audio was generated.\n\nBefore production, you’ll still need to:\n- Review and approve the closing; later finish and approve the craftsmanship narration.\n- Choose the closing’s voice and speech profile, plus generated or uploaded audio for the other sections.\n- Review the recordings and measured timing for the 2–3 minute edit.\n- Supply desired product/brand references, settle the visual plan, and approve each shot’s exact keyframe before video generation.\n- Authorize generation through OpenSlate.\n\nThe current media configuration is test-only; real production providers will also be needed.",
+      "questionForm": "assistant_text_only",
+      "toolTrace": [
+        {
+          "tool": "read_context",
+          "section": "overview",
+          "state": "succeeded"
+        },
+        {
+          "tool": "read_context",
+          "section": "narration",
+          "state": "succeeded"
+        },
+        {
+          "tool": "revise_narration_draft",
+          "section": null,
+          "state": "succeeded"
+        },
+        {
+          "tool": "read_context",
+          "section": "narration",
+          "state": "succeeded"
+        }
+      ],
+      "narrationVersionBefore": 2,
+      "narrationVersionAfter": 3,
+      "canonicalDigestBefore": "d3fcdba52d8b3b6c96d8b8197c540cb06f275ba03066f97eed7954b6e23030ec",
+      "canonicalDigestAfter": "d3fcdba52d8b3b6c96d8b8197c540cb06f275ba03066f97eed7954b6e23030ec",
+      "savedClosing": "Slip into these leather boots and take your next step. Wherever you’re headed, make the journey your own.",
+      "sourceIntent": {
+        "kind": "generated",
+        "profileRevisionId": null,
+        "voice": null
+      },
+      "cleanupComplete": true
+    }
+  ],
+  "checks": [
+    {
+      "name": "two_unique_acknowledged_known_clean_starts",
+      "pass": true
+    },
+    {
+      "name": "exact_pins_and_historical_bound",
+      "pass": true
+    },
+    {
+      "name": "harness_frozen_since_allowance",
+      "pass": true
+    },
+    {
+      "name": "triage:clean_exact_commit",
+      "pass": true
+    },
+    {
+      "name": "triage:one_start_bound_to_exact_ledger_and_model_record",
+      "pass": true
+    },
+    {
+      "name": "triage:all_original_harness_checks_passed",
+      "pass": true
+    },
+    {
+      "name": "triage:fresh_local_human_scope_and_revoked_epoch",
+      "pass": true
+    },
+    {
+      "name": "triage:durable_context_equals_dispatched_snapshot",
+      "pass": true
+    },
+    {
+      "name": "triage:saved_v2_lock_and_exact_original_narration",
+      "pass": true
+    },
+    {
+      "name": "triage:canonical_and_all_protected_rows_unchanged",
+      "pass": true
+    },
+    {
+      "name": "triage:accepted_opening_middle_and_original_script_json_exact",
+      "pass": true
+    },
+    {
+      "name": "triage:saved_narration_and_turn_survive_reopen",
+      "pass": true
+    },
+    {
+      "name": "triage:tool_receipts_bound_successful_and_result_hashed",
+      "pass": true
+    },
+    {
+      "name": "triage:known_completed_under_90_seconds",
+      "pass": true
+    },
+    {
+      "name": "triage:processes_closed_and_exact_thread_archived",
+      "pass": true
+    },
+    {
+      "name": "triage:no_media_attempts_reservations_or_consumption",
+      "pass": true
+    },
+    {
+      "name": "triage:actual_narration_read_without_draft_change_or_structured_question",
+      "pass": true
+    },
+    {
+      "name": "triage:sqlite_integrity_ok",
+      "pass": true
+    },
+    {
+      "name": "triage:original_report_not_rewritten",
+      "pass": true
+    },
+    {
+      "name": "closing:clean_exact_commit",
+      "pass": true
+    },
+    {
+      "name": "closing:one_start_bound_to_exact_ledger_and_model_record",
+      "pass": true
+    },
+    {
+      "name": "closing:all_original_harness_checks_passed",
+      "pass": true
+    },
+    {
+      "name": "closing:fresh_local_human_scope_and_revoked_epoch",
+      "pass": true
+    },
+    {
+      "name": "closing:durable_context_equals_dispatched_snapshot",
+      "pass": true
+    },
+    {
+      "name": "closing:saved_v2_lock_and_exact_original_narration",
+      "pass": true
+    },
+    {
+      "name": "closing:canonical_and_all_protected_rows_unchanged",
+      "pass": true
+    },
+    {
+      "name": "closing:accepted_opening_middle_and_original_script_json_exact",
+      "pass": true
+    },
+    {
+      "name": "closing:saved_narration_and_turn_survive_reopen",
+      "pass": true
+    },
+    {
+      "name": "closing:tool_receipts_bound_successful_and_result_hashed",
+      "pass": true
+    },
+    {
+      "name": "closing:known_completed_under_90_seconds",
+      "pass": true
+    },
+    {
+      "name": "closing:processes_closed_and_exact_thread_archived",
+      "pass": true
+    },
+    {
+      "name": "closing:no_media_attempts_reservations_or_consumption",
+      "pass": true
+    },
+    {
+      "name": "closing:only_existing_closing_changed_once_and_is_unaccepted",
+      "pass": true
+    },
+    {
+      "name": "closing:chronological_read_write_read_receipts",
+      "pass": true
+    },
+    {
+      "name": "closing:sqlite_integrity_ok",
+      "pass": true
+    },
+    {
+      "name": "closing:original_report_not_rewritten",
+      "pass": true
+    },
+    {
+      "name": "original_ledger_not_rewritten",
+      "pass": true
+    }
+  ],
+  "independentChecksPassed": 37,
+  "semanticAssessment": {
+    "triage": {
+      "result": "useful_gap_selection_with_capability_disclosure_weakness",
+      "strengths": [
+        "Correctly distinguishes accepted opening from unfinished middle and closing outlines.",
+        "Recognizes absent audio and measured timing before paid visual generation.",
+        "Offers one practical source-choice question in ordinary prose; structured input was not required."
+      ],
+      "weakness": "OpenSlate voicing is presented as requiring voice/provider configuration, without disclosing that built-in speech generation is not implemented. Configuration alone is insufficient; generated recordings currently must be supplied from elsewhere."
+    },
+    "closing": {
+      "result": "scope_and_creative_constraints_met_with_same_disclosure_weakness",
+      "strengths": [
+        "Two warm English sentences invite the next step without a discount or durability guarantee.",
+        "Only the saved closing changed; the reply explicitly states it is a draft and no audio was generated.",
+        "Identifies remaining approval, source/voice, recording/timing, visual and spending decisions."
+      ],
+      "weakness": "The remaining-work guidance treats eventual speech generation primarily as a setup choice rather than clearly disclosing the missing implementation."
+    }
+  },
+  "limitations": [
+    "Two independent single-turn examples, not a broad reliability benchmark or complete commercial workflow.",
+    "Input, persistence, receipt and no-spend checks are objective; usefulness, tone and capability disclosure were separately assessed by reading actual responses.",
+    "No real image, H3, speech or other media API was called. No generated voice was verified.",
+    "Normal application/controller/bridge used; no browser was exercised.",
+    "Original reports retain subjectiveAssessment:not_assessed; this is a separate assessment.",
+    "Zero-turn preflight archive reported no persisted rollout; its original cleanup flag remains false, with a separate 12-check disposition confirming no turn/start and closed processes.",
+    "An initial independent audit incorrectly used UUID ordering for tool chronology. Its separate note is preserved; the corrected audit uses SQLite row order. No model was repeated."
+  ]
+}

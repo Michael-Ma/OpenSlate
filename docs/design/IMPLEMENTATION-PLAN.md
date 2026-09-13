@@ -1,7 +1,7 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.21 · September 12, 2026
-**Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render, a 60-shot fake workflow with scoped reuse/restart, and a native question-answer continuation passed. The single-process launcher has exclusive local installation ownership. Opt-in image/H3 execution, human spending/budget review, exact PNG ingestion, recoverable video normalization and automatic real local assembly are integrated. The full injected-provider-to-render path and no-key built browser setup passed. Media-inclusive same-root backup, interrupted restore and exact human recovery release are integrated. The complete checkout passed 899 tests, followed by 45 web tests for the final scroll correction. Default generation remains fake; live media validation is pending. See [current implementation status](../implementation/STATUS.md) for limits and remaining work.
+**Version:** 0.22 · September 12, 2026
+**Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render, a 60-shot fake workflow with scoped reuse/restart, and a native question-answer continuation passed. The single-process launcher has exclusive local installation ownership. Opt-in image/H3 execution, human spending/budget review, exact PNG ingestion, recoverable video normalization and automatic real local assembly are integrated. The full injected-provider-to-render path and no-key built browser setup passed. Media-inclusive same-root backup, interrupted restore and exact human recovery release are integrated. The complete checkout passed 899 tests, followed by 45 web tests for the final scroll correction. Two native narration stage/gap cases passed objective scope checks; explicit capability facts address a semantic disclosure weakness, with 29 focused tests passing. Default generation remains fake; live media validation is pending. See [current implementation status](../implementation/STATUS.md) for limits and remaining work.
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
@@ -144,6 +144,8 @@ Add stage/gap assessment and focused task-prompt references, pinned with recipe/
 **Design:** [Director runtime](../technical/DIRECTOR-RUNTIME.md), [skills/tools](../technical/SKILLS-TOOLS.md).
 
 **September 12 browser follow-through:** A real structured question and browser answer passed across application reopen, refresh, full reload and exact HTTP replay. The two turns took 5.556 and 4.484 seconds; 22 continuation checks and 14 independent checks passed. Historical native starts total 21, with no media API calls. The strict initial harness-label failure and extra model follow-up remain in the evidence. See [browser question validation](../implementation/CODEX-QUESTION-BROWSER-VALIDATION.md).
+
+**September 12 stage/gap follow-through:** Two real turns selected narration work from partial saved material. Triage preserved all state; drafting changed only the existing closing. Eighteen and 21 harness checks plus 37 independent checks passed, with historical native starts now 23. Semantic review identified insufficient disclosure of unimplemented speech generation. Host-authored capability facts now accompany every paged context without changing locked tools or authority; 29 focused tests passed independently. Native verification of this disclosure change remains next. See [stage/gap evidence](../implementation/CODEX-STAGE-GAP-VALIDATION.md).
 
 ### T07 — Narration readiness, source choices and cue propagation
 

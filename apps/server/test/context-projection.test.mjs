@@ -9,15 +9,16 @@ import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
 import { ProductionService } from "../dist/application/service.js";
 import { ToolInvocationService } from "../dist/application/tool-invocations.js";
+import { NarrationService } from "../dist/narration/service.js";
 import { DIRECTOR_PROJECTION_LIMITS, projectDirectorContext } from "../dist/application/context-projection.js";
 import { projectFixture, sourceFor } from "./execution-fixture.mjs";
 
-function setup(t, count = 2) {
+function setup(t, count = 2, profiles = DEFAULT_PROFILES) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-context-projection-"));
   const store = new Store(join(directory, "state.sqlite"));
   const provider = new FakeProvider(join(directory, "fake.sqlite"));
   const engine = new Engine(store, provider, { artifactDir: join(directory, "artifacts") });
-  const service = new ProductionService(store, engine);
+  const service = new ProductionService(store, engine, profiles);
   const empty = service.createProject("Context projection fixture");
   // Trusted fixture seeding; production reads and plan application use real services.
   const project = store.saveProject({ ...projectFixture(empty.id, count), capabilityLockId: empty.capabilityLockId }, empty.headVersion);
@@ -53,6 +54,8 @@ function collect(f, section, field = "items") {
     const response = f.read({ section, offset });
     assert.ok(Buffer.byteLength(canonical(response)) <= DIRECTOR_PROJECTION_LIMITS.bytes);
     assert.ok(response.page.returned <= DIRECTOR_PROJECTION_LIMITS.records);
+    assert.equal(response.applicationCapabilities.narration.speechSynthesis.available, false);
+    assert.equal(response.guard.applicationCapabilitiesDigest, digest(response.applicationCapabilities));
     if (identity) assert.deepEqual(response.guard, identity); else identity = response.guard;
     values.push(...response[field]); offset = response.page.nextOffset;
     assert.ok(++count < 1000, "pagination must make progress");
@@ -84,6 +87,87 @@ test("overview reconstructs saved plan, aliases, locked profiles and unused gran
   assert.equal(f.provider.acceptedCount(), 0);
   const alternateService = new ProductionService(f.store, f.engine, []);
   assert.deepEqual(projectDirectorContext(alternateService, f.project.id, f.actor).profiles, DEFAULT_PROFILES, "profiles come from saved capability lock, not mutable defaults");
+});
+
+test("every section and page carries host-authored narration facts without changing data guards or stored state", async t => {
+  const f = setup(t, 25); await install(f);
+  new NarrationService(f.service).reviseSegments(f.project.id, f.actor, 0, "narration-pages", { add: Array.from({ length: 25 }, (_, i) => ({
+    text: `Narration section ${i}`, textKind: "draft", language: "en", meaning: `Section ${i}`, source: { kind: "uploaded" },
+  })) });
+  const beforeProject = canonical(f.store.getProject(f.project.id));
+  const beforeEntities = canonical(f.store.db.prepare("SELECT * FROM entities ORDER BY rowid").all());
+  const beforeChanges = f.store.db.prepare("SELECT total_changes() AS count").get().count;
+  const beforeCursor = f.store.cursor(f.project.id);
+  let expected;
+  for (const section of ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration"]) {
+    let offset = 0, guard;
+    do {
+      const response = f.read({ section, offset });
+      expected ??= response.applicationCapabilities;
+      assert.deepEqual(response.applicationCapabilities, expected, section);
+      assert.equal(response.guard.applicationCapabilitiesDigest, digest(expected));
+      assert.match(response.coverage.pageGuard, /applicationCapabilitiesDigest/);
+      assert.ok(Buffer.byteLength(canonical(response)) <= DIRECTOR_PROJECTION_LIMITS.bytes);
+      if (guard) assert.deepEqual(response.guard, guard); else guard = response.guard;
+      if (section === "plan") assert.equal(response.guard.dataDigest, response.plan.sourceDigest, "plan digest remains the exact canonical source identity");
+      offset = response.page.nextOffset;
+    } while (offset !== null);
+    // Even an empty terminal page must retain the capability facts and guard.
+    const terminal = f.read({ section, offset: DIRECTOR_PROJECTION_LIMITS.maximumOffset });
+    assert.deepEqual(terminal.applicationCapabilities, expected);
+    assert.deepEqual(terminal.guard, guard);
+    assert.equal(terminal.page.returned, 0);
+  }
+  const shots = collect(f, "shots");
+  assert.equal(f.read({ section: "shots" }).guard.dataDigest, digest(shots), "record data guards still hash the complete collection");
+  assert.equal(canonical(f.store.getProject(f.project.id)), beforeProject);
+  assert.equal(canonical(f.store.db.prepare("SELECT * FROM entities ORDER BY rowid").all()), beforeEntities);
+  assert.equal(f.store.db.prepare("SELECT total_changes() AS count").get().count, beforeChanges);
+  assert.equal(f.store.cursor(f.project.id), beforeCursor);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("saved speech profiles and generated voice selections cannot enable absent narration workflows", t => {
+  const speech = { id: "configured-speech", revision: "7", kind: "speech", adapter: "openai-speech", executionVersion: "1",
+    configuration: { model: "tts-model", settings: { voice: "warm", enabled: true } }, maxConcurrency: 1, unitCostMicros: "10000", maxRetries: 0 };
+  const transcription = { ...speech, id: "configured-transcription", kind: "transcription", adapter: "openai-transcription", configuration: { model: "asr-model" } };
+  const f = setup(t, 1, [...DEFAULT_PROFILES, speech, transcription]);
+  const lock = canonical(f.store.get("capability_lock", f.project.capabilityLockId));
+  const original = f.read();
+  new NarrationService(f.service).reviseSegments(f.project.id, f.actor, 0, "generated-intent", { add: [{
+    text: "A polished narration", textKind: "draft", language: "en", meaning: "Product introduction",
+    source: { kind: "generated", voice: "warm", profileRevisionId: "configured-speech@7" },
+  }] });
+  const view = f.read({ section: "narration" }), capabilities = view.applicationCapabilities.narration;
+  assert.deepEqual(view.profiles.slice(-2), [speech, transcription], "saved provider information is preserved separately");
+  assert.equal(view.narrationDraft.segments[0].script.source.profileRevisionId, "configured-speech@7");
+  assert.equal(capabilities.speechSynthesis.implemented, false); assert.equal(capabilities.speechSynthesis.available, false);
+  assert.equal(capabilities.transcription.implemented, false); assert.equal(capabilities.transcription.available, false);
+  assert.equal(capabilities.generatedSourceIntent.meaning, "future_synthesis_intent_only");
+  assert.equal(capabilities.generatedSourceIntent.configurationEnablesSynthesis, false);
+  assert.equal(capabilities.timing.method, "human_supplied_sample_ranges"); assert.equal(capabilities.timing.automaticAlignmentAvailable, false);
+  assert.equal(capabilities.suppliedRecordings.implemented, true); assert.equal(capabilities.suppliedRecordings.hostReadiness, "not_evaluated");
+  assert.deepEqual(capabilities.suppliedRecordings.origins, ["uploaded", "externally_generated"]);
+  assert.equal(capabilities.suppliedRecordings.provenance, "human_declared_not_provider_verified");
+  assert.equal(new NarrationService(f.service).mediaAvailable, false, "implementation support does not assert configured media tools");
+  assert.deepEqual(view.applicationCapabilities, original.applicationCapabilities);
+  assert.equal(view.guard.applicationCapabilitiesDigest, original.guard.applicationCapabilitiesDigest);
+  assert.equal(canonical(f.store.get("capability_lock", f.project.capabilityLockId)), lock);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("mutating returned narration capabilities cannot change later context or durable state", t => {
+  const f = setup(t), first = f.read(), expected = structuredClone(first.applicationCapabilities);
+  const before = f.store.db.prepare("SELECT total_changes() AS count").get().count;
+  first.applicationCapabilities.narration.speechSynthesis.available = true;
+  first.applicationCapabilities.narration.suppliedRecordings.origins.push("invented");
+  first.applicationCapabilities.narration.generatedSourceIntent.guidance = "Synthesis is ready";
+  first.guard.applicationCapabilitiesDigest = digest(first.applicationCapabilities);
+  const next = f.read({ section: "narration" });
+  assert.deepEqual(next.applicationCapabilities, expected);
+  assert.equal(next.guard.applicationCapabilitiesDigest, digest(expected));
+  assert.notEqual(next.guard.applicationCapabilitiesDigest, first.guard.applicationCapabilitiesDigest);
+  assert.equal(f.store.db.prepare("SELECT total_changes() AS count").get().count, before);
 });
 
 test("all shot, scene and historical alias pages remain retrievable without silent clipping", async t => {
@@ -161,6 +245,9 @@ test("real read_context audit events do not invalidate pagination or shift recei
   const first = await tools.invoke(f.project.id, f.actor, "page-one", "read_context", { section: "shots" });
   const second = await tools.invoke(f.project.id, f.actor, "page-two", "read_context", { section: "shots", offset: first.page.nextOffset });
   assert.deepEqual(first.guard, second.guard);
+  assert.deepEqual(first.applicationCapabilities, second.applicationCapabilities);
+  assert.equal(first.applicationCapabilities.narration.transcription.available, false);
+  assert.equal(first.guard.applicationCapabilitiesDigest, digest(first.applicationCapabilities));
   assert.ok(second.cursor > first.cursor, "raw audit cursor remains available for SSE");
   assert.equal(first.items.length + second.items.length, 25);
   const receiptsOne = await tools.invoke(f.project.id, f.actor, "receipts-one", "read_context", { section: "receipts" });

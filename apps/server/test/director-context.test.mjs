@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSkillCatalog, createSkillLock, SKILL_TOOL_IDS } from '@openslate/director';
 import { FakeProvider } from '@openslate/providers';
+import { digest } from '@openslate/core';
 import { ProductionService } from '../dist/application/service.js';
 import { DirectorContextService } from '../dist/application/director-context.js';
 import { Store } from '../dist/persistence/store.js';
@@ -55,6 +56,24 @@ test('lock installation is application-only and activation/context provenance ca
   const other = f.service.createProject('Other project'); const human = f.service.beginRequest(other.id, 'human', 'Use a different project'); const bridge = f.service.openEpoch(other.id, human);
   assert.throws(() => f.contexts.capture(other.id, bridge.actor, { lockId: f.lock.id, selectedSkillIds: ['production'] }), { code: 'SCOPE_DENIED' });
   assert.equal(f.store.list('director_context', other.id).length, 0);
+});
+
+test('captured application capability facts are digest-bound and detached from saved context and skill locks', t => {
+  const f = fixture(t), beforeLock = structuredClone(f.store.get('director_skill_lock', f.lock.id));
+  const captured = f.contexts.capture(f.project.id, f.bridge.actor, { lockId: f.lock.id, selectedSkillIds: ['production'] });
+  const expected = structuredClone(captured.snapshot);
+  assert.equal(captured.activation.contextDigest, digest(expected));
+  assert.equal(expected.guard.applicationCapabilitiesDigest, digest(expected.applicationCapabilities));
+  assert.equal(expected.applicationCapabilities.narration.speechSynthesis.available, false);
+  captured.snapshot.applicationCapabilities.narration.speechSynthesis.available = true;
+  assert.notEqual(digest(captured.snapshot), captured.activation.contextDigest, 'capability changes invalidate the captured context identity');
+  const saved = f.store.get('director_context', captured.activation.contextSnapshotId);
+  assert.deepEqual(saved.snapshot, expected);
+  assert.equal(saved.contextDigest, digest(expected));
+  const r = f.reopen();
+  assert.deepEqual(r.store.get('director_context', captured.activation.contextSnapshotId), saved);
+  assert.deepEqual(r.store.get('director_skill_lock', f.lock.id), beforeLock);
+  assert.equal(r.service.readContext(f.project.id, f.bridge.actor).applicationCapabilities.narration.speechSynthesis.available, false);
 });
 
 test('stage prompt claims are checked and an epoch cannot switch skill locks', t => {

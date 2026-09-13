@@ -3,6 +3,8 @@ import type { ActorContext, CompiledPlan, ProjectRecord, ProviderProfile } from 
 import type { ProductionService } from "./service.js";
 import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
 import { NarrationService } from "../narration/service.js";
+import { projectApplicationCapabilities } from "./application-capabilities.js";
+import type { DirectorApplicationCapabilities } from "./application-capabilities.js";
 
 export const DIRECTOR_PROJECTION_LIMITS = Object.freeze({ bytes: 512 * 1024, records: 20, sourceCharacters: 64 * 1024, maximumOffset: 10_000_000 });
 export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts" | "narration";
@@ -24,10 +26,11 @@ export interface DirectorContextProjection {
   section: DirectorContextSection;
   project: ProjectMetadata;
   headVersion: number; revisionId: string; activePlanId: string | null; cursor: number;
-  guard: { projectId: string; headVersion: number; revisionId: string; activePlanId: string | null; graphDigest: string | null; capabilityLockId: string; domainCursor: number; dataDigest: string };
+  guard: { projectId: string; headVersion: number; revisionId: string; activePlanId: string | null; graphDigest: string | null; capabilityLockId: string; applicationCapabilitiesDigest: string; domainCursor: number; dataDigest: string };
   request: { id: string; scopeIds: string[]; editing: boolean; state: string };
   plan: PlanMetadata;
   profiles: ProviderProfile[];
+  applicationCapabilities: DirectorApplicationCapabilities;
   page: { offset: number; returned: number; total: number; nextOffset: number | null; offsetUnit: "records" | "utf16_characters" };
   items: unknown[];
   messages: Message[];
@@ -120,15 +123,17 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     const { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames } = saved;
     const cursor = service.store.cursor(projectId);
     const domainCursor = (service.store.db.prepare("SELECT coalesce(max(sequence),0) AS cursor FROM events WHERE project_id=? AND json_extract(body,'$.kind') NOT IN ('tool.started','tool.finished','director.context_captured')").get(projectId) as { cursor: number }).cursor;
+    const applicationCapabilities = projectApplicationCapabilities();
     const base: DirectorContextProjection = {
       section, project: { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames, shots: [], scenes: [] },
       headVersion, revisionId, activePlanId, cursor,
-      guard: { projectId, headVersion, revisionId, activePlanId, graphDigest: plan.graphDigest, capabilityLockId, domainCursor, dataDigest: "" },
+      guard: { projectId, headVersion, revisionId, activePlanId, graphDigest: plan.graphDigest, capabilityLockId, applicationCapabilitiesDigest: digest(applicationCapabilities), domainCursor, dataDigest: "" },
       request: { id: request.id, scopeIds: request.scopeIds, editing: request.editing, state: request.state }, plan, profiles: lock.profiles,
+      applicationCapabilities,
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
       execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,
         scopedHoldSemantics: "Director pause creates a request-owned scope hold. Applying a matching plan releases that request's hold. This is separate from the human global pause. Read current context after mutations before describing execution state." },
-      coverage: { sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts"], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
+      coverage: { sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts"], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
     };
     const itemsPage = (items: unknown[]): DirectorContextProjection => {
       base.guard.dataDigest = digest(items);

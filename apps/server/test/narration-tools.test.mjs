@@ -144,6 +144,8 @@ test('narration read projection is bounded, paginated and excludes local recordi
   do {
     const page = await f.tools.invoke(f.project.id, f.bridge.actor, 'page-'+offset, 'read_context', { section: 'narration', offset });
     const json = JSON.stringify(page); assert.ok(Buffer.byteLength(json) <= 512 * 1024); assert.equal(json.includes('/private/'), false);
+    assert.equal(page.applicationCapabilities.narration.speechSynthesis.available, false);
+    assert.equal(page.guard.applicationCapabilitiesDigest, digest(page.applicationCapabilities));
     firstDigest ??= page.guard.dataDigest; assert.equal(page.guard.dataDigest, firstDigest);
     segments.push(...page.narrationDraft.segments); recordings.push(...page.audioLibrary); gaps.push(...page.narrationDraft.readiness.gaps);
     offset = page.page.nextOffset;
