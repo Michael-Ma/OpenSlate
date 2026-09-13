@@ -100,8 +100,39 @@ function receipts(service: ProductionService, projectId: string): unknown[] {
 function workSummary(service: ProductionService, projectId: string, planId: string | null) {
   const phaseCounts = service.store.db.prepare("SELECT json_extract(body,'$.phase') AS phase,count(*) AS count FROM entities WHERE kind='attempt' AND project_id=? GROUP BY phase").all(projectId);
   const nodeCounts = service.store.db.prepare("SELECT json_extract(body,'$.node.kind') AS kind,count(*) AS count FROM entities WHERE kind='node_binding' AND project_id=? AND json_extract(body,'$.planId')=? AND json_extract(body,'$.state')='active' GROUP BY kind").all(projectId, planId);
-  const outputs = service.store.db.prepare("SELECT count(*) AS count FROM entities, json_each(json_extract(entities.body,'$.outputs')) WHERE entities.kind='node_binding' AND entities.project_id=? AND json_extract(entities.body,'$.planId')=? AND json_extract(entities.body,'$.state')='active'").get(projectId, planId) as { count: number };
-  return { planId, nodeCounts, attemptPhaseCounts: phaseCounts, currentOutputCount: outputs.count, fixtureOnly: true };
+  // Aggregate every current output in SQL. Do not hydrate artifact bodies or
+  // infer their provenance from a provider, profile or mutable attempt phase.
+  const outputs = service.store.db.prepare(`WITH current_outputs AS (
+    SELECT CASE WHEN output.type='object' AND typeof(output.key)='text' THEN output.value ELSE '{}' END AS ref
+    FROM entities AS binding, json_each(binding.body,'$.outputs') AS output
+    WHERE binding.kind='node_binding' AND binding.project_id=? AND json_type(binding.body,'$.projectId')='text' AND json_extract(binding.body,'$.projectId')=?
+      AND json_type(binding.body,'$.id')='text' AND json_extract(binding.body,'$.id')=binding.id AND json_type(binding.body,'$.planId')='text' AND json_extract(binding.body,'$.planId')=?
+      AND json_extract(binding.body,'$.state')='active'
+  ), classified AS (
+    SELECT CASE WHEN
+      (SELECT count(*) FROM json_each(ref))=3
+      AND json_type(ref,'$.artifactId')='text' AND length(json_extract(ref,'$.artifactId')) BETWEEN 1 AND 160
+      AND json_type(ref,'$.sha256')='text' AND length(json_extract(ref,'$.sha256'))=64
+      AND json_extract(ref,'$.sha256') NOT GLOB '*[^0-9a-f]*'
+      AND json_type(ref,'$.kind')='text' AND json_extract(ref,'$.kind') IN ('image','audio','video','data')
+      AND json_type(artifact.body,'$.id')='text' AND json_extract(artifact.body,'$.id')=artifact.id
+      AND json_type(artifact.body,'$.projectId')='text' AND json_extract(artifact.body,'$.projectId')=artifact.project_id
+      AND json_type(artifact.body,'$.artifact')='object'
+      AND (SELECT count(*) FROM json_each(CASE WHEN json_type(artifact.body,'$.artifact')='object' THEN json_extract(artifact.body,'$.artifact') ELSE '{}' END))=3
+      AND json_type(artifact.body,'$.artifact.artifactId')='text' AND json_extract(artifact.body,'$.artifact.artifactId')=json_extract(ref,'$.artifactId')
+      AND json_type(artifact.body,'$.artifact.sha256')='text' AND json_extract(artifact.body,'$.artifact.sha256')=json_extract(ref,'$.sha256')
+      AND json_type(artifact.body,'$.artifact.kind')='text' AND json_extract(artifact.body,'$.artifact.kind')=json_extract(ref,'$.kind')
+      THEN CASE json_type(artifact.body,'$.fixture') WHEN 'true' THEN 'fixture' WHEN 'false' THEN 'nonfixture' ELSE 'unknown' END
+      ELSE 'unknown' END AS provenance
+    FROM current_outputs LEFT JOIN entities AS artifact ON artifact.kind='artifact' AND artifact.project_id=?
+      AND artifact.id=json_extract(ref,'$.artifactId')
+  ) SELECT count(*) AS count, coalesce(sum(provenance='fixture'),0) AS fixture,
+    coalesce(sum(provenance='nonfixture'),0) AS nonfixture, coalesce(sum(provenance='unknown'),0) AS unknown FROM classified`)
+    .get(projectId, projectId, planId, projectId) as { count: number; fixture: number; nonfixture: number; unknown: number };
+  const currentOutputProvenance = { fixture: outputs.fixture, nonfixture: outputs.nonfixture, unknown: outputs.unknown };
+  const fixtureOnly = outputs.nonfixture > 0 ? false : outputs.count === 0 || outputs.unknown > 0 ? null : true;
+  return { planId, nodeCounts, attemptPhaseCounts: phaseCounts, currentOutputCount: outputs.count, currentOutputProvenance,
+    fixtureOnly, fixtureOnlyScope: "current_active_plan_outputs" };
 }
 
 /** Read-only projection. The server owns context freshness; compare guards across paged reads. */

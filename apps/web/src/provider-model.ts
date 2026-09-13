@@ -13,7 +13,7 @@ export interface ProviderSelection { expectedCatalogDigest: string; profileIds: 
 export interface NewProjectCommand { key: string; body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }
 export const PROVIDER_KIND_CHOICES = Object.freeze([
   Object.freeze({ kind: "image" as const, label: "Keyframes" }), Object.freeze({ kind: "video" as const, label: "Video" }),
-  Object.freeze({ kind: "speech" as const, label: "Narration voice" }), Object.freeze({ kind: "transcription" as const, label: "Speech recognition" }),
+  Object.freeze({ kind: "speech" as const, label: "Narration model" }), Object.freeze({ kind: "transcription" as const, label: "Speech recognition" }),
 ]);
 export function selectedProviderForKind(catalog: ProviderCatalogView, selection: ProviderSelection | null, kind: ProviderKind): ProviderView | undefined {
   return catalog.profiles.find(provider => provider.profile?.kind === kind && selection?.profileIds.includes(provider.id))

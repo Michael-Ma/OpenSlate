@@ -1,6 +1,9 @@
 import Database from "better-sqlite3";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { canonical, digest, invariant } from "@openslate/core";
+import { canonical, composeTranscriptionPlanIsolated, digest, invariant, snapshotLocalExecution } from "@openslate/core";
+import type { CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
+import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal, ownedTranscriptionCatalog } from "../narration/owned-transcription-records.js";
+import type { OwnedTranscriptionSource } from "../narration/owned-transcription-types.js";
 import type { ExecutionSpoolOutput } from "@openslate/providers";
 import { parseOpenAITranscriptionResponse } from "@openslate/providers";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
@@ -91,6 +94,37 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       },
     };
     const checkedSpeech = new Set<string>();
+    const checkedOwnedSources = new Map<string, string>();
+    const ownedSource = async (value: unknown, projectId: string): Promise<void> => {
+      assertOwnedTranscriptionSource(speechReader, projectId, value);
+      const identity = digest(value), previous = checkedOwnedSources.get(value.id);
+      if (previous) { fail(previous === identity, "Owned transcription source changed during backup"); return; }
+      await source(value.source); artifact(get("artifact", value.artifact.artifactId));
+      const path = `media/blobs/${value.source.sha256}.wav`;
+      const measured = await inspectPcmWave(join(bundle, path), value.source.byteLength), pcm = measured.pcm;
+      fail(measured.sha256 === value.source.sha256 && measured.byteLength === value.source.byteLength
+        && pcm.sampleRate === 48000 && pcm.channels === 2 && pcm.bitsPerSample === 16 && pcm.sampleCount === value.sourceEndSample,
+        "Owned recording normalized samples differ");
+      // Exact source() closure also retains the original upload and descriptor. Generated rows receive their existing full speech closure below.
+      checkedOwnedSources.set(value.id, identity);
+    };
+    const ownedProposal = async (value: unknown, projectId: string): Promise<void> => {
+      assertOwnedTranscriptionProposal(speechReader, projectId, value);
+      const binding = get("owned_transcription_source", value.sourceBinding.id) as OwnedTranscriptionSource;
+      await ownedSource(binding, projectId);
+      const project = get("project_revision", value.baseProject.revisionId).project as ProjectRecord;
+      const lock = get("capability_lock", value.capabilityLock.id) as { profiles: ProviderProfile[]; localExecution?: unknown };
+      const base = value.basePlan ? get("plan", value.basePlan.id).compiled as CompiledPlan : null;
+      const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
+      for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
+      const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
+      const compiled = await composeTranscriptionPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+        allocateId: () => { fail(false, "Owned transcription proposal lacks an exact saved logical ID"); return ""; },
+        transcriptionInputs: [...catalog, { id: binding.id, digest: digest(binding), consumerAlias: binding.consumerAlias, artifact: binding.artifact }],
+        ...(localExecution ? { localExecution } : {}) });
+      fail(canonical(compiled) === canonical(value.compiled) && canonical(logicalIds) === canonical(value.logicalIds),
+        "Owned transcription proposal differs from isolated historical recomposition");
+    };
     const checkedGeneratedNarration = new Map<string, string>();
     const generatedNarration = async (value: RecordValue): Promise<void> => {
       assertGeneratedNarrationAudio(speechReader, value.projectId, value);
@@ -317,6 +351,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         if (value.origin === "transcription_response") fail(get("transcript_candidate", value.transcriptCandidateId).artifactId === value.id,
           "Raw transcription artifact lost its unreviewed candidate");
       }
+      else if (row.kind === "owned_transcription_source") await ownedSource(value, value.projectId);
+      else if (row.kind === "owned_transcription_proposal") await ownedProposal(value, value.projectId);
       else if (row.kind === "media_source") {
         await source(value.source);
         if (value.origin === "generated_audio") {

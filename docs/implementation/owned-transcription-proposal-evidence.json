@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "date": "2026-09-13",
+  "scope": "Exact ungranted owned recording proposals, shared publication refactor, immutable source/history/restore closure and truthful current-output context",
+  "fullCheckout": {
+    "passed": 1523,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 64,
+    "durationMilliseconds": 111647.45625,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "unchangedSourceTestConfigurationAndStyleFiles": 351
+  },
+  "focusedVerification": {
+    "ownedProposalService": 26,
+    "sourcePersistenceAndBackup": 12,
+    "directorOutputProvenance": 11,
+    "newPublicationBoundaries": 15,
+    "newAndExistingPublicationChecks": 33,
+    "publicationChecksAlsoPassedAgainstPreRefactorBuild": 15,
+    "note": "Focused checks overlap the full checkout, not additive counts."
+  },
+  "proposalProof": {
+    "actualLocalImport": "Synthetic 0.1-second WAV, normalized by the real local media service",
+    "uploadWithoutScriptCueOrAcceptance": true,
+    "fullActiveTwoShotPlanPreserved": true,
+    "exactGeneratedArtifactProvenanceRetained": true,
+    "actualWorkerResultChangeAndCancellationFenced": true,
+    "unrelatedNarrationSectionEditAllowed": true,
+    "equalByteSelectedTakeReplacementRejected": true,
+    "newGrantCandidateAttemptAllowanceConsumptionCount": 0,
+    "activePlanGlobalAliasesStagesHoldsAndCanonicalNarrationUnchanged": true
+  },
+  "restoration": {
+    "actualSameRootExportInspectionRestore": true,
+    "originalNormalizedAndInstalledBytesPreserved": true,
+    "isolatedHistoricalPlanRecomposition": true,
+    "sourceTextTamperingRejected": true,
+    "missingRequiredFilesRejected": true,
+    "importedProposalPermanentlyFencedAfterHumanRelease": true,
+    "providerCalls": 0
+  },
+  "independentReview": {
+    "remainingCorrectnessFindings": []
+  },
+  "limitations": [
+    "Human generation review, application receipts and new-input Engine activation remain pending",
+    "No browser or conversational proposal entry point is exposed",
+    "Real media access, billing and recognition quality remain unverified"
+  ],
+  "mediaApiCalls": 0,
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "pushed": false,
+  "next": "Exact human review and candidate application receipts, then owned input admission/preparation/first-dispatch validation"
+}

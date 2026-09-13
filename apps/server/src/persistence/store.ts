@@ -44,6 +44,7 @@ import { assertGeneratedCanonicalNarrationSegment, assertGeneratedNarrationAudio
 import { assertTranscriptCanonicalSegment, assertTranscriptSelection, assertTranscriptSelectionOutput, transcriptCanonicalProvenance } from "../narration/transcript-selection.js";
 import type { CanonicalNarration, PreparedNarrationCommit } from "../narration/canonical-types.js";
 import type { NarrationAudio } from "../narration/types.js";
+import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal } from "../narration/owned-transcription-records.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -152,6 +153,8 @@ export class Store {
       assertTranscriptionPreparationAttemptState(this, { ...body, id, projectId } as unknown as Attempt);
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "owned_transcription_source") assertOwnedTranscriptionSource(this, projectId, { ...body, id, projectId });
+    if (kind === "owned_transcription_proposal") assertOwnedTranscriptionProposal(this, projectId, { ...body, id, projectId });
     if (kind === "narration_transcript_selection") assertTranscriptSelection(this, projectId, { ...body, id, projectId });
     if (kind === "narration_segment" || kind === "narration_cue")
       assertTranscriptSelectionOutput(this, projectId, kind, { ...body, id, projectId });
@@ -578,7 +581,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
-        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection"].includes(kind))
+        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection", "owned_transcription_source", "owned_transcription_proposal"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);

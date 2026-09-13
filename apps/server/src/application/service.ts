@@ -44,6 +44,14 @@ interface ProjectCapabilityLock {
   projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string;
   localExecution?: LocalExecutionIdentity;
 }
+interface PreparedChangeCapture {
+  before: ProjectRecord; next: ProjectRecord; lock: ProjectCapabilityLock;
+  proposal: ChangeProposal; proposalDigest: string; compiled: CompiledPlan | null;
+  logicalIds: Record<string, string>;
+}
+interface CompiledChangeAssessment {
+  impact: NodeImpact[]; stages: StageRequirement[]; extraTakeIds: Set<string>;
+}
 export { TOOL_NAMES } from "@openslate/core";
 
 /** The trusted application boundary. Models propose data; these methods own authority and commits. */
@@ -216,6 +224,14 @@ export class ProductionService {
     const logicalIds = { ...(this.store.get<{ aliases: Record<string, string> }>("logical_ids", projectId)?.aliases ?? {}) };
     const compiled = proposal.source ? await compilePlanIsolated(proposal.source, { project: next, profiles: lock.profiles, logicalIds, allocateId: newId,
       ...(localExecution ? { localExecution } : {}) }) : null;
+    const captured: PreparedChangeCapture = { before, next, lock, proposal, proposalDigest, compiled, logicalIds };
+    const assessment = this.assessCompiledChange(captured, actor);
+    return this.store.transaction(() => this.finalizePreparedChange(projectId, actor, captured, assessment));
+  }
+
+  /** Shared post-compile validation. This assessment creates neither records nor generation authority. */
+  private assessCompiledChange(captured: PreparedChangeCapture, actor: ActorContext): CompiledChangeAssessment {
+    const { before, next, proposal, compiled } = captured;
     const oldPlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
     const impact = compiled ? diffPlans(oldPlan, compiled) : [];
     const extra = new Set(proposal.requestNewTakes ?? []);
@@ -229,42 +245,47 @@ export class ProductionService {
     const stages = requiredStages(before, next, compiled);
     for (const proposed of proposal.stages ?? []) validateStageScope(next, proposed.scopeId);
     validateStageRequirements(next, stages);
-    return this.store.transaction(() => {
-      // Parsing and provider completion may interleave. Authority and project version are rechecked here.
-      this.assertActor(projectId, actor, true);
-      invariant(this.store.getProject(projectId).headVersion === before.headVersion, "REVISION_CONFLICT", "Project changed during preparation");
-      const duplicate = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
-      if (duplicate) return duplicate;
-      const noProgress = digest(before) === digest(next) && !compiled;
-      invariant(!noProgress || this.store.list<Prepared>("prepared", projectId).filter(item => item.requestId === actor.requestId && !item.semanticChange && !item.compiled).length < 3,
-        "WAITING_USER", "No production progress after three assessments; ask the user for the missing information");
-      const used = new Set(this.store.list<Candidate>("candidate", projectId).map(candidate => candidate.grantId));
-      const authorities = new Set([actor.requestId]);
-      const continuations = this.store.list<{ fromRequestId: string; toRequestId: string }>("request_continuation", projectId);
-      for (let count = 0; count < continuations.length; count++) for (const continuation of continuations)
-        if (authorities.has(continuation.toRequestId)) authorities.add(continuation.fromRequestId);
-      const grants = this.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id) && authorities.has(grant.authorityId)
-        && !this.recovery.isImported(projectId, "grant", grant.id));
-      const grantBindings: Record<string, string> = {};
-      for (const change of impact.filter(change => change.kind === "new" || change.kind === "replace")) {
-        const node = compiled!.nodes.find(n => n.id === change.nodeId)!;
-        if (["timeline", "render"].includes(node.kind)) continue;
-        const sceneId = next.shots.find(s => s.id === node.shotId)?.sceneId;
-        const grant = grants.find(g => !used.has(g.id) && g.kind === node.kind && (!extra.has(node.id) || g.origin === "user_change") && (g.scopeId === node.shotId || g.scopeId === sceneId || g.scopeId === projectId));
-        invariant(grant, "ORIGIN_NOT_AUTHORIZED", `Human generation authorization is required for ${node.alias}`);
-        used.add(grant.id); grantBindings[node.id] = grant.id;
-      }
-      const stageVersions = Object.fromEntries(stages.map(stage => { const id = this.stageId(projectId, stage); return [id, this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0]; }));
-      const prepared: Prepared = {
-        id: newId(), projectId, requestId: actor.requestId, principalId: actor.principalId, epochId: actor.kind === "director" ? actor.epochId : null,
-        proposal, proposalDigest, baseVersion: before.headVersion, next, compiled, logicalIds, impact, stages, stageVersions, grantBindings,
-        semanticChange: digest(before) !== digest(next),
-        capabilityDigest: digest(lock),
-      };
-      this.store.insert("prepared", prepared.id, projectId, prepared);
-      this.store.appendEvent(projectId, "change.prepared", { preparedId: prepared.id, impact: impact.map(i => ({ ...i })) });
-      return prepared;
-    });
+    return { impact, stages, extraTakeIds: extra };
+  }
+
+  /** Synchronous finalization inside prepare's transaction; existing unused grants remain mandatory. */
+  private finalizePreparedChange(projectId: string, actor: ActorContext, captured: PreparedChangeCapture, assessment: CompiledChangeAssessment): Prepared {
+    const { before, next, lock, proposal, proposalDigest, compiled, logicalIds } = captured;
+    const { impact, stages, extraTakeIds: extra } = assessment;
+    // Parsing and provider completion may interleave. Authority and project version are rechecked here.
+    this.assertActor(projectId, actor, true);
+    invariant(this.store.getProject(projectId).headVersion === before.headVersion, "REVISION_CONFLICT", "Project changed during preparation");
+    const duplicate = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
+    if (duplicate) return duplicate;
+    const noProgress = digest(before) === digest(next) && !compiled;
+    invariant(!noProgress || this.store.list<Prepared>("prepared", projectId).filter(item => item.requestId === actor.requestId && !item.semanticChange && !item.compiled).length < 3,
+      "WAITING_USER", "No production progress after three assessments; ask the user for the missing information");
+    const used = new Set(this.store.list<Candidate>("candidate", projectId).map(candidate => candidate.grantId));
+    const authorities = new Set([actor.requestId]);
+    const continuations = this.store.list<{ fromRequestId: string; toRequestId: string }>("request_continuation", projectId);
+    for (let count = 0; count < continuations.length; count++) for (const continuation of continuations)
+      if (authorities.has(continuation.toRequestId)) authorities.add(continuation.fromRequestId);
+    const grants = this.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id) && authorities.has(grant.authorityId)
+      && !this.recovery.isImported(projectId, "grant", grant.id));
+    const grantBindings: Record<string, string> = {};
+    for (const change of impact.filter(change => change.kind === "new" || change.kind === "replace")) {
+      const node = compiled!.nodes.find(n => n.id === change.nodeId)!;
+      if (["timeline", "render"].includes(node.kind)) continue;
+      const sceneId = next.shots.find(s => s.id === node.shotId)?.sceneId;
+      const grant = grants.find(g => !used.has(g.id) && g.kind === node.kind && (!extra.has(node.id) || g.origin === "user_change") && (g.scopeId === node.shotId || g.scopeId === sceneId || g.scopeId === projectId));
+      invariant(grant, "ORIGIN_NOT_AUTHORIZED", `Human generation authorization is required for ${node.alias}`);
+      used.add(grant.id); grantBindings[node.id] = grant.id;
+    }
+    const stageVersions = Object.fromEntries(stages.map(stage => { const id = this.stageId(projectId, stage); return [id, this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0]; }));
+    const prepared: Prepared = {
+      id: newId(), projectId, requestId: actor.requestId, principalId: actor.principalId, epochId: actor.kind === "director" ? actor.epochId : null,
+      proposal, proposalDigest, baseVersion: before.headVersion, next, compiled, logicalIds, impact, stages, stageVersions, grantBindings,
+      semanticChange: digest(before) !== digest(next),
+      capabilityDigest: digest(lock),
+    };
+    this.store.insert("prepared", prepared.id, projectId, prepared);
+    this.store.appendEvent(projectId, "change.prepared", { preparedId: prepared.id, impact: impact.map(i => ({ ...i })) });
+    return prepared;
   }
 
   apply(projectId: string, actor: ActorContext, preparedId: string): ApplyReceipt {
@@ -273,37 +294,42 @@ export class ProductionService {
       this.assertActor(projectId, actor, true);
       const prepared = this.store.get<Prepared>("prepared", preparedId);
       invariant(prepared && prepared.projectId === projectId && prepared.requestId === actor.requestId && prepared.principalId === actor.principalId && prepared.epochId === (actor.kind === "director" ? actor.epochId : null), "ACTOR_DENIED", "Prepared change is not owned by this request");
-      return this.store.command(`${actor.principalId}:${projectId}:apply`, preparedId, prepared.proposalDigest, () => {
-        const before = this.store.getProject(projectId);
-        invariant(digest(this.store.get("capability_lock", before.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Project capability lock changed");
-        validateStageRequirements(prepared.next, prepared.stages);
-        invariant(before.headVersion === prepared.baseVersion, "REVISION_CONFLICT", "Prepared change is stale");
-        for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed");
-        let planId = before.activePlanId;
-        if (prepared.compiled) planId = newId();
-        const changed = prepared.semanticChange || !!prepared.compiled;
-        const next = changed ? this.store.saveProject({ ...prepared.next, revisionId: newId(), activePlanId: planId }, prepared.baseVersion) : before;
-        if (prepared.compiled) {
-          this.engine.installPlan(projectId, planId!, prepared.compiled, prepared.grantBindings);
-          this.store.put("logical_ids", projectId, projectId, { aliases: prepared.logicalIds });
-        }
-        if (changed) this.store.insert("project_revision", next.revisionId, projectId, { project: next });
-        for (const stage of prepared.stages) {
-          const id = this.stageId(projectId, stage);
-          const previous = this.store.get<StageBinding>("stage", id);
-          const inputDigest = stageInputDigest(next, stage);
-          const outputDigest = digest(prepared.compiled?.nodes.filter(n => stage.scopeId === projectId || n.shotId === stage.scopeId || next.shots.some(s => s.id === n.shotId && s.sceneId === stage.scopeId)).map(n => n.specDigest) ?? []);
-          const bindingVersion = (previous?.bindingVersion ?? 0) + (previous?.inputDigest === inputDigest && previous?.outputDigest === outputDigest ? 0 : 1);
-          const binding: StageBinding = { ...stage, id, projectId, inputDigest, outputDigest, bindingVersion, progressVersion: previous?.progressVersion ?? 0, contractDigest: digest(STAGE_CONTRACTS[stage.stageId]) };
-          this.store.put("stage", id, projectId, binding);
-          if (bindingVersion !== previous?.bindingVersion) this.store.insert("stage_revision", newId(), projectId, { binding, preparedId });
-        }
-        for (const proposal of prepared.proposal.stages ?? []) this.store.insert("stage_assessment", newId(), projectId, { ...proposal, preparedId, advisory: true });
-        if (prepared.compiled) this.releaseResolvedHolds(projectId, actor, prepared);
-        this.store.appendEvent(projectId, "change.applied", { preparedId, revisionId: next.revisionId, planId, headVersion: next.headVersion });
-        return { preparedId, projectId, revisionId: next.revisionId, headVersion: next.headVersion, activePlanId: next.activePlanId, cursor: this.store.cursor(projectId) };
-      });
+      return this.store.command(`${actor.principalId}:${projectId}:apply`, preparedId, prepared.proposalDigest,
+        () => this.publishPreparedChange(projectId, actor, prepared));
     });
+  }
+
+  /** Shared synchronous publication kernel; callers retain exact actor ownership and command authority. */
+  private publishPreparedChange(projectId: string, actor: ActorContext, prepared: Prepared): ApplyReceipt {
+    const preparedId = prepared.id;
+    const before = this.store.getProject(projectId);
+    invariant(digest(this.store.get("capability_lock", before.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Project capability lock changed");
+    validateStageRequirements(prepared.next, prepared.stages);
+    invariant(before.headVersion === prepared.baseVersion, "REVISION_CONFLICT", "Prepared change is stale");
+    for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed");
+    let planId = before.activePlanId;
+    if (prepared.compiled) planId = newId();
+    const changed = prepared.semanticChange || !!prepared.compiled;
+    const next = changed ? this.store.saveProject({ ...prepared.next, revisionId: newId(), activePlanId: planId }, prepared.baseVersion) : before;
+    if (prepared.compiled) {
+      this.engine.installPlan(projectId, planId!, prepared.compiled, prepared.grantBindings);
+      this.store.put("logical_ids", projectId, projectId, { aliases: prepared.logicalIds });
+    }
+    if (changed) this.store.insert("project_revision", next.revisionId, projectId, { project: next });
+    for (const stage of prepared.stages) {
+      const id = this.stageId(projectId, stage);
+      const previous = this.store.get<StageBinding>("stage", id);
+      const inputDigest = stageInputDigest(next, stage);
+      const outputDigest = digest(prepared.compiled?.nodes.filter(n => stage.scopeId === projectId || n.shotId === stage.scopeId || next.shots.some(s => s.id === n.shotId && s.sceneId === stage.scopeId)).map(n => n.specDigest) ?? []);
+      const bindingVersion = (previous?.bindingVersion ?? 0) + (previous?.inputDigest === inputDigest && previous?.outputDigest === outputDigest ? 0 : 1);
+      const binding: StageBinding = { ...stage, id, projectId, inputDigest, outputDigest, bindingVersion, progressVersion: previous?.progressVersion ?? 0, contractDigest: digest(STAGE_CONTRACTS[stage.stageId]) };
+      this.store.put("stage", id, projectId, binding);
+      if (bindingVersion !== previous?.bindingVersion) this.store.insert("stage_revision", newId(), projectId, { binding, preparedId });
+    }
+    for (const proposal of prepared.proposal.stages ?? []) this.store.insert("stage_assessment", newId(), projectId, { ...proposal, preparedId, advisory: true });
+    if (prepared.compiled) this.releaseResolvedHolds(projectId, actor, prepared);
+    this.store.appendEvent(projectId, "change.applied", { preparedId, revisionId: next.revisionId, planId, headVersion: next.headVersion });
+    return { preparedId, projectId, revisionId: next.revisionId, headVersion: next.headVersion, activePlanId: next.activePlanId, cursor: this.store.cursor(projectId) };
   }
 
   private releaseResolvedHolds(projectId: string, actor: ActorContext, prepared: Prepared): void {
