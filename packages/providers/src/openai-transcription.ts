@@ -80,6 +80,17 @@ const DEFAULT_LIMITS: Limits = {
 };
 interface Prepared { description: OpenAITranscriptionDescription; transport: PreparedAudioRequest }
 
+function validateOptionFields(own: Record<string, unknown>): asserts own is Record<string, unknown> & Pick<OpenAITranscriptionRequest, "model" | "language" | "timing"> {
+  audioEnsure(own.model === OPENAI_TRANSCRIPTION_MODEL, "UNSUPPORTED_MODEL");
+  audioEnsure(own.language === null || (typeof own.language === "string" && LANGUAGES.has(own.language)), "INVALID_LANGUAGE");
+  audioEnsure(own.timing === "word", "UNSUPPORTED_TIMING");
+}
+
+/** Validate operation choices before any caller-owned audio preparation; never reads input bytes. */
+export function validateOpenAITranscriptionOptions(input: Pick<OpenAITranscriptionRequest, "model" | "language" | "timing">): void {
+  validateOptionFields(audioDataObject(input, ["model", "language", "timing"]));
+}
+
 /** Accept a complete, deliberately narrow PCM WAV subset; never decode, downmix or resample here. */
 function waveform(bytes: Buffer): TranscriptionWaveform {
   audioEnsure(bytes.length >= 44 && bytes.toString("latin1", 0, 4) === "RIFF"
@@ -126,9 +137,7 @@ function copyBytes(value: unknown, maximum: number, invalidCode = "INVALID_AUDIO
 
 function prepare(request: OpenAITranscriptionRequest, limits: Limits): Prepared {
   const own = audioDataObject(request, ["model", "language", "timing", "input"]);
-  audioEnsure(own.model === OPENAI_TRANSCRIPTION_MODEL, "UNSUPPORTED_MODEL");
-  audioEnsure(own.language === null || (typeof own.language === "string" && LANGUAGES.has(own.language)), "INVALID_LANGUAGE");
-  audioEnsure(own.timing === "word", "UNSUPPORTED_TIMING");
+  validateOptionFields(own);
   const input = audioDataObject(own.input, ["artifactId", "sha256", "mimeType", "bytes"], "INVALID_AUDIO_INPUT");
   audioEnsure(typeof input.artifactId === "string" && ID.test(input.artifactId), "INVALID_ARTIFACT_ID");
   audioEnsure(typeof input.sha256 === "string" && HASH.test(input.sha256), "INVALID_INPUT_HASH");

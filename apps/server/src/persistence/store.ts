@@ -16,6 +16,9 @@ import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../executi
 import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
 import { assertSpeechExecutionDispatch, assertSpeechExecutionResult } from "../execution/audio-execution-receipts.js";
 import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionResult } from "../execution/audio-execution-receipts.js";
+import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "../execution/transcription-execution-authority.js";
+import { assertTranscriptionExecutionDispatch, assertTranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
+import type { TranscriptionExecutionMapping, TranscriptionExecutionDispatch, TranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt, ArtifactRecord } from "../execution/engine.js";
@@ -309,6 +312,31 @@ export class Store {
         assertSpeechExecutionResult(attempt, mapping, dispatch, result, outputId ? this.get<OutputReceipt>("execution_output_receipt", outputId) : undefined);
       }
     }
+    if (["transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(kind)) {
+      reference("attempt", id);
+      const attempt = this.get<Attempt>("attempt", id)!, value = { ...body, id, projectId };
+      const mapping = this.get<TranscriptionExecutionMapping>("transcription_execution_mapping", id);
+      const dispatch = this.get<TranscriptionExecutionDispatch>("transcription_execution_dispatch", id);
+      const pin = kind === "transcription_execution_mapping" ? value as unknown as TranscriptionExecutionMapping : mapping;
+      const admission = resolveTranscriptionAdmission(this, attempt.request, pin);
+      const preparation = pin ? resolveTranscriptionPreparation(this, attempt, pin) : undefined;
+      if (pin) {
+        reference("capability_lock", pin.capabilityLockId); reference("transcription_audio_intent", pin.preparation.intentId);
+        reference("transcription_audio_receipt", pin.preparation.receiptId); assertTranscriptionMappingAdmission(admission, pin, preparation!);
+      }
+      if (kind === "transcription_execution_mapping") {
+        invariant(!this.get("transcription_execution_result", id) || !!mapping, "TRANSCRIPTION_EXECUTION_CONFLICT", "A terminal transcription preparation cannot acquire another mapping");
+      } else if (kind === "transcription_execution_dispatch") {
+        reference("transcription_execution_mapping", id);
+        invariant(!this.get("transcription_execution_result", id) || !!dispatch, "TRANSCRIPTION_EXECUTION_CONFLICT", "A terminal transcription preparation cannot acquire a dispatch");
+        assertTranscriptionExecutionDispatch(attempt, mapping!, value as unknown as TranscriptionExecutionDispatch, preparation!);
+      } else {
+        const result = value as unknown as TranscriptionExecutionResult;
+        const outputId = result.observation?.kind === "completed" ? result.observation.outputReceiptId : undefined;
+        if (outputId !== undefined) reference("execution_output_receipt", outputId);
+        assertTranscriptionExecutionResult(attempt, mapping, dispatch, result, preparation, outputId ? this.get<OutputReceipt>("execution_output_receipt", outputId) : undefined);
+      }
+    }
     if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation", "h3_poll_schedule"].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
@@ -473,7 +501,8 @@ export class Store {
       if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
-        "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result"].includes(kind))
+        "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
+        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);

@@ -29,7 +29,8 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Local media integration](implementation/MEDIA-INTEGRATION.md) | Owned uploads, render jobs, preview recovery and six-minute synthetic evidence |
 | [Six-minute workflow probe](implementation/SIX-MINUTE-WORKFLOW.md) | Sixty shots, exact batch review, one-shot reuse and uncertain-job restart using fake media |
 | [Speech application execution](implementation/OPENAI-SPEECH-EXECUTION.md) | Exact consumed approval, one-use speech dispatch and complete unadopted audio recovery |
-| [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech and next transcription mapping, dispatch and raw-result recovery slices |
+| [Transcription application execution](implementation/OPENAI-TRANSCRIPTION-EXECUTION.md) | Exact owned upload and consumed approval, one-use dispatch, raw JSON recovery and backup closure |
+| [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration next |
 | [Transcript candidate plan](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, unreviewed words and later human adoption |
 | [Transcription audio preparation](implementation/TRANSCRIPTION-AUDIO-PREPARATION.md) | Verified complete-source 16 kHz derivative, six-minute recovery, parser and timing helper |
 | [Generated audio ingestion](implementation/GENERATED-AUDIO-INGESTION.md) | Verified raw storage, complete PCM normalization, provenance and six-minute recovery; later transcript phases |

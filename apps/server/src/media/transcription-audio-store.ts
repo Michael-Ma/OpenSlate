@@ -13,6 +13,8 @@ const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "MED
 const hash = (value: string): boolean => /^[a-f0-9]{64}$/.test(value);
 async function syncDirectory(path: string): Promise<void> { const handle = await open(path, "r"); try { await handle.sync(); } finally { await handle.close(); } }
 export interface StoredTranscriptionAudio { receipt: TranscriptionAudioReceipt; /** Trusted host only; never expose in a tool or browser response. */ path: string }
+/** Detached upload bytes for a trusted transport. This is not provider dispatch authority. */
+export interface TranscriptionAudioUpload { receipt: TranscriptionAudioReceipt; bytes: Uint8Array }
 
 /** Owns immutable derivative bytes, not project/lease/SQL authority. Temps are never backup inputs. */
 export class TranscriptionAudioStore {
@@ -63,6 +65,38 @@ export class TranscriptionAudioStore {
     // Retain measured bad endpoints as evidence; the application separately rejects using them.
     assertTranscriptionAudioReceipt(intent, receipt, false);
     const path = await this.verifyBlob(receipt, intent, signal); stopped(signal); return { receipt, path };
+  }
+  async readUpload(input: TranscriptionAudioIntent, options: { signal?: AbortSignal } = {}): Promise<TranscriptionAudioUpload> {
+    const intent = structuredClone(input), signal = options.signal; stopped(signal);
+    const receipt = await this.readReceipt(intent.id); stopped(signal);
+    invariant(receipt, "TRANSCRIPTION_AUDIO_NOT_READY", "The exact transcription derivative is not complete");
+    // Historical measured failures remain readable through read(), but cannot become upload inputs.
+    assertTranscriptionAudioReceipt(intent, receipt);
+    const maximum = Math.min(intent.recipe.maxOutputBytes, 25_000_000);
+    invariant(receipt.audio.byteLength <= maximum, "TRANSCRIPTION_AUDIO_CORRUPT", "Derivative exceeds its upload byte bound");
+    // Reuse the complete PCM parser; matching the copied hash below proves these are the same verified bytes.
+    const path = await this.verifyBlob(receipt, intent, signal); stopped(signal);
+    await this.directories(); stopped(signal);
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let bytes: Buffer;
+    try {
+      stopped(signal); const before = await file.stat(); stopped(signal);
+      invariant(before.isFile() && before.size === receipt.audio.byteLength && before.size <= maximum,
+        "TRANSCRIPTION_AUDIO_CORRUPT", "Verified derivative size changed before upload");
+      bytes = Buffer.alloc(before.size); const sha = createHash("sha256"); let offset = 0;
+      while (offset < bytes.length) {
+        stopped(signal); const part = await file.read(bytes, offset, Math.min(65536, bytes.length - offset), offset); stopped(signal);
+        invariant(part.bytesRead > 0, "TRANSCRIPTION_AUDIO_CORRUPT", "Verified derivative was truncated during upload read");
+        sha.update(bytes.subarray(offset, offset + part.bytesRead)); offset += part.bytesRead;
+      }
+      const extra = await file.read(Buffer.alloc(1), 0, 1, bytes.length); stopped(signal);
+      const after = await file.stat(); stopped(signal);
+      invariant(extra.bytesRead === 0 && after.size === before.size && after.mtimeMs === before.mtimeMs && after.ctimeMs === before.ctimeMs
+        && sha.digest("hex") === receipt.audio.sha256,
+      "TRANSCRIPTION_AUDIO_CORRUPT", "Verified derivative changed during upload read");
+    } finally { await file.close(); stopped(signal); }
+    await this.directories(); stopped(signal);
+    return { receipt, bytes };
   }
   async install(input: TranscriptionAudioIntent, value: MeasuredTranscriptionAudio, temporaryPath: string, options: { signal?: AbortSignal } = {}): Promise<StoredTranscriptionAudio> {
     const intent = structuredClone(input), audio = structuredClone(value), signal = options.signal, sourcePath = temporaryPath;

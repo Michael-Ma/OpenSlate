@@ -21,7 +21,7 @@ export { OPENAI_SPEECH_MODEL, OPENAI_SPEECH_VOICES, OPENAI_SPEECH_BUDGET, descri
 export type { OpenAISpeechModel, OpenAISpeechVoice, OpenAISpeechRequest, OpenAISpeechDescription,
   OpenAISpeechResult, OpenAISpeechOutcome, OpenAISpeechAdapterOptions, OpenAISpeechWireDescription } from "./openai-speech.js";
 export { OPENAI_TRANSCRIPTION_MODEL, OPENAI_TRANSCRIPTION_PROJECTION_VERSION, describeOpenAITranscriptionRequest,
-  parseOpenAITranscriptionResponse, OpenAITranscriptionAdapter } from "./openai-transcription.js";
+  validateOpenAITranscriptionOptions, parseOpenAITranscriptionResponse, OpenAITranscriptionAdapter } from "./openai-transcription.js";
 export type { OpenAITranscriptionRequest, OpenAITranscriptionDescription, OpenAITranscriptionResult,
   OpenAITranscriptionOutcome, OpenAITranscriptionAdapterOptions, TranscriptionWaveform,
   TranscriptionWord, TranscriptionTimingIssue, OpenAITranscriptionResponseInput, OpenAITranscriptionParseOptions,

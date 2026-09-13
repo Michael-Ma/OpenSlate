@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonical, digest, invariant } from "@openslate/core";
 import type { ExecutionSpoolOutput } from "@openslate/providers";
+import { parseOpenAITranscriptionResponse } from "@openslate/providers";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
 import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
 import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormalizedAudioIngestion } from "../execution/audio-derivation.js";
@@ -14,6 +15,9 @@ import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.j
 import type { SpeechAuthorityStore } from "../execution/audio-execution-authority.js";
 import { assertSpeechExecutionDispatch, assertSpeechExecutionResult } from "../execution/audio-execution-receipts.js";
 import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionResult } from "../execution/audio-execution-receipts.js";
+import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "../execution/transcription-execution-authority.js";
+import { assertTranscriptionExecutionDispatch, assertTranscriptionExecutionResult, compactTranscriptionExecutionResult, prepareTranscriptionExecutionRequest } from "../execution/transcription-execution-receipts.js";
+import type { TranscriptionExecutionMapping, TranscriptionExecutionDispatch, TranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
@@ -141,6 +145,47 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         && pcm.pcm.channels === 1 && pcm.pcm.sampleCount === receipt.audio.sampleCount, "Transcription derivative PCM differs from its measured receipt");
       transcriptionCompletions.set(receipt.id, identity);
     };
+    const checkedTranscription = new Set<string>();
+    const transcriptionRecords = async (attemptId: string) => {
+      if (checkedTranscription.has(attemptId)) return;
+      const attempt = get("attempt", attemptId) as Attempt;
+      const mapping = speechReader.get<TranscriptionExecutionMapping>("transcription_execution_mapping", attemptId);
+      const dispatch = speechReader.get<TranscriptionExecutionDispatch>("transcription_execution_dispatch", attemptId);
+      const result = speechReader.get<TranscriptionExecutionResult>("transcription_execution_result", attemptId);
+      const admission = resolveTranscriptionAdmission(speechReader, attempt.request, mapping);
+      const preparation = mapping ? resolveTranscriptionPreparation(speechReader, attempt, mapping) : undefined;
+      if (mapping) {
+        assertTranscriptionMappingAdmission(admission, mapping, preparation!);
+        await transcriptionCompletion(preparation!.receipt);
+        fail(canonical(await json(`audio-derivatives/completions/${preparation!.receipt.id}.json`)) === canonical(preparation!.receipt),
+          "Transcription mapping lost its exact derivative completion file");
+        const bytes = await read(`audio-derivatives/blobs/${preparation!.receipt.audio.sha256}.wav`);
+        const prepared = prepareTranscriptionExecutionRequest(attempt.request, preparation!, bytes);
+        fail(canonical(prepared.description) === canonical(mapping.transport), "Transcription multipart differs from the actual saved upload bytes");
+      }
+      if (dispatch) { fail(mapping && preparation, "Transcription dispatch lost its exact mapping"); assertTranscriptionExecutionDispatch(attempt, mapping, dispatch, preparation); }
+      if (result) {
+        const raw = result.observation.kind === "completed" ? get("execution_output_receipt", result.observation.outputReceiptId) as OutputReceipt : undefined;
+        assertTranscriptionExecutionResult(attempt, mapping, dispatch, result, preparation, raw);
+        if (result.observation.kind === "completed") {
+          const observation = result.observation, manifestPath = `execution-output/manifests/${observation.outputReceiptId}.json`;
+          // Preserve unsaved/conflicting synchronous results as liabilities. No candidate is published by this bridge.
+          // When this exact receipt has durable bytes, reparse it independently of whichever raw slot won.
+          if (files.has(manifestPath)) {
+            const spool = await json(manifestPath), value = observation.result;
+            fail(spool.receiptId === observation.outputReceiptId && spool.sha256 === value.rawResponseSha256
+              && spool.byteLength === value.rawResponseByteLength, "Transcription raw spool differs from its observed result");
+            const path = `execution-output/blobs/${spool.blobKey}`; required(path, value.rawResponseSha256, value.rawResponseByteLength);
+            const parsed = parseOpenAITranscriptionResponse({ bytes: await read(path), mimeType: "application/json",
+              sourceDurationSeconds: preparation!.receipt.audio.sampleCount / 16000 }, {
+              maxTextBytes: mapping!.parser.maxTextBytes, maxWords: mapping!.parser.maxWords, maxWordBytes: mapping!.parser.maxWordBytes });
+            fail(parsed.reportedModel === observation.reportedModel && canonical(compactTranscriptionExecutionResult(parsed.result)) === canonical(value),
+              "Transcription compact result differs from its exact raw response and pinned parser");
+          }
+        }
+      }
+      checkedTranscription.add(attemptId);
+    };
     let storageId: string | undefined;
     if (files.has("execution-output/identity.json")) {
       const identity = await json("execution-output/identity.json");
@@ -246,6 +291,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           assertOutputReceiptIdentity(value as OutputReceipt, attempt as Attempt);
       } else if (["speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result"].includes(row.kind)) {
         speechRecords(row.id);
+      } else if (["transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(row.kind)) {
+        await transcriptionRecords(row.id);
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);

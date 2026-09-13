@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Explicit transcription application bridge with exact owned audio and raw response recovery",
+  "activation": "No launcher or narration UI activation",
+  "realMediaApiCalls": 0,
+  "nativeModelStartsInThisMilestone": 0,
+  "focusedChecks": {
+    "transportParserAndBridge": 63,
+    "independentBridge": 10,
+    "independentRecordsAndBackup": 12,
+    "independentUploadReader": 14
+  },
+  "pipeline": {
+    "privateProofId": "openslate-audio-bridges-proof-L3fepV",
+    "harnessChecksPassed": 11,
+    "independentAuditChecksPassed": 24,
+    "calls": {
+      "speech": 1,
+      "transcription": 1,
+      "credentials": 2,
+      "normalization": 1,
+      "derivative": 1
+    },
+    "fixtureEstimatesMicros": [
+      "100",
+      "50"
+    ],
+    "source": {
+      "sampleRate": 48000,
+      "channels": 2,
+      "samplesPerChannel": 288000,
+      "sha256": "b48f5e53481b8785fa6c06cf24e5ae130a5b9865033da34ef0366a3af740efb9"
+    },
+    "derivative": {
+      "bitsPerSample": 16,
+      "byteLength": 192078,
+      "channels": 1,
+      "endDelta48kSamples": 0,
+      "sampleCount": 96000,
+      "sampleRate": 16000,
+      "sha256": "112567fc9507c62a9fa79b1cd4e382dad76b38a4927020aaea5e8597c3b6d932"
+    },
+    "upload": {
+      "sha256": "112567fc9507c62a9fa79b1cd4e382dad76b38a4927020aaea5e8597c3b6d932",
+      "byteLength": 192078,
+      "bodySha256": "2cade25e92227719a5d43bdf6fac2ed7476131738939b0ddb8b8f9f2a5b881a2",
+      "bodyByteLength": 192701,
+      "contentType": "multipart/form-data; boundary=openslate-600e2537cb6f37e33e67de1e32303e2c7162e9717429d7b8-0"
+    },
+    "rawResponse": {
+      "rawResponseByteLength": 164,
+      "rawResponseSha256": "b022d1eed41bfb113c9c11a225bd995c9c16464ecb2054a243b9a72a6043d940",
+      "reportedDurationSeconds": 6,
+      "reportedLanguage": "english",
+      "resultDigest": "2205d64757c8cda13455ead78ec19519bfeb3041138895a7125df22498de6f2b",
+      "textBytes": 13,
+      "timingIssueCount": 1,
+      "usage": null,
+      "wordCount": 2
+    },
+    "parser": {
+      "adapter": "openai-transcription-v1",
+      "maxResponseBytes": 4194304,
+      "maxTextBytes": 262144,
+      "maxWordBytes": 1024,
+      "maxWords": 8192,
+      "version": 1
+    },
+    "recovery": "Forced raw-spool SQL failure followed by reopen; no prepare, credential resolution, media probing, conversion or repeat POST",
+    "outcome": "Speech succeeded; raw transcript remains ingesting/reserved without a candidate ingester",
+    "narrationOrCanonicalChanges": false,
+    "timingEvidence": "Original 6.000001-second endpoint remains flagged as out of source even though 48 kHz rounding yields the last source sample"
+  },
+  "privateBackup": {
+    "privateProofId": "openslate-audio-bridges-backup-proof-NYFYY4",
+    "exportAndInspection": "passed",
+    "originalHarnessPassed": 9,
+    "originalHarnessFailed": 1,
+    "failedAssertion": "Source directory equality: expected ownership file and SQLite sidecars were added",
+    "supplementalChecksPassed": 9,
+    "originalDatabaseHashesUnchanged": true,
+    "managedFilesVerifiedAgainstManifest": 14,
+    "manifestFiles": 16,
+    "runtimeFilesAdded": 5,
+    "actualRestorePerformed": false
+  },
+  "limits": [
+    "HTTP responses and human fixture principals are synthetic; no live provider access, speech recognition quality, actual pricing or browser approval is verified.",
+    "Plan/grant seeding uses trusted host services; spending issuance and both Engine admissions are actual application paths.",
+    "The recovery harness manually expires an attempt lease and reopens the database; it does not measure natural expiry or kill a process.",
+    "Raw lookup verifies stored source/preparation identities and raw output bytes; future candidate ingestion and backup verify the required source/derivative bytes.",
+    "Concurrent callers after a dispatch marker cannot repeat POST. Concurrent missing-derivative preparation is not coalesced; owned pre-marker MEDIA_BUSY is a definite local failure with consumed allowance capacity retained.",
+    "The backup disposition preserves its failed initial inventory assertion and expected runtime sidecars; it does not claim the source directory remained identical.",
+    "Transcript candidate ingestion, human adoption and opt-in audio activation remain separate work."
+  ],
+  "completeCheckout": {
+    "tests": 1173,
+    "passed": 1173,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "builds": "passed",
+    "typechecks": "passed",
+    "installedCodexNoTurnProbe": "passed"
+  }
+}
