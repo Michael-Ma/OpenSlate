@@ -5,6 +5,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | Document | Contents |
 |---|---|
 | [Implementation status](implementation/STATUS.md) | Tested foundation, demo, compatibility evidence and remaining gates |
+| [Fresh checkout validation](implementation/CLEAN-CHECKOUT-VALIDATION.md) | New source/dependencies, build, default launcher and offline demo on macOS |
 | [Local launcher](implementation/LOCAL-LAUNCHER.md) | One built process for interface/API, private local state and clean shutdown |
 | [Opt-in media execution](implementation/MEDIA-EXECUTION-LAUNCHER.md) | Independent provider activation, truthful setup status and no-key browser evidence |
 | [Automatic local assembly](implementation/AUTOMATIC-LOCAL-ASSEMBLY.md) | Real Engine timeline/render, immutable recipes, content reuse and restart recovery |

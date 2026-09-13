@@ -23,7 +23,7 @@ Local deployment does not mean offline generation. The initial production adapte
 
 ## Quick start
 
-Prerequisites: Node.js 24 and pnpm 10.33.0. If needed, install pnpm with `npm install -g pnpm@10.33.0`.
+Prerequisites: Node.js 24 and pnpm 10.33.0. The SQLite dependency invokes native build tooling; the verified macOS setup also had Python 3 and Xcode command-line build tools. See [fresh checkout evidence](docs/implementation/CLEAN-CHECKOUT-VALIDATION.md) for the tested environment. If needed, install pnpm with `npm install -g pnpm@10.33.0`.
 
 ```sh
 git clone https://github.com/Michael-Ma/OpenSlate.git

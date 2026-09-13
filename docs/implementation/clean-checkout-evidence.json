@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "sourceCommit": "3f974bbf7d242619e4be88a2368171affd31a1e2",
+  "sourceArchiveSha256": "0216b8e3a1462df9cee3b8f00eb9919c5666dd6b0ad7bcd38d555066c6c0c05e",
+  "sourceFiles": 389,
+  "platform": "macOS arm64",
+  "node": "24.15.0",
+  "pnpm": "10.33.0",
+  "packageDownloads": 86,
+  "reusedPackages": 0,
+  "steps": [
+    {
+      "step": "install",
+      "exitCode": 1,
+      "elapsedMs": 200
+    },
+    {
+      "step": "install",
+      "exitCode": 1,
+      "elapsedMs": 368
+    },
+    {
+      "step": "install-online",
+      "exitCode": 0,
+      "elapsedMs": 3159
+    },
+    {
+      "step": "build",
+      "exitCode": 0,
+      "elapsedMs": 2924
+    },
+    {
+      "step": "launcher",
+      "exitCode": 0,
+      "elapsedMs": 2079
+    },
+    {
+      "step": "demo",
+      "exitCode": 0,
+      "elapsedMs": 1579
+    },
+    {
+      "step": "launcher-no-media-tools",
+      "exitCode": 0,
+      "elapsedMs": 1890
+    }
+  ],
+  "launcher": {
+    "status": "passed",
+    "launcher": "built single process on 127.0.0.1:3001",
+    "bundle": true,
+    "protectedApi": true,
+    "tokenFileMode": "0600",
+    "tokenPrinted": false,
+    "authenticatedProject": true,
+    "duplicateInstallationDeniedBeforeTokenRead": true,
+    "firstInstallationStayedHealthy": true,
+    "ownershipInodePreserved": true,
+    "ownershipReleasedAfterShutdown": true,
+    "openEventStreamClosed": true,
+    "shutdownMs": 7,
+    "modelCalls": 0,
+    "mediaApiCalls": 0
+  },
+  "launcherWithoutConfiguredMediaTools": {
+    "status": "passed",
+    "launcher": "built single process on 127.0.0.1:3001",
+    "bundle": true,
+    "protectedApi": true,
+    "tokenFileMode": "0600",
+    "tokenPrinted": false,
+    "authenticatedProject": true,
+    "duplicateInstallationDeniedBeforeTokenRead": true,
+    "firstInstallationStayedHealthy": true,
+    "ownershipInodePreserved": true,
+    "ownershipReleasedAfterShutdown": true,
+    "openEventStreamClosed": true,
+    "shutdownMs": 7,
+    "modelCalls": 0,
+    "mediaApiCalls": 0
+  },
+  "demo": {
+    "fixture": true,
+    "initialFakeAccepts": 4,
+    "totalFakeAcceptsAfterEditAndRestart": 6,
+    "duplicateAccepts": 0,
+    "previewSeconds": 1,
+    "networkCalls": 0
+  },
+  "checks": [
+    {
+      "name": "source_started_without_dependencies_or_build_outputs",
+      "pass": true
+    },
+    {
+      "name": "all_exported_source_bytes_unchanged_after_install_and_checks",
+      "pass": true
+    },
+    {
+      "name": "exact_source_archive_identity",
+      "pass": true
+    },
+    {
+      "name": "install-online_exited_zero",
+      "pass": true
+    },
+    {
+      "name": "build_exited_zero",
+      "pass": true
+    },
+    {
+      "name": "launcher_exited_zero",
+      "pass": true
+    },
+    {
+      "name": "demo_exited_zero",
+      "pass": true
+    },
+    {
+      "name": "launcher-no-media-tools_exited_zero",
+      "pass": true
+    },
+    {
+      "name": "fresh_package_cache_downloaded_all_86_dependencies",
+      "pass": true
+    },
+    {
+      "name": "launcher_owner_token_api_shutdown_proof",
+      "pass": true
+    },
+    {
+      "name": "no_media_tools_owner_token_api_shutdown_proof",
+      "pass": true
+    },
+    {
+      "name": "demo_review_edit_and_uncertain_restart_no_duplicate",
+      "pass": true
+    },
+    {
+      "name": "demo_preview_exact_saved_hash",
+      "pass": true
+    },
+    {
+      "name": "demo_evidence_retained_outside_tmp",
+      "pass": true
+    }
+  ],
+  "exceptions": [
+    "Initial harness used an unsupported pnpm userconfig argument and failed before install; corrected to the supported npm_config_userconfig environment setting.",
+    "Offline-cache attempt failed because a locked tarball was absent; a separate empty package cache and public-registry install downloaded all86packages successfully."
+  ],
+  "limitations": [
+    "Export of a local commit, not a clone of the unpushed GitHub state.",
+    "Fresh source and package cache on the existing macOS host, not a clean OS; existing Node/corepack/node-gyp caches and Python/Xcode build tooling were present.",
+    "Launcher health/static/API behavior was tested, not a browser or a signed desktop installer.",
+    "No Codex model or media API call; fake media is a one-second fixture, not a real commercial.",
+    "Linux and Windows not tested."
+  ]
+}
