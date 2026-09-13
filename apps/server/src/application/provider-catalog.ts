@@ -1,8 +1,8 @@
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
-import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
+import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerProfileArguments, snapshotLocalExecution } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import { describeOpenAIImageRequest } from "@openslate/providers";
-import type { ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality } from "@openslate/providers";
+import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality } from "@openslate/providers";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 import type { MediaCredentialId } from "./provider-credentials.js";
 
@@ -100,26 +100,43 @@ export class InstalledProviderCatalog {
   readonly #registry: ExecutionRegistry | undefined;
   readonly #credentials: EnvironmentMediaCredentials;
   readonly #mediaTools: Readonly<{ image: boolean; video: boolean }>;
+  readonly #enabledExecutions: ReadonlySet<string>;
   readonly #digest: string;
   get digest(): string { return this.#digest; }
   constructor(options: { configuration?: unknown; registry?: ExecutionRegistry; credentials?: EnvironmentMediaCredentials;
-    mediaTools?: { image: boolean; video: boolean } } = {}) {
+    mediaTools?: { image: boolean; video: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
     const configuration = options.configuration === undefined ? { version: 1 as const, profiles: [] } : validateConfiguration(options.configuration);
     this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles];
     this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true });
+    const enabled = options.enabledExecutions ?? [];
+    invariant(Array.isArray(enabled) && enabled.length <= 2 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "minimax-h3"].includes(value.adapter) && value.version === "1"),
+    "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
+    this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
+    invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");
   }
   view() {
+    const profiles = this.#definitions.map(definition => this.describe(definition.profile, definition.label));
     return { catalogDigest: this.digest, defaults: BUILT_IN_PROFILES.map(profile => profile.id),
-      profiles: this.#definitions.map(definition => this.describe(definition.profile, definition.label)),
-      realExecutionEnabled: false as const, notice: "Model selection does not grant generation or spending permission. Real execution is not enabled." };
+      profiles, realExecutionEnabled: profiles.some(profile => profile.readiness.realExecutionEnabled),
+      notice: this.#enabledExecutions.size ? "Enabled models still require configured keys, exact generation permission and a spending allowance. Check each model's readiness."
+        : "Model selection does not grant generation or spending permission. Real execution is not enabled." };
   }
-  projectView(profiles: unknown, provenance?: unknown) {
+  projectView(profiles: unknown, provenance?: unknown, localExecution?: unknown) {
     invariant(Array.isArray(profiles) && profiles.length > 0 && profiles.length <= 64, "PROVIDER_CATALOG_INVALID", "The project provider lock is unavailable");
+    let localAssemblyCompatible = false;
+    try { snapshotLocalExecution(localExecution); localAssemblyCompatible = true; } catch { /* Absence and unsupported saved pins require a new project for H3. */ }
+    const described = profiles.map(profile => {
+      const row = this.describe(profile), compatible = row.profile?.adapter !== "minimax-h3" || localAssemblyCompatible;
+      return { ...row, projectExecution: { compatible,
+        code: compatible ? null : "LOCAL_EXECUTION_UPGRADE_REQUIRED",
+        message: compatible ? null : "Create a new project with video generation enabled on this computer. This project's saved assembly mode cannot generate H3 video." } };
+    });
     return { catalogDigest: this.digest, pinnedSelection: object(provenance) && typeof provenance.catalogDigest === "string"
       && /^[a-f0-9]{64}$/.test(provenance.catalogDigest) ? { catalogDigest: provenance.catalogDigest } : null,
-      profiles: profiles.map(profile => this.describe(profile)), realExecutionEnabled: false as const,
+      profiles: described, realExecutionEnabled: described.some(profile => profile.readiness.realExecutionEnabled && profile.projectExecution.compatible),
       notice: "These are the project's saved models. Installation changes do not replace them; selection does not authorize generation." };
   }
   select(expectedCatalogDigest: string, profileIds: readonly string[]): InstalledProviderSelection {
@@ -149,6 +166,9 @@ export class InstalledProviderCatalog {
       try { credentialPresent = this.#credentials.status().credentials.find(value => value.id === policy.credential)?.configured ?? false; }
       catch { credentialUnavailable = true; }
     }
+    const enabledByHost = !!profile && !policy?.fixture && this.#enabledExecutions.has(canonical({ adapter: profile.adapter, version: profile.executionVersion }));
+    const realExecutionEnabled = enabledByHost && registered && valid && !!policy?.media && this.#mediaTools[policy.media]
+      && credentialPresent === true && !credentialUnavailable;
     return { id: object(input) && typeof input.id === "string" && ID.test(input.id) ? input.id : "unavailable",
       label: name ?? current?.label ?? (profile ? `${profile.kind}: ${profile.id}` : "Unsupported saved provider"),
       profile, definitionDigest: profile ? digest(profile) : null, installedDefinition: !!current,
@@ -157,7 +177,7 @@ export class InstalledProviderCatalog {
       readiness: { configurationValid: valid, registered,
         mediaTools: { required: !!policy?.media, available: policy?.media ? this.#mediaTools[policy.media] : valid },
         credential: { required: !!policy?.credential, present: credentialPresent, backendUnavailable: credentialUnavailable, apiValidated: false as const },
-        spendingPermissionRequired: !policy?.fixture, realExecutionEnabled: false as const } };
+        spendingPermissionRequired: !policy?.fixture, enabledByHost, realExecutionEnabled } };
   }
 }
 

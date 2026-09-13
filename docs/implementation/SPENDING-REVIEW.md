@@ -1,6 +1,6 @@
 # Human spending review
 
-The local browser now exposes exact external-work allowances and a separate project budget editor. These controls call authenticated application routes; they do not start a director turn, edit the film, create a generation grant or activate a provider. The shipped launcher still registers only fake execution.
+The local browser exposes exact external-work allowances and a separate project budget editor. These controls call authenticated application routes; they do not start a director turn, edit the film, create a generation grant or activate a provider. The launcher defaults to fake execution; external providers require independent [opt-in setup](MEDIA-EXECUTION-LAUNCHER.md).
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ Candidate/history pagination exposes coverage and retains backward navigation wh
 
 ## Verification
 
-The complete checkout passed **768 tests, zero failures/skips**, with all builds/typechecks and the installed no-turn Codex probe. This includes authenticated issue/revoke and lost-response/reopen tests, project-budget compare-and-swap and rollback tests, safe historical projections, browser model helpers, shared timeline capture and optional local compiler identity.
+At this component's initial milestone the complete checkout passed **768 tests, zero failures/skips**, with all builds/typechecks and the installed no-turn Codex probe. This included authenticated issue/revoke and lost-response/reopen tests, project-budget compare-and-swap and rollback tests, safe historical projections, browser model helpers, shared timeline capture and optional local compiler identity. See [current status](STATUS.md) for subsequent integration evidence.
 
 In the actual built browser, an isolated two-keyframe project selected only its first keyframe, reviewed its exact image model/settings, issued a one-start $0.10 configured-estimate allowance, displayed and revoked that allowance, then independently reviewed and saved a $1-to-$2 project budget change. Refresh retained the records. Browser warning/error checks were empty in the corrected run.
 

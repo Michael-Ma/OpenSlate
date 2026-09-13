@@ -79,9 +79,9 @@ export function createApp(options: AppOptions = {}) {
   app.get("/api/providers", async () => providerCatalog().view());
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
     const project = service().store.getProject(request.params.projectId);
-    const lock = service().store.get<{ projectId: string; profiles: unknown; providerSelection?: unknown }>("capability_lock", project.capabilityLockId);
+    const lock = service().store.get<{ projectId: string; profiles: unknown; providerSelection?: unknown; localExecution?: unknown }>("capability_lock", project.capabilityLockId);
     invariant(lock?.projectId === project.id, "PROVIDER_CATALOG_INVALID", "The project provider lock is unavailable");
-    return providerCatalog().projectView(lock.profiles, lock.providerSelection);
+    return providerCatalog().projectView(lock.profiles, lock.providerSelection, lock.localExecution);
   });
   app.post<{ Body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
     schema: { body: { ...object({ name: string, expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },

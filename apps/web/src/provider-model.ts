@@ -5,7 +5,8 @@ export interface ProviderView {
   estimatedCost: { currency: "USD"; unitMicros: string; basis: "fixture" | "host_configured"; actualVendorPriceVerified: false } | null;
   readiness: { configurationValid: boolean; registered: boolean; mediaTools: { required: boolean; available: boolean };
     credential: { required: boolean; present: boolean | null; backendUnavailable: boolean; apiValidated: false };
-    spendingPermissionRequired: boolean; realExecutionEnabled: boolean };
+    spendingPermissionRequired: boolean; enabledByHost?: boolean; realExecutionEnabled: boolean };
+  projectExecution?: { compatible: boolean; code: string | null; message: string | null };
 }
 export interface ProviderCatalogView { catalogDigest: string; defaults: string[]; profiles: ProviderView[]; realExecutionEnabled: boolean; notice: string }
 export interface ProviderSelection { expectedCatalogDigest: string; profileIds: string[] }
@@ -32,4 +33,12 @@ export function providerEstimate(provider: ProviderView): string {
 export function canUseDemo(providers: ProviderView[]): boolean {
   return ["fake-image-v1", "fake-video-v1"].every(id => providers.some(provider => provider.id === id && provider.profile?.adapter === "fake"))
     && providers.every(provider => provider.profile?.adapter === "fake");
+}
+
+export function providerExecutionStatus(provider: ProviderView): string {
+  if (provider.projectExecution?.compatible === false)
+    return provider.projectExecution.message ?? "This project's saved execution mode is incompatible. Create a new project to use this provider.";
+  if (provider.readiness.realExecutionEnabled) return "Provider ready · generation permission and a spending allowance are still required.";
+  return provider.readiness.enabledByHost ? "Enabled on this computer · setup is incomplete."
+    : "Generation is disabled on this computer. Key setup does not authorize spending.";
 }

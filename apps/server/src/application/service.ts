@@ -37,6 +37,8 @@ export interface ApplyReceipt { preparedId: string; projectId: string; revisionI
 export interface ProductionServiceOptions {
   /** Trusted installation choice for new projects only. Existing locks never inherit this default. */
   newProjectLocalExecution?: LocalExecutionIdentity;
+  /** Limit the new-project pin to the resolved trusted profile selection. Omission means all. */
+  newProjectLocalExecutionFor?: "all" | "external-video";
 }
 interface ProjectCapabilityLock {
   projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string;
@@ -47,15 +49,23 @@ export { TOOL_NAMES } from "@openslate/core";
 /** The trusted application boundary. Models propose data; these methods own authority and commits. */
 export class ProductionService {
   private readonly newProjectLocalExecution: Readonly<LocalExecutionIdentity> | undefined;
+  private readonly newProjectLocalExecutionFor: "all" | "external-video";
   constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES,
     options: ProductionServiceOptions = {}) {
     const selected = options.newProjectLocalExecution;
     this.newProjectLocalExecution = selected === undefined ? undefined : snapshotLocalExecution(selected);
+    const scope = options.newProjectLocalExecutionFor === undefined ? "all" : options.newProjectLocalExecutionFor;
+    invariant(scope === "all" || scope === "external-video", "LOCAL_EXECUTION_UNSUPPORTED", "Unsupported new-project local execution scope");
+    invariant(scope !== "external-video" || this.newProjectLocalExecution, "LOCAL_EXECUTION_UNSUPPORTED", "External-video scope requires an exact local execution identity");
+    this.newProjectLocalExecutionFor = scope;
   }
 
   createProject(name: string, selection?: InstalledProviderSelection): ProjectRecord {
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
     const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
+    const profiles = selected?.profiles ?? this.profiles;
+    const pinLocalExecution = this.newProjectLocalExecution && (this.newProjectLocalExecutionFor === "all"
+      || profiles.some(profile => profile.kind === "video" && profile.adapter !== "fake"));
     return this.store.transaction(() => {
       const project: ProjectRecord = {
         id: newId(), revisionId: newId(), headVersion: 0, name, brief: "", story: "", scenes: [],
@@ -63,10 +73,10 @@ export class ProductionService {
         shots: [], cues: [], artifacts: [], activePlanId: null,
       };
       this.store.createProject(project);
-      this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: selected?.profiles ?? this.profiles,
+      this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles,
         recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES,
         ...(selected ? { providerSelection: selected.provenance } : {}),
-        ...(this.newProjectLocalExecution ? { localExecution: this.newProjectLocalExecution } : {}) });
+        ...(pinLocalExecution ? { localExecution: this.newProjectLocalExecution } : {}) });
       this.store.insert("project_revision", project.revisionId, project.id, { project });
       this.store.appendEvent(project.id, "project.created", { revisionId: project.revisionId });
       return project;

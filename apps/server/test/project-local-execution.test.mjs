@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonical, compilePlan, DEFAULT_PROFILES, newId, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, TOOL_NAMES } from "@openslate/core";
-import { FakeProvider } from "@openslate/providers";
+import { FakeProvider, OPENAI_IMAGE_MODEL } from "@openslate/providers";
 import { Store } from "../dist/persistence/store.js";
 import { Engine } from "../dist/execution/engine.js";
 import { ProductionService } from "../dist/application/service.js";
@@ -117,9 +117,12 @@ test("human or model proposals cannot select or replace a project's local execut
   const f = fixture(t, { newProjectLocalExecution: identity() }), saved = f.seed(), before = lock(f, saved.project);
   for (const proposal of [
     { variant: "plan", source: localPlanSource, localExecution: identity() },
+    { variant: "plan", source: localPlanSource, newProjectLocalExecutionFor: "all" },
     { variant: "project", creative: { localExecution: identity() } },
+    { variant: "project", creative: { newProjectLocalExecutionFor: "all" } },
     { variant: "project", creative: { capabilityLockId: "another-lock" } },
     { variant: "plan", source: localPlanSource.replace('takes:[video]', 'takes:[video],localExecution:{adapter:"local-media",version:"1"}') },
+    { variant: "plan", source: localPlanSource.replace('takes:[video]', 'takes:[video],newProjectLocalExecutionFor:"all"') },
   ]) await assert.rejects(f.service.prepare(saved.project.id, saved.human, { ...proposal, expectedHeadVersion: saved.project.headVersion }));
   assert.deepEqual(lock(f, saved.project), before); assert.equal(f.store.list("prepared", saved.project.id).length, 0);
   const { localExecution: _localExecution, ...withoutIdentity } = before;
@@ -130,7 +133,7 @@ test("project HTTP creation does not expose host identity selection even when th
   const f = fixture(t, { newProjectLocalExecution: identity() }), token = "offline_project_local_identity_1234567890", app = createApp({ service: f.service, localToken: token });
   try {
     const headers = { host: "127.0.0.1", authorization: `Bearer ${token}` };
-    for (const extra of [{ localExecution: identity() }, { newProjectLocalExecution: identity() }])
+    for (const extra of [{ localExecution: identity() }, { newProjectLocalExecution: identity() }, { newProjectLocalExecutionFor: "all" }])
       assert.equal((await app.inject({ method: "POST", url: "/api/projects", headers, payload: { name: "Not selectable by client", ...extra } })).statusCode, 400);
     assert.equal(f.store.listProjects().length, 0);
     const response = await app.inject({ method: "POST", url: "/api/projects", headers, payload: { name: "Host-pinned project" } });
@@ -147,4 +150,63 @@ test("trusted local assembly pin composes with independent saved provider select
   for (const kind of ["message", "hold", "epoch", "grant", "candidate", "attempt", "reservation", "approval", "external_allowance"])
     assert.equal(f.store.list(kind, project.id).length, 0);
   assert.equal(f.provider.acceptedCount(), 0);
+});
+
+function externalCatalog() {
+  return new InstalledProviderCatalog({ configuration: { version: 1, profiles: [
+    { label: "External image", profile: { id: "external-image", revision: "configured-image-1", kind: "image", adapter: "openai-image", executionVersion: "1",
+      configuration: { model: OPENAI_IMAGE_MODEL, settings: { width: 1024, height: 1024, quality: "medium" } }, maxConcurrency: 1, unitCostMicros: "100000", maxRetries: 0 } },
+    { label: "External video", profile: { id: "external-video", revision: "configured-video-1", kind: "video", adapter: "minimax-h3", executionVersion: "1",
+      configuration: { model: "MiniMax-H3", settings: { resolution: "768P" } }, maxConcurrency: 1, unitCostMicros: "200000", maxRetries: 0, minFrames: 120, maxFrames: 450 } },
+  ] } });
+}
+
+test("external-video host scope preserves default demo lock bytes and compilation", async t => {
+  const f = fixture(t, { newProjectLocalExecution: identity(), newProjectLocalExecutionFor: "external-video" }), saved = f.seed();
+  const expected = { profiles: DEFAULT_PROFILES, recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES,
+    id: saved.project.capabilityLockId, projectId: saved.project.id };
+  assert.equal(f.store.db.prepare("SELECT body FROM entities WHERE kind='capability_lock' AND id=?").get(saved.project.capabilityLockId).body, canonical(expected));
+  const prepared = await f.prepare(saved), direct = compilePlan(localPlanSource, { project: saved.project, profiles: DEFAULT_PROFILES,
+    logicalIds: saved.logicalIds, allocateId: () => { throw Error("Aliases already assigned"); } });
+  assert.equal(JSON.stringify(prepared.compiled), JSON.stringify(direct));
+  assert.ok(localNodes(prepared.compiled).every(node => !Object.hasOwn(node.args, "localExecution")));
+});
+
+test("external-video scope pins only selected external video; external image with fake video remains legacy", t => {
+  const f = fixture(t, { newProjectLocalExecution: identity(), newProjectLocalExecutionFor: "external-video" }), catalog = externalCatalog();
+  for (const [profileIds, pinned] of [[["fake-video-v1"], false], [["external-image"], false], [["external-video"], true], [["external-image", "external-video"], true]]) {
+    const selection = catalog.select(catalog.digest, profileIds), project = f.service.createProject("Selected media", selection), saved = lock(f, project);
+    assert.equal(Object.hasOwn(saved, "localExecution"), pinned);
+    if (pinned) assert.deepEqual(saved.localExecution, identity());
+    assert.deepEqual(saved.providerSelection, { catalogDigest: catalog.digest, profileIds: saved.profiles.map(profile => profile.id) });
+    assert.equal(saved.profiles.find(profile => profile.kind === "video").adapter !== "fake", pinned);
+    for (const kind of ["message", "hold", "epoch", "grant", "candidate", "attempt", "reservation", "approval", "external_allowance"])
+      assert.equal(f.store.list(kind, project.id).length, 0);
+  }
+  assert.throws(() => f.service.createProject("Forged selection", { catalogDigest: catalog.digest, profileIds: ["external-video"] }), { code: "PROVIDER_SELECTION_INVALID" });
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("host scope and identity are captured before caller mutation, and all retains the existing opt-in behavior", t => {
+  const options = { newProjectLocalExecution: identity(), newProjectLocalExecutionFor: "external-video" }, f = fixture(t, options), catalog = externalCatalog();
+  options.newProjectLocalExecutionFor = "all"; options.newProjectLocalExecution.adapter = "mutated";
+  const demo = f.service.createProject("Still a legacy demo"), real = f.service.createProject("Still exact local assembly", catalog.select(catalog.digest, ["external-video"]));
+  assert.equal(Object.hasOwn(lock(f, demo), "localExecution"), false); assert.deepEqual(lock(f, real).localExecution, identity());
+  for (const scope of [undefined, "all"]) {
+    const service = new ProductionService(f.store, f.engine, DEFAULT_PROFILES, { newProjectLocalExecution: identity(), newProjectLocalExecutionFor: scope });
+    assert.deepEqual(lock(f, service.createProject("Explicit or default all")).localExecution, identity());
+  }
+  const explicitAllWithoutIdentity = new ProductionService(f.store, f.engine, DEFAULT_PROFILES, { newProjectLocalExecutionFor: "all" });
+  assert.equal(Object.hasOwn(lock(f, explicitAllWithoutIdentity.createProject("No identity supplied")), "localExecution"), false);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("unsupported scopes and conditional selection without an exact identity fail before creating state", t => {
+  const f = fixture(t);
+  for (const scope of [null, false, 1, "external", "EXTERNAL-VIDEO", [], {}, ""]) {
+    assert.throws(() => new ProductionService(f.store, f.engine, DEFAULT_PROFILES, { newProjectLocalExecution: identity(), newProjectLocalExecutionFor: scope }), { code: "LOCAL_EXECUTION_UNSUPPORTED" });
+  }
+  for (const selected of [undefined, null, { adapter: "local-media", version: "2" }])
+    assert.throws(() => new ProductionService(f.store, f.engine, DEFAULT_PROFILES, { newProjectLocalExecution: selected, newProjectLocalExecutionFor: "external-video" }), { code: "LOCAL_EXECUTION_UNSUPPORTED" });
+  assert.equal(f.store.listProjects().length, 0);
 });

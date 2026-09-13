@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { StudioApi } from "./api";
 import { errorText } from "./components";
-import { providerEstimate } from "./provider-model";
+import { providerEstimate, providerExecutionStatus } from "./provider-model";
 import type { ProviderCatalogView, ProviderSelection, ProviderView } from "./provider-model";
 import "./providers.css";
 
@@ -29,7 +29,7 @@ export function NewProjectProviderFields({ api, selection, changed, disabled }: 
       <select id={`new-${kind}-profile`} value={selected(kind)?.id ?? ""} disabled={disabled || stale} onChange={event => choose(kind, event.target.value)}>
         {catalog.profiles.filter(provider => provider.profile?.kind === kind).map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
       </select>{selected(kind) && <p>{providerEstimate(selected(kind)!)}</p>}</div>)}
-      <p>{selection ? "These models will be saved for this project. Paid generation is not enabled yet." : "Demo models are selected. No paid media calls."}</p></>}
+      <p>{selection ? "These models will be saved for this project. Generation also requires model readiness and your exact spending allowance." : "Demo models are selected. No paid media calls."}</p></>}
     {stale && <p role="alert">The model catalog changed. Refresh the choices before creating this project.</p>}
     {error && <p role="alert">{error} Reset the choices to create a default demo project.</p>}
     {(selection || error || stale) && <button type="button" disabled={disabled} onClick={() => { changed(null); setRefresh(value => value + 1); }}>Reset and refresh choices</button>}
@@ -52,7 +52,7 @@ export function ProjectProviderSummary({ api, projectId }: { api: StudioApi; pro
       <span>{providerEstimate(provider)}</span>
       {provider.readiness.credential.required && <span>{provider.readiness.credential.backendUnavailable ? "Credential status unavailable" : provider.readiness.credential.present ? "API key configured · not checked with provider" : "API key not configured"}</span>}
       {provider.readiness.mediaTools.required && !provider.readiness.mediaTools.available && <span>Local media tools unavailable</span>}
-      {provider.readiness.spendingPermissionRequired && <span>Paid generation is not enabled. Key setup does not authorize spending.</span>}
+      {provider.readiness.spendingPermissionRequired && <span>{providerExecutionStatus(provider)}</span>}
     </li>)}</ul>}
     {error && <p role="alert" className="form-error">{error}</p>}
     <button type="button" className="text-button" onClick={() => setRefresh(value => value + 1)}>Refresh model status</button>

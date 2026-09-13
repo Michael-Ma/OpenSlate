@@ -136,6 +136,38 @@ test("registered execution and present dependencies still do not activate real g
   assert.equal(row.readiness.credential.present, true); assert.equal(row.readiness.spendingPermissionRequired, true); assert.equal(row.readiness.realExecutionEnabled, false);
 });
 
+test("project provider HTTP separates installation readiness from immutable local assembly compatibility without writes", async t => {
+  const f = fixture(t, configuration(image(), video()), { readCredential: () => credential });
+  const port = adapter => registerExecutionProvider({ submit: async () => { throw Error("No provider calls"); },
+    lookup: async () => { throw Error("No provider calls"); }, poll: async () => { throw Error("No provider calls"); } }, { adapter, version: "1" });
+  const catalog = new InstalledProviderCatalog({ configuration: configuration(image(), video()),
+    registry: new ExecutionRegistry([port("openai-image"), port("minimax-h3")]), credentials: new EnvironmentMediaCredentials(() => credential),
+    mediaTools: { image: true, video: true }, enabledExecutions: [{ adapter: "openai-image", version: "1" }, { adapter: "minimax-h3", version: "1" }] });
+  const app = f.appFor(catalog), selection = catalog.select(catalog.digest, ["video-pinned"]);
+  const legacy = f.service.createProject("Earlier external video project", selection);
+  const pinnedService = new ProductionService(f.store, f.engine, DEFAULT_PROFILES, { newProjectLocalExecution: { adapter: "local-media", version: "1" } });
+  const pinned = pinnedService.createProject("Compatible production project", selection);
+  const imageOnly = f.service.createProject("External images, fake video", catalog.select(catalog.digest, ["image-pinned"]));
+  const before = f.store.db.prepare("SELECT * FROM entities ORDER BY kind,id").all();
+  const installation = (await f.req("GET", "/api/providers", undefined, randomUUID(), app)).json();
+  assert.equal(installation.realExecutionEnabled, true); assert.equal(installation.profiles.find(row => row.id === "video-pinned").projectExecution, undefined);
+  for (const [project, compatible, profileId] of [[legacy, false, "video-pinned"], [pinned, true, "video-pinned"], [imageOnly, true, "image-pinned"]]) {
+    const response = await f.req("GET", `/api/projects/${project.id}/providers`, undefined, randomUUID(), app); assert.equal(response.statusCode, 200, response.body);
+    const view = response.json(), row = view.profiles.find(row => row.id === profileId);
+    assert.equal(row.readiness.realExecutionEnabled, true, "Installation readiness remains independent");
+    assert.equal(row.projectExecution.compatible, compatible); assert.equal(view.realExecutionEnabled, compatible);
+    assert.equal(row.projectExecution.code, compatible ? null : "LOCAL_EXECUTION_UPGRADE_REQUIRED");
+    if (!compatible) assert.match(row.projectExecution.message, /Create a new project/);
+  }
+  assert.deepEqual(f.store.db.prepare("SELECT * FROM entities ORDER BY kind,id").all(), before);
+  assert.equal(f.provider.acceptedCount(), 0);
+  for (const invalid of [undefined, null, {}, { adapter: "local-media", version: "2" }, { adapter: "local-media", version: "1", hostPath: "/not/exposed" }]) {
+    const view = catalog.projectView([video().profile], undefined, invalid);
+    assert.equal(view.realExecutionEnabled, false); assert.equal(view.profiles[0].projectExecution.code, "LOCAL_EXECUTION_UPGRADE_REQUIRED");
+    assert.equal(JSON.stringify(view).includes("/not/exposed"), false);
+  }
+});
+
 test("credential presence updates locally and sanitized backend failure does not rewrite catalog identity", () => {
   let value, fails = false;
   const catalog = new InstalledProviderCatalog({ configuration: configuration(image()), credentials: new EnvironmentMediaCredentials(() => { if (fails) throw Error(credential); return value; }) });

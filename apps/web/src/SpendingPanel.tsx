@@ -77,7 +77,7 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
   return <section className="spending-panel" aria-labelledby="spending-title">
     <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">Review generation costs</h3></div><button className="text-button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)}>Refresh costs</button></div>
     <p>Approve spending for specific work. Keyframe review remains a separate step before video generation.</p>
-    <p className="spending-disabled">Paid execution is not enabled in this build. Recorded allowances can be used if it is enabled before they expire.</p>
+    <p className="spending-disabled">Generation also requires an enabled, ready provider and sufficient project budget. An allowance does not enable a provider or approve a keyframe.</p>
     {!!(loadError || reviewError || slot.error) && <p role="alert" className="form-error">{loadError || reviewError || errorText(slot.error)}</p>}
     {!state && !loadError && <p role="status">Loading current work and saved allowances…</p>}
     {slot.command && <div className="notice warning"><span>{slot.running ? "Saving your exact spending request…" : "The result was not confirmed. Retry the saved request to check its outcome."}</span>{!slot.running && <button onClick={() => execute(slot.command!)}>Retry same spending action</button>}</div>}
