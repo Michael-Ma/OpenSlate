@@ -93,6 +93,21 @@ export interface PlanNode {
   requires: Id[];
   intentDigest: string;
   specDigest: string;
+  /** Host-authored source binding. Compilation alone does not establish ownership or generation authority. */
+  applicationInput?: TranscriptionApplicationInput;
+}
+
+export interface TranscriptionInputBinding {
+  id: string;
+  digest: string;
+  consumerAlias: string;
+  artifact: ArtifactRef;
+}
+
+export interface TranscriptionApplicationInput {
+  kind: "owned_transcription";
+  id: string;
+  digest: string;
 }
 
 export interface ReviewMember {
@@ -126,6 +141,8 @@ export interface CompileContext {
   profiles: ProviderProfile[];
   /** Trusted host selection, never supplied through the planning language. Omission preserves legacy assembly. */
   localExecution?: LocalExecutionIdentity;
+  /** Trusted compact metadata for exact transcription consumers; never source ownership or approval by itself. */
+  transcriptionInputs?: readonly TranscriptionInputBinding[];
   /** Existing symbolic aliases survive source edits. Missing aliases allocate once per prepare. */
   logicalIds: Record<string, Id>;
   allocateId: () => Id;

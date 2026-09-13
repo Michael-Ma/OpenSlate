@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "date": "2026-09-13",
+  "scope": "Owned transcription compiler binding, full-plan-preserving composition, original-signal artifact installation and inactive execution gate",
+  "fullCheckout": {
+    "passed": 1459,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 62,
+    "durationMilliseconds": 107165.935166,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "unchangedSourceTestConfigurationAndStyleFiles": 342
+  },
+  "focusedVerification": {
+    "compilerBinding": 26,
+    "fullPlanComposition": 11,
+    "audioInstaller": 16,
+    "executionActivationGate": 9,
+    "note": "Focused counts overlap the full checkout."
+  },
+  "sixMinuteComposition": {
+    "shots": 60,
+    "priorOperations": 122,
+    "priorReviewGates": 60,
+    "timelineFrames": 10800,
+    "focusedMilliseconds": 101.0,
+    "fullSuiteMilliseconds": 107.2,
+    "workerDeadlineMilliseconds": 5000,
+    "allPriorNodesGatesAndFinalOutputPreserved": true,
+    "note": "Synthetic plan workload; not a general latency guarantee."
+  },
+  "independentReview": {
+    "remainingCorrectnessFindings": []
+  },
+  "limitations": [
+    "New application inputs are rejected by the Engine until exact source-binding and human-review authority is installed",
+    "Append only; replacement requires an explicit later contract",
+    "No new recording proposal, review, backup schema or browser entry point is activated",
+    "Real media access, billing and recognition quality remain unverified"
+  ],
+  "mediaApiCalls": 0,
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "pushed": false,
+  "next": "Exact owned recording source bindings, ungranted proposals and shared atomic human review/apply"
+}

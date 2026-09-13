@@ -142,6 +142,7 @@ export class Engine {
   installPlan(projectId: string, planId: string, compiled: CompiledPlan, grantBindings: Record<string, string> = {}): { planId: string; nodes: NodeBinding[] } {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId);
+      for (const node of compiled.nodes) this.rejectApplicationInput(node);
       const project = this.store.getProject(projectId);
       if (!this.store.get("budget", projectId)) this.store.insert("budget", projectId, projectId, { capMicros: this.defaultBudgetMicros, currency: "USD" });
       const saved = this.store.get<PlanRecord>("plan", planId);
@@ -301,6 +302,7 @@ export class Engine {
     const settled = await Promise.allSettled(candidates.map(async binding => {
       let attempt: Attempt;
       try {
+        this.rejectApplicationInput(binding.node);
         const lock = this.store.get<{ localExecution?: unknown }>("capability_lock", this.store.getProject(binding.projectId).capabilityLockId);
         if (Object.hasOwn(binding.node.args, "localExecution") || ((binding.node.kind === "timeline" || binding.node.kind === "render") && lock && Object.hasOwn(lock, "localExecution"))) {
           const outcome = await this.runLocalReady(binding);
@@ -678,6 +680,7 @@ export class Engine {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId);
       const project = this.store.getProject(projectId); const binding = this.currentBinding(projectId, nodeId); const node = binding.node;
+      this.rejectApplicationInput(node);
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
       invariant(!this.held(project, nodeId), "EXECUTION_HELD", "Dispatch is paused or held");
       this.checkIntent(project, node);
@@ -755,6 +758,10 @@ export class Engine {
       }
       this.store.appendEvent(projectId, "attempt.state_changed", { attemptId: id, phase: "submitting", nodeId }); return attempt;
     });
+  }
+
+  private rejectApplicationInput(node: PlanNode): void {
+    invariant(!Object.hasOwn(node, "applicationInput"), "APPLICATION_INPUT_UNAVAILABLE", "Application-owned recording inputs are not yet enabled for execution");
   }
 
   private preparationMatches(attempt: Attempt): boolean {

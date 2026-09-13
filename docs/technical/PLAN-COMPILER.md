@@ -14,6 +14,8 @@ V0 supports six operation families: image generation, video generation, speech s
 
 Project, node, specification, candidate, and artifact identities are opaque UUIDs. Readable source aliases such as `shot7` are local symbols; array position, a title, and a source line number never establish durable identity. A prepared change allocates new service-owned identities once and retains them across idempotent retries.
 
+The implemented owned-recording foundation adds a trusted, bounded transcription-input catalog and full-plan-preserving isolated composition. Its application binding participates in both fingerprints while legacy absence preserves old bytes. The Engine currently rejects these new inputs until exact source and human-review authority is connected. See [implementation and activation boundary](../implementation/OWNED-RECORDING-TRANSCRIPTION.md).
+
 ## 2. Inputs and intermediate representation
 
 These fragments describe compiler contracts. Shared branded IDs and JSON validation belong to the core contracts package.

@@ -3,16 +3,21 @@ import { Worker } from "node:worker_threads";
 import { canonical, digest, DomainError, invariant } from "../common.js";
 import { providerProfileArguments } from "../provider-profile.js";
 import { snapshotLocalExecution } from "../local-execution.js";
+import { snapshotCompileTranscriptionInputs, snapshotTranscriptionApplicationInput } from "./transcription-input.js";
 import type {
   ArtifactRef, CompileContext, CompiledPlan, CueRecord, InputBinding, InputSource, JsonObject,
   JsonValue, NodeImpact, OperationKind, PlanNode, ProviderProfile, ReviewGate, ShotRecord,
+  TranscriptionApplicationInput, TranscriptionInputBinding,
 } from "../contracts.js";
 
+export { snapshotCompileTranscriptionInputs, snapshotTranscriptionInputs, TRANSCRIPTION_INPUT_LIMITS } from "./transcription-input.js";
 export const PLAN_LIMITS = Object.freeze({ sourceBytes: 2 * 1024 * 1024, depth: 64, nodes: 5000, edges: 20000, astNodes: 100000, timeoutMs: 5000 });
-type Ast = { type: string; [key: string]: unknown };
+export type RestrictedPlanAst = { type: string; [key: string]: unknown };
+type Ast = RestrictedPlanAst;
 const REF = Symbol("compiler-reference");
 type ReferenceData =
   | { kind: "asset"; artifact: ArtifactRef }
+  | { kind: "transcription_input"; binding: TranscriptionInputBinding }
   | { kind: "shot"; shot: ShotRecord }
   | { kind: "operation"; node: PlanNode }
   | { kind: "review"; gate: ReviewGate; specifications: ReviewSpec[] }
@@ -82,6 +87,10 @@ export function shotIntentDigest(shot: ShotRecord, kind: "image" | "video", cue?
 
 /** Review and dispatch must resolve the same exact, role-labelled input bytes. */
 export function effectiveNodeDigest(node: PlanNode, resolvedInputs: ResolvedInput[]): string {
+  const applicationField = Object.getOwnPropertyDescriptor(node, "applicationInput");
+  invariant(applicationField || !("applicationInput" in node), "TRANSCRIPTION_INPUT_INVALID", "Application input must be own metadata");
+  invariant(!applicationField || (Object.hasOwn(applicationField, "value") && applicationField.enumerable && node.kind === "transcription"), "TRANSCRIPTION_INPUT_INVALID", "Application input must be exact transcription metadata");
+  const applicationInput = applicationField ? snapshotTranscriptionApplicationInput(applicationField.value) : undefined;
   const expected = new Set(node.inputs.map(binding => canonical([binding.destinationPort, binding.role, binding.order])));
   invariant(resolvedInputs.length === expected.size, "INPUT_BINDING_MISMATCH", "All effective inputs must be resolved exactly once");
   const seen = new Set<string>();
@@ -93,14 +102,14 @@ export function effectiveNodeDigest(node: PlanNode, resolvedInputs: ResolvedInpu
     invariant(original.source.kind !== "artifact" || original.source.artifact.sha256 === input.sha256, "INPUT_BINDING_MISMATCH", "Resolved artifact bytes differ from the prepared input");
     seen.add(key);
   }
-  return digest({ kind: node.kind, args: node.args, intent: node.intentDigest, inputs: [...resolvedInputs].sort(compareInputs) });
+  return digest({ kind: node.kind, args: node.args, intent: node.intentDigest, inputs: [...resolvedInputs].sort(compareInputs), ...(applicationInput ? { applicationInput } : {}) });
 }
 function compareInputs(a: { destinationPort: string; role: string; order: number }, b: { destinationPort: string; role: string; order: number }): number {
   return a.destinationPort.localeCompare(b.destinationPort) || a.role.localeCompare(b.role) || a.order - b.order;
 }
 
 // Reject excessive lexical nesting before Babel can recurse. Strings/comments do not add depth.
-function preflight(sourceText: string): void {
+export function assertRestrictedPlanSource(sourceText: string): void {
   invariant(typeof sourceText === "string" && Buffer.byteLength(sourceText, "utf8") <= PLAN_LIMITS.sourceBytes, "PLAN_LIMIT", "Plan source exceeds the size limit");
   let depth = 0; let quote = ""; let comment = "";
   for (let i = 0; i < sourceText.length; i++) {
@@ -132,9 +141,10 @@ function boundAst(root: Ast): void {
 
 /** Pure synchronous compiler. Production callers use compilePlanIsolated for a hard deadline. */
 export function compilePlan(sourceText: string, context: CompileContext): CompiledPlan {
+  const transcriptionInputs = new Map((snapshotCompileTranscriptionInputs(context) ?? []).map(binding => [binding.id, binding]));
   const selectedLocalExecution = context.localExecution;
   const localExecution = selectedLocalExecution === undefined ? undefined : snapshotLocalExecution(selectedLocalExecution);
-  preflight(sourceText);
+  assertRestrictedPlanSource(sourceText);
   invariant(Number.isSafeInteger(context.project.maxFrames) && context.project.maxFrames > 0 && context.project.maxFrames <= 10800, "DURATION_LIMIT", "Project cap must be positive and no more than six minutes at 30 fps");
   let file: Ast;
   try { file = ast(parse(sourceText, { sourceType: "module", strictMode: true, errorRecovery: false, plugins: ["typescript"] })); }
@@ -183,14 +193,14 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
     invariant(shot.promptIntent?.[kind] === shotIntentDigest(shot, kind, cue), "STALE_PROMPT_INTENT", `${kind} prompt has not been authored for the current shot intent`);
     invariant(prompt === (kind === "image" ? shot.imagePrompt : shot.videoPrompt), "STALE_PROMPT_INTENT", `${kind} prompt differs from the accepted shot prompt`);
   };
-  const makeNode = (alias: string, kind: OperationKind, shot: ShotRecord | null, profile: ProviderProfile | null, nodeArgs: JsonObject, inputs: InputBinding[], requires: string[] = []): Ref => {
+  const makeNode = (alias: string, kind: OperationKind, shot: ShotRecord | null, profile: ProviderProfile | null, nodeArgs: JsonObject, inputs: InputBinding[], requires: string[] = [], applicationInput?: Readonly<TranscriptionApplicationInput>): Ref => {
     if (localExecution && (kind === "timeline" || kind === "render")) nodeArgs = { ...nodeArgs, localExecution: Object.freeze({ ...localExecution }) };
     invariant(planNodes.length < PLAN_LIMITS.nodes, "PLAN_LIMIT", "Plan has too many operations");
-    const node: PlanNode = { id: idFor(alias), alias, kind, shotId: shot?.id ?? null, shotRevisionId: shot?.revisionId ?? null, profileId: profile?.id ?? null, args: nodeArgs, inputs, requires, intentDigest: intentFor(shot, kind), specDigest: "" };
+    const node: PlanNode = { id: idFor(alias), alias, kind, shotId: shot?.id ?? null, shotRevisionId: shot?.revisionId ?? null, profileId: profile?.id ?? null, args: nodeArgs, inputs, requires, intentDigest: intentFor(shot, kind), specDigest: "", ...(applicationInput ? { applicationInput } : {}) };
     // A symbolic recipe includes upstream semantics, not newly allocated node/artifact IDs.
     const recipeInputs = inputs.map(binding => ({ destinationPort: binding.destinationPort, role: binding.role, order: binding.order, source: binding.source.kind === "artifact" ? { hash: binding.source.artifact.sha256, kind: binding.source.artifact.kind } : { port: binding.source.port, recipe: outputs.get(binding.source.nodeId)?.specDigest } }));
     invariant(recipeInputs.every(binding => binding.source.hash !== undefined || binding.source.recipe !== undefined), "UNKNOWN_REFERENCE", "Input operation must be declared before use");
-    node.specDigest = digest({ kind, args: nodeArgs, intent: node.intentDigest, inputs: recipeInputs.sort(compareInputs) });
+    node.specDigest = digest({ kind, args: nodeArgs, intent: node.intentDigest, inputs: recipeInputs.sort(compareInputs), ...(applicationInput ? { applicationInput } : {}) });
     planNodes.push(node); outputs.set(node.id, node); return ref({ kind: "operation", node });
   };
   const input = (destinationPort: string, role: string, order: number, value: Ref): InputBinding => ({ destinationPort, role, order, source: source(value) });
@@ -200,6 +210,10 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
     if (name === "asset") {
       arity(1); const id = string(values[0], "asset ID"); const artifact = context.project.artifacts.find(item => item.artifactId === id);
       invariant(artifact && /^[0-9a-f]{64}$/.test(artifact.sha256), "UNKNOWN_REFERENCE", `Unknown or invalid project artifact ${id}`); return ref({ kind: "asset", artifact });
+    }
+    if (name === "transcriptionInput") {
+      arity(1); const id = string(values[0], "transcription input ID"); const binding = transcriptionInputs.get(id);
+      invariant(binding, "UNKNOWN_REFERENCE", "Unknown application transcription input"); return ref({ kind: "transcription_input", binding });
     }
     if (name === "shot") {
       arity(1); const id = string(values[0], "shot ID"); const shot = context.project.shots.find(item => item.id === id || item.revisionId === id || `${item.id}@${item.revisionId}` === id);
@@ -256,9 +270,13 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
       return makeNode(alias, "speech", null, profile, { ...profileArgs(profile), text: string(spec.text, "text"), voice: string(spec.voice, "voice"), instructions: spec.instructions === undefined ? "" : string(spec.instructions, "instructions"), settings: jsonObject(spec.settings) }, []);
     }
     if (name === "transcription") {
-      const spec = fields(data, ["profile", "audio", "language", "timing", "settings"], ["profile", "audio"]); const profile = profileFor(spec.profile, "transcription"); const audio = mediaRef(spec.audio, "audio"); const timing = spec.timing ?? "segment";
+      const spec = fields(data, ["profile", "audio", "language", "timing", "settings"], ["profile", "audio"]); const profile = profileFor(spec.profile, "transcription");
+      const owned = spec.audio !== undefined && isRef(spec.audio) && spec.audio.kind === "transcription_input" ? spec.audio.binding : undefined;
+      invariant(!owned || owned.consumerAlias === alias, "TRANSCRIPTION_INPUT_CONSUMER", "Application transcription input belongs to a different operation");
+      const applicationInput = owned ? snapshotTranscriptionApplicationInput({ kind: "owned_transcription", id: owned.id, digest: owned.digest }) : undefined;
+      const audio = owned ? ref({ kind: "asset", artifact: owned.artifact }) : mediaRef(spec.audio, "audio"); const timing = spec.timing ?? "segment";
       invariant(timing === "segment" || timing === "word" || timing === "none", "VALIDATION_ERROR", "Unsupported transcription timing");
-      return makeNode(alias, "transcription", null, profile, { ...profileArgs(profile), language: spec.language === undefined ? "auto" : string(spec.language, "language"), timing, settings: jsonObject(spec.settings) }, [input("audio", "audio", 0, audio)]);
+      return makeNode(alias, "transcription", null, profile, { ...profileArgs(profile), language: spec.language === undefined ? "auto" : string(spec.language, "language"), timing, settings: jsonObject(spec.settings) }, [input("audio", "audio", 0, audio)], [], applicationInput);
     }
     if (name === "timeline") {
       const spec = fields(data, ["takes", "narration", "transition", "cueRange"], ["takes"]); const takes = list(spec.takes, "takes").map(item => mediaRef(item, "video")); invariant(takes.length > 0, "VALIDATION_ERROR", "Timeline requires takes");
@@ -336,7 +354,7 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
   for (const gate of gates) invariant(gate.members.length > 0, "REVIEW_SPEC_MISMATCH", "Unused human review; preparation-only plans should return their images");
   validateGraph(planNodes);
   const graphDigest = digest({ nodes: planNodes.map(node => ({ id: node.id, kind: node.kind, spec: node.specDigest, requires: [...node.requires].sort() })).sort((a, b) => a.id.localeCompare(b.id)), gates: gates.map(gate => ({ id: gate.id, members: [...gate.members].sort((a, b) => a.videoNodeId.localeCompare(b.videoNodeId)) })).sort((a, b) => a.id.localeCompare(b.id)) });
-  return { source: sourceText, canonicalSource: printPlan(declaration), graphDigest, nodes: planNodes, gates };
+  return { source: sourceText, canonicalSource: printRestrictedPlan(declaration), graphDigest, nodes: planNodes, gates };
 }
 
 function rejectCallExtras(node: Ast): void { invariant(!node.optional && !node.typeParameters && !node.typeArguments, "SYNTAX_NOT_ALLOWED", "Optional/generic calls are unsupported"); }
@@ -356,7 +374,8 @@ function validateGraph(planNodes: PlanNode[]): void {
   for (const node of planNodes) visit(node);
 }
 
-function printPlan(node: Ast): string {
+/** Format a validated restricted AST. This printer does not replace source/DSL validation. */
+export function printRestrictedPlan(node: RestrictedPlanAst): string {
   function expression(value: Ast): string {
     switch (value.type) {
       case "StringLiteral": case "NumericLiteral": case "BooleanLiteral": return JSON.stringify(value.value);
@@ -387,13 +406,14 @@ export function diffPlans(oldPlan: CompiledPlan | null, next: CompiledPlan): Nod
 
 /** A fixed trusted module parses untrusted source in a disposable, resource-bounded worker. */
 export async function compilePlanIsolated(sourceText: string, context: CompileContext): Promise<CompiledPlan> {
+  const transcriptionInputs = snapshotCompileTranscriptionInputs(context);
   const selectedLocalExecution = context.localExecution;
   const localExecution = selectedLocalExecution === undefined ? undefined : snapshotLocalExecution(selectedLocalExecution);
-  preflight(sourceText);
+  assertRestrictedPlanSource(sourceText);
   const initialIds = { ...context.logicalIds };
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./worker.js", import.meta.url), { workerData: { source: sourceText, project: context.project, profiles: context.profiles, logicalIds: initialIds,
-      ...(localExecution ? { localExecution } : {}) }, resourceLimits: { maxOldGenerationSizeMb: 64, stackSizeMb: 4 } });
+      ...(localExecution ? { localExecution } : {}), ...(transcriptionInputs ? { transcriptionInputs } : {}) }, resourceLimits: { maxOldGenerationSizeMb: 64, stackSizeMb: 4 } });
     let settled = false;
     const finish = (error?: unknown, result?: CompiledPlan): void => { if (settled) return; settled = true; clearTimeout(timer); void worker.terminate(); if (error) reject(error); else resolve(result!); };
     const timer = setTimeout(() => finish(new DomainError("PLAN_LIMIT", "Plan compilation exceeded its deadline")), PLAN_LIMITS.timeoutMs);
@@ -405,6 +425,8 @@ export async function compilePlanIsolated(sourceText: string, context: CompileCo
         // Structured cloning drops object freezing; restore the captured identity's immutability.
         if (localExecution) for (const node of message.plan!.nodes) if (node.kind === "timeline" || node.kind === "render")
           node.args.localExecution = Object.freeze({ ...snapshotLocalExecution(node.args.localExecution) });
+        for (const node of message.plan!.nodes) if (Object.hasOwn(node, "applicationInput"))
+          node.applicationInput = snapshotTranscriptionApplicationInput(node.applicationInput);
         for (const [alias, id] of Object.entries(message.logicalIds!)) invariant(!Object.hasOwn(context.logicalIds, alias) || context.logicalIds[alias] === id, "REVISION_CONFLICT", "Logical identity mapping changed during compilation");
         for (const [alias, id] of Object.entries(message.logicalIds!)) if (!Object.hasOwn(context.logicalIds, alias)) Object.defineProperty(context.logicalIds, alias, { value: id, enumerable: true, writable: true, configurable: true });
         finish(undefined, message.plan!);

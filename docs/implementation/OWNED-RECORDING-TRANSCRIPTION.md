@@ -1,6 +1,6 @@
 # Transcribe an owned draft recording
 
-September 13, 2026. **Planned next implementation sequence.** The configured transcription runtime and durable local preparation waiting are implemented. This sequence connects an uploaded recording to reviewed transcription without requiring a script, cue or canonical narration acceptance first.
+September 13, 2026. **Compiler and owned-file foundation implemented; application review and execution activation remain planned.** The configured transcription runtime and durable local preparation waiting are implemented. This sequence connects an uploaded recording to reviewed transcription without requiring a script, cue or canonical narration acceptance first.
 
 ## User and authority flow
 
@@ -19,6 +19,23 @@ flowchart LR
 Preparing an operation does not issue a creative grant or consume a spending allowance. Exact human review creates and consumes the needed grant atomically with the candidate and plan. The existing separate allowance then bounds execution. A model, a generic read-only message or an earlier allowance cannot stand in for that review.
 
 ## 1. Compiler and owned-file foundation
+
+**Implemented boundary:** `composeTranscriptionPlanIsolated` validates the complete saved source, recompiles it against the current project, and appends one bound operation within a single five-second worker deadline. Its plain-data capture is limited to 16 MiB, 400,000 values and depth 128; existing compiler limits still apply. The compact input catalog permits at most 64 bindings and 64 KiB of canonical metadata. Application callers must use the isolated API. The synchronous function exists for the fixed worker and focused tests.
+
+```ts
+// Trusted host context contains the exact recording binding; the source cannot mint it.
+definePlan({ baseRevision: "current-project-revision" }, p => {
+  return p.transcription("recording-transcript", {
+    profile: "locked-transcription-profile",
+    audio: p.transcriptionInput("application-issued-binding-id"),
+    language: "en",
+    timing: "word",
+    settings: {}
+  });
+});
+```
+
+The reference above is available only to `recording-transcript`. Its binding ID/digest participates in the symbolic specification and effective execution fingerprint. The caller's catalog is detached before an allocator callback or worker can run. Legacy nodes omit the new metadata entirely and preserve their previous serialized bytes and hashes. The Engine currently rejects the new field before installation, input verification or admission; a successfully compiled source is not an executable approval.
 
 Add a trusted bounded `CompileContext.transcriptionInputs` catalog. Each entry contains an opaque binding ID/digest, one consumer alias and an exact audio artifact reference. The application will later derive these entries from verified immutable recording bindings; the planning language cannot create them. `p.transcriptionInput(id)` returns an internal reference that only the named transcription operation can consume. Images, video, timeline narration, rendering and other transcription aliases must reject it. Ordinary `p.asset()` remains limited to canonical project artifacts.
 
@@ -52,7 +69,11 @@ General future plan edits must be able to retain already reviewed application-ow
 
 After the backend path passes, add authenticated recording-generation review routes and a browser action. Keep the current V2 director contract unchanged. The later conversational entry point needs an explicit new tool version and guidance upgrade, alongside the planned speech-section/chunk flow. Correct the existing unconditional `fixtureOnly` context claim before advertising real generated work through that entry point.
 
-## Acceptance evidence
+## Verified foundation and remaining acceptance
+
+**Foundation verification:** all 1,459 checkout tests passed (62 additions), with builds/typechecks and the installed no-turn Codex probe. The 26 compiler, 11 composition, 16 installer and nine activation-gate checks cover the new boundary. A 60-shot six-minute fixture retained all 122 old operations and 60 review gates; isolated composition took 101.0 ms in its focused run and 107.2 ms during the full suite. These are fixture observations, not a production latency guarantee. All 342 authored source/test/configuration/style files were unchanged through the full check. Independent review found no remaining correctness issues. No model or media calls occurred. See [sanitized evidence](owned-recording-foundation-evidence.json).
+
+The first three items below are verified; the remaining backend and browser path is still planned.
 
 - Pure and isolated compilation: exact bound audio input, wrong-consumer rejection, detached caller data, bounded parsing and unchanged legacy identities.
 - Full-plan composition: audio-only project plus an existing reviewed multi-shot plan, preserving unrelated aliases, node bytes, review gates and returned render outputs.
