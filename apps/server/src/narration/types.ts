@@ -9,7 +9,11 @@ export interface SegmentDraft {
   meaning: string;
   source: SourceChoice;
 }
-export interface SegmentRevision extends SegmentDraft { id: string; segmentId: string; projectId: string }
+export interface SegmentRevision extends SegmentDraft {
+  id: string; segmentId: string; projectId: string;
+  /** Present only on the exact successor authored by a human transcript selection. */
+  transcriptSelectionId?: string;
+}
 export interface SuppliedNarrationAudio {
   id: string; projectId: string; media: SuppliedMedia;
   /** A human-declared origin for an already supplied recording; not provider evidence. */
@@ -38,11 +42,19 @@ export interface GeneratedNarrationSummary {
   selection: { artifactDigest: string; generationEvidenceDigest: string };
   generation: { adapter: "openai-speech"; version: "1"; model: string; voice: string };
 }
-export interface NarrationCue {
+export interface HumanNarrationCue {
   id: string; projectId: string; segmentRevisionId: string; audioId: string;
   /** Both endpoints are local to the normalized audio artifact. */
   startSample: number; endSample: number;
   method: "human"; confidence: null;
+}
+export interface TranscriptNarrationCue extends Omit<HumanNarrationCue, "method"> {
+  method: "transcript_selection"; transcriptSelectionId: string;
+}
+export type NarrationCue = HumanNarrationCue | TranscriptNarrationCue;
+export interface TranscriptCanonicalProvenance {
+  writing?: { selectionId: string; selectionDigest: string };
+  timing?: { selectionId: string; selectionDigest: string };
 }
 export interface NarrationEntry {
   segmentId: string; segmentRevisionId: string; audioId: string | null; cueId: string | null;

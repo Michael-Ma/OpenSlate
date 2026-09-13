@@ -30,9 +30,9 @@ export function appendGeneratedRecordings(current: GeneratedRecordingPage, next:
 }
 export interface NarrationSegment {
   entry: { segmentId: string; atSample: number; audioId: string | null };
-  script: NarrationDraft & { id: string };
+  script: NarrationDraft & { id: string; transcriptSelectionId?: string };
   audio: Recording | null;
-  cue: { id: string; startSample: number; endSample: number } | null;
+  cue: { id: string; startSample: number; endSample: number; method?: "human" | "transcript_selection"; transcriptSelectionId?: string } | null;
   accepted: { script: boolean; audio: boolean; timing: boolean };
 }
 export interface NarrationView {
@@ -77,6 +77,8 @@ export function narrationError(code: string, fallback: string): string {
     NARRATION_STALE_ACCEPTANCE: "That saved version changed. Refresh and review the current version before accepting it.", NARRATION_MAPPING_REQUIRED: "A removed narration section is still linked to a shot. Choose a replacement or No narration for that shot.",
     REVISION_CONFLICT: "A saved version changed. Your typed text is still here; refresh and compare it before saving again.", NARRATION_CUE_OUT_OF_RANGE: "The selected range goes beyond the recording. Check its start and end times.",
     UPLOAD_TOO_LARGE: "Choose a recording smaller than 128 MiB.", MEDIA_BUSY: "Another local media operation is running. Try again shortly.", MEDIA_TOOL_FAILED: "This recording could not be read. Try a supported audio file.",
+    TRANSCRIPT_REVIEW_CONFLICT: "The recording or transcript list changed. Refresh transcripts and choose the range again.", TRANSCRIPT_REVIEW_TOO_LARGE: "This transcript page is too large to show. Choose a smaller range.",
+    TRANSCRIPT_SELECTION_CONFLICT: "This transcript selection no longer matches the saved section. Refresh and review it again.", TRANSCRIPT_SELECTION_INVALID: "Check the selected words and recording before using this suggestion.",
     NARRATION_INVALID_INPUT: "Check the section, timing and recording choices before saving.", NARRATION_INTEGRITY_ERROR: "The saved narration no longer matches its inputs. Refresh before continuing." } as Record<string, string>)[code] ?? fallback;
 }
 

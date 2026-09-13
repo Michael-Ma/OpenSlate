@@ -27,14 +27,15 @@ export async function generatedNarrationFixture(t,options={}){
  const parent=realpathSync(mkdtempSync(join(tmpdir(),'openslate-generated-narration-'))),root=join(parent,'installation');mkdirSync(root);
  const stores=[],f={parent,root,calls:{http:0,credentials:0,normalization:0},stores};
  f.profile={id:'offline-speech',revision:'fixture-estimate-1',kind:'speech',adapter:'openai-speech',executionVersion:'1',configuration:{model:OPENAI_SPEECH_MODEL,settings:{}},maxConcurrency:1,unitCostMicros:'100',maxRetries:0};
+ const profiles=[f.profile,...(options.extraProfiles??[])];
  f.open=(recovery=false)=>{
   f.store=new Store(join(root,'openslate.sqlite'));stores.push(f.store);const fake=new FakeProvider(join(root,'fake-provider.sqlite'));fake.close();
   f.outputs=new ExecutionOutputStore(f.store,{rootDir:join(root,'execution-output')});
   f.media=new LocalMediaService({rootDir:join(root,'media'),allowedInputRoots:[f.outputs.rootDir],ffmpegPath:recovery?'/unavailable/ffmpeg':ffmpegPath,ffprobePath:recovery?'/unavailable/ffprobe':ffprobePath});
   const original=f.media.importMedia.bind(f.media);f.media.importMedia=async(...args)=>{f.calls.normalization++;assert.equal(recovery,false);return original(...args);};
   f.bridge=new OpenAISpeechExecution({store:f.store,outputStore:f.outputs,credentials:new EnvironmentMediaCredentials(()=>{f.calls.credentials++;assert.equal(recovery,false);return 'synthetic-generated-narration-key';}),fetch:async()=>{f.calls.http++;assert.equal(recovery,false);return new Response(wave(options.samples??24000),{headers:{'content-type':'audio/wav'}});}});
-  f.engine=new Engine(f.store,f.bridge,{artifactDir:join(root,'artifacts'),profiles:[f.profile],outputStore:f.outputs,outputIngestor:new SpoolAudioIngestor(f.outputs,f.media,{rootDir:join(root,'audio-derivations')}),externalAdmission:new DurableExternalAdmission(f.store,()=>{assert.equal(recovery,false);})});
-  f.production=new ProductionService(f.store,f.engine,[f.profile]);f.narration=new NarrationService(f.production,f.media);f.canonical=new NarrationCanonicalService(f.narration);
+  f.engine=new Engine(f.store,f.bridge,{artifactDir:join(root,'artifacts'),profiles,outputStore:f.outputs,outputIngestor:new SpoolAudioIngestor(f.outputs,f.media,{rootDir:join(root,'audio-derivations')}),externalAdmission:new DurableExternalAdmission(f.store,()=>{assert.equal(recovery,false);})});
+  f.production=new ProductionService(f.store,f.engine,profiles);f.narration=new NarrationService(f.production,f.media);f.canonical=new NarrationCanonicalService(f.narration);
  };
  t.after(()=>{for(const store of stores)if(store.db.open)store.close();rmSync(parent,{recursive:true,force:true});});
  f.open();f.project=f.production.createProject('Generated narration fixture');

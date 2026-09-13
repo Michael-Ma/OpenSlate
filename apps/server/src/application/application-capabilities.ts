@@ -1,6 +1,6 @@
 /** Implementation facts authored by the application, not provider profiles or model input. */
 export interface DirectorApplicationCapabilities {
-  version: 2;
+  version: 3;
   authority: "application_implementation";
   scope: string;
   narration: {
@@ -24,14 +24,19 @@ export interface DirectorApplicationCapabilities {
       toolAvailable: false;
       requirements: string;
     };
-    timing: { method: "human_supplied_sample_ranges"; automaticAlignmentAvailable: false; acceptance: string };
+    transcriptReview: {
+      implemented: true; workflow: "human_select_existing_transcript_words_or_timing";
+      createsTranscription: false; automaticAdoption: false; toolAvailable: false;
+      hostReadiness: "not_evaluated"; requirements: string;
+    };
+    timing: { method: "human_supplied_or_reviewed_transcript_ranges"; automaticAlignmentAvailable: false; acceptance: string };
   };
 }
 
 /** A fresh detached value on every read; no host credentials or mutable configuration are inspected. */
 export function projectApplicationCapabilities(): DirectorApplicationCapabilities {
   return {
-    version: 2,
+    version: 3,
     authority: "application_implementation",
     scope: "Implementation facts only. These do not add tools to the locked catalog, verify host setup or API access, or grant permission.",
     narration: {
@@ -51,9 +56,14 @@ export function projectApplicationCapabilities(): DirectorApplicationCapabilitie
         hostReadiness: "not_evaluated", createsAudio: false, toolAvailable: false,
         requirements: "An authenticated human selects an existing completed recording in narration review. Retained provider and normalization evidence and owned bytes must verify. Script, recording and timing acceptance remain separate; this does not enable synthesis, transcription or automatic alignment.",
       },
+      transcriptReview: {
+        implemented: true, workflow: "human_select_existing_transcript_words_or_timing", createsTranscription: false,
+        automaticAdoption: false, toolAvailable: false, hostReadiness: "not_evaluated",
+        requirements: "An authenticated human reviews an existing transcript for the exact attached recording, then chooses words or suggested source timing separately. Flagged timing is not silently repaired. The candidate remains unreviewed history; exact script, audio and timing acceptance remains separate. This does not enable new transcription or synthesis.",
+      },
       timing: {
-        method: "human_supplied_sample_ranges", automaticAlignmentAvailable: false,
-        acceptance: "Timing is manually supplied by the human against measured audio. Exact script, audio and timing acceptance remain separate human decisions; metadata does not prove spoken words.",
+        method: "human_supplied_or_reviewed_transcript_ranges", automaticAlignmentAvailable: false,
+        acceptance: "A human supplies a source range or selects valid timing suggestions from an existing transcript of the exact recording. Exact script, audio and timing acceptance remain separate human decisions; recognition is not forced alignment or proof of spoken words.",
       },
     },
   };

@@ -150,7 +150,12 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       })() : ({ id: audio.id, declaredOrigin: audio.declaredOrigin,
         sha256: audio.media.sha256, samples: audio.media.probe.audio?.samples ?? null,
         sampleRate: audio.media.probe.audio?.sampleRate ?? null, originEvidence: "human_declared_supplied_recording" });
-      const segments = snapshot.segments.map(({ entry, script, audio, cue, accepted }) => ({ entry, script, audio: audio ? recording(audio) : null, cue, accepted }));
+      const segments = snapshot.segments.map(({ entry, script, audio, cue, accepted }) => {
+        const writing = "transcriptSelectionId" in script && typeof script.transcriptSelectionId === "string" ? script.transcriptSelectionId : null;
+        const timing = cue && "transcriptSelectionId" in cue && typeof cue.transcriptSelectionId === "string" ? cue.transcriptSelectionId : null;
+        return { entry, script, audio: audio ? recording(audio) : null, cue, accepted,
+          ...(writing || timing ? { transcriptAdoption: { writingSelectionId: writing, timingSelectionId: timing, authority: "Human editorial selection from existing recognition; acceptance remains separate." } } : {}) };
+      });
       const audioLibrary = service.store.list<NarrationAudio>("narration_audio", projectId).reverse().map(recording);
       const gaps = snapshot.readiness.gaps;
       const total = Math.max(segments.length, audioLibrary.length, gaps.length);

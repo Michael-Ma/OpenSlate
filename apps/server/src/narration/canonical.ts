@@ -1,11 +1,14 @@
 import { digest, invariant, newId, requiredStages, shotIntentDigest, stageInputDigest, STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, RECIPE_DIGEST, validateStageRequirements } from "@openslate/core";
 import type { ActorContext, CueRecord, ProjectRecord, StageRequirement } from "@openslate/core";
 import type { NarrationService } from "./service.js";
-import type { NarrationAcceptance, NarrationSnapshot } from "./types.js";
+import type { NarrationAcceptance, NarrationAudio, NarrationSnapshot } from "./types.js";
 import type { CanonicalNarration, CanonicalNarrationArtifact, NarrationCommitReceipt, NarrationShotImpact, NarrationShotMapping, PreparedNarrationCommit, PrepareNarrationCommit } from "./canonical-types.js";
 import { installNarrationAudio } from "./verified-audio.js";
 import { assertGeneratedNarrationAudio, createGeneratedNarrationProvenance, isVerifiedGeneratedNarrationAudio, narrationAudioOrigin, resolveGeneratedNarrationAudio, verifyGeneratedNarrationAudio } from "./generated-audio.js";
 import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
+import { resolvePublishedTranscriptCandidate, transcriptCanonicalProvenance, transcriptSelectionRecord } from "./transcript-selection.js";
+import type { TranscriptSelection } from "./transcript-selection.js";
+import { verifyTranscriptSelectionEvidence } from "./transcript-selection-media.js";
 
 interface StageBinding extends StageRequirement { id: string; projectId: string; inputDigest: string; outputDigest: string; bindingVersion: number; progressVersion: number; contractDigest: string }
 const stageId = (projectId: string, stage: StageRequirement) => digest({ projectId, stageId: stage.stageId, scopeId: stage.scopeId });
@@ -104,6 +107,19 @@ export class NarrationCanonicalService {
     if (replay) return replay;
     this.checkCurrent(prepared, actor);
     invariant(!this.store.db.inTransaction, "ASYNC_TRANSACTION", "Narration artifact verification must run outside SQLite transactions");
+    // Writing can retain evidence from an earlier take; timing must still match
+    // the selected script/recording. Verify each linked historical selection once.
+    const transcriptSelections = new Set<string>();
+    for (const view of prepared.snapshot.segments) {
+      const links = transcriptCanonicalProvenance(this.store, projectId, view.script, view.cue);
+      for (const link of [links?.writing, links?.timing]) if (link) transcriptSelections.add(link.selectionId);
+    }
+    for (const selectionId of transcriptSelections) {
+      const selection = transcriptSelectionRecord<TranscriptSelection>(this.store, "narration_transcript_selection", selectionId, projectId);
+      const audio = transcriptSelectionRecord<NarrationAudio>(this.store, "narration_audio", selection.input.audioId, projectId);
+      const published = resolvePublishedTranscriptCandidate(this.store, projectId, selection.candidateId);
+      await verifyTranscriptSelectionEvidence(this.store, this.narration.media, { artifactDir: this.production.engine.artifactDir }, published, audio);
+    }
     const sources = [...new Map(prepared.projection.segments.map(segment => [segment.audioPlacement.source.artifactId, segment.audioPlacement.source])).values()];
     const artifacts: CanonicalNarrationArtifact[] = [];
     const generated: ResolvedGeneratedNarrationAudio[] = [];
@@ -141,9 +157,11 @@ export class NarrationCanonicalService {
         segments: prepared.projection.segments.map(segment => {
           const view = prepared.snapshot.segments.find(view => view.entry.segmentId === segment.segmentId)!;
           const audio = view.audio!;
-          if (isVerifiedGeneratedNarrationAudio(audio)) return { ...segment, provenance: createGeneratedNarrationProvenance(audio, {
+          const transcriptProvenance = transcriptCanonicalProvenance(this.store, projectId, view.script, view.cue);
+          const nextSegment = { ...segment, ...(transcriptProvenance ? { transcriptProvenance } : {}) };
+          if (isVerifiedGeneratedNarrationAudio(audio)) return { ...nextSegment, provenance: createGeneratedNarrationProvenance(audio, {
             scriptAcceptanceId: view.entry.scriptAcceptanceId!, audioAcceptanceId: view.entry.audioAcceptanceId!, timingAcceptanceId: view.entry.timingAcceptanceId! }) };
-          return { ...segment, provenance: { audioId: audio.id, declaredOrigin: audio.declaredOrigin, originEvidence: "human_declared_supplied_recording",
+          return { ...nextSegment, provenance: { audioId: audio.id, declaredOrigin: audio.declaredOrigin, originEvidence: "human_declared_supplied_recording",
             scriptAcceptanceId: view.entry.scriptAcceptanceId!, audioAcceptanceId: view.entry.audioAcceptanceId!, timingAcceptanceId: view.entry.timingAcceptanceId!,
             originalSha256: view.audio!.media.originalSha256, toolchainDigest: view.audio!.media.toolchainDigest } };
         }) };
@@ -190,6 +208,7 @@ export class NarrationCanonicalService {
     for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed after preparation");
   }
   private verifyAcceptances(projectId: string, snapshot: NarrationSnapshot): void {
+    for (const view of snapshot.segments) transcriptCanonicalProvenance(this.store, projectId, view.script, view.cue);
     for (const view of snapshot.segments) if (view.audio && isVerifiedGeneratedNarrationAudio(view.audio)) assertGeneratedNarrationAudio(this.store, projectId, view.audio);
     for (const view of snapshot.segments) for (const kind of ["script", "audio", "timing"] as const) {
       const id = kind === "script" ? view.entry.scriptAcceptanceId : kind === "audio" ? view.entry.audioAcceptanceId : view.entry.timingAcceptanceId;

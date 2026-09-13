@@ -12,11 +12,14 @@ import type { NarrationAudio, ReviseSegments } from "./types.js";
 import { ManagedUploadStore } from "./managed-upload.js";
 import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from "./generated-audio.js";
 import { projectGeneratedRecordings } from "./generated-recording-projection.js";
+import { projectTranscriptCandidates, projectTranscriptSelection, projectTranscriptWords } from "./transcript-projection.js";
 
 interface Session { id: string; projectId: string; requestId: string; principalId: "local-user" }
 interface Params { projectId: string }
 const id = { type: "string", minLength: 1, maxLength: 160 };
 const sha256 = { type: "string", pattern: "^[a-f0-9]{64}$" };
+const wordIndex = { type: "integer", minimum: 0, maximum: 8192 };
+const queryIndex = { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" };
 const version = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
 const samples = { type: "integer", minimum: 0, maximum: 48000 * 360 };
 const object = (properties: object, required: string[]) => ({ type: "object", properties, required, additionalProperties: false });
@@ -64,6 +67,15 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     scoped.get<{ Params: Params; Querystring: { offset?: string; expectedDigest?: string } }>(`${base}/generated-recordings`, {
       schema: { querystring: object({ offset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" }, expectedDigest: sha256 }, []) },
     }, async request => projectGeneratedRecordings(store, request.params.projectId, Number(request.query.offset ?? 0), request.query.expectedDigest));
+    scoped.get<{ Params: Params & { audioId: string }; Querystring: { offset?: string; expectedDigest?: string } }>(`${base}/audio/:audioId/transcripts`, {
+      schema: { querystring: object({ offset: queryIndex, expectedDigest: sha256 }, []) },
+    }, async request => projectTranscriptCandidates(store, request.params.projectId, request.params.audioId, Number(request.query.offset ?? 0), request.query.expectedDigest));
+    scoped.get<{ Params: Params & { candidateId: string }; Querystring: { audioId: string; candidateDigest: string; offset?: string } }>(`${base}/transcripts/:candidateId/words`, {
+      schema: { querystring: object({ audioId: id, candidateDigest: sha256, offset: queryIndex }, ["audioId", "candidateDigest"]) },
+    }, async request => projectTranscriptWords(store, request.params.projectId, { ...request.query, candidateId: request.params.candidateId, offset: Number(request.query.offset ?? 0) }));
+    scoped.get<{ Params: Params & { candidateId: string }; Querystring: { audioId: string; candidateDigest: string; startWordIndex: string; endWordIndex: string } }>(`${base}/transcripts/:candidateId/selection`, {
+      schema: { querystring: object({ audioId: id, candidateDigest: sha256, startWordIndex: queryIndex, endWordIndex: queryIndex }, ["audioId", "candidateDigest", "startWordIndex", "endWordIndex"]) },
+    }, async request => projectTranscriptSelection(store, request.params.projectId, { ...request.query, candidateId: request.params.candidateId, startWordIndex: Number(request.query.startWordIndex), endWordIndex: Number(request.query.endWordIndex) }));
     scoped.get<{ Params: Params & { audioId: string } }>(`${base}/audio/:audioId/content`, async (request, reply) => {
       const recording = store.get<NarrationAudio>("narration_audio", request.params.audioId);
       invariant(recording?.projectId === request.params.projectId, "NOT_FOUND", "Recording does not belong to this project");
@@ -107,6 +119,15 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
       const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
       request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
       try { return await narration.attachGeneratedAudio(request.params.projectId, actor, { ...input, key: commandKey }, { signal: abort.signal }); }
+      finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
+    });
+    for (const action of ["words", "timing"] as const) scoped.post<{ Params: Params; Body: { sessionId: string; expectedVersion: number; segmentId: string; segmentRevisionId: string; audioId: string; candidateId: string; candidateDigest: string; startWordIndex: number; endWordIndex: number; selectedTextDigest: string } }>(`${base}/transcript-${action}`, {
+      schema: { body: edit({ segmentId: id, segmentRevisionId: id, audioId: id, candidateId: id, candidateDigest: sha256, startWordIndex: wordIndex, endWordIndex: wordIndex, selectedTextDigest: sha256 }, ["segmentId", "segmentRevisionId", "audioId", "candidateId", "candidateDigest", "startWordIndex", "endWordIndex", "selectedTextDigest"]) },
+    }, async (request, reply) => {
+      const { sessionId, ...input } = request.body, actor = actorFor(request.params.projectId, sessionId), commandKey = key(request);
+      const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
+      request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
+      try { return await (action === "words" ? narration.useTranscriptWords.bind(narration) : narration.useTranscriptTiming.bind(narration))(request.params.projectId, actor, { ...input, key: commandKey }, { signal: abort.signal }); }
       finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
     });
     scoped.post<{ Params: Params; Body: { sessionId: string; expectedVersion: number; segmentId: string; startSample: number; endSample: number } }>(`${base}/cues`, {

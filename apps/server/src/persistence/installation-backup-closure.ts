@@ -25,6 +25,7 @@ import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
 import type { BackupFile } from "./installation-backup.js";
 import { assertGeneratedCanonicalNarrationSegment, assertGeneratedNarrationAudio, resolveGeneratedNarrationAudio } from "../narration/generated-audio.js";
+import { assertTranscriptCanonicalSegment, assertTranscriptSelection, assertTranscriptSelectionOutput, transcriptCanonicalProvenance } from "../narration/transcript-selection.js";
 
 type RecordValue = Record<string, any>;
 const object = (value: unknown): value is RecordValue => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -205,6 +206,25 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       }
       checkedTranscription.add(attemptId);
     };
+    const checkedTranscriptCandidates = new Map<string, string>();
+    const transcriptCandidate = async (candidate: TranscriptCandidate): Promise<void> => {
+      const identity = digest(candidate), previous = checkedTranscriptCandidates.get(candidate.id);
+      if (previous) { fail(previous === identity, "Transcript candidate changed during backup validation"); return; }
+      const lineage = resolveTranscriptionSpoolLineage(speechReader, get("attempt", candidate.attemptId) as Attempt, candidate.raw.spoolId);
+      // Selections and candidates share one exact raw/derivative closure. Do not
+      // re-read a large response for every historical editorial selection.
+      await transcriptionRecords(candidate.attemptId);
+      const path = `execution-output/blobs/${lineage.spool.blobKey}`;
+      required(path, lineage.spool.sha256, lineage.spool.byteLength);
+      const parsed = parseOpenAITranscriptionResponse({ bytes: await read(path), mimeType: "application/json",
+        sourceDurationSeconds: lineage.preparation.receipt.audio.sampleCount / 16000 }, {
+        maxTextBytes: lineage.mapping.parser.maxTextBytes, maxWords: lineage.mapping.parser.maxWords, maxWordBytes: lineage.mapping.parser.maxWordBytes });
+      fail(canonical(createTranscriptCandidate(lineage, parsed)) === canonical(candidate), "Published transcript candidate differs from its raw response and source-sample projection");
+      assertTranscriptCandidateIngestion(lineage, { port: "cues", kind: "data", mimeType: "application/json", extension: "json",
+        sha256: lineage.spool.sha256, byteLength: lineage.spool.byteLength, fixture: false, storage: { type: "spool", spoolId: lineage.spool.id } }, {
+        type: "transcript_candidate", artifact: get("artifact", candidate.artifactId) as any, candidate });
+      checkedTranscriptCandidates.set(candidate.id, identity);
+    };
     let storageId: string | undefined;
     if (files.has("execution-output/identity.json")) {
       const identity = await json("execution-output/identity.json");
@@ -287,6 +307,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         else await source(value.media);
       } else if (row.kind === "narration_prepared") {
         for (const view of value.snapshot?.segments ?? []) {
+          transcriptCanonicalProvenance(speechReader, value.projectId, view.script, view.cue);
           const saved = view.audio ? speechReader.get<RecordValue>("narration_audio", view.audio.id) : undefined;
           if (!view.audio || !(Object.hasOwn(view.audio, "originEvidence") || Object.hasOwn(view.audio, "generation") || saved && Object.hasOwn(saved, "generation"))) continue;
           fail(canonical(get("narration_audio", view.audio.id)) === canonical(view.audio), "Prepared generated narration differs from its saved recording");
@@ -294,6 +315,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         }
       } else if (row.kind === "narration_canonical") {
         for (const segment of value.segments ?? []) {
+          assertTranscriptCanonicalSegment(speechReader, value.projectId, segment,
+            { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
           const provenance = segment.provenance;
           const saved = provenance ? speechReader.get<RecordValue>("narration_audio", provenance.audioId) : undefined;
           if (!provenance || provenance.originEvidence === "human_declared_supplied_recording" && !Object.hasOwn(provenance, "generation") && !(saved && Object.hasOwn(saved, "generation"))) continue;
@@ -301,6 +324,14 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
             { narrationRevisionId: value.narrationRevisionId, narrationVersion: value.narrationVersion });
           const audio = get("narration_audio", provenance.audioId); await generatedNarration(audio);
         }
+      } else if (row.kind === "narration_segment" || row.kind === "narration_cue") {
+        assertTranscriptSelectionOutput(speechReader, value.projectId, row.kind, value);
+      } else if (row.kind === "narration_transcript_selection") {
+        assertTranscriptSelection(speechReader, value.projectId, value);
+        const output = get(value.output.kind, value.output.id);
+        assertTranscriptSelectionOutput(speechReader, value.projectId, value.output.kind, output);
+        fail(output.id === value.id && digest(output) === value.output.digest, "Transcript selection lost its reciprocal output");
+        await transcriptCandidate(get("transcript_candidate", value.candidateId) as TranscriptCandidate);
       }
       else if (row.kind === "media_render") { await renderManifest(value.manifest); if (value.artifact) {
         const saved = get("artifact", value.artifact.artifactId); fail(canonical(saved.artifact) === canonical(value.artifact), "Render artifact identity differs"); }
@@ -334,21 +365,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       } else if (["transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(row.kind)) {
         await transcriptionRecords(row.id);
       } else if (row.kind === "transcript_candidate") {
-        const candidate = value as TranscriptCandidate;
-        const lineage = resolveTranscriptionSpoolLineage(speechReader, get("attempt", candidate.attemptId) as Attempt, candidate.raw.spoolId);
-        // Published candidates require the exact winning raw bytes, unlike unresolved pre-candidate result metadata.
-        await transcriptionRecords(candidate.attemptId);
-        const path = `execution-output/blobs/${lineage.spool.blobKey}`;
-        required(path, lineage.spool.sha256, lineage.spool.byteLength);
-        const parsed = parseOpenAITranscriptionResponse({ bytes: await read(path), mimeType: "application/json",
-          sourceDurationSeconds: lineage.preparation.receipt.audio.sampleCount / 16000 }, {
-          maxTextBytes: lineage.mapping.parser.maxTextBytes, maxWords: lineage.mapping.parser.maxWords, maxWordBytes: lineage.mapping.parser.maxWordBytes });
-        fail(canonical(createTranscriptCandidate(lineage, parsed)) === canonical(candidate),
-          "Published transcript candidate differs from its raw response and source-sample projection");
-        assertTranscriptCandidateIngestion(lineage, { port: "cues", kind: "data", mimeType: "application/json", extension: "json",
-          sha256: lineage.spool.sha256, byteLength: lineage.spool.byteLength, fixture: false,
-          storage: { type: "spool", spoolId: lineage.spool.id } }, {
-          type: "transcript_candidate", artifact: get("artifact", candidate.artifactId) as any, candidate });
+        await transcriptCandidate(value as TranscriptCandidate);
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);

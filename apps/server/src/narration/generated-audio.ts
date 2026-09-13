@@ -17,6 +17,7 @@ import type { LocalMediaService, SuppliedMedia } from "../media/index.js";
 import { inspectPcmWave } from "../media/pcm-wave.js";
 import type { GeneratedNarrationEvidence, GeneratedNarrationSummary, NarrationAcceptance, NarrationAudio, NarrationCue, NarrationEntry, SegmentRevision, VerifiedGeneratedNarrationAudio } from "./types.js";
 import type { CanonicalNarration, GeneratedNarrationProvenance } from "./canonical-types.js";
+import { assertTranscriptCanonicalSegment, transcriptCanonicalProvenance } from "./transcript-selection.js";
 
 export const GENERATED_NARRATION_LIMITS = Object.freeze({ recordBytes: 128 * 1024, sourceBytes: 32768, evidenceBytes: 8192, objectNodes: 8192 });
 export interface ResolvedGeneratedNarrationAudio {
@@ -181,7 +182,7 @@ export function assertGeneratedNarrationProvenance(store: SpeechAuthorityStore, 
 export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityStore, projectId: string, input: unknown,
   selection: Pick<CanonicalNarration, "narrationRevisionId" | "narrationVersion">): void {
   const segment = snapshot(input), selected = snapshot(selection);
-  exact(segment, ["segmentId", "segmentRevisionId", "cue", "frameCoverage", "audioPlacement", "provenance"]);
+  exact(segment, ["segmentId", "segmentRevisionId", "cue", "frameCoverage", "audioPlacement", "provenance", ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment, "transcriptProvenance") ? ["transcriptProvenance"] : [])]);
   exact(selected, ["narrationRevisionId", "narrationVersion"]);
   fail(id(segment.segmentId) && id(segment.segmentRevisionId) && id(selected.narrationRevisionId)
     && Number.isSafeInteger(selected.narrationVersion) && selected.narrationVersion > 0, "Canonical narration requires an exact saved revision");
@@ -214,8 +215,10 @@ export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityS
     && script.textKind === "draft" && typeof script.text === "string" && script.text.trim().length > 0
     && typeof script.meaning === "string" && script.meaning.trim().length > 0 && script.source?.kind === "generated", "Canonical generated script differs from its accepted section");
   const cue = record<NarrationCue>(store, "narration_cue", entry.cueId as string, projectId);
+  const transcriptProvenance = transcriptCanonicalProvenance(store, projectId, script, cue);
+  assertTranscriptCanonicalSegment(store, projectId, segment, selection);
   fail(cue.id === entry.cueId && cue.projectId === projectId && cue.segmentRevisionId === script.id && cue.audioId === audio.id
-    && cue.method === "human" && cue.confidence === null && Number.isSafeInteger(cue.startSample) && cue.startSample >= 0
+    && (cue.method === "human" || cue.method === "transcript_selection" && transcriptProvenance?.timing) && cue.confidence === null && Number.isSafeInteger(cue.startSample) && cue.startSample >= 0
     && Number.isSafeInteger(cue.endSample) && cue.endSample > cue.startSample && cue.endSample <= audio.generation.normalizedSamples,
   "Canonical generated cue differs from its measured recording");
   for (const kind of ["script", "audio", "timing"] as const) {
@@ -240,7 +243,8 @@ export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityS
     cue: { id: cue.id, meaning: script.meaning, placementFrames: frame(atSample), durationFrames: frame(durationSamples),
       audio: { artifactId: audio.id, sha256: audio.media.sha256, kind: "audio" }, accepted: true, measured: true },
     frameCoverage: { startFrame: frame(atSample), endFrame: frame(atSample + durationSamples) },
-    audioPlacement: { source: audio.media, startSample: cue.startSample, durationSamples, atSample, gainMilliDb: 0 }, provenance };
+    audioPlacement: { source: audio.media, startSample: cue.startSample, durationSamples, atSample, gainMilliDb: 0 }, provenance,
+    ...(transcriptProvenance ? { transcriptProvenance } : {}) };
   fail(canonical(segment) === canonical(expected), "Canonical generated section differs from its accepted script, cue, or placement");
 }
 /** A bounded saved-record projection, not a claim of fresh byte verification or narration acceptance. */

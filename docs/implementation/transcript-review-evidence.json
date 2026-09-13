@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Separate human adoption of recognized words and source timing with immutable and canonical provenance",
+  "fullCheckout": {
+    "passed": 1306,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 46,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "durationMilliseconds": 218634.192292,
+    "unchangedSourceTestConfigurationAndStyleFilesDuringCheck": 311
+  },
+  "focusedVerification": {
+    "selectionAndGeneratedHelpers": 26,
+    "domainAndBackup": 19,
+    "adjacentDomainAndBackup": 44,
+    "httpAndBrowserModel": 27,
+    "adjacentHttpAndBrowserModel": 40,
+    "note": "Focused suites overlap with the full checkout total; counts are not added together."
+  },
+  "syntheticFixture": {
+    "pipelineChecksPassed": 14,
+    "baselineChecksPassed": 4,
+    "injectedSpeechResponses": 1,
+    "injectedTranscriptionResponses": 1,
+    "syntheticCredentialReads": 2,
+    "actualLocalNormalizations": 1,
+    "actualLocalDerivatives": 1,
+    "audioKind": "tone with silence, not human speech",
+    "audioSeconds": 6,
+    "sampleRate": 48000,
+    "channels": 2,
+    "samples": 288000
+  },
+  "browser": {
+    "actions": [
+      "Read candidate pages and exact selection without creating state",
+      "Use recognized words Leather boots for one section",
+      "Accept script and recording separately",
+      "Use first-word timing at original source samples 1 through 12000",
+      "Accept timing separately",
+      "Repeat identical timing as a true no-op preserving acceptance",
+      "Reopen exact selected narration",
+      "Apply canonical narration with independent writing and timing provenance",
+      "Reopen exact canonical result and verify complete source bytes"
+    ],
+    "independentInitialAudit": {
+      "passed": 35,
+      "failed": 0
+    },
+    "independentFinalReopenAudit": {
+      "passed": 7,
+      "failed": 0
+    },
+    "rootHttpReplayAndRejection": {
+      "passed": 7,
+      "failed": 0
+    },
+    "rootFinalReopenStateAndPlaybackBytes": {
+      "passed": 2,
+      "failed": 0
+    },
+    "protectedRows": 41,
+    "protectedRowKinds": 28,
+    "unchangedManagedFiles": 15,
+    "unchangedManagedFileBytes": 3076753,
+    "completePlaybackArtifactBytes": 1152078,
+    "consoleWarningsOrErrorsBeforeFirstRestart": 0,
+    "cleanup": "All three owned launcher runs exited successfully; temporary browser tab closed"
+  },
+  "independentReview": {
+    "findingsFixed": [
+      "Transcript-bearing supplied-audio canonical records must retain exact original audio provenance, toolchain and human acceptance closure"
+    ],
+    "remainingFindings": []
+  },
+  "limitations": [
+    "Synthetic tone and injected words do not establish speech or recognition quality",
+    "No automatic alignment, transcript acceptance or paid audio activation",
+    "Independent audit compares captured SQL/files and saved HTTP results; it did not repeat HTTP requests or monitor external network traffic",
+    "Final playback verification hashes the full HTTP artifact; a later browser playback inspection could not run after its tab closed"
+  ],
+  "mediaApiCalls": 0,
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "automaticAcceptance": false,
+  "pushed": false,
+  "next": "Disabled-by-default audio configuration, preflight and spending views, then explicit preparation waiting and owned-source generation review"
+}

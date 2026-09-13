@@ -1,5 +1,5 @@
 import type { ArtifactRef, CueRecord, ProjectRecord, StageRequirement } from "@openslate/core";
-import type { GeneratedNarrationEvidence, NarrationProjection, NarrationSnapshot } from "./types.js";
+import type { GeneratedNarrationEvidence, NarrationProjection, NarrationSnapshot, TranscriptCanonicalProvenance } from "./types.js";
 
 export interface NarrationShotMapping { shotId: string; segmentId: string | null }
 export interface PrepareNarrationCommit {
@@ -46,6 +46,8 @@ export interface CanonicalNarrationSegment {
   frameCoverage: NarrationProjection["segments"][number]["frameCoverage"];
   audioPlacement: NarrationProjection["segments"][number]["audioPlacement"];
   provenance: SuppliedNarrationProvenance | GeneratedNarrationProvenance;
+  /** Omitted for legacy/manual outputs; links writing and source timing independently. */
+  transcriptProvenance?: TranscriptCanonicalProvenance;
 }
 export interface CanonicalNarration {
   id: string; projectId: string; projectRevisionId: string; headVersion: number;

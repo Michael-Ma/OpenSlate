@@ -5,10 +5,18 @@ import type { LocalMediaService } from "../media/index.js";
 import type { NarrationAcceptance, NarrationAudio, NarrationCue, NarrationEntry, NarrationGap, NarrationImpact, NarrationProjection, NarrationReadiness, NarrationSegmentView, NarrationSnapshot, NarrationState, ReviseSegments, SegmentDraft, SegmentRevision } from "./types.js";
 import { isVerifiedGeneratedNarrationAudio, narrationAudioOrigin, resolveGeneratedNarrationAudio, verifyGeneratedNarrationAudio } from "./generated-audio.js";
 import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
+import { createTranscriptSelection, resolvePublishedTranscriptCandidate } from "./transcript-selection.js";
+import type { ResolvedPublishedTranscriptCandidate } from "./transcript-selection.js";
+import { verifyTranscriptSelectionEvidence } from "./transcript-selection-media.js";
 
 export interface AttachGeneratedNarrationAudio {
   expectedVersion: number; segmentId: string; segmentRevisionId: string;
   artifactId: string; artifactDigest: string; generationEvidenceDigest: string; key: string;
+}
+export interface UseTranscriptSelection {
+  expectedVersion: number; segmentId: string; segmentRevisionId: string; audioId: string;
+  candidateId: string; candidateDigest: string; startWordIndex: number; endWordIndex: number;
+  selectedTextDigest: string; key: string;
 }
 
 const MAX_SAMPLES = 48000 * 360;
@@ -167,6 +175,72 @@ export class NarrationService {
     return verifyGeneratedNarrationAudio(this.store, this.media, { artifactDir: this.production.engine.artifactDir }, selected, signal ? { signal } : {});
   }
 
+  useTranscriptWords(projectId: string, human: ActorContext, input: UseTranscriptSelection, options: { signal?: AbortSignal } = {}): Promise<NarrationSnapshot> {
+    return this.useTranscript(projectId, human, input, "writing", options);
+  }
+  useTranscriptTiming(projectId: string, human: ActorContext, input: UseTranscriptSelection, options: { signal?: AbortSignal } = {}): Promise<NarrationSnapshot> {
+    return this.useTranscript(projectId, human, input, "timing", options);
+  }
+
+  /** Human editorial choice only. Recognition cannot grant acceptance or generate more media. */
+  private async useTranscript(projectId: string, human: ActorContext, input: UseTranscriptSelection, action: "writing" | "timing",
+    options: { signal?: AbortSignal }): Promise<NarrationSnapshot> {
+    const signal = options.signal; human = structuredClone(human); input = structuredClone(input);
+    const stopped = () => invariant(!signal?.aborted, "NARRATION_CANCELLED", "Transcript selection was cancelled");
+    this.authority(projectId, human, true); stopped();
+    invariant(input && Object.keys(input).sort().join("\0") === ["expectedVersion", "segmentId", "segmentRevisionId", "audioId", "candidateId", "candidateDigest",
+      "startWordIndex", "endWordIndex", "selectedTextDigest", "key"].sort().join("\0"), "NARRATION_INVALID_INPUT", "Select an exact transcript range for one saved section");
+    integer(input.expectedVersion, 0, Number.MAX_SAFE_INTEGER); integer(input.startWordIndex, 0, 8191); integer(input.endWordIndex, input.startWordIndex + 1, 8192);
+    for (const value of [input.segmentId, input.segmentRevisionId, input.audioId, input.candidateId, input.key]) text(value, 160);
+    for (const value of [input.candidateDigest, input.selectedTextDigest]) invariant(typeof value === "string" && /^[a-f0-9]{64}$/.test(value), "NARRATION_INVALID_INPUT", "Transcript identity is invalid");
+    const { expectedVersion, key, ...selection } = input, commandAction = action === "writing" ? "transcript_words" : "transcript_timing";
+    const replay = this.store.commandReplay<NarrationSnapshot>(`${human.principalId}:${projectId}:${human.requestId}:narration`, key,
+      digest({ action: commandAction, expectedVersion, arguments: selection }));
+    if (replay) return replay.result;
+    const section = (state: NarrationState) => {
+      invariant(state.version === expectedVersion, "REVISION_CONFLICT", "Narration changed before this transcript selection");
+      const entry = this.entry(state, selection.segmentId);
+      invariant(entry.segmentRevisionId === selection.segmentRevisionId && entry.audioId === selection.audioId,
+        "REVISION_CONFLICT", "The selected section or recording changed");
+      return { entry, script: this.record<SegmentRevision>("narration_segment", entry.segmentRevisionId, projectId),
+        audio: this.record<NarrationAudio>("narration_audio", selection.audioId, projectId),
+        cue: entry.cueId ? this.record<NarrationCue>("narration_cue", entry.cueId, projectId) : null };
+    };
+    const resolve = () => {
+      const published = resolvePublishedTranscriptCandidate(this.store, projectId, selection.candidateId);
+      invariant(published.candidateDigest === selection.candidateDigest, "NARRATION_TRANSCRIPT_CHANGED", "Selected transcript evidence changed");
+      return published;
+    };
+    const initialState = this.read(projectId).state, initial = section(initialState), published = resolve(), selectionId = newId(), outputId = selectionId;
+    const derive = (state: NarrationState, current: ReturnType<typeof section>, candidate: ResolvedPublishedTranscriptCandidate) => createTranscriptSelection({
+      id: selectionId, outputId, projectId, requestId: human.requestId, principalId: human.principalId, action, state, ...current, published: candidate,
+      range: { startWordIndex: selection.startWordIndex, endWordIndex: selection.endWordIndex }, selectedTextDigest: selection.selectedTextDigest });
+    const proposed = derive(initialState, initial, published);
+    await this.verifyTranscript(published, initial.audio, signal);
+    stopped(); this.authority(projectId, human, true);
+    return this.mutate(projectId, human, expectedVersion, key, commandAction, selection, state => {
+      stopped(); this.authority(projectId, human, true);
+      const current = section(state), candidate = resolve();
+      invariant(digest(current) === digest(initial), "NARRATION_TRANSCRIPT_CHANGED", "Selected narration evidence changed during transcript verification");
+      const result = derive(state, current, candidate);
+      invariant(digest(result) === digest(proposed), "NARRATION_TRANSCRIPT_CHANGED", "Transcript selection changed during verification");
+      // A true no-op preserves even an existing manual cue and all accepted work.
+      if (!result.changed) return false;
+      this.store.insert("narration_transcript_selection", result.selection.id, projectId, result.selection);
+      this.store.insert(result.output.kind, result.output.record.id, projectId, result.output.record);
+      if (result.output.kind === "narration_segment") {
+        current.entry.segmentRevisionId = result.output.record.id; current.entry.cueId = null;
+        current.entry.scriptAcceptanceId = current.entry.audioAcceptanceId = current.entry.timingAcceptanceId = null;
+      } else { current.entry.cueId = result.output.record.id; current.entry.timingAcceptanceId = null; }
+      this.store.appendEvent(projectId, "narration.transcript_selected", { action, selectionId: result.selection.id, candidateId: selection.candidateId,
+        segmentId: selection.segmentId, outputId: result.output.record.id, requestId: human.requestId });
+    });
+  }
+
+  private verifyTranscript(published: ResolvedPublishedTranscriptCandidate, audio: NarrationAudio, signal?: AbortSignal): Promise<ResolvedPublishedTranscriptCandidate> {
+    return verifyTranscriptSelectionEvidence(this.store, this.media, { artifactDir: this.production.engine.artifactDir }, published, audio, signal ? { signal } : {});
+  }
+
   recordHumanCue(projectId: string, human: ActorContext, expectedVersion: number, key: string, input: { segmentId: string; startSample: number; endSample: number }): NarrationSnapshot {
     this.authority(projectId, human, true);
     return this.mutate(projectId, human, expectedVersion, key, "cue", input, state => {
@@ -274,14 +348,15 @@ export class NarrationService {
     };
     return { state, segments, readiness, canonicalApplied: false };
   }
-  private mutate(projectId: string, actor: ActorContext, expectedVersion: number, key: string, action: string, argumentsValue: unknown, fn: (state: NarrationState) => void): NarrationSnapshot {
+  private mutate(projectId: string, actor: ActorContext, expectedVersion: number, key: string, action: string, argumentsValue: unknown, fn: (state: NarrationState) => void | false): NarrationSnapshot {
     this.authority(projectId, actor); integer(expectedVersion, 0, Number.MAX_SAFE_INTEGER); text(key, 160);
     return this.store.transaction(() => {
       this.authority(projectId, actor);
       return this.store.command(`${actor.principalId}:${projectId}:${actor.requestId}:narration`, key, digest({ action, expectedVersion, arguments: argumentsValue }), () => {
         const state = this.read(projectId).state;
         invariant(state.version === expectedVersion, "REVISION_CONFLICT", "Narration changed before this edit");
-        fn(state);
+        // Only new transcript callbacks return false. Legacy no-op mutation behavior is unchanged.
+        if (fn(state) === false) return this.read(projectId);
         const revisionId = newId();
         const next = { ...state, version: state.version + 1, revisionId };
         this.store.insert("narration_revision", revisionId, projectId, { state: next, requestId: actor.requestId });
