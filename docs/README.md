@@ -21,6 +21,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Browser question validation](implementation/CODEX-QUESTION-BROWSER-VALIDATION.md) | Actual native question answered through the browser after reopen, exact replay and independent audit |
 | [Narration browser validation](implementation/NARRATION-BROWSER-VALIDATION.md) | Actual canonical review, supplied playback and project-switch recovery |
 | [Narration integration](implementation/NARRATION-INTEGRATION.md) | Drafts, recordings, exact acceptance and guarded canonical commit |
+| [Narration capability follow-up](implementation/CODEX-NARRATION-CAPABILITY-VALIDATION.md) | One live turn correctly explains unavailable synthesis and the supported recording path |
 | [Native stage and gap validation](implementation/CODEX-STAGE-GAP-VALIDATION.md) | Two scoped narration turns, independent semantic review and explicit application capability disclosure |
 | [Native narration validation](implementation/CODEX-NARRATION-V2-VALIDATION.md) | One actual V2 draft edit after an explicit guidance upgrade, with preserved acceptance and authority |
 | [Versioned narration tools](implementation/NARRATION-TOOLS.md) | Draft-only conversational writes, exact catalog locks and legacy compatibility |

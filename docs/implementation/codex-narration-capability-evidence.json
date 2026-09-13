@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "assessedAt": "2026-09-13T02:47:59.664Z",
+  "codeCommit": "0a95fd07b3a31afbc0c2e29e7870c8410ee1b687",
+  "runtime": {
+    "version": "0.153.4",
+    "model": "gpt-6-astra",
+    "reasoningEffort": "low",
+    "deadlineMs": 90000
+  },
+  "allowance": {
+    "maxStarts": 1,
+    "actualStarts": 1,
+    "transportStarts": 1,
+    "priorHistoricalStarts": 23,
+    "historicalStartsAfter": 24,
+    "knownAndClean": true,
+    "exhausted": true,
+    "harnessDigest": "59b211989331bc6e4276e10a85f60e0666791fad5a2eeb5242e80168c87bd9e5",
+    "ledgerSha256": "a412287d4ec25619ba9cf635bbbc73d4eebd1f2dbe91df9b4ab2887fa09ab0ef"
+  },
+  "originalReportSha256": "f3c4b148d356f5b2daaffd271485bb521a5ae85931a2a1957aa929c3d24ac423",
+  "elapsedMs": 21118,
+  "setupElapsedMs": 2093,
+  "harnessChecks": {
+    "passed": 20,
+    "total": 20
+  },
+  "independentChecks": {
+    "passed": 28,
+    "total": 28,
+    "checks": [
+      {
+        "name": "source_and_imported_helper_hashes_match_exhausted_allowance",
+        "pass": true
+      },
+      {
+        "name": "clean_committed_reviewed_source_recorded",
+        "pass": true
+      },
+      {
+        "name": "actual_pinned_runtime_and_single_start_allowance",
+        "pass": true
+      },
+      {
+        "name": "one_known_acknowledged_start_bound_to_the_saved_input",
+        "pass": true
+      },
+      {
+        "name": "all_original_harness_checks_pass_and_result_is_within_bound",
+        "pass": true
+      },
+      {
+        "name": "no_transport_retry_or_unknown_rpc_receipt",
+        "pass": true
+      },
+      {
+        "name": "saved_sqlite_integrity_and_project_identity",
+        "pass": true
+      },
+      {
+        "name": "exact_canonical_project_unchanged_before_after_reopen",
+        "pass": true
+      },
+      {
+        "name": "project_revision_and_head_remain_frozen",
+        "pass": true
+      },
+      {
+        "name": "every_protected_authority_media_acceptance_row_preserved",
+        "pass": true
+      },
+      {
+        "name": "all_narration_rows_preserved_byte_for_byte",
+        "pass": true
+      },
+      {
+        "name": "accepted_opening_and_unapproved_outlines_preserved",
+        "pass": true
+      },
+      {
+        "name": "readonly_local_user_request_and_fenced_epoch",
+        "pass": true
+      },
+      {
+        "name": "no_audio_recordings_timing_candidates_allowances_or_paid_attempts",
+        "pass": true
+      },
+      {
+        "name": "only_existing_seed_hold_remains",
+        "pass": true
+      },
+      {
+        "name": "captured_context_is_exact_and_hash_verified",
+        "pass": true
+      },
+      {
+        "name": "unavailable_capability_facts_are_bound_into_snapshot",
+        "pass": true
+      },
+      {
+        "name": "v2_skill_lock_and_epoch_bind_same_tool_catalog",
+        "pass": true
+      },
+      {
+        "name": "all_four_pinned_skill_reference_bytes_match_saved_hashes",
+        "pass": true
+      },
+      {
+        "name": "exact_runtime_context_reconstructed_from_pinned_source_and_skills",
+        "pass": true
+      },
+      {
+        "name": "native_start_intent_hash_binds_reconstructed_capability_context",
+        "pass": true
+      },
+      {
+        "name": "only_two_successful_context_reads_were_called_in_order",
+        "pass": true
+      },
+      {
+        "name": "tool_receipt_hashes_scope_and_capability_facts_remain_exact",
+        "pass": true
+      },
+      {
+        "name": "single_completed_turn_and_final_response_survive_reopen",
+        "pass": true
+      },
+      {
+        "name": "saved_native_runtime_selection_matches_experiment",
+        "pass": true
+      },
+      {
+        "name": "recorded_native_cleanup_all_processes_exit_zero_and_exact_thread_archived",
+        "pass": true
+      },
+      {
+        "name": "same_prior_triage_prompt_and_previous_exhausted_ledger_preserved",
+        "pass": true
+      },
+      {
+        "name": "source_report_original_assessment_and_ledger_unchanged_by_audit",
+        "pass": true
+      }
+    ]
+  },
+  "sourceFiles": [
+    {
+      "name": "run.mjs",
+      "sha256": "4358c76fb9b83b6d3b5a14a89b7da587cfc1cb02c3bb72ce9d79482224de6a29"
+    },
+    {
+      "name": "cases.mjs",
+      "sha256": "170a37e4d4571c6a234248df16eabdf6313bb02202fb57e39bf265d519656911"
+    },
+    {
+      "name": "ledger.mjs",
+      "sha256": "0b99de89637944be2c12a2ddaa05bd86320c2268e802ce8c5c7261afaa0962f6"
+    },
+    {
+      "name": "../supervisor-validation/allowance.mjs",
+      "sha256": "dedeaa79939150492333788cabaa9b30c79e4914eb8d4a1b4329e0d1d682aa4e"
+    },
+    {
+      "name": "../supervisor-validation/native-client.mjs",
+      "sha256": "81dae87f79079fe107cc1ee16c46c003fa2925465922da2494ab7f53f7700989"
+    }
+  ],
+  "mediaApiCalls": 0,
+  "requestText": "I want to make a 2–3 minute leather boots commercial from what we have saved. I like the opening and have approved it, but the rest is only an outline. I am unsure whether to record the narration myself or have OpenSlate voice it. Help me understand what we need next before spending on video, and ask me the single most useful choice to get unstuck. For now, just discuss it with me; keep the saved work as it is.",
+  "responseText": "I’ve checked the saved work and left it unchanged. No generation was started.\n\nYour **opening script is approved**:\n> “Some things are made for the long road. Step into a pair built to go with you.”\n\nThe craftsmanship middle and closing invitation are still outlines. There are no recordings, accepted timings, or planned shots yet; opening approval covers the words, not audio or visuals.\n\n**Before spending on video:**\n1. Finish the middle and closing, preserving the opening and avoiding unsupported product claims.\n2. Review the complete script, then record it and check the actual 2–3 minute pacing.\n3. Review audio and timing separately in OpenSlate. Timing currently requires human-supplied ranges; automatic transcription and alignment aren’t connected.\n4. Plan shots against that timing, then approve each exact conditioning image before authorizing video.\n\n**Voice options:** Your own recording offers a personal feel. An external voice service offers another delivery style, but **OpenSlate cannot currently synthesize narration**—selecting a voice/profile or adding an API key won’t enable it. Either recording route requires you to upload, bind, and review the audio in OpenSlate; import-tool readiness still needs checking. Current media profiles are test fixtures, not production generators.\n\n**Would you prefer this commercial to speak in your own voice or use an externally produced narrator?**",
+  "toolTrace": [
+    {
+      "tool": "read_context",
+      "section": "overview",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "section": "narration",
+      "state": "succeeded"
+    }
+  ],
+  "questionForm": "assistant_text_only",
+  "identity": {
+    "applicationCapabilitiesDigest": "94ac66aa8cdfbd9f29372377830d26c011db631aa4675f3cee8443eff756b3a6",
+    "inputDigest": "e5727e44077717454a60fd2214eef401e4c66479dca180a6533365b03d834f30",
+    "canonicalBefore": "07bc4a95fa13862604a9e7efec56eb9f9dc0b0fec0971039daaf9ef303d94aea",
+    "canonicalAfter": "07bc4a95fa13862604a9e7efec56eb9f9dc0b0fec0971039daaf9ef303d94aea",
+    "narrationVersionBefore": 2,
+    "narrationVersionAfter": 2,
+    "acceptedOpeningPreserved": true,
+    "protectedRowsPreserved": true
+  },
+  "cleanup": {
+    "applicationClosed": true,
+    "nativeProcessExitCodes": [
+      0,
+      0,
+      0
+    ],
+    "threadArchived": true,
+    "archiveProcessExited": true,
+    "sqliteReopenIntegrity": "ok"
+  },
+  "semanticAssessment": {
+    "status": "positive_single_case_observation",
+    "method": "Independent reading of the actual saved response against the user request, saved facts and implementation context; not keyword scoring.",
+    "criteria": [
+      {
+        "criterion": "Recognize the next useful stage and missing information",
+        "assessment": "The response identifies the accepted opening, unfinished middle/closing, no recording or accepted timing, and no planned shots. It recommends script completion and actual recorded pacing before video spending."
+      },
+      {
+        "criterion": "Explain current speech/transcription capability truth",
+        "assessment": "It explicitly states that OpenSlate cannot currently synthesize narration and that selecting a voice/profile or adding an API key cannot enable it. It also identifies absent automatic transcription/alignment and manual human timing."
+      },
+      {
+        "criterion": "Offer a usable supported alternative without inventing readiness",
+        "assessment": "It contrasts the user recording with an externally produced narrator, then explains human upload, binding and review. It leaves local import-tool readiness unchecked and correctly identifies this project's saved media profiles as fixtures."
+      },
+      {
+        "criterion": "Keep the question relevant and preserve user authority",
+        "assessment": "It asks one prose question about the recording route. No structured question was required; no saved source choice, acceptance, hold or paid work was changed."
+      }
+    ],
+    "limitations": [
+      "One positively assessed triage response is not a statistical or general reliability claim.",
+      "The harness was service/HTTP driven, not a new browser workflow proof.",
+      "No speech, transcription, image or video media API was called; standalone audio transports are still unconnected to the application.",
+      "Upload/recording, voice quality and timing alignment were not exercised.",
+      "Cleanup is assessed from preserved RPC/process evidence and reopened SQLite; the independent audit made no new native requests."
+    ]
+  }
+}
