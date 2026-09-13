@@ -7,7 +7,7 @@ import type { Store } from "../persistence/store.js";
 import type { TranscriptionAudioService } from "./transcription-audio-service.js";
 import type { Attempt } from "./engine.js";
 import { ExecutionOutputStore } from "./output-store.js";
-import { assertTranscriptionFirstDispatch, assertTranscriptionMappingAdmission, createTranscriptionExecutionMapping, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "./transcription-execution-authority.js";
+import { assertTranscriptionFirstDispatch, assertTranscriptionSubmissionOwner, assertTranscriptionMappingAdmission, createTranscriptionExecutionMapping, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "./transcription-execution-authority.js";
 import { assertTranscriptionExecutionDispatch, assertTranscriptionExecutionResult, compactTranscriptionExecutionResult, prepareTranscriptionExecutionRequest, transcriptionExecutionOptions, TRANSCRIPTION_EXECUTION_PARSER } from "./transcription-execution-receipts.js";
 import type { TranscriptionExecutionDispatch, TranscriptionExecutionMapping, TranscriptionExecutionObservation, TranscriptionExecutionResult } from "./transcription-execution-receipts.js";
 import { assertSubmissionPreparationEligibility, snapshotSubmissionPreparationContext } from "./submission-preparation.js";
@@ -52,7 +52,7 @@ export class OpenAITranscriptionExecution implements ExecutionProvider, Submissi
     if (this.#store.get("transcription_preparation_intent", admission.attempt.id)) return this.resume(request, context);
     let control: unknown;
     try { this.#store.transaction(() => {
-      assertTranscriptionFirstDispatch(this.#store, admission, context.expectedLease);
+      assertTranscriptionSubmissionOwner(this.#store, admission, context.expectedLease);
       const intent = createTranscriptionPreparationIntent(this.#store, admission.attempt);
       // Paused or obsolete work still receives positive pre-submit evidence so
       // the Engine can defer or retire it without treating absence as authority.

@@ -11,6 +11,7 @@ import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, Transcription
 import type { SubmissionPreparationContext } from "./submission-preparation.js";
 import { snapshotSubmissionPreparationContext } from "./submission-preparation.js";
 import { assertOwnedTranscriptionPreparation, resolveTranscriptionPreparationIntent } from "./transcription-preparation.js";
+import { assertOwnedTranscriptionAttemptCurrent, resolveOwnedTranscriptionAttempt } from "./owned-transcription-execution.js";
 
 export interface TranscriptionPreparationOptions {
   expectedLease: Readonly<{ owner: string; epoch: number }>; signal: AbortSignal;
@@ -47,13 +48,18 @@ export class TranscriptionAudioService {
         invariant(current.phase === "submitting", "TRANSCRIPTION_AUDIO_LEASE_LOST", "Only an original submitting attempt can start preparation");
         recovery.assertFirstSubmit(attempt.projectId, attempt.id);
       }
+      if (!this.store.get("transcription_execution_dispatch", attempt.id) && !this.store.get("transcription_execution_result", attempt.id))
+        assertOwnedTranscriptionAttemptCurrent(this.store, attempt);
       return current;
     };
     owned();
     const id = transcriptionAudioId(attempt.projectId, attempt.id);
     let intent = this.store.get<TranscriptionAudioIntent>("transcription_audio_intent", id);
     const proof = protocol ? resolveTranscriptionPreparationIntent(this.store, attempt) : undefined;
-    const selected = resolveTranscriptionAudioSource(attempt, this.sources(attempt), proof?.sourceRecord ?? intent?.sourceRecord);
+    const ownedInput = resolveOwnedTranscriptionAttempt(this.store, attempt), sourcePin = ownedInput?.source.sourceRecord ?? proof?.sourceRecord ?? intent?.sourceRecord;
+    invariant(!ownedInput || (!proof || canonical(proof.sourceRecord) === canonical(sourcePin)) && (!intent || canonical(intent.sourceRecord) === canonical(sourcePin)),
+      "TRANSCRIPTION_AUDIO_CONFLICT", "Owned transcription preparation must retain its exact reviewed source provenance");
+    const selected = resolveTranscriptionAudioSource(attempt, this.sources(attempt), sourcePin);
     const source = structuredClone((selected.kind === "media_source" ? selected.record.source : selected.record.media)!);
     if (intent) assertTranscriptionAudioIntent(intent, attempt, selected);
     const verified = await this.media.verifiedSource(source, { signal });

@@ -13,6 +13,7 @@ import { TRANSCRIPTION_EXECUTION_PARSER } from "./transcription-execution-receip
 import { assertTranscriptionAudioIntent, assertTranscriptionAudioReceipt, resolveTranscriptionAudioSource, transcriptionAudioId, transcriptionAudioInput } from "./transcription-audio.js";
 import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, TranscriptionAudioSourceRecord } from "./transcription-audio.js";
 import type { OpenAITranscriptionDescription } from "@openslate/providers";
+import { assertOwnedTranscriptionAttemptCurrent, resolveOwnedTranscriptionAttempt } from "./owned-transcription-execution.js";
 
 export interface TranscriptionCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; [key: string]: unknown }
 export interface TranscriptionReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
@@ -59,6 +60,8 @@ export function resolveTranscriptionPreparation(store: TranscriptionAuthoritySto
   fail(!pinned || (pinned.preparation.intentId === id && pinned.preparation.receiptId === id), "Transcription mapping references another preparation");
   const intent = store.get<TranscriptionAudioIntent>("transcription_audio_intent", id), receipt = store.get<TranscriptionAudioReceipt>("transcription_audio_receipt", id);
   fail(intent && receipt, "Transcription requires its exact completed preparation records");
+  const owned = resolveOwnedTranscriptionAttempt(store, attempt);
+  fail(!owned || canonical(intent!.sourceRecord) === canonical(owned.source.sourceRecord), "Transcription derivative lost its reviewed source provenance");
   const input = transcriptionAudioInput(attempt as Attempt);
   const records = (["media_source", "narration_audio"] as const).flatMap(kind => {
     const record = store.get<TranscriptionAudioSourceRecord["record"]>(kind, input.artifactId); return record ? [{ kind, record }] : [];
@@ -90,6 +93,7 @@ export function resolveTranscriptionAdmission(store: TranscriptionAuthorityStore
   fail(attempt && canonical(attempt.request) === canonical(request) && attempt.candidateId && attempt.reservationId,
     "Transcription requires an unchanged stored admission");
   const current = attempt!;
+  resolveOwnedTranscriptionAttempt(store, current);
   const candidate = store.get<Candidate>("candidate", current.candidateId!), grant = candidate ? store.get<Grant>("grant", candidate.grantId) : undefined;
   const reservation = store.get<TranscriptionReservation>("reservation", current.reservationId!);
   const allowance = store.get<ExternalAllowance>("external_allowance", request.externalAllowanceId ?? "");
@@ -128,6 +132,12 @@ export function resolveTranscriptionAdmission(store: TranscriptionAuthorityStore
 
 /** Use inside the short pre-marker/local-failure transaction; late provider observations use no first-submit check. */
 export function assertTranscriptionFirstDispatch(store: Store, original: TranscriptionAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+  assertTranscriptionSubmissionOwner(store, original, expectedLease);
+  assertOwnedTranscriptionAttemptCurrent(store, original.attempt);
+}
+
+/** Ownership only, so start can retain positive pre-submit proof before settling a newly obsolete selection. */
+export function assertTranscriptionSubmissionOwner(store: Store, original: TranscriptionAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
   new InstallationRecoveryGuard(store).assertFirstSubmit(original.attempt.projectId, original.attempt.id);
   const current = resolveTranscriptionAdmission(store, original.attempt.request, { capabilityLockId: original.capabilityLock.id,
     capabilityLockDigest: digest(original.capabilityLock), profileDefinition: original.profile });

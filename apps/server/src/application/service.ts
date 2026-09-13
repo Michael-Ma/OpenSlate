@@ -16,6 +16,9 @@ import { projectDirectorContext } from "./context-projection.js";
 import type { DirectorContextQuery } from "./context-projection.js";
 import { selectedProviderProfiles } from "./provider-catalog.js";
 import type { InstalledProviderSelection } from "./provider-catalog.js";
+import { ownedTranscriptionCatalog, snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
+import { captureOwnedTranscriptionReviewInput, currentOwnedTranscriptionReview, ownedTranscriptionReviewScope } from "../narration/owned-transcription-review-state.js";
+import type { OwnedTranscriptionApplication, OwnedTranscriptionApplyReceipt, OwnedTranscriptionReview, ReviewOwnedTranscription } from "../narration/owned-transcription-types.js";
 
 interface RequestRecord { id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
@@ -222,7 +225,10 @@ export class ProductionService {
     invariant(before.headVersion === proposal.expectedHeadVersion, "REVISION_CONFLICT", "Project changed before preparation");
     const next = proposal.creative ? applyCreativePatch(before, proposal.creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } })) : structuredClone(before);
     const logicalIds = { ...(this.store.get<{ aliases: Record<string, string> }>("logical_ids", projectId)?.aliases ?? {}) };
+    const basePlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
+    const transcriptionInputs = ownedTranscriptionCatalog(this.store, projectId, basePlan);
     const compiled = proposal.source ? await compilePlanIsolated(proposal.source, { project: next, profiles: lock.profiles, logicalIds, allocateId: newId,
+      ...(transcriptionInputs.length ? { transcriptionInputs } : {}),
       ...(localExecution ? { localExecution } : {}) }) : null;
     const captured: PreparedChangeCapture = { before, next, lock, proposal, proposalDigest, compiled, logicalIds };
     const assessment = this.assessCompiledChange(captured, actor);
@@ -266,7 +272,7 @@ export class ProductionService {
     for (let count = 0; count < continuations.length; count++) for (const continuation of continuations)
       if (authorities.has(continuation.toRequestId)) authorities.add(continuation.fromRequestId);
     const grants = this.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id) && authorities.has(grant.authorityId)
-      && !this.recovery.isImported(projectId, "grant", grant.id));
+      && !this.recovery.isImported(projectId, "grant", grant.id) && !this.store.get("owned_transcription_review", grant.id));
     const grantBindings: Record<string, string> = {};
     for (const change of impact.filter(change => change.kind === "new" || change.kind === "replace")) {
       const node = compiled!.nodes.find(n => n.id === change.nodeId)!;
@@ -276,6 +282,14 @@ export class ProductionService {
       invariant(grant, "ORIGIN_NOT_AUTHORIZED", `Human generation authorization is required for ${node.alias}`);
       used.add(grant.id); grantBindings[node.id] = grant.id;
     }
+    return this.recordPreparedChange(projectId, actor, captured, assessment, grantBindings);
+  }
+
+  /** Record one validated compiled change; callers own the exact grant selection and outer transaction. */
+  private recordPreparedChange(projectId: string, actor: ActorContext, captured: PreparedChangeCapture,
+    assessment: CompiledChangeAssessment, grantBindings: Record<string, string>): Prepared {
+    const { before, next, lock, proposal, proposalDigest, compiled, logicalIds } = captured;
+    const { impact, stages } = assessment;
     const stageVersions = Object.fromEntries(stages.map(stage => { const id = this.stageId(projectId, stage); return [id, this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0]; }));
     const prepared: Prepared = {
       id: newId(), projectId, requestId: actor.requestId, principalId: actor.principalId, epochId: actor.kind === "director" ? actor.epochId : null,
@@ -286,6 +300,58 @@ export class ProductionService {
     this.store.insert("prepared", prepared.id, projectId, prepared);
     this.store.appendEvent(projectId, "change.prepared", { preparedId: prepared.id, impact: impact.map(i => ({ ...i })) });
     return prepared;
+  }
+
+  /** Trusted synchronous host boundary after review re-verifies bytes and isolated composition.
+   * All human authority, one-use grant, plan publication and receipt records commit together.
+   * This method is never a model tool; admission independently verifies the exact owned bytes again.
+   */
+  commitOwnedTranscriptionReview(projectId: string, human: ActorContext, input: ReviewOwnedTranscription,
+    options: { signal?: AbortSignal } = {}): OwnedTranscriptionApplyReceipt {
+    const signal = options.signal;
+    const stopped = (): void => invariant(!signal?.aborted, "OWNED_TRANSCRIPTION_CANCELLED", "Recording review was cancelled");
+    stopped();
+    human = snapshotOwnedTranscriptionData(human, 16384); input = captureOwnedTranscriptionReviewInput(input);
+    const authority = (): void => {
+      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human can approve recording transcription");
+      this.assertActor(projectId, human, true);
+      invariant(this.request(projectId, human).scopeIds.includes(projectId), "SCOPE_DENIED", "Recording review requires editable project scope");
+      this.recovery.assertFreshAuthority(projectId, "owned_transcription_proposal", input.proposalId);
+    };
+    authority();
+    return this.store.transaction(() => {
+      authority();
+      const receipt = this.store.command(ownedTranscriptionReviewScope(projectId, human), input.key, digest(input), () => {
+        const { proposal: owned, before, lock } = currentOwnedTranscriptionReview(this.store, projectId, input);
+        const proposal = parseChangeProposal({ variant: "plan", expectedHeadVersion: before.headVersion, source: owned.compiled.source });
+        const captured: PreparedChangeCapture = { before, next: structuredClone(before), lock: lock as ProjectCapabilityLock,
+          proposal, proposalDigest: digest(proposal), compiled: owned.compiled, logicalIds: owned.logicalIds };
+        const assessment = this.assessCompiledChange(captured, human);
+        invariant(digest(assessment.impact) === digest(owned.impact) && digest(assessment.stages) === digest(owned.stages),
+          "OWNED_TRANSCRIPTION_STALE", "Recording proposal assessment changed since human review");
+        const node = owned.compiled.nodes.find(item => item.alias === owned.operation.alias)!;
+        const grant = this.engine.createGrant(projectId, projectId, "transcription", human.requestId, "user_change");
+        const review: OwnedTranscriptionReview = { id: grant.id, version: 1, projectId, requestId: human.requestId,
+          principalId: human.principalId, proposal: { id: owned.id, digest: input.proposalDigest }, grantDigest: digest(grant),
+          sourceBinding: owned.sourceBinding, nodeId: node.id, specDigest: node.specDigest, compiledDigest: digest(owned.compiled) };
+        this.store.insert("owned_transcription_review", review.id, projectId, review);
+        const prepared = this.recordPreparedChange(projectId, human, captured, assessment, { [node.id]: grant.id });
+        const applied = this.publishPreparedChange(projectId, human, prepared);
+        const binding = this.store.get<{ candidateId: string }>("node_binding", node.id)!;
+        const candidate = this.store.get("candidate", binding.candidateId)!;
+        const application: OwnedTranscriptionApplication = { id: binding.candidateId, version: 1, projectId,
+          review: { id: review.id, digest: digest(review) }, candidateDigest: digest(candidate),
+          prepared: { id: prepared.id, digest: digest(this.store.get("prepared", prepared.id)) },
+          plan: { id: applied.activePlanId!, digest: digest(this.store.get("plan", applied.activePlanId!)) },
+          projectRevision: { id: applied.revisionId, digest: digest(this.store.get("project_revision", applied.revisionId)) }, receipt: applied };
+        this.store.insert("owned_transcription_application", application.id, projectId, application);
+        this.store.appendEvent(projectId, "narration.transcription_reviewed", { proposalId: owned.id, reviewId: review.id,
+          applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, requestId: human.requestId });
+        return { proposalId: owned.id, proposalDigest: input.proposalDigest, reviewId: review.id,
+          applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, applied };
+      });
+      stopped(); return receipt;
+    });
   }
 
   apply(projectId: string, actor: ActorContext, preparedId: string): ApplyReceipt {

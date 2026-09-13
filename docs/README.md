@@ -34,7 +34,8 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Transcript review and adoption](implementation/TRANSCRIPT-REVIEW-ADOPTION.md) | Implemented bounded review, separate human writing/timing choices and canonical/backup provenance |
 | [Audio activation and narration planning](implementation/AUDIO-ACTIVATION.md) | Implemented audio configuration/preflight/spending/runtime and preparation waiting; planned owned draft sources, generation review and chunks |
 | [Audio preparation waiting](implementation/AUDIO-PREPARATION-WAITING.md) | Verified same-attempt waiting, current-selection/lease checks, shared-worker restart and permanent restored-submit fences |
-| [Owned-recording transcription](implementation/OWNED-RECORDING-TRANSCRIPTION.md) | Implemented compiler/file foundation and ungranted proposals; planned exact human generation review |
+| [Owned-recording transcription](implementation/OWNED-RECORDING-TRANSCRIPTION.md) | Implemented compiler, exact proposals and reviewed execution; browser/conversation follow-through |
+| [Human recording review and execution](implementation/OWNED-TRANSCRIPTION-REVIEW.md) | Atomic one-use review/application, retained plan reuse, exact source admission and historical recovery |
 | [Ungranted recording proposals](implementation/OWNED-TRANSCRIPTION-PROPOSALS.md) | Exact source/model/full-plan proposals, scoped current-selection fences and media-inclusive restore |
 | [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration linked |
 | [Unreviewed transcript candidates](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, atomic publication and backup recovery; human adoption remains separate |

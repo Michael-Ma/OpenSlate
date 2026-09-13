@@ -7,7 +7,8 @@ import { assertTranscriptionAudioSource } from "../execution/transcription-audio
 import { isVerifiedGeneratedNarrationAudio, resolveGeneratedNarrationAudio, verifyGeneratedNarrationAudio } from "./generated-audio.js";
 import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal, ownedTranscriptionCatalog,
   snapshotOwnedTranscriptionData } from "./owned-transcription-records.js";
-import type { OwnedTranscriptionProposal, OwnedTranscriptionSource, OwnedTranscriptionTarget, PrepareOwnedTranscription } from "./owned-transcription-types.js";
+import type { OwnedTranscriptionApplyReceipt, OwnedTranscriptionProposal, OwnedTranscriptionSource, OwnedTranscriptionTarget, PrepareOwnedTranscription, ReviewOwnedTranscription } from "./owned-transcription-types.js";
+import { captureOwnedTranscriptionReviewInput, currentOwnedTranscriptionReview, ownedTranscriptionReviewScope } from "./owned-transcription-review-state.js";
 import type { NarrationAudio, NarrationState } from "./types.js";
 import type { NarrationService } from "./service.js";
 import { installNarrationAudio } from "./verified-audio.js";
@@ -50,6 +51,50 @@ export class OwnedTranscriptionService {
     const entry = state?.entries.find(item => item.segmentId === target.segmentId);
     invariant(entry?.segmentRevisionId === target.segmentRevisionId && entry.audioId === target.audioId,
       "OWNED_TRANSCRIPTION_STALE", "The selected narration section or recording changed");
+  }
+
+  /** Explicit human review re-verifies the recording and saved code before creating any authority. */
+  async review(projectId: string, human: ActorContext, input: ReviewOwnedTranscription,
+    options: { signal?: AbortSignal } = {}): Promise<OwnedTranscriptionApplyReceipt> {
+    const signal = options.signal, artifactDir = this.artifactDir, cancellation = signal ? { signal } : {};
+    const stopped = (): void => invariant(!signal?.aborted, "OWNED_TRANSCRIPTION_CANCELLED", "Recording review was cancelled");
+    try {
+      stopped(); human = snapshotOwnedTranscriptionData(human, 16384); input = captureOwnedTranscriptionReviewInput(input);
+      const scope = ownedTranscriptionReviewScope(projectId, human), inputDigest = digest(input);
+      const checkpoint = (): OwnedTranscriptionApplyReceipt | undefined => {
+        stopped(); invariant(human.kind === "human", "ACTOR_DENIED", "Only a human can approve recording transcription");
+        this.authority(projectId, human);
+        this.production.recovery.assertFreshAuthority(projectId, "owned_transcription_proposal", input.proposalId);
+        const replay = this.store.commandReplay<OwnedTranscriptionApplyReceipt>(scope, input.key, inputDigest);
+        if (replay) return replay.result;
+        currentOwnedTranscriptionReview(this.store, projectId, input); return undefined;
+      };
+      let replay = checkpoint(); if (replay) return replay;
+      const captured = currentOwnedTranscriptionReview(this.store, projectId, input), { proposal, source } = captured;
+      const media = this.narration.media;
+      const audio = this.store.get<NarrationAudio>("narration_audio", source.sourceRecord.id)!;
+      const generated = isVerifiedGeneratedNarrationAudio(audio) ? resolveGeneratedNarrationAudio(this.store, projectId, audio.id) : null;
+      if (generated) {
+        await verifyGeneratedNarrationAudio(this.store, media, { artifactDir }, generated, cancellation);
+        replay = checkpoint(); if (replay) return replay;
+      }
+      const installed = await installNarrationAudio(media, artifactDir, projectId, source.source, cancellation);
+      replay = checkpoint(); if (replay) return replay;
+      invariant(generated ? canonical(captured.artifact) === canonical(generated.artifact) : canonical(captured.artifact) === canonical(installed),
+        "OWNED_TRANSCRIPTION_STALE", "Recording artifact differs from the verified source provenance");
+      const logicalIds = { ...proposal.logicalIds };
+      const localExecution = Object.hasOwn(captured.lock, "localExecution") ? snapshotLocalExecution(captured.lock.localExecution) : undefined;
+      const compiled = await composeTranscriptionPlanIsolated(captured.base?.compiled ?? null, proposal.operation,
+        { project: captured.before, profiles: captured.lock.profiles, logicalIds,
+          allocateId: () => { throw new Error("Reviewed composition cannot allocate a new identity"); },
+          transcriptionInputs: [...ownedTranscriptionCatalog(this.store, projectId, captured.base?.compiled ?? null),
+            { id: source.id, digest: digest(source), consumerAlias: source.consumerAlias, artifact: source.artifact }],
+          ...(localExecution ? { localExecution } : {}) }, cancellation);
+      replay = checkpoint(); if (replay) return replay;
+      invariant(canonical(compiled) === canonical(proposal.compiled) && canonical(logicalIds) === canonical(proposal.logicalIds),
+        "OWNED_TRANSCRIPTION_STALE", "Saved recording code no longer reproduces the exact reviewed plan");
+      return this.production.commitOwnedTranscriptionReview(projectId, human, input, cancellation);
+    } finally { stopped(); }
   }
 
   async prepare(projectId: string, actor: ActorContext, input: PrepareOwnedTranscription,

@@ -4,6 +4,7 @@ import { canonical, composeTranscriptionPlanIsolated, digest, invariant, snapsho
 import type { CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
 import { assertOwnedTranscriptionSource, assertOwnedTranscriptionProposal, ownedTranscriptionCatalog } from "../narration/owned-transcription-records.js";
 import type { OwnedTranscriptionSource } from "../narration/owned-transcription-types.js";
+import { assertOwnedTranscriptionReview, assertOwnedTranscriptionApplication, assertOwnedTranscriptionAttemptInput, resolveOwnedTranscriptionApplication } from "../narration/owned-transcription-authorization.js";
 import type { ExecutionSpoolOutput } from "@openslate/providers";
 import { parseOpenAITranscriptionResponse } from "@openslate/providers";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
@@ -108,8 +109,11 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       // Exact source() closure also retains the original upload and descriptor. Generated rows receive their existing full speech closure below.
       checkedOwnedSources.set(value.id, identity);
     };
+    const checkedOwnedProposals = new Map<string, string>();
     const ownedProposal = async (value: unknown, projectId: string): Promise<void> => {
       assertOwnedTranscriptionProposal(speechReader, projectId, value);
+      const identity = digest(value), previous = checkedOwnedProposals.get(value.id);
+      if (previous) { fail(previous === identity, "Owned transcription proposal changed during backup"); return; }
       const binding = get("owned_transcription_source", value.sourceBinding.id) as OwnedTranscriptionSource;
       await ownedSource(binding, projectId);
       const project = get("project_revision", value.baseProject.revisionId).project as ProjectRecord;
@@ -124,6 +128,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         ...(localExecution ? { localExecution } : {}) });
       fail(canonical(compiled) === canonical(value.compiled) && canonical(logicalIds) === canonical(value.logicalIds),
         "Owned transcription proposal differs from isolated historical recomposition");
+      checkedOwnedProposals.set(value.id, identity);
     };
     const checkedGeneratedNarration = new Map<string, string>();
     const generatedNarration = async (value: RecordValue): Promise<void> => {
@@ -353,6 +358,17 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       }
       else if (row.kind === "owned_transcription_source") await ownedSource(value, value.projectId);
       else if (row.kind === "owned_transcription_proposal") await ownedProposal(value, value.projectId);
+      else if (row.kind === "owned_transcription_review") {
+        assertOwnedTranscriptionReview(speechReader, value.projectId, value);
+        await ownedProposal(get("owned_transcription_proposal", value.proposal.id), value.projectId);
+      } else if (row.kind === "owned_transcription_application") {
+        assertOwnedTranscriptionApplication(speechReader, value.projectId, value);
+        const resolved = resolveOwnedTranscriptionApplication(speechReader, value.projectId, value.id);
+        await ownedProposal(resolved.proposal, value.projectId);
+      } else if (row.kind === "candidate" && (speechReader.get("owned_transcription_review", value.grantId) || speechReader.get("owned_transcription_application", value.id))) {
+        const resolved = resolveOwnedTranscriptionApplication(speechReader, value.projectId, value.id);
+        await ownedProposal(resolved.proposal, value.projectId);
+      }
       else if (row.kind === "media_source") {
         await source(value.source);
         if (value.origin === "generated_audio") {
@@ -409,6 +425,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         assertNormalizedAudioIngestion(intent, attempt, output, { type: "normalized_audio", artifact: get("artifact", intent.artifactId) as any,
           derivation: value as AudioDerivationReceipt, mediaSource: get("media_source", intent.artifactId) as any });
       } else if (row.kind === "attempt") {
+        const owned = assertOwnedTranscriptionAttemptInput(speechReader, value as Attempt);
+        if (owned) await ownedProposal(owned.proposal, value.projectId);
         await waitingPreparation(value as Attempt);
       } else if (row.kind === "transcription_preparation_intent") {
         const attempt = get("attempt", row.id) as Attempt;

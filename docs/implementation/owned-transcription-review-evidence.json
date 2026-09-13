@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "date": "2026-09-13",
+  "scope": "Exact human recording review, atomic grant/application publication, owned transcription execution and historical recovery",
+  "fullCheckout": {
+    "passed": 1593,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 70,
+    "durationMilliseconds": 122161.682875,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "unchangedSourceTestConfigurationAndStyleFiles": 357
+  },
+  "focusedVerification": {
+    "humanReviewAndContinuity": 44,
+    "newAuthorityStorageAndRestore": 11,
+    "newActualExecution": 15,
+    "newAndExistingStorageRestore": 23,
+    "existingProductionPreparationRegressions": 80,
+    "adjacentExecutionBridgePreparationRegressions": 96,
+    "note": "Focused checks overlap the complete checkout; these counts are not additive."
+  },
+  "review": {
+    "humanOnly": true,
+    "noAuthorityBeforeFileAndWorkerVerification": true,
+    "atomicGrantReviewPreparedPlanCandidateApplicationAndCommand": true,
+    "finalOriginalCancellationRollsBack": true,
+    "concurrentSameKeyConverges": true,
+    "fullVideoOutputsAndPreviousCandidateReuse": true,
+    "secondDifferentRecordingRetainsFirstHistoricalChain": true,
+    "generatedAudioProvenanceRetainedWithoutNewGeneration": true,
+    "separateFiniteAllowanceRequired": true
+  },
+  "execution": {
+    "source": "Real local import and conversion of synthetic PCM; injected transcription HTTP response",
+    "uploadWithoutScriptCueOrAcceptance": true,
+    "providerPostCountPerSuccessfulCandidate": 1,
+    "localDerivativeCountPerSuccessfulCandidate": 1,
+    "outputStatus": "unreviewed",
+    "narrationAcceptanceCreated": false,
+    "exactNarrationSourceRetainedDespiteEquivalentMediaRecord": true,
+    "selectedSectionChangesBlockedBeforeAdmissionProofWaitingAndDispatch": true,
+    "lateHistoricalResultPreserved": true,
+    "candidatePublicationRollbackRecoversAfterReopenWithoutRepeatedWork": true,
+    "ordinaryShotEditRetainsAndResumesSameAttempt": true
+  },
+  "restoration": {
+    "actualSameRootBackupInspectionRestore": true,
+    "reviewApplicationAndAdmissionClosureVerified": true,
+    "fullOwnedBytesRetained": true,
+    "importedAuthoritiesPermanentlyFencedAfterHumanRelease": true,
+    "missingApplicationStrippedMetadataForgedReceiptAndFingerprintRejected": true
+  },
+  "independentReview": {
+    "humanReviewAndPublication": "passed",
+    "executionAndPreparation": "passed",
+    "remainingCorrectnessFindings": []
+  },
+  "limitations": [
+    "Browser recording-generation routes and review UI remain next",
+    "No conversational generation tool is exposed; V2 remains unchanged",
+    "Live media access, billing and recognition quality remain unverified"
+  ],
+  "mediaApiCalls": 0,
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "pushed": false,
+  "next": "Authenticated recording proposal/review projections and routes, upload-first browser flow, then versioned conversational audio planning"
+}

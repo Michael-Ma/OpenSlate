@@ -1,6 +1,6 @@
 # Transcribe an owned draft recording
 
-September 13, 2026. **Compiler and owned-file foundation implemented; application review and execution activation remain planned.** The configured transcription runtime and durable local preparation waiting are implemented. This sequence connects an uploaded recording to reviewed transcription without requiring a script, cue or canonical narration acceptance first.
+September 13, 2026. **Compiler, exact proposals, human application review and owned-input execution are implemented. Browser/conversation entry points remain next.** The configured transcription runtime and durable local preparation waiting are implemented. This sequence connects an uploaded recording to reviewed transcription without requiring a script, cue or canonical narration acceptance first.
 
 ## User and authority flow
 
@@ -35,7 +35,7 @@ definePlan({ baseRevision: "current-project-revision" }, p => {
 });
 ```
 
-The reference above is available only to `recording-transcript`. Its binding ID/digest participates in the symbolic specification and effective execution fingerprint. The caller's catalog is detached before an allocator callback or worker can run. Legacy nodes omit the new metadata entirely and preserve their previous serialized bytes and hashes. The Engine currently rejects the new field before installation, input verification or admission; a successfully compiled source is not an executable approval.
+The reference above is available only to `recording-transcript`. Its binding ID/digest participates in the symbolic specification and effective execution fingerprint. The caller's catalog is detached before an allocator callback or worker can run. Legacy nodes omit the new metadata entirely and preserve their previous serialized bytes and hashes. The Engine now requires the exact human review/application chain before installation and admission; a successfully compiled source is not an executable approval.
 
 Add a trusted bounded `CompileContext.transcriptionInputs` catalog. Each entry contains an opaque binding ID/digest, one consumer alias and an exact audio artifact reference. The application will later derive these entries from verified immutable recording bindings; the planning language cannot create them. `p.transcriptionInput(id)` returns an internal reference that only the named transcription operation can consume. Images, video, timeline narration, rendering and other transcription aliases must reject it. Ordinary `p.asset()` remains limited to canonical project artifacts.
 
@@ -43,13 +43,13 @@ The new node has an optional `applicationInput` link with the fixed `owned_trans
 
 Use the existing restricted AST printer to compose one new transcription declaration into the complete existing source. Update only the base revision and insert the application-owned declaration before the final return, preserving existing returned outputs. All declared operations already belong to the execution graph, so the new transcription need not replace the existing render output. For a project without a plan, return the single transcription operation. Recompile the rewritten baseline and result in a bounded worker, then verify every unrelated node and review gate remains exactly identical. Reject conflicting aliases, invalid historical graph/source pairs or an existing plan that no longer compiles against current canonical state. Never concatenate compiled graphs while claiming unrelated source as the executable plan.
 
-This first foundation supports appending one operation. Stable replacement of an existing section operation will receive an explicit composition contract before conversational edits depend on it. Preserve old outputs and history; do not silently retire omitted video work. Compilation is not publication or permission. Until the application binding/review service is installed, Engine installation and admission reject nodes containing this new application-input field.
+This first foundation supports appending one operation. Stable replacement of an existing section operation will receive an explicit composition contract before conversational edits depend on it. Preserve old outputs and history; do not silently retire omitted video work. Compilation is not publication or permission. Engine installation and admission now require the exact application binding/review chain for nodes containing this field.
 
 Reuse the existing exact narration artifact installer and byte format, with additive original-signal cancellation. Keep the saved artifact identity compatible with later canonical application. Do not add the draft recording to `project.artifacts`, narration cues or acceptance records merely to make it available for transcription.
 
 ## 2. Exact recording proposal and human application
 
-**Implemented preparation slice:** [Ungranted recording proposals](OWNED-TRANSCRIPTION-PROPOSALS.md) now retain exact owned source/target, model, full composed plan and historical project evidence without creating authority or changing the active plan. Store and backup closure are implemented. The human application described below remains planned.
+**Implemented preparation slice:** [Ungranted recording proposals](OWNED-TRANSCRIPTION-PROPOSALS.md) now retain exact owned source/target, model, full composed plan and historical project evidence without creating authority or changing the active plan. Store and backup closure are implemented. The [human application and execution slice](OWNED-TRANSCRIPTION-REVIEW.md) is also implemented; the paragraphs below retain its intended boundaries.
 
 A narrow application service captures the original request, project head, current capability lock, full selected profile/options, source-record digest and complete owned source descriptor/range. Its target is explicit: an independent recording, or a named narration section with exact selected section revision/audio. Never infer a section from matching bytes.
 
@@ -77,7 +77,7 @@ After the backend path passes, add authenticated recording-generation review rou
 
 **Foundation verification:** all 1,459 checkout tests passed (62 additions), with builds/typechecks and the installed no-turn Codex probe. The 26 compiler, 11 composition, 16 installer and nine activation-gate checks cover the new boundary. A 60-shot six-minute fixture retained all 122 old operations and 60 review gates; isolated composition took 101.0 ms in its focused run and 107.2 ms during the full suite. These are fixture observations, not a production latency guarantee. All 342 authored source/test/configuration/style files were unchanged through the full check. Independent review found no remaining correctness issues. No model or media calls occurred. See [sanitized evidence](owned-recording-foundation-evidence.json).
 
-The first three items below are verified; the remaining backend and browser path is still planned.
+All backend items below are now verified by the subsequent [proposal](OWNED-TRANSCRIPTION-PROPOSALS.md) and [human review/execution](OWNED-TRANSCRIPTION-REVIEW.md) milestones. Browser and conversational entry points remain next.
 
 - Pure and isolated compilation: exact bound audio input, wrong-consumer rejection, detached caller data, bounded parsing and unchanged legacy identities.
 - Full-plan composition: audio-only project plus an existing reviewed multi-shot plan, preserving unrelated aliases, node bytes, review gates and returned render outputs.

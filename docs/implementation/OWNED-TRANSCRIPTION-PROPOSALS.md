@@ -1,6 +1,6 @@
 # Ungranted recording proposals
 
-September 13, 2026. The backend can prepare and retain one exact transcription operation for an owned uploaded or previously generated recording. This slice creates no generation permission. Human generation review, execution activation and ordinary browser/conversation entry points remain the next integration.
+September 13, 2026. The backend can prepare and retain one exact transcription operation for an owned uploaded or previously generated recording. This slice creates no generation permission. The subsequent [human review/execution milestone](OWNED-TRANSCRIPTION-REVIEW.md) now connects this evidence to one reviewed candidate; ordinary browser/conversation entry points remain next.
 
 ```mermaid
 flowchart LR
@@ -42,7 +42,7 @@ Exact command replay returns the retained result before requiring today's files 
 
 Store writes validate source/proposal closure and make both families immutable. Backup verifies the descriptor, original upload, normalized PCM and installed artifact. It also independently recomposes the proposal in the bounded compiler worker from the pinned historical project, plan, model lock and input bindings, then compares the full result and proposed IDs. Saved graph digests alone do not substitute for this source check.
 
-An actual same-root restore retains those records and bytes. Imported proposals receive a permanent authority fence: releasing restoration quarantine does not make them fresh approvals. Their source evidence can still support a new request. The Engine's application-input rejection remains enabled for this milestone; no new transcription can be admitted through this proposal API.
+An actual same-root restore retains those records and bytes. Imported proposals receive a permanent authority fence: releasing restoration quarantine does not make them fresh approvals. Their source evidence can still support a new request. This proposal API still grants no execution authority. The subsequent [human review/execution milestone](OWNED-TRANSCRIPTION-REVIEW.md) replaces the initial blanket Engine rejection with exact candidate/application admission checks.
 
 ## Shared publication and truthful context
 

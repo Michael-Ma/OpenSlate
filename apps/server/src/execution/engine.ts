@@ -20,6 +20,8 @@ import { assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedL
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent, LocalExecutionOptions, LocalExecutionPort, LocalExecutionResult, PreparedLocalExecution } from "./local-execution.js";
 import type { PreparationEligibility, PreparationSubmissionOutcome, SubmissionPreparationContext, SubmissionPreparationPort } from "./submission-preparation.js";
 import { resolveTranscriptionPreparationIntent } from "./transcription-preparation.js";
+import { assertOwnedTranscriptionInstallation, assertOwnedTranscriptionCurrent, assertOwnedTranscriptionAttemptCurrent, resolveOwnedTranscriptionNode } from "./owned-transcription-execution.js";
+import type { OwnedTranscriptionAttemptInput } from "../narration/owned-transcription-types.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
@@ -36,6 +38,7 @@ export interface Attempt {
   taskId: string | null; reservationId: string | null;
   failure: { id: string; technical: boolean; source: string; retryAllowed: boolean } | null;
   preparation?: { intentId: string; intentDigest: string; waitCount: number; nextEligibleAt: number };
+  applicationInput?: OwnedTranscriptionAttemptInput;
   outputs: Record<string, ArtifactRef>; createdAt: string;
 }
 export interface ArtifactRecord {
@@ -142,8 +145,8 @@ export class Engine {
   installPlan(projectId: string, planId: string, compiled: CompiledPlan, grantBindings: Record<string, string> = {}): { planId: string; nodes: NodeBinding[] } {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId);
-      for (const node of compiled.nodes) this.rejectApplicationInput(node);
       const project = this.store.getProject(projectId);
+      assertOwnedTranscriptionInstallation(this.store, project, planId, compiled, grantBindings);
       if (!this.store.get("budget", projectId)) this.store.insert("budget", projectId, projectId, { capMicros: this.defaultBudgetMicros, currency: "USD" });
       const saved = this.store.get<PlanRecord>("plan", planId);
       if (saved) {
@@ -302,7 +305,9 @@ export class Engine {
     const settled = await Promise.allSettled(candidates.map(async binding => {
       let attempt: Attempt;
       try {
-        this.rejectApplicationInput(binding.node);
+        const project = this.store.getProject(binding.projectId);
+        const ownedInput = resolveOwnedTranscriptionNode(this.store, project, binding.node, binding.candidateId);
+        if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, binding.node, binding.candidateId, ownedInput.resolved);
         const lock = this.store.get<{ localExecution?: unknown }>("capability_lock", this.store.getProject(binding.projectId).capabilityLockId);
         if (Object.hasOwn(binding.node.args, "localExecution") || ((binding.node.kind === "timeline" || binding.node.kind === "render") && lock && Object.hasOwn(lock, "localExecution"))) {
           const outcome = await this.runLocalReady(binding);
@@ -680,7 +685,8 @@ export class Engine {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId);
       const project = this.store.getProject(projectId); const binding = this.currentBinding(projectId, nodeId); const node = binding.node;
-      this.rejectApplicationInput(node);
+      const ownedInput = resolveOwnedTranscriptionNode(this.store, project, node, binding.candidateId);
+      if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, node, binding.candidateId, ownedInput.resolved);
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
       invariant(!this.held(project, nodeId), "EXECUTION_HELD", "Dispatch is paused or held");
       this.checkIntent(project, node);
@@ -749,6 +755,7 @@ export class Engine {
           execution: { ...execution }, ...(pinnedProfile ? { profile: pinnedProfile } : {}), ...(externalAllowanceId ? { externalAllowanceId } : {}) },
         phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId, failure: null, outputs: {}, createdAt: new Date().toISOString(),
+        ...(ownedInput ? { applicationInput: structuredClone(ownedInput.input) } : {}),
       };
       this.store.insert("attempt", id, projectId, attempt);
       if (reservationId) this.store.insert("reservation", reservationId, projectId, { attemptId: id, micros: cost.toString(), state: "reserved" });
@@ -758,10 +765,6 @@ export class Engine {
       }
       this.store.appendEvent(projectId, "attempt.state_changed", { attemptId: id, phase: "submitting", nodeId }); return attempt;
     });
-  }
-
-  private rejectApplicationInput(node: PlanNode): void {
-    invariant(!Object.hasOwn(node, "applicationInput"), "APPLICATION_INPUT_UNAVAILABLE", "Application-owned recording inputs are not yet enabled for execution");
   }
 
   private preparationMatches(attempt: Attempt): boolean {
@@ -781,6 +784,11 @@ export class Engine {
       "SUBMISSION_PREPARATION_LEASE_LOST", "Preparation no longer owns its original active lease");
     this.recovery.assertFirstSubmit(current.projectId, current.id);
     if (current.preparation) resolveTranscriptionPreparationIntent(this.store, current);
+    try { assertOwnedTranscriptionAttemptCurrent(this.store, current); }
+    catch (error) {
+      if (error instanceof DomainError && error.code === "SUBMISSION_PREPARATION_OBSOLETE") return { type: "obsolete", reason: "inputs_changed" };
+      throw error;
+    }
     invariant(current.reservationId && this.store.get<Reservation>("reservation", current.reservationId)?.state === "reserved",
       "SUBMISSION_PREPARATION_INVALID", "Preparation requires its original reserved liability");
     const project = this.store.getProject(current.projectId), binding = this.store.get<NodeBinding>("node_binding", current.nodeId);

@@ -10,6 +10,7 @@ import { transcriptionExecutionOptions } from "./transcription-execution-receipt
 import type { SubmissionPreparationContext } from "./submission-preparation.js";
 import { assertSubmissionPreparationEligibility } from "./submission-preparation.js";
 import type { Store } from "../persistence/store.js";
+import { assertOwnedTranscriptionAttemptCurrent, resolveOwnedTranscriptionAttempt } from "./owned-transcription-execution.js";
 
 export interface TranscriptionPreparationIntent {
   id: string; version: 1; projectId: string; attemptId: string; requestDigest: string;
@@ -44,11 +45,13 @@ function snapshotIntent(input: TranscriptionPreparationIntent): TranscriptionPre
   const result = copy(input, 0) as TranscriptionPreparationIntent; fail(Buffer.byteLength(canonical(result)) <= 65536); return result;
 }
 function selectedSource(store: TranscriptionAuthorityStore, attempt: Readonly<Attempt>, pin?: TranscriptionPreparationIntent["sourceRecord"]) {
+  const owned = resolveOwnedTranscriptionAttempt(store, attempt);
+  fail(!owned || !pin || canonical(pin) === canonical(owned.source.sourceRecord));
   const input = transcriptionAudioInput(attempt as Attempt);
   const records = (["media_source", "narration_audio"] as const).flatMap(kind => {
     const record = store.get<TranscriptionAudioSourceRecord["record"]>(kind, input.artifactId); return record ? [{ kind, record }] : [];
   });
-  return resolveTranscriptionAudioSource(attempt as Attempt, records, pin);
+  return resolveTranscriptionAudioSource(attempt as Attempt, records, owned?.source.sourceRecord ?? pin);
 }
 function initialInput<T>(read: () => T): T {
   try { return read(); }
@@ -105,6 +108,7 @@ export function assertOwnedTranscriptionPreparation(store: Store, attempt: Reado
   const reservation = store.get<{ state: string }>("reservation", proof.reservation.id);
   invariant(reservation?.state === "reserved", "SUBMISSION_PREPARATION_LEASE_LOST", "Preparation requires its original reserved liability");
   new InstallationRecoveryGuard(store).assertFirstSubmit(attempt.projectId, attempt.id);
+  assertOwnedTranscriptionAttemptCurrent(store, current);
   assertSubmissionPreparationEligibility(context);
   return proof;
 }
