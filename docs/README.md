@@ -8,6 +8,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Local launcher](implementation/LOCAL-LAUNCHER.md) | One built process for interface/API, private local state and clean shutdown |
 | [Opt-in media execution](implementation/MEDIA-EXECUTION-LAUNCHER.md) | Independent provider activation, truthful setup status and no-key browser evidence |
 | [Automatic local assembly](implementation/AUTOMATIC-LOCAL-ASSEMBLY.md) | Real Engine timeline/render, immutable recipes, content reuse and restart recovery |
+| [Installation recovery brief](implementation/INSTALLATION-RECOVERY.md) | Planned same-root private backup, paused restore and permanent fences on imported spending authority |
 | [Database migrations](implementation/DATABASE-MIGRATIONS.md) | Versioned schema, verified pre-upgrade backups and WAL-consistent restore |
 | [Conversation workspace and local services](implementation/CONVERSATION-WORKSPACE.md) | Current UI, supervisor, native adapter, narration drafts, supplied-media renderer and verification |
 | [Supervised Codex validation](implementation/CODEX-SUPERVISOR-VALIDATION.md) | Actual native supervisor question/restart/scoped-edit fixture passed; historical three-start experiment; later capability evidence linked below |
