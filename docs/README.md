@@ -27,6 +27,9 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Allowance HTTP](implementation/ALLOWANCE-HTTP.md) | Authenticated purpose-bound commands, durable replay and paginated coverage |
 | [Project budget revisions](implementation/PROJECT-BUDGET.md) | Independent audited cap changes with revision and value checks |
 | [Shared timeline capture](implementation/TIMELINE-CAPTURE.md) | Exact SQL source/audio resolution reused by human and future automatic rendering |
+| [Pinned project local execution](implementation/PROJECT-LOCAL-EXECUTION.md) | Host-only new-project pins retained across edits and restart |
+| [Immutable timeline documents](implementation/LOCAL-TIMELINE-DOCUMENT.md) | Exact content identity, verified owned JSON and recovery |
+| [Local cancellation and recovery](implementation/LOCAL-MEDIA-RECOVERY.md) | Original-signal propagation, bounded reads and cleanup before return |
 | [Trusted local assembly identity](implementation/LOCAL-EXECUTION-IDENTITY.md) | Optional host-only compiler identity with exact legacy compatibility |
 | [External spending allowances](implementation/EXTERNAL-SPENDING-ALLOWANCES.md) | Human candidate/profile limits, permanent admission consumption and revocation |
 | [Provider execution boundary](implementation/PROVIDER-EXECUTION.md) | Registered executor contracts, receipt identity, ingestion and recovery |

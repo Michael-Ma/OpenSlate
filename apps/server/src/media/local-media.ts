@@ -125,7 +125,9 @@ export class LocalMediaService {
     }));
   }
 
-  async freezeManifest(input: RenderManifestInput): Promise<FrozenRenderManifest> {
+  async freezeManifest(input: RenderManifestInput, options: { signal?: AbortSignal } = {}): Promise<FrozenRenderManifest> {
+    const { signal } = options;
+    aborted(signal);
     // Detach from the caller before the first asynchronous file read.
     const value = structuredClone(input);
     invariant(typeof value.projectId === "string" && typeof value.targetRevisionId === "string" && ID.test(value.projectId) && ID.test(value.targetRevisionId), "MEDIA_INVALID_INPUT", "Invalid project or target revision identity");
@@ -142,7 +144,7 @@ export class LocalMediaService {
       sourceIdentities.set(source.artifactId, source.id);
     };
     for (const clip of value.clips) {
-      const source = await this.readSource(clip.source);
+      const source = await this.readSource(clip.source, signal);
       rememberSource(source);
       invariant(source.kind === "video" && source.probe.video, "MEDIA_INVALID_INPUT", "Clip requires normalized video");
       integer(clip.startFrame, 0, this.limits.maxDurationFrames, "source start frame");
@@ -157,7 +159,7 @@ export class LocalMediaService {
     const audio = [];
     const audioStreams = new Set<string>();
     for (const placement of value.audio ?? []) {
-      const source = await this.readSource(placement.source);
+      const source = await this.readSource(placement.source, signal);
       invariant(source.kind === "audio" && source.probe.audio?.samples !== null && source.probe.audio?.samples !== undefined, "MEDIA_INVALID_INPUT", "Audio placement requires measured normalized audio");
       rememberSource(source); audioStreams.add(source.sha256);
       invariant(audioStreams.size <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many distinct audio source streams");
@@ -170,31 +172,36 @@ export class LocalMediaService {
       audio.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
     }
     invariant(audioLanes(audio).length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many simultaneous audio placements");
-    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, toolchainDigest: await this.toolchainDigest() };
+    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, toolchainDigest: await this.toolchainDigest(signal) };
+    aborted(signal);
     const manifest: FrozenRenderManifest = { digest: digest(body), ...body };
     await this.installJson("manifests", manifest.digest, manifest);
+    aborted(signal);
     return frozen(manifest);
   }
 
   async render(input: FrozenRenderManifest, options: RenderOptions = {}): Promise<RenderResult> {
-    return this.exclusive(async () => this.temporary(async dir => {
+    const { signal, isCurrent, publish } = options;
+    const captured = structuredClone(input);
+    aborted(signal);
+    const result = await this.exclusive(async () => this.temporary(async dir => {
       // Read the immutable stored recipe; caller-supplied paths/filters cannot enter FFmpeg.
-      const manifest = await this.readManifest(input);
+      const manifest = await this.readManifest(captured, signal);
       invariant(manifest.clips.length <= this.limits.maxClips && manifest.audio.length <= this.limits.maxAudioPlacements && manifest.totalFrames <= this.limits.maxDurationFrames,
         "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the current local resource limits");
-      aborted(options.signal);
-      invariant(!options.isCurrent || options.isCurrent(manifest) === true, "MEDIA_STALE_TARGET", "Render target is already stale");
-      invariant(manifest.toolchainDigest === await this.toolchainDigest(options.signal), "MEDIA_TOOLCHAIN_CHANGED", "Frozen render toolchain changed");
+      aborted(signal);
+      invariant(!isCurrent || isCurrent(manifest) === true, "MEDIA_STALE_TARGET", "Render target is already stale");
+      invariant(manifest.toolchainDigest === await this.toolchainDigest(signal), "MEDIA_TOOLCHAIN_CHANGED", "Frozen render toolchain changed");
       const args = ["-nostdin", "-v", "error", "-xerror", "-filter_complex_threads", "1"];
-      for (const clip of manifest.clips) { await this.verifySource(clip.source); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(clip.source)); }
+      for (const clip of manifest.clips) { await this.verifySource(clip.source, signal); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(clip.source)); }
       const audioSources = new Map<string, { source: SuppliedMedia; indices: number[] }>();
       for (const [index, placement] of manifest.audio.entries()) {
-        await this.readSource(placement.source);
+        await this.readSource(placement.source, signal);
         const group = audioSources.get(placement.source.sha256) ?? { source: placement.source, indices: [] };
         group.indices.push(index); audioSources.set(placement.source.sha256, group);
       }
       invariant(audioSources.size <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the current audio source limit");
-      for (const group of audioSources.values()) { await this.verifySource(group.source); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(group.source)); }
+      for (const group of audioSources.values()) { await this.verifySource(group.source, signal); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(group.source)); }
       const filters: string[] = [];
       manifest.clips.forEach((clip, index) => {
         const size = `${manifest.width}:${manifest.height}`;
@@ -234,61 +241,73 @@ export class LocalMediaService {
       if (manifest.audio.length) args.push("-map", "[outa]", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2");
       else args.push("-an");
       args.push("-map_metadata", "-1", "-map_chapters", "-1", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30", "-fps_mode", "cfr", "-frames:v", String(manifest.totalFrames), "-movflags", "+faststart", "-fs", String(this.limits.maxOutputBytes), output);
-      await this.run(this.ffmpeg, args, options.signal);
-      const probe = await this.inspect(output, options.signal);
+      await this.run(this.ffmpeg, args, signal);
+      const probe = await this.inspect(output, signal);
       invariant(probe.video?.frames === manifest.totalFrames && probe.video.width === manifest.width && probe.video.height === manifest.height && probe.video.frameRate === "30/1" && probe.video.codec === "h264", "MEDIA_VALIDATION_FAILED", "Rendered picture does not match frozen frame count or geometry");
       if (manifest.audio.length) {
         invariant(probe.audio?.sampleRate === SAMPLE_RATE && probe.audio.channels === 2 && probe.audio.codec === "aac" && probe.audio.samples !== null && Math.abs(probe.audio.samples - manifest.totalFrames * SAMPLES_PER_FRAME) <= 2048, "MEDIA_VALIDATION_FAILED", "Rendered audio does not match the timeline within AAC padding tolerance");
       } else invariant(!probe.audio, "MEDIA_VALIDATION_FAILED", "Unexpected output audio");
-      await this.decode(output, options.signal);
-      aborted(options.signal);
+      await this.decode(output, signal);
+      aborted(signal);
       const installed = await this.installFile(output, "mp4", this.limits.maxOutputBytes);
       const completion: RenderCompletion = { manifest, artifact: { id: installed.sha256, manifestDigest: manifest.digest, ...installed, probe } };
       // A filesystem receipt precedes application publication. Callback failure or
       // process loss may leave history/orphans, never a half-written final file.
       await this.installJson("completions", `${manifest.digest}-${installed.sha256}`, completion);
-      aborted(options.signal);
+      aborted(signal);
       let status: RenderResult["status"] = "completed";
-      if (options.publish) {
-        const published = options.publish(frozen(completion));
+      if (publish) {
+        const published = publish(frozen(completion));
         invariant(typeof published === "boolean", "MEDIA_INVALID_CALLBACK", "Publication must synchronously compare and select the target");
         status = published ? "published" : "historical";
       }
       return frozen({ ...completion, status });
     }));
+    aborted(signal);
+    return result;
   }
 
   /** Recover an already installed completion; selection still needs the guarded host port. */
-  async readCompletion(manifestDigest: string, sha256: string): Promise<RenderCompletion> {
+  async readCompletion(manifestDigest: string, sha256: string, options: { signal?: AbortSignal } = {}): Promise<RenderCompletion> {
+    const { signal } = options;
+    aborted(signal);
     invariant(HASH.test(manifestDigest) && HASH.test(sha256), "MEDIA_INVALID_INPUT", "Invalid completion identity");
-    const result = JSON.parse(await readFile(join(this.rootDir, "completions", `${manifestDigest}-${sha256}.json`), "utf8")) as RenderCompletion;
-    await this.readManifest(result.manifest);
+    const result = await this.readRecord(join(this.rootDir, "completions", `${manifestDigest}-${sha256}.json`), signal) as RenderCompletion;
+    await this.readManifest(result.manifest, signal);
     invariant(result.manifest.digest === manifestDigest && result.artifact.id === sha256 && result.artifact.manifestDigest === manifestDigest && result.artifact.sha256 === sha256 && result.artifact.path === join(this.rootDir, "blobs", `${sha256}.mp4`), "MEDIA_INTEGRITY_ERROR", "Completion identity mismatch");
-    const verified = await this.hashFile(result.artifact.path, this.limits.maxOutputBytes);
+    const verified = await this.hashFile(result.artifact.path, this.limits.maxOutputBytes, signal);
+    aborted(signal);
     invariant(verified.sha256 === sha256 && verified.byteLength === result.artifact.byteLength, "MEDIA_INTEGRITY_ERROR", "Completion artifact changed");
     return frozen(result);
   }
 
   /** Trusted host access only: verify a service-issued descriptor before copying bytes. */
-  async verifiedSource(source: SuppliedMedia): Promise<{ source: SuppliedMedia; path: string }> {
+  async verifiedSource(source: SuppliedMedia, options: { signal?: AbortSignal } = {}): Promise<{ source: SuppliedMedia; path: string }> {
+    const { signal } = options;
+    aborted(signal);
     const value = structuredClone(source);
-    await this.verifySource(value);
+    await this.verifySource(value, signal);
+    aborted(signal);
     return { source: frozen(value), path: this.blobPath(value) };
   }
 
   /** Discover installed receipts after a process exit before its SQL completion commit. */
-  async findCompletions(manifestDigest: string): Promise<RenderCompletion[]> {
+  async findCompletions(manifestDigest: string, options: { signal?: AbortSignal } = {}): Promise<RenderCompletion[]> {
+    const { signal } = options;
+    aborted(signal);
     invariant(HASH.test(manifestDigest), "MEDIA_INVALID_INPUT", "Invalid manifest identity");
     const { opendir } = await import("node:fs/promises");
     const names: string[] = [];
     for await (const entry of await opendir(join(this.rootDir, "completions"))) {
+      aborted(signal);
       if (entry.isFile() && entry.name.startsWith(`${manifestDigest}-`) && /^[a-f0-9]{64}-[a-f0-9]{64}\.json$/.test(entry.name)) {
         names.push(entry.name);
         invariant(names.length <= 8, "MEDIA_RECEIPT_LIMIT", "Too many outputs for one frozen manifest");
       }
     }
     const results: RenderCompletion[] = [];
-    for (const name of names.sort()) results.push(await this.readCompletion(manifestDigest, name.slice(65, 129)));
+    for (const name of names.sort()) results.push(await this.readCompletion(manifestDigest, name.slice(65, 129), { ...(signal ? { signal } : {}) }));
+    aborted(signal);
     return results;
   }
 
@@ -304,7 +323,7 @@ export class LocalMediaService {
   private async run(executable: string, args: string[], signal?: AbortSignal): Promise<string> {
     aborted(signal);
     let binary: { sha256: string; byteLength: number };
-    try { binary = await this.hashFile(await realpath(executable), 256 * 1024 * 1024); }
+    try { binary = await this.hashFile(await realpath(executable), 256 * 1024 * 1024, signal); }
     catch (error) {
       if (["ENOENT", "EACCES", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw new DomainError("MEDIA_TOOL_UNAVAILABLE", "Unable to read configured media executable");
       throw error;
@@ -397,36 +416,61 @@ export class LocalMediaService {
     invariant(HASH.test(source.sha256), "MEDIA_INTEGRITY_ERROR", "Invalid source hash");
     return join(this.rootDir, "blobs", `${source.sha256}.${source.kind === "video" ? "mp4" : "wav"}`);
   }
-  private async readSource(source: SuppliedMedia): Promise<SuppliedMedia> {
+  private async readSource(source: SuppliedMedia, signal?: AbortSignal): Promise<SuppliedMedia> {
+    aborted(signal);
     invariant(source && HASH.test(source.id), "MEDIA_INVALID_INPUT", "Unknown supplied-media descriptor");
-    const stored = JSON.parse(await readFile(join(this.rootDir, "sources", `${source.id}.json`), "utf8")) as SuppliedMedia;
+    const stored = await this.readRecord(join(this.rootDir, "sources", `${source.id}.json`), signal) as SuppliedMedia;
     const { id, ...body } = stored;
     invariant(id === digest(body) && canonical(stored) === canonical(source), "MEDIA_INTEGRITY_ERROR", "Source differs from its frozen descriptor");
     return stored;
   }
-  private async verifySource(source: SuppliedMedia): Promise<void> {
-    await this.readSource(source);
-    const observed = await this.hashFile(this.blobPath(source), this.limits.maxOutputBytes);
+  private async verifySource(source: SuppliedMedia, signal?: AbortSignal): Promise<void> {
+    await this.readSource(source, signal);
+    const observed = await this.hashFile(this.blobPath(source), this.limits.maxOutputBytes, signal);
+    aborted(signal);
     invariant(observed.sha256 === source.sha256 && observed.byteLength === source.byteLength, "MEDIA_INTEGRITY_ERROR", "Normalized media changed after import");
   }
-  private async readManifest(manifest: FrozenRenderManifest): Promise<FrozenRenderManifest> {
+  private async readManifest(manifest: FrozenRenderManifest, signal?: AbortSignal): Promise<FrozenRenderManifest> {
+    aborted(signal);
     invariant(manifest && HASH.test(manifest.digest), "MEDIA_INVALID_INPUT", "Invalid manifest identity");
-    const stored = JSON.parse(await readFile(join(this.rootDir, "manifests", `${manifest.digest}.json`), "utf8")) as FrozenRenderManifest;
+    const stored = await this.readRecord(join(this.rootDir, "manifests", `${manifest.digest}.json`), signal) as FrozenRenderManifest;
     const { digest: identity, ...body } = stored;
     invariant(identity === digest(body) && canonical(stored) === canonical(manifest), "MEDIA_INTEGRITY_ERROR", "Manifest changed after freezing");
     return frozen(stored);
   }
-  private async hashFile(path: string, maxBytes: number): Promise<{ sha256: string; byteLength: number }> {
-    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  /** Read owned JSON records with the same bound used when installing them. */
+  private async readRecord(path: string, signal?: AbortSignal): Promise<unknown> {
+    aborted(signal);
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const metadata = await file.stat();
+      invariant(metadata.isFile() && metadata.size > 0 && metadata.size <= 1024 * 1024, "MEDIA_MANIFEST_LIMIT", "Media record exceeds its byte limit");
+      const chunks: Buffer[] = [], buffer = Buffer.alloc(65536); let size = 0;
+      for (;;) {
+        aborted(signal);
+        const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+        aborted(signal); if (!bytesRead) break;
+        size += bytesRead;
+        invariant(size <= 1024 * 1024, "MEDIA_MANIFEST_LIMIT", "Media record grew beyond its byte limit");
+        chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+      }
+      invariant(size === metadata.size, "MEDIA_INTEGRITY_ERROR", "Media record size changed");
+      return JSON.parse(Buffer.concat(chunks, size).toString("utf8"));
+    } finally { await file.close(); aborted(signal); }
+  }
+  private async hashFile(path: string, maxBytes: number, signal?: AbortSignal): Promise<{ sha256: string; byteLength: number }> {
+    aborted(signal);
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const metadata = await file.stat();
       invariant(metadata.isFile() && metadata.size > 0 && metadata.size <= maxBytes, "MEDIA_OUTPUT_LIMIT", "Media file exceeds its byte limit");
       const hash = createHash("sha256"), buffer = Buffer.alloc(65536);
       let byteLength = 0;
-      while (true) { const result = await file.read(buffer, 0, buffer.length, null); if (!result.bytesRead) break; byteLength += result.bytesRead; invariant(byteLength <= maxBytes, "MEDIA_OUTPUT_LIMIT", "Media file grew beyond its byte limit"); hash.update(buffer.subarray(0, result.bytesRead)); }
+      while (true) { aborted(signal); const result = await file.read(buffer, 0, buffer.length, null); aborted(signal); if (!result.bytesRead) break; byteLength += result.bytesRead; invariant(byteLength <= maxBytes, "MEDIA_OUTPUT_LIMIT", "Media file grew beyond its byte limit"); hash.update(buffer.subarray(0, result.bytesRead)); }
       invariant(byteLength === metadata.size, "MEDIA_INTEGRITY_ERROR", "Media file size changed");
+      aborted(signal);
       return { sha256: hash.digest("hex"), byteLength };
-    } finally { await file.close(); }
+    } finally { await file.close(); aborted(signal); }
   }
   private async syncDirectory(path: string): Promise<void> { const handle = await open(path, "r"); try { await handle.sync(); } finally { await handle.close(); } }
   private async installFile(path: string, extension: "mp4" | "wav" | "source", maxBytes: number): Promise<{ sha256: string; byteLength: number; path: string }> {

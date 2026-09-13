@@ -1,13 +1,13 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   applyCreativePatch, compilePlanIsolated, DEFAULT_PROFILES, digest, diffPlans, invariant, newId,
-  parseChangeProposal, RECIPE_DIGEST, requiredStages, shotIntentDigest, stageInputDigest,
+  parseChangeProposal, RECIPE_DIGEST, requiredStages, shotIntentDigest, snapshotLocalExecution, stageInputDigest,
   validateStageRequirements, validateStageScope, workflowReadiness,
   STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, TOOL_NAMES,
 } from "@openslate/core";
 import type {
   ActorContext, ArtifactRef, ChangeProposal, CompiledPlan, NodeImpact, OperationKind, ProjectRecord,
-  ProviderProfile, ShotRecord, StageRequirement,
+  LocalExecutionIdentity, ProviderProfile, ShotRecord, StageRequirement,
 } from "@openslate/core";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
@@ -34,11 +34,24 @@ interface Prepared {
 }
 
 export interface ApplyReceipt { preparedId: string; projectId: string; revisionId: string; headVersion: number; activePlanId: string | null; cursor: number }
+export interface ProductionServiceOptions {
+  /** Trusted installation choice for new projects only. Existing locks never inherit this default. */
+  newProjectLocalExecution?: LocalExecutionIdentity;
+}
+interface ProjectCapabilityLock {
+  projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string;
+  localExecution?: LocalExecutionIdentity;
+}
 export { TOOL_NAMES } from "@openslate/core";
 
 /** The trusted application boundary. Models propose data; these methods own authority and commits. */
 export class ProductionService {
-  constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES) {}
+  private readonly newProjectLocalExecution: Readonly<LocalExecutionIdentity> | undefined;
+  constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES,
+    options: ProductionServiceOptions = {}) {
+    const selected = options.newProjectLocalExecution;
+    this.newProjectLocalExecution = selected === undefined ? undefined : snapshotLocalExecution(selected);
+  }
 
   createProject(name: string, selection?: InstalledProviderSelection): ProjectRecord {
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
@@ -52,7 +65,8 @@ export class ProductionService {
       this.store.createProject(project);
       this.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: selected?.profiles ?? this.profiles,
         recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES,
-        ...(selected ? { providerSelection: selected.provenance } : {}) });
+        ...(selected ? { providerSelection: selected.provenance } : {}),
+        ...(this.newProjectLocalExecution ? { localExecution: this.newProjectLocalExecution } : {}) });
       this.store.insert("project_revision", project.revisionId, project.id, { project });
       this.store.appendEvent(project.id, "project.created", { revisionId: project.revisionId });
       return project;
@@ -178,12 +192,14 @@ export class ProductionService {
     if (same) return same;
     this.holdRequest(projectId, actor);
     const before = this.store.getProject(projectId);
-    const lock = this.store.get<{ profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string }>("capability_lock", before.capabilityLockId);
-    invariant(lock?.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Project workflow lock is unsupported");
+    const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
+    invariant(lock?.projectId === projectId && lock.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Project workflow lock is unsupported");
+    const localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
     invariant(before.headVersion === proposal.expectedHeadVersion, "REVISION_CONFLICT", "Project changed before preparation");
     const next = proposal.creative ? applyCreativePatch(before, proposal.creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } })) : structuredClone(before);
     const logicalIds = { ...(this.store.get<{ aliases: Record<string, string> }>("logical_ids", projectId)?.aliases ?? {}) };
-    const compiled = proposal.source ? await compilePlanIsolated(proposal.source, { project: next, profiles: lock.profiles, logicalIds, allocateId: newId }) : null;
+    const compiled = proposal.source ? await compilePlanIsolated(proposal.source, { project: next, profiles: lock.profiles, logicalIds, allocateId: newId,
+      ...(localExecution ? { localExecution } : {}) }) : null;
     const oldPlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
     const impact = compiled ? diffPlans(oldPlan, compiled) : [];
     const extra = new Set(proposal.requestNewTakes ?? []);

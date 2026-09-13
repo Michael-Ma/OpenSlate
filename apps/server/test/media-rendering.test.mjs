@@ -114,6 +114,63 @@ test("failed application publication leaves a verified receipt recoverable after
   assert.deepEqual(await readdir(join(shared.rootDir, "tmp")), []);
 });
 
+test("completion recovery stops on the original signal even after byte verification finishes", async () => {
+  const frozen = await manifest([video(red, 7)]), completed = await shared.render(frozen);
+  const reopened = service("shared"), controller = new AbortController(), options = { signal: controller.signal };
+  const hash = reopened.hashFile.bind(reopened); let hashed = false;
+  reopened.hashFile = async (...args) => {
+    const result = await hash(...args); hashed = true;
+    options.signal = new AbortController().signal; controller.abort(); return result;
+  };
+  await assert.rejects(reopened.readCompletion(frozen.digest, completed.artifact.sha256, options), code("MEDIA_CANCELLED"));
+  assert.equal(hashed, true);
+  assert.deepEqual(await service("shared").readCompletion(frozen.digest, completed.artifact.sha256), { manifest: frozen, artifact: completed.artifact });
+});
+
+test("completion discovery propagates cancellation and cannot return late recovered results", async () => {
+  const frozen = await manifest([video(blue, 7)]); await shared.render(frozen);
+  const reopened = service("shared"), controller = new AbortController(), original = reopened.readCompletion.bind(reopened);
+  reopened.readCompletion = async (...args) => {
+    assert.equal(args[2].signal, controller.signal);
+    const result = await original(...args); controller.abort(); return result;
+  };
+  await assert.rejects(reopened.findCompletions(frozen.digest, { signal: controller.signal }), code("MEDIA_CANCELLED"));
+  await assert.rejects(reopened.findCompletions(frozen.digest, { signal: controller.signal }), code("MEDIA_CANCELLED"));
+});
+
+test("recovery bounds owned JSON before parsing and pre-abort performs no source or manifest work", async () => {
+  const owner = service("bounded-records"), manifestId = "1".repeat(64), outputId = "2".repeat(64);
+  await writeFile(join(owner.rootDir, "completions", `${manifestId}-${outputId}.json`), Buffer.alloc(1024 * 1024 + 1, 32));
+  await assert.rejects(owner.readCompletion(manifestId, outputId), code("MEDIA_MANIFEST_LIMIT"));
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(owner.verifiedSource(red, { signal: controller.signal }), code("MEDIA_CANCELLED"));
+  await assert.rejects(owner.freezeManifest({ projectId: "p", targetRevisionId: "t", width: 160, height: 90, clips: [video(red)] }, { signal: controller.signal }), code("MEDIA_CANCELLED"));
+  assert.deepEqual(await readdir(join(owner.rootDir, "manifests")), []);
+});
+
+test("render retains its original signal when the caller replaces mutable options", async () => {
+  const frozen = await manifest([video(red, 5)]), owner = service("shared"), controller = new AbortController();
+  const options = { signal: controller.signal }, read = owner.readManifest.bind(owner); let runs = 0;
+  owner.readManifest = async (...args) => {
+    const result = await read(...args); options.signal = new AbortController().signal; controller.abort(); return result;
+  };
+  owner.run = async () => { runs++; throw new Error("must not launch a media subprocess"); };
+  await assert.rejects(owner.render(frozen, options), code("MEDIA_CANCELLED"));
+  assert.equal(runs, 0);
+});
+
+test("render cancellation during final temporary cleanup retains recoverable output without reporting success", async () => {
+  const frozen = await manifest([video(blue, 5)]), owner = service("shared"), controller = new AbortController();
+  const temporary = owner.temporary.bind(owner); let depth = 0;
+  owner.temporary = async operation => {
+    depth++; try { return await temporary(operation); }
+    finally { if (--depth === 0) controller.abort(); }
+  };
+  await assert.rejects(owner.render(frozen, { signal: controller.signal }), code("MEDIA_CANCELLED"));
+  assert.deepEqual(await readdir(join(owner.rootDir, "tmp")), []);
+  assert.equal((await service("shared").findCompletions(frozen.digest)).length, 1);
+});
+
 test("ranges are checked against measured frames/samples with no implicit looping or narration truncation", async () => {
   await assert.rejects(manifest([video(red, 31)]), code("MEDIA_SOURCE_TOO_SHORT"));
   await assert.rejects(manifest([video(red, 1, 0.5)]), code("MEDIA_INVALID_INPUT"));

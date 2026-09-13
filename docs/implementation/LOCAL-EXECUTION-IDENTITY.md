@@ -17,7 +17,7 @@ The planning language does not expose this field. `definePlan`, `p.timeline` and
 
 No field is added to legacy nodes. A deterministic fixture captured before this change verifies the exact serialized plan bytes, canonical source digest and full graph digest with the optional context omitted. Historical source and direct/isolated compilation remain compatible.
 
-This is an identity foundation only. It does not register an executor, change Engine work keys, create authority, pin project locks or enable automatic rendering. Production code must later obtain the context field from an immutable trusted project lock and verify it again at dispatch/reuse/publication. Real assembly still needs complete timeline source/sample identities, toolchain validation, attempt receipts and current-target fences described in [shared timeline capture](TIMELINE-CAPTURE.md).
+This compiler change is an identity foundation only. The subsequent [project pinning service](PROJECT-LOCAL-EXECUTION.md) obtains this context field from an immutable trusted project lock. Executor registration, work keys and dispatch/reuse/publication checks remain separate integration work. Real assembly still needs complete timeline source/sample identities, toolchain validation, attempt receipts and current-target fences described in [shared timeline capture](TIMELINE-CAPTURE.md).
 
 ## Verification
 
