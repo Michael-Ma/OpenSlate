@@ -24,6 +24,7 @@ export class MediaApplicationService {
   private get store() { return this.production.store; }
 
   private authorize(projectId: string, actor: ActorContext, write = true): void {
+    if (write) this.production.recovery.assertWritable(projectId, actor.requestId);
     this.production.assertActor(projectId, actor, write && actor.kind === "director");
     const request = this.store.get<Request>("message", actor.requestId);
     invariant(request?.projectId === projectId && request.principalId === actor.principalId && (!write || request.state === "active"), "ACTOR_DENIED", "Render request is inactive");

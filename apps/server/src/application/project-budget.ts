@@ -57,6 +57,7 @@ export class ProjectBudgetService {
   revise(projectId: string, actor: ActorContext, value: ProjectBudgetInput): ProjectBudgetRevision {
     const input = structuredClone(value), contextDigest = projectBudgetContextDigest(projectId, input), { store } = this.service;
     return store.transaction(() => {
+      this.service.recovery.assertWritable(projectId, actor.requestId);
       const request = store.get<HumanRequest>("message", actor.requestId);
       invariant(actor.kind === "human" && request?.projectId === projectId && request.principalId === actor.principalId
         && request.state === "active" && request.editing === false && request.contextDigest === contextDigest && Array.isArray(request.scopeIds) && request.scopeIds.includes(projectId),

@@ -2,7 +2,7 @@ import { DomainError, digest, moneyMicros, providerProfileArguments } from "@ope
 import type { ProviderProfile } from "@openslate/core";
 import { isLegacyExecution, profileExecutionIdentity } from "@openslate/providers";
 import type { ProductionService } from "./service.js";
-import type { Attempt, NodeBinding, PlanRecord } from "../execution/engine.js";
+import type { Attempt, Candidate, NodeBinding, PlanRecord } from "../execution/engine.js";
 import { allowanceUsage, currentAllowanceSelection } from "../execution/durable-external-admission.js";
 import type { ExternalAllowance, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
 import { MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS } from "../execution/external-allowance-records.js";
@@ -38,11 +38,16 @@ export function projectSpendingProjection(service: ProductionService, projectId:
           profileDefinitionDigest = digest(profile); estimatedMicros = moneyMicros(profile.unitCostMicros).toString();
           currentAllowanceSelection(store, projectId, selection, profileDigest ?? "", profileDefinitionDigest); selectionCurrent = true;
         } catch (error) { if (!(error instanceof DomainError)) throw error; unavailableCode = error.code; }
+        const candidate = store.get<Candidate>("candidate", selection.candidateId);
+        if (service.recovery.isImported(projectId, "candidate", selection.candidateId)
+          || candidate && service.recovery.isImported(projectId, "grant", candidate.grantId)) {
+          selectionCurrent = false; unavailableCode = "RESTORED_AUTHORITY_REQUIRES_NEW";
+        }
         const history = attempts.filter(attempt => attempt.candidateId === selection.candidateId).sort((a, b) => b.ordinal - a.ordinal);
         const latest = history[0], hasOutput = Object.keys(binding.outputs).length > 0;
         const workState = hasOutput || latest?.phase === "succeeded" ? "completed" : latest?.phase === "submission_unknown" ? "uncertain"
           : latest?.phase === "failed" ? "failed" : latest ? "in_progress" : "unattempted";
-        const retryPermitted = latest?.phase === "failed" && latest.failure?.technical === true && latest.failure.retryAllowed === true
+        const retryPermitted = unavailableCode !== "RESTORED_AUTHORITY_REQUIRES_NEW" && latest?.phase === "failed" && latest.failure?.technical === true && latest.failure.retryAllowed === true
           && latest.ordinal <= (profile?.maxRetries ?? 0);
         return [{ ...selection, alias: binding.node.alias, shotId: binding.node.shotId ?? null, operation: binding.node.kind,
           profileId: binding.node.profileId ?? null, profileRevision: profile?.revision ?? null, profileDigest, profileDefinitionDigest,
@@ -57,11 +62,12 @@ export function projectSpendingProjection(service: ProductionService, projectId:
       store.list<{ projectId: string; profiles: unknown }>("capability_lock", projectId), store.list<PlanRecord>("plan", projectId));
     const candidateOffset = offsets.candidateOffset ?? 0, allowanceOffset = offsets.allowanceOffset ?? 0;
     const projectedAllowances = allAllowances.map(allowance => {
+      const restoredHistory = service.recovery.isImported(projectId, "external_allowance", allowance.id);
       const used = allowanceUsage(store, allowance), revocation = store.get<ExternalAllowanceRevocation>("external_allowance_revocation", allowance.id);
       const remainingAttempts = Math.max(0, allowance.maxAttempts - used.attempts);
       const remainingEstimate = moneyMicros(allowance.maxEstimatedMicros) - moneyMicros(used.estimatedMicros);
       const remainingEstimatedMicros = (remainingEstimate > 0n ? remainingEstimate : 0n).toString();
-      const currentSelections = allowance.selections.flatMap(selection => {
+      const currentSelections = restoredHistory ? [] : allowance.selections.flatMap(selection => {
         const candidate = byCandidate.get(selection.candidateId);
         return candidate?.selectionCurrent && candidate.profileDigest === allowance.profileDigest
           && candidate.profileDefinitionDigest === allowance.profileDefinitionDigest && selection.nodeId === candidate.nodeId
@@ -69,14 +75,14 @@ export function projectSpendingProjection(service: ProductionService, projectId:
       });
       const estimate = currentSelections[0]?.estimatedMicros;
       const expired = Date.parse(allowance.expiresAt) <= Date.now();
-      const status = revocation ? "revoked" : expired ? "expired" : remainingAttempts === 0 ? "start_limit_reached"
+      const status = revocation ? "revoked" : restoredHistory ? "restored_history" : expired ? "expired" : remainingAttempts === 0 ? "start_limit_reached"
         : !currentSelections.length ? "no_current_work" : estimate !== null && estimate !== undefined && moneyMicros(estimate) > moneyMicros(remainingEstimatedMicros)
           ? "estimate_limit_reached" : "open";
       // Capacity is shared by an allowance's selections; this is matching coverage, never a dedicated reservation.
       if (status === "open") for (const candidate of currentSelections) candidate.matchingAllowanceCount++;
       return { ...allowance, usedAttempts: used.attempts, usedEstimatedMicros: used.estimatedMicros, remainingAttempts, remainingEstimatedMicros,
         ...historyDisplay(allowance, currentSelections),
-        revoked: !!revocation, expired, status, currentSelectionCount: currentSelections.length,
+        revoked: !!revocation, expired, restoredHistory, status, currentSelectionCount: currentSelections.length,
         suggestedSelectionCount: currentSelections.filter(candidate => candidate.suggestedForIssue).length,
         revocation: revocation ? { requestId: revocation.requestId, createdAt: revocation.createdAt } : null };
     });

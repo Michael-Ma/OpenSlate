@@ -22,6 +22,7 @@ export interface SpendingAllowance {
   maxAttempts: number; maxEstimatedMicros: string; expiresAt: string; createdAt: string;
   usedAttempts: number; usedEstimatedMicros: string; remainingAttempts: number; remainingEstimatedMicros: string;
   revoked: boolean; expired: boolean; status: string; currentSelectionCount: number;
+  restoredHistory?: boolean;
   providerDisplay: SpendingProviderDisplay | null; work: AllowanceWork[];
 }
 interface Coverage { offset: number; returned: number; total: number; nextOffset: number | null }
@@ -55,10 +56,24 @@ export function spendingMoney(value: string): string {
   return `$${whole}.${fraction} USD`;
 }
 export function canSelectSpending(candidate: SpendingCandidate): boolean {
-  return candidate.selectionCurrent && candidate.suggestedForIssue && ["image", "video"].includes(candidate.operation)
+  return candidate.unavailableCode !== "RESTORED_AUTHORITY_REQUIRES_NEW" && candidate.selectionCurrent && candidate.suggestedForIssue && ["image", "video"].includes(candidate.operation)
     && (candidate.matchingAllowanceCount ?? 0) === 0 && !!candidate.providerDisplay
     && candidate.providerDisplay.definitionDigest === candidate.profileDefinitionDigest && candidate.providerDisplay.id === candidate.profileId
     && candidate.providerDisplay.revision === candidate.profileRevision;
+}
+export function spendingWorkStatus(candidate: SpendingCandidate): string {
+  if (candidate.unavailableCode === "RESTORED_AUTHORITY_REQUIRES_NEW") {
+    if (candidate.workState === "completed") return "Completed · restored history";
+    if (candidate.workState === "uncertain") return "Restored uncertain result · existing evidence can be recovered";
+    if (candidate.workState === "in_progress") return "Restored work in progress · existing results can be recovered";
+    return "Restored work · request a new take with fresh approval";
+  }
+  return (candidate.matchingAllowanceCount ?? 0) > 0 ? "Matching allowance recorded; remaining limits are shared."
+    : canSelectSpending(candidate) ? "Available for cost review" : candidate.workState === "uncertain" ? "Outcome uncertain · waiting for recovery"
+      : candidate.workState === "completed" ? "Completed" : candidate.workState === "in_progress" ? "Already in progress" : "Not available for another attempt";
+}
+export function spendingAllowanceStatus(allowance: SpendingAllowance): string {
+  return allowance.status === "restored_history" ? "Restored history · cannot start new work" : allowance.status.replaceAll("_", " ");
 }
 export function spendingModelSettings(display: SpendingProviderDisplay): string {
   return "resolution" in display.settings ? display.settings.resolution : `${display.settings.width} × ${display.settings.height} · ${display.settings.quality}`;

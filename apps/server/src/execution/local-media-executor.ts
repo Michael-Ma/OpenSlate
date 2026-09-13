@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import { canonical, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, JsonObject, LocalExecutionIdentity } from "@openslate/core";
 import type { Store } from "../persistence/store.js";
+import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { captureRender, captureTimeline } from "../media/timeline-capture.js";
 import { createLocalTimelineDocument, LocalTimelineStore, parseLocalTimelineDocument } from "../media/local-timeline.js";
 import type { LocalTimelineDocument, StoredLocalTimeline } from "../media/local-timeline.js";
@@ -23,17 +24,20 @@ const timelineDocument = (capture: PreparedLocalExecution["capture"]): LocalTime
 
 /** Owned local assembly. Engine alone admits work, records dispatch and publishes SQL state. */
 export class LocalMediaExecutor implements LocalExecutionPort {
+  readonly recovery: InstallationRecoveryGuard;
   readonly identity: LocalExecutionIdentity = Object.freeze({ adapter: "local-media", version: "1" });
   readonly maxOutputBytes: number;
   readonly artifactDir: string;
   readonly timelines: LocalTimelineStore;
   constructor(readonly store: Store, readonly media: LocalMediaService, options: { artifactDir: string }) {
+    this.recovery = new InstallationRecoveryGuard(store);
     this.artifactDir = resolve(options.artifactDir);
     this.maxOutputBytes = media.limits.maxOutputBytes;
     this.timelines = new LocalTimelineStore({ rootDir: join(this.artifactDir, "local-timelines"), media });
   }
 
   async prepare(projectId: string, nodeId: string, options: { signal?: AbortSignal } = {}): Promise<PreparedLocalExecution> {
+    this.recovery.assertWritable(projectId);
     const { signal } = options; check(signal);
     const binding = this.binding(projectId, nodeId);
     let prepared: PreparedLocalExecution;
@@ -70,6 +74,7 @@ export class LocalMediaExecutor implements LocalExecutionPort {
   }
 
   async recover(value: LocalExecutionIntent, options: LocalExecutionOptions): Promise<LocalExecutionResult | null> {
+    this.recovery.assertWritable(value.projectId);
     const intent = structuredClone(value), signal = options.signal, expectedLease = { ...options.expectedLease };
     this.owned(intent, expectedLease, signal, true);
     let result: LocalExecutionResult;
@@ -106,6 +111,7 @@ export class LocalMediaExecutor implements LocalExecutionPort {
     // Defensive replay is read-only. A completed filesystem receipt is never rerendered.
     const recovered = await this.recover(intent, { signal, expectedLease });
     if (recovered) return recovered;
+    this.recovery.assertFreshAuthority(intent.projectId, "attempt", intent.id);
     this.owned(intent, expectedLease, signal, false);
     let result: LocalExecutionResult;
     if (intent.prepared.kind === "timeline") {

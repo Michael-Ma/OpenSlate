@@ -2,6 +2,7 @@ import { canonical, digest, invariant, moneyMicros, providerProfileArguments } f
 import type { ProjectRecord, ProviderProfile } from "@openslate/core";
 import { isLegacyExecution, profileExecutionIdentity } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
+import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import type { Attempt, Candidate, ExternalExecutionAdmission, NodeBinding, PlanRecord } from "./engine.js";
 import type { AllowanceSelection, ExternalAllowance, ExternalAllowanceConsumption } from "./external-allowance-records.js";
 
@@ -34,10 +35,14 @@ export function allowanceUsage(store: Store, allowance: ExternalAllowance): { at
 
 /** Opt-in host policy. Registration and credentials alone never issue spending authority. */
 export class DurableExternalAdmission implements ExternalExecutionAdmission {
+  readonly recovery: InstallationRecoveryGuard;
   constructor(readonly store: Store, private readonly assertReady: (profile: Readonly<ProviderProfile>) => void) {
+    this.recovery = new InstallationRecoveryGuard(store);
     invariant(typeof assertReady === "function" && assertReady.constructor.name !== "AsyncFunction", "ASYNC_TRANSACTION", "Credential readiness must be a synchronous host check");
   }
   authorize(input: Parameters<ExternalExecutionAdmission["authorize"]>[0]): { allowanceId: string } {
+    this.recovery.assertWritable(input.projectId);
+    this.recovery.assertFreshAuthority(input.projectId, "candidate", input.candidateId);
     this.inTransaction();
     const binding = this.store.get<NodeBinding>("node_binding", input.nodeId);
     invariant(binding, "ALLOWANCE_SELECTION_STALE", "Selected node no longer exists");
@@ -58,6 +63,7 @@ export class DurableExternalAdmission implements ExternalExecutionAdmission {
     return { allowanceId: chosen.id };
   }
   recordAdmission(input: Readonly<Attempt>): void {
+    this.recovery.assertFirstSubmit(input.projectId, input.id);
     this.inTransaction();
     const attempt = this.store.get<Attempt>("attempt", input.id);
     invariant(attempt && canonical(attempt) === canonical(input) && attempt.phase === "submitting" && attempt.candidateId && attempt.reservationId,
@@ -83,6 +89,7 @@ export class DurableExternalAdmission implements ExternalExecutionAdmission {
     invariant(this.store.db.inTransaction, "ALLOWANCE_TRANSACTION_REQUIRED", "External admission must share the Engine transaction");
   }
   private available(allowance: ExternalAllowance, estimatedMicros: string): boolean {
+    if (this.recovery.isImported(allowance.projectId, "external_allowance", allowance.id)) return false;
     if (Date.parse(allowance.expiresAt) <= Date.now() || this.store.get("external_allowance_revocation", allowance.id)) return false;
     const used = allowanceUsage(this.store, allowance);
     return used.attempts < allowance.maxAttempts && moneyMicros(used.estimatedMicros) + moneyMicros(estimatedMicros) <= moneyMicros(allowance.maxEstimatedMicros);

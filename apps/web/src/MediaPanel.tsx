@@ -1,3 +1,4 @@
+import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { StudioApi } from "./api";
 import { ApiError } from "./api";
@@ -26,6 +27,7 @@ function OwnedPlayback({ api, projectId, artifact }: { api: StudioApi; projectId
 type MediaPanelProps = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; onContinue?: ((requestId: string) => void) | undefined };
 export function MediaPanel(props: MediaPanelProps) { return <MediaWorkspace key={props.snapshot.project.id} {...props} />; }
 function MediaWorkspace({ api, snapshot, onChanged, onContinue }: MediaPanelProps) {
+  const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/media`;
   const [state, setState] = useState<MediaState | null>(null), [loadError, setLoadError] = useState("");
   const registry = pendingCommandsFor(api);
@@ -55,6 +57,7 @@ function MediaWorkspace({ api, snapshot, onChanged, onContinue }: MediaPanelProp
     void poll(); return () => { abort.abort(); clearTimeout(timer); };
   }, [api, base, refresh, snapshot.project.headVersion]);
   function execute(command: PendingCommand) {
+    if (recoveryReadOnly) return;
     void registry.run(projectId, command, saved => saved.file ? api.upload(saved.path, saved.file, saved.key)
       : api.request(saved.path, { method: "POST", body: saved.body ?? {}, key: saved.key, timeoutMs: 90000 }),
       error => !(error instanceof ApiError) || ["NETWORK_ERROR", "INTERNAL_ERROR", "REQUEST_FAILED"].includes(error.code));
@@ -66,24 +69,24 @@ function MediaWorkspace({ api, snapshot, onChanged, onContinue }: MediaPanelProp
     <p>Import clips from this computer, discuss their order with OpenSlate, then render the current plan. Uploaded video audio is removed; add narration separately.</p>
     {(error || loadError) && <p role="alert" className="form-error">{error || loadError}</p>}
     {pending && busy && <p role="status">Your saved request is still running. Switching projects will not start it again.</p>}
-    {pending && !busy && <div className="notice warning"><span>The result was not confirmed. Retry the saved request to check its outcome.</span><button onClick={() => void execute(pending)}>Retry same action</button></div>}
+    {pending && !busy && <div className="notice warning"><span>The result was not confirmed. Retry the saved request to check its outcome.</span><button disabled={recoveryReadOnly} onClick={() => void execute(pending)}>Retry same action</button></div>}
     <form className="clip-upload" onSubmit={event => { event.preventDefault(); if (!file) return;
       const query = new URLSearchParams({ expectedHeadVersion: String(snapshot.project.headVersion), ...(reuse && currentImportRequest ? { requestId: currentImportRequest } : {}) });
       void execute({ path: `${base}/uploads?${query}`, file, key: crypto.randomUUID() });
     }}>
-      <label htmlFor="supplied-video">Video file · up to 128 MiB</label><input key={fileVersion} id="supplied-video" type="file" accept="video/*" disabled={busy || !!pending} onChange={event => setFile(event.target.files?.[0] ?? null)} />
-      {currentImportRequest && <label className="check-row"><input type="checkbox" checked={reuse} disabled={busy || !!pending} onChange={event => setReuse(event.target.checked)} />Add this clip to the current edit</label>}
-      <button className="button small" disabled={busy || !!pending || !file}>{busy ? "Working…" : "Import clip"}</button>
+      <label htmlFor="supplied-video">Video file · up to 128 MiB</label><input key={fileVersion} id="supplied-video" type="file" accept="video/*" disabled={recoveryReadOnly || busy || !!pending} onChange={event => setFile(event.target.files?.[0] ?? null)} />
+      {currentImportRequest && <label className="check-row"><input type="checkbox" checked={reuse} disabled={recoveryReadOnly || busy || !!pending} onChange={event => setReuse(event.target.checked)} />Add this clip to the current edit</label>}
+      <button className="button small" disabled={recoveryReadOnly || busy || !!pending || !file}>{busy ? "Working…" : "Import clip"}</button>
     </form>
     {!!state?.sources.length && <div className="supplied-clips">{state.sources.map((source, index) => <button key={source.artifactId} className="supplied-clip" onClick={() => setSelected({ artifactId: source.artifactId, sha256: source.sha256, kind: "video" })}><strong>Clip {index + 1}</strong><span>{durationLabel(source.frames)} · {(source.byteLength / 1048576).toFixed(1)} MiB</span><small>Preview</small></button>)}</div>}
-    {!!state?.sources.length && currentImportRequest && onContinue && <button className="text-button" disabled={busy || !!pending} onClick={() => onContinue(currentImportRequest)}>Discuss these clips with OpenSlate</button>}
-    <div className="render-controls"><button className="button primary" disabled={busy || !!pending || !renderNode || !state} onClick={() => renderNode && run(`${base}/renders`, { expectedHeadVersion: snapshot.project.headVersion, renderNodeId: renderNode.id })}>Render current plan</button><p>{renderNode ? "Uses the current clips and accepted narration. Pending edits and pause still apply." : "A timeline plan is needed before rendering."}</p></div>
+    {!!state?.sources.length && currentImportRequest && onContinue && <button className="text-button" disabled={recoveryReadOnly || busy || !!pending} onClick={() => onContinue(currentImportRequest)}>Discuss these clips with OpenSlate</button>}
+    <div className="render-controls"><button className="button primary" disabled={recoveryReadOnly || busy || !!pending || !renderNode || !state} onClick={() => renderNode && run(`${base}/renders`, { expectedHeadVersion: snapshot.project.headVersion, renderNodeId: renderNode.id })}>Render current plan</button><p>{renderNode ? "Uses the current clips and accepted narration. Pending edits and pause still apply." : "A timeline plan is needed before rendering."}</p></div>
     {show && <><div className="playback-heading"><h4>{selected ? "Selected video" : "Current rendered preview"}</h4>{selected && <button className="text-button" onClick={() => setSelected(null)}>Show current preview</button>}</div><OwnedPlayback key={show.artifactId} api={api} projectId={projectId} artifact={show} /></>}
     {!!state?.jobs.length && <details><summary>Render history · {state.jobs.length}</summary><div className="render-jobs">{state.jobs.map(job => <div key={job.id}><strong>{job.state.replaceAll("_", " ")} · {durationLabel(job.totalFrames)}</strong>{job.errorCode && <p>{errorText(new ApiError(job.errorCode))}</p>}<div className="render-actions">
       {job.artifact && <button className="text-button" onClick={() => setSelected(job.artifact)}>Review saved result</button>}
-      {job.canRun && <button disabled={busy || !!pending} onClick={() => run(`${base}/renders/${job.id}/run`)}>Run prepared render</button>}
-      {job.canRecover && <button disabled={busy || !!pending} onClick={() => run(`${base}/renders/${job.id}/recover`)}>Check saved completion</button>}
-      {["prepared", "running"].includes(job.state) && <button disabled={busy || !!pending} onClick={() => run(`${base}/renders/${job.id}/cancel`)}>Cancel</button>}
+      {job.canRun && <button disabled={recoveryReadOnly || busy || !!pending} onClick={() => run(`${base}/renders/${job.id}/run`)}>Run prepared render</button>}
+      {job.canRecover && <button disabled={recoveryReadOnly || busy || !!pending} onClick={() => run(`${base}/renders/${job.id}/recover`)}>Check saved completion</button>}
+      {["prepared", "running"].includes(job.state) && <button disabled={recoveryReadOnly || busy || !!pending} onClick={() => run(`${base}/renders/${job.id}/cancel`)}>Cancel</button>}
     </div></div>)}</div></details>}
   </section>;
 }

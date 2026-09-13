@@ -33,6 +33,7 @@ export class DirectorToolSettings {
   }
 
   upgrade(projectId: string, input: DirectorToolsUpgrade, key: string) {
+    this.service.recovery.assertWritable(projectId);
     invariant(input && Object.keys(input).every(field => ["expectedLockId", "expectedLockDigest", "targetVersion"].includes(field))
       && typeof input.expectedLockId === "string" && input.expectedLockId.length > 0 && input.expectedLockId.length <= 160
       && typeof input.expectedLockDigest === "string" && /^[a-f0-9]{64}$/.test(input.expectedLockDigest)

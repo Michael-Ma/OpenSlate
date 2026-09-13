@@ -16,6 +16,8 @@ import { acquireInstallationOwner } from "./persistence/installation-owner.js";
 import { readInstalledProviderConfiguration } from "./application/provider-catalog.js";
 import { readMediaExecutionConfiguration } from "./application/media-execution-config.js";
 import { createMediaExecutionRuntime } from "./application/media-execution-runtime.js";
+import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
+import { assertInstallationRestoreComplete } from "./persistence/installation-restore-state.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
@@ -34,6 +36,7 @@ mkdirSync(directory, { recursive: true, mode: 0o700 });
 const installation = acquireInstallationOwner(directory);
 const releaseInstallation = () => installation.close();
 process.once("exit", releaseInstallation);
+assertInstallationRestoreComplete(directory);
 const tokenPath = join(directory, "local-session.token");
 let localToken = process.env.OPENSLATE_LOCAL_TOKEN;
 if (!localToken) {
@@ -46,6 +49,8 @@ if (!localToken) {
 }
 invariant(/^[A-Za-z0-9_-]{20,256}$/.test(localToken), "CONFIGURATION_ERROR", "Local session token must contain 20–256 URL-safe characters");
 const store = new Store(join(directory, "openslate.sqlite"));
+const recovery = new InstallationRecoveryGuard(store);
+const recoveryPending = recovery.isQuarantined();
 const provider = new FakeProvider(join(directory, "fake-provider.sqlite"));
 const findMediaTool = (name: string, override?: string) => {
   const candidates = override ? [resolve(override)] : [...(process.env.PATH ?? "").split(":").filter(Boolean).map(path => join(path, name)), `/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`];
@@ -68,6 +73,7 @@ const app = createApp({ service, director, runtimeSettings: director, providerCa
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
 let running = false;
 const timer = setInterval(() => {
+  if (recovery.isQuarantined()) return;
   try { director.tick(); } catch (error) { app.log.error(error); }
   if (running) return;
   running = true;
@@ -84,6 +90,7 @@ const close = () => closing ??= app.close();
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close().catch(error => { app.log.error(error); process.exitCode = 1; }); });
 try {
   await app.listen({ host: "127.0.0.1", port: 3001 });
+  if (recoveryPending) process.stdout.write("Restored workspace: inspect your saved work and finish recovery review before making changes.\n");
   process.stdout.write(`\nOpenSlate ${serveWeb ? "is ready" : "API is ready"} at http://127.0.0.1:3001${serveWeb ? "" : "/api/health"}\nLocal data: ${directory}\n${process.env.OPENSLATE_LOCAL_TOKEN ? "Local session token: provided by OPENSLATE_LOCAL_TOKEN" : `Local session token file: ${tokenPath}`}\n${serveWeb ? "Paste the local session token into the connection screen.\n" : "Open the development interface at http://127.0.0.1:5173\n"}Stop with Ctrl+C.\n\n`);
 }
 catch (error) { clearInterval(timer); app.log.error(error); await close(); process.exitCode = 1; }

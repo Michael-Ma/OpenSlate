@@ -1,6 +1,6 @@
 # Local installation backup and recovery
 
-Status: implementation brief, September 12, 2026. The existing SQLite snapshot, schema migration and installation-owner primitives are implemented. The bundle, quarantine and release behavior below are the next release slice; they are not yet active.
+Status: implemented and verified offline, September 12, 2026. Private backup/inspection, interrupted same-root restore, V3 quarantine, permanent imported-authority fences and the browser recovery/release flow are integrated. The full checkout passed 899 tests, zero failures/skips, all builds/typechecks and the installed no-turn Codex probe. The final conversation-scroll correction passed a web build/typecheck and all 45 web tests. See the [synthetic browser campaign](INSTALLATION-RECOVERY-VALIDATION.md) for exact evidence and limits.
 
 ## Scope and defaults
 
@@ -38,12 +38,13 @@ interface InstallationBackupManifest {
   createdAt: string;
   originalDataRoot: string;
   applicationSchemaVersion: number;
+  fixtureSchema: { tag: 1; userVersion: 0 };
   files: Array<{
     path: string;
     sha256: string;
     byteLength: number;
     kind: BackupFileKind;
-    readOnly: boolean;
+    mode: number; // bounded permitted permission bits; never ownership or special bits
   }>;
 }
 ```
@@ -69,7 +70,7 @@ Exclude staging/temporary directories, transient uploads, arbitrary native works
 
 Protected provider locators can exist in immutable SQL receipts and must remain intact; do not call the bundle credential-free. No locator is fetched during copying. Expired locators remain historical evidence and do not become permission to regenerate.
 
-Suggested initial host bounds are 64 GiB total, 100,000 files, a 32 MiB manifest, a 1 GiB ordinary-file bound and a separate 4 GiB database-snapshot bound. These are supported-copy limits, not an assertion that every installation fits. Use bounded streaming, at most two copy workers, disk-space preflight plus continuing byte limits, and explicit errors for excess size. Buffer no whole media file. Reject absolute, parent-traversal, duplicate, special, FIFO or symlink entries; do not preserve source hardlinks as links in the bundle.
+Initial host bounds are 256 GiB total, 100,000 files, 8 GiB per file, a 32 MiB manifest, depth 16 and 1 MiB streaming buffers. These are supported-copy limits, not an assertion that every installation fits. Use bounded streaming, at most two copy workers, disk-space preflight plus continuing byte limits, and explicit errors for excess size. Buffer no whole media file. Reject absolute, parent-traversal, duplicate, special, FIFO or symlink entries; do not preserve source hardlinks as links in the bundle. Never recurse into migration-backup directories. Manifest entries are sorted by their relative path.
 
 ## Export and restore ordering
 
@@ -85,6 +86,12 @@ Do not replace an existing destination directory atomically over its owner lock.
 
 Generate a new local session token on subsequent launcher startup. Do not import external credentials, inherit another running native process or remove local holds.
 
+The implemented `installation-restore.json` marker binds the exact bundle and original root through `copying`, `publishing` and `complete`. Staging lives in this restore's private destination subtree. A copying retry can discard only that validated incomplete subtree. Publication moves complete top-level namespaces; a retry hashes already published content and refuses differences, duplicates or extras rather than replacing it. A torn first marker write can be discarded only before any staging or publication exists. Normal startup checks completion and the matching database receipt after acquiring ownership, before opening Store or creating a token.
+
+The exclusively staged database is checkpointed and switched to DELETE journal mode before hashing and publication, avoiding new WAL/SHM files during read-only verification. Ordinary Store startup later restores normal WAL operation. Source and bundle databases are not changed. Supported migration diagnostics remain private in the restored installation and are excluded from subsequent exports. A completed marker is also excluded from re-export; durable database receipts and all previous authority fences remain included. A repeated completed restore returns `already_restored` without reverting newer application work.
+
+Use `pnpm installation export --data-dir PATH --output PATH`, `pnpm installation inspect --backup PATH`, or `pnpm installation restore --backup PATH --data-dir ORIGINAL_PATH` after building. These commands return bounded JSON summaries and never start application workers. Copying is serial with one 1 MiB buffer; publication inventory lookup uses precomputed path sets. Accepted file-count/byte ceilings are not a measured maximum-size performance guarantee.
+
 ## Durable recovery state
 
 Add a small schema V3 migration for global installation recovery state. A global record must not be represented by a fabricated project, and release must not depend on an independently editable filesystem authority flag. Preserve historical V1/V2 migration definitions and JSON bytes.
@@ -98,6 +105,7 @@ interface VerifiedRecoveryOrigin {
   backupManifestSha256: string;
   sourceDatabaseSha256: string;
   originalDataRoot: string;
+  backupCreatedAt: string;
   restoredAt: string;
 }
 type ImportedAuthorityKind =
@@ -107,6 +115,8 @@ interface RecoveryFence {
   id: string; projectId: string; restoreId: string; version: 1;
   kind: ImportedAuthorityKind; recordId: string;
   originalBodySha256: string;
+  // Exact stored JSON for a native turn, null for other kinds.
+  originalBody: string | null;
 }
 interface RecoveryReceipt extends VerifiedRecoveryOrigin {
   version: 1;
@@ -148,6 +158,7 @@ interface RecoverySnapshot {
 class InstallationRecoveryGuard {
   constructor(store: Store);
   snapshot(): RecoverySnapshot;
+  isQuarantined(): boolean;
   isImported(projectId: string, kind: ImportedAuthorityKind, id: string): boolean;
   assertWritable(projectId?: string, requestId?: string): void;
   assertFreshAuthority(projectId: string, kind: ImportedAuthorityKind, id: string): void;
@@ -159,6 +170,27 @@ class InstallationRecoveryGuard {
 function installRecoveryQuarantine(store: Store, origin: VerifiedRecoveryOrigin): RecoveryReceipt;
 function releaseRecovery(store: Store, input: RecoveryReleaseInput,
   authority: { principalId: string; commandId: string }): RecoveryReleaseReceipt;
+
+// Backup module owns source locking and verified file I/O; no injected
+// generic quiescence callback or online drain contract in this slice.
+function createInstallationBackup(options: {
+  sourceRoot: string; destination: string; signal?: AbortSignal;
+  limits?: Partial<InstallationBackupLimits>;
+}): Promise<VerifiedInstallationBackup>;
+function inspectInstallationBackup(options: {
+  directory: string; expectedSourceRoot?: string; signal?: AbortSignal;
+  limits?: Partial<InstallationBackupLimits>;
+}): Promise<VerifiedInstallationBackup>;
+interface VerifiedInstallationBackup {
+  directory: string;
+  manifest: InstallationBackupManifest;
+  manifestSha256: string;
+}
+
+// Engine: existing reviewSnapshot keeps its persisted-ID contract.
+// This inspection variant shares calculation, but has no Store writes.
+type ReviewInspection = Omit<ReviewSnapshot, "id">;
+// engine.inspectReview(projectId: string, gateId?: string): ReviewInspection
 ```
 
 `VerifiedRecoveryOrigin` comes only from the verified backend copy path. The release authority is supplied only by the authenticated human HTTP handler; it is not taken from request-body claims, exported history or an agent tool. The guard is synchronous and reads current SQLite state inside relevant transactions. Default construction for an ordinary database is inert; a restored database cannot lose protection because a caller forgot an optional flag. No model-authored plan fields choose or release recovery mode.
@@ -182,14 +214,14 @@ function releaseRecovery(store: Store, input: RecoveryReleaseInput,
 | Image/H3 lookup/poll/replay | Quarantine performs no network; after release permit only existing owned results or exact known task/output receipts. Unknown task identity never becomes a guessed lookup or new task |
 | `ProductionService.assertActor(..., mutating=true)`, request/epoch creation, non-editing human command roots | Block quarantine writes and imported request authority; ordinary read-only context stays readable. Also cover approval, pause/resume, spending, budget and setup paths that intentionally use non-editing human requests |
 | `DirectorSupervisor.enqueue`, claim/tick and question reply; native pre-start reservation | Old requests/turns cannot start again or answer an imported waiting question to borrow authority. Fresh post-release requests may start under normal project pause/hold rules |
-| HTTP `preHandler`, after authentication | While quarantined, permit public assets/health and explicit authenticated read routes; reject mutations and all internal agent tools except the dedicated human release endpoint. Enforce before upload writes where the route's streaming lifecycle requires an earlier authenticated hook |
+| HTTP `preHandler`, after authentication | While quarantined, permit public assets/health and explicitly audited authenticated read routes; reject mutations and all internal agent tools except the dedicated human release endpoint. Audit project snapshot, runtime settings/tools and narration/media/image listings rather than assuming GET is pure. Enforce before upload writes where the route's streaming lifecycle requires an earlier authenticated hook |
 | Review GET | Split calculation from persistence. Quarantine returns inspection data with no actionable approval snapshot ID and does not append review rows |
 
 Checks at scheduling alone are insufficient: direct application/bridge calls must also fail closed. Checks at HTTP alone are insufficient: restart schedulers run without an HTTP request. Existing lease owner/epoch fences remain mandatory and are not replaced by recovery policy.
 
 ## Release behavior
 
-Release is a dedicated human action, not project Resume. Its review binds the exact restore receipt and current safe summary. It explains that existing results can be recovered, restored requests/spending permissions do not restart, and projects remain paused. Reject stale restore ID, receipt or summary digests before writing a release. Successful release changes no project pause, grant, candidate, allowance consumption, budget, review decision or held scope.
+Release is a dedicated human action, not project Resume. Its review binds the exact restore receipt and current safe summary. It explains that existing results can be recovered, restored requests/spending permissions do not restart, and projects remain paused. Reject stale restore ID, receipt or summary digests before writing a release. Successful release changes no project pause, grant, candidate, allowance consumption, budget, review decision or held scope. Use an independently authenticated global human command and idempotency identity; do not call `beginRequest` while quarantined or reuse an imported request as release authority.
 
 | Restored state | While quarantined | After human release |
 |---|---|---|
@@ -205,6 +237,10 @@ Release is a dedicated human action, not project Resume. Its review binds the ex
 
 An imported candidate cannot be made new by issuing another allowance against it. Explicit creation of a new take/candidate is required. This matters when an old backup predates a spend that occurred in the source installation: restoring that backup must not reuse the old request as though it had never started. Keep all recorded charges/reservations and unknown liability; do not claim the backup includes later source activity it never captured.
 
+Expose imported unfinished work as requiring a fresh take/request in the safe work/readiness projection. Preserve its exact historical labels and receipts rather than hiding it or presenting its old unused allowance as currently spendable.
+
+The spending projection now sets `selectionCurrent` and `suggestedForIssue` false for an imported candidate or its imported grant, with `RESTORED_AUTHORITY_REQUIRES_NEW`. An imported allowance retains its usage, expiry, exact historical work and model descriptor, but has `restoredHistory: true` and `status: "restored_history"` unless already revoked. It contributes no current selection or matching coverage. Fresh human revocation remains available, including for expired restored history; a newly approved take receives its own independent allowance. The UI preserves completed/uncertain work labels and explains that restored permissions cannot start new work. Three new projection/UI regressions passed with the **22-check** spending suite and web typecheck; no execution or recovery contract changed for this follow-through.
+
 Release does not resume all projects, transfer old edit holds, execute a native turn or create any generation authority. A fresh human continuation may explicitly transfer applicable old holds through the existing continuation protocol. A read-only history fence must not block that authorized fresh continuation.
 
 ## Verification and implementation order
@@ -217,3 +253,15 @@ Release does not resume all projects, transfer old edit holds, execute a native 
 6. Run an end-to-end synthetic export/restore campaign in disposable paths, including a SQL-publication crash receipt, then independent review and full checks. No user's live installation is restored for these tests.
 
 No user decision is required to implement these defaults. Relocation, overwrite-in-place, online backup, merge/import, encrypted sharing and multi-host activation are separate future work. This brief authorizes no live media calls, destructive replacement or secret collection.
+
+### Guard implementation evidence
+
+The V3 migration adds only the recovery table/index and checked ledger entry. A V2 upgrade regression retains the original project/entity/command/event JSON and prior ledger rows, verifies the private V2 backup, and interrupts V3 creation to prove schema/data rollback. The historical V1 migration tests remain intact and now verify the complete current migration chain.
+
+The recovery review counts a pending job as known only when the retained attempt task ID and accepted evidence contain exactly one distinct task ID. Conflicting accepted IDs remain uncertain even when an attempt already has a task ID; computing this summary performs no provider query or state mutation. Synchronous completions without a task ID may remain in the uncertain counter until reconciliation verifies and publishes their saved bytes. These counts describe saved task identity, not a new billing or retry decision.
+
+`InstallationRecoveryGuard` is constructed from Store by Engine, external admission and both external bridges. It validates the complete fence set across restore generations and caches that imported identity set; `isQuarantined()` avoids rebuilding work summaries on every authenticated media request. Snapshot work counting reads evidence and allowance consumption once per project. Recovery installation bounds the fence inventory before adding each row and saves native original-body evidence before its explicit ownership-loss transitions.
+
+Application mutation roots check quarantine and the supplied request before idempotent receipt replay, including budget/allowance actions, read-only director discussions, attachment selection, skill provenance, media rendering and tools. Fresh conversation continuation may transfer the saved request's holds, but imported grants are excluded from its planning selection. An imported question retains its exact stored history and receives `canAnswer: false` only in the display projection; answering that old question remains prohibited at the backend. `Engine.inspectReview()` verifies current inputs without creating a persisted approval snapshot, including valid plans with no review gates.
+
+Focused new regressions cover the restoration protocol and these boundaries. The main focused run passed **107 checks**, including both injected provider bridges, director/context/attachment behavior and six real local assembly tests. An earlier **85-check** recovery/migration/service/supervisor/budget/allowance run also passed; these sets overlap. The subsequent task-conflict summary and restored-spending follow-through passed a **32-check** recovery/spending/UI-model run plus web typecheck. Provider tests used only injected offline responses. They demonstrate no credential resolution or first POST for imported pre-dispatch attempts, exact synchronous PNG receipt reuse, known H3 task polling with its retained cooldown, no imported technical retry, and no reservation refund. No live media request was made.

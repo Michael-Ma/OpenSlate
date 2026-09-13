@@ -58,6 +58,7 @@ export class ToolInvocationService {
   }
 
   async invoke(projectId: string, actor: ActorContext, callId: string, tool: string, input: unknown): Promise<JsonValue> {
+    this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Tool transport requires a director epoch");
     this.service.assertActor(projectId, actor);
     invariant(/^[A-Za-z0-9_-]{1,160}$/.test(callId), "VALIDATION_ERROR", "Invalid tool call identity");

@@ -15,6 +15,7 @@ import { SpoolImageIngestor } from "../dist/execution/spool-image-ingester.js";
 import { LocalImageStore } from "../dist/media/local-images.js";
 import { Store } from "../dist/persistence/store.js";
 import { projectFixture, refreshIntent } from "./execution-fixture.mjs";
+import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from "../dist/application/installation-recovery.js";
 
 const key = "offline-image-credential", hash = bytes => createHash("sha256").update(bytes).digest("hex");
 function png(value = 128) {
@@ -74,6 +75,29 @@ function fixture(t, options = {}) {
   return { directory, path, store, project, artifactRoot, outputs, credentials, fetch, bridge, calls, attempt, request: attempt?.request, engine, admit, references, profile };
 }
 const context = f => ({ expectedLease: { owner: f.attempt.leaseOwner, epoch: f.attempt.leaseEpoch } });
+function restoreImageFixture(f) {
+  installRecoveryQuarantine(f.store, { restoreId: randomUUID(), backupId: randomUUID(), backupManifestSha256: "a".repeat(64), sourceDatabaseSha256: "b".repeat(64),
+    originalDataRoot: f.directory, backupCreatedAt: "2026-09-11T00:00:00.000Z", restoredAt: "2026-09-12T00:00:00.000Z" });
+  return () => { const snapshot = new InstallationRecoveryGuard(f.store).snapshot(); return releaseRecovery(f.store, { restoreId: snapshot.receipt.restoreId,
+    expectedReceiptDigest: snapshot.receiptDigest, expectedSummaryDigest: snapshot.summaryDigest }, { principalId: "human", commandId: randomUUID() }); };
+}
+
+test("restoration blocks direct image calls and permanently denies an imported attempt's first POST before credentials", async t => {
+  const f = fixture(t), release = restoreImageFixture(f);
+  for (const operation of [() => f.bridge.submit(f.request, context(f)), () => f.bridge.lookup(f.attempt.id), () => f.bridge.poll("invented", f.request)])
+    await assert.rejects(operation(), { code: "INSTALLATION_QUARANTINED" });
+  release(); await assert.rejects(f.bridge.submit(f.request, context(f)), { code: "RESTORED_AUTHORITY_REQUIRES_NEW" });
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type, "unknown");
+  assert.deepEqual(f.calls, { http: 0, credentials: 0 }); assert.equal(rows(f, "image_execution_dispatch").length, 0);
+});
+
+test("released image restoration reuses its exact synchronous spool without another HTTP call", async t => {
+  const f = fixture(t), completed = await f.bridge.submit(f.request, context(f)), release = restoreImageFixture(f);
+  const before = { ...f.calls }; await assert.rejects(f.bridge.lookup(f.attempt.id), { code: "INSTALLATION_QUARANTINED" });
+  release(); const restarted = restart(t, f);
+  assert.deepEqual(await restarted.bridge.lookup(f.attempt.id), completed);
+  assert.deepEqual(f.calls, before); assert.equal(completed.vendorTaskId, null);
+});
 const rows = (f, kind) => f.store.list(kind, f.project.id);
 function restart(t, f) {
   f.store.close(); const store = new Store(f.path), outputs = new ExecutionOutputStore(store, { rootDir: join(f.directory, "outputs") });

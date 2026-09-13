@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "auditedAt": "2026-09-13T02:13:30.288Z",
+  "checks": [
+    {
+      "name": "source_archive_and_before_canonical_are_identical",
+      "pass": true
+    },
+    {
+      "name": "restoration_preserved_canonical_body_and_head_version",
+      "pass": true
+    },
+    {
+      "name": "original_event_bytes_preserved_as_prefix",
+      "pass": true
+    },
+    {
+      "name": "restoration_added_exactly_one_event_at_next_sequence",
+      "pass": true
+    },
+    {
+      "name": "restored_fixture_started_paused",
+      "pass": true
+    },
+    {
+      "name": "all_28_imported_fences_match_original_exact_body_hashes",
+      "pass": true
+    },
+    {
+      "name": "fence_digest_matches_restore_receipt",
+      "pass": true
+    },
+    {
+      "name": "release_is_exact_local_human_receipt_and_summary",
+      "pass": true
+    },
+    {
+      "name": "release_did_not_change_imported_authority_or_holds",
+      "pass": true
+    },
+    {
+      "name": "release_kept_execution_paused",
+      "pass": true
+    },
+    {
+      "name": "final_reopen_retains_exact_recovery_and_release_rows",
+      "pass": true
+    },
+    {
+      "name": "final_reopen_retains_completed_canonical_rows",
+      "pass": true
+    },
+    {
+      "name": "final_reopen_changed_only_optional_read_only_review_cache_rows",
+      "pass": true
+    },
+    {
+      "name": "final_events_remain_exact_and_contiguous",
+      "pass": true
+    },
+    {
+      "name": "exactly_two_fresh_fixture_attempts_image_and_video",
+      "pass": true
+    },
+    {
+      "name": "imported_attempt_rows_never_resubmitted_or_changed",
+      "pass": true
+    },
+    {
+      "name": "new_attempts_have_fresh_shot_one_human_candidate_and_grant",
+      "pass": true
+    },
+    {
+      "name": "only_shot_one_creative_revision_changed",
+      "pass": true
+    },
+    {
+      "name": "second_shot_candidates_and_selected_outputs_reused_exactly",
+      "pass": true
+    },
+    {
+      "name": "fresh_human_approval_binds_exact_new_keyframe_and_video_fingerprint",
+      "pass": true
+    },
+    {
+      "name": "preapproval_evidence_new_frame_unapproved_old_preview_retained",
+      "pass": true
+    },
+    {
+      "name": "latest_render_is_reused_historical_fixture_not_new_render",
+      "pass": true
+    },
+    {
+      "name": "all_selected_preview_artifacts_match_owned_bytes",
+      "pass": true
+    },
+    {
+      "name": "no_native_model_start_or_external_allowance_usage",
+      "pass": true
+    },
+    {
+      "name": "initial_harness_failure_is_retained_and_explained",
+      "pass": true
+    },
+    {
+      "name": "both_launcher_processes_closed_successfully",
+      "pass": true
+    },
+    {
+      "name": "restored_and_source_databases_integrity_ok",
+      "pass": true
+    }
+  ],
+  "passed": 27,
+  "actualNativeStarts": 0,
+  "realMediaCalls": 0,
+  "freshFixtureAttempts": 2,
+  "reusedHistoricalFixtureRender": true,
+  "browserEvidence": "Root-observed CUA decoding, exact review action, reload and clear console; not independently replayed by this audit",
+  "retainedHarnessFailure": "Original entire-SQL-project-row assertion included event_sequence; canonical body/head were unchanged",
+  "sourceArchivePreserved": true
+}

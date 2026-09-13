@@ -19,6 +19,8 @@ import { registerImageRoutes } from "./media/image-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./application/provider-catalog.js";
 import { registerAllowanceRoutes } from "./application/allowance-routes.js";
+import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
+import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
   allowanceRoutes?: Parameters<typeof registerAllowanceRoutes>[1];
@@ -36,6 +38,7 @@ export function createApp(options: AppOptions = {}) {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 3 * 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const actors = new WeakMap<object, ActorContext>();
+  const recovery = options.service ? new InstallationRecoveryGuard(options.service.store) : undefined;
   const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
   const eventStreams = new Set<() => void>();
   app.addHook("preClose", async () => { for (const close of eventStreams) close(); });
@@ -65,9 +68,15 @@ export function createApp(options: AppOptions = {}) {
       const projectId = (request.params as { projectId: string }).projectId;
       actors.set(request, service().actorForBridge(projectId, bearer));
     } else invariant(options.localToken && timingSafeEqual(Buffer.from(digest(bearer)), Buffer.from(digest(options.localToken))), "AUTH_REQUIRED", "Invalid local session token");
+    // Authenticate first. The narrow release endpoint is independent of project/model authority;
+    // all other writes (including raw upload handlers) stay closed during recovery review.
+    if (recovery?.isQuarantined()) invariant(recoveryInspectionAllowed(request.method, request.routeOptions.url)
+      || request.method === "POST" && request.routeOptions.url === RECOVERY_RELEASE_PATH,
+    "INSTALLATION_QUARANTINED", "Review this restored installation before making changes");
   });
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
   options.webAssets?.register(app);
+  if (options.service) registerRecoveryRoutes(app, options.service);
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
@@ -173,14 +182,19 @@ export function createApp(options: AppOptions = {}) {
     // Planning may stop at images before a video/review recipe exists. Keep the
     // workspace readable without fabricating an approval snapshot or authority.
     if (!activePlan.compiled.gates.length) return { id: null, projectId, planId: activePlan.id, members: [], headVersion: project.headVersion, revisionId: project.revisionId };
-    const cursor = service().store.cursor(projectId);
-    let cached = reviewCache.get(projectId);
-    if (!cached || cached.cursor !== cursor) {
-      cached = { cursor, snapshot: service().engine.reviewSnapshot(projectId) }; reviewCache.set(projectId, cached);
+    let snapshot: ReviewSnapshot | (Omit<ReviewSnapshot, "id"> & { id: null });
+    if (recovery?.isQuarantined()) snapshot = { ...service().engine.inspectReview(projectId), id: null };
+    else {
+      const cursor = service().store.cursor(projectId);
+      let cached = reviewCache.get(projectId);
+      if (!cached || cached.cursor !== cursor) {
+        cached = { cursor, snapshot: service().engine.reviewSnapshot(projectId) }; reviewCache.set(projectId, cached);
+      }
+      snapshot = cached.snapshot;
     }
-    const plan = service().store.get<PlanRecord>("plan", cached.snapshot.planId)!;
+    const plan = service().store.get<PlanRecord>("plan", snapshot.planId)!;
     const approvals = service().store.list<{ videoNodeId: string; approvalDigest: string }>("approval", projectId);
-    return { ...cached.snapshot, headVersion: project.headVersion, revisionId: project.revisionId, members: cached.snapshot.members.map(member => {
+    return { ...snapshot, headVersion: project.headVersion, revisionId: project.revisionId, members: snapshot.members.map(member => {
       const node = plan.compiled.nodes.find(node => node.id === member.videoNodeId)!;
       return { ...member, keyframeFixture: member.keyframe ? service().artifactFixture(projectId, member.keyframe) : null,
         approved: approvals.some(approval => approval.videoNodeId === member.videoNodeId && approval.approvalDigest === member.approvalDigest), motionPrompt: node.args.prompt, durationFrames: node.args.durationFrames, profileLabel: node.profileId };

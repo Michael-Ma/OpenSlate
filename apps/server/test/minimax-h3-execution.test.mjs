@@ -19,6 +19,7 @@ import { LocalMediaService } from "../dist/media/local-media.js";
 import { Engine } from "../dist/execution/engine.js";
 import { Store } from "../dist/persistence/store.js";
 import { projectFixture } from "./execution-fixture.mjs";
+import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from "../dist/application/installation-recovery.js";
 
 const key = "offline-h3-credential", taskId = "known_h3_task", hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const ffmpegPath = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg");
@@ -81,6 +82,31 @@ const rows = (f, kind) => f.store.list(kind, f.project.id);
 const context = f => ({ expectedLease: { owner: f.attempt.leaseOwner, epoch: f.attempt.leaseEpoch } });
 function due(f) { f.clock.value = rows(f, "h3_poll_schedule")[0].nextPollAt; }
 function attempt(f) { return f.engine.attempts(f.project.id)[0]; }
+function restoreH3Fixture(f) {
+  installRecoveryQuarantine(f.store, { restoreId: randomUUID(), backupId: randomUUID(), backupManifestSha256: "a".repeat(64), sourceDatabaseSha256: "b".repeat(64),
+    originalDataRoot: f.directory, backupCreatedAt: "2026-09-11T00:00:00.000Z", restoredAt: "2026-09-12T00:00:00.000Z" });
+  return () => { const snapshot = new InstallationRecoveryGuard(f.store).snapshot(); return releaseRecovery(f.store, { restoreId: snapshot.receipt.restoreId,
+    expectedReceiptDigest: snapshot.receiptDigest, expectedSummaryDigest: snapshot.summaryDigest }, { principalId: "human", commandId: randomUUID() }); };
+}
+
+test("restoration blocks direct H3 calls and an imported pre-dispatch attempt never acquires first POST authority", async t => {
+  const f = fixture(t), release = restoreH3Fixture(f);
+  for (const operation of [() => f.bridge.submit(f.request, context(f)), () => f.bridge.lookup(f.attempt.id), () => f.bridge.poll(taskId, f.request)])
+    await assert.rejects(operation(), { code: "INSTALLATION_QUARANTINED" });
+  release(); await assert.rejects(f.bridge.submit(f.request, context(f)), { code: "RESTORED_AUTHORITY_REQUIRES_NEW" });
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type, "unknown");
+  assert.deepEqual(f.calls, { post: 0, query: 0, download: 0, credentials: 0 }); assert.equal(rows(f, "h3_execution_dispatch").length, 0);
+});
+
+test("released H3 restoration polls only its retained task and keeps existing cooldown without another POST", async t => {
+  const f = fixture(t); assert.deepEqual(await f.bridge.submit(f.request, context(f)), { type: "accepted", taskId });
+  const release = restoreH3Fixture(f), before = { ...f.calls };
+  await assert.rejects(f.bridge.poll(taskId, f.request), { code: "INSTALLATION_QUARANTINED" }); assert.deepEqual(f.calls, before);
+  release(); assert.deepEqual(await f.bridge.lookup(f.attempt.id), { type: "accepted", taskId });
+  due(f); await f.bridge.poll(taskId, f.request); assert.equal(f.calls.query, 1); const schedule = rows(f, "h3_poll_schedule")[0];
+  await f.bridge.poll(taskId, f.request); assert.equal(f.calls.query, 1); assert.equal(rows(f, "h3_poll_schedule")[0].nextPollAt, schedule.nextPollAt);
+  await assert.rejects(f.bridge.poll("wrong-task", f.request), { code: "H3_EXECUTION_CONFLICT" }); assert.equal(f.calls.post, 1);
+});
 
 test("H3 first POST is bound to immutable mapping, exact wire SHA and unchanged reviewed PNG", async t => {
   const f = fixture(t, { fetch: async (url, init) => {

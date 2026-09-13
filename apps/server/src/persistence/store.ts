@@ -19,6 +19,8 @@ import { assertProjectBudgetRevision } from "../application/project-budget.js";
 import type { ProjectBudgetRevision } from "../application/project-budget.js";
 import { assertLocalExecutionDispatch, assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution } from "../execution/local-execution.js";
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent } from "../execution/local-execution.js";
+import { assertRecoveryFence, assertRecoveryReceipt, assertRecoveryRelease, recoveryBodyHash } from "./recovery-records.js";
+import type { InstallationRecoveryRow, RecoveryFence, RecoveryReceipt, RecoveryReleaseReceipt } from "./recovery-records.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -126,6 +128,18 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "installation_recovery_fence") {
+      const fence = { ...body, id, projectId } as unknown as RecoveryFence; assertRecoveryFence(fence);
+      reference(fence.kind, fence.recordId);
+      const recovery = this.installationRecoveries().find(row => row.receipt.restoreId === fence.restoreId);
+      invariant(recovery?.receipt.projectIds.includes(projectId), "RECOVERY_INVALID", "Fence has no matching recovery receipt");
+      // The first insert must capture the exact original row before restoration transitions.
+      if (!this.get(kind, id)) {
+        const original = this.db.prepare("SELECT body FROM entities WHERE kind=? AND id=?").get(fence.kind, fence.recordId) as { body: string };
+        invariant(recoveryBodyHash(original.body) === fence.originalBodySha256 && (fence.originalBody === null || fence.originalBody === original.body),
+          "RECOVERY_INVALID", "Fence does not match the exact original record");
+      }
+    }
     if (kind === "local_execution_intent") {
       reference("attempt", id); reference("capability_lock", body.capabilityLockId);
       const intent = { ...body, id, projectId } as unknown as LocalExecutionIntent;
@@ -364,7 +378,7 @@ export class Store {
       }
       if (["external_allowance", "external_allowance_revocation", "external_allowance_consumption", "project_budget_revision"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
-      if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion"].includes(kind))
+      if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
@@ -448,6 +462,43 @@ export class Store {
       const result = fn();
       this.db.prepare("INSERT INTO commands(actor_scope,key,digest,result) VALUES(?,?,?,?)").run(actorScope, key, requestDigest, canonical(result));
       return result;
+    });
+  }
+
+  installationRecoveries(): InstallationRecoveryRow[] {
+    const rows = this.db.prepare("SELECT generation,restore_id,receipt,release_receipt FROM installation_recoveries ORDER BY generation").all() as
+      { generation: number; restore_id: string; receipt: string; release_receipt: string | null }[];
+    return rows.map(row => {
+      const receipt = JSON.parse(row.receipt) as RecoveryReceipt; assertRecoveryReceipt(receipt);
+      invariant(receipt.generation === row.generation && receipt.restoreId === row.restore_id, "RECOVERY_INVALID", "Recovery row identity differs");
+      const release = row.release_receipt === null ? null : JSON.parse(row.release_receipt) as RecoveryReleaseReceipt;
+      if (release) assertRecoveryRelease(release, receipt);
+      return { generation: row.generation, receipt, release };
+    });
+  }
+
+  insertInstallationRecovery(receipt: RecoveryReceipt): RecoveryReceipt {
+    const snapshot = JSON.parse(canonical(receipt)) as RecoveryReceipt; assertRecoveryReceipt(snapshot);
+    return this.transaction(() => {
+      const rows = this.installationRecoveries(), previous = rows.find(row => row.receipt.restoreId === snapshot.restoreId);
+      if (previous) { invariant(canonical(previous.receipt) === canonical(snapshot), "IMMUTABLE_RECORD", "Recovery receipt is immutable"); return previous.receipt; }
+      invariant(snapshot.generation === (rows.at(-1)?.generation ?? 0) + 1, "RECOVERY_CONFLICT", "Recovery generation changed");
+      for (const projectId of snapshot.projectIds) this.getProject(projectId);
+      this.db.prepare("INSERT INTO installation_recoveries(generation,restore_id,receipt) VALUES(?,?,?)").run(snapshot.generation, snapshot.restoreId, canonical(snapshot));
+      return snapshot;
+    });
+  }
+
+  releaseInstallationRecovery(value: RecoveryReleaseReceipt): RecoveryReleaseReceipt {
+    const snapshot = JSON.parse(canonical(value)) as RecoveryReleaseReceipt;
+    return this.transaction(() => {
+      const current = this.installationRecoveries().at(-1);
+      invariant(current?.receipt.restoreId === snapshot.restoreId, "RECOVERY_CONFLICT", "Release refers to another restoration");
+      assertRecoveryRelease(snapshot, current.receipt);
+      if (current.release) { invariant(canonical(current.release) === canonical(snapshot), "IMMUTABLE_RECORD", "Recovery release is immutable"); return current.release; }
+      const result = this.db.prepare("UPDATE installation_recoveries SET release_receipt=? WHERE restore_id=? AND release_receipt IS NULL")
+        .run(canonical(snapshot), snapshot.restoreId);
+      invariant(result.changes === 1, "RECOVERY_CONFLICT", "Recovery release changed"); return snapshot;
     });
   }
 

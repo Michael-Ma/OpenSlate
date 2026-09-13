@@ -36,6 +36,7 @@ export class DirectorSupervisor {
   }
 
   enqueue(projectId: string, human: ActorContext): DirectorTurn {
+    this.service.recovery.assertWritable(projectId, human.requestId);
     invariant(!this.closed && human.kind === "human", "ACTOR_DENIED", "Only an active human channel can queue a director request");
     this.service.assertActor(projectId, human);
     return this.service.store.transaction(() => {
@@ -53,9 +54,11 @@ export class DirectorSupervisor {
 
   turns(projectId: string): DirectorTurn[] { return this.service.store.list<DirectorTurn>("director_turn", projectId); }
   answerQuestion(projectId: string, principalId: string, questionId: string, text: string, key: string): ActorContext {
-    return this.service.store.command(`${principalId}:${projectId}:question`, key, digest({ questionId, text }), () => {
+    this.service.recovery.assertWritable(projectId);
+    const actor = this.service.store.command<ActorContext>(`${principalId}:${projectId}:question`, key, digest({ questionId, text }), () => {
       const question = this.service.store.get<{ id: string; projectId: string; requestId: string; state: string }>("director_question", questionId);
       invariant(question?.projectId === projectId && question.state === "pending", "QUESTION_STALE", "This question is no longer waiting for a reply");
+      this.service.recovery.assertFreshAuthority(projectId, "message", question.requestId);
       const original = this.service.store.get<Request & { scopeIds: string[] }>("message", question.requestId);
       invariant(original?.principalId === principalId && original.state === "active", "QUESTION_STALE", "A newer request has replaced this question");
       const actor = this.service.beginRequest(projectId, principalId, text, { scopeIds: original.scopeIds,
@@ -65,6 +68,7 @@ export class DirectorSupervisor {
       this.enqueue(projectId, actor);
       return actor;
     });
+    this.service.recovery.assertFreshAuthority(projectId, "message", actor.requestId); return actor;
   }
   status(projectId: string) {
     const turns = this.turns(projectId), current = turns.find(turn => turn.state === "running") ?? turns.find(turn => turn.state === "queued") ?? turns.at(-1);
@@ -90,7 +94,7 @@ export class DirectorSupervisor {
 
   /** Called on startup and periodically. A foreign owner retains its lease until expiry. */
   tick(): void {
-    if (this.closed) return;
+    if (this.closed || this.service.recovery.isQuarantined()) return;
     for (const project of this.service.store.listProjects()) {
       if (this.options.projectFilter && !this.options.projectFilter(project.id)) continue;
       this.service.store.transaction(() => {
@@ -117,7 +121,7 @@ export class DirectorSupervisor {
         if (this.service.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return null;
         const turns = this.turns(project.id);
         if (turns.some(turn => turn.state === "running")) return null;
-        const next = turns.find(turn => turn.state === "queued");
+        const next = turns.find(turn => turn.state === "queued" && this.service.recovery.directorEligible(project.id, turn.id, turn.requestId));
         if (!next) return null;
         if (next.runtimeId !== this.runtime.id) { this.terminal(next, "failed", "RUNTIME_MISMATCH"); return null; }
         const claimed = this.save({ ...next, state: "running", owner: this.owner, leaseExpiresAt: this.now() + this.leaseMs });
@@ -169,6 +173,8 @@ export class DirectorSupervisor {
       // Persist intent before the adapter may write turn/start. No credentials are persisted.
       service.store.transaction(() => {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
+        service.recovery.assertWritable(claimed.projectId, claimed.requestId);
+        service.recovery.assertFreshAuthority(claimed.projectId, "director_turn", claimed.id);
         invariant(turn.owner === this.owner && turn.state === "running", "DIRECTOR_LEASE_LOST", "Director turn ownership changed");
         this.save({ ...turn, dispatched: true });
         service.store.appendEvent(claimed.projectId, "director.dispatch_intent", { turnId: claimed.id, requestId: claimed.requestId, contextDigest: digest(input.context), inputDigest: directorInputDigest(input) });

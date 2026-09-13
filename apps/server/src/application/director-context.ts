@@ -14,6 +14,7 @@ export class DirectorContextService {
 
   /** Trusted host configuration, never exposed through director tools or HTTP request data. */
   bootstrapLock(projectId: string, lock: SkillCapabilityLock): string {
+    this.service.recovery.assertWritable(projectId);
     verifySkillLock(lock, this.environment);
     return this.service.store.transaction(() => {
       this.service.store.getProject(projectId);
@@ -45,6 +46,7 @@ export class DirectorContextService {
   }
 
   capture(projectId: string, actor: ActorContext, options: { lockId: string; selectedSkillIds: string[]; stageBindings?: SkillStageBinding[] }) {
+    this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Director context must bind an immutable epoch");
     this.service.assertActor(projectId, actor);
     const record = this.service.store.get<LockRecord>("director_skill_lock", options.lockId);
@@ -84,6 +86,7 @@ export class DirectorContextService {
   }
 
   readSkill(projectId: string, actor: ActorContext, activationId: string, selection: { skillId: string; path: string }) {
+    this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Skill reads must retain their director epoch");
     this.service.assertActor(projectId, actor);
     const record = this.service.store.get<ActivationRecord>("skill_activation", activationId);

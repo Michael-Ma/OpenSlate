@@ -59,6 +59,7 @@ export class DirectorImageProjector {
     return record;
   }
   record(projectId: string, actor: ActorContext, supplied: SelectedDirectorImage[]): RequestImageSelection {
+    this.production.recovery.assertWritable(projectId, actor.requestId);
     const images = selectedDirectorImages(supplied);
     invariant(actor.kind === "human", "ACTOR_DENIED", "Only a human message can select image attachments");
     this.production.assertActor(projectId, actor);
@@ -91,6 +92,7 @@ export class DirectorImageProjector {
     }
   }
   async prepare(input: DirectorRunInput, actor: ActorContext, projection: string, options: { signal?: AbortSignal } = {}): Promise<DirectorRunInput> {
+    this.production.recovery.assertWritable(input.projectId, actor.requestId);
     const identity = { projectId: input.projectId, requestId: input.requestId, epochId: input.epochId }, authority = structuredClone(actor), signal = options.signal;
     invariant(authority.kind === "director" && authority.requestId === identity.requestId && authority.epochId === identity.epochId, "DIRECTOR_IMAGE_IDENTITY", "Image input requires its current director epoch");
     const current = () => { invariant(!signal?.aborted, "MEDIA_CANCELLED", "Image attachment preparation cancelled"); this.production.assertActor(identity.projectId, authority); };

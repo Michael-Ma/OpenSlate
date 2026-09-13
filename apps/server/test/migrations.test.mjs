@@ -39,25 +39,25 @@ function legacy(t, { wal = false, missing = [] } = {}) {
   return { root, path, db, backups };
 }
 
-test("fresh and in-memory databases apply both checked migrations; reopen leaves ledger and data unchanged", t => {
+test("fresh and in-memory databases apply all checked migrations; reopen leaves ledger and data unchanged", t => {
   const root = directory(t), path = join(root, "fresh.sqlite"), store = new Store(path);
   assert.equal(version(store.db), CURRENT_SCHEMA_VERSION);
   const rows = store.db.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
   assert.deepEqual(rows.map(row => [row.version, row.name, row.checksum, row.mode]), MIGRATIONS.map(m => [m.version, m.name, m.checksum, "applied"]));
-  assert.equal(rows.length, 2); assert.equal(store.db.pragma("journal_mode", { simple: true }), "wal");
+  assert.equal(rows.length, MIGRATIONS.length); assert.equal(store.db.pragma("journal_mode", { simple: true }), "wal");
   store.close(); const reopened = new Store(path);
   try { assert.deepEqual(reopened.db.prepare("SELECT * FROM schema_migrations ORDER BY version").all(), rows); }
   finally { reopened.close(); }
   assert.equal(existsSync(`${path}.migration-backups`), false);
-  const memory = new Store(":memory:"); try { assert.equal(version(memory.db), 2); } finally { memory.close(); }
+  const memory = new Store(":memory:"); try { assert.equal(version(memory.db), CURRENT_SCHEMA_VERSION); } finally { memory.close(); }
 });
 
 test("legacy WAL state upgrades with one verified private backup and preserves every historical JSON byte", t => {
   const f = legacy(t, { wal: true, missing: ["director_request_once", "director_running_once"] }), before = contents(f.db);
   assert.ok(existsSync(`${f.path}-wal`)); const store = new Store(f.path);
   try {
-    assert.equal(version(store.db), 2); assert.deepEqual(contents(store.db), before);
-    assert.deepEqual(store.db.prepare("SELECT version,mode FROM schema_migrations ORDER BY version").all(), [{ version: 1, mode: "adopted" }, { version: 2, mode: "applied" }]);
+    assert.equal(version(store.db), CURRENT_SCHEMA_VERSION); assert.deepEqual(contents(store.db), before);
+    assert.deepEqual(store.db.prepare("SELECT version,mode FROM schema_migrations ORDER BY version").all(), MIGRATIONS.map(m => ({ version: m.version, mode: m.version === 1 ? "adopted" : "applied" })));
     assert.ok(schema(store.db).some(row => row.name === "director_request_once"));
     assert.ok(schema(store.db).some(row => row.name === "execution_evidence_attempt"));
     assert.equal(f.backups().length, 1); const backup = f.backups()[0]; Store.checkDatabase(backup);
@@ -127,7 +127,7 @@ test("restore snapshots active WAL consistently and preserves V1 until ordinary 
   const restored = new Database(destination, { readonly: true });
   try { assert.equal(version(restored), 1); assert.deepEqual(contents(restored), committed); } finally { restored.close(); }
   assert.equal(version(f.db), 1); const opened = new Store(destination);
-  try { assert.equal(version(opened.db), 2); assert.deepEqual(contents(opened.db), committed); } finally { opened.close(); }
+  try { assert.equal(version(opened.db), CURRENT_SCHEMA_VERSION); assert.deepEqual(contents(opened.db), committed); } finally { opened.close(); }
   assert.equal(readdirSync(`${destination}.migration-backups`).length, 1);
 });
 
@@ -150,5 +150,34 @@ test("two independent Store processes serialize V1 migration and produce one pre
   const url = new URL("../dist/persistence/store.js", import.meta.url).href;
   const code = `import { Store } from ${JSON.stringify(url)}; const store=new Store(process.argv[1]); process.stdout.write(String(store.db.pragma('user_version',{simple:true}))); store.close();`;
   const results = await Promise.all([1, 2].map(() => promisify(execFile)(process.execPath, ["--input-type=module", "-e", code, f.path], { timeout: 15000, maxBuffer: 65536 })));
-  assert.deepEqual(results.map(result => result.stdout), ["2", "2"]); assert.equal(f.backups().length, 1); Store.checkDatabase(f.path);
+  assert.deepEqual(results.map(result => result.stdout), [String(CURRENT_SCHEMA_VERSION), String(CURRENT_SCHEMA_VERSION)]); assert.equal(f.backups().length, 1); Store.checkDatabase(f.path);
+});
+
+test("V2 to V3 preserves original JSON and ledger bytes, backs up V2, and rolls back interrupted recovery schema creation", t => {
+  for (const interrupted of [false, true]) {
+    const f = legacy(t);
+    // Construct the shipped V2 schema without invoking current Store initialization.
+    f.db.exec(MIGRATIONS[1].sql);
+    for (const migration of MIGRATIONS.slice(0, 2)) f.db.prepare("INSERT INTO schema_migrations VALUES(?,?,?,?,?)")
+      .run(migration.version, migration.name, migration.checksum, "2026-09-01T00:00:00.000Z", migration.version === 1 ? "adopted" : "applied");
+    f.db.pragma("user_version=2");
+    const before = contents(f.db), ledger = f.db.prepare("SELECT * FROM schema_migrations ORDER BY version").all(), originalSchema = schema(f.db);
+    const original = Database.prototype.exec;
+    if (interrupted) Database.prototype.exec = function (sql) {
+      const result = original.call(this, sql); if (sql.includes("CREATE TABLE IF NOT EXISTS installation_recoveries")) throw Error("V3 interrupted"); return result;
+    };
+    try {
+      if (interrupted) assert.throws(() => new Store(f.path), /V3 interrupted/);
+      else { const store = new Store(f.path); store.close(); }
+    } finally { Database.prototype.exec = original; }
+    assert.deepEqual(contents(f.db), before);
+    assert.deepEqual(f.db.prepare("SELECT * FROM schema_migrations WHERE version<=2 ORDER BY version").all(), ledger);
+    assert.equal(version(f.db), interrupted ? 2 : 3);
+    if (interrupted) assert.deepEqual(schema(f.db), originalSchema);
+    else assert.equal(f.db.prepare("SELECT count(*) AS n FROM installation_recoveries").get().n, 0);
+    assert.equal(f.backups().length, 1); Store.checkDatabase(f.backups()[0]);
+    const saved = new Database(f.backups()[0], { readonly: true });
+    try { assert.equal(version(saved), 2); assert.deepEqual(contents(saved), before); assert.deepEqual(schema(saved), originalSchema); }
+    finally { saved.close(); }
+  }
 });

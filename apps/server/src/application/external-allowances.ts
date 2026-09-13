@@ -1,6 +1,7 @@
 import { canonical, invariant, moneyMicros } from "@openslate/core";
 import type { ActorContext } from "@openslate/core";
 import { Store } from "../persistence/store.js";
+import { InstallationRecoveryGuard } from "./installation-recovery.js";
 import { allowanceUsage, currentAllowanceSelection } from "../execution/durable-external-admission.js";
 import { allowanceIssueContextDigest, allowanceIssueInput, allowanceRevokeContextDigest, MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS } from "../execution/external-allowance-records.js";
 import type { AllowanceHumanRequest, AllowanceIssueInput, AllowanceRevokeInput, ExternalAllowance, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
@@ -9,7 +10,8 @@ export { allowanceIssueContextDigest, allowanceRevokeContextDigest } from "../ex
 
 /** Called only by an authenticated human handler, never exposed as a director tool. */
 export class ExternalAllowanceService {
-  constructor(readonly store: Store) {}
+  readonly recovery: InstallationRecoveryGuard;
+  constructor(readonly store: Store) { this.recovery = new InstallationRecoveryGuard(store); }
   issue(projectId: string, actor: ActorContext, value: AllowanceIssueInput): ExternalAllowance {
     const input = structuredClone(value), contextDigest = allowanceIssueContextDigest(projectId, input);
     return this.store.transaction(() => {
@@ -24,6 +26,7 @@ export class ExternalAllowanceService {
       invariant(Date.parse(input.expiresAt) - Date.parse(createdAt) <= MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS,
         "ALLOWANCE_EXPIRY_INVALID", "Spending allowances expire within thirty days");
       for (const selection of input.selections) {
+        this.recovery.assertFreshAuthority(projectId, "candidate", selection.candidateId);
         const { project, binding } = currentAllowanceSelection(this.store, projectId, selection, input.profileDigest, input.profileDefinitionDigest);
         const shot = project.shots.find(shot => shot.id === binding.node.shotId);
         invariant(request.scopeIds.includes(projectId) || (shot && (request.scopeIds.includes(shot.id) || request.scopeIds.includes(shot.sceneId))),
@@ -63,6 +66,7 @@ export class ExternalAllowanceService {
     });
   }
   private human(projectId: string, actor: ActorContext, contextDigest: string): AllowanceHumanRequest {
+    this.recovery.assertWritable(projectId, actor.requestId);
     const request = this.request(projectId, actor);
     invariant(actor.kind === "human" && request.state === "active" && request.contextDigest === contextDigest,
       "ALLOWANCE_AUTHORITY_INVALID", "Use a dedicated current human request bound to this exact spending action");

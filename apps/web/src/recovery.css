@@ -1,0 +1,10 @@
+.recovery-panel { margin: 20px 28px 0; padding: 22px; border: 1px solid #c7a56b; border-radius: 12px; background: #f9f2e5; color: #443523; }
+.recovery-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.recovery-heading h2 { margin: 6px 0; font-size: 20px; }
+.recovery-panel p { max-width: 1000px; line-height: 1.55; }
+.recovery-counts { display: flex; flex-wrap: wrap; gap: 16px 32px; }
+.recovery-counts dt { font-size: 12px; }
+.recovery-counts dd { margin: 6px 0 0; font-size: 22px; font-weight: 650; }
+.recovery-decision { border-top: 1px solid #d9c7a8; margin-top: 16px; padding-top: 8px; }
+.recovery-decision button + button { margin-left: 12px; }
+@media (max-width: 680px) { .recovery-panel { margin: 12px; padding: 16px; } .recovery-heading { align-items: flex-start; } }

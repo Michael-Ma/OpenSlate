@@ -1,3 +1,4 @@
+import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
 import type { StudioApi } from "./api";
@@ -36,12 +37,13 @@ function ImagePreview({ api, projectId, reference }: { api: StudioApi; projectId
 
 export function ImagePanel(props: Props) { return <ImageWorkspace key={props.snapshot.project.id} {...props} />; }
 function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, discussionUnavailable }: Props) {
+  const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/images`, registry = pendingCommandsFor(api, "images");
   const slot = useSyncExternalStore(useCallback(listener => registry.subscribe(projectId, listener), [registry, projectId]), useCallback(() => registry.snapshot(projectId), [registry, projectId]));
   const [library, setLibrary] = useState<Library | null>(null), [loadError, setLoadError] = useState(""), [fileError, setFileError] = useState("");
   const [selected, setSelected] = useState<Reference | null>(null), [file, setFile] = useState<File | null>(null), [fileVersion, setFileVersion] = useState(0);
   const [offset, setOffset] = useState(0), [refresh, setRefresh] = useState(0), [loading, setLoading] = useState(true), [reuse, setReuse] = useState(true);
-  const currentRequest = activeProjectEdit(snapshot.messages, projectId), blocked = slot.running || !!slot.command;
+  const currentRequest = activeProjectEdit(snapshot.messages, projectId), blocked = recoveryReadOnly || slot.running || !!slot.command;
   const changed = useRef(onChanged); changed.current = onChanged;
   const observed = useRef({ registry, version: 0 });
   useEffect(() => {
@@ -59,6 +61,7 @@ function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, 
     return () => abort.abort();
   }, [api, base, offset, refresh, snapshot.project.headVersion]);
   function execute(command: PendingCommand) {
+    if (recoveryReadOnly) return;
     void registry.run(projectId, command, saved => api.upload(saved.path, saved.file!, saved.key),
       error => !(error instanceof ApiError) || ["NETWORK_ERROR", "INTERNAL_ERROR", "REQUEST_FAILED"].includes(error.code));
   }
@@ -69,7 +72,7 @@ function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, 
     {error && <p role="alert" className="form-error">{error}</p>}
     {library && !library.capabilities.import && <p role="status">{library.capabilities.unavailableReason}</p>}
     {slot.command && slot.running && <p role="status">Your saved import is running. Switching projects will not start it again.</p>}
-    {slot.command && !slot.running && <div className="notice warning"><span>The import result was not confirmed. Check the same saved request.</span><button onClick={() => execute(slot.command!)}>Retry same import</button></div>}
+    {slot.command && !slot.running && <div className="notice warning"><span>The import result was not confirmed. Check the same saved request.</span><button disabled={recoveryReadOnly} onClick={() => execute(slot.command!)}>Retry same import</button></div>}
     <form className="clip-upload" onSubmit={event => {
       event.preventDefault(); if (!file || fileError || !library?.capabilities.import || blocked) return;
       const query = new URLSearchParams({ expectedHeadVersion: String(snapshot.project.headVersion), ...(reuse && currentRequest ? { requestId: currentRequest } : {}) });

@@ -117,6 +117,7 @@ export class LocalDirectorController {
     return { mode: "native", binaryPath: input.binaryPath, model: input.model, ...(input.codexHome ? { codexHome: input.codexHome } : {}) };
   }
   async configure(projectId: string, supplied: LocalDirectorSelection, key: string) {
+    this.service.recovery.assertWritable(projectId);
     this.service.store.getProject(projectId);
     const selection = this.validate(structuredClone(supplied)); const identity = digest(selection);
     invariant(typeof key === "string" && key.length > 0 && key.length <= 160, "VALIDATION_ERROR", "Use one bounded setup command identity");
@@ -169,6 +170,7 @@ export class LocalDirectorController {
     return this.prepare(projectId, saved.selection);
   }
   private prepare(projectId: string, selection: LocalDirectorSelection) {
+    this.service.recovery.assertWritable(projectId);
     const key = digest({ projectId, selection }); const existing = this.prepared.get(key); if (existing) return existing;
     const pending = (async () => {
       const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace"), snapshots = join(projection, ".agents", "skills"), storage = join(root, "runtime");
@@ -183,7 +185,11 @@ export class LocalDirectorController {
     this.prepared.set(key, pending); void pending.catch(() => this.prepared.delete(key)); return pending;
   }
   private async startNative(input: DirectorRunInput, options: DirectorStartOptions = {}) {
+    this.service.recovery.assertWritable(input.projectId, input.requestId);
+    this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
     const { runtime } = await this.ready(input.projectId);
+    this.service.recovery.assertWritable(input.projectId, input.requestId);
+    this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
     return runtime.start(input, { ...options, onEvent: async event => {
       if (event.kind === "runtime_started") this.service.store.transaction(() => {
         invariant(!this.service.store.get("native_model_start", input.turnId), "NATIVE_DISPATCH_ALREADY_RESERVED", "This native turn already has a dispatch reservation; do not replay it");

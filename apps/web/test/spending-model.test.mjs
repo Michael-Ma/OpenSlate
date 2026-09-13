@@ -1,12 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewSpending, spendingReviewCurrent, spendingMoney, spendingPage, revokeSpending, budgetCommand } from '../src/spending-model.ts';
+import { reviewSpending, spendingReviewCurrent, spendingMoney, spendingPage, revokeSpending, budgetCommand, canSelectSpending, spendingWorkStatus, spendingAllowanceStatus } from '../src/spending-model.ts';
 import { pendingCommandsFor } from '../src/pending-command.ts';
 const hash = letter=>letter.repeat(64);
 const candidate = (index,extra={})=>({ candidateId:`candidate-${index}`,nodeId:`node-${index}`,specDigest:hash('a'),alias:`Frame ${index}`,operation:'image',
   profileId:'image-profile',profileRevision:'version-1',profileDigest:hash('b'),profileDefinitionDigest:hash('c'),estimatedMicros:'100001',selectionCurrent:true,suggestedForIssue:true,
   providerDisplay:{id:'image-profile',revision:'version-1',adapter:'openai-image',model:'gpt-image-2',settings:{width:1024,height:1024,quality:'medium'},definitionDigest:hash('c')},...extra });
 const state = (extra={})=>({projectId:'project',candidates:[candidate(1),candidate(2)],...extra});
+test('restored work cannot be selected or retain a pending cost review while historical allowances remain revocable',()=>{
+  const source=state(), review=reviewSpending(source,['candidate-1'],'before-restore',1000);
+  const restored=candidate(1,{selectionCurrent:false,suggestedForIssue:false,unavailableCode:'RESTORED_AUTHORITY_REQUIRES_NEW',workState:'unattempted',matchingAllowanceCount:0});
+  assert.equal(canSelectSpending(restored),false);
+  assert.throws(()=>reviewSpending(state({candidates:[restored]}),['candidate-1'],'after-restore',1001));
+  assert.equal(spendingReviewCurrent(review,state({candidates:[restored]}),1001),false);
+  assert.equal(canSelectSpending({...restored,selectionCurrent:true,suggestedForIssue:true}),false);
+  assert.match(spendingWorkStatus(restored),/new take with fresh approval/);
+  assert.match(spendingWorkStatus({...restored,workState:'uncertain'}),/existing evidence can be recovered/);
+  assert.match(spendingWorkStatus({...restored,workState:'completed'}),/Completed/);
+  assert.equal(spendingAllowanceStatus({status:'restored_history'}),'Restored history · cannot start new work');
+  assert.equal(spendingAllowanceStatus({status:'revoked',restoredHistory:true}),'revoked');
+  assert.deepEqual(revokeSpending('project','old-allowance','fresh-command'),{path:'/api/projects/project/spending/allowances/old-allowance/revoke',key:'fresh-command',body:{}});
+});
 test('a plan shrink keeps navigation back from an empty later page',()=>{
   assert.deepEqual(spendingPage({offset:100,returned:0,total:2,nextOffset:null},100),{visible:true,previousOffset:0,label:'No work on this page'});
   assert.equal(spendingPage({offset:0,returned:2,total:2,nextOffset:null},100).visible,false);

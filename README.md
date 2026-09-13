@@ -67,6 +67,7 @@ Run `pnpm demo:headless` for a reproducible two-shot example. It generates clear
 |---|---|
 | `pnpm dev` | Start the web app and API in development |
 | `pnpm start` | Serve the built interface and API at `127.0.0.1:3001` |
+| `pnpm installation export / inspect / restore` | Back up or recover a stopped local installation; see the path options below |
 | `pnpm check` | Build, run domain/API/SQLite tests and check TypeScript |
 | `pnpm test` | Build and run offline tests, including the fake integration demo |
 | `pnpm demo:headless` | Run the two-shot edit/restart demonstration without keys |
@@ -83,6 +84,26 @@ The web build is written to `apps/web/dist`. Production loads a bounded snapshot
 Tests use isolated local databases and require permission to bind loopback ports. The native Codex probe test is opt-in through `OPENSLATE_CODEX_PROBE_BINARY`; normal CI does not require Codex or credentials. Supplied-media workflows require FFmpeg and ffprobe on PATH (or OPENSLATE_FFMPEG and OPENSLATE_FFPROBE). They provide authenticated local upload, narration review, clip playback and rendering of compatible plans. They do not call cloud media APIs.
 
 Recognized older databases receive a verified snapshot before a schema upgrade. Those snapshots contain database records, not the referenced media files. See [database migration and restore boundaries](docs/implementation/DATABASE-MIGRATIONS.md) before treating a metadata snapshot as a complete project backup.
+
+## Local backups and recovery
+
+Build the application, then stop its server before using these commands. A backup includes the installation's projects, saved conversations, owned media, recovery receipts and locked skills. Use a new backup directory outside the data directory:
+
+```sh
+pnpm installation export --data-dir /absolute/path/to/openslate-data --output /absolute/path/to/backups/openslate-backup
+pnpm installation inspect --backup /absolute/path/to/backups/openslate-backup
+```
+
+The bundle is private and can contain protected provider result locations. It excludes API credentials, the local browser token and external Codex authentication. Keep it as carefully as your project data. Inspection verifies saved bytes without contacting any provider.
+
+Recovery currently supports the **same original data path on the same computer**. It refuses to overwrite or merge existing installation data. Preserve any existing installation separately before restoring into its now-empty original path:
+
+```sh
+pnpm installation restore --backup /absolute/path/to/backups/openslate-backup --data-dir /absolute/path/to/openslate-data
+OPENSLATE_DATA_DIR=/absolute/path/to/openslate-data pnpm start
+```
+
+If interrupted, repeat the exact restore command with the same bundle. The launcher refuses an unfinished restore. On successful startup, enter the newly created local token and inspect the recovery summary, saved projects and previews. Select **Review release**, then **Finish recovery review** when ready. Release keeps each project paused, while existing job results may now be recovered. Restored unused permissions cannot start new generation. Use a fresh conversation and new spending review for new work. Work after the backup may be absent, and uncertain provider submissions remain unresolved. See [recovery contracts and verification](docs/implementation/INSTALLATION-RECOVERY.md).
 
 ## Repository
 

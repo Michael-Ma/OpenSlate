@@ -1,3 +1,4 @@
+import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
 import type { StudioApi } from "./api";
@@ -16,6 +17,7 @@ const message = (error: unknown) => error instanceof ApiError ? narrationError(e
 
 export function NarrationPanel(props: Props) { return <NarrationWorkspace key={props.projectId} {...props} />; }
 function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, onChanged, onContinue }: Props) {
+  const recoveryReadOnly = useRecoveryReadOnly();
   const base = `/api/projects/${encodeURIComponent(projectId)}/narration`;
   const registry = pendingCommandsFor(api, "narration");
   const slot = useSyncExternalStore(useCallback(listener => registry.subscribe(projectId, listener), [registry, projectId]), useCallback(() => registry.snapshot(projectId), [registry, projectId]));
@@ -61,11 +63,12 @@ function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, 
     changed.current(); void load();
   }, [registry, slot.settledVersion]);
   function execute(command: PendingCommand) {
+    if (recoveryReadOnly) return;
     setError(""); setNotice("");
     void registry.run(projectId, command, saved => saved.file ? api.upload(saved.path, saved.file, saved.key)
       : api.request(saved.path, { method: "POST", body: saved.body, key: saved.key, timeoutMs: 180000 }), ambiguous);
   }
-  const locked = busy || !!pending, active = view?.session?.state === "active", disabled = locked || !active;
+  const locked = recoveryReadOnly || busy || !!pending, active = view?.session?.state === "active", disabled = locked || !active;
   const command = (suffix: string, body: unknown, label: string, effect?: CompletionEffect) => void execute({ path: `${base}${suffix}`, body, key: crypto.randomUUID(), metadata: { label, ...(effect ? { effect } : {}) } });
   const edit = (suffix: string, fields: Record<string, unknown>, label: string, effect?: CompletionEffect) => {
     if (!view?.session || disabled) return;
@@ -93,7 +96,7 @@ function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, 
     </div>
     {(error || loadError) && <div className="narration-feedback error" role="alert">{error || loadError}</div>}{notice && <div className="narration-feedback" role="status">{notice}</div>}
     {pending && busy && <p role="status">Your saved narration request is still running. Switching projects will not start it again.</p>}
-    {pending && !busy && <div className="narration-feedback"><p>The response was uncertain. Retry the same saved request to check its result.</p><button className="button primary" onClick={() => void execute(pending)}>Retry exact request</button></div>}
+    {pending && !busy && <div className="narration-feedback"><p>The response was uncertain. Retry the same saved request to check its result.</p><button className="button primary" disabled={recoveryReadOnly} onClick={() => void execute(pending)}>Retry exact request</button></div>}
     {!view ? <p className="narration-empty">Loading your saved narration…</p> : <>
       <div className="narration-steps"><span>01 · Write</span><span>02 · Listen & time</span><span>03 · Review changes</span></div>
       <div className="narration-section-header"><h3>Your sections <span>{view.snapshot.segments.length}</span></h3><button className="button" disabled={disabled} onClick={() => setAdding(value => !value)}>{adding ? "Close new section" : "+ Add a section"}</button></div>

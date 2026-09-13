@@ -48,6 +48,7 @@ export { TOOL_NAMES } from "@openslate/core";
 
 /** The trusted application boundary. Models propose data; these methods own authority and commits. */
 export class ProductionService {
+  get recovery() { return this.engine.recovery; }
   private readonly newProjectLocalExecution: Readonly<LocalExecutionIdentity> | undefined;
   private readonly newProjectLocalExecutionFor: "all" | "external-video";
   constructor(readonly store: Store, readonly engine: Engine, readonly profiles: ProviderProfile[] = DEFAULT_PROFILES,
@@ -61,6 +62,7 @@ export class ProductionService {
   }
 
   createProject(name: string, selection?: InstalledProviderSelection): ProjectRecord {
+    this.recovery.assertWritable();
     invariant(typeof name === "string" && name.trim().length > 0 && name.length <= 160, "VALIDATION_ERROR", "Provide a short project name");
     const selected = selection === undefined ? undefined : selectedProviderProfiles(selection);
     const profiles = selected?.profiles ?? this.profiles;
@@ -85,9 +87,10 @@ export class ProductionService {
 
   /** Invoked from an authenticated human channel, never from model arguments. */
   beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; contextDigest?: string } = {}): ActorContext {
+    this.recovery.assertWritable(projectId);
     invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
     const key = options.key ?? newId();
-    return this.store.command(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null }), () => {
+    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null }), () => {
       const project = this.store.getProject(projectId);
       const scopeIds = [...new Set(options.scopeIds ?? [projectId])];
       invariant(scopeIds.length > 0 && scopeIds.length <= 400, "VALIDATION_ERROR", "A request requires a bounded scope");
@@ -113,9 +116,11 @@ export class ProductionService {
       this.store.appendEvent(projectId, "message.recorded", { requestId: request.id, text, editing: options.editing ?? true });
       return { kind: "human", principalId, requestId: request.id };
     });
+    this.recovery.assertFreshAuthority(projectId, "message", actor.requestId); return actor;
   }
 
   openEpoch(projectId: string, human: ActorContext): { actor: ActorContext; token: string } {
+    this.recovery.assertWritable(projectId, human.requestId);
     this.assertActor(projectId, human);
     invariant(human.kind === "human", "ACTOR_DENIED", "Only the human request handler can open a director bridge");
     const request = this.request(projectId, human);
@@ -140,6 +145,7 @@ export class ProductionService {
   }
 
   assertActor(projectId: string, actor: ActorContext, mutating = false): void {
+    if (mutating) this.recovery.assertWritable(projectId, actor.requestId);
     const request = this.request(projectId, actor);
     if (actor.kind === "director") {
       const epoch = this.store.get<Epoch>("epoch", actor.epochId);
@@ -237,7 +243,8 @@ export class ProductionService {
       const continuations = this.store.list<{ fromRequestId: string; toRequestId: string }>("request_continuation", projectId);
       for (let count = 0; count < continuations.length; count++) for (const continuation of continuations)
         if (authorities.has(continuation.toRequestId)) authorities.add(continuation.fromRequestId);
-      const grants = this.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id) && authorities.has(grant.authorityId));
+      const grants = this.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id) && authorities.has(grant.authorityId)
+        && !this.recovery.isImported(projectId, "grant", grant.id));
       const grantBindings: Record<string, string> = {};
       for (const change of impact.filter(change => change.kind === "new" || change.kind === "replace")) {
         const node = compiled!.nodes.find(n => n.id === change.nodeId)!;
@@ -351,7 +358,9 @@ export class ProductionService {
       holds: this.store.list("hold", projectId), messages, conversation,
       control: { paused: this.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false },
       plan: plan ? { id: plan.id, graphDigest: plan.compiled.graphDigest, canonicalSource: plan.compiled.canonicalSource, nodes: plan.compiled.nodes } : null,
-      questions: this.store.list("director_question", projectId),
+      questions: this.store.list<{ id: string; requestId: string; turnId: string }>("director_question", projectId).map(question =>
+        this.recovery.isQuarantined() || this.recovery.isImported(projectId, "message", question.requestId)
+          || this.recovery.isImported(projectId, "director_turn", question.turnId) ? { ...question, canAnswer: false } : question),
       previousPreviews: this.engine.attempts(projectId).filter(attempt => attempt.request.kind === "render" && attempt.phase === "succeeded")
         .reverse().flatMap(attempt => Object.values(attempt.outputs).map(artifact => ({ artifact, nodeId: attempt.nodeId, fixture: this.artifactFixture(projectId, artifact) }))).slice(0, 3),
       reconciliations: this.store.list("tool_reconciliation", projectId),
@@ -362,6 +371,7 @@ export class ProductionService {
   }
 
   approve(projectId: string, human: ActorContext, snapshotId: string, videoNodeIds: string[]) {
+    this.recovery.assertWritable(projectId, human.requestId);
     this.assertActor(projectId, human);
     invariant(human.kind === "human", "ACTOR_DENIED", "Only human review can approve keyframes");
     const project = this.store.getProject(projectId);
@@ -373,6 +383,7 @@ export class ProductionService {
   }
 
   replyToReview(projectId: string, human: ActorContext, snapshotId: string, text: string) {
+    this.recovery.assertWritable(projectId, human.requestId);
     this.assertActor(projectId, human);
     invariant(human.kind === "human", "ACTOR_DENIED", "Review replies must come from a human");
     const snapshot = this.store.get<{ projectId: string; members: Array<{ videoNodeId: string }> }>("review_snapshot", snapshotId);
@@ -382,6 +393,7 @@ export class ProductionService {
   }
 
   control(projectId: string, actor: ActorContext, action: "pause" | "resume") {
+    this.recovery.assertWritable(projectId, actor.requestId);
     this.assertActor(projectId, actor);
     invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Global pause and resume require a human project command");
     this.engine.setPaused(projectId, action === "pause", actor.requestId);

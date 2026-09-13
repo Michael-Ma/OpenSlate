@@ -6,6 +6,7 @@ import { canonical, digest, invariant } from "@openslate/core";
 import { assertExecutionRequest, describeOpenAIImageRequest, OPENAI_IMAGE_MODEL, OpenAIImageAdapter, registerExecutionProvider } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, OpenAIImageInput, OpenAIImageModel, OpenAIImageQuality, OpenAIImageRequest } from "@openslate/providers";
 import { EnvironmentMediaCredentials } from "../application/provider-credentials.js";
+import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { Store } from "../persistence/store.js";
 import type { ArtifactRecord, Attempt } from "./engine.js";
 import { ExecutionOutputStore } from "./output-store.js";
@@ -22,6 +23,7 @@ function stopped(signal?: AbortSignal): void { invariant(!signal?.aborted, "IMAG
 
 /** Offline-tested application bridge. Construction registers availability, never spending authority. */
 export class OpenAIImageExecution implements ExecutionProvider {
+  readonly #recovery: InstallationRecoveryGuard;
   readonly #store: Store;
   readonly #outputs: ExecutionOutputStore;
   readonly #root: string;
@@ -33,6 +35,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
     invariant(options.outputStore.store === options.store && isAbsolute(options.artifactRoot) && options.artifactRoot !== "/",
       "IMAGE_EXECUTION_CONFIGURATION", "Use one application store and a private absolute artifact root");
     this.#store = options.store; this.#outputs = options.outputStore; this.#credentials = options.credentials;
+    this.#recovery = new InstallationRecoveryGuard(options.store);
     this.#fetch = options.fetch; this.#timeoutMs = options.timeoutMs;
     mkdirSync(options.artifactRoot, { recursive: true, mode: 0o700 }); this.#root = realpathSync(options.artifactRoot);
     registerExecutionProvider(this, { adapter: "openai-image", version: "1" });
@@ -117,6 +120,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
   }
 
   async poll(_taskId: string, input?: Readonly<ExecutionRequest>): Promise<ExecutionOutcome> {
+    this.#recovery.assertWritable();
     if (input) this.admitted(structuredClone(input));
     return unknown("Synchronous image generation has no pollable vendor task");
   }
@@ -125,6 +129,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
     return { id: attempt.id, projectId: attempt.projectId, version: 1 as const, attemptId: attempt.id, requestDigest: digest(attempt.request) };
   }
   private admitted(request: ExecutionRequest): Attempt {
+    this.#recovery.assertWritable();
     assertExecutionRequest(this, request);
     const attempt = this.#store.get<Attempt>("attempt", request.attemptId);
     invariant(attempt && attempt.id === request.attemptId && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint
@@ -138,6 +143,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
     return attempt;
   }
   private dispatchable(previous: Attempt, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+    this.#recovery.assertFirstSubmit(previous.projectId, previous.id);
     const current = this.admitted(previous.request);
     const reservation = this.#store.get<{ state: string }>("reservation", current.reservationId!);
     invariant(expectedLease && Object.keys(expectedLease).every(key => ["owner", "epoch"].includes(key))

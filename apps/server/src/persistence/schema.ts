@@ -30,6 +30,11 @@ const V2_SCHEMA: readonly Readonly<SchemaObject>[] = Object.freeze([
     mode TEXT NOT NULL CHECK(mode IN ('applied','adopted'))`),
   index("execution_evidence_attempt", "ON entities(project_id,json_extract(body,'$.attemptId')) WHERE kind='execution_evidence'"),
 ].map(value => Object.freeze(value)));
+const V3_SCHEMA: readonly Readonly<SchemaObject>[] = Object.freeze([
+  table("installation_recoveries", `generation INTEGER PRIMARY KEY CHECK(generation > 0), restore_id TEXT NOT NULL UNIQUE,
+    receipt TEXT NOT NULL CHECK(json_valid(receipt)), release_receipt TEXT CHECK(release_receipt IS NULL OR json_valid(release_receipt))`),
+  index("installation_recovery_fence_lookup", "ON entities(project_id,json_extract(body,'$.kind'),json_extract(body,'$.recordId')) WHERE kind='installation_recovery_fence'"),
+].map(value => Object.freeze(value)));
 const migration = (version: number, name: string, sql: string) => Object.freeze({ version, name, sql,
   checksum: createHash("sha256").update(JSON.stringify({ version, name, sql })).digest("hex") });
 export const MIGRATIONS = Object.freeze([
@@ -37,8 +42,9 @@ export const MIGRATIONS = Object.freeze([
   // V1 acquired indexes over time without a version bump. Upgrade restores all
   // known indexes transactionally; incompatible duplicate data is not rewritten.
   migration(2, "migration_ledger_and_evidence_lookup", [...V1_SCHEMA.filter(object => object.type === "index"), ...V2_SCHEMA].map(object => object.sql).join("\n")),
+  migration(3, "installation_recovery_quarantine", V3_SCHEMA.map(object => object.sql).join("\n")),
 ]);
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 export interface MigrationLedgerRow { version: number; name: string; checksum: string; applied_at: string; mode: "applied" | "adopted" }
 const sqlIdentity = (sql: string) => sql.replace(/\bIF\s+NOT\s+EXISTS\b/gi, "").replace(/\s+/g, " ").replace(/\s*([(),;])\s*/g, "$1").replace(/;$/, "").trim();
 
@@ -52,7 +58,7 @@ export function verifySchema(db: Database.Database, options: { allowEmpty?: bool
     invariant(options.allowEmpty && objects.length === 0, "DATABASE_SCHEMA_MISMATCH", "Only an empty database can initialize without a schema version");
     return 0;
   }
-  const expected = new Map([...V1_SCHEMA, ...(version >= 2 ? V2_SCHEMA : [])].map(object => [object.name, object]));
+  const expected = new Map([...V1_SCHEMA, ...(version >= 2 ? V2_SCHEMA : []), ...(version >= 3 ? V3_SCHEMA : [])].map(object => [object.name, object]));
   for (const object of objects) {
     const known = expected.get(object.name);
     invariant(known && known.type === object.type && typeof object.sql === "string" && sqlIdentity(known.sql) === sqlIdentity(object.sql),

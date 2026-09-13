@@ -13,6 +13,8 @@ import { ExternalAllowanceService, allowanceIssueContextDigest } from "../dist/a
 import { DurableExternalAdmission } from "../dist/execution/durable-external-admission.js";
 import { createApp } from "../dist/app.js";
 import { projectFixture } from "./execution-fixture.mjs";
+import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from "../dist/application/installation-recovery.js";
+import { projectSpendingProjection } from "../dist/application/allowance-projection.js";
 
 const token = "offline_allowance_http_session_0123456789";
 function fixture(t, options = {}) {
@@ -57,6 +59,58 @@ const url = f => `/api/projects/${f.projectId}/spending`;
 const rows = (f, kind, id = f.projectId) => f.store.list(kind, id);
 const counts = f => Object.fromEntries(["projects", "entities", "commands", "events"].map(table => [table, f.store.db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n]));
 const creative = f => ({ project: f.store.getProject(f.projectId), holds: rows(f, "hold"), grants: rows(f, "grant"), epochs: rows(f, "epoch"), approvals: rows(f, "approval"), turns: rows(f, "director_turn") });
+function restoreSpendingFixture(f) {
+  installRecoveryQuarantine(f.store, { restoreId: randomUUID(), backupId: randomUUID(), backupManifestSha256: "a".repeat(64), sourceDatabaseSha256: "b".repeat(64),
+    originalDataRoot: f.directory, backupCreatedAt: "2026-09-11T00:00:00.000Z", restoredAt: "2026-09-12T00:00:00.000Z" });
+  return () => { const snapshot = new InstallationRecoveryGuard(f.store).snapshot(); return releaseRecovery(f.store, { restoreId: snapshot.receipt.restoreId,
+    expectedReceiptDigest: snapshot.receiptDigest, expectedSummaryDigest: snapshot.summaryDigest }, { principalId: "local-user", commandId: randomUUID() }); };
+}
+
+test("spending projection treats imported permissions as history before and after release while fresh work gets independent coverage", async t => {
+  const f = fixture(t, { count: 1 }), input = await f.inputFor();
+  const issue = await f.request("POST", `${url(f)}/allowances`, input); assert.equal(issue.statusCode, 200, issue.body);
+  const oldId = issue.json().allowance.id, original = f.store.get("external_allowance", oldId);
+  const oldProjection = projectSpendingProjection(f.service, f.projectId), release = restoreSpendingFixture(f);
+  for (const stage of ["quarantined", "released"]) {
+    if (stage === "released") release();
+    const before = counts(f), response = await f.request("GET", url(f)); assert.equal(response.statusCode, 200, response.body);
+    const value = response.json(), candidate = value.candidates[0], allowance = value.allowances[0];
+    assert.equal(candidate.selectionCurrent, false); assert.equal(candidate.suggestedForIssue, false);
+    assert.equal(candidate.unavailableCode, "RESTORED_AUTHORITY_REQUIRES_NEW"); assert.equal(candidate.matchingAllowanceCount, 0);
+    assert.equal(allowance.status, "restored_history"); assert.equal(allowance.restoredHistory, true);
+    assert.equal(allowance.currentSelectionCount, 0); assert.equal(allowance.suggestedSelectionCount, 0);
+    assert.equal(allowance.remainingAttempts, original.maxAttempts); assert.equal(allowance.usedAttempts, 0);
+    assert.equal(allowance.work[0].alias, oldProjection.allowances[0].work[0].alias); assert.equal(allowance.work[0].historyAvailable, true);
+    assert.equal(allowance.work[0].current, false); assert.deepEqual(counts(f), before); assert.deepEqual(f.store.get("external_allowance", oldId), original);
+  }
+  const project = f.store.getProject(f.projectId), plan = f.store.get("plan", project.activePlanId).compiled, node = plan.nodes[0], planId = randomUUID();
+  const grant = f.engine.createGrant(f.projectId, node.shotId, node.kind, "fresh-human-request");
+  f.engine.installPlan(f.projectId, planId, plan, { [node.id]: grant.id }); f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion);
+  const nextInput = await f.inputFor(); assert.notEqual(nextInput.selections[0].candidateId, input.selections[0].candidateId);
+  const newIssue = await f.request("POST", `${url(f)}/allowances`, nextInput); assert.equal(newIssue.statusCode, 200, newIssue.body);
+  const next = projectSpendingProjection(f.service, f.projectId);
+  assert.equal(next.candidates[0].selectionCurrent, true); assert.equal(next.candidates[0].matchingAllowanceCount, 1);
+  assert.equal(next.allowances.find(row => row.id === oldId).status, "restored_history");
+  assert.equal(next.allowances.find(row => row.id === newIssue.json().allowance.id).status, "open");
+  const revoked = await f.request("POST", `${url(f)}/allowances/${oldId}/revoke`, {}); assert.equal(revoked.statusCode, 200, revoked.body);
+  const history = projectSpendingProjection(f.service, f.projectId).allowances.find(row => row.id === oldId);
+  assert.equal(history.status, "revoked"); assert.equal(history.restoredHistory, true); assert.equal(history.currentSelectionCount, 0);
+  assert.deepEqual(history.work[0], { ...oldProjection.allowances[0].work[0], current: false });
+  assert.equal(f.calls(), 0); assert.deepEqual(f.store.get("external_allowance", oldId), original);
+});
+
+test("spending projection also rejects a new candidate bound to an unused imported grant", t => {
+  const f = fixture(t, { count: 1 }), binding = rows(f, "node_binding")[0];
+  const grant = f.engine.createGrant(f.projectId, binding.node.shotId, "image", "old-unused-grant");
+  const release = restoreSpendingFixture(f); release();
+  // Simulate historical low-level data admission; projection must independently check the grant fence.
+  const candidate = f.store.insert("candidate", randomUUID(), f.projectId, { nodeId: binding.id, grantId: grant.id, origin: grant.origin });
+  f.store.put("node_binding", binding.id, f.projectId, { ...binding, candidateId: candidate.id });
+  assert.equal(f.service.recovery.isImported(f.projectId, "candidate", candidate.id), false);
+  const before = counts(f), value = projectSpendingProjection(f.service, f.projectId).candidates[0];
+  assert.equal(value.selectionCurrent, false); assert.equal(value.unavailableCode, "RESTORED_AUTHORITY_REQUIRES_NEW");
+  assert.equal(value.suggestedForIssue, false); assert.equal(value.matchingAllowanceCount, 0); assert.deepEqual(counts(f), before);
+});
 
 test("spending routes are absent unless a trusted host explicitly installs them", async t => {
   const f = fixture(t, { enabled: false }), before = counts(f);

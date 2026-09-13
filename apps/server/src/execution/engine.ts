@@ -7,6 +7,7 @@ import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, P
 import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionTaskId, fixtureOutputs, isLegacyExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
+import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { ExecutionOutputStore } from "./output-store.js";
 import { materializeFixtureOutput } from "./fixture-ingester.js";
 import { assertNormalizedVideoIngestion } from "./video-derivation.js";
@@ -63,6 +64,7 @@ const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
 
 /** Durable executor over registered ports. The shipped launcher enables only fake execution. */
 export class Engine {
+  readonly recovery: InstallationRecoveryGuard;
   readonly registry: ExecutionRegistry;
   private readonly externalAdmission: ExternalExecutionAdmission | undefined;
   private readonly providerTimeoutMs: number;
@@ -82,6 +84,7 @@ export class Engine {
     providerTimeoutMs?: number;
     localExecution?: LocalExecutionPort;
   }) {
+    this.recovery = new InstallationRecoveryGuard(store);
     this.registry = provider instanceof ExecutionRegistry ? provider : new ExecutionRegistry([provider]);
     this.externalAdmission = options.externalAdmission;
     invariant(!options.externalAdmission || (typeof options.externalAdmission.authorize === "function" && options.externalAdmission.authorize.constructor.name !== "AsyncFunction"), "ASYNC_TRANSACTION", "External admission policy must be synchronous");
@@ -110,6 +113,7 @@ export class Engine {
   }
 
   createGrant(projectId: string, scopeId: string, kind: OperationKind, authorityId: string, origin: Grant["origin"] = "user_change"): Grant {
+    this.recovery.assertWritable(projectId, authorityId);
     const project = this.store.getProject(projectId);
     invariant(scopeId === projectId || project.shots.some(shot => shot.id === scopeId) || project.scenes.some(scene => scene.id === scopeId), "SCOPE_DENIED", "Grant scope is not part of the project");
     invariant(GENERATED.has(kind) && authorityId.length > 0, "ORIGIN_NOT_AUTHORIZED", "A media grant requires trusted scoped authority");
@@ -118,6 +122,7 @@ export class Engine {
 
   installPlan(projectId: string, planId: string, compiled: CompiledPlan, grantBindings: Record<string, string> = {}): { planId: string; nodes: NodeBinding[] } {
     return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
       const project = this.store.getProject(projectId);
       if (!this.store.get("budget", projectId)) this.store.insert("budget", projectId, projectId, { capMicros: this.defaultBudgetMicros, currency: "USD" });
       const saved = this.store.get<PlanRecord>("plan", planId);
@@ -137,6 +142,7 @@ export class Engine {
         let candidateId: string | null = same ? old.candidateId : null;
         if (GENERATED.has(node.kind) && (!same || grantId)) {
           invariant(grantId, "ORIGIN_NOT_AUTHORIZED", `Node ${node.alias} requires an unused grant`);
+          this.recovery.assertFreshAuthority(projectId, "grant", grantId);
           const grant = this.store.get<Grant>("grant", grantId);
           const sceneId = project.shots.find(shot => shot.id === node.shotId)?.sceneId;
           invariant(grant && grant.projectId === projectId && grant.kind === node.kind && [projectId, node.shotId, sceneId].includes(grant.scopeId), "ORIGIN_NOT_AUTHORIZED", "Grant does not cover this operation");
@@ -157,6 +163,7 @@ export class Engine {
 
   setHold(projectId: string, value: { scopeId: string; ownerId: string; id?: string }): Hold {
     return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId, value.ownerId);
       const project = this.store.getProject(projectId);
       invariant(value.scopeId === projectId || project.shots.some(shot => shot.id === value.scopeId) || project.scenes.some(scene => scene.id === value.scopeId), "SCOPE_DENIED", "Unknown hold scope");
       const id = value.id ?? newId(); const old = this.store.get<Hold>("hold", id);
@@ -167,6 +174,7 @@ export class Engine {
   }
   releaseHold(projectId: string, holdId: string, ownerId: string): void {
     this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
       const hold = this.store.get<Hold>("hold", holdId);
       invariant(hold?.projectId === projectId && hold.ownerId === ownerId, "SCOPE_DENIED", "Only the hold owner may release it");
       this.store.put("hold", holdId, projectId, { ...hold, active: false });
@@ -175,12 +183,14 @@ export class Engine {
   }
   setPaused(projectId: string, paused: boolean, authorityId: string): void {
     this.store.transaction(() => {
+      this.recovery.assertWritable(projectId, authorityId);
       invariant(authorityId.length > 0, "ORIGIN_NOT_AUTHORIZED", "Pause control requires authority");
       this.store.put("execution_control", projectId, projectId, { paused, authorityId });
       this.store.appendEvent(projectId, "execution.pause_changed", { paused });
     });
   }
   setBudget(projectId: string, capMicros: string): void {
+    this.recovery.assertWritable(projectId);
     moneyMicros(capMicros); this.store.put("budget", projectId, projectId, { capMicros, currency: "USD" });
   }
   budget(projectId: string): { capMicros: string; committedMicros: string; currency: "USD" } {
@@ -190,6 +200,13 @@ export class Engine {
   }
 
   reviewSnapshot(projectId: string, gateId?: string): ReviewSnapshot {
+    this.recovery.assertWritable(projectId);
+    return this.calculateReview(projectId, gateId, true) as ReviewSnapshot;
+  }
+  inspectReview(projectId: string, gateId?: string): Omit<ReviewSnapshot, "id"> {
+    return this.calculateReview(projectId, gateId, false);
+  }
+  private calculateReview(projectId: string, gateId: string | undefined, persist: boolean): ReviewSnapshot | Omit<ReviewSnapshot, "id"> {
     // Verify bytes before the short consistency transaction. The transaction then
     // compares the same immutable input identities without doing filesystem I/O.
     const before = this.activePlan(this.store.getProject(projectId));
@@ -202,7 +219,7 @@ export class Engine {
       const project = this.store.getProject(projectId);
       const plan = this.activePlan(project);
       const gates = gateId ? plan.compiled.gates.filter(gate => gate.id === gateId) : plan.compiled.gates;
-      invariant(gates.length > 0, "NOT_FOUND", "No matching review gate");
+      invariant(!persist && !gateId || gates.length > 0, "NOT_FOUND", "No matching review gate");
       const members: ReviewSnapshot["members"] = [];
       for (const member of gates.flatMap(gate => gate.members)) {
         const binding = this.currentBinding(projectId, member.videoNodeId);
@@ -215,12 +232,14 @@ export class Engine {
         } catch (error) { if (!(error instanceof DomainError)) throw error; keyframe = null; approvalDigest = null; }
         members.push({ videoNodeId: member.videoNodeId, shotId: member.shotId, keyframe, approvalDigest, ready: keyframe !== null && approvalDigest !== null });
       }
+      if (!persist) return { projectId, planId: plan.id, members };
       const snapshot = { id: newId(), projectId, planId: plan.id, members };
       return this.store.insert("review_snapshot", snapshot.id, projectId, snapshot);
     });
   }
   approve(projectId: string, snapshotId: string, videoNodeIds: string[], authorityId: string): Approval[] {
     return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId, authorityId);
       invariant(authorityId.length > 0 && videoNodeIds.length > 0 && new Set(videoNodeIds).size === videoNodeIds.length, "HUMAN_REVIEW_REQUIRED", "Approval requires a human decision and an exact nonempty subset");
       const snapshot = this.store.get<ReviewSnapshot>("review_snapshot", snapshotId);
       invariant(snapshot?.projectId === projectId, "SCOPE_DENIED", "Review snapshot is outside this project");
@@ -251,6 +270,7 @@ export class Engine {
   }
 
   async runReady(): Promise<{ dispatched: number; reused: number; blocked: { nodeId: string; code: string }[] }> {
+    this.recovery.assertWritable();
     this.store.transaction(() => {
       for (const project of this.projects()) for (const binding of this.store.list<NodeBinding>("node_binding", project.id))
         if (binding.state === "active" && binding.planId === project.activePlanId && Object.hasOwn(binding.node.args, "localExecution")
@@ -278,6 +298,7 @@ export class Engine {
         await this.handle(attempt, { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) }); return;
       }
       const provider = this.registry.forRequest(attempt.request);
+      this.recovery.assertFirstSubmit(attempt.projectId, attempt.id);
       const outcome = await this.observeProvider(attempt, options => provider.submit(structuredClone(attempt.request), options), "Submission threw after intent was persisted");
       if (outcome) await this.handle(attempt, outcome);
     }));
@@ -286,6 +307,7 @@ export class Engine {
   }
 
   async reconcile(): Promise<{ reconciled: number; blocked?: { attemptId: string; code: string }[] }> {
+    this.recovery.assertWritable();
     const pending = this.projects().flatMap(project => this.attempts(project.id)).filter(attempt => !TERMINAL.has(attempt.phase));
     let reconciled = 0; const blocked: { attemptId: string; code: string }[] = [];
     const settled = await Promise.allSettled(pending.map(async observed => {
@@ -325,7 +347,9 @@ export class Engine {
       else if (recovered) outcome = authoritativeTask && executionTaskId(recovered) !== authoritativeTask
         ? { type: "unknown", diagnostic: "Owned output conflicts with retained accepted task identity" } : recovered;
       else if (acceptedIds.length === 1) outcome = { type: "accepted", taskId: acceptedIds[0]! };
-      else if (attempt.candidateId === null) outcome = { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) };
+      else if (attempt.candidateId === null) outcome = this.recovery.recoveryMode(attempt.projectId, attempt.id) === "existing_results_only"
+        ? { type: "unknown", diagnostic: "Restored local work has no retained completion; use a fresh request" }
+        : { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) };
       else {
         const result = await this.observeProvider(attempt, options => attempt.taskId
           ? provider.poll(attempt.taskId, structuredClone(attempt.request), options)
@@ -454,6 +478,8 @@ export class Engine {
         this.store.transaction(() => {
           const current = this.owns(attempt); invariant(current, "LOCAL_EXECUTION_LEASE_LOST", "Local dispatch lease changed");
           invariant(!this.store.get("local_execution_dispatch", attempt.id), "LOCAL_EXECUTION_INTERRUPTED", "Local dispatch has no recoverable completion; automatic rerender is disabled");
+          this.recovery.assertWritable(attempt.projectId);
+          this.recovery.assertFreshAuthority(attempt.projectId, "attempt", attempt.id);
           const project = this.store.getProject(attempt.projectId), binding = this.currentBinding(project.id, attempt.nodeId);
           this.localMode(project, binding.node);
           invariant(!this.held(project, binding.id), "EXECUTION_HELD", "Local work is paused or held");
@@ -493,7 +519,7 @@ export class Engine {
       this.store.transaction(() => {
         const current = this.owns(attempt); if (!current) return;
         const held = error instanceof DomainError && error.code === "EXECUTION_HELD";
-        const recoverable = verifiedCompletion || (!!this.store.get("local_execution_dispatch", current.id)
+        const recoverable = verifiedCompletion || (error instanceof DomainError && error.code === "RESTORED_AUTHORITY_REQUIRES_NEW") || (!!this.store.get("local_execution_dispatch", current.id)
           && !(error instanceof DomainError && ["LOCAL_EXECUTION_INTERRUPTED", "LOCAL_EXECUTION_CONFLICT"].includes(error.code)));
         this.store.put("attempt", current.id, current.projectId, { ...current, phase: held || recoverable ? "ingesting" : "failed", leaseExpiresAt: 0,
           failure: held ? null : { id: error instanceof DomainError ? error.code : "LOCAL_EXECUTION_FAILED", technical: true, source: "local_media", retryAllowed: false } });
@@ -622,6 +648,7 @@ export class Engine {
 
   private admit(projectId: string, nodeId: string, preparedFingerprint: string): Attempt {
     return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
       const project = this.store.getProject(projectId); const binding = this.currentBinding(projectId, nodeId); const node = binding.node;
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
       invariant(!this.held(project, nodeId), "EXECUTION_HELD", "Dispatch is paused or held");
@@ -655,6 +682,8 @@ export class Engine {
       if (binding.candidateId) {
         const candidate = this.store.get<Candidate>("candidate", binding.candidateId); const grant = candidate ? this.store.get<Grant>("grant", candidate.grantId) : undefined;
         invariant(candidate?.projectId === projectId && candidate.nodeId === nodeId && grant?.projectId === projectId && grant.kind === node.kind, "ORIGIN_NOT_AUTHORIZED", "Candidate lacks its immutable grant");
+        this.recovery.assertFreshAuthority(projectId, "candidate", candidate.id);
+        this.recovery.assertFreshAuthority(projectId, "grant", grant.id);
       } else invariant(!GENERATED.has(node.kind), "ORIGIN_NOT_AUTHORIZED", "Generation requires a candidate");
       const workKey = binding.candidateId ? null : digest({ projectId, nodeId, fingerprint: inputs.fingerprint });
       const previous = this.attempts(projectId).filter(attempt => binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey).sort((a, b) => b.ordinal - a.ordinal)[0];

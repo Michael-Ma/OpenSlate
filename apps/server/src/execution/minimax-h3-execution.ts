@@ -6,6 +6,7 @@ import { canonical, digest, invariant } from "@openslate/core";
 import { assertExecutionRequest, describeMiniMaxH3Request, MiniMaxH3Provider, registerExecutionProvider } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, ExecutionProvider, ExecutionRequest, MiniMaxH3Model, MiniMaxH3Request, MiniMaxH3Resolution, MiniMaxH3SubmitResult } from "@openslate/providers";
 import { EnvironmentMediaCredentials } from "../application/provider-credentials.js";
+import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { Store } from "../persistence/store.js";
 import type { ArtifactRecord, Attempt } from "./engine.js";
 import { ExecutionOutputStore } from "./output-store.js";
@@ -18,6 +19,7 @@ const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "H3_
 
 /** Trusted opt-in application bridge. Construction registers availability, never spending permission. */
 export class MiniMaxH3Execution implements ExecutionProvider {
+  readonly #recovery: InstallationRecoveryGuard;
   readonly #store: Store; readonly #outputs: ExecutionOutputStore; readonly #root: string;
   readonly #credentials: EnvironmentMediaCredentials; readonly #download: ProtectedVideoDownloader;
   readonly #fetch: typeof globalThis.fetch | undefined; readonly #timeout: number; readonly #now: () => number;
@@ -28,6 +30,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     invariant(options.outputStore.store === options.store && isAbsolute(options.artifactRoot) && options.artifactRoot !== "/",
       "H3_EXECUTION_CONFIGURATION", "Use one application store and an owned artifact root");
     this.#store = options.store; this.#outputs = options.outputStore; this.#credentials = options.credentials; this.#download = options.downloader;
+    this.#recovery = new InstallationRecoveryGuard(options.store);
     this.#fetch = options.fetch; this.#timeout = options.timeoutMs ?? 30000; this.#now = options.now ?? Date.now;
     invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= 120000,
       "H3_EXECUTION_CONFIGURATION", "H3 request timeout must be bounded");
@@ -162,6 +165,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
   }
   private identity(attempt: Attempt) { return { id: attempt.id, version: 1 as const, projectId: attempt.projectId, attemptId: attempt.id, requestDigest: digest(attempt.request) }; }
   private admitted(request: ExecutionRequest): Attempt {
+    this.#recovery.assertWritable();
     assertExecutionRequest(this, request);
     const attempt = this.#store.get<Attempt>("attempt", request.attemptId);
     invariant(attempt && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint && attempt.candidateId && attempt.reservationId
@@ -172,6 +176,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     return attempt;
   }
   private dispatchable(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
+    this.#recovery.assertFirstSubmit(previous.projectId, previous.id);
     const current = this.admitted(previous.request), reservation = this.#store.get<{ state: string }>("reservation", current.reservationId!);
     invariant(expected && Object.keys(expected).every(key => ["owner", "epoch"].includes(key)) && expected.owner === current.leaseOwner
       && expected.epoch === current.leaseEpoch && previous.leaseOwner === current.leaseOwner && previous.leaseEpoch === current.leaseEpoch

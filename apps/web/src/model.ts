@@ -3,7 +3,7 @@ export type ArtifactFixture = boolean | null;
 export interface Shot { id: string; revisionId: string; sceneId: string; purpose: string; action: string; framing: string; motion: string; desiredFrames: number; imagePrompt: string; videoPrompt: string; cueId: string | null }
 export interface ProjectSummary { id: string; name: string; headVersion: number; activePlanId: string | null; shotCount?: number }
 export interface ConversationMessage { id: string; role: "user" | "assistant"; text: string; state?: string; requestId?: string }
-export interface PendingQuestion { id: string; requestId: string; state: "pending" | "answered"; questions: { id: string; header: string; question: string; options: { label: string; description: string }[] }[]; answerRequestId?: string }
+export interface PendingQuestion { id: string; requestId: string; state: "pending" | "answered"; canAnswer?: boolean; questions: { id: string; header: string; question: string; options: { label: string; description: string }[] }[]; answerRequestId?: string }
 export interface ProjectSnapshot {
   project: ProjectSummary & { revisionId: string; brief: string; story: string; shots: Shot[]; scenes: { id: string; revisionId: string; purpose: string }[]; narration: { script: string; source: string }; cues: { id: string; meaning: string; accepted: boolean; measured: boolean }[] };
   messages: { id: string; text: string; state?: string; requestId?: string; editing?: boolean; scopeIds?: string[] }[];
@@ -35,6 +35,7 @@ export function makeMessageCommand(project: ProjectSnapshot["project"], draft: s
 export function makeQuestionReply(projectId: string, question: PendingQuestion, draft: string, key: string): MessageCommand {
   const text = draft.trim();
   if (question.state !== "pending") throw new Error("That question has already been answered. Refresh to continue.");
+  if (question.canAnswer === false) throw new Error("This saved question cannot be continued after recovery. Start a fresh conversation with your answer.");
   if (!text || text.length > 16000 || !key) throw new Error("Write an answer of up to 16,000 characters.");
   return { projectId, key, body: { text, replyToQuestionId: question.id } };
 }
@@ -85,6 +86,11 @@ export function durationLabel(frames: number): string {
 export function pollingDelay(failures: number, hidden = false): number { return Math.min(30000, Math.max(hidden ? 15000 : 4000, 2000 * 2 ** Math.min(4, Math.max(0, failures)))); }
 export function errorMessage(code: string): string {
   const messages: Record<string, string> = {
+    INSTALLATION_QUARANTINED: "Finish the restored installation review before making changes.",
+    RESTORED_AUTHORITY_REQUIRES_NEW: "This saved request cannot start work after recovery. Start a fresh conversation and review new permissions.",
+    RECOVERY_CONFLICT: "The recovery state changed. Refresh and review it again.",
+    RECOVERY_INVALID: "The saved recovery record could not be verified. Keep this installation paused.",
+    RECOVERY_ALREADY_RELEASED: "Recovery was already released by another decision. Refresh to see its current status.",
     AUTH_REQUIRED: "Your local access token was rejected. Reconnect with the current token.",
     REVISION_CONFLICT: "This project changed while you were working. Refresh to continue with its latest state.",
     HUMAN_REVIEW_REQUIRED: "The video is waiting for approval of its exact keyframe and motion plan.",

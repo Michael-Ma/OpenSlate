@@ -13,6 +13,7 @@ import { ProductionService } from "../dist/application/service.js";
 import { ExternalAllowanceService, allowanceIssueContextDigest, allowanceRevokeContextDigest } from "../dist/application/external-allowances.js";
 import { DurableExternalAdmission } from "../dist/execution/durable-external-admission.js";
 import { projectFixture } from "./execution-fixture.mjs";
+import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from "../dist/application/installation-recovery.js";
 
 function fixture(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-allowance-")), dbPath = join(directory, "store.sqlite"), store = new Store(dbPath);
@@ -47,6 +48,25 @@ function fixture(t, options = {}) {
     input, human, issue, calls, setReady: value => { ready = value; } };
 }
 const rows = (f, family) => f.store.list(family, f.projectId);
+
+test("restoration fences existing allowance replay and admission while a fresh human may revoke old unused authority", async t => {
+  const f = fixture(t), issued = f.issue();
+  installRecoveryQuarantine(f.store, { restoreId: randomUUID(), backupId: randomUUID(), backupManifestSha256: "a".repeat(64), sourceDatabaseSha256: "b".repeat(64),
+    originalDataRoot: f.directory, backupCreatedAt: "2026-09-11T00:00:00.000Z", restoredAt: "2026-09-12T00:00:00.000Z" });
+  assert.throws(() => f.allowances.issue(f.projectId, issued.actor, issued.input), { code: "INSTALLATION_QUARANTINED" });
+  const snapshot = new InstallationRecoveryGuard(f.store).snapshot(); assert.equal(snapshot.counts.unusedAllowances, 1);
+  releaseRecovery(f.store, { restoreId: snapshot.receipt.restoreId, expectedReceiptDigest: snapshot.receiptDigest,
+    expectedSummaryDigest: snapshot.summaryDigest }, { principalId: "local-person", commandId: randomUUID() });
+  assert.throws(() => f.allowances.issue(f.projectId, issued.actor, issued.input), { code: "RESTORED_AUTHORITY_REQUIRES_NEW" });
+  const fresh = f.production.beginRequest(f.projectId, "local-person", "Resume", { editing: false }); f.production.control(f.projectId, fresh, "resume");
+  const run = await f.engine.runReady(); assert.equal(run.dispatched, 0); assert.ok(run.blocked.every(row => row.code === "RESTORED_AUTHORITY_REQUIRES_NEW"));
+  const selected = f.selections()[0];
+  assert.throws(() => f.store.transaction(() => f.policy.authorize({ attemptId: randomUUID(), projectId: f.projectId, nodeId: selected.nodeId,
+    candidateId: selected.candidateId, profile: f.profile, estimatedMicros: "100" })), { code: "RESTORED_AUTHORITY_REQUIRES_NEW" });
+  const revoked = { allowanceId: issued.allowance.id }, human = f.human(revoked, [f.projectId], "revoke");
+  assert.equal(f.allowances.revoke(f.projectId, human, revoked).allowanceId, issued.allowance.id);
+  assert.equal(f.calls.length, 0); assert.equal(rows(f, "external_allowance_consumption").length, 0);
+});
 
 test("explicit read-only human spending authority issues once without changing plan, grants, holds or director epochs", t => {
   const f = fixture(t), editing = f.production.beginRequest(f.projectId, "local-person", "Edit the opening", { scopeIds: ["shot-0"] });
