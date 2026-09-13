@@ -20,9 +20,21 @@ export interface ExecutionOutput {
 }
 /** Small owned-byte descriptor. Raw bytes and protected vendor locators stay outside execution evidence. */
 export interface ExecutionSpoolOutput {
-  port: "image" | "video"; kind: "image" | "video"; mimeType: "image/png" | "video/mp4";
-  extension: "png" | "mp4"; sha256: string; byteLength: number; fixture: false;
+  port: "image" | "video" | "audio" | "cues"; kind: "image" | "video" | "audio" | "data";
+  mimeType: "image/png" | "video/mp4" | "audio/wav" | "application/json";
+  extension: "png" | "mp4" | "wav" | "json"; sha256: string; byteLength: number; fixture: false;
   storage: { type: "spool"; spoolId: string };
+}
+export type ExecutionSpoolRole = Pick<ExecutionSpoolOutput, "port" | "kind" | "mimeType" | "extension">;
+/** Only generated operations have raw output spools; local render/timeline never fall back here. */
+export const EXECUTION_SPOOL_ROLES = Object.freeze({
+  image: Object.freeze({ port: "image", kind: "image", mimeType: "image/png", extension: "png" } as const),
+  video: Object.freeze({ port: "video", kind: "video", mimeType: "video/mp4", extension: "mp4" } as const),
+  speech: Object.freeze({ port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav" } as const),
+  transcription: Object.freeze({ port: "cues", kind: "data", mimeType: "application/json", extension: "json" } as const),
+});
+export function executionSpoolRole(kind: OperationKind): Readonly<ExecutionSpoolRole> | null {
+  return Object.hasOwn(EXECUTION_SPOOL_ROLES, kind) ? EXECUTION_SPOOL_ROLES[kind as keyof typeof EXECUTION_SPOOL_ROLES] : null;
 }
 export interface ExecutionSpoolCompletion {
   type: "completed"; version: 2; receiptId: string; vendorTaskId: string | null;
@@ -139,7 +151,8 @@ const object = (value: unknown): value is Record<string, unknown> =>
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,255}$/.test(value);
 const exact = (value: Record<string, unknown>, fields: string[]): boolean => Object.keys(value).every(key => fields.includes(key));
 export const MAX_EXECUTION_OUTPUT_BYTES = 64 * 1024 * 1024;
-export const EXECUTION_SPOOL_LIMITS = Object.freeze({ image: 32 * 1024 * 1024, video: 256 * 1024 * 1024 });
+export const EXECUTION_SPOOL_LIMITS = Object.freeze({ image: 32 * 1024 * 1024, video: 256 * 1024 * 1024,
+  audio: 32 * 1024 * 1024, data: 4 * 1024 * 1024 });
 export function isSpoolCompletion(value: ExecutionOutcome): value is ExecutionSpoolCompletion {
   return value.type === "completed" && "version" in value && value.version === 2;
 }
@@ -155,21 +168,25 @@ function normalizeSpoolCompletion(value: Record<string, unknown>, request?: Exec
     || !hash(value.receiptId) || !(value.vendorTaskId === null || id(value.vendorTaskId))
     || !Array.isArray(value.outputs) || value.outputs.length !== 1) return null;
   const output = value.outputs[0];
+  const role = object(output) ? Object.values(EXECUTION_SPOOL_ROLES).find(candidate => candidate.port === output.port
+    && candidate.kind === output.kind && candidate.mimeType === output.mimeType && candidate.extension === output.extension) : undefined;
   if (!object(output) || !exact(output, ["port", "kind", "mimeType", "extension", "sha256", "byteLength", "fixture", "storage"])
-    || !((output.port === "image" && output.kind === "image" && output.mimeType === "image/png" && output.extension === "png")
-      || (output.port === "video" && output.kind === "video" && output.mimeType === "video/mp4" && output.extension === "mp4"))
+    || !role || ((role.kind === "audio" || role.kind === "data") && value.vendorTaskId !== null)
     || !hash(output.sha256) || !Number.isSafeInteger(output.byteLength) || Number(output.byteLength) <= 0
-    || Number(output.byteLength) > EXECUTION_SPOOL_LIMITS[output.kind as "image" | "video"] || output.fixture !== false
+    || Number(output.byteLength) > EXECUTION_SPOOL_LIMITS[role.kind] || output.fixture !== false
     || !object(output.storage) || !exact(output.storage, ["type", "spoolId"]) || output.storage.type !== "spool"
-    || output.storage.spoolId !== value.receiptId || (request && request.kind !== output.kind)) return null;
+    || output.storage.spoolId !== value.receiptId || (request && executionSpoolRole(request.kind) !== role)) return null;
   return structuredClone(value) as unknown as ExecutionSpoolCompletion;
 }
 
 /** Validate and copy normalized adapter observations before saving immutable evidence. */
 export function normalizeExecutionOutcome(value: unknown, request?: ExecutionRequest): ExecutionOutcome {
+  const synchronousRaw = request?.kind === "speech" || request?.kind === "transcription"
+    || (object(value) && Array.isArray(value.outputs) && value.outputs.length === 1 && object(value.outputs[0])
+      && (value.outputs[0].kind === "audio" || value.outputs[0].kind === "data"));
   const invalid = (): ExecutionOutcome => ({ type: "unknown", diagnostic: "Invalid execution provider observation",
     ...(object(value) && value.type === "completed" && "version" in value
-      ? value.version === 2 && !("taskId" in value) && id(value.vendorTaskId) ? { taskId: value.vendorTaskId } : {}
+      ? value.version === 2 && !synchronousRaw && !("taskId" in value) && id(value.vendorTaskId) ? { taskId: value.vendorTaskId } : {}
       : object(value) && ["accepted", "completed", "failed", "unknown"].includes(String(value.type)) && id(value.taskId) ? { taskId: value.taskId } : {}) });
   if (!object(value)) return invalid();
   if (value.type === "completed" && "version" in value) return normalizeSpoolCompletion(value, request) ?? invalid();

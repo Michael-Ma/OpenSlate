@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { open } from "node:fs/promises";
 import { DEFAULT_PROFILES, DomainError, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, ProjectRecord, ProviderProfile } from "@openslate/core";
-import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionTaskId, fixtureOutputs, isLegacyExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
+import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionSpoolRole, executionTaskId, fixtureOutputs, isLegacyExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
@@ -12,6 +12,8 @@ import { ExecutionOutputStore } from "./output-store.js";
 import { materializeFixtureOutput } from "./fixture-ingester.js";
 import { assertNormalizedVideoIngestion } from "./video-derivation.js";
 import type { NormalizedVideoIngestion, VideoDerivationIntent } from "./video-derivation.js";
+import { assertNormalizedAudioIngestion } from "./audio-derivation.js";
+import type { AudioDerivationIntent, NormalizedAudioIngestion } from "./audio-derivation.js";
 import { assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution, isLocalExecutionAttempt, localFingerprint, localWorkKey } from "./local-execution.js";
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent, LocalExecutionOptions, LocalExecutionPort, LocalExecutionResult, PreparedLocalExecution } from "./local-execution.js";
 
@@ -34,7 +36,7 @@ export interface Attempt {
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
-  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio" | "generated_video";
+  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio" | "generated_video" | "generated_audio";
   outputReceiptId?: string; outputSpoolId?: string; byteLength?: number;
   width?: number; height?: number; validationDigest?: string;
   derivationId?: string; sourceDescriptorId?: string;
@@ -48,10 +50,11 @@ export interface ReviewSnapshot {
 }
 interface Evidence { id: string; projectId: string; attemptId: string; outcome: ExecutionOutcome; outcomeDigest: string; recordedAt: string }
 /** Trusted host hook: decode/probe and publish immutable bytes before returning their exact record. */
+type NormalizedIngestion = NormalizedVideoIngestion | NormalizedAudioIngestion;
 export interface ExecutionOutputIngestor {
-  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<IngestibleExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord | NormalizedVideoIngestion> | ArtifactRecord | NormalizedVideoIngestion;
+  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<IngestibleExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord | NormalizedIngestion> | ArtifactRecord | NormalizedIngestion;
 }
-interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedVideoIngestion }
+interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedIngestion }
 interface ResolvedInputs { artifacts: ArtifactRef[]; fingerprint: string }
 export interface ExternalExecutionAdmission {
   /** Trusted synchronous policy; check readiness and select allowance in this admission transaction. */
@@ -779,8 +782,11 @@ export class Engine {
     let outputs: IngestedOutput[] | null;
     try { outputs = await this.ingestOutputs(attempt, completed.outputs); }
     catch (error) {
+      const role = executionSpoolRole(attempt.request.kind), output = completed.outputs[0];
       if (!(error instanceof DomainError && error.code === "MEDIA_BUSY" && isSpoolCompletion(completed)
-        && completed.outputs.length === 1 && completed.outputs[0]?.kind === "video" && completed.outputs[0].port === "video")) throw error;
+        && completed.outputs.length === 1 && role && (role.kind === "video" || role.kind === "audio")
+        && output?.kind === role.kind && output.port === role.port && output.mimeType === role.mimeType && output.extension === role.extension
+        && this.completionBound(attempt, completed))) throw error;
       // A trusted local normalizer is occupied. Keep the durable completion and
       // liability, but let the next cycle recover it without a vendor call.
       this.store.transaction(() => {
@@ -799,7 +805,8 @@ export class Engine {
         if (normalized) this.validateDerived(current, output, normalized);
         this.store.insert("artifact", record.id, attempt.projectId, record); mapped[output.port] = record.artifact;
         if (normalized) {
-          this.store.insert("video_derivation_receipt", normalized.derivation.id, attempt.projectId, normalized.derivation);
+          this.store.insert(normalized.type === "normalized_audio" ? "audio_derivation_receipt" : "video_derivation_receipt",
+            normalized.derivation.id, attempt.projectId, normalized.derivation);
           this.store.insert("media_source", record.id, attempt.projectId, normalized.mediaSource);
         }
         this.store.appendEvent(attempt.projectId, "artifact.published", { artifactId: record.id, attemptId: attempt.id, fixture: record.fixture });
@@ -881,7 +888,9 @@ export class Engine {
           output: structuredClone(output), artifactDir: this.artifactDir, signal }) : materializeFixtureOutput({ attempt, output, artifactDir: this.artifactDir, signal });
         if (signal.aborted) return [];
         const snapshot = structuredClone(received);
-        const normalized = "type" in snapshot && snapshot.type === "normalized_video" ? snapshot : undefined;
+        const normalized = "type" in snapshot && (snapshot.type === "normalized_video" || snapshot.type === "normalized_audio") ? snapshot : undefined;
+        if (isSpoolOutput(output) && output.kind === "audio") invariant(normalized?.type === "normalized_audio",
+          "AUDIO_DERIVATION_CONFLICT", "Real audio requires its exact normalized derivation result");
         const record = normalized ? normalized.artifact : snapshot as ArtifactRecord;
         await this.validateIngested(attempt, output, record, signal, normalized);
         outputs.push({ output, record, ...(normalized ? { normalized } : {}) });
@@ -890,13 +899,18 @@ export class Engine {
     });
   }
 
-  private validateDerived(attempt: Attempt, output: IngestibleExecutionOutput, result: NormalizedVideoIngestion): VideoDerivationIntent {
+  private validateDerived(attempt: Attempt, output: IngestibleExecutionOutput, result: NormalizedIngestion): VideoDerivationIntent | AudioDerivationIntent {
+    if (result.type === "normalized_audio") {
+      const intent = this.store.get<AudioDerivationIntent>("audio_derivation_intent", result.derivation?.id);
+      invariant(intent, "AUDIO_DERIVATION_CONFLICT", "Generated audio requires its durable pre-normalization intent");
+      assertNormalizedAudioIngestion(intent, attempt, output, result); return intent;
+    }
     const intent = this.store.get<VideoDerivationIntent>("video_derivation_intent", result.derivation?.id);
     invariant(intent, "VIDEO_DERIVATION_CONFLICT", "Generated video requires its durable pre-transcode intent");
     assertNormalizedVideoIngestion(intent, attempt, output, result); return intent;
   }
 
-  private async validateIngested(attempt: Attempt, output: IngestibleExecutionOutput, record: ArtifactRecord, signal: AbortSignal, normalized?: NormalizedVideoIngestion): Promise<void> {
+  private async validateIngested(attempt: Attempt, output: IngestibleExecutionOutput, record: ArtifactRecord, signal: AbortSignal, normalized?: NormalizedIngestion): Promise<void> {
     const derivation = normalized ? this.validateDerived(attempt, output, normalized) : undefined;
     const expectedSha = normalized ? normalized.derivation.source.sha256 : output.sha256;
     const expectedSize = normalized ? normalized.derivation.source.byteLength : isSpoolOutput(output) ? output.byteLength : undefined;

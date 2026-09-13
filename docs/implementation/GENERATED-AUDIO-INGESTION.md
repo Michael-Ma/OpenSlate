@@ -1,12 +1,12 @@
 # Generated audio ingestion and transcript candidates
 
-September 12, 2026. **Accepted plan; first ingestion slice is next.** File names are repository-relative. Proposed APIs below are not yet implemented; standalone transports are already verified offline. The accepted transport brief supplies protocol details, with the corrected speech policy name `utf8-cap-v1`: it is a host byte restriction, not an exact tokenizer or provider-acceptance guarantee.
+September 12, 2026. **Raw storage and normalized generated-audio ingestion are implemented and verified offline. Derivative, candidate and narration integration remain pending.** File names are repository-relative. The accepted transport brief supplies protocol details, with the corrected speech policy name `utf8-cap-v1`: it is a host byte restriction, not an exact tokenizer or provider-acceptance guarantee.
 
 ## Smallest independently shippable slice
 
-First ship **durable raw audio/data spools and normalized generated-audio artifacts**, exercised with injected transport results. Reuse the existing Engine attempt, output-slot and leased ingestion machinery. Do not register speech/ASR adapters in the launcher, change the installed profile catalog, create HTTP/tools, bind narration segments or mark application synthesis/transcription available. A verified playable artifact is a useful completed boundary without claiming a working narration-generation workflow.
+The implemented slice provides **durable raw audio/data spools and normalized generated-audio artifacts**, exercised with injected transport results. It reuses the existing Engine attempt, output-slot and leased ingestion machinery. Speech/ASR adapters are not registered in the launcher; installed profiles, HTTP/tools, narration bindings and application synthesis/transcription capabilities remain unchanged. A verified playable artifact is a completed boundary, while the narration-generation workflow still needs integration.
 
-Follow with the **16 kHz transcription-input derivative and unreviewed transcript candidate** slice. Human adoption and paid application bridges are subsequent work. Separating these keeps first delivery independent of narration editing, chunk orchestration, new spending UI and transcript acceptance.
+Next implement the **16 kHz transcription-input derivative**, detailed in [owned transcription preparation](TRANSCRIPTION-AUDIO-PREPARATION.md), then unreviewed transcript candidates. Human adoption and paid application bridges follow. This keeps ingestion independent of narration editing, chunk orchestration, new spending UI and transcript acceptance.
 
 ```mermaid
 flowchart LR
@@ -21,7 +21,17 @@ flowchart LR
   Human --> Canonical[Reviewed canonical narration]
 ```
 
-The diagram shows future integration, not authorization to execute these stages automatically.
+The diagram includes future integration and does not authorize automatic execution of these stages.
+
+## Verification of the implemented slice
+
+The full checkout passes **1,012 tests, zero failures/cancellations/skips**, with all builds/typechecks and the installed no-turn Codex probe. The 64 added tests cover 26 raw-role/storage cases, 22 PCM/normalization/managed-audio cases, ten Engine integrations, five backup cases and one router case. Independent review approved storage, normalization, Engine publication and backup closure. Existing image/video receipt IDs, SQL bodies, manifests, slots and completion digests were compared against the previous implementation and remain byte-identical.
+
+Two separate end-to-end proofs used injected speech HTTP responses and actual local FFmpeg. Both passed 12 checks: a two-second fixture and a **360-second** fixture. The latter preserved 8,640,000 mono source samples at 24 kHz as 17,280,000 stereo samples at 48 kHz, with exact endpoint agreement. Full PCM decoding confirmed channel equality, signal and leading/trailing silence. Each proof forced SQL publication failure after filesystem completion, reopened both databases and recovered with one total submit shim call, one conversion and no poll/lookup. Recovery explicitly forbade conversion and current-toolchain lookup. Canonical narration and authority stayed unchanged. Separate read-only audits added 23 checks to the two-second proof and 26 to the six-minute proof, using streamed hashes/decoding for the larger recording.
+
+The maintained real-media regression also exports a filesystem-only completion, **restores the backup at its original root**, verifies quarantine, explicitly releases it and recovers the saved result without another conversion. Imported first submission remains denied. Tests retain malformed or incomplete output as evidence, reject truncated endpoints and preserve paid liability.
+
+The first private six-minute harness incorrectly yielded its entire 17 MB raw response as one chunk. Storage correctly rejected the oversized chunk before conversion. The corrected harness streams 1 MiB chunks; its successful run and the failed original report are retained separately. No real media/model calls occurred. These are synthetic PCM and local recovery checks, not speech-quality, account-access or production audio-bridge evidence. See [sanitized results](generated-audio-evidence.json).
 
 ## Existing seams and exact file changes
 
@@ -36,7 +46,7 @@ The diagram shows future integration, not authorization to execute these stages 
 | `persistence/store.ts` | Immutable `audio_derivation_intent` / `audio_derivation_receipt`, same-project attempt/slot/artifact references, exact raw/normalized identities and generated `media_source` checks. Entity-family additions need no new table migration. |
 | `persistence/installation-backup.ts`, `installation-backup-closure.ts` | Include the published `audio-derivations/completions` namespace and filesystem-only audio completions. Add derivative/transcript namespaces only when their actual producers and closure contracts ship. Validate new raw-role and derivation closure rather than merely copying unknown files. |
 
-Current `LocalMediaService.importMedia({kind:"audio"})` already preserves original bytes at `media/blobs/<rawSha>.source`, installs decoded 48 kHz stereo PCM WAV plus `media/sources/<descriptorId>.json`, and verifies duration. Its public recipe descriptor and attempt-keyed outer completion index are currently video-specific. Its general 0.1-second compressed-audio tolerance is not a license to trim the new narrow PCM transcription derivative.
+`LocalMediaService.importMedia({kind:"audio"})` preserves original bytes at `media/blobs/<rawSha>.source`, installs decoded 48 kHz stereo PCM WAV plus `media/sources/<descriptorId>.json`, and verifies duration. Generated audio now has a separate recipe descriptor and attempt-keyed completion index, preserving existing video/human identities. Its general 0.1-second compressed-audio tolerance is not used to accept generated PCM endpoints.
 
 ## Raw receipt and restart contract
 
@@ -50,13 +60,13 @@ Restart checks the winning local slot before provider code. Blob/manifest/slot r
 
 ## Normalized generated audio and provenance
 
-Proposed essential records (IDs/digests computed by the application):
+Implemented essential records (IDs/digests computed by the application):
 
 ```ts
 interface AudioDerivationIntent {
   id: string; version: 1; projectId: string; attemptId: string;
   requestDigest: string; slotId: string; spoolId: string;
-  rawSha256: string; rawByteLength: number; artifactId: string;
+  rawSha256: string; rawByteLength: number; artifactId: string; recipe: "generated-audio-v1";
   rawPcm: { sampleRate: number; channels: 1 | 2; sampleCount: number; bitsPerSample: 16 };
   normalization: {
     version: 1; recipe: "pcm-s16le-48khz-stereo-v1";
@@ -87,7 +97,7 @@ The resulting artifact/media source records retain `origin:"generated_audio"`, r
 
 ## Same-source 48 kHz →16 kHz derivative
 
-The next slice adds `media/transcription-audio.ts` and `narration/transcription-records.ts`. Resolve a same-project owned audio source by ID and verify its descriptor and bytes; neither transport nor model supplies a filesystem path. Reuse a generated source or a human-supplied source identically after ownership checks.
+**Planned; not implemented in the ingestion milestone.** The [next slice](TRANSCRIPTION-AUDIO-PREPARATION.md) adds separate media and transcription records. Resolve a same-project owned audio source by ID and verify its descriptor and bytes; neither transport nor model supplies a filesystem path. Reuse a generated source or a human-supplied source identically after ownership checks.
 
 `TranscriptionAudioIntent` pins source artifact/descriptor IDs, SHA, byte length, `sampleRate:48000`, `channels:2`, measured sample count, **complete range** `[0,sourceSamples)`, recipe/toolchain/limits. `TranscriptionAudioReceipt` pins intent digest, derivative hash/length, `sampleRate:16000`, `channels:1`, `pcm_s16le`, actual decoded sample count and `endDelta48kSamples = derivativeSamples*3-sourceSamples`.
 
@@ -97,7 +107,7 @@ Keep its own durable intent/completion and shared-worker ownership. Hash recipe/
 
 ## Transcript candidates, not human cues
 
-Add `narration/transcript-candidate.ts` and optionally `execution/spool-transcript-ingester.ts` after derivative support. Parse the exact winning raw JSON through the same versioned pure parser used by the transport. Bind `TranscriptCandidate` to attempt/request/raw-spool IDs, parser version, exact derivative receipt, source descriptor/hash, raw-response hash and a separately hashed detached text/word projection. Store original word seconds, mapped source-local sample intervals and explicit timing issues. Never derive application source identity from an ASR response field.
+**Planned; not implemented in the ingestion milestone.** Add `narration/transcript-candidate.ts` and optionally `execution/spool-transcript-ingester.ts` after derivative support. Parse the exact winning raw JSON through the same versioned pure parser used by the transport. Bind `TranscriptCandidate` to attempt/request/raw-spool IDs, parser version, exact derivative receipt, source descriptor/hash, raw-response hash and a separately hashed detached text/word projection. Store original word seconds, mapped source-local sample intervals and explicit timing issues. Never derive application source identity from an ASR response field.
 
 Map each absolute timestamp once with `seconds-to-48k-half-up-v1` (`floor(seconds*48000+0.5)` for finite nonnegative bounded seconds). The derivative and source share the same time origin; do not first round to a 16 kHz integer and then multiply, stretch timestamps to force endpoint equality, clamp to source bounds or add project `atSample`. Preserve out-of-range, overlapping and nonmonotone timings as candidate issues requiring review. No confidence is invented. Empty text/words is a completed no-speech candidate, never automatic retry permission.
 

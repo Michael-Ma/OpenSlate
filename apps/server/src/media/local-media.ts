@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { runMediaProcess } from "./process.js";
-import type { FrozenRenderManifest, LocalMediaOptions, MediaLimits, MediaNormalizationIdentity, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
+import type { FrozenRenderManifest, LocalMediaOptions, MediaAudioNormalizationIdentity, MediaLimits, MediaNormalizationIdentity, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
 
 const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioPlacements: 64, timeoutMs: 120000 };
 // No playlists, concat demuxer, devices or network protocols. MOV external data
@@ -79,6 +79,18 @@ export class LocalMediaService {
         maxInputBytes: this.limits.maxInputBytes, maxOutputBytes: this.limits.maxOutputBytes,
         maxDurationFrames: this.limits.maxDurationFrames, timeoutMs: this.limits.timeoutMs });
     });
+  }
+
+  /** Generated audio has its own recipe; existing human/video descriptor identities are unchanged. */
+  async describeAudioNormalization(options: { signal?: AbortSignal } = {}): Promise<MediaAudioNormalizationIdentity> {
+    const signal = options.signal; aborted(signal);
+    const result = await this.exclusive(async () => {
+      const toolchainDigest = await this.toolchainDigest(signal); aborted(signal);
+      return frozen({ version: 1 as const, recipe: "pcm-s16le-48khz-stereo-v1" as const, toolchainDigest,
+        maxInputBytes: this.limits.maxInputBytes, maxOutputBytes: this.limits.maxOutputBytes,
+        maxSamples: this.limits.maxDurationFrames * SAMPLES_PER_FRAME, timeoutMs: this.limits.timeoutMs });
+    });
+    aborted(signal); return result;
   }
 
   /** Read-only inspection of a bounded snapshot, never a remote URL. */

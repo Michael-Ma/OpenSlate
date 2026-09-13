@@ -28,7 +28,8 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Project guidance upgrades](implementation/DIRECTOR-TOOLS-UPGRADE.md) | Explicit human upgrade, old-epoch preservation and browser evidence |
 | [Local media integration](implementation/MEDIA-INTEGRATION.md) | Owned uploads, render jobs, preview recovery and six-minute synthetic evidence |
 | [Six-minute workflow probe](implementation/SIX-MINUTE-WORKFLOW.md) | Sixty shots, exact batch review, one-shot reuse and uncertain-job restart using fake media |
-| [Generated audio ingestion](implementation/GENERATED-AUDIO-INGESTION.md) | Accepted raw-storage, complete PCM normalization, provenance and transcript-candidate phases |
+| [Transcription audio preparation](implementation/TRANSCRIPTION-AUDIO-PREPARATION.md) | Next slice: owned complete-source 16 kHz derivative and recovery before separately authorized transcription |
+| [Generated audio ingestion](implementation/GENERATED-AUDIO-INGESTION.md) | Verified raw storage, complete PCM normalization, provenance and six-minute recovery; later transcript phases |
 | [OpenAI audio transports](implementation/OPENAI-AUDIO-TRANSPORTS.md) | Standalone speech/transcription transports, exact wire identity, cancellation and offline evidence |
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |

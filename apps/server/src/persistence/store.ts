@@ -8,6 +8,10 @@ import { initializeDatabase } from "./migrations.js";
 import { flushSnapshot, prepareSnapshotDirectory, snapshotDatabase, verifyDatabase } from "./database-snapshot.js";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
 import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
+import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormalizedAudioIngestion } from "../execution/audio-derivation.js";
+import type { AudioDerivationIntent, AudioDerivationReceipt } from "../execution/audio-derivation.js";
+import { assertOutputReceiptIdentity } from "../execution/output-store.js";
+import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt, ArtifactRecord } from "../execution/engine.js";
 import { assertImageExecutionDispatch, assertImageExecutionMapping, assertImageExecutionResult } from "../execution/openai-image-receipts.js";
 import type { ImageExecutionDispatch, ImageExecutionMapping, ImageExecutionResult } from "../execution/openai-image-receipts.js";
@@ -232,14 +236,22 @@ export class Store {
     }
     if (kind === "execution_output_receipt") {
       reference("attempt", body.attemptId);
-      const attempt = this.get<{ request: unknown }>("attempt", String(body.attemptId))!;
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
       invariant(body.requestDigest === digest(attempt.request), "IDENTITY_MISMATCH", "Output receipt must bind its immutable attempt request");
+      if (attempt.request.kind === "speech" || attempt.request.kind === "transcription" || body.kind === "audio" || body.kind === "data")
+        assertOutputReceiptIdentity({ ...body, id, projectId } as unknown as OutputReceipt, attempt);
     }
     if (kind === "execution_output_spool") {
       reference("execution_output_receipt", body.receiptId);
       const receipt = this.get<Record<string, unknown>>("execution_output_receipt", String(body.receiptId))!;
       invariant(id === body.receiptId && body.attemptId === receipt.attemptId && body.requestDigest === receipt.requestDigest && body.port === receipt.port,
         "IDENTITY_MISMATCH", "Output spool must match its receipt and attempt");
+      if (receipt.kind === "audio" || receipt.kind === "data") {
+        const source = receipt.source as { kind: string; sha256: string; byteLength: number };
+        invariant(body.version === 1 && source.kind === "returned_bytes" && body.sha256 === source.sha256 && body.byteLength === source.byteLength
+          && body.blobKey === `${source.sha256}.blob` && typeof body.storageId === "string" && /^[a-f0-9-]{36}$/.test(body.storageId),
+        "IDENTITY_MISMATCH", "Audio/data spool must preserve its exact returned-byte receipt");
+      }
     }
     if (kind === "execution_output_slot") {
       reference("execution_output_spool", body.spoolId);
@@ -327,6 +339,36 @@ export class Store {
       invariant(receipt.source.artifactId === id && receipt.attemptId === body.attemptId && canonical(receipt.source) === canonical(body.source)
         && body.requestId === undefined, "IDENTITY_MISMATCH", "Generated media source must retain its exact derivation without upload authority");
     }
+    if (kind === "audio_derivation_intent") {
+      reference("attempt", body.attemptId); reference("execution_output_slot", body.slotId); reference("execution_output_spool", body.spoolId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      const slot = this.get<{ spoolId: string; attemptId: string; port: string }>("execution_output_slot", String(body.slotId))!;
+      const spool = this.get<{ sha256: string; byteLength: number }>("execution_output_spool", String(body.spoolId))!;
+      invariant(slot.spoolId === body.spoolId && slot.attemptId === body.attemptId && slot.port === "audio",
+        "IDENTITY_MISMATCH", "Audio derivation must bind the exact winning raw slot");
+      assertAudioDerivationIntent({ ...body, id, projectId } as unknown as AudioDerivationIntent, attempt,
+        { port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav", sha256: spool.sha256, byteLength: spool.byteLength,
+          fixture: false, storage: { type: "spool", spoolId: String(body.spoolId) } });
+    }
+    if (kind === "audio_derivation_receipt") {
+      reference("audio_derivation_intent", id);
+      const intent = this.get<AudioDerivationIntent>("audio_derivation_intent", id)!;
+      const receipt = { ...body, id, projectId } as unknown as AudioDerivationReceipt;
+      assertAudioDerivationReceipt(intent, receipt); reference("artifact", receipt.source.artifactId);
+      const artifact = this.get<ArtifactRecord>("artifact", receipt.source.artifactId)!;
+      assertNormalizedAudioIngestion(intent, this.get<Attempt>("attempt", intent.attemptId)!,
+        { port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav", sha256: intent.rawSha256,
+          byteLength: intent.rawByteLength, fixture: false, storage: { type: "spool", spoolId: intent.spoolId } },
+        { type: "normalized_audio", artifact, derivation: receipt, mediaSource: { id: intent.artifactId, projectId, source: receipt.source,
+          origin: "generated_audio", attemptId: intent.attemptId, derivationId: id } });
+    }
+    if (kind === "media_source" && body.origin === "generated_audio") {
+      reference("artifact", id); reference("attempt", body.attemptId); reference("audio_derivation_receipt", body.derivationId);
+      const receipt = this.get<AudioDerivationReceipt>("audio_derivation_receipt", String(body.derivationId))!;
+      invariant(canonical({ ...body, id, projectId }) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId,
+        source: receipt.source, origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }),
+      "IDENTITY_MISMATCH", "Generated audio source must retain its exact derivation without human upload authority");
+    }
     if (kind === "director_turn") {
       reference("message", body.requestId);
       if (body.epochId !== null) reference("epoch", body.epochId);
@@ -380,6 +422,8 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
+      if (kind === "audio_derivation_intent" || kind === "audio_derivation_receipt")
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {

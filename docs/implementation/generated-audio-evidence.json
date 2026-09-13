@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Injected synchronous speech output with real local PCM ingestion and recovery; no production paid audio bridge",
+  "fullCheck": { "tests": 1012, "passed": 1012, "failed": 0, "cancelled": 0, "skipped": 0, "builds": "passed", "typechecks": "passed", "installedNoTurnCodexProbe": true },
+  "focused": { "newTests": 64, "rawSpoolNew": 26, "normalizationAndManagedAudio": 22, "engineIntegration": 10, "backup": 5, "routerNew": 1 },
+  "proofs": [
+    { "durationSeconds": 2, "checks": 12, "passed": 12, "raw": { "sampleRate": 24000, "channels": 1, "samples": 48000, "byteLength": 96044 }, "normalized": { "sampleRate": 48000, "channels": 2, "samples": 96000, "byteLength": 384078 }, "endpointDeltaNumerator": 0, "injectedSpeechResponses": 1, "providerSubmitShimCalls": 1, "providerPollCalls": 0, "providerLookupCalls": 0, "localConversions": 1, "sqlFailureAndReopen": "passed", "decodedToneStereoAndSilence": "passed", "cleanupErrors": 0 },
+    { "durationSeconds": 360, "checks": 12, "passed": 12, "raw": { "sampleRate": 24000, "channels": 1, "samples": 8640000, "byteLength": 17280044 }, "normalized": { "sampleRate": 48000, "channels": 2, "samples": 17280000, "byteLength": 69120078 }, "endpointDeltaNumerator": 0, "injectedSpeechResponses": 1, "providerSubmitShimCalls": 1, "providerPollCalls": 0, "providerLookupCalls": 0, "localConversions": 1, "sqlFailureAndReopen": "passed", "decodedToneStereoAndSilence": "passed", "cleanupErrors": 0 }
+  ],
+  "independentReview": { "rawSpool": "approved", "normalization": "approved", "engineStoreRouterBackup": "approved", "twoSecondProofAdditionalChecks": 23, "sixMinuteProofAdditionalChecks": 26 },
+  "actualSameRootRestore": "Maintained real-FFmpeg test backs up a filesystem-only audio completion, restores at the original root, requires human quarantine release, recovers without repeat conversion or provider calls, and denies imported first submission",
+  "preserved": ["canonical narration", "script/audio/timing acceptance", "existing image/video/fake storage identities", "paid unknown liability", "original owner and cancellation fences"],
+  "modelCalls": 0,
+  "mediaApiCalls": 0,
+  "limitations": ["Synthetic tones are not generated spoken narration or an audio-quality assessment", "No launcher/catalog/admission bridge or narration adoption is enabled", "First six-minute private harness run yielded an oversized raw chunk and was correctly rejected before conversion; the corrected run streams 1 MiB chunks and the failed report is retained", "Filesystem/SQLite crash boundaries are injected; this does not prove every power-loss or platform behavior", "Conversion may repeat if interrupted before the durable completion index is published"]
+}

@@ -56,7 +56,7 @@ export function installationBackupFileKind(path: string): BackupFileKind | null 
     || new RegExp(`^media/completions/${HASH}-${HASH}\\.json$`).test(path)
     || path === "execution-output/identity.json"
     || new RegExp(`^execution-output/(manifests|slots)/${HASH}\\.json$`).test(path)
-    || new RegExp(`^video-derivations/completions/${HASH}\\.json$`).test(path)) return "owned_metadata";
+    || new RegExp(`^(video|audio)-derivations/completions/${HASH}\\.json$`).test(path)) return "owned_metadata";
   const skill = SKILL.exec(path);
   if (skill && skill[2]!.split("/").every(part => /^(?:[A-Za-z0-9][A-Za-z0-9._-]*|\.openslate-snapshot\.json)$/.test(part))) return "owned_metadata";
   return null;
@@ -104,7 +104,7 @@ async function enumerate(root: string, bound: InstallationBackupLimits, signal: 
     for await (const entry of stream) { if (entry.name !== INSTALLATION_BACKUP_MANIFEST) await walk(entry.name); }
   } else {
     for (const prefix of ["artifacts", "fixture-imports", "media/blobs", "media/sources", "media/manifests", "media/completions",
-      "execution-output/identity.json", "execution-output/blobs", "execution-output/manifests", "execution-output/slots", "video-derivations/completions", "skill-snapshots"]) await walk(prefix);
+      "execution-output/identity.json", "execution-output/blobs", "execution-output/manifests", "execution-output/slots", "video-derivations/completions", "audio-derivations/completions", "skill-snapshots"]) await walk(prefix);
     if (!(await missing(join(root, "native")))) {
       await checkedPath(root, "native"); const stream = await opendir(join(root, "native"));
       for await (const entry of stream) {

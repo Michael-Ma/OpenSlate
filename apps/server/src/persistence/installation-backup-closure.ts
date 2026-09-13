@@ -3,6 +3,10 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonical, digest, invariant } from "@openslate/core";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
 import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
+import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormalizedAudioIngestion } from "../execution/audio-derivation.js";
+import type { AudioDerivationIntent, AudioDerivationReceipt } from "../execution/audio-derivation.js";
+import { assertOutputReceiptIdentity } from "../execution/output-store.js";
+import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
 import type { BackupFile } from "./installation-backup.js";
 
@@ -56,6 +60,21 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       fail(row && Buffer.byteLength(row.body) <= 16 * 1024 ** 2, `Required database identity is missing: ${kind}`);
       const value: unknown = JSON.parse(row.body); fail(object(value), "Invalid saved record"); return value;
     };
+    const audioIntent = async (intent: AudioDerivationIntent) => {
+      const attempt = get("attempt", intent.attemptId) as Attempt;
+      const spool = await json(`execution-output/manifests/${intent.spoolId}.json`);
+      const slot = await json(`execution-output/slots/${intent.slotId}.json`);
+      const receipt = get("execution_output_receipt", intent.spoolId) as OutputReceipt;
+      assertOutputReceiptIdentity(receipt, attempt);
+      fail(receipt.kind === "audio" && receipt.port === "audio" && spool.projectId === intent.projectId
+        && slot.projectId === intent.projectId && slot.attemptId === intent.attemptId && slot.spoolId === intent.spoolId
+        && slot.port === "audio" && spool.attemptId === intent.attemptId && spool.sha256 === intent.rawSha256
+        && spool.byteLength === intent.rawByteLength, "Audio derivation differs from its exact raw spool and winning slot");
+      const output = { port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav", sha256: spool.sha256,
+        byteLength: spool.byteLength, fixture: false, storage: { type: "spool", spoolId: spool.id } } as const;
+      assertAudioDerivationIntent(intent, attempt, output);
+      return { attempt, output };
+    };
     let storageId: string | undefined;
     if (files.has("execution-output/identity.json")) {
       const identity = await json("execution-output/identity.json");
@@ -82,6 +101,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           && spool.requestDigest === receipt.requestDigest && spool.requestDigest === digest(attempt.request) && spool.port === receipt.port
           && spool.blobKey === `${spool.sha256}.blob`, "Output spool ownership differs");
         const { id, ...body } = receipt; fail(id === digest(body), "Output receipt digest differs");
+        if (receipt.kind === "audio" || receipt.kind === "data" || attempt.request.kind === "speech" || attempt.request.kind === "transcription")
+          assertOutputReceiptIdentity(receipt as OutputReceipt, attempt as Attempt);
         fail(receipt.source?.kind === "protected_locator" || (receipt.source?.kind === "returned_bytes"
           && receipt.source.sha256 === spool.sha256 && receipt.source.byteLength === spool.byteLength), "Spool differs from its returned byte receipt");
         required(`execution-output/blobs/${spool.blobKey}`, spool.sha256, spool.byteLength);
@@ -100,13 +121,30 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         fail(slot.spoolId === intent.spoolId, "Video derivation differs from its winning raw slot");
         assertVideoDerivationIntent(intent as VideoDerivationIntent, get("attempt", intent.attemptId) as Attempt,
           { port: "video", kind: "video", mimeType: "video/mp4", extension: "mp4", sha256: spool.sha256, byteLength: spool.byteLength, fixture: false, storage: { type: "spool", spoolId: spool.id } });
+      } else if (path.startsWith("audio-derivations/completions/")) {
+        const receipt = await json(path), intent = get("audio_derivation_intent", receipt.id) as AudioDerivationIntent;
+        fail(path === `audio-derivations/completions/${receipt.id}.json`, "Audio derivation filename differs");
+        await audioIntent(intent);
+        // Keep valid measured receipts even when their endpoint failed final acceptance; do not force another conversion.
+        assertAudioDerivationReceipt(intent, receipt as AudioDerivationReceipt, false); await source(receipt.source);
       }
     }
     for (const row of db.prepare("SELECT kind,id,body FROM entities").iterate() as Iterable<{ kind: string; id: string; body: string }>) {
       fail(Buffer.byteLength(row.body) <= 16 * 1024 ** 2, "Saved record exceeds backup verification bound");
       const value: RecordValue = JSON.parse(row.body);
-      if (row.kind === "artifact") artifact(value);
-      else if (row.kind === "media_source") await source(value.source);
+      if (row.kind === "artifact") {
+        artifact(value);
+        if (value.origin === "generated_audio") fail(get("audio_derivation_receipt", value.derivationId).source.artifactId === value.id,
+          "Generated audio artifact lost its derivation receipt");
+      }
+      else if (row.kind === "media_source") {
+        await source(value.source);
+        if (value.origin === "generated_audio") {
+          const receipt = get("audio_derivation_receipt", value.derivationId);
+          fail(canonical(value) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId, source: receipt.source,
+            origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }), "Generated audio source lost its exact provenance");
+        }
+      }
       else if (row.kind === "narration_audio") await source(value.media);
       else if (row.kind === "media_render") { await renderManifest(value.manifest); if (value.artifact) {
         const saved = get("artifact", value.artifact.artifactId); fail(canonical(saved.artifact) === canonical(value.artifact), "Render artifact identity differs"); }
@@ -116,6 +154,18 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         fail(canonical(await json(path)) === canonical(value), "Saved output metadata differs from its published receipt");
       } else if (row.kind === "video_derivation_receipt") {
         fail(canonical(await json(`video-derivations/completions/${row.id}.json`)) === canonical(value), "Saved derivation differs from its published receipt");
+      } else if (row.kind === "audio_derivation_intent") {
+        await audioIntent(value as AudioDerivationIntent);
+      } else if (row.kind === "audio_derivation_receipt") {
+        fail(canonical(await json(`audio-derivations/completions/${row.id}.json`)) === canonical(value), "Saved audio derivation differs from its published receipt");
+        const intent = get("audio_derivation_intent", row.id) as AudioDerivationIntent;
+        const { attempt, output } = await audioIntent(intent);
+        assertNormalizedAudioIngestion(intent, attempt, output, { type: "normalized_audio", artifact: get("artifact", intent.artifactId) as any,
+          derivation: value as AudioDerivationReceipt, mediaSource: get("media_source", intent.artifactId) as any });
+      } else if (row.kind === "execution_output_receipt") {
+        const attempt = get("attempt", value.attemptId);
+        if (value.kind === "audio" || value.kind === "data" || attempt.request.kind === "speech" || attempt.request.kind === "transcription")
+          assertOutputReceiptIdentity(value as OutputReceipt, attempt as Attempt);
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);

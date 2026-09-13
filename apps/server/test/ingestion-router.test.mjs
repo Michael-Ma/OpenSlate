@@ -98,5 +98,18 @@ test('router captures inputs and forwards the original signal; unsupported inlin
   const raw = fixtureOutputs({ kind: 'image', args: {}, inputs: [], fingerprint: 'x', nodeId: 'x', attemptId: 'x' })[0];
   assert.throws(() => router.ingest({ ...input, output: { ...raw, fixture: false } }), { code: 'OUTPUT_INGESTION_UNSUPPORTED' });
   signal.abort(); assert.throws(() => router.ingest(input), { code: 'OUTPUT_STORE_CANCELLED' });
-  assert.throws(() => new ExecutionIngestionRouter({ audio: handlers.image }), { code: 'OUTPUT_INGESTION_CONFIGURATION' });
+  assert.throws(() => new ExecutionIngestionRouter({ data: handlers.image }), { code: 'OUTPUT_INGESTION_CONFIGURATION' });
+});
+
+test('audio requires its explicit handler while raw transcription data has no fallback route', async () => {
+  let audioCalls = 0;
+  const router = new ExecutionIngestionRouter({ audio: { ingest(input) { audioCalls++; return { audio: input.output.sha256 }; } } });
+  const input = { attempt: { id: 'attempt' }, artifactDir: temporary, signal: new AbortController().signal,
+    output: { kind: 'audio', port: 'audio', mimeType: 'audio/wav', extension: 'wav', byteLength: 44,
+      fixture: false, sha256: 'a'.repeat(64), storage: { type: 'spool', spoolId: 'b'.repeat(64) } } };
+  assert.deepEqual(router.ingest(input), { audio: 'a'.repeat(64) }); assert.equal(audioCalls, 1);
+  assert.throws(() => new ExecutionIngestionRouter({}).ingest(input), { code: 'OUTPUT_INGESTION_UNSUPPORTED' });
+  assert.throws(() => router.ingest({ ...input, output: { ...input.output, port: 'cues', kind: 'data', mimeType: 'application/json', extension: 'json' } }),
+    { code: 'OUTPUT_INGESTION_UNSUPPORTED' });
+  assert.equal(audioCalls, 1);
 });

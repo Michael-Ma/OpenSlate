@@ -6,7 +6,11 @@ export interface GeneratedMediaSource {
   id: string; projectId: string; source: SuppliedMedia; origin: "generated_video";
   attemptId: string; derivationId: string;
 }
-export type OwnedMediaSource = { id: string; projectId: string; source: SuppliedMedia; requestId: string } | GeneratedMediaSource;
+export interface GeneratedAudioMediaSource {
+  id: string; projectId: string; source: SuppliedMedia; origin: "generated_audio";
+  attemptId: string; derivationId: string;
+}
+export type OwnedMediaSource = { id: string; projectId: string; source: SuppliedMedia; requestId: string } | GeneratedMediaSource | GeneratedAudioMediaSource;
 export interface RealVideoArtifact {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: "video/mp4";
   fixture: false; attemptId: null; origin: "supplied_video" | "local_render";

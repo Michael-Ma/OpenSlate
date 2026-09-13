@@ -3,13 +3,15 @@ import { constants, closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdir
 import { chmod, link, lstat, mkdtemp, open, rm, statfs } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
-import type { ExecutionIdentity, ExecutionSpoolCompletion, ExecutionSpoolOutput } from "@openslate/providers";
+import { EXECUTION_SPOOL_LIMITS, EXECUTION_SPOOL_ROLES, executionSpoolRole } from "@openslate/providers";
+import type { ExecutionIdentity, ExecutionSpoolCompletion, ExecutionSpoolOutput, ExecutionSpoolRole } from "@openslate/providers";
 import type { Attempt } from "./engine.js";
-import { Store } from "../persistence/store.js";
+import type { Store } from "../persistence/store.js";
 
 const MiB = 1024 * 1024, HASH = /^[a-f0-9]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,255}$/;
-export const OUTPUT_STORE_LIMITS = Object.freeze({ imageBytes: 32 * MiB, videoBytes: 256 * MiB,
+export const OUTPUT_STORE_LIMITS = Object.freeze({ imageBytes: EXECUTION_SPOOL_LIMITS.image, videoBytes: EXECUTION_SPOOL_LIMITS.video,
+  audioBytes: EXECUTION_SPOOL_LIMITS.audio, dataBytes: EXECUTION_SPOOL_LIMITS.data,
   metadataBytes: 16 * 1024, locatorBytes: 8192, chunkBytes: MiB, concurrentWriters: 2,
   diskHeadroomBytes: 16 * MiB, timeoutMs: 600000 });
 export type OutputReceiptSource =
@@ -19,9 +21,9 @@ export interface OutputReceiptInput {
   attemptId: string;
   /** Digest of the complete persisted application request, not a vendor idempotency key. */
   expectedRequestDigest: string;
-  port: "image" | "video";
-  kind: "image" | "video";
-  mimeType: "image/png" | "video/mp4";
+  port: ExecutionSpoolRole["port"];
+  kind: ExecutionSpoolRole["kind"];
+  mimeType: ExecutionSpoolRole["mimeType"];
   vendorTaskId: string | null;
   diagnosticRequestId: string | null;
   source: OutputReceiptSource;
@@ -32,10 +34,10 @@ export interface OutputReceipt extends Omit<OutputReceiptInput, "expectedRequest
 }
 export interface OutputSpool {
   id: string; projectId: string; version: 1; storageId: string; receiptId: string; attemptId: string;
-  requestDigest: string; port: "image" | "video"; sha256: string; byteLength: number; blobKey: string;
+  requestDigest: string; port: ExecutionSpoolRole["port"]; sha256: string; byteLength: number; blobKey: string;
 }
 interface OutputSlot {
-  id: string; projectId: string; version: 1; storageId: string; attemptId: string; port: "image" | "video";
+  id: string; projectId: string; version: 1; storageId: string; attemptId: string; port: ExecutionSpoolRole["port"];
   spoolId: string; sha256: string; byteLength: number;
 }
 export type OutputByteSource = (signal: AbortSignal) => AsyncIterable<Uint8Array> | Promise<AsyncIterable<Uint8Array>>;
@@ -44,7 +46,7 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 function exact(value: unknown, fields: string[]): asserts value is Record<string, unknown> {
   invariant(object(value) && Object.keys(value).every(key => fields.includes(key)), "OUTPUT_RECEIPT_INVALID", "Unsupported output receipt fields");
 }
-function limitFor(kind: "image" | "video"): number { return kind === "image" ? OUTPUT_STORE_LIMITS.imageBytes : OUTPUT_STORE_LIMITS.videoBytes; }
+function limitFor(kind: ExecutionSpoolRole["kind"]): number { return EXECUTION_SPOOL_LIMITS[kind]; }
 function stopped(signal?: AbortSignal): void { invariant(!signal?.aborted, "OUTPUT_STORE_CANCELLED", "Output storage was cancelled"); }
 function small(value: unknown): string {
   const body = canonical(value);
@@ -52,6 +54,40 @@ function small(value: unknown): string {
   return body;
 }
 function optionalId(value: unknown): boolean { return value === null || (typeof value === "string" && ID.test(value)); }
+function assertObservation(value: OutputReceiptInput | OutputReceipt): Readonly<ExecutionSpoolRole> {
+  const role = Object.values(EXECUTION_SPOOL_ROLES).find(candidate => candidate.port === value.port
+    && candidate.kind === value.kind && candidate.mimeType === value.mimeType);
+  invariant(role, "OUTPUT_RECEIPT_INVALID", "Unsupported output role or format");
+  invariant(optionalId(value.vendorTaskId) && optionalId(value.diagnosticRequestId), "OUTPUT_RECEIPT_INVALID", "Invalid provider diagnostic identity");
+  exact(value.source, ["kind", "sha256", "byteLength", "locator", "expiresAt"]);
+  invariant((role.kind !== "audio" && role.kind !== "data") || (value.vendorTaskId === null && value.source.kind === "returned_bytes"),
+    "OUTPUT_RECEIPT_INVALID", "Raw audio and transcription require synchronous returned bytes");
+  if (value.source.kind === "returned_bytes") {
+    exact(value.source, ["kind", "sha256", "byteLength"]);
+    invariant(typeof value.source.sha256 === "string" && HASH.test(value.source.sha256) && Number.isSafeInteger(value.source.byteLength)
+      && Number(value.source.byteLength) > 0 && Number(value.source.byteLength) <= limitFor(role.kind), "OUTPUT_RECEIPT_INVALID", "Invalid expected output bytes");
+  } else {
+    exact(value.source, ["kind", "locator", "expiresAt"]);
+    invariant(value.source.kind === "protected_locator" && typeof value.source.locator === "string" && value.source.locator.length > 0
+      && Buffer.byteLength(value.source.locator) <= OUTPUT_STORE_LIMITS.locatorBytes && !/[\u0000-\u001f\u007f]/.test(value.source.locator)
+      && typeof value.vendorTaskId === "string" && (value.source.expiresAt === null || (typeof value.source.expiresAt === "string"
+        && value.source.expiresAt.length <= 64 && Number.isFinite(Date.parse(value.source.expiresAt)))), "OUTPUT_RECEIPT_INVALID", "Invalid protected output locator");
+  }
+  return role;
+}
+
+/** Pure immutable receipt validation, without storage access or mutable task/lease authority. */
+export function assertOutputReceiptIdentity(receipt: OutputReceipt, attempt: Pick<Attempt, "id" | "projectId" | "request">): void {
+  exact(receipt, ["id", "projectId", "version", "requestDigest", "execution", "attemptId", "port", "kind", "mimeType",
+    "vendorTaskId", "diagnosticRequestId", "source"]);
+  const { id, ...body } = receipt;
+  invariant(digest(body) === id, "OUTPUT_STORE_CORRUPT", "Stored output receipt identity differs");
+  const role = assertObservation(receipt);
+  invariant(receipt.version === 1 && receipt.projectId === attempt.projectId && receipt.attemptId === attempt.id
+    && receipt.requestDigest === digest(attempt.request) && role === executionSpoolRole(attempt.request.kind)
+    && canonical(receipt.execution) === canonical(attempt.request.execution ?? { adapter: "fake", version: "1" }),
+  "OUTPUT_RECEIPT_CONFLICT", "Stored output role or execution differs from its admitted request");
+}
 
 /** Storage only: no provider dispatch, URL fetch, media decoder, artifact selection, or grant mutation. */
 export class ExecutionOutputStore {
@@ -96,24 +132,10 @@ export class ExecutionOutputStore {
     exact(value, ["attemptId", "expectedRequestDigest", "port", "kind", "mimeType", "vendorTaskId", "diagnosticRequestId", "source"]);
     invariant(typeof value.attemptId === "string" && ID.test(value.attemptId) && typeof value.expectedRequestDigest === "string" && HASH.test(value.expectedRequestDigest),
       "OUTPUT_RECEIPT_INVALID", "Output requires an admitted attempt and exact request digest");
-    invariant((value.kind === "image" && value.port === "image" && value.mimeType === "image/png")
-      || (value.kind === "video" && value.port === "video" && value.mimeType === "video/mp4"), "OUTPUT_RECEIPT_INVALID", "Unsupported output role or format");
-    invariant(optionalId(value.vendorTaskId) && optionalId(value.diagnosticRequestId), "OUTPUT_RECEIPT_INVALID", "Invalid provider diagnostic identity");
-    exact(value.source, ["kind", "sha256", "byteLength", "locator", "expiresAt"]);
-    if (value.source.kind === "returned_bytes") {
-      exact(value.source, ["kind", "sha256", "byteLength"]);
-      invariant(typeof value.source.sha256 === "string" && HASH.test(value.source.sha256) && Number.isSafeInteger(value.source.byteLength)
-        && Number(value.source.byteLength) > 0 && Number(value.source.byteLength) <= limitFor(value.kind), "OUTPUT_RECEIPT_INVALID", "Invalid expected output bytes");
-    } else {
-      exact(value.source, ["kind", "locator", "expiresAt"]);
-      invariant(value.source.kind === "protected_locator" && typeof value.source.locator === "string" && value.source.locator.length > 0
-        && Buffer.byteLength(value.source.locator) <= OUTPUT_STORE_LIMITS.locatorBytes && !/[\u0000-\u001f\u007f]/.test(value.source.locator)
-        && typeof value.vendorTaskId === "string" && (value.source.expiresAt === null || (typeof value.source.expiresAt === "string"
-          && value.source.expiresAt.length <= 64 && Number.isFinite(Date.parse(value.source.expiresAt)))), "OUTPUT_RECEIPT_INVALID", "Invalid protected output locator");
-    }
+    const role = assertObservation(value);
     return this.store.transaction(() => {
       const attempt = this.attempt(projectId, value.attemptId, value.expectedRequestDigest);
-      invariant(attempt.request.kind === value.kind && (!attempt.taskId || value.vendorTaskId === attempt.taskId),
+      invariant(executionSpoolRole(attempt.request.kind) === role && (!attempt.taskId || value.vendorTaskId === attempt.taskId),
         "OUTPUT_RECEIPT_CONFLICT", "Output does not match the admitted operation or accepted task");
       const { expectedRequestDigest, ...observation } = value;
       const body = { ...observation, version: 1 as const, projectId, requestDigest: expectedRequestDigest,
@@ -250,8 +272,9 @@ export class ExecutionOutputStore {
     const signal = options.signal; stopped(signal);
     const attempt = this.store.get<Attempt>("attempt", attemptId);
     invariant(attempt?.projectId === projectId, "SCOPE_DENIED", "Attempt is outside this project");
-    const port = attempt.request.kind;
-    if (port !== "image" && port !== "video") return null;
+    const role = executionSpoolRole(attempt.request.kind);
+    if (!role) return null;
+    const port = role.port;
     const active = activeWriters.get(this.rootDir) ?? 0;
     invariant(active < OUTPUT_STORE_LIMITS.concurrentWriters, "OUTPUT_STORE_BUSY", "Two output storage operations are already active");
     activeWriters.set(this.rootDir, active + 1);
@@ -288,7 +311,8 @@ export class ExecutionOutputStore {
 
   private completion(projectId: string, attemptId: string, receiptId: string): ExecutionSpoolCompletion {
     const receipt = this.receipt(projectId, receiptId), attempt = this.attempt(projectId, attemptId, receipt.requestDigest);
-    invariant(receipt.attemptId === attemptId && receipt.kind === attempt.request.kind && receipt.port === receipt.kind
+    const role = executionSpoolRole(attempt.request.kind);
+    invariant(role && receipt.attemptId === attemptId && receipt.kind === role.kind && receipt.port === role.port && receipt.mimeType === role.mimeType
       && canonical(receipt.execution) === canonical(attempt.request.execution ?? { adapter: "fake", version: "1" })
       && (!attempt.taskId || receipt.vendorTaskId === attempt.taskId), "OUTPUT_RECEIPT_CONFLICT", "Completion receipt does not match its admitted operation or accepted task");
     const spool = this.store.get<OutputSpool>("execution_output_spool", receiptId);
@@ -299,7 +323,7 @@ export class ExecutionOutputStore {
       port: receipt.port, spoolId: spool.id, sha256: spool.sha256, byteLength: spool.byteLength }),
     "OUTPUT_SLOT_CONFLICT", "Execution requires the exact first completed attempt/output slot");
     return { type: "completed", version: 2, receiptId, vendorTaskId: receipt.vendorTaskId,
-      outputs: [{ port: receipt.port, kind: receipt.kind, mimeType: receipt.mimeType, extension: receipt.kind === "image" ? "png" : "mp4",
+      outputs: [{ port: receipt.port, kind: receipt.kind, mimeType: receipt.mimeType, extension: role.extension,
         sha256: spool.sha256, byteLength: spool.byteLength, fixture: false, storage: { type: "spool", spoolId: spool.id } }] };
   }
 
@@ -313,9 +337,8 @@ export class ExecutionOutputStore {
     invariant(typeof receiptId === "string" && HASH.test(receiptId), "OUTPUT_RECEIPT_INVALID", "Invalid output receipt identity");
     const receipt = this.store.get<OutputReceipt>("execution_output_receipt", receiptId);
     invariant(receipt?.projectId === projectId, "SCOPE_DENIED", "Output receipt is outside this project");
-    const { id, ...body } = receipt;
-    invariant(digest(body) === id, "OUTPUT_STORE_CORRUPT", "Stored output receipt identity differs");
-    this.attempt(projectId, receipt.attemptId, receipt.requestDigest);
+    const attempt = this.attempt(projectId, receipt.attemptId, receipt.requestDigest);
+    assertOutputReceiptIdentity(receipt, attempt);
     return receipt;
   }
   private descriptor(receipt: OutputReceipt, sha256: string, byteLength: number): OutputSpool {

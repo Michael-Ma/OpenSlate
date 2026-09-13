@@ -32,6 +32,15 @@ export interface MediaNormalizationIdentity {
   maxInputBytes: number; maxOutputBytes: number; maxDurationFrames: number; timeoutMs: number;
 }
 
+export interface AudioPcmGeometry {
+  sampleRate: number; channels: 1 | 2; sampleCount: number; bitsPerSample: 16;
+}
+/** Exact generated-audio recipe and the actual configured shared-worker bounds. */
+export interface MediaAudioNormalizationIdentity {
+  version: 1; recipe: "pcm-s16le-48khz-stereo-v1"; toolchainDigest: string;
+  maxInputBytes: number; maxOutputBytes: number; maxSamples: number; timeoutMs: number;
+}
+
 /** A measured, normalized, service-issued descriptor. No caller-selected storage path. */
 export interface SuppliedMedia {
   id: string;
