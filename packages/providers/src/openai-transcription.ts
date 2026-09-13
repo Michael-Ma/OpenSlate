@@ -4,6 +4,7 @@ import {
 } from "./audio-http.js";
 
 export const OPENAI_TRANSCRIPTION_MODEL = "whisper-1" as const;
+export const OPENAI_TRANSCRIPTION_PROJECTION_VERSION = 1 as const;
 export interface OpenAITranscriptionRequest {
   model: typeof OPENAI_TRANSCRIPTION_MODEL;
   language: string | null;
@@ -40,12 +41,24 @@ export interface OpenAITranscriptionResult {
   resultDigest: string;
 }
 export type OpenAITranscriptionOutcome = AudioTransportOutcome<OpenAITranscriptionResult>;
+export interface OpenAITranscriptionResponseInput {
+  bytes: Uint8Array; mimeType: "application/json";
+  /** Measured duration of the exact owned derivative, supplied by the host rather than the response. */
+  sourceDurationSeconds: number;
+}
+export interface OpenAITranscriptionParseOptions {
+  maxTextBytes?: number; maxWords?: number; maxWordBytes?: number;
+}
+export interface ParsedOpenAITranscriptionResponse {
+  reportedModel: string | null; result: OpenAITranscriptionResult;
+}
 export interface OpenAITranscriptionAdapterOptions extends AudioHttpOptions {
   maxInputBytes?: number; maxTextBytes?: number; maxWords?: number; maxWordBytes?: number;
 }
 
 const ADAPTER = "openai-transcription-v1" as const;
 const MAX_INPUT_BYTES = 25_000_000;
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
 const MAX_WORDS = 8192;
 const MAX_WORD_BYTES = 1024;
@@ -98,16 +111,16 @@ function waveform(bytes: Buffer): TranscriptionWaveform {
     sampleCount: samples, dataByteLength: samples * 2, durationSeconds: samples / 16000 };
 }
 
-function copyBytes(value: unknown, maximum: number): Buffer {
-  audioEnsure(value instanceof Uint8Array, "INVALID_AUDIO_BYTES");
+function copyBytes(value: unknown, maximum: number, invalidCode = "INVALID_AUDIO_BYTES", sizeCode = "INPUT_TOO_LARGE"): Buffer {
+  audioEnsure(value instanceof Uint8Array, invalidCode);
   // Intrinsic typed-array access avoids user-defined property getters and subclass iterators.
   const typed = Object.getPrototypeOf(Uint8Array.prototype) as object;
   const get = (name: string): unknown => Object.getOwnPropertyDescriptor(typed, name)!.get!.call(value);
   let buffer: unknown, offset: unknown, length: unknown;
   try { buffer = get("buffer"); offset = get("byteOffset"); length = get("byteLength"); }
-  catch { audioEnsure(false, "INVALID_AUDIO_BYTES"); }
+  catch { audioEnsure(false, invalidCode); }
   audioEnsure(buffer instanceof ArrayBuffer && typeof offset === "number" && typeof length === "number"
-    && length > 0 && length <= maximum, "INPUT_TOO_LARGE");
+    && length > 0 && length <= maximum, sizeCode);
   return Buffer.from(new Uint8Array(buffer, offset, length));
 }
 
@@ -156,9 +169,8 @@ export function describeOpenAITranscriptionRequest(request: OpenAITranscriptionR
 
 const jsonObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const seconds = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
-function decode(bytes: Uint8Array, mime: string, sourceDuration: number, limits: Limits): {
-  reportedModel: string | null; result: OpenAITranscriptionResult;
-} {
+function decode(bytes: Uint8Array, mime: string, sourceDuration: number,
+  limits: Required<OpenAITranscriptionParseOptions>): ParsedOpenAITranscriptionResponse {
   audioEnsure(mime === "application/json", "INVALID_TRANSCRIPTION_MIME");
   const value = audioJson(bytes);
   audioEnsure(jsonObject(value) && !Object.hasOwn(value, "error"), "INVALID_TRANSCRIPTION_RESPONSE");
@@ -193,7 +205,21 @@ function decode(bytes: Uint8Array, mime: string, sourceDuration: number, limits:
     && value.usage.seconds <= 86400 ? { type: "duration" as const, seconds: value.usage.seconds } : null;
   const projection = { text, reportedLanguage, reportedDurationSeconds: value.duration, words, timingIssues, usage };
   return { reportedModel, result: { rawResponseBytes: Buffer.from(bytes), rawResponseSha256: audioSha256(bytes), ...projection,
-    resultDigest: audioSha256(JSON.stringify({ adapter: ADAPTER, projectionVersion: 1, ...projection })) } };
+    resultDigest: audioSha256(JSON.stringify({ adapter: ADAPTER, projectionVersion: OPENAI_TRANSCRIPTION_PROJECTION_VERSION, ...projection })) } };
+}
+
+/** Parse saved raw response bytes without HTTP, source lookup, timestamp repair or narration adoption. */
+export function parseOpenAITranscriptionResponse(input: OpenAITranscriptionResponseInput,
+  options: OpenAITranscriptionParseOptions = {}): ParsedOpenAITranscriptionResponse {
+  const own = audioDataObject(input, ["bytes", "mimeType", "sourceDurationSeconds"], "INVALID_TRANSCRIPTION_PARSE_INPUT");
+  const configured = audioDataObject(options, ["maxTextBytes", "maxWords", "maxWordBytes"], "INVALID_ADAPTER_OPTION");
+  audioEnsure(own.mimeType === "application/json", "INVALID_TRANSCRIPTION_MIME");
+  audioEnsure(seconds(own.sourceDurationSeconds) && own.sourceDurationSeconds > 0 && own.sourceDurationSeconds <= 360,
+    "INVALID_SOURCE_DURATION");
+  const limits = { maxTextBytes: audioBoundedOption(configured.maxTextBytes, MAX_TEXT_BYTES),
+    maxWords: audioBoundedOption(configured.maxWords, MAX_WORDS), maxWordBytes: audioBoundedOption(configured.maxWordBytes, MAX_WORD_BYTES) };
+  const bytes = copyBytes(own.bytes, MAX_RESPONSE_BYTES, "INVALID_TRANSCRIPTION_RESPONSE_BYTES", "RESPONSE_TOO_LARGE");
+  return decode(bytes, own.mimeType, own.sourceDurationSeconds, limits);
 }
 
 /** Standalone synchronous-API transport. The host must persist authority and a one-use dispatch marker separately. */
@@ -208,7 +234,7 @@ export class OpenAITranscriptionAdapter {
       maxWordBytes: audioBoundedOption(own.maxWordBytes, MAX_WORD_BYTES) };
     const http = Object.fromEntries(["apiKey", "fetch", "timeoutMs", "maxResponseBytes"].filter(name => Object.hasOwn(own, name))
       .map(name => [name, own[name]])) as unknown as AudioHttpOptions;
-    this.#http = new AudioHttpClient(ADAPTER, http, { timeoutMs: 180000, maxResponseBytes: 4 * 1024 * 1024 });
+    this.#http = new AudioHttpClient(ADAPTER, http, { timeoutMs: 180000, maxResponseBytes: MAX_RESPONSE_BYTES });
   }
   describe(request: OpenAITranscriptionRequest): OpenAITranscriptionDescription { return prepare(request, this.#limits).description; }
   submit(request: OpenAITranscriptionRequest, context: AudioSubmitContext): Promise<OpenAITranscriptionOutcome> {

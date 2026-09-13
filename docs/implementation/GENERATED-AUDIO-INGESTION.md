@@ -1,12 +1,12 @@
 # Generated audio ingestion and transcript candidates
 
-September 12, 2026. **Raw storage and normalized generated-audio ingestion are implemented and verified offline. Derivative, candidate and narration integration remain pending.** File names are repository-relative. The accepted transport brief supplies protocol details, with the corrected speech policy name `utf8-cap-v1`: it is a host byte restriction, not an exact tokenizer or provider-acceptance guarantee.
+September 12, 2026. **Raw storage and normalized generated-audio ingestion are implemented and verified offline. The complete-source derivative is also verified; candidate and narration integration remain pending.** File names are repository-relative. The accepted transport brief supplies protocol details, with the corrected speech policy name `utf8-cap-v1`: it is a host byte restriction, not an exact tokenizer or provider-acceptance guarantee.
 
 ## Smallest independently shippable slice
 
 The implemented slice provides **durable raw audio/data spools and normalized generated-audio artifacts**, exercised with injected transport results. It reuses the existing Engine attempt, output-slot and leased ingestion machinery. Speech/ASR adapters are not registered in the launcher; installed profiles, HTTP/tools, narration bindings and application synthesis/transcription capabilities remain unchanged. A verified playable artifact is a completed boundary, while the narration-generation workflow still needs integration.
 
-Next implement the **16 kHz transcription-input derivative**, detailed in [owned transcription preparation](TRANSCRIPTION-AUDIO-PREPARATION.md), then unreviewed transcript candidates. Human adoption and paid application bridges follow. This keeps ingestion independent of narration editing, chunk orchestration, new spending UI and transcript acceptance.
+The **16 kHz transcription-input derivative** is now verified in [owned transcription preparation](TRANSCRIPTION-AUDIO-PREPARATION.md). Next implement [exact audio execution bridges](AUDIO-APPLICATION-BRIDGES.md), then unreviewed transcript candidates and human adoption. This keeps ingestion independent of narration editing, chunk orchestration, new spending UI and transcript acceptance.
 
 ```mermaid
 flowchart LR
@@ -97,7 +97,7 @@ The resulting artifact/media source records retain `origin:"generated_audio"`, r
 
 ## Same-source 48 kHz →16 kHz derivative
 
-**Planned; not implemented in the ingestion milestone.** The [next slice](TRANSCRIPTION-AUDIO-PREPARATION.md) adds separate media and transcription records. Resolve a same-project owned audio source by ID and verify its descriptor and bytes; neither transport nor model supplies a filesystem path. Reuse a generated source or a human-supplied source identically after ownership checks.
+**Implemented in the following [transcription preparation milestone](TRANSCRIPTION-AUDIO-PREPARATION.md).** It adds separate media and transcription records. Resolve a same-project owned audio source by ID and verify its descriptor and bytes; neither transport nor model supplies a filesystem path. Reuse a generated source or a human-supplied source identically after ownership checks.
 
 `TranscriptionAudioIntent` pins source artifact/descriptor IDs, SHA, byte length, `sampleRate:48000`, `channels:2`, measured sample count, **complete range** `[0,sourceSamples)`, recipe/toolchain/limits. `TranscriptionAudioReceipt` pins intent digest, derivative hash/length, `sampleRate:16000`, `channels:1`, `pcm_s16le`, actual decoded sample count and `endDelta48kSamples = derivativeSamples*3-sourceSamples`.
 

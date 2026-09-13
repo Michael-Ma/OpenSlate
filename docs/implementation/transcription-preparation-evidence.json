@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Owned full-source transcription derivative, reusable raw-response parser and unreviewed timing helper; no production paid audio bridge or adoption",
+  "fullCheck": { "tests": 1064, "passed": 1064, "failed": 0, "cancelled": 0, "skipped": 0, "builds": "passed", "typechecks": "passed", "installedNoTurnCodexProbe": true },
+  "addedTests": { "total": 52, "worker": 15, "wrapperAndStorage": 16, "backup": 5, "parser": 11, "sampleMapping": 5 },
+  "sixMinuteProof": {
+    "checks": 13, "passed": 13, "independentReadOnlyChecks": 23,
+    "source": { "sampleRate": 48000, "channels": 2, "samples": 17280000, "byteLength": 69120078 },
+    "derivative": { "sampleRate": 16000, "channels": 1, "samples": 5760000, "byteLength": 11520078, "endDelta48kSamples": 0 },
+    "actualSourceImports": 1, "localDerivativeConversions": 1, "injectedMultipartTranscriptions": 1,
+    "sqlFailureThenReopenWithUnavailableTools": "passed",
+    "fullPCMDecodeAndSilence": "passed",
+    "exactUploadAndParserIdentity": "passed",
+    "canonicalNarrationAndAuthority": "unchanged",
+    "independentDatabaseFileHashes": "unchanged",
+    "cleanupErrors": 0
+  },
+  "parserLegacyIdentityComparisons": 6,
+  "actualSameRootRestore": "passed with explicit human release and controlled replacement-lease fixture; missing imported preparation and first submission remain denied",
+  "modelCalls": 0,
+  "mediaApiCalls": 0,
+  "limitations": ["The private proof uses a trusted manually inserted attempt, not Engine paid admission", "Synthetic tone/transcript fixtures do not validate speech recognition or audio quality", "No candidate persistence, human adoption, launcher activation or live audio bridge is provided", "Cancellation or interruption before durable completion publication may require another local conversion; no provider submission follows from preparation"]
+}

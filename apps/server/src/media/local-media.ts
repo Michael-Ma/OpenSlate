@@ -4,6 +4,9 @@ import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import { runMediaProcess } from "./process.js";
+import { inspectPcmWave } from "./pcm-wave.js";
+import { assertTranscriptionAudioCapacity, assertTranscriptionAudioMeasurement, assertTranscriptionAudioRecipe, TRANSCRIPTION_AUDIO_LIMITS } from "./transcription-audio-types.js";
+import type { MeasuredTranscriptionAudio, TranscriptionAudioOptions, TranscriptionAudioRecipe } from "./transcription-audio-types.js";
 import type { FrozenRenderManifest, LocalMediaOptions, MediaAudioNormalizationIdentity, MediaLimits, MediaNormalizationIdentity, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
 
 const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioPlacements: 64, timeoutMs: 120000 };
@@ -91,6 +94,98 @@ export class LocalMediaService {
         maxSamples: this.limits.maxDurationFrames * SAMPLES_PER_FRAME, timeoutMs: this.limits.timeoutMs });
     });
     aborted(signal); return result;
+  }
+
+  /** Fixed complete-source upload derivative; this is neither narration acceptance nor provider dispatch. */
+  async describeTranscriptionAudio(options: { signal?: AbortSignal } = {}): Promise<Readonly<TranscriptionAudioRecipe>> {
+    const signal = options.signal; aborted(signal);
+    const result = await this.exclusive(async () => {
+      const toolchainDigest = await this.toolchainDigest(signal, Math.min(this.limits.timeoutMs, TRANSCRIPTION_AUDIO_LIMITS.timeoutMs));
+      aborted(signal); return this.transcriptionAudioRecipe(toolchainDigest);
+    });
+    aborted(signal); return result;
+  }
+
+  async deriveTranscriptionAudio(input: { source: SuppliedMedia; recipe: TranscriptionAudioRecipe }, options: TranscriptionAudioOptions): Promise<Readonly<MeasuredTranscriptionAudio>> {
+    const { signal, assertCanStart, persistCompletion } = options, { source, recipe } = structuredClone(input);
+    aborted(signal);
+    invariant(typeof assertCanStart === "function" && typeof persistCompletion === "function", "TRANSCRIPTION_AUDIO_CONFIGURATION", "Derivative requires trusted authority and filesystem completion ports");
+    assertTranscriptionAudioRecipe(recipe);
+    invariant(canonical(recipe) === canonical(this.transcriptionAudioRecipe(recipe.toolchainDigest)),
+      "TRANSCRIPTION_AUDIO_RECIPE_CHANGED", "Incomplete transcription audio requires its original effective worker bounds");
+    const samples = source?.probe?.audio?.samples;
+    invariant(source?.kind === "audio" && !source.probe.video && source.probe.audio?.codec === "pcm_s16le"
+      && source.probe.audio.sampleRate === 48000 && source.probe.audio.channels === 2 && typeof samples === "number",
+    "TRANSCRIPTION_AUDIO_SOURCE_INVALID", "A verified complete 48 kHz stereo PCM source is required");
+    assertTranscriptionAudioCapacity(samples, recipe);
+    invariant(Number.isSafeInteger(source.byteLength) && source.byteLength >= samples * 4 + 44
+      && source.byteLength <= samples * 4 + TRANSCRIPTION_AUDIO_LIMITS.headerBytes && source.byteLength <= recipe.maxInputBytes,
+    "TRANSCRIPTION_AUDIO_SOURCE_INVALID", "Source PCM size differs from its declared complete geometry");
+    assertCanStart();
+    const result = await this.exclusive(async () => this.temporary(async directory => {
+      const sourcePath = join(directory, "source.wav"), output = join(directory, "transcription.wav");
+      await this.snapshotOwnedAudio(source, sourcePath, recipe.maxInputBytes, signal);
+      const raw = await inspectPcmWave(sourcePath, recipe.maxInputBytes, signal);
+      invariant(raw.sha256 === source.sha256 && raw.byteLength === source.byteLength && raw.pcm.sampleRate === 48000
+        && raw.pcm.channels === 2 && raw.pcm.sampleCount === samples, "TRANSCRIPTION_AUDIO_SOURCE_INVALID", "Owned PCM bytes differ from the complete selected source");
+      aborted(signal); assertCanStart();
+      const current = this.transcriptionAudioRecipe(await this.toolchainDigest(signal, recipe.timeoutMs));
+      invariant(canonical(current) === canonical(recipe), "TRANSCRIPTION_AUDIO_RECIPE_CHANGED", "Incomplete transcription audio requires its pinned recipe and toolchain");
+      aborted(signal); assertCanStart();
+      await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS,
+        "-i", sourcePath, "-map_metadata", "-1", "-map_chapters", "-1", "-map", "0:a:0", "-vn",
+        "-af", "pan=mono|c0=0.5*c0+0.5*c1,aresample=16000:resampler=swr:dither_method=none,aformat=sample_fmts=s16:channel_layouts=mono",
+        "-c:a", "pcm_s16le", "-ar", "16000", "-ac", "1", "-t", String(recipe.maxSourceSamples / 48000 + 1),
+        "-fs", String(recipe.maxOutputBytes), "-f", "wav", output], signal, recipe.timeoutMs);
+      const observed = await inspectPcmWave(output, recipe.maxOutputBytes, signal);
+      invariant(observed.pcm.sampleRate === 16000 && observed.pcm.channels === 1, "TRANSCRIPTION_AUDIO_MEASUREMENT_INVALID", "Derivative is not 16 kHz mono PCM16");
+      await this.run(this.ffmpeg, ["-nostdin", "-v", "error", "-xerror", "-threads", "1", "-err_detect", "explode",
+        ...INPUT_OPTIONS, "-i", output, "-map", "0:a:0", "-f", "null", "-"], signal, recipe.timeoutMs);
+      const measured = frozen({ sha256: observed.sha256, byteLength: observed.byteLength, sampleRate: 16000 as const,
+        channels: 1 as const, bitsPerSample: 16 as const, sampleCount: observed.pcm.sampleCount,
+        endDelta48kSamples: observed.pcm.sampleCount * 3 - samples });
+      assertTranscriptionAudioMeasurement(measured, samples, recipe, false);
+      // The trusted sink may retain measured evidence after late lease loss, but honors its original cancellation policy.
+      // Invoking it does not guarantee a durable index; SQL authority belongs to the outer service.
+      await persistCompletion(measured, output);
+      aborted(signal); assertTranscriptionAudioMeasurement(measured, samples, recipe);
+      return measured;
+    }));
+    aborted(signal); return result;
+  }
+
+  private transcriptionAudioRecipe(toolchainDigest: string): Readonly<TranscriptionAudioRecipe> {
+    const maxSourceSamples = Math.min(this.limits.maxDurationFrames * SAMPLES_PER_FRAME, TRANSCRIPTION_AUDIO_LIMITS.maxSourceSamples);
+    return frozen({ version: 1 as const, recipe: "pcm-s16le-16khz-mono-half-sum-v1" as const, toolchainDigest,
+      maxInputBytes: Math.min(this.limits.maxInputBytes, TRANSCRIPTION_AUDIO_LIMITS.maxInputBytes),
+      maxOutputBytes: Math.min(this.limits.maxOutputBytes, TRANSCRIPTION_AUDIO_LIMITS.maxOutputBytes), maxSourceSamples,
+      maxOutputSamples: Math.ceil(maxSourceSamples / 3), timeoutMs: Math.min(this.limits.timeoutMs, TRANSCRIPTION_AUDIO_LIMITS.timeoutMs) });
+  }
+
+  /** Copy only an exact service-owned descriptor; never expand the external input root allowlist. */
+  private async snapshotOwnedAudio(source: SuppliedMedia, destination: string, maxBytes: number, signal: AbortSignal): Promise<void> {
+    await this.readSource(source, signal);
+    const path = this.blobPath(source);
+    invariant(await realpath(path) === path, "MEDIA_PATH_REJECTED", "Owned audio storage cannot redirect through links");
+    const input = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const stat = await input.stat();
+      invariant(stat.isFile() && stat.size === source.byteLength && stat.size <= maxBytes, "TRANSCRIPTION_AUDIO_SOURCE_INVALID", "Owned audio size changed");
+      const output = await open(destination, "wx", 0o600);
+      try {
+        const hash = createHash("sha256"), buffer = Buffer.alloc(65536); let total = 0;
+        for (;;) {
+          aborted(signal); const read = await input.read(buffer, 0, buffer.length, null); aborted(signal);
+          if (!read.bytesRead) break; total += read.bytesRead;
+          invariant(total <= source.byteLength && total <= maxBytes, "TRANSCRIPTION_AUDIO_SOURCE_INVALID", "Owned audio grew while copying");
+          hash.update(buffer.subarray(0, read.bytesRead)); let offset = 0;
+          while (offset < read.bytesRead) { const written = await output.write(buffer, offset, read.bytesRead - offset);
+            invariant(written.bytesWritten > 0, "MEDIA_WRITE_FAILED", "Unable to copy complete audio"); offset += written.bytesWritten; }
+        }
+        invariant(total === source.byteLength && hash.digest("hex") === source.sha256, "MEDIA_INTEGRITY_ERROR", "Owned audio changed while copying");
+        await output.sync(); aborted(signal);
+      } finally { await output.close(); }
+    } finally { await input.close(); aborted(signal); }
   }
 
   /** Read-only inspection of a bounded snapshot, never a remote URL. */
@@ -332,7 +427,7 @@ export class LocalMediaService {
     const dir = await mkdtemp(join(this.rootDir, "tmp", "job-"));
     try { return await fn(dir); } finally { await rm(dir, { recursive: true, force: true }); }
   }
-  private async run(executable: string, args: string[], signal?: AbortSignal): Promise<string> {
+  private async run(executable: string, args: string[], signal?: AbortSignal, timeoutMs = this.limits.timeoutMs): Promise<string> {
     aborted(signal);
     let binary: { sha256: string; byteLength: number };
     try { binary = await this.hashFile(await realpath(executable), 256 * 1024 * 1024, signal); }
@@ -343,12 +438,12 @@ export class LocalMediaService {
     const previous = this.executableHashes.get(executable);
     invariant(!previous || previous === binary.sha256, "MEDIA_TOOLCHAIN_CHANGED", "Configured media executable changed during this worker lifetime");
     this.executableHashes.set(executable, binary.sha256);
-    return runMediaProcess(executable, args, { cwd: this.rootDir, timeoutMs: this.limits.timeoutMs, ...(signal ? { signal } : {}) });
+    return runMediaProcess(executable, args, { cwd: this.rootDir, timeoutMs, ...(signal ? { signal } : {}) });
   }
-  private async toolchainDigest(signal?: AbortSignal): Promise<string> {
+  private async toolchainDigest(signal?: AbortSignal, timeoutMs = this.limits.timeoutMs): Promise<string> {
     if (!this.toolchain) {
-      const ffmpeg = await this.run(this.ffmpeg, ["-version"], signal);
-      const ffprobe = await this.run(this.ffprobe, ["-version"], signal);
+      const ffmpeg = await this.run(this.ffmpeg, ["-version"], signal, timeoutMs);
+      const ffprobe = await this.run(this.ffprobe, ["-version"], signal, timeoutMs);
       this.toolchain = digest({ recipe: "openslate-supplied-media-v1", ffmpeg, ffprobe, ffmpegSha256: this.executableHashes.get(this.ffmpeg), ffprobeSha256: this.executableHashes.get(this.ffprobe) });
     }
     return this.toolchain;

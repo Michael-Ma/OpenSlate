@@ -5,6 +5,9 @@ import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../ex
 import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
 import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormalizedAudioIngestion } from "../execution/audio-derivation.js";
 import type { AudioDerivationIntent, AudioDerivationReceipt } from "../execution/audio-derivation.js";
+import { assertTranscriptionAudioIntent, assertTranscriptionAudioReceipt, resolveTranscriptionAudioSource, transcriptionAudioInput } from "../execution/transcription-audio.js";
+import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, TranscriptionAudioSourceRecord } from "../execution/transcription-audio.js";
+import { inspectPcmWave } from "../media/pcm-wave.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
@@ -75,6 +78,35 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       assertAudioDerivationIntent(intent, attempt, output);
       return { attempt, output };
     };
+    const transcriptionIntents = new Map<string, string>(), transcriptionCompletions = new Map<string, string>();
+    const transcriptionIntent = async (intent: TranscriptionAudioIntent) => {
+      const identity = digest(intent), previous = transcriptionIntents.get(intent.id);
+      if (previous) { fail(previous === identity, "Transcription intent changed during closure verification"); return; }
+      const attempt = get("attempt", intent.attemptId) as Attempt;
+      const input = transcriptionAudioInput(attempt);
+      const records = (["media_source", "narration_audio"] as const).flatMap(kind => {
+        const row = db.prepare("SELECT body FROM entities WHERE kind=? AND id=?").get(kind, input.artifactId) as { body: string } | undefined;
+        return row ? [{ kind, record: JSON.parse(row.body) as TranscriptionAudioSourceRecord["record"] }] : [];
+      });
+      assertTranscriptionAudioIntent(intent, attempt, resolveTranscriptionAudioSource(attempt, records, intent.sourceRecord));
+      await source(intent.source);
+      const pcm = await inspectPcmWave(join(bundle, "media", "blobs", `${intent.source.sha256}.wav`), intent.recipe.maxInputBytes);
+      fail(pcm.sha256 === intent.source.sha256 && pcm.byteLength === intent.source.byteLength && pcm.pcm.sampleRate === 48000
+        && pcm.pcm.channels === 2 && pcm.pcm.sampleCount === intent.sourceEndSample, "Transcription source PCM differs from its complete descriptor");
+      transcriptionIntents.set(intent.id, identity);
+    };
+    const transcriptionCompletion = async (receipt: TranscriptionAudioReceipt) => {
+      const identity = digest(receipt), previous = transcriptionCompletions.get(receipt.id);
+      if (previous) { fail(previous === identity, "Transcription completion changed during closure verification"); return; }
+      const intent = get("transcription_audio_intent", receipt.id) as TranscriptionAudioIntent;
+      await transcriptionIntent(intent); assertTranscriptionAudioReceipt(intent, receipt, false);
+      const path = `audio-derivatives/blobs/${receipt.audio.sha256}.wav`;
+      required(path, receipt.audio.sha256, receipt.audio.byteLength);
+      const pcm = await inspectPcmWave(join(bundle, path), intent.recipe.maxOutputBytes);
+      fail(pcm.sha256 === receipt.audio.sha256 && pcm.byteLength === receipt.audio.byteLength && pcm.pcm.sampleRate === 16000
+        && pcm.pcm.channels === 1 && pcm.pcm.sampleCount === receipt.audio.sampleCount, "Transcription derivative PCM differs from its measured receipt");
+      transcriptionCompletions.set(receipt.id, identity);
+    };
     let storageId: string | undefined;
     if (files.has("execution-output/identity.json")) {
       const identity = await json("execution-output/identity.json");
@@ -83,7 +115,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
     fail(storageId || ![...files.keys()].some(path => path.startsWith("execution-output/")), "Execution output storage identity is missing");
     for (const [path, file] of files) {
       // Binary objects and timeline documents use the exact byte hash as the name.
-      const named = /^(?:artifacts\/(?:images\/blobs|local-timelines\/documents|[^/]+)|media\/blobs|execution-output\/blobs)\/([a-f0-9]{64})\.[a-z]+$/.exec(path)
+      const named = /^(?:artifacts\/(?:images\/blobs|local-timelines\/documents|[^/]+)|media\/blobs|execution-output\/blobs|audio-derivatives\/blobs)\/([a-f0-9]{64})\.[a-z]+$/.exec(path)
         ?? /^native\/[^/]+\/workspace\/image-attachments\/[a-f0-9]{64}\/[0-3]-([a-f0-9]{64})\.jpg$/.exec(path);
       if (named) fail(file.sha256 === named[1], `Content-addressed filename differs: ${path}`);
       if (path.startsWith("media/sources/")) { const value = await json(path); fail(path === `media/sources/${value.id}.json`, "Source descriptor filename differs"); await source(value); }
@@ -127,6 +159,11 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         await audioIntent(intent);
         // Keep valid measured receipts even when their endpoint failed final acceptance; do not force another conversion.
         assertAudioDerivationReceipt(intent, receipt as AudioDerivationReceipt, false); await source(receipt.source);
+      } else if (path.startsWith("audio-derivatives/completions/")) {
+        fail(file.byteLength <= 32768, "Transcription completion exceeds its metadata bound");
+        const receipt = await json(path) as TranscriptionAudioReceipt;
+        fail(path === `audio-derivatives/completions/${receipt.id}.json`, "Transcription completion filename differs");
+        await transcriptionCompletion(receipt);
       }
     }
     for (const row of db.prepare("SELECT kind,id,body FROM entities").iterate() as Iterable<{ kind: string; id: string; body: string }>) {
@@ -162,6 +199,13 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         const { attempt, output } = await audioIntent(intent);
         assertNormalizedAudioIngestion(intent, attempt, output, { type: "normalized_audio", artifact: get("artifact", intent.artifactId) as any,
           derivation: value as AudioDerivationReceipt, mediaSource: get("media_source", intent.artifactId) as any });
+      } else if (row.kind === "transcription_audio_intent") {
+        await transcriptionIntent(value as TranscriptionAudioIntent);
+      } else if (row.kind === "transcription_audio_receipt") {
+        fail(canonical(await json(`audio-derivatives/completions/${row.id}.json`)) === canonical(value), "Saved transcription preparation differs from its durable completion");
+        const intent = get("transcription_audio_intent", row.id) as TranscriptionAudioIntent;
+        assertTranscriptionAudioReceipt(intent, value as TranscriptionAudioReceipt);
+        await transcriptionCompletion(value as TranscriptionAudioReceipt);
       } else if (row.kind === "execution_output_receipt") {
         const attempt = get("attempt", value.attemptId);
         if (value.kind === "audio" || value.kind === "data" || attempt.request.kind === "speech" || attempt.request.kind === "transcription")

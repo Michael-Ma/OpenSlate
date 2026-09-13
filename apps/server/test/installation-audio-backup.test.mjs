@@ -75,7 +75,7 @@ test("backup includes filesystem-only audio completion, exact raw/normalized byt
   assert.deepEqual(readFileSync(join(f.destination, f.completionPath)), readFileSync(join(f.sourceRoot, f.completionPath)));
   assert.deepEqual(await inspectInstallationBackup({ directory: f.destination }), result);
   assert.equal(installationBackupFileKind(f.completionPath), "owned_metadata");
-  assert.equal(installationBackupFileKind("audio-derivatives/completions/" + "a".repeat(64) + ".json"), null, "future namespaces remain unavailable");
+  assert.equal(installationBackupFileKind("audio-derivatives/transcripts/" + "a".repeat(64) + ".json"), null, "future namespaces remain unavailable");
 });
 
 test("backup preserves measured endpoint failure as recovery evidence without inventing a completed audio artifact", async t => {
