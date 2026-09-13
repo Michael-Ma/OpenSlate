@@ -47,6 +47,8 @@ The Engine bounds wakeups and checks project pause, transitive holds, exact curr
 
 ### 3. Trusted planning against owned draft recordings
 
+The next [owned-recording implementation sequence](OWNED-RECORDING-TRANSCRIPTION.md) separates the compiler/file foundation, exact backend review/application and ordinary UI/tool activation. Each step preserves the full existing plan and keeps unaccepted audio out of canonical narration.
+
 Add a versioned application proposal for an exact uploaded or generated recording, even before canonical narration exists. Bind the owned source record and complete descriptor/hash, selected narration version/section where applicable, pinned transcription profile, language decision and explicit word timing. Verify the installed input before publication and again at the existing execution boundary.
 
 The compiler currently resolves `p.asset()` only from canonical project artifacts, and Engine resolution also requires a saved artifact row. A draft upload has neither until canonical publication. Do not insert unaccepted draft recordings into canonical state merely to make them visible. Connect a verified owned recording through input artifact installation, bounded transcription-only compiler binding and Engine source resolution; validate every consumer. An unaccepted recording must not become timeline narration through this new path. Preserve existing compiler fingerprints when the new binding is absent. The application persists the exact source binding beside the prepared plan, and rechecks it after asynchronous compilation and when applying that same request's proposal.
