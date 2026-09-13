@@ -1,6 +1,6 @@
 # OpenSlate — Development Plan
 
-**Version:** 0.19 · September 12, 2026
+**Version:** 0.20 · September 12, 2026
 **Status:** Local native setup, conversation/review, canonical narration, owned uploads and local rendering are integrated. A six-minute synthetic render, a 60-shot fake workflow with scoped reuse/restart, and a native question-answer continuation passed. The single-process launcher has exclusive local installation ownership. Opt-in image/H3 execution, human spending/budget review, exact PNG ingestion, recoverable video normalization and automatic real local assembly are integrated. The full injected-provider-to-render path and no-key built browser setup passed. The complete checkout passes 842 tests. Default generation remains fake; live media validation is pending. See [current implementation status](../implementation/STATUS.md) for limits and remaining work.
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
@@ -143,6 +143,8 @@ Add stage/gap assessment and focused task-prompt references, pinned with recipe/
 
 **Design:** [Director runtime](../technical/DIRECTOR-RUNTIME.md), [skills/tools](../technical/SKILLS-TOOLS.md).
 
+**September 12 browser follow-through:** A real structured question and browser answer passed across application reopen, refresh, full reload and exact HTTP replay. The two turns took 5.556 and 4.484 seconds; 22 continuation checks and 14 independent checks passed. Historical native starts total 21, with no media API calls. The strict initial harness-label failure and extra model follow-up remain in the evidence. See [browser question validation](../implementation/CODEX-QUESTION-BROWSER-VALIDATION.md).
+
 ### T07 — Narration readiness, source choices and cue propagation
 
 **Dependencies:** T04; conversation integration uses T05/T06. **Homes:** core narration, production references and fake audio adapters.
@@ -187,7 +189,7 @@ The GPT Image 2 and MiniMax H3 transports have offline protocol/fault tests. Eng
 
 H3 application mapping, exact reviewed first-frame transfer, durable polling cooldown and protected download/normalization pass offline restart/fault tests. Human allowances pin exact candidates and full profiles; admission atomically consumes start and configured-estimate caps. The browser saves installed model choices and displays backend credential readiness and project compatibility. The integrated Engine now automatically produces a real six-second local export from an injected generated take and human-accepted supplied narration.
 
-Authenticated human allowance HTTP/UI, safe historical model/work display and independent audited budget changes pass actual browser and database checks. New enabled H3 projects pin real local assembly; immutable timeline/render intents, completion receipts and fresh cache bindings preserve restart recovery and scoped content reuse. The full injected-provider pipeline and no-key built browser activation checks passed. Synchronous images retain null vendor task IDs; H3 locators remain protected receipts until downloaded and measured. Spending limits distinguish configured estimates from actual provider billing, and known/unknown paid outcomes cannot borrow a new allowance or repeat a POST. Next complete broader native stage/question evaluations and local backup/recovery release work while deferring live media prerequisites.
+Authenticated human allowance HTTP/UI, safe historical model/work display and independent audited budget changes pass actual browser and database checks. New enabled H3 projects pin real local assembly; immutable timeline/render intents, completion receipts and fresh cache bindings preserve restart recovery and scoped content reuse. The full injected-provider pipeline and no-key built browser activation checks passed. Synchronous images retain null vendor task IDs; H3 locators remain protected receipts until downloaded and measured. Spending limits distinguish configured estimates from actual provider billing, and known/unknown paid outcomes cannot borrow a new allowance or repeat a POST. Next complete broader native stage/gap evaluations and local backup/recovery release work while deferring live media prerequisites.
 
 Versioned narration tools, explicit human guidance upgrades, the owned PNG library and actual browser image discussion are implemented. The launcher, installation guard and backed-up database migrations are verified. The next release slice is [offline same-root installation backup and recovery](../implementation/INSTALLATION-RECOVERY.md): a private verified media bundle, read-only recovery review, permanent fences on imported spending authority and separate human release while projects remain paused. Portable relocation needs a later logical-path/provenance design; clean-install work also remains. Complete independent local and injected-transport checks before requesting live prerequisites. Live H3 stays deferred; other real media needs an explicit test allowance.
 

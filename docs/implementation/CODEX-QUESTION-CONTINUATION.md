@@ -35,7 +35,7 @@ The native adapter closed its process. A separate zero-turn archive request arch
 
 ## Limits
 
-- The saved fixture belonged to `capability-human`, while the production HTTP route represents `local-user`. An authenticated HTTP answer from that different principal correctly returned `QUESTION_STALE`. The successful answer used the actual application service under the original principal; **positive HTTP and browser question-answer interaction remain unverified**.
+- The saved fixture belonged to `capability-human`, while the production HTTP route represents `local-user`. An authenticated HTTP answer from that different principal correctly returned `QUESTION_STALE`. The successful answer used the actual application service under the original principal; **this experiment did not verify positive HTTP or browser question answering**. A later, separate [browser question validation](CODEX-QUESTION-BROWSER-VALIDATION.md) passed using a new `local-user` project and its own acknowledged question, without changing this fixture's ownership or historical evidence.
 - This was one read-only tone question. It does not establish broad multi-question, stage-selection, editing or generation quality.
 - No new image was attached on continuation. The earlier image observation was available as saved conversation context.
 - The test used a fresh native thread, not a resumed interrupted turn. Runtime upgrades still need compatibility validation.

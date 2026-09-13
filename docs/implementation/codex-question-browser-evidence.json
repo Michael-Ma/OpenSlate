@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "test": "Native question followed by an actual browser answer after application restart",
+  "recordedAt": "2026-09-13T01:22:01.253Z",
+  "codeCommit": "e1d2c22baef27e092811e6b0265c0bf39d3da826",
+  "runtimeVersion": "0.153.4",
+  "model": "gpt-6-astra",
+  "reasoningEffort": "low",
+  "nodeVersion": "24.15.0",
+  "projectId": "6575684a-2f86-43c6-b812-72054b5930c7",
+  "source": {
+    "fixture": "browser-Du8gVw",
+    "reportDigest": "ac3eeded7e15628f94ad225f27d459bfadc428ddf701edcaff996361f0e0b93c",
+    "requestId": "9745d7b7-a5e8-4a33-b003-047a054136b8",
+    "turnId": "267231f1-55bc-4446-8da9-703cd676dade",
+    "epochId": "9627ab74-8c0b-44f8-928d-78861a8bbb61",
+    "nativeThreadId": "01a09853-dc22-7390-b864-3a8473733c20",
+    "nativeTurnId": "01a09853-dd6b-7693-a33d-60e3ee30e37a",
+    "inputDigest": "fe90e6a2fe628d03ad8ec913096db486d9ef4c476645b62c2e08ede9b79a0d8f",
+    "contextDigest": "f78a81dea650934060baf8fef9067faa60fb4c0a01d3da36a389d591e873ba47",
+    "elapsedMs": 5556,
+    "applicationState": "waiting_user",
+    "nativeStatus": "interrupted",
+    "reservedAt": "2026-09-13T01:13:48.114Z",
+    "acknowledgedAt": "2026-09-13T01:13:48.154Z",
+    "questionId": "09f738f1891d800b4cac1186496fa69877c4803b2b1640ca53cd135091cdec75",
+    "question": [
+      {
+        "header": "Tone",
+        "id": "tone",
+        "options": [
+          {
+            "description": "Friendly, inviting, and personal.",
+            "label": "Warm (Recommended)"
+          },
+          {
+            "description": "Balanced, clear, and understated.",
+            "label": "Neutral"
+          },
+          {
+            "description": "Polished, authoritative, and professional.",
+            "label": "Formal"
+          }
+        ],
+        "question": "Which tone would you prefer for the film?"
+      }
+    ],
+    "harnessFailure": {
+      "code": "ERR_ASSERTION",
+      "message": "tone_options_are_available"
+    },
+    "failedCheckPreserved": true,
+    "sourceReportUnchanged": true
+  },
+  "continuation": {
+    "fixture": "continuation-MEcmbv",
+    "requestId": "72c2fe52-a402-4381-9f0d-2e1ba6e033bd",
+    "turnId": "e95e43d7-84e3-44c6-bdb8-7aeedb6d007c",
+    "epochId": "d2daf511-a2b2-4f86-9283-77c6b9f6bc4c",
+    "nativeThreadId": "01a0985a-442b-74c3-8a18-e091a301921e",
+    "nativeTurnId": "01a0985a-4572-7422-9f45-da95982021f7",
+    "inputDigest": "93ed8c2978f9cd77626a2ab332d4c39915d67ce32037b9a63e61fd331b0c7787",
+    "contextDigest": "5780f2a5b417beec41d07ce30881367b5e575201c4f8d278ca95742de481c3ef",
+    "elapsedMs": 4484,
+    "applicationState": "completed",
+    "nativeStatus": "completed",
+    "reservedAt": "2026-09-13T01:20:47.961Z",
+    "acknowledgedAt": "2026-09-13T01:20:48.001Z",
+    "answer": "Warm",
+    "response": "Warm it is—friendly, inviting, and personal. What’s the film about?",
+    "nativeResumeRequested": false,
+    "boundary": "Actual browser -> authenticated messages route -> LocalDirectorController -> DirectorSupervisor.answerQuestion -> unmodified input builder -> fresh native thread",
+    "knownPendingQuestionReopened": true,
+    "savedRuntimeSelectionUnchanged": true,
+    "originalQuestionAndTurnUnchanged": true,
+    "harnessChecks": [
+      {
+        "name": "known_question_provenance_verified_read_only_before_reopen",
+        "pass": true
+      },
+      {
+        "name": "production_origin_after_restart",
+        "pass": true
+      },
+      {
+        "name": "saved_selection_zero_turn_setup_ready",
+        "pass": true
+      },
+      {
+        "name": "reopened_setup_selection_matches",
+        "pass": true
+      },
+      {
+        "name": "continuation_reopen_preserves_question_and_setup",
+        "pass": true
+      },
+      {
+        "name": "continuation_canonical_narration_and_authority_unchanged",
+        "pass": true
+      },
+      {
+        "name": "continuation_setup_did_not_start_a_model",
+        "pass": true
+      },
+      {
+        "name": "answer_request_is_read_only_local_user",
+        "pass": true
+      },
+      {
+        "name": "answer_has_no_attachments_or_native_resume",
+        "pass": true
+      },
+      {
+        "name": "exact_warm_answer_and_context",
+        "pass": true
+      },
+      {
+        "name": "answer_has_fresh_authority_and_original_scope",
+        "pass": true
+      },
+      {
+        "name": "saved_selection_unchanged_before_answer",
+        "pass": true
+      },
+      {
+        "name": "exact_browser_question_reply",
+        "pass": true
+      },
+      {
+        "name": "answer_completed_with_selected_tone",
+        "pass": true
+      },
+      {
+        "name": "two_known_acknowledged_starts",
+        "pass": true
+      },
+      {
+        "name": "question_answer_is_saved_exactly",
+        "pass": true
+      },
+      {
+        "name": "original_turn_unchanged_and_both_epochs_revoked",
+        "pass": true
+      },
+      {
+        "name": "fresh_native_thread_on_answer",
+        "pass": true
+      },
+      {
+        "name": "project_narration_and_authority_unchanged",
+        "pass": true
+      },
+      {
+        "name": "no_mutating_application_tools_or_media_calls",
+        "pass": true
+      },
+      {
+        "name": "exact_http_answer_replay_creates_no_new_turn",
+        "pass": true
+      },
+      {
+        "name": "question_answer_and_selection_survive_final_reopen",
+        "pass": true
+      }
+    ]
+  },
+  "dispatch": {
+    "allowanceId": "openslate-native-question-browser-20260912",
+    "maximumStarts": 2,
+    "actualStarts": 2,
+    "priorHistoricalStarts": 19,
+    "historicalStarts": 21,
+    "status": "exhausted",
+    "repeatedFirstTurn": false,
+    "unknownOutcomeRetried": false,
+    "mediaApiCalls": 0
+  },
+  "authority": {
+    "principalId": "local-user",
+    "bothRequestsReadOnly": true,
+    "originalScopePreserved": true,
+    "canonicalBefore": "237d8e2fb114fe48a780de600186b8e213974a6f1f21d51f776aa8c28aae47d4",
+    "canonicalAfter": "237d8e2fb114fe48a780de600186b8e213974a6f1f21d51f776aa8c28aae47d4",
+    "preservedRecordFamilies": [
+      "hold",
+      "grant",
+      "approval",
+      "candidate",
+      "attempt",
+      "reservation",
+      "plan",
+      "prepared",
+      "artifact",
+      "external_allowance",
+      "external_allowance_consumption",
+      "budget_revision",
+      "narration_state",
+      "narration_segment",
+      "narration_audio",
+      "narration_cue",
+      "narration_acceptance",
+      "narration_revision",
+      "narration_prepared",
+      "narration_canonical",
+      "narration_commit_receipt"
+    ],
+    "applicationToolCalls": 0,
+    "bothEpochsRevoked": true,
+    "exactAnswerReplayCreatedNoNewTurn": true
+  },
+  "browser": {
+    "observer": "Parent agent using CUA, reported after the completed run",
+    "browserTab": 9,
+    "pendingToneWithRecommendedLabelVisible": true,
+    "answerButtonClicked": true,
+    "textEntered": "Warm",
+    "submitCount": 1,
+    "exactAnswerVisible": true,
+    "pendingQuestionCardDisappeared": true,
+    "answerRetainedAfterProjectRefresh": true,
+    "answerRetainedAfterFullPageReloadAndReconnect": true,
+    "disconnectedBeforeCleanup": true,
+    "consoleChecks": [
+      {
+        "window": "After answer and project refresh",
+        "warningsAndErrors": []
+      },
+      {
+        "window": "After full page reload and reconnect",
+        "warningsAndErrors": []
+      }
+    ],
+    "unrelatedPanelLimitation": "Image, media and spending panels reported missing items/404 because the focused harness did not register those routes. Empty inspected console windows do not establish a globally clean browser run."
+  },
+  "independentAudit": [
+    {
+      "name": "original_failed_report_digest_unchanged",
+      "pass": true
+    },
+    {
+      "name": "initial_failure_record_retained",
+      "pass": true
+    },
+    {
+      "name": "one_question_and_one_answer_acknowledged_without_replay",
+      "pass": true
+    },
+    {
+      "name": "known_completed_continuation_with_22_passes",
+      "pass": true
+    },
+    {
+      "name": "both_native_threads_archived_and_processes_exited",
+      "pass": true
+    },
+    {
+      "name": "closed_status_has_exact_total_without_token",
+      "pass": true
+    },
+    {
+      "name": "exhausted_allowance_refuses_known_question_resume",
+      "pass": true
+    },
+    {
+      "name": "independent_reopen_canonical_project_unchanged",
+      "pass": true
+    },
+    {
+      "name": "independent_reopen_preserved_authority_and_narration_records",
+      "pass": true
+    },
+    {
+      "name": "independent_reopen_exact_answer_and_original_question",
+      "pass": true
+    },
+    {
+      "name": "independent_reopen_original_and_answer_turns_exact",
+      "pass": true
+    },
+    {
+      "name": "independent_reopen_same_saved_selection",
+      "pass": true
+    },
+    {
+      "name": "independent_reopen_both_requests_read_only_local_user",
+      "pass": true
+    },
+    {
+      "name": "independent_reopen_two_dispatches_and_revoked_epochs",
+      "pass": true
+    }
+  ],
+  "cleanup": {
+    "originalThreadArchived": true,
+    "answerThreadArchived": true,
+    "bothArchiveProcessesExited": true,
+    "observedSetupAndRuntimeProcessesExited": true,
+    "applicationClosed": true,
+    "questionAnswerAndSelectionSurvivedReopen": true,
+    "readyTokenRemoved": true
+  },
+  "limitations": [
+    "One explicitly requested read-only tone question; not broad stage selection, editing, planning or model-quality validation.",
+    "The model added a follow-up question despite the requested one-sentence acknowledgment.",
+    "Initial harness failed on Warm (Recommended); only validation was relaxed, and the original pending question/first turn were not repeated.",
+    "The focused browser harness omitted image, media and spending routes, causing unrelated panel 404 states.",
+    "No images were attached and no media provider API was called."
+  ]
+}

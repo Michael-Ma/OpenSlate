@@ -16,6 +16,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Native browser validation](implementation/CODEX-BROWSER-VALIDATION.md) | Two browser conversations, restart and a persisted brief edit |
 | [Native images and questions](implementation/CODEX-CAPABILITY-VALIDATION.md) | Bounded attached-image and structured-question evidence |
 | [Native question continuation](implementation/CODEX-QUESTION-CONTINUATION.md) | One live answer resumed from the exact persisted application question |
+| [Browser question validation](implementation/CODEX-QUESTION-BROWSER-VALIDATION.md) | Actual native question answered through the browser after reopen, exact replay and independent audit |
 | [Narration browser validation](implementation/NARRATION-BROWSER-VALIDATION.md) | Actual canonical review, supplied playback and project-switch recovery |
 | [Narration integration](implementation/NARRATION-INTEGRATION.md) | Drafts, recordings, exact acceptance and guarded canonical commit |
 | [Native narration validation](implementation/CODEX-NARRATION-V2-VALIDATION.md) | One actual V2 draft edit after an explicit guidance upgrade, with preserved acceptance and authority |
