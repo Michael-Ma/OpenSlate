@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonical, digest, invariant } from "@openslate/core";
+import type { ExecutionSpoolOutput } from "@openslate/providers";
 import { assertVideoDerivationIntent, assertVideoDerivationReceipt } from "../execution/video-derivation.js";
 import type { VideoDerivationIntent, VideoDerivationReceipt } from "../execution/video-derivation.js";
 import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormalizedAudioIngestion } from "../execution/audio-derivation.js";
@@ -8,6 +9,11 @@ import type { AudioDerivationIntent, AudioDerivationReceipt } from "../execution
 import { assertTranscriptionAudioIntent, assertTranscriptionAudioReceipt, resolveTranscriptionAudioSource, transcriptionAudioInput } from "../execution/transcription-audio.js";
 import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, TranscriptionAudioSourceRecord } from "../execution/transcription-audio.js";
 import { inspectPcmWave } from "../media/pcm-wave.js";
+import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../execution/audio-execution-authority.js";
+import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
+import type { SpeechAuthorityStore } from "../execution/audio-execution-authority.js";
+import { assertSpeechExecutionDispatch, assertSpeechExecutionResult } from "../execution/audio-execution-receipts.js";
+import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionResult } from "../execution/audio-execution-receipts.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
@@ -63,7 +69,34 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       fail(row && Buffer.byteLength(row.body) <= 16 * 1024 ** 2, `Required database identity is missing: ${kind}`);
       const value: unknown = JSON.parse(row.body); fail(object(value), "Invalid saved record"); return value;
     };
+    const speechReader: SpeechAuthorityStore = { db,
+      get<T>(kind: string, id: string): T | undefined {
+        const row = db.prepare("SELECT 1 FROM entities WHERE kind=? AND id=?").get(kind, id);
+        return row ? get(kind, id) as T : undefined;
+      },
+      getProject(id) {
+        const row = db.prepare("SELECT body FROM projects WHERE id=?").get(id) as { body: string } | undefined;
+        fail(row, "Speech admission project is missing"); return JSON.parse(row.body);
+      },
+    };
+    const checkedSpeech = new Set<string>();
+    const speechRecords = (attemptId: string) => {
+      if (checkedSpeech.has(attemptId)) return;
+      const attempt = get("attempt", attemptId) as Attempt;
+      const mapping = speechReader.get<SpeechExecutionMapping>("speech_execution_mapping", attemptId);
+      const dispatch = speechReader.get<SpeechExecutionDispatch>("speech_execution_dispatch", attemptId);
+      const result = speechReader.get<SpeechExecutionResult>("speech_execution_result", attemptId);
+      const admission = resolveSpeechAdmission(speechReader, attempt.request, mapping);
+      if (mapping) assertSpeechMappingAdmission(admission, mapping);
+      if (dispatch) { fail(mapping, "Speech dispatch lost its exact mapping"); assertSpeechExecutionDispatch(attempt, mapping, dispatch); }
+      if (result) assertSpeechExecutionResult(attempt, mapping, dispatch, result, result.observation.kind === "completed"
+        ? get("execution_output_receipt", result.observation.outputReceiptId) as OutputReceipt : undefined);
+      checkedSpeech.add(attemptId);
+    };
+    const audioIntents = new Map<string, { identity: string; attempt: Attempt; output: ExecutionSpoolOutput }>();
     const audioIntent = async (intent: AudioDerivationIntent) => {
+      const identity = digest(intent), previous = audioIntents.get(intent.id);
+      if (previous) { fail(previous.identity === identity, "Audio intent changed during closure verification"); return previous; }
       const attempt = get("attempt", intent.attemptId) as Attempt;
       const spool = await json(`execution-output/manifests/${intent.spoolId}.json`);
       const slot = await json(`execution-output/slots/${intent.slotId}.json`);
@@ -73,10 +106,11 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         && slot.projectId === intent.projectId && slot.attemptId === intent.attemptId && slot.spoolId === intent.spoolId
         && slot.port === "audio" && spool.attemptId === intent.attemptId && spool.sha256 === intent.rawSha256
         && spool.byteLength === intent.rawByteLength, "Audio derivation differs from its exact raw spool and winning slot");
+      assertSpeechSpoolLineage(speechReader, attempt, intent.spoolId);
       const output = { port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav", sha256: spool.sha256,
         byteLength: spool.byteLength, fixture: false, storage: { type: "spool", spoolId: spool.id } } as const;
       assertAudioDerivationIntent(intent, attempt, output);
-      return { attempt, output };
+      const checked = { identity, attempt, output }; audioIntents.set(intent.id, checked); return checked;
     };
     const transcriptionIntents = new Map<string, string>(), transcriptionCompletions = new Map<string, string>();
     const transcriptionIntent = async (intent: TranscriptionAudioIntent) => {
@@ -210,6 +244,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         const attempt = get("attempt", value.attemptId);
         if (value.kind === "audio" || value.kind === "data" || attempt.request.kind === "speech" || attempt.request.kind === "transcription")
           assertOutputReceiptIdentity(value as OutputReceipt, attempt as Attempt);
+      } else if (["speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result"].includes(row.kind)) {
+        speechRecords(row.id);
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);

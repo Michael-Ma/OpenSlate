@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Explicit speech application bridge, consumed human allowance, owned complete audio and recovery",
+  "activation": "Not exposed in launcher or narration UI",
+  "realMediaApiCalls": 0,
+  "nativeModelStartsInThisMilestone": 0,
+  "privatePipelineProof": {
+    "id": "openslate-speech-application-proof-uhEutm",
+    "harnessChecksPassed": 15,
+    "independentChecksPassed": 20,
+    "injectedHttpRequests": 1,
+    "credentialResolutions": 1,
+    "realLocalNormalizations": 1,
+    "configuredFixtureEstimateMicros": "100",
+    "durationSeconds": 6,
+    "raw": {
+      "sampleRate": 24000,
+      "channels": 1,
+      "samplesPerChannel": 144000,
+      "byteLength": 288044,
+      "sha256": "f3a0a3afb025e7515b15f08721ce5f6ec2bf3ddcb6ce6c1c38de7f7f98dda27a"
+    },
+    "normalized": {
+      "sampleRate": 48000,
+      "channels": 2,
+      "samplesPerChannel": 288000,
+      "decodedPcmByteLength": 1152000,
+      "sha256": "b48f5e53481b8785fa6c06cf24e5ae130a5b9865033da34ef0366a3af740efb9",
+      "endpointDeltaNumerator": 0,
+      "independentlyMeasuredToneHz": 440,
+      "leadingAndTrailingSilenceMsVerified": 200
+    },
+    "failureInjected": "SQL audio_derivation_receipt publication",
+    "reopen": "Saved derivation published and reservation charged once with missing credentials/media binaries; no new HTTP or conversion",
+    "narrationOrCanonicalChanges": false
+  },
+  "independentReview": {
+    "checksPassed": 24,
+    "authorityAndWire": 12,
+    "bridgeBoundaries": 5,
+    "normalizationStoreAndBackup": 6,
+    "actualEngineConflictingReceiptProof": 1,
+    "findingsResolved": [
+      "Equal audio bytes under a different receipt could satisfy bridge completion",
+      "Generic Engine spool recovery could bypass bridge lookup and publish the alternate receipt"
+    ],
+    "finalConflictingReceiptResult": "Blocked before conversion or artifact publication; original raw evidence/liability retained, no extra POST"
+  },
+  "limitations": [
+    "Synthetic tones and injected HTTP do not verify speech quality, live access or provider pricing.",
+    "The harness seeds a trusted plan/grant and synthetic human principal; allowance issuance and Engine admission are actual application services, but this is not an HTTP or UI approval proof.",
+    "The harness manually expires the retained lease before reopen; it does not measure natural lease expiry or simulate a hard process kill.",
+    "The pipeline proof has one exact receipt. Separate controlled regressions cover competing receipts and generic Engine recovery.",
+    "A retained matching capability lock proves full-definition agreement; consumption does not identify the originating historical lock.",
+    "Narration adoption, transcription application execution and opt-in audio activation remain separate work."
+  ]
+}

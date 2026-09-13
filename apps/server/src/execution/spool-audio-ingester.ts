@@ -12,6 +12,7 @@ import { installManagedAudio } from "../media/managed-audio.js";
 import { assertNormalizedAudioIngestion, assertAudioDerivationIntent, assertAudioDerivationReceipt,
   AUDIO_DERIVATION_LIMITS, audioArtifactId, audioDerivationId } from "./audio-derivation.js";
 import type { NormalizedAudioIngestion, AudioDerivationIntent, AudioDerivationReceipt } from "./audio-derivation.js";
+import { assertSpeechSpoolLineage } from "./audio-execution-lineage.js";
 
 const activeRoots = new Set<string>();
 const cancelled = (signal: AbortSignal): void => invariant(!signal.aborted, "MEDIA_CANCELLED", "Audio derivation cancelled");
@@ -42,9 +43,11 @@ export class SpoolAudioIngestor implements ExecutionOutputIngestor {
     activeRoots.add(this.rootDir);
     try {
       const owned = await this.outputs.resolveOutput(attempt.projectId, attempt.id, output, { signal });
+      // The Engine may recover a generic spool without calling the provider bridge. Re-establish speech's exact response lineage here.
+      this.owned(attempt, signal, owned.spool.id);
       const raw = await inspectPcmWave(owned.path, AUDIO_DERIVATION_LIMITS.inputBytes, signal);
       invariant(raw.sha256 === output.sha256 && raw.byteLength === output.byteLength, "AUDIO_DERIVATION_CONFLICT", "Raw PCM bytes differ from their spool");
-      this.owned(attempt, signal);
+      this.owned(attempt, signal, owned.spool.id);
       const id = audioDerivationId(attempt.projectId, attempt.id), saved = this.outputs.store.get<AudioDerivationIntent>("audio_derivation_intent", id);
       let intent = saved;
       if (!intent) {
@@ -55,7 +58,7 @@ export class SpoolAudioIngestor implements ExecutionOutputIngestor {
           artifactId: audioArtifactId(id), rawPcm: raw.pcm, recipe: "generated-audio-v1", normalization };
         assertAudioDerivationIntent(proposed, attempt, output);
         intent = this.outputs.store.transaction(() => {
-          this.owned(attempt, signal);
+          this.owned(attempt, signal, owned.spool.id);
           // A pre-transcode intent pins the recipe; restarts cannot silently choose another one.
           return this.outputs.store.put("audio_derivation_intent", id, attempt.projectId, proposed) as AudioDerivationIntent;
         });
@@ -66,12 +69,12 @@ export class SpoolAudioIngestor implements ExecutionOutputIngestor {
       const databaseReceipt = this.outputs.store.get<AudioDerivationReceipt>("audio_derivation_receipt", id);
       if (databaseReceipt) invariant(receipt && canonical(receipt) === canonical(databaseReceipt), "AUDIO_DERIVATION_CORRUPT", "Recorded derivation lost its exact durable completion");
       if (!receipt) {
-        this.owned(attempt, signal);
+        this.owned(attempt, signal, owned.spool.id);
         if (saved) {
           const normalization = await this.media.describeAudioNormalization({ signal });
           invariant(canonical(normalization) === canonical(intent.normalization), "AUDIO_DERIVATION_RECIPE_CHANGED", "Incomplete derivation requires its original normalization recipe and toolchain");
         }
-        this.owned(attempt, signal);
+        this.owned(attempt, signal, owned.spool.id);
         const source = await this.media.importMedia({ artifactId: intent.artifactId, path: owned.path, kind: "audio" }, { signal });
         const verified = await this.media.verifiedSource(source, { signal });
         const normalized = await inspectPcmWave(verified.path, intent.normalization.maxOutputBytes, signal);
@@ -84,15 +87,15 @@ export class SpoolAudioIngestor implements ExecutionOutputIngestor {
         // This completion index is durable before SQL artifact/source publication. Keep it on late cancellation.
         await this.writeIndex(receipt);
       }
-      assertAudioDerivationReceipt(intent, receipt); this.owned(attempt, signal);
+      assertAudioDerivationReceipt(intent, receipt); this.owned(attempt, signal, owned.spool.id);
       const verified = await this.media.verifiedSource(receipt.source, { signal });
       const normalized = await inspectPcmWave(verified.path, intent.normalization.maxOutputBytes, signal);
       invariant(normalized.sha256 === receipt.source.sha256 && normalized.byteLength === receipt.source.byteLength
         && normalized.pcm.sampleRate === 48000 && normalized.pcm.channels === 2 && normalized.pcm.sampleCount === receipt.normalizedSamples,
         "AUDIO_DERIVATION_CONFLICT", "Completed PCM bytes differ from their measured receipt");
-      this.owned(attempt, signal);
+      this.owned(attempt, signal, owned.spool.id);
       const path = await installManagedAudio(artifactDir, attempt.projectId, { ...verified.source, path: verified.path }, intent.normalization.maxOutputBytes, { signal });
-      this.owned(attempt, signal);
+      this.owned(attempt, signal, owned.spool.id);
       const source = receipt.source;
       const result: NormalizedAudioIngestion = { type: "normalized_audio", derivation: receipt,
         artifact: { id: intent.artifactId, projectId: attempt.projectId, attemptId: attempt.id,
@@ -105,12 +108,13 @@ export class SpoolAudioIngestor implements ExecutionOutputIngestor {
     } finally { activeRoots.delete(this.rootDir); }
   }
 
-  private owned(attempt: Attempt, signal: AbortSignal): void {
+  private owned(attempt: Attempt, signal: AbortSignal, spoolId?: string): void {
     cancelled(signal);
     new InstallationRecoveryGuard(this.outputs.store).assertWritable(attempt.projectId);
     const current = this.outputs.store.get<Attempt>("attempt", attempt.id);
     invariant(current?.projectId === attempt.projectId && current.phase === "ingesting" && current.leaseOwner === attempt.leaseOwner
       && current.leaseEpoch === attempt.leaseEpoch && current.leaseExpiresAt > Date.now() && digest(current.request) === digest(attempt.request), "AUDIO_DERIVATION_LEASE_LOST", "Audio derivation no longer owns the active ingestion lease");
+    if (spoolId !== undefined) assertSpeechSpoolLineage(this.outputs.store, attempt, spoolId);
   }
 
   private async readIndex(id: string): Promise<AudioDerivationReceipt | null> {

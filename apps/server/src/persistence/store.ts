@@ -12,6 +12,10 @@ import { assertAudioDerivationIntent, assertAudioDerivationReceipt, assertNormal
 import type { AudioDerivationIntent, AudioDerivationReceipt } from "../execution/audio-derivation.js";
 import { assertTranscriptionAudioIntent, assertTranscriptionAudioReceipt, resolveTranscriptionAudioSource, transcriptionAudioInput } from "../execution/transcription-audio.js";
 import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, TranscriptionAudioSourceRecord } from "../execution/transcription-audio.js";
+import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../execution/audio-execution-authority.js";
+import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
+import { assertSpeechExecutionDispatch, assertSpeechExecutionResult } from "../execution/audio-execution-receipts.js";
+import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionResult } from "../execution/audio-execution-receipts.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt, ArtifactRecord } from "../execution/engine.js";
@@ -284,6 +288,27 @@ export class Store {
         assertImageExecutionResult(attempt, mapping, dispatch, result, outputId ? this.get("execution_output_receipt", outputId) : undefined);
       }
     }
+    if (["speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result"].includes(kind)) {
+      reference("attempt", id);
+      const attempt = this.get<Attempt>("attempt", id)!, value = { ...body, id, projectId };
+      const mapping = this.get<SpeechExecutionMapping>("speech_execution_mapping", id);
+      const dispatch = this.get<SpeechExecutionDispatch>("speech_execution_dispatch", id);
+      const pin = kind === "speech_execution_mapping" ? value as unknown as SpeechExecutionMapping : mapping;
+      const admission = resolveSpeechAdmission(this, attempt.request, pin);
+      if (pin) { reference("capability_lock", pin.capabilityLockId); assertSpeechMappingAdmission(admission, pin); }
+      if (kind === "speech_execution_mapping") {
+        invariant(!this.get("speech_execution_result", id) || !!mapping, "SPEECH_EXECUTION_CONFLICT", "A terminal speech preparation cannot acquire another mapping");
+      } else if (kind === "speech_execution_dispatch") {
+        reference("speech_execution_mapping", id);
+        invariant(!this.get("speech_execution_result", id) || !!dispatch, "SPEECH_EXECUTION_CONFLICT", "A terminal speech preparation cannot acquire a dispatch");
+        assertSpeechExecutionDispatch(attempt, mapping!, value as unknown as SpeechExecutionDispatch);
+      } else {
+        const result = value as unknown as SpeechExecutionResult;
+        const outputId = result.observation?.kind === "completed" ? result.observation.outputReceiptId : undefined;
+        if (outputId !== undefined) reference("execution_output_receipt", outputId);
+        assertSpeechExecutionResult(attempt, mapping, dispatch, result, outputId ? this.get<OutputReceipt>("execution_output_receipt", outputId) : undefined);
+      }
+    }
     if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation", "h3_poll_schedule"].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
@@ -348,6 +373,7 @@ export class Store {
       const spool = this.get<{ sha256: string; byteLength: number }>("execution_output_spool", String(body.spoolId))!;
       invariant(slot.spoolId === body.spoolId && slot.attemptId === body.attemptId && slot.port === "audio",
         "IDENTITY_MISMATCH", "Audio derivation must bind the exact winning raw slot");
+      assertSpeechSpoolLineage(this, attempt, String(body.spoolId));
       assertAudioDerivationIntent({ ...body, id, projectId } as unknown as AudioDerivationIntent, attempt,
         { port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav", sha256: spool.sha256, byteLength: spool.byteLength,
           fixture: false, storage: { type: "spool", spoolId: String(body.spoolId) } });
@@ -374,9 +400,11 @@ export class Store {
       reference("audio_derivation_intent", id);
       const intent = this.get<AudioDerivationIntent>("audio_derivation_intent", id)!;
       const receipt = { ...body, id, projectId } as unknown as AudioDerivationReceipt;
+      const attempt = this.get<Attempt>("attempt", intent.attemptId)!;
+      assertSpeechSpoolLineage(this, attempt, intent.spoolId);
       assertAudioDerivationReceipt(intent, receipt); reference("artifact", receipt.source.artifactId);
       const artifact = this.get<ArtifactRecord>("artifact", receipt.source.artifactId)!;
-      assertNormalizedAudioIngestion(intent, this.get<Attempt>("attempt", intent.attemptId)!,
+      assertNormalizedAudioIngestion(intent, attempt,
         { port: "audio", kind: "audio", mimeType: "audio/wav", extension: "wav", sha256: intent.rawSha256,
           byteLength: intent.rawByteLength, fixture: false, storage: { type: "spool", spoolId: intent.spoolId } },
         { type: "normalized_audio", artifact, derivation: receipt, mediaSource: { id: intent.artifactId, projectId, source: receipt.source,
@@ -385,6 +413,8 @@ export class Store {
     if (kind === "media_source" && body.origin === "generated_audio") {
       reference("artifact", id); reference("attempt", body.attemptId); reference("audio_derivation_receipt", body.derivationId);
       const receipt = this.get<AudioDerivationReceipt>("audio_derivation_receipt", String(body.derivationId))!;
+      const intent = this.get<AudioDerivationIntent>("audio_derivation_intent", receipt.id)!;
+      assertSpeechSpoolLineage(this, this.get<Attempt>("attempt", receipt.attemptId)!, intent.spoolId);
       invariant(canonical({ ...body, id, projectId }) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId,
         source: receipt.source, origin: "generated_audio", attemptId: receipt.attemptId, derivationId: receipt.id }),
       "IDENTITY_MISMATCH", "Generated audio source must retain its exact derivation without human upload authority");
@@ -442,7 +472,8 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion", "installation_recovery_fence"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
-      if (kind === "audio_derivation_intent" || kind === "audio_derivation_receipt" || kind === "transcription_audio_intent" || kind === "transcription_audio_receipt")
+      if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
+        "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);

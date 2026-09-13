@@ -18,6 +18,7 @@ export interface OpenAISpeechDescription {
   budgetPolicy: "utf8-cap-v1";
   requestDigest: string; bodySha256: string;
 }
+export interface OpenAISpeechWireDescription { description: OpenAISpeechDescription; bodyByteLength: number }
 export interface OpenAISpeechResult {
   bytes: Uint8Array; sha256: string; byteLength: number; mimeType: "audio/wav"; extension: "wav"; fixture: false;
   /** The binary speech response does not report per-request usage. */
@@ -48,6 +49,12 @@ function prepare(request: OpenAISpeechRequest): { description: OpenAISpeechDescr
 
 /** Pure request validation and exact semantic/wire fingerprints. No credentials, files or network. */
 export function describeOpenAISpeechRequest(request: OpenAISpeechRequest): OpenAISpeechDescription { return prepare(request).description; }
+
+/** Additive application mapping helper. Keeps historical descriptions and wire bytes unchanged; exposes no mutable body. */
+export function describeOpenAISpeechWireRequest(request: OpenAISpeechRequest): OpenAISpeechWireDescription {
+  const prepared = prepare(request);
+  return { description: prepared.description, bodyByteLength: prepared.transport.body.byteLength };
+}
 
 /** Raw synchronous WAV transport. Local decode, durable storage and human acceptance are separate. */
 export class OpenAISpeechAdapter {
