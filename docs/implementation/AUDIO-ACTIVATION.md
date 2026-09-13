@@ -1,6 +1,6 @@
 # Audio activation and narration planning
 
-September 12, 2026. **Slice 1 implemented and verified offline; ordinary audio creation remains planned.** The speech/transcription bridges and unreviewed transcript publication are implemented offline. Human recording attachment is implemented; [transcript review/adoption](TRANSCRIPT-REVIEW-ADOPTION.md) is implemented and verified offline. This sequence connects those components to ordinary local use without requiring media API keys during development.
+September 13, 2026. **Slices 1 and 2 implemented and verified offline; ordinary audio creation remains planned.** The speech/transcription bridges and unreviewed transcript publication are implemented offline. Human recording attachment is implemented; [transcript review/adoption](TRANSCRIPT-REVIEW-ADOPTION.md) is implemented and verified offline. This sequence connects those components to ordinary local use without requiring media API keys during development.
 
 ## End-to-end paths
 
@@ -37,13 +37,13 @@ Compose speech with complete audio ingestion and transcription with owned deriva
 
 Extend the existing spending projection and browser eligibility rules as part of activation: they currently describe image/video work only. Audio needs safe model, voice/language, operation and estimate summaries, including historical unavailable-profile handling. Catalog registration alone would otherwise advertise work the normal review UI cannot authorize. Configuration support can land independently with switches off, but ordinary audio generation is incomplete until generation review and owned-source planning are connected.
 
-### 2. Resume local preparation without repeating paid submission — next
+### 2. Resume local preparation without repeating paid submission — implemented
 
-Follow the reviewed [preparation waiting protocol](AUDIO-PREPARATION-WAITING.md) to resolve shared-normalizer contention before enabling concurrent narration batches. The current transcription bridge records a definite `not_dispatched` failure for a busy preparation worker, consuming that attempt's start allowance. That behavior is documented; it must not silently become an uncertain provider outcome.
+The implemented [preparation waiting protocol](AUDIO-PREPARATION-WAITING.md) resolves shared-normalizer contention in the configured runtime. The standalone legacy bridge retains its definite local-failure behavior; the explicit Engine port preserves the same admitted attempt, reservation and consumed start while local preparation waits. The complete checkout passes 1,397 tests, including 50 additions. Actual worker contention/reopen and same-root restore are covered without live provider calls.
 
-Add a narrow application-owned pre-submit waiting protocol, with explicit durable evidence that no dispatch marker or provider result exists. Resume the same admitted attempt and reservation under a fresh original lease; consume no second allowance start and create no additional generation grant. A crash, expired lease or missing proof cannot be interpreted as permission to repeat a POST. Ordinary provider `lookup` remains read-only and never submits. Restored attempts retain their permanent first-submission fence.
+The narrow application-owned pre-submit waiting protocol uses explicit durable evidence that no dispatch marker or provider result exists. It resumes the same admitted attempt and reservation under a fresh lease without another allowance start or generation grant. A crash, expired lease or missing proof cannot be interpreted as permission to repeat a POST. Ordinary provider `lookup` remains read-only and never submits. Restored attempts retain their permanent first-submission fence.
 
-Bound wakeups and preserve project pause, request holds and obsolete-plan fences. Recheck the exact current binding and relevant selected draft input when claiming resumed work and immediately before its first dispatch marker. Existing lease renewal and the transcription bridge's historical-admission check do not themselves enforce these conditions; this is part of the new protocol. Return promptly when the worker is busy. Once the marker exists, the existing uncertain-submission and completed-output recovery protocols take over. Test replacement workers, cancellation, contention, restart, later user edits and restoration before relying on this for batching.
+The Engine bounds wakeups and checks project pause, transitive holds, exact current binding/candidate/specification and the complete ordered input artifact identities at resumed claim and immediately before the marker. The next owned-source planning slice must additionally bind the relevant selected draft input; current operation requests do not yet carry that selection proof. Busy work returns promptly. Once the marker exists, the existing uncertain-submission and completed-output recovery protocols take over. Maintained checks cover replacement workers, cancellation, contention, restart, later user edits and restoration.
 
 ### 3. Trusted planning against owned draft recordings
 

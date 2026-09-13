@@ -69,6 +69,7 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   // Ingestion remains available for already retained outputs independently of new-submit switches.
   const transcriptionFiles = localMedia ? new TranscriptionAudioStore({ rootDir: join(directory, "audio-derivatives") }) : null;
   const providers: ExecutionProvider[] = [fakeProvider], enabledExecutions: ExecutionIdentity[] = [];
+  let transcriptionExecution: OpenAITranscriptionExecution | undefined;
   if (configuration.image) {
     providers.push(new OpenAIImageExecution({ store, outputStore, artifactRoot: artifactDir, credentials,
       ...(options.transport?.imageFetch ? { fetch: options.transport.imageFetch } : {}) }));
@@ -85,9 +86,10 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     enabledExecutions.push({ adapter: "openai-speech", version: "1" });
   }
   if (configuration.transcription) {
-    providers.push(new OpenAITranscriptionExecution({ store, outputStore, credentials,
+    transcriptionExecution = new OpenAITranscriptionExecution({ store, outputStore, credentials,
       preparation: new TranscriptionAudioService(store, localMedia!, transcriptionFiles!),
-      ...(options.transport?.transcriptionFetch ? { fetch: options.transport.transcriptionFetch } : {}) }));
+      ...(options.transport?.transcriptionFetch ? { fetch: options.transport.transcriptionFetch } : {}) });
+    providers.push(transcriptionExecution);
     enabledExecutions.push({ adapter: "openai-transcription", version: "1" });
   }
   const registry = new ExecutionRegistry(providers);
@@ -122,6 +124,7 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
         audio: new SpoolAudioIngestor(outputStore, localMedia, { rootDir: join(directory, "audio-derivations") }),
         transcription: new SpoolTranscriptIngestor(outputStore, localMedia, transcriptionFiles!, { artifactDir }) } : {}) }),
     ...(enabled ? { externalAdmission } : {}),
+    ...(transcriptionExecution ? { submissionPreparation: transcriptionExecution } : {}),
     ...(localMedia ? { localExecution: new LocalMediaExecutor(store, localMedia, { artifactDir }) } : {}) });
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
     registry, credentials, enabledExecutions, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });

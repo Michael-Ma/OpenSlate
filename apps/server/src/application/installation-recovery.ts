@@ -2,12 +2,14 @@ import { canonical, digest, invariant } from "@openslate/core";
 import type { Store } from "../persistence/store.js";
 import { assertRecoveryFence, assertRecoveryOrigin, assertRecoveryReleaseInput, IMPORTED_AUTHORITY_KINDS, recoveryBodyHash, recoveryFenceId } from "../persistence/recovery-records.js";
 import type { ImportedAuthorityKind, InstallationRecoveryRow, RecoveryFence, RecoveryReceipt, RecoveryReleaseInput, RecoveryReleaseReceipt, VerifiedRecoveryOrigin } from "../persistence/recovery-records.js";
+import { assertTranscriptionPreparationAttemptState } from "../persistence/transcription-preparation-state.js";
+import type { Attempt } from "../execution/engine.js";
 export type { ImportedAuthorityKind, RecoveryFence, RecoveryReceipt, RecoveryReleaseInput, RecoveryReleaseReceipt, VerifiedRecoveryOrigin } from "../persistence/recovery-records.js";
 
 export interface RecoverySnapshot {
   state: "ordinary" | "quarantined" | "released";
   receipt: RecoveryReceipt | null; receiptDigest: string | null; summaryDigest: string | null;
-  counts: { projects: number; knownJobs: number; unknownJobs: number; nativeRequests: number; unusedAllowances: number };
+  counts: { projects: number; knownJobs: number; unknownJobs: number; nativeRequests: number; unusedAllowances: number; preparingJobs?: number };
 }
 const terminal = new Set(["succeeded", "failed"]);
 const fenceKey = (projectId: string, kind: ImportedAuthorityKind, id: string) => `${projectId}\0${kind}\0${id}`;
@@ -65,7 +67,7 @@ export class InstallationRecoveryGuard {
     return (!current || !!current.release) && !this.isImported(projectId, "director_turn", turnId) && !this.isImported(projectId, "message", requestId);
   }
   snapshot(): RecoverySnapshot {
-    const current = this.current(), counts = { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0 };
+    const current = this.current(), counts: RecoverySnapshot["counts"] = { projects: 0, knownJobs: 0, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0 };
     if (!current) return { state: "ordinary", receipt: null, receiptDigest: null, summaryDigest: null, counts };
     counts.projects = current.receipt.projectIds.length;
     const imported = (projectId: string, kind: ImportedAuthorityKind, id: string) => this.imported.has(fenceKey(projectId, kind, id));
@@ -76,13 +78,20 @@ export class InstallationRecoveryGuard {
       for (const row of evidence) if (row.outcome.type === "accepted" && row.outcome.taskId && row.outcomeDigest === digest(row.outcome)) {
         const entries = acceptedByAttempt.get(row.attemptId) ?? []; entries.push(row); acceptedByAttempt.set(row.attemptId, entries);
       }
-      for (const attempt of this.store.list<{ id: string; phase: string; taskId: string | null; reservationId: string | null }>("attempt", projectId)) {
+      for (const attempt of this.store.list<Attempt>("attempt", projectId)) {
         if (!imported(projectId, "attempt", attempt.id) || terminal.has(attempt.phase)) continue;
         const accepted = acceptedByAttempt.get(attempt.id) ?? [];
         const taskIds = new Set(accepted.map(row => row.outcome.taskId));
         if (attempt.taskId) taskIds.add(attempt.taskId);
-        const known = taskIds.size === 1;
-        if (known) counts.knownJobs++; else counts.unknownJobs++;
+        let preparing = false;
+        if (attempt.phase === "preparing" && accepted.length === 0 && !this.store.get("transcription_execution_dispatch", attempt.id)
+          && !this.store.get("transcription_execution_result", attempt.id)) {
+          try { assertTranscriptionPreparationAttemptState(this.store, attempt, true); preparing = true; }
+          catch { /* Damaged evidence remains uncertain; this read never repairs or authorizes it. */ }
+        }
+        const known = taskIds.size === 1 && attempt.phase !== "preparing";
+        if (preparing) counts.preparingJobs = (counts.preparingJobs ?? 0) + 1;
+        else if (known) counts.knownJobs++; else counts.unknownJobs++;
         work.push({ projectId, attemptId: attempt.id, phase: attempt.phase, task: attempt.taskId ? digest(attempt.taskId) : null,
           accepted: accepted.map(row => row.outcomeDigest).sort(), reservation: attempt.reservationId ? this.store.get("reservation", attempt.reservationId) ?? null : null });
       }

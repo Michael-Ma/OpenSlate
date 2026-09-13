@@ -18,6 +18,8 @@ import { assertTranscriptCandidateIngestion, resolveTranscriptionSpoolLineage } 
 import type { TranscriptCandidateIngestion } from "./transcript-candidate.js";
 import { assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution, isLocalExecutionAttempt, localFingerprint, localWorkKey } from "./local-execution.js";
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent, LocalExecutionOptions, LocalExecutionPort, LocalExecutionResult, PreparedLocalExecution } from "./local-execution.js";
+import type { PreparationEligibility, PreparationSubmissionOutcome, SubmissionPreparationContext, SubmissionPreparationPort } from "./submission-preparation.js";
+import { resolveTranscriptionPreparationIntent } from "./transcription-preparation.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
@@ -26,13 +28,14 @@ export interface NodeBinding {
   id: string; projectId: string; planId: string; node: PlanNode;
   candidateId: string | null; state: "active" | "retired"; outputs: Record<string, ArtifactRef>;
 }
-export type AttemptPhase = "submitting" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
+export type AttemptPhase = "submitting" | "preparing" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
 export interface Attempt {
   id: string; projectId: string; nodeId: string; candidateId: string | null; ordinal: number;
   specDigest: string; fingerprint: string; request: ExecutionRequest; workKey: string | null;
   phase: AttemptPhase; leaseOwner: string; leaseEpoch: number; leaseExpiresAt: number;
   taskId: string | null; reservationId: string | null;
   failure: { id: string; technical: boolean; source: string; retryAllowed: boolean } | null;
+  preparation?: { intentId: string; intentDigest: string; waitCount: number; nextEligibleAt: number };
   outputs: Record<string, ArtifactRef>; createdAt: string;
 }
 export interface ArtifactRecord {
@@ -74,6 +77,7 @@ export class Engine {
   readonly registry: ExecutionRegistry;
   private readonly externalAdmission: ExternalExecutionAdmission | undefined;
   private readonly providerTimeoutMs: number;
+  private readonly submissionPreparation: SubmissionPreparationPort | undefined;
   readonly workerId: string;
   readonly profiles: ProviderProfile[];
   readonly artifactDir: string;
@@ -89,6 +93,7 @@ export class Engine {
     externalAdmission?: ExternalExecutionAdmission;
     providerTimeoutMs?: number;
     localExecution?: LocalExecutionPort;
+    submissionPreparation?: SubmissionPreparationPort;
   }) {
     this.recovery = new InstallationRecoveryGuard(store);
     this.registry = provider instanceof ExecutionRegistry ? provider : new ExecutionRegistry([provider]);
@@ -98,6 +103,14 @@ export class Engine {
       && options.externalAdmission.recordAdmission.constructor.name !== "AsyncFunction"), "ASYNC_TRANSACTION", "Admission recording must be synchronous");
     this.providerTimeoutMs = options.providerTimeoutMs ?? 600000;
     invariant(Number.isSafeInteger(this.providerTimeoutMs) && this.providerTimeoutMs >= 10 && this.providerTimeoutMs <= 600000, "PROVIDER_CONFIGURATION_INVALID", "Provider operation deadline must be bounded");
+    if (options.submissionPreparation) {
+      const port = options.submissionPreparation, identity = structuredClone(port.identity);
+      invariant(canonical(identity) === canonical({ adapter: "openai-transcription", version: "1" })
+        && typeof port.start === "function" && typeof port.resume === "function",
+      "SUBMISSION_PREPARATION_INVALID", "Install the exact bounded transcription preparation port");
+      this.registry.resolve(identity);
+      this.submissionPreparation = Object.freeze({ identity: Object.freeze(identity), start: port.start.bind(port), resume: port.resume.bind(port) });
+    }
     this.workerId = options.workerId ?? newId();
     this.profiles = options.profiles ?? DEFAULT_PROFILES;
     this.artifactDir = resolve(options.artifactDir);
@@ -305,6 +318,7 @@ export class Engine {
       }
       const provider = this.registry.forRequest(attempt.request);
       this.recovery.assertFirstSubmit(attempt.projectId, attempt.id);
+      if (this.preparationMatches(attempt)) { await this.runPreparation(attempt, false); return; }
       const outcome = await this.observeProvider(attempt, options => provider.submit(structuredClone(attempt.request), options), "Submission threw after intent was persisted");
       if (outcome) await this.handle(attempt, outcome);
     }));
@@ -328,6 +342,14 @@ export class Engine {
       let provider: ExecutionProvider;
       try { provider = this.registry.forRequest(observed.request); }
       catch (error) { if (error instanceof DomainError) { blocked.push({ attemptId: observed.id, code: error.code }); return; } throw error; }
+      if (observed.phase === "preparing" && !this.preparationObserved(observed)) {
+        try {
+          invariant(this.preparationMatches(observed), "SUBMISSION_PREPARATION_UNAVAILABLE", "The saved preparation runtime is not installed");
+          const attempt = this.claimPreparation(observed); if (!attempt) return;
+          await this.runPreparation(attempt, true); reconciled++;
+        } catch (error) { if (error instanceof DomainError) { blocked.push({ attemptId: observed.id, code: error.code }); return; } throw error; }
+        return;
+      }
       const attempt = this.claim(observed);
       if (!attempt) return;
       let outcome: ExecutionOutcome;
@@ -735,10 +757,133 @@ export class Engine {
     });
   }
 
+  private preparationMatches(attempt: Attempt): boolean {
+    return !!this.submissionPreparation && canonical(requestExecutionIdentity(attempt.request)) === canonical(this.submissionPreparation.identity);
+  }
+  /** Presence only selects observation recovery; it never supplies permission to submit. */
+  private preparationObserved(attempt: Attempt): boolean {
+    return !!(this.store.get("transcription_execution_dispatch", attempt.id) || this.store.get("transcription_execution_result", attempt.id));
+  }
+  private preparationEligibility(attempt: Attempt, requireOwnership = true): PreparationEligibility {
+    const current = this.store.get<Attempt>("attempt", attempt.id);
+    invariant(current && current.projectId === attempt.projectId && current.nodeId === attempt.nodeId
+      && current.candidateId === attempt.candidateId && current.specDigest === attempt.specDigest
+      && current.fingerprint === attempt.fingerprint && canonical(current.request) === canonical(attempt.request),
+    "SUBMISSION_PREPARATION_INVALID", "Preparation no longer matches its retained request");
+    if (requireOwnership) invariant(this.owns(attempt) && current.leaseOwner === attempt.leaseOwner,
+      "SUBMISSION_PREPARATION_LEASE_LOST", "Preparation no longer owns its original active lease");
+    this.recovery.assertFirstSubmit(current.projectId, current.id);
+    if (current.preparation) resolveTranscriptionPreparationIntent(this.store, current);
+    invariant(current.reservationId && this.store.get<Reservation>("reservation", current.reservationId)?.state === "reserved",
+      "SUBMISSION_PREPARATION_INVALID", "Preparation requires its original reserved liability");
+    const project = this.store.getProject(current.projectId), binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
+    if (!binding || binding.projectId !== project.id || binding.state !== "active" || binding.planId !== project.activePlanId
+      || binding.candidateId !== current.candidateId || binding.node.specDigest !== current.specDigest || Object.keys(binding.outputs).length)
+      return { type: "obsolete", reason: "binding_changed" };
+    const plan = this.store.get<PlanRecord>("plan", binding.planId), planned = plan?.compiled.nodes.find(node => node.id === binding.id);
+    if (plan?.projectId !== project.id || !planned || canonical(planned) !== canonical(binding.node)
+      || binding.node.kind !== current.request.kind || canonical(binding.node.args) !== canonical(current.request.args))
+      return { type: "obsolete", reason: "intent_changed" };
+    try {
+      this.checkIntent(project, binding.node);
+      const inputs = this.resolveInputs(project.id, binding.node);
+      // A content hash alone cannot authorize replacing an owned recording with
+      // another artifact that happens to contain identical bytes.
+      if (inputs.fingerprint !== current.fingerprint || canonical(inputs.artifacts) !== canonical(current.request.inputs))
+        return { type: "obsolete", reason: "inputs_changed" };
+    } catch (error) {
+      if (!(error instanceof DomainError)) throw error;
+      return { type: "obsolete", reason: "inputs_changed" };
+    }
+    if (this.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return { type: "deferred", reason: "paused" };
+    if (this.held(project, current.nodeId)) return { type: "deferred", reason: "held" };
+    return { type: "ready" };
+  }
+  private claimPreparation(observed: Attempt): Attempt | null {
+    return this.store.transaction(() => {
+      const current = this.store.get<Attempt>("attempt", observed.id);
+      if (!current || current.phase !== "preparing" || this.preparationObserved(current) || current.leaseExpiresAt > Date.now()) return null;
+      resolveTranscriptionPreparationIntent(this.store, current);
+      invariant(canonical(current.request) === canonical(observed.request) && canonical(current.preparation) === canonical(observed.preparation),
+        "SUBMISSION_PREPARATION_INVALID", "Preparation changed before its wakeup claim");
+      if (current.preparation!.nextEligibleAt > Date.now()) return null;
+      // Current selection is rechecked inside this claim and again at the
+      // irreversible marker. Deferred/obsolete work still gets an owned decision.
+      this.preparationEligibility(current, false);
+      const claimed: Attempt = { ...current, leaseOwner: this.workerId, leaseEpoch: current.leaseEpoch + 1, leaseExpiresAt: Date.now() + this.leaseMs };
+      this.store.put("attempt", claimed.id, claimed.projectId, claimed); return claimed;
+    });
+  }
+  private settlePreparationWait(attempt: Attempt): void {
+    this.store.transaction(() => {
+      const current = this.owns(attempt);
+      if (!current || current.phase !== "preparing" || this.preparationObserved(current)) return;
+      resolveTranscriptionPreparationIntent(this.store, current);
+      const eligibility = this.preparationEligibility(attempt);
+      if (eligibility.type === "obsolete") {
+        this.store.put("attempt", current.id, current.projectId, { ...current, phase: "failed", leaseExpiresAt: 0,
+          failure: { id: "PREPARATION_OBSOLETE", technical: false, source: "application:submission-preparation/1", retryAllowed: false } });
+        this.setReservation(current, "released");
+        this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase: "failed", reason: "preparation_obsolete" });
+        return;
+      }
+      const waitCount = Math.min(1_000_000, current.preparation!.waitCount + 1);
+      const delayMs = Math.min(5000, 500 * 2 ** Math.min(waitCount - 1, 4));
+      this.store.put("attempt", current.id, current.projectId, { ...current, leaseExpiresAt: 0,
+        preparation: { ...current.preparation!, waitCount, nextEligibleAt: Date.now() + delayMs } });
+      // Bounded mutable wakeup metadata, not an immutable row every polling cycle.
+    });
+  }
+  private async runPreparation(attempt: Attempt, resume: boolean): Promise<void> {
+    const port = this.submissionPreparation!;
+    const controller = new AbortController();
+    const context: SubmissionPreparationContext = Object.freeze({ signal: controller.signal,
+      expectedLease: Object.freeze({ owner: attempt.leaseOwner, epoch: attempt.leaseEpoch }),
+      eligibility: () => this.preparationEligibility(attempt) });
+    const renew = (): void => {
+      if (controller.signal.aborted) return;
+      try {
+        this.store.transaction(() => {
+          const current = this.owns(attempt);
+          if (!current) { controller.abort(); return; }
+          if (current.phase === "preparing" && !this.preparationObserved(current)
+            && this.preparationEligibility(attempt).type !== "ready") { controller.abort(); return; }
+          this.store.put("attempt", current.id, current.projectId, { ...current, leaseExpiresAt: Date.now() + this.leaseMs });
+        });
+      } catch { controller.abort(); }
+    };
+    // start() must first retain its positive no-dispatch proof, including when
+    // selection/pause changed immediately after admission.
+    const timer = setInterval(renew, Math.max(1, Math.floor(this.leaseMs / 3))); timer.unref();
+    const deadline = setTimeout(() => controller.abort(), this.providerTimeoutMs);
+    let outcome: PreparationSubmissionOutcome | undefined, failure: unknown;
+    try {
+      try { outcome = await port[resume ? "resume" : "start"](structuredClone(attempt.request), context); }
+      catch (error) { failure = error; }
+    } finally { clearInterval(timer); clearTimeout(deadline); controller.abort(); }
+    const current = this.store.get<Attempt>("attempt", attempt.id);
+    if (current?.phase === "preparing" && !this.preparationObserved(current)) {
+      if (!this.owns(attempt)) return;
+      const proof = resolveTranscriptionPreparationIntent(this.store, current);
+      if (outcome?.type === "preparation_deferred") invariant(outcome.intentId === proof.id && outcome.intentDigest === digest(proof)
+        && ["local_media_busy", "paused", "held", "cancelled"].includes(outcome.reason),
+      "SUBMISSION_PREPARATION_INVALID", "Deferred preparation differs from its exact proof");
+      if (failure instanceof DomainError && !["SUBMISSION_PREPARATION_OBSOLETE", "SUBMISSION_PREPARATION_PAUSED", "SUBMISSION_PREPARATION_HELD"].includes(failure.code))
+        throw failure;
+      this.settlePreparationWait(attempt); return;
+    }
+    if (current && TERMINAL.has(current.phase)) return;
+    invariant(outcome?.type !== "preparation_deferred", "SUBMISSION_PREPARATION_INVALID", "Dispatched work cannot become a local preparation wait");
+    // Once the marker exists, preserve ordinary late provider evidence even if
+    // a pause, edit or replacement worker has taken away publication authority.
+    await this.handle(attempt, outcome ?? { type: "unknown", diagnostic: "Submission has no retained outcome; reconcile without resubmission" });
+  }
+
   private claim(observed: Attempt): Attempt | null {
     return this.store.transaction(() => {
       const attempt = this.store.get<Attempt>("attempt", observed.id)!;
       if (TERMINAL.has(attempt.phase) || attempt.leaseExpiresAt > Date.now()) return null;
+      if (attempt.phase === "preparing" && !this.preparationObserved(attempt)) return null;
       const updated: Attempt = { ...attempt, phase: attempt.phase === "submitting" ? "submission_unknown" : attempt.phase, leaseOwner: this.workerId, leaseEpoch: attempt.leaseEpoch + 1, leaseExpiresAt: Date.now() + this.leaseMs };
       this.store.put("attempt", updated.id, updated.projectId, updated); return updated;
     });

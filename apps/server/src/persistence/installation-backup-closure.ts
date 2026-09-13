@@ -18,6 +18,9 @@ import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionRe
 import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "../execution/transcription-execution-authority.js";
 import { assertTranscriptionExecutionDispatch, assertTranscriptionExecutionResult, compactTranscriptionExecutionResult, prepareTranscriptionExecutionRequest } from "../execution/transcription-execution-receipts.js";
 import type { TranscriptionExecutionMapping, TranscriptionExecutionDispatch, TranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
+import { assertTranscriptionPreparationIntent, resolveTranscriptionPreparationIntent } from "../execution/transcription-preparation.js";
+import type { TranscriptionPreparationIntent } from "../execution/transcription-preparation.js";
+import { assertTranscriptionPreparationAttemptState, assertTranscriptionPreparationMapping } from "./transcription-preparation-state.js";
 import { assertTranscriptCandidateIngestion, createTranscriptCandidate, resolveTranscriptionSpoolLineage } from "../execution/transcript-candidate.js";
 import type { TranscriptCandidate } from "../execution/transcript-candidate.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
@@ -165,6 +168,22 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         && pcm.pcm.channels === 1 && pcm.pcm.sampleCount === receipt.audio.sampleCount, "Transcription derivative PCM differs from its measured receipt");
       transcriptionCompletions.set(receipt.id, identity);
     };
+    const checkedWaiting = new Set<string>();
+    const waitingPreparation = async (attempt: Attempt): Promise<void> => {
+      if (checkedWaiting.has(attempt.id)) return;
+      assertTranscriptionPreparationAttemptState(speechReader, attempt, true);
+      if (!Object.hasOwn(attempt, "preparation")) return;
+      const proof = resolveTranscriptionPreparationIntent(speechReader, attempt), input = transcriptionAudioInput(attempt);
+      await source(proof.source);
+      const saved = get("artifact", input.artifactId);
+      fail(saved.projectId === attempt.projectId && canonical(saved.artifact) === canonical(input), "Waiting preparation lost its exact owned input artifact");
+      artifact(saved);
+      const pcm = await inspectPcmWave(join(bundle, "media", "blobs", `${proof.source.sha256}.wav`), 256 * 1024 ** 2);
+      fail(pcm.sha256 === proof.source.sha256 && pcm.byteLength === proof.source.byteLength && pcm.pcm.sampleRate === 48000
+        && pcm.pcm.channels === 2 && pcm.pcm.sampleCount === proof.sourceEndSample,
+      "Waiting preparation source differs from its complete recorded PCM identity");
+      checkedWaiting.add(attempt.id);
+    };
     const checkedTranscription = new Set<string>();
     const transcriptionRecords = async (attemptId: string) => {
       if (checkedTranscription.has(attemptId)) return;
@@ -176,6 +195,10 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const preparation = mapping ? resolveTranscriptionPreparation(speechReader, attempt, mapping) : undefined;
       if (mapping) {
         assertTranscriptionMappingAdmission(admission, mapping, preparation!);
+        if (Object.hasOwn(attempt, "preparation") || speechReader.get("transcription_preparation_intent", attemptId)) {
+          await waitingPreparation(attempt);
+          assertTranscriptionPreparationMapping(resolveTranscriptionPreparationIntent(speechReader, attempt), mapping);
+        }
         await transcriptionCompletion(preparation!.receipt);
         fail(canonical(await json(`audio-derivatives/completions/${preparation!.receipt.id}.json`)) === canonical(preparation!.receipt),
           "Transcription mapping lost its exact derivative completion file");
@@ -349,6 +372,12 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         const { attempt, output } = await audioIntent(intent);
         assertNormalizedAudioIngestion(intent, attempt, output, { type: "normalized_audio", artifact: get("artifact", intent.artifactId) as any,
           derivation: value as AudioDerivationReceipt, mediaSource: get("media_source", intent.artifactId) as any });
+      } else if (row.kind === "attempt") {
+        await waitingPreparation(value as Attempt);
+      } else if (row.kind === "transcription_preparation_intent") {
+        const attempt = get("attempt", row.id) as Attempt;
+        assertTranscriptionPreparationIntent(speechReader, attempt, value as TranscriptionPreparationIntent);
+        await waitingPreparation(attempt);
       } else if (row.kind === "transcription_audio_intent") {
         await transcriptionIntent(value as TranscriptionAudioIntent);
       } else if (row.kind === "transcription_audio_receipt") {

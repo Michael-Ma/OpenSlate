@@ -21,7 +21,7 @@ The application wrapper receives the captured attempt, its original lease owner/
 
 The two source families deliberately include generated artifacts and human recordings that have not yet been accepted into canonical narration. Both are ordinary owned media for preparation; neither supplies script/timing acceptance. Retain the source descriptor, original provenance record and source bytes unchanged.
 
-Creating an intent or starting a conversion requires the still-current original submitting lease and the existing first-submit recovery guard. Quarantine blocks preparation. After human recovery release, an imported attempt may verify/recover an already completed derivative, but may not start a missing conversion or a first provider POST. Reusing a derivative never bypasses the later bridge's fresh dispatch check. A lost lease can leave immutable filesystem evidence; it cannot publish or borrow the replacement owner's authority.
+Creating an intent or starting a conversion requires the still-current original lease and first-submit recovery guard. The explicit [waiting protocol](AUDIO-PREPARATION-WAITING.md) additionally permits its proven `preparing` phase through the captured Engine context; ordinary service callers cannot bypass that protocol. Legacy callers retain the original submitting-phase rule. Quarantine blocks preparation. After human recovery release, an imported attempt may verify/recover an already completed derivative, but may not start a missing conversion or a first provider POST. Reusing a derivative never bypasses the later bridge's fresh dispatch check. A lost lease can leave immutable filesystem evidence; it cannot publish or borrow the replacement owner's authority.
 
 ## Records and conversion
 

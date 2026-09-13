@@ -31,3 +31,11 @@ test("restored question projection cannot create an answer command; ordinary pen
   assert.equal(makeQuestionReply("project", question, "Warm", "ordinary").body.replyToQuestionId, question.id);
   assert.throws(() => makeQuestionReply("project", { ...question, canAnswer: false }, "Warm", "restored"), /fresh conversation/);
 });
+
+test("local preparation disclosure is summary evidence and adds no release or submission authority", () => {
+  const legacy = state(), source = { ...state(), counts: { ...state().counts, unknownJobs: 0, preparingJobs: 1 } };
+  const command = recoveryReleaseCommand(source, 'review-local-preparation');
+  assert.deepEqual(command.body, recoveryReleaseCommand(legacy, 'legacy').body);
+  assert.equal(Object.hasOwn(legacy.counts, 'preparingJobs'), false);
+  assert.equal(recoveryReviewCurrent(command, { ...source, summaryDigest: 'c'.repeat(64), counts: { ...legacy.counts } }), false);
+});

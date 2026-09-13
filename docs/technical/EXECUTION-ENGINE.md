@@ -1,8 +1,10 @@
 # OpenSlate — Durable Execution Engine
 
-**Version:** 0.5 · September 10, 2026
+**Version:** 0.6 · September 13, 2026
 **Status:** implementation specification; proposed contracts, not implemented behavior.
 **Ownership:** local TypeScript worker plus shared executor/policy repositories. The server owns creative mutations; the worker owns execution progress. See [Plan Compiler](PLAN-COMPILER.md) and the [confirmed execution rules](../design/EXECUTION-AND-EDITING.md).
+
+**Implemented preparation boundary (September 13, 2026):** The shipped launcher has a narrow `openai-transcription/1` preparation port. Existing admission first creates `submitting` with its reserved cost and consumed allowance; a second short transaction installs immutable positive preparation evidence and changes it to `preparing` before local IO. Busy work resumes the same attempt, and the unique provider-dispatch marker returns it to `submitting`. A crash before protocol installation retains ordinary unknown-submission behavior. This differs from the broader target sequence below, which describes preparation before cost admission. Follow the [implemented protocol](../implementation/AUDIO-PREPARATION-WAITING.md) for current phase, lease, cancellation, backup and restore contracts; do not infer generic resumability from the phase name alone.
 
 ## 1. Process and storage boundary
 

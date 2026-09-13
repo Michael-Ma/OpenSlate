@@ -55,18 +55,19 @@ function fixture(t, options = {}) {
     const selection = f.runtime.providerCatalog.select(f.runtime.providerCatalog.digest, [speech.id, transcription.id]);
     const project = f.production.createProject("Synthetic audio runtime", selection); f.projectId = project.id;
     const human = f.production.beginRequest(project.id, "synthetic-human", "Generate the exact reviewed narration and recognize its words");
-    f.production.authorize(project.id, human, [{ scopeId: project.id, kind: "speech" }, ...(changes.speechOnly ? [] : [{ scopeId: project.id, kind: "transcription" }])], key(), "initial_slot");
+    f.production.authorize(project.id, human, [{ scopeId: project.id, kind: "speech" }, ...(changes.speechOnly ? [] : [{ scopeId: project.id, kind: "transcription" }, ...(changes.secondTranscription ? [{ scopeId: project.id, kind: "transcription" }] : [])])], key(), "initial_slot");
     const q = JSON.stringify;
-    const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const voice=p.speech("voice",{profile:${q(speech.id)},text:${q(changes.text ?? "Leather boots.")},voice:${q(changes.voice ?? "coral")},instructions:"Warm and clear."});${changes.speechOnly ? "return voice;" : `return p.transcription("words",{profile:${q(transcription.id)},audio:voice,language:"auto",timing:${q(changes.timing ?? "word")}});`}});`;
+    const words = alias => `p.transcription(${q(alias)},{profile:${q(transcription.id)},audio:voice,language:"auto",timing:${q(changes.timing ?? "word")}})`;
+    const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const voice=p.speech("voice",{profile:${q(speech.id)},text:${q(changes.text ?? "Leather boots.")},voice:${q(changes.voice ?? "coral")},instructions:"Warm and clear."});${changes.speechOnly ? "return voice;" : `return ${changes.secondTranscription ? `[${words("words")},${words("words-second")}]` : words("words")};`}});`;
     const prepared = await f.production.prepare(project.id, human, { variant: "plan", expectedHeadVersion: project.headVersion, source });
     f.production.apply(project.id, human, prepared.id);
     return f.store.list("node_binding", project.id);
   };
   f.issue = kind => {
-    const profile = kind === "speech" ? speech : transcription, binding = f.store.list("node_binding", f.projectId).find(row => row.node.kind === kind);
+    const profile = kind === "speech" ? speech : transcription, bindings = f.store.list("node_binding", f.projectId).filter(row => row.node.kind === kind);
     const input = { profileDigest: String(providerProfileArguments(profile).profileDigest), profileDefinitionDigest: digest(profile),
-      selections: [{ candidateId: binding.candidateId, nodeId: binding.id, specDigest: binding.node.specDigest }], maxAttempts: 1,
-      maxEstimatedMicros: "100", expiresAt: new Date(Date.now() + 3600000).toISOString() };
+      selections: bindings.map(binding => ({ candidateId: binding.candidateId, nodeId: binding.id, specDigest: binding.node.specDigest })), maxAttempts: bindings.length,
+      maxEstimatedMicros: String(100 * bindings.length), expiresAt: new Date(Date.now() + 3600000).toISOString() };
     const human = f.production.beginRequest(f.projectId, "synthetic-human", "Approve this exact synthetic estimate", { editing: false,
       contextDigest: allowanceIssueContextDigest(f.projectId, input) });
     return f.runtime.allowances.issue(f.projectId, human, input);
@@ -151,4 +152,46 @@ test("runtime recovers a retained speech spool after local ingestion contention 
   const recovered = f.store.get("attempt", attempt.id); assert.equal(recovered.phase, "succeeded");
   assert.equal(f.calls.speech, 1); assert.equal(f.calls.normalization, 1); assert.equal(f.rows("attempt").length, 1);
   assert.equal(f.rows("external_allowance_consumption").length, 1); assert.equal(f.store.get("reservation", recovered.reservationId).state, "charged");
+});
+
+test("two admitted transcriptions contend on the actual shared worker and the waiting attempt resumes after reopen with one POST each", async t => {
+  const f = fixture(t); await f.seed({ secondTranscription: true }); f.issue("speech"); f.issue("transcription");
+  await f.runtime.engine.runReady(); assert.equal(f.calls.speech, 1);
+  const media = f.runtime.localMedia, describe = media.describeTranscriptionAudio.bind(media);
+  let arrived = 0, release;
+  const together = new Promise(resolve => { release = resolve; });
+  // Synchronize the first two recipe requests; contention itself comes from
+  // the actual worker's exclusive guard, not an injected MEDIA_BUSY error.
+  media.describeTranscriptionAudio = async (...args) => {
+    if (++arrived <= 2) { if (arrived === 2) release(); await together; }
+    return describe(...args);
+  };
+  const initial = await f.runtime.engine.runReady(); assert.equal(initial.dispatched, 2);
+  const audioAttempts = f.rows("attempt").filter(row => row.request.kind === "transcription");
+  assert.equal(audioAttempts.length, 2);
+  const waiting = audioAttempts.find(row => row.phase === "preparing"), completed = audioAttempts.find(row => row.phase === "succeeded");
+  assert.ok(waiting); assert.ok(completed); assert.equal(waiting.preparation.waitCount, 1); assert.equal(waiting.leaseExpiresAt, 0);
+  assert.equal(f.calls.transcription, 1); assert.equal(f.calls.derivative, 1);
+  assert.equal(f.rows("external_allowance_consumption").length, 3);
+  assert.equal(f.rows("transcription_preparation_intent").length, 2);
+  assert.equal(f.rows("transcription_execution_dispatch").length, 1);
+  assert.equal(f.store.get("reservation", waiting.reservationId).state, "reserved");
+  const pins = canonical({ proofs: f.rows("transcription_preparation_intent"), consumption: f.rows("external_allowance_consumption"),
+    candidates: f.rows("candidate"), grants: f.rows("grant") });
+  // Make only the saved wakeup eligible, then reopen the actual composition.
+  f.store.put("attempt", waiting.id, f.projectId, { ...waiting, preparation: { ...waiting.preparation, nextEligibleAt: 0 } });
+  f.open(); await f.runtime.engine.reconcile();
+  const finished = f.store.get("attempt", waiting.id);
+  assert.equal(finished.phase, "succeeded"); assert.equal(finished.ordinal, waiting.ordinal);
+  assert.equal(finished.candidateId, waiting.candidateId); assert.equal(finished.reservationId, waiting.reservationId);
+  assert.equal(finished.leaseEpoch, waiting.leaseEpoch + 1);
+  assert.equal(f.calls.transcription, 2); assert.equal(f.calls.derivative, 2); assert.equal(f.calls.normalization, 1);
+  assert.equal(f.rows("attempt").length, 3); assert.equal(f.rows("transcription_execution_dispatch").length, 2);
+  assert.equal(f.rows("transcript_candidate").length, 2); assert.ok(f.rows("reservation").every(row => row.state === "charged"));
+  assert.equal(canonical({ proofs: f.rows("transcription_preparation_intent"), consumption: f.rows("external_allowance_consumption"),
+    candidates: f.rows("candidate"), grants: f.rows("grant") }), pins);
+  const calls = { ...f.calls }; f.keys = false; f.open(); await f.runtime.engine.reconcile();
+  assert.deepEqual(f.calls, calls);
+  for (const kind of ["narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_transcript_selection", "narration_canonical"])
+    assert.equal(f.rows(kind).length, 0);
 });

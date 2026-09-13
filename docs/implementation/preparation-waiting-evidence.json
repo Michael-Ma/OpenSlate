@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "date": "2026-09-13",
+  "scope": "Durable same-attempt transcription preparation waiting, exact current eligibility, restore closure and recovery disclosure",
+  "fullCheckout": {
+    "passed": 1397,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 50,
+    "durationMilliseconds": 105652.772083,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "unchangedSourceTestConfigurationAndStyleFiles": 336
+  },
+  "focusedVerification": {
+    "engine": 21,
+    "portBridgeAndPreparationService": 57,
+    "storageRestoreAndExistingRecovery": 26,
+    "webRecoveryModel": 4,
+    "configuredAudioRuntime": 9,
+    "note": "Focused counts overlap with the full checkout and are not added together."
+  },
+  "sharedWorkerProof": {
+    "providerResponses": "Injected HTTP only",
+    "input": "One normalized synthetic PCM recording",
+    "admittedTranscriptions": 2,
+    "initialSucceeded": 1,
+    "initialWaiting": 1,
+    "transcriptionStartsConsumed": 2,
+    "additionalStartsConsumedOnResume": 0,
+    "postsPerTranscription": 1,
+    "derivativesPerTranscription": 1,
+    "unreviewedTranscriptCandidates": 2,
+    "sameAttemptReservationCandidateAndProofRetained": true,
+    "contention": "Synchronized recipe requests compete on the real shared LocalMediaService exclusive guard",
+    "recovery": "Actual configured runtime reopened; waiting attempt resumes with incremented lease epoch",
+    "repeatWorkAfterCompletedReopenWithUnavailableKeys": 0,
+    "narrationAcceptanceCreated": false
+  },
+  "restoration": {
+    "actualSameRootExportInspectionAndRestore": true,
+    "sourceBytesAndAuthorityPreserved": true,
+    "quarantineBlocksReconciliation": true,
+    "humanReleaseKeepsPause": true,
+    "importedFirstSubmissionPermanentlyBlocked": true,
+    "controlledReplacementLeaseDoesNotRemoveFence": true,
+    "validWaitingPreparationCount": 1,
+    "validWaitingUncertainCount": 0,
+    "malformedProofRemainsUncertain": true,
+    "summaryReadsCreateState": false,
+    "corruptionCases": [
+      "missing proof",
+      "stripped metadata",
+      "changed source record",
+      "absent source bytes",
+      "committed incomplete liability settlement"
+    ]
+  },
+  "independentReview": {
+    "remainingCorrectnessFindings": [],
+    "closedFindings": [
+      "Classified local input failure before proof installation retains definite not-dispatched evidence under the original lease",
+      "Recovery disclosure separates proven unsubmitted preparation from uncertain provider jobs"
+    ]
+  },
+  "limitations": [
+    "Real media provider access, billing and recognition quality remain unverified",
+    "Ordinary owned draft-recording planning and exact human generation review are not yet connected",
+    "Crash before positive preparation proof retains the existing unknown-submission boundary",
+    "The new recovery row is covered by model tests and build/typecheck; no additional browser session was run for this slice"
+  ],
+  "mediaApiCalls": 0,
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "pushed": false,
+  "next": "Owned uploaded-recording transcription proposals, exact human generation review and full-plan-preserving composition"
+}

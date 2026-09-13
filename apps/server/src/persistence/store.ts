@@ -19,6 +19,10 @@ import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionRe
 import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "../execution/transcription-execution-authority.js";
 import { assertTranscriptionExecutionDispatch, assertTranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
 import type { TranscriptionExecutionMapping, TranscriptionExecutionDispatch, TranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
+import { assertTranscriptionPreparationIntent, resolveTranscriptionPreparationIntent } from "../execution/transcription-preparation.js";
+import type { TranscriptionPreparationIntent } from "../execution/transcription-preparation.js";
+import { assertTranscriptionPreparationAttemptState, assertTranscriptionPreparationMapping, assertTranscriptionPreparationTransition } from "./transcription-preparation-state.js";
+import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import { assertTranscriptCandidateIngestion, resolveTranscriptionSpoolLineage } from "../execution/transcript-candidate.js";
 import type { TranscriptCandidate } from "../execution/transcript-candidate.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
@@ -145,6 +149,7 @@ export class Store {
       if (body.candidateId !== null) reference("candidate", body.candidateId);
       else invariant(typeof body.workKey === "string", "REFERENCE_REQUIRED", "Local work requires a work key");
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
+      assertTranscriptionPreparationAttemptState(this, { ...body, id, projectId } as unknown as Attempt);
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
     if (kind === "narration_transcript_selection") assertTranscriptSelection(this, projectId, { ...body, id, projectId });
@@ -348,23 +353,45 @@ export class Store {
         assertSpeechExecutionResult(attempt, mapping, dispatch, result, outputId ? this.get<OutputReceipt>("execution_output_receipt", outputId) : undefined);
       }
     }
+    if (kind === "transcription_preparation_intent") {
+      reference("attempt", id);
+      const attempt = this.get<Attempt>("attempt", id)!, proof = { ...body, id, projectId } as unknown as TranscriptionPreparationIntent;
+      assertTranscriptionPreparationIntent(this, attempt, proof);
+      if (!this.get(kind, id)) {
+        new InstallationRecoveryGuard(this).assertFirstSubmit(projectId, id);
+        invariant(attempt.phase === "submitting" && attempt.leaseExpiresAt > Date.now() && !Object.hasOwn(attempt, "preparation")
+          && !this.get("transcription_execution_mapping", id) && !this.get("transcription_execution_dispatch", id)
+          && !this.get("transcription_execution_result", id), "SUBMISSION_PREPARATION_INVALID", "Preparation proof requires an undispatched original admission");
+        invariant(this.get<{ state: string }>("reservation", proof.reservation.id)?.state === "reserved",
+          "SUBMISSION_PREPARATION_INVALID", "Preparation proof requires its original reserved liability");
+      }
+    }
     if (["transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(kind)) {
       reference("attempt", id);
       const attempt = this.get<Attempt>("attempt", id)!, value = { ...body, id, projectId };
       const mapping = this.get<TranscriptionExecutionMapping>("transcription_execution_mapping", id);
       const dispatch = this.get<TranscriptionExecutionDispatch>("transcription_execution_dispatch", id);
+      const protocol = Object.hasOwn(attempt, "preparation") || this.get("transcription_preparation_intent", id)
+        ? resolveTranscriptionPreparationIntent(this, attempt) : undefined;
       const pin = kind === "transcription_execution_mapping" ? value as unknown as TranscriptionExecutionMapping : mapping;
       const admission = resolveTranscriptionAdmission(this, attempt.request, pin);
       const preparation = pin ? resolveTranscriptionPreparation(this, attempt, pin) : undefined;
       if (pin) {
         reference("capability_lock", pin.capabilityLockId); reference("transcription_audio_intent", pin.preparation.intentId);
         reference("transcription_audio_receipt", pin.preparation.receiptId); assertTranscriptionMappingAdmission(admission, pin, preparation!);
+        if (protocol) assertTranscriptionPreparationMapping(protocol, pin);
       }
       if (kind === "transcription_execution_mapping") {
         invariant(!this.get("transcription_execution_result", id) || !!mapping, "TRANSCRIPTION_EXECUTION_CONFLICT", "A terminal transcription preparation cannot acquire another mapping");
       } else if (kind === "transcription_execution_dispatch") {
         reference("transcription_execution_mapping", id);
         invariant(!this.get("transcription_execution_result", id) || !!dispatch, "TRANSCRIPTION_EXECUTION_CONFLICT", "A terminal transcription preparation cannot acquire a dispatch");
+        if (!dispatch && Object.hasOwn(attempt, "preparation")) {
+          new InstallationRecoveryGuard(this).assertFirstSubmit(projectId, id);
+          invariant(attempt.phase === "preparing" && attempt.leaseExpiresAt > Date.now()
+            && attempt.reservationId !== null && this.get<{ state: string }>("reservation", attempt.reservationId)?.state === "reserved",
+          "SUBMISSION_PREPARATION_INVALID", "A preparation dispatch requires the original active waiting phase and liability");
+        }
         assertTranscriptionExecutionDispatch(attempt, mapping!, value as unknown as TranscriptionExecutionDispatch, preparation!);
       } else {
         const result = value as unknown as TranscriptionExecutionResult;
@@ -551,7 +578,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
-        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcript_candidate", "narration_transcript_selection"].includes(kind))
+        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
@@ -583,6 +610,7 @@ export class Store {
         const next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["candidateId", "ordinal", "nodeId", "specDigest", "fingerprint", "request", "workKey"])
           invariant(canonical(previous[field] ?? null) === canonical(next[field] ?? null), "IMMUTABLE_RECORD", `Attempt ${field} is immutable`);
+        assertTranscriptionPreparationTransition(previous as unknown as Attempt, next as unknown as Attempt);
       }
       if (kind === "media_render") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;

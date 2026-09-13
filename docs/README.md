@@ -32,8 +32,8 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Transcription application execution](implementation/OPENAI-TRANSCRIPTION-EXECUTION.md) | Exact owned upload and consumed approval, one-use dispatch, raw JSON recovery and backup closure |
 | [Generated narration attachment](implementation/GENERATED-NARRATION-ATTACHMENT.md) | Verified human selection, exact canonical generation history, browser review and restart evidence |
 | [Transcript review and adoption](implementation/TRANSCRIPT-REVIEW-ADOPTION.md) | Implemented bounded review, separate human writing/timing choices and canonical/backup provenance |
-| [Audio activation and narration planning](implementation/AUDIO-ACTIVATION.md) | Implemented audio configuration/preflight/spending/runtime; planned preparation waiting, owned draft sources, generation review and chunks |
-| [Audio preparation waiting](implementation/AUDIO-PREPARATION-WAITING.md) | Planned same-attempt local waiting before the one-use provider dispatch marker |
+| [Audio activation and narration planning](implementation/AUDIO-ACTIVATION.md) | Implemented audio configuration/preflight/spending/runtime and preparation waiting; planned owned draft sources, generation review and chunks |
+| [Audio preparation waiting](implementation/AUDIO-PREPARATION-WAITING.md) | Verified same-attempt waiting, current-selection/lease checks, shared-worker restart and permanent restored-submit fences |
 | [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration linked |
 | [Unreviewed transcript candidates](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, atomic publication and backup recovery; human adoption remains separate |
 | [Transcription audio preparation](implementation/TRANSCRIPTION-AUDIO-PREPARATION.md) | Verified complete-source 16 kHz derivative, six-minute recovery, parser and timing helper |
