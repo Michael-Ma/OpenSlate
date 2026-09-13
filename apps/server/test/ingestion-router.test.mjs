@@ -113,3 +113,25 @@ test('audio requires its explicit handler while raw transcription data has no fa
     { code: 'OUTPUT_INGESTION_UNSUPPORTED' });
   assert.equal(audioCalls, 1);
 });
+
+test('transcription routing requires the exact installed adapter and data contract', async () => {
+  let calls = 0;
+  const router = new ExecutionIngestionRouter({ transcription: { ingest(input) { calls++; return { sha256: input.output.sha256 }; } } });
+  const input = { attempt: { id: 'attempt', request: { kind: 'transcription', execution: { adapter: 'openai-transcription', version: '1' } } },
+    artifactDir: temporary, signal: new AbortController().signal,
+    output: { kind: 'data', port: 'cues', mimeType: 'application/json', extension: 'json', byteLength: 44,
+      fixture: false, sha256: 'a'.repeat(64), storage: { type: 'spool', spoolId: 'b'.repeat(64) } } };
+  assert.deepEqual(router.ingest(input), { sha256: 'a'.repeat(64) }); assert.equal(calls, 1);
+  for (const change of [
+    value => { value.attempt.request.execution.version = '2'; },
+    value => { value.attempt.request.execution.adapter = 'another-transcriber'; },
+    value => { value.attempt.request.kind = 'speech'; },
+    value => { value.output.port = 'data'; },
+    value => { value.output.mimeType = 'text/plain'; },
+    value => { value.output.extension = 'txt'; },
+  ]) {
+    const altered = { ...input, attempt: structuredClone(input.attempt), output: structuredClone(input.output) }; change(altered);
+    assert.throws(() => router.ingest(altered), { code: 'OUTPUT_INGESTION_UNSUPPORTED' });
+  }
+  assert.equal(calls, 1);
+});

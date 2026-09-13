@@ -19,6 +19,8 @@ import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionRe
 import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "../execution/transcription-execution-authority.js";
 import { assertTranscriptionExecutionDispatch, assertTranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
 import type { TranscriptionExecutionMapping, TranscriptionExecutionDispatch, TranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
+import { assertTranscriptCandidateIngestion, resolveTranscriptionSpoolLineage } from "../execution/transcript-candidate.js";
+import type { TranscriptCandidate } from "../execution/transcript-candidate.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt, ArtifactRecord } from "../execution/engine.js";
@@ -337,6 +339,19 @@ export class Store {
         assertTranscriptionExecutionResult(attempt, mapping, dispatch, result, preparation, outputId ? this.get<OutputReceipt>("execution_output_receipt", outputId) : undefined);
       }
     }
+    if (kind === "transcript_candidate") {
+      const candidate = { ...body, id, projectId } as unknown as TranscriptCandidate;
+      reference("attempt", candidate.attemptId); reference("artifact", candidate.artifactId);
+      reference("execution_output_receipt", candidate.raw?.receiptId); reference("execution_output_spool", candidate.raw?.spoolId);
+      reference("transcription_execution_mapping", candidate.attemptId); reference("transcription_execution_dispatch", candidate.attemptId);
+      reference("transcription_execution_result", candidate.attemptId); reference("transcription_audio_intent", candidate.preparation?.intentId);
+      reference("transcription_audio_receipt", candidate.preparation?.receiptId);
+      const lineage = resolveTranscriptionSpoolLineage(this, this.get<Attempt>("attempt", candidate.attemptId)!, candidate.raw.spoolId);
+      const artifact = this.get<ArtifactRecord>("artifact", candidate.artifactId)!;
+      assertTranscriptCandidateIngestion(lineage, { port: "cues", kind: "data", mimeType: "application/json", extension: "json",
+        sha256: lineage.spool.sha256, byteLength: lineage.spool.byteLength, fixture: false,
+        storage: { type: "spool", spoolId: lineage.spool.id } }, { type: "transcript_candidate", artifact, candidate });
+    }
     if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation", "h3_poll_schedule"].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
@@ -502,7 +517,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
-        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(kind))
+        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcript_candidate"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);

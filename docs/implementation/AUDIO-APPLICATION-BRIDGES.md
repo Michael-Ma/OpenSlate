@@ -2,7 +2,7 @@
 
 September 12, 2026. **Both explicitly constructed application bridges are implemented offline.** See [speech execution](OPENAI-SPEECH-EXECUTION.md) and [transcription execution](OPENAI-TRANSCRIPTION-EXECUTION.md). Neither workflow is activated in the launcher or exposed as built-in narration generation. This follows [audio ingestion](GENERATED-AUDIO-INGESTION.md), [transcription preparation](TRANSCRIPTION-AUDIO-PREPARATION.md) and the standalone transport contracts. It precedes [transcript candidate ingestion](TRANSCRIPT-CANDIDATES.md), because a candidate must know exactly which recording was uploaded.
 
-Speech and transcription mapping/dispatch/recovery are complete; implement candidates next. Keep activation, narration adoption and user-facing generation controls separate. All initial verification uses injected HTTP and synthetic audio; no real media API calls or API keys are needed.
+Speech and transcription mapping/dispatch/recovery and [unreviewed candidate ingestion](TRANSCRIPT-CANDIDATES.md) are complete. [Human generated-recording attachment](GENERATED-NARRATION-ATTACHMENT.md), transcript review/adoption and activation follow. Keep activation, narration adoption and user-facing generation controls separate. All initial verification uses injected HTTP and synthetic audio; no real media API calls or API keys are needed.
 
 ## Components and identities
 

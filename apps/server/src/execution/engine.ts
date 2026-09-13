@@ -14,6 +14,8 @@ import { assertNormalizedVideoIngestion } from "./video-derivation.js";
 import type { NormalizedVideoIngestion, VideoDerivationIntent } from "./video-derivation.js";
 import { assertNormalizedAudioIngestion } from "./audio-derivation.js";
 import type { AudioDerivationIntent, NormalizedAudioIngestion } from "./audio-derivation.js";
+import { assertTranscriptCandidateIngestion, resolveTranscriptionSpoolLineage } from "./transcript-candidate.js";
+import type { TranscriptCandidateIngestion } from "./transcript-candidate.js";
 import { assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution, isLocalExecutionAttempt, localFingerprint, localWorkKey } from "./local-execution.js";
 import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent, LocalExecutionOptions, LocalExecutionPort, LocalExecutionResult, PreparedLocalExecution } from "./local-execution.js";
 
@@ -36,10 +38,11 @@ export interface Attempt {
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
-  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio" | "generated_video" | "generated_audio";
+  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio" | "generated_video" | "generated_audio" | "transcription_response";
   outputReceiptId?: string; outputSpoolId?: string; byteLength?: number;
   width?: number; height?: number; validationDigest?: string;
   derivationId?: string; sourceDescriptorId?: string;
+  transcriptCandidateId?: string;
 }
 interface Reservation { id: string; projectId: string; attemptId: string; micros: string; state: "reserved" | "charged" | "released" }
 interface Hold { id: string; projectId: string; scopeId: string; ownerId: string; active: boolean }
@@ -52,9 +55,9 @@ interface Evidence { id: string; projectId: string; attemptId: string; outcome: 
 /** Trusted host hook: decode/probe and publish immutable bytes before returning their exact record. */
 type NormalizedIngestion = NormalizedVideoIngestion | NormalizedAudioIngestion;
 export interface ExecutionOutputIngestor {
-  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<IngestibleExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord | NormalizedIngestion> | ArtifactRecord | NormalizedIngestion;
+  ingest(input: { attempt: Readonly<Attempt>; output: Readonly<IngestibleExecutionOutput>; artifactDir: string; signal: AbortSignal }): Promise<ArtifactRecord | NormalizedIngestion | TranscriptCandidateIngestion> | ArtifactRecord | NormalizedIngestion | TranscriptCandidateIngestion;
 }
-interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedIngestion }
+interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedIngestion; transcript?: TranscriptCandidateIngestion }
 interface ResolvedInputs { artifacts: ArtifactRef[]; fingerprint: string }
 export interface ExternalExecutionAdmission {
   /** Trusted synchronous policy; check readiness and select allowance in this admission transaction. */
@@ -801,14 +804,16 @@ export class Engine {
       const current = this.owns(attempt); if (!current) return;
       if (isSpoolCompletion(completed)) this.outputStore!.assertCompletion(current.projectId, current.id, completed);
       const mapped: Record<string, ArtifactRef> = {};
-      for (const { output, record, normalized } of outputs) {
+      for (const { output, record, normalized, transcript } of outputs) {
         if (normalized) this.validateDerived(current, output, normalized);
+        if (transcript) this.validateTranscript(current, output, transcript);
         this.store.insert("artifact", record.id, attempt.projectId, record); mapped[output.port] = record.artifact;
         if (normalized) {
           this.store.insert(normalized.type === "normalized_audio" ? "audio_derivation_receipt" : "video_derivation_receipt",
             normalized.derivation.id, attempt.projectId, normalized.derivation);
           this.store.insert("media_source", record.id, attempt.projectId, normalized.mediaSource);
         }
+        if (transcript) this.store.insert("transcript_candidate", transcript.candidate.id, attempt.projectId, transcript.candidate);
         this.store.appendEvent(attempt.projectId, "artifact.published", { artifactId: record.id, attemptId: attempt.id, fixture: record.fixture });
       }
       const finished: Attempt = { ...current, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
@@ -889,14 +894,25 @@ export class Engine {
         if (signal.aborted) return [];
         const snapshot = structuredClone(received);
         const normalized = "type" in snapshot && (snapshot.type === "normalized_video" || snapshot.type === "normalized_audio") ? snapshot : undefined;
+        const transcript = "type" in snapshot && snapshot.type === "transcript_candidate" ? snapshot : undefined;
         if (isSpoolOutput(output) && output.kind === "audio") invariant(normalized?.type === "normalized_audio",
           "AUDIO_DERIVATION_CONFLICT", "Real audio requires its exact normalized derivation result");
-        const record = normalized ? normalized.artifact : snapshot as ArtifactRecord;
+        if (attempt.request.kind === "transcription" && attempt.request.execution?.adapter === "openai-transcription"
+          && attempt.request.execution.version === "1") invariant(transcript,
+          "TRANSCRIPT_CANDIDATE_CONFLICT", "Supported real transcription requires its exact unreviewed candidate result");
+        if (transcript) this.validateTranscript(attempt, output, transcript);
+        const record = normalized ? normalized.artifact : transcript ? transcript.artifact : snapshot as ArtifactRecord;
         await this.validateIngested(attempt, output, record, signal, normalized);
-        outputs.push({ output, record, ...(normalized ? { normalized } : {}) });
+        outputs.push({ output, record, ...(normalized ? { normalized } : {}), ...(transcript ? { transcript } : {}) });
       }
       return outputs;
     });
+  }
+
+  private validateTranscript(attempt: Attempt, output: IngestibleExecutionOutput, result: TranscriptCandidateIngestion): void {
+    invariant(isSpoolOutput(output), "TRANSCRIPT_CANDIDATE_CONFLICT", "Transcript candidates require an owned response spool");
+    const lineage = resolveTranscriptionSpoolLineage(this.store, attempt, output.storage.spoolId);
+    assertTranscriptCandidateIngestion(lineage, output, result);
   }
 
   private validateDerived(attempt: Attempt, output: IngestibleExecutionOutput, result: NormalizedIngestion): VideoDerivationIntent | AudioDerivationIntent {

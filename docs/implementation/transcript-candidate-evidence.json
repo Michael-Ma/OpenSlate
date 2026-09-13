@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "date": "2026-09-12",
+  "scope": "Exact raw transcript candidate ingestion, atomic publication and local/installation recovery",
+  "focused": {
+    "newCandidate": 9,
+    "newProjectionDigest": 3,
+    "newIngester": 15,
+    "newStoreAndBackup": 10,
+    "newEngine": 6,
+    "newRouter": 1,
+    "existingTransportAndParser": 36,
+    "existingTranscriptionRecordsAndBackup": 32,
+    "independentEngineRouterReview": "no findings"
+  },
+  "pipeline": {
+    "privateProofId": "FoeLUY",
+    "checks": 14,
+    "passed": 14,
+    "injectedCalls": {
+      "speech": 1,
+      "transcription": 1,
+      "credentials": 2,
+      "normalization": 1,
+      "derivative": 1
+    },
+    "realMediaApiCalls": 0,
+    "nativeModelTurns": 0,
+    "source": {
+      "sampleRate": 48000,
+      "channels": 2,
+      "samples": 288000,
+      "durationSeconds": 6
+    },
+    "derivative": {
+      "bitsPerSample": 16,
+      "byteLength": 192078,
+      "channels": 1,
+      "endDelta48kSamples": 0,
+      "sampleCount": 96000,
+      "sampleRate": 16000,
+      "sha256": "112567fc9507c62a9fa79b1cd4e382dad76b38a4927020aaea5e8597c3b6d932"
+    },
+    "rawResponse": {
+      "sha256": "b022d1eed41bfb113c9c11a225bd995c9c16464ecb2054a243b9a72a6043d940",
+      "byteLength": 164
+    },
+    "candidate": {
+      "status": "unreviewed",
+      "providerResultDigest": "2205d64757c8cda13455ead78ec19519bfeb3041138895a7125df22498de6f2b",
+      "wordCount": 2,
+      "parserIssues": [
+        {
+          "code": "word_outside_source",
+          "wordIndex": 1
+        }
+      ],
+      "sampleIssues": [
+        {
+          "code": "source_range_exceeded",
+          "wordIndex": 1
+        }
+      ]
+    },
+    "failureRecovery": [
+      "Raw output filesystem completion before failed SQL spool publication",
+      "Candidate insert failure rolls back artifact and settlement",
+      "Two reopen recoveries with unavailable credentials, preparation and media binaries"
+    ],
+    "independentAudit": {
+      "checks": 29,
+      "passed": 29,
+      "originalFiles": 20,
+      "allOriginalHashesUnchanged": true
+    },
+    "canonicalAndAcceptanceUnchanged": true
+  },
+  "actualInstallationRestore": {
+    "privateProofId": "GEI7lK",
+    "checks": 27,
+    "passed": 27,
+    "injectedCalls": {
+      "speech": 1,
+      "transcription": 1,
+      "credentials": 2,
+      "normalization": 1,
+      "derivative": 1
+    },
+    "completeOriginalFileMapsRetained": true,
+    "originalArchivedWithoutOverwrite": true,
+    "sameCanonicalRoot": true,
+    "quarantinePreventedWork": true,
+    "exactHumanReleaseKeptPaused": true,
+    "importedFirstPostFencesPreserved": true,
+    "candidatePublishedOnceAfterRelease": true,
+    "canonicalAndAcceptanceUnchanged": true,
+    "readOnlyAudit": {
+      "checks": 23,
+      "passed": 23,
+      "originalArchivedFiles": 19,
+      "requiredFinalManifestFiles": 17,
+      "expectedRuntimeFilesAdded": 5,
+      "originalEvidenceUnchanged": true
+    }
+  },
+  "limits": [
+    "All HTTP responses and human fixture principals are synthetic; estimates are not verified provider prices.",
+    "No real speech quality, transcription quality, provider account access or media spending was tested.",
+    "Candidate persistence is explicitly configured; launcher audio activation, browser candidate review, human adoption and generated narration attachment remain subsequent work.",
+    "The initial root Engine run had one test-message regex mismatch despite the correct rejection; the assertion now checks the stable error code and its targeted rerun passed."
+  ],
+  "completeCheckout": {
+    "tests": 1217,
+    "passed": 1217,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "builds": "passed",
+    "typechecks": "passed",
+    "installedCodexNoTurnProbe": "passed"
+  }
+}

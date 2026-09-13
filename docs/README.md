@@ -30,8 +30,9 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Six-minute workflow probe](implementation/SIX-MINUTE-WORKFLOW.md) | Sixty shots, exact batch review, one-shot reuse and uncertain-job restart using fake media |
 | [Speech application execution](implementation/OPENAI-SPEECH-EXECUTION.md) | Exact consumed approval, one-use speech dispatch and complete unadopted audio recovery |
 | [Transcription application execution](implementation/OPENAI-TRANSCRIPTION-EXECUTION.md) | Exact owned upload and consumed approval, one-use dispatch, raw JSON recovery and backup closure |
-| [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration next |
-| [Transcript candidate plan](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, unreviewed words and later human adoption |
+| [Generated narration attachment plan](implementation/GENERATED-NARRATION-ATTACHMENT.md) | Next human selection of verified generated audio, preserving legacy recording and canonical provenance |
+| [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration linked |
+| [Unreviewed transcript candidates](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, atomic publication and backup recovery; human adoption remains separate |
 | [Transcription audio preparation](implementation/TRANSCRIPTION-AUDIO-PREPARATION.md) | Verified complete-source 16 kHz derivative, six-minute recovery, parser and timing helper |
 | [Generated audio ingestion](implementation/GENERATED-AUDIO-INGESTION.md) | Verified raw storage, complete PCM normalization, provenance and six-minute recovery; later transcript phases |
 | [OpenAI audio transports](implementation/OPENAI-AUDIO-TRANSPORTS.md) | Standalone speech/transcription transports, exact wire identity, cancellation and offline evidence |

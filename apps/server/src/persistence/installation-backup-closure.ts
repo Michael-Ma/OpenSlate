@@ -18,6 +18,8 @@ import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionRe
 import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "../execution/transcription-execution-authority.js";
 import { assertTranscriptionExecutionDispatch, assertTranscriptionExecutionResult, compactTranscriptionExecutionResult, prepareTranscriptionExecutionRequest } from "../execution/transcription-execution-receipts.js";
 import type { TranscriptionExecutionMapping, TranscriptionExecutionDispatch, TranscriptionExecutionResult } from "../execution/transcription-execution-receipts.js";
+import { assertTranscriptCandidateIngestion, createTranscriptCandidate, resolveTranscriptionSpoolLineage } from "../execution/transcript-candidate.js";
+import type { TranscriptCandidate } from "../execution/transcript-candidate.js";
 import { assertOutputReceiptIdentity } from "../execution/output-store.js";
 import type { OutputReceipt } from "../execution/output-store.js";
 import type { Attempt } from "../execution/engine.js";
@@ -252,6 +254,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         artifact(value);
         if (value.origin === "generated_audio") fail(get("audio_derivation_receipt", value.derivationId).source.artifactId === value.id,
           "Generated audio artifact lost its derivation receipt");
+        if (value.origin === "transcription_response") fail(get("transcript_candidate", value.transcriptCandidateId).artifactId === value.id,
+          "Raw transcription artifact lost its unreviewed candidate");
       }
       else if (row.kind === "media_source") {
         await source(value.source);
@@ -293,6 +297,22 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         speechRecords(row.id);
       } else if (["transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(row.kind)) {
         await transcriptionRecords(row.id);
+      } else if (row.kind === "transcript_candidate") {
+        const candidate = value as TranscriptCandidate;
+        const lineage = resolveTranscriptionSpoolLineage(speechReader, get("attempt", candidate.attemptId) as Attempt, candidate.raw.spoolId);
+        // Published candidates require the exact winning raw bytes, unlike unresolved pre-candidate result metadata.
+        await transcriptionRecords(candidate.attemptId);
+        const path = `execution-output/blobs/${lineage.spool.blobKey}`;
+        required(path, lineage.spool.sha256, lineage.spool.byteLength);
+        const parsed = parseOpenAITranscriptionResponse({ bytes: await read(path), mimeType: "application/json",
+          sourceDurationSeconds: lineage.preparation.receipt.audio.sampleCount / 16000 }, {
+          maxTextBytes: lineage.mapping.parser.maxTextBytes, maxWords: lineage.mapping.parser.maxWords, maxWordBytes: lineage.mapping.parser.maxWordBytes });
+        fail(canonical(createTranscriptCandidate(lineage, parsed)) === canonical(candidate),
+          "Published transcript candidate differs from its raw response and source-sample projection");
+        assertTranscriptCandidateIngestion(lineage, { port: "cues", kind: "data", mimeType: "application/json", extension: "json",
+          sha256: lineage.spool.sha256, byteLength: lineage.spool.byteLength, fixture: false,
+          storage: { type: "spool", spoolId: lineage.spool.id } }, {
+          type: "transcript_candidate", artifact: get("artifact", candidate.artifactId) as any, candidate });
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);

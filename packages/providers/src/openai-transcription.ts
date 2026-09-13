@@ -40,6 +40,8 @@ export interface OpenAITranscriptionResult {
   usage: { type: "duration"; seconds: number } | null;
   resultDigest: string;
 }
+export type OpenAITranscriptionProjection = Pick<OpenAITranscriptionResult,
+  "text" | "reportedLanguage" | "reportedDurationSeconds" | "words" | "timingIssues" | "usage">;
 export type OpenAITranscriptionOutcome = AudioTransportOutcome<OpenAITranscriptionResult>;
 export interface OpenAITranscriptionResponseInput {
   bytes: Uint8Array; mimeType: "application/json";
@@ -178,6 +180,44 @@ export function describeOpenAITranscriptionRequest(request: OpenAITranscriptionR
 
 const jsonObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const seconds = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+function projectionDigest(value: OpenAITranscriptionProjection): string {
+  return audioSha256(JSON.stringify({ adapter: ADAPTER, projectionVersion: OPENAI_TRANSCRIPTION_PROJECTION_VERSION,
+    text: value.text, reportedLanguage: value.reportedLanguage, reportedDurationSeconds: value.reportedDurationSeconds,
+    words: value.words, timingIssues: value.timingIssues, usage: value.usage }));
+}
+function projectionArray(value: unknown, maximum: number): unknown[] {
+  audioEnsure(Array.isArray(value) && Object.getPrototypeOf(value) === Array.prototype && value.length <= maximum, "INVALID_TRANSCRIPTION_PROJECTION");
+  const keys = Reflect.ownKeys(value);
+  audioEnsure(keys.length === value.length + 1 && keys.every(key => key === "length" || (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)
+    && Number(key) < value.length && Object.hasOwn(Object.getOwnPropertyDescriptor(value, key)!, "value"))), "INVALID_TRANSCRIPTION_PROJECTION");
+  return value;
+}
+/** Exact v1 semantic digest, independent of raw JSON whitespace. No raw-byte or application-authority claim. */
+export function digestOpenAITranscriptionProjection(input: OpenAITranscriptionProjection): string {
+  const value = audioDataObject(input, ["text", "reportedLanguage", "reportedDurationSeconds", "words", "timingIssues", "usage"], "INVALID_TRANSCRIPTION_PROJECTION");
+  const text = audioUtf8(value.text, MAX_TEXT_BYTES, "INVALID_TRANSCRIPT_TEXT", true), reportedLanguage = audioUtf8(value.reportedLanguage, 128, "INVALID_TRANSCRIPT_LANGUAGE");
+  audioEnsure(seconds(value.reportedDurationSeconds), "INVALID_TRANSCRIPT_DURATION");
+  const words = projectionArray(value.words, MAX_WORDS).map(input => {
+    const word = audioDataObject(input, ["word", "startSeconds", "endSeconds"], "INVALID_TRANSCRIPTION_PROJECTION");
+    audioEnsure(seconds(word.startSeconds) && seconds(word.endSeconds) && word.startSeconds <= word.endSeconds, "INVALID_WORD_TIMING");
+    return { word: audioUtf8(word.word, MAX_WORD_BYTES, "INVALID_TRANSCRIPT_WORD"), startSeconds: word.startSeconds, endSeconds: word.endSeconds };
+  });
+  audioEnsure(text.trim().length === 0 || words.length > 0, "MISSING_TRANSCRIPT_WORDS");
+  const timingIssues: TranscriptionTimingIssue[] = projectionArray(value.timingIssues, words.length * 3 + 2).map(input => {
+    const issue = audioDataObject(input, ["code", "wordIndex"], "INVALID_TRANSCRIPTION_PROJECTION");
+    const global = issue.code === "reported_duration_outside_source" || issue.code === "text_word_mismatch";
+    audioEnsure(global ? issue.wordIndex === null : typeof issue.code === "string" && ["word_outside_source", "word_overlap", "word_nonmonotone"].includes(issue.code)
+      && Number.isSafeInteger(issue.wordIndex) && Number(issue.wordIndex) >= 0 && Number(issue.wordIndex) < words.length, "INVALID_TRANSCRIPTION_PROJECTION");
+    return { code: issue.code as TranscriptionTimingIssue["code"], wordIndex: issue.wordIndex as number | null };
+  });
+  let usage: OpenAITranscriptionProjection["usage"] = null;
+  if (value.usage !== null) {
+    const own = audioDataObject(value.usage, ["type", "seconds"], "INVALID_TRANSCRIPTION_PROJECTION");
+    audioEnsure(own.type === "duration" && seconds(own.seconds) && own.seconds <= 86400, "INVALID_TRANSCRIPTION_PROJECTION");
+    usage = { type: "duration", seconds: own.seconds };
+  }
+  return projectionDigest({ text, reportedLanguage, reportedDurationSeconds: value.reportedDurationSeconds, words, timingIssues, usage });
+}
 function decode(bytes: Uint8Array, mime: string, sourceDuration: number,
   limits: Required<OpenAITranscriptionParseOptions>): ParsedOpenAITranscriptionResponse {
   audioEnsure(mime === "application/json", "INVALID_TRANSCRIPTION_MIME");
@@ -214,7 +254,7 @@ function decode(bytes: Uint8Array, mime: string, sourceDuration: number,
     && value.usage.seconds <= 86400 ? { type: "duration" as const, seconds: value.usage.seconds } : null;
   const projection = { text, reportedLanguage, reportedDurationSeconds: value.duration, words, timingIssues, usage };
   return { reportedModel, result: { rawResponseBytes: Buffer.from(bytes), rawResponseSha256: audioSha256(bytes), ...projection,
-    resultDigest: audioSha256(JSON.stringify({ adapter: ADAPTER, projectionVersion: OPENAI_TRANSCRIPTION_PROJECTION_VERSION, ...projection })) } };
+    resultDigest: projectionDigest(projection) } };
 }
 
 /** Parse saved raw response bytes without HTTP, source lookup, timestamp repair or narration adoption. */
