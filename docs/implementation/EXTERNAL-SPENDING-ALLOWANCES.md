@@ -1,6 +1,6 @@
 # External spending allowances
 
-OpenSlate now has an opt-in durable admission policy for external providers. It is exercised with offline adapters and synthetic inputs. The launcher remains fake-only; this component adds no HTTP endpoint, credential configuration, real provider activation or model call.
+OpenSlate now has an opt-in durable admission policy for external providers. It is exercised with offline adapters and synthetic inputs. The launcher remains fake-only. A separate [human spending API](ALLOWANCE-HTTP.md) provides optional issue/revoke routes and a read-only current-selection summary; this core component does not configure credentials, activate providers or make model calls.
 
 An allowance bounds **attempt starts and configured cost estimates** for an exact set of candidates. Its micros cap is not a guarantee about the provider's eventual bill. The absolute start cap remains binding even when an estimate is inaccurate. Credentials, creative grants and spending permission are separate requirements.
 
@@ -21,9 +21,9 @@ flowchart TD
 
 ## Human authority without creative side effects
 
-`ExternalAllowanceService` is an application boundary intended only for an authenticated human handler. It is not a director tool. The eventual handler must mint a dedicated human request whose `contextDigest` is produced by `allowanceIssueContextDigest(projectId, payload)` or `allowanceRevokeContextDigest(projectId, payload)`. Each digest contains an exact purpose tag, contract version, project and complete payload. Generic read-only discussion, a different payload, another principal/project, a director actor or a superseded request cannot authorize spending.
+`ExternalAllowanceService` is an application boundary intended only for an authenticated human handler. It is not a director tool. The handler must mint a dedicated human request whose `contextDigest` is produced by `allowanceIssueContextDigest(projectId, payload)` or `allowanceRevokeContextDigest(projectId, payload)`. Each digest contains an exact purpose tag, contract version, project and complete payload. Generic read-only discussion, a different payload, another principal/project, a director actor or a superseded request cannot authorize spending.
 
-The request may use `editing: false`. Issuing or revoking an allowance does not open a request, revoke a director epoch, create/release creative holds, grant generation, approve frames, change the canonical project or compile a plan. The service checks that the supplied request is active and scoped to the selected shots/scenes, or to the whole project. Revocation requires project scope. The HTTP handler that will create these purpose-bound requests remains separate work.
+The request may use `editing: false`. The core service itself does not open a request, revoke a director epoch, create/release creative holds, grant generation, approve frames, change the canonical project or compile a plan. It checks that the supplied request is active and scoped to the selected shots/scenes, or to the whole project. Revocation requires project scope. The optional HTTP handler creates these purpose-bound requests inside the issue/revoke command transaction.
 
 The issue payload is bounded data:
 
@@ -74,4 +74,4 @@ All **22 allowance tests** passed. The combined allowance, routing, execution an
 
 Sources: `apps/server/src/application/external-allowances.ts`, `apps/server/src/execution/durable-external-admission.ts`, `external-allowance-records.ts`, the optional Engine admission hook and Store record checks. Tests: `apps/server/test/external-allowances.test.mjs`.
 
-Remaining integration work is an authenticated human issue/revoke flow, explicit profile selection, credential readiness wiring, launcher activation and separately authorized live media validation. The default Engine behavior remains external-denied unless a host deliberately installs a policy. Existing offline fixture policies remain compatible with the optional recording hook; their correlation IDs do not represent these durable human allowances.
+Remaining integration work includes browser spending review, credential readiness wiring, launcher activation and separately authorized live media validation. Saved profile selection, optional human HTTP routes and [audited project-budget revisions](PROJECT-BUDGET.md) now exist as separate components. The default Engine behavior remains external-denied unless a host deliberately installs a policy. Existing offline fixture policies remain compatible with the optional recording hook; their correlation IDs do not represent these durable human allowances.

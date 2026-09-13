@@ -12,6 +12,17 @@ function savedArtifact(f, fixture, kind = "video") {
   return artifact;
 }
 
+test("an image-only active plan has an empty current review without failing the workspace or creating authority", async t => {
+  const f = setup(t, { imagesOnly: true }), service = new ProductionService(f.store, f.engine);
+  const localToken = "offline_image_only_review_session_0123456789", app = createApp({ service, localToken }); t.after(() => app.close());
+  const project = f.store.getProject(f.projectId), before = f.store.db.prepare("SELECT count(*) AS n FROM entities").get().n;
+  const response = await app.inject({ method: "GET", url: `/api/projects/${f.projectId}/review`, headers: { host: "127.0.0.1", authorization: `Bearer ${localToken}` } });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), { id: null, projectId: f.projectId, planId: project.activePlanId, members: [], headVersion: project.headVersion, revisionId: project.revisionId });
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM entities").get().n, before);
+  assert.deepEqual(f.store.getProject(f.projectId), project); assert.equal(f.store.list("approval", f.projectId).length, 0);
+});
+
 test("artifact fixture projection requires exact project, content and kind and preserves unknown metadata", t => {
   const f = setup(t, { count: 1 }), service = new ProductionService(f.store, f.engine);
   for (const fixture of [true, false, undefined, "false"]) {

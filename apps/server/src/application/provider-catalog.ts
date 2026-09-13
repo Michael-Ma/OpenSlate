@@ -25,7 +25,8 @@ function label(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 120 && !/[\u0000-\u001f\u007f]/.test(value)
     && !/\b[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^(?:\/|~\/)/.test(value);
 }
-function profilePolicy(profile: ProviderProfile): { credential: MediaCredentialId | null; media: "image" | "video" | null; fixture: boolean } {
+/** Pure fixed-profile validation; does not inspect credentials, readiness or registration. */
+export function profilePolicy(profile: ProviderProfile): { credential: MediaCredentialId | null; media: "image" | "video" | null; fixture: boolean } {
   exact(profile, ["id", "revision", "kind", "adapter", "executionVersion", "configuration", "maxConcurrency", "unitCostMicros", "maxRetries", "minFrames", "maxFrames"]);
   providerProfileArguments(profile);
   invariant(integer(profile.maxConcurrency, 1, 64) && integer(profile.maxRetries, 0, 3) && typeof profile.unitCostMicros === "string",

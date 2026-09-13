@@ -18,8 +18,10 @@ import { registerMediaRoutes } from "./media/routes.js";
 import { registerImageRoutes } from "./media/image-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./application/provider-catalog.js";
+import { registerAllowanceRoutes } from "./application/allowance-routes.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+  allowanceRoutes?: Parameters<typeof registerAllowanceRoutes>[1];
   providerCatalog?: InstalledProviderCatalog;
   webAssets?: WebAssets;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
@@ -69,6 +71,10 @@ export function createApp(options: AppOptions = {}) {
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
+  if (options.allowanceRoutes) {
+    invariant(options.allowanceRoutes.service === options.service, "ALLOWANCE_CONFIGURATION_INVALID", "Spending routes must use this application's service");
+    registerAllowanceRoutes(app, options.allowanceRoutes);
+  }
   app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
   app.get("/api/providers", async () => providerCatalog().view());
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
@@ -162,6 +168,11 @@ export function createApp(options: AppOptions = {}) {
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/review", async request => {
     const { projectId } = request.params, project = service().store.getProject(projectId);
     if (!project.activePlanId) return { id: null, projectId, planId: null, members: [], headVersion: project.headVersion, revisionId: project.revisionId };
+    const activePlan = service().store.get<PlanRecord>("plan", project.activePlanId);
+    invariant(activePlan?.projectId === projectId, "PLAN_REQUIRED", "The current plan is unavailable");
+    // Planning may stop at images before a video/review recipe exists. Keep the
+    // workspace readable without fabricating an approval snapshot or authority.
+    if (!activePlan.compiled.gates.length) return { id: null, projectId, planId: activePlan.id, members: [], headVersion: project.headVersion, revisionId: project.revisionId };
     const cursor = service().store.cursor(projectId);
     let cached = reviewCache.get(projectId);
     if (!cached || cached.cursor !== cursor) {

@@ -15,6 +15,8 @@ import { assertH3ExecutionMapping, assertH3ExecutionDispatch, assertH3ExecutionS
 import type { H3ExecutionMapping, H3ExecutionDispatch, H3ExecutionSubmit, H3ExecutionObservation, H3PollSchedule } from "../execution/minimax-h3-receipts.js";
 import { assertExternalAllowance, assertExternalAllowanceConsumption, assertExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
 import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
+import { assertProjectBudgetRevision } from "../application/project-budget.js";
+import type { ProjectBudgetRevision } from "../application/project-budget.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -122,6 +124,11 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "project_budget_revision") {
+      reference("message", body.requestId);
+      assertProjectBudgetRevision({ ...body, id, projectId } as unknown as ProjectBudgetRevision,
+        this.get<AllowanceHumanRequest & { editing: boolean }>("message", String(body.requestId))!);
+    }
     if (kind === "external_allowance") {
       reference("message", body.requestId);
       const allowance = { ...body, id, projectId } as unknown as ExternalAllowance;
@@ -321,7 +328,7 @@ export class Store {
           invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "H3 poll identity and host policy are immutable");
         invariant(Number(next.count) >= Number(previous.count), "H3_EXECUTION_CONFLICT", "H3 poll backoff cannot rewind");
       }
-      if (["external_allowance", "external_allowance_revocation", "external_allowance_consumption"].includes(kind))
+      if (["external_allowance", "external_allowance_revocation", "external_allowance_consumption", "project_budget_revision"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);

@@ -16,6 +16,7 @@ import { assertWebDataSeparation, loadWebAssets } from "./web-assets.js";
 import { acquireInstallationOwner } from "./persistence/installation-owner.js";
 import { InstalledProviderCatalog, readInstalledProviderConfiguration } from "./application/provider-catalog.js";
 import { EnvironmentMediaCredentials } from "./application/provider-credentials.js";
+import { ExternalAllowanceService } from "./application/external-allowances.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
@@ -65,6 +66,7 @@ const providerCatalog = new InstalledProviderCatalog({ ...(providerConfiguration
 // Each project starts in demo mode until its user chooses and checks local Codex.
 const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
 const app = createApp({ service, director, runtimeSettings: director, providerCatalog, localToken, logger: true,
+  allowanceRoutes: { service, allowances: new ExternalAllowanceService(store) },
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },
