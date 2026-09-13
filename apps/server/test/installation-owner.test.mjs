@@ -34,15 +34,22 @@ test("a symbolic-link lock or corrupt reserved file is rejected without replacem
   assert.throws(() => acquireInstallationOwner(root), { code: "INSTALLATION_LOCK_FAILED" });
   assert.equal(readFileSync(join(root, "installation-owner.sqlite"), "utf8"), corrupt);
 });
-test("a different process cannot acquire ownership and abrupt owner death releases it", { timeout: 10000 }, async t => {
+test("a retained owner survives forced GC in another process and abrupt death releases it", { timeout: 10000 }, async t => {
   const root = fixture(t), moduleUrl = new URL("../dist/persistence/installation-owner.js", import.meta.url).href;
-  const code = `import { acquireInstallationOwner } from ${JSON.stringify(moduleUrl)}; acquireInstallationOwner(process.argv[1]); process.stdout.write('owned\\n'); setInterval(() => {}, 1000);`;
-  const child = spawn(process.execPath, ["--input-type=module", "-e", code, root], { stdio: ["ignore", "pipe", "pipe"] });
+  // Retain the handle for the process lifetime, as the launcher does. Discarding
+  // it lets the SQLite finalizer release ownership during ordinary collection.
+  const code = `import { acquireInstallationOwner } from ${JSON.stringify(moduleUrl)};
+    const owner = acquireInstallationOwner(process.argv[1]);
+    const timer = setInterval(() => { if (typeof owner.close !== 'function') process.exit(2); }, 1000);
+    process.once('SIGTERM', () => { clearInterval(timer); owner.close(); process.exit(0); });
+    for (let i = 0; i < 8; i++) { global.gc(); await new Promise(setImmediate); }
+    process.stdout.write('owned-after-gc\\n');`;
+  const child = spawn(process.execPath, ["--expose-gc", "--input-type=module", "-e", code, root], { stdio: ["ignore", "pipe", "pipe"] });
   let stderr = ""; child.stderr.on("data", bytes => { stderr += bytes; });
   const ended = once(child, "exit");
   t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await ended; });
   const ready = await Promise.race([once(child.stdout, "data").then(([data]) => data.toString()), ended.then(() => { throw new Error(stderr); })]);
-  assert.equal(ready, "owned\n");
+  assert.equal(ready, "owned-after-gc\n");
   assert.throws(() => acquireInstallationOwner(root), { code: "INSTALLATION_IN_USE" });
   child.kill("SIGKILL"); await ended;
   const replacement = acquireInstallationOwner(root); replacement.close();

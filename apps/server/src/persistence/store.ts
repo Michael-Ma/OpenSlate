@@ -17,6 +17,8 @@ import { assertExternalAllowance, assertExternalAllowanceConsumption, assertExte
 import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
 import { assertProjectBudgetRevision } from "../application/project-budget.js";
 import type { ProjectBudgetRevision } from "../application/project-budget.js";
+import { assertLocalExecutionDispatch, assertLocalExecutionIntent, assertLocalExecutionResult, assertPreparedLocalExecution } from "../execution/local-execution.js";
+import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDispatch, LocalExecutionIntent } from "../execution/local-execution.js";
 
 interface EntityRow { body: string; project_id: string; version: number }
 interface ProjectRow { body: string; head_version: number }
@@ -124,6 +126,38 @@ export class Store {
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "local_execution_intent") {
+      reference("attempt", id); reference("capability_lock", body.capabilityLockId);
+      const intent = { ...body, id, projectId } as unknown as LocalExecutionIntent;
+      assertLocalExecutionIntent(intent, this.get<Attempt>("attempt", id)!);
+      const lock = this.get<{ localExecution?: unknown }>("capability_lock", intent.capabilityLockId);
+      invariant(canonical(lock?.localExecution) === canonical(intent.execution), "LOCAL_EXECUTION_CONFLICT", "Local intent requires its exact saved execution lock");
+    }
+    if (kind === "local_execution_dispatch") {
+      reference("local_execution_intent", id);
+      assertLocalExecutionDispatch({ ...body, id, projectId } as unknown as LocalExecutionDispatch, this.get<LocalExecutionIntent>("local_execution_intent", id)!);
+    }
+    if (kind === "local_execution_completion") {
+      reference("local_execution_intent", id);
+      const completion = { ...body, id, projectId } as unknown as LocalExecutionCompletion;
+      invariant(Object.keys(completion).length === 5 && completion.version === 1 && completion.attemptId === id,
+        "LOCAL_EXECUTION_CONFLICT", "Invalid local completion fields");
+      const intent = this.get<LocalExecutionIntent>("local_execution_intent", id)!;
+      assertLocalExecutionResult(completion.result, intent); reference("artifact", completion.result.artifact.id);
+      invariant(canonical(this.get("artifact", completion.result.artifact.id)) === canonical(completion.result.artifact),
+        "LOCAL_EXECUTION_CONFLICT", "Local receipt differs from the published artifact");
+    }
+    if (kind === "local_execution_binding") {
+      reference("node_binding", id); reference("local_execution_completion", body.attemptId);
+      const selection = { ...body, id, projectId } as unknown as LocalExecutionBinding;
+      invariant(Object.keys(selection).length === 4, "LOCAL_EXECUTION_CONFLICT", "Invalid local selection fields");
+      assertPreparedLocalExecution(selection.prepared);
+      const intent = this.get<LocalExecutionIntent>("local_execution_intent", selection.attemptId)!;
+      invariant(selection.prepared.projectId === projectId && selection.prepared.nodeId === id
+        && selection.prepared.nodeId === intent.prepared.nodeId && selection.prepared.kind === intent.prepared.kind
+        && selection.prepared.specDigest === intent.prepared.specDigest && selection.prepared.contentDigest === intent.prepared.contentDigest,
+      "LOCAL_EXECUTION_CONFLICT", "Local selection differs from the verified completed work");
+    }
     if (kind === "project_budget_revision") {
       reference("message", body.requestId);
       assertProjectBudgetRevision({ ...body, id, projectId } as unknown as ProjectBudgetRevision,
@@ -330,6 +364,8 @@ export class Store {
       }
       if (["external_allowance", "external_allowance_revocation", "external_allowance_consumption", "project_budget_revision"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
+      if (["local_execution_intent", "local_execution_dispatch", "local_execution_completion"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {

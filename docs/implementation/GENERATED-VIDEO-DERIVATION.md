@@ -55,6 +55,8 @@ An incomplete intent cannot silently choose a new toolchain after restart. A cha
 
 Lease renewal covers normalization and file verification. Losing ownership aborts cooperative work and prevents publication. Bounded file publication/cleanup is awaited rather than detached; files completed just before cancellation remain recovery evidence. One active derivation per configured root is allowed in this process. Cross-process safety depends on the local installation ownership boundary and attempt leases; this is not a distributed worker design.
 
+When that trusted local worker reports `MEDIA_BUSY` for a completed V2 video spool, Engine leaves the attempt ingesting and releases only its still-owned original lease. The next cycle recovers the existing completion immediately, without waiting for the normal lease timeout or contacting the provider. Task identity, spool evidence and reserved liability stay unchanged. A late busy result cannot release a replacement owner's lease; other ingestion errors retain their existing behavior.
+
 ## Limits and exact-PNG compatibility
 
 - Raw output storage supports MP4 up to 256 MiB. This initial normalizer supports **at most 128 MiB input**, using the existing media import limit, and rejects larger input with `VIDEO_NORMALIZATION_INPUT_LIMIT`. Lower configured bounds are respected. General uploads are unchanged.
@@ -68,6 +70,8 @@ Lease renewal covers normalization and file verification. Losing ownership abort
 Nine new offline integration tests pass using locally generated six-second and two-second MP4 files. The six-second fixture starts with 24-fps video, audio and metadata; its normalized source is measured at 180 frames, silent and 30 fps, and the renderer produces an exact 90-frame trim. No real provider API or native model calls are made.
 
 The tests also cover pre-transcode intent ordering, raw/normalized identities, atomic SQL rollback, completion-index recovery with no toolchain/transcode call, explicit lease theft after durable completion, short-footage recovery without repeat transcoding, the 128-MiB admission bound, incomplete-recipe drift, corrupted index/bytes, contradictory source duration/provenance, untagged hash rejection and retired-binding history.
+
+Two additional controlled contention tests passed with actual synthetic MP4 spools and the real normalizer. After one worker reported busy, reopening SQLite recovered the second video immediately: two submissions, two normalizations and zero provider polls/lookups. A separate owner/epoch theft preserved the replacement lease unchanged. The pre-fix negative control reproduced the unnecessary roughly 30-second delay.
 
 ```sh
 pnpm --filter @openslate/server build
