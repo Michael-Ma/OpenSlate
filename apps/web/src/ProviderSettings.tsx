@@ -27,7 +27,9 @@ export function NewProjectProviderFields({ api, selection, changed, disabled }: 
       <select id={`new-${kind}-profile`} value={selected(kind)?.id ?? ""} disabled={disabled || stale} onChange={event => choose(kind, event.target.value)}>
         {catalog.profiles.filter(provider => provider.profile?.kind === kind).map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
       </select>{selected(kind) && <p>{providerEstimate(selected(kind)!)}</p>}</div>)}
-      <p>{selection ? "These models will be saved for this project. Generation also requires model readiness and your exact spending allowance." : "Demo models are selected. No paid media calls."}</p></>}
+      <p>{selection ? PROVIDER_KIND_CHOICES.some(({ kind }) => selected(kind)?.profile?.adapter === "codex-image")
+        ? "These models will be saved for this project. Codex image starts require a separate, finite Codex usage approval. Quota use is not estimated; there is no automatic switch to the image API."
+        : "These models will be saved for this project. Generation also requires model readiness and your exact spending allowance." : "Demo models are selected. No paid media calls."}</p></>}
     {stale && <p role="alert">The model catalog changed. Refresh the choices before creating this project.</p>}
     {error && <p role="alert">{error} Reset the choices to create a default demo project.</p>}
     {(selection || error || stale) && <button type="button" disabled={disabled} onClick={() => { changed(null); setRefresh(value => value + 1); }}>Reset and refresh choices</button>}
@@ -49,6 +51,7 @@ export function ProjectProviderSummary({ api, projectId }: { api: StudioApi; pro
       <span>{provider.profile?.configuration?.model ?? (provider.profile?.adapter === "fake" ? "Demo model" : "Saved model unavailable")}</span>
       <span>{providerEstimate(provider)}</span>
       {provider.readiness.credential.required && <span>{provider.readiness.credential.backendUnavailable ? "Credential status unavailable" : provider.readiness.credential.present ? "API key configured · not checked with provider" : "API key not configured"}</span>}
+      {provider.readiness.nativeAccess && <span>{provider.readiness.nativeAccess.configured ? "Local Codex runtime configured" : "Local Codex runtime unavailable"} · authentication checked before each start · quota unverified</span>}
       {provider.readiness.mediaTools.required && !provider.readiness.mediaTools.available && <span>Local media tools unavailable</span>}
       {provider.readiness.spendingPermissionRequired && <span>{providerExecutionStatus(provider)}</span>}
     </li>)}</ul>}

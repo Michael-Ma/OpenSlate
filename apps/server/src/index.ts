@@ -82,7 +82,7 @@ const timer = setInterval(() => {
   running = true;
   void engine.reconcile().then(() => engine.runReady()).catch(error => app.log.error(error)).finally(() => { running = false; });
 }, 500);
-app.addHook("preClose", async () => { clearInterval(timer); await director.close(); });
+app.addHook("preClose", async () => { clearInterval(timer); await Promise.all([director.close(), runtime.close()]); });
 app.addHook("onClose", async () => {
   while (running) await new Promise(resolve => setTimeout(resolve, 10));
   store.close(); provider.close();

@@ -79,6 +79,9 @@ importers:
       '@openslate/core':
         specifier: workspace:*
         version: link:../core
+      '@openslate/providers':
+        specifier: workspace:*
+        version: link:../providers
 
   packages/providers:
     dependencies:

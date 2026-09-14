@@ -1,8 +1,12 @@
+import { isAbsolute } from "node:path";
 import { invariant } from "@openslate/core";
 import { ProtectedVideoDownloader } from "../execution/video-download.js";
 
 export interface MediaExecutionConfiguration {
   image: boolean;
+  codexImage?: boolean;
+  codexImageBinary?: string;
+  codexImageHome?: string;
   h3: boolean;
   /** Omission preserves trusted pre-audio programmatic callers; environment parsing returns explicit booleans. */
   speech?: boolean;
@@ -22,6 +26,14 @@ export function readMediaExecutionConfiguration(environment: Readonly<Record<str
   const image = enabled("OPENSLATE_ENABLE_IMAGE_GENERATION"), h3 = enabled("OPENSLATE_ENABLE_H3_GENERATION");
   const speech = enabled("OPENSLATE_ENABLE_SPEECH_GENERATION"), transcription = enabled("OPENSLATE_ENABLE_TRANSCRIPTION");
   const viggleH3 = enabled("OPENSLATE_ENABLE_VIGGLE_H3_GENERATION");
+  const codexImage = enabled("OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION");
+  const nativePath = (name: string): string | undefined => {
+    const value = environment[name]; if (value === undefined || value === "") return undefined;
+    invariant(isAbsolute(value) && value.length <= 4096 && !value.includes("\0"), "MEDIA_EXECUTION_CONFIGURATION", "Codex image paths must be bounded absolute local paths");
+    return value;
+  };
+  const codexImageBinary = nativePath("OPENSLATE_CODEX_IMAGE_BINARY"), codexImageHome = nativePath("OPENSLATE_CODEX_IMAGE_HOME");
+  invariant(!codexImage || codexImageBinary, "MEDIA_EXECUTION_CONFIGURATION", "Configure an explicit pinned Codex image binary before enabling generation");
   const downloadHosts = (raw: string | undefined, required: boolean): readonly string[] => {
     invariant(raw === undefined || raw.length <= 8192, "MEDIA_EXECUTION_CONFIGURATION", "Output host configuration is too large");
     const hosts = raw ? raw.split(",").map(host => host.trim()) : [];
@@ -34,5 +46,5 @@ export function readMediaExecutionConfiguration(environment: Readonly<Record<str
   };
   const h3DownloadHosts = downloadHosts(environment.OPENSLATE_H3_DOWNLOAD_HOSTS, h3);
   const viggleH3DownloadHosts = downloadHosts(environment.OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS, viggleH3);
-  return Object.freeze({ image, h3, speech, transcription, viggleH3, h3DownloadHosts, viggleH3DownloadHosts });
+  return Object.freeze({ image, codexImage, ...(codexImageBinary ? { codexImageBinary } : {}), ...(codexImageHome ? { codexImageHome } : {}), h3, speech, transcription, viggleH3, h3DownloadHosts, viggleH3DownloadHosts });
 }

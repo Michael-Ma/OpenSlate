@@ -7,21 +7,21 @@ test("media execution defaults off and credential presence cannot enable a route
   const environment = new Proxy({ OPENSLATE_OPENAI_API_KEY: "synthetic-key", OPENSLATE_MINIMAX_API_KEY: "synthetic-key", OPENSLATE_VIGGLE_API_KEY: "synthetic-viggle-key" }, {
     get(target, property) { seen.push(property); return target[property]; },
   });
-  assert.deepEqual(readMediaExecutionConfiguration(environment), { image: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
-  assert.deepEqual(seen, ["OPENSLATE_ENABLE_IMAGE_GENERATION", "OPENSLATE_ENABLE_H3_GENERATION", "OPENSLATE_ENABLE_SPEECH_GENERATION", "OPENSLATE_ENABLE_TRANSCRIPTION", "OPENSLATE_ENABLE_VIGGLE_H3_GENERATION", "OPENSLATE_H3_DOWNLOAD_HOSTS", "OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS"]);
+  assert.deepEqual(readMediaExecutionConfiguration(environment), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+  assert.deepEqual(seen, ["OPENSLATE_ENABLE_IMAGE_GENERATION", "OPENSLATE_ENABLE_H3_GENERATION", "OPENSLATE_ENABLE_SPEECH_GENERATION", "OPENSLATE_ENABLE_TRANSCRIPTION", "OPENSLATE_ENABLE_VIGGLE_H3_GENERATION", "OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION", "OPENSLATE_CODEX_IMAGE_BINARY", "OPENSLATE_CODEX_IMAGE_HOME", "OPENSLATE_H3_DOWNLOAD_HOSTS", "OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS"]);
   assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_ENABLE_IMAGE_GENERATION: "0", OPENSLATE_ENABLE_H3_GENERATION: "" }),
-    { image: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+    { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
 });
 
 test("explicit independent switches capture an immutable exact host list without network access", () => {
   const environment = { OPENSLATE_ENABLE_IMAGE_GENERATION: "1", OPENSLATE_ENABLE_H3_GENERATION: "1",
     OPENSLATE_H3_DOWNLOAD_HOSTS: "media.example.test, video.example.test" };
   const value = readMediaExecutionConfiguration(environment);
-  assert.deepEqual(value, { image: true, h3: true, speech: false, transcription: false, h3DownloadHosts: ["media.example.test", "video.example.test"], viggleH3: false, viggleH3DownloadHosts: [] });
+  assert.deepEqual(value, { image: true, codexImage: false, h3: true, speech: false, transcription: false, h3DownloadHosts: ["media.example.test", "video.example.test"], viggleH3: false, viggleH3DownloadHosts: [] });
   environment.OPENSLATE_ENABLE_IMAGE_GENERATION = "0"; environment.OPENSLATE_H3_DOWNLOAD_HOSTS = "other.example.test";
   assert.equal(value.image, true); assert.equal(Object.isFrozen(value), true); assert.equal(Object.isFrozen(value.h3DownloadHosts), true);
   assert.throws(() => value.h3DownloadHosts.push("other.example.test"), TypeError);
-  assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_ENABLE_IMAGE_GENERATION: "1" }), { image: true, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+  assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_ENABLE_IMAGE_GENERATION: "1" }), { image: true, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
 });
 
 test("speech and transcription are independent immutable switches and do not require H3 download configuration", () => {
@@ -29,7 +29,7 @@ test("speech and transcription are independent immutable switches and do not req
   for (const [speech, transcription] of [[false, false], [true, false], [false, true], [true, true]]) {
     const environment = { [names[0]]: speech ? "1" : "0", [names[1]]: transcription ? "1" : "" };
     const value = readMediaExecutionConfiguration(environment);
-    assert.deepEqual(value, { image: false, h3: false, speech, transcription, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+    assert.deepEqual(value, { image: false, codexImage: false, h3: false, speech, transcription, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
     environment[names[0]] = speech ? "0" : "1"; environment[names[1]] = transcription ? "0" : "1";
     assert.equal(value.speech, speech); assert.equal(value.transcription, transcription); assert.ok(Object.isFrozen(value));
     assert.throws(() => { value.speech = !speech; }, TypeError);
@@ -77,4 +77,18 @@ test("Viggle rejects ambiguous enablement and unsafe output hosts even when anot
     assert.throws(() => readMediaExecutionConfiguration({ OPENSLATE_ENABLE_VIGGLE_H3_GENERATION: "1", OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS: hosts, OPENSLATE_H3_DOWNLOAD_HOSTS: "minimax.example.test" }),
       error => ["MEDIA_EXECUTION_CONFIGURATION", "OUTPUT_DOWNLOAD_CONFIGURATION"].includes(error.code));
   }
+});
+
+
+test("Codex image opt-in needs an explicit local binary and never enables API images", () => {
+  const value = readMediaExecutionConfiguration({ OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: "1", OPENSLATE_CODEX_IMAGE_BINARY: "/opt/codex", OPENSLATE_CODEX_IMAGE_HOME: "/private/codex" });
+  assert.equal(value.codexImage, true); assert.equal(value.image, false);
+  assert.equal(value.codexImageBinary, "/opt/codex"); assert.equal(value.codexImageHome, "/private/codex");
+  assert.ok(Object.isFrozen(value));
+  for (const configuration of [
+    { OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: "1" },
+    { OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: "true" },
+    { OPENSLATE_CODEX_IMAGE_BINARY: "relative/codex" },
+    { OPENSLATE_CODEX_IMAGE_HOME: "/a\0b" },
+  ]) assert.throws(() => readMediaExecutionConfiguration(configuration), error => error.code === "MEDIA_EXECUTION_CONFIGURATION");
 });

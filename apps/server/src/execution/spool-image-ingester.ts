@@ -1,3 +1,4 @@
+import { assertCodexImageSpoolLineage } from "./codex-image-lineage.js";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { digest, invariant } from "@openslate/core";
@@ -17,6 +18,7 @@ export class SpoolImageIngestor implements ExecutionOutputIngestor {
       "OUTPUT_INGESTION_UNSUPPORTED", "Generated video requires explicit normalization provenance before publication");
     invariant(!signal.aborted, "OUTPUT_STORE_CANCELLED", "Image ingestion cancelled");
     const owned = await this.outputs.resolveOutput(attempt.projectId, attempt.id, output, { signal });
+    assertCodexImageSpoolLineage(this.outputs.store, attempt, owned.spool.id);
     const file = await open(owned.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     let bytes: Buffer;
     try {
@@ -36,6 +38,7 @@ export class SpoolImageIngestor implements ExecutionOutputIngestor {
     const image = await this.images.ingest({ bytes, sha256: output.sha256, mimeType: "image/png",
       width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }, { signal });
     invariant(!signal.aborted, "OUTPUT_STORE_CANCELLED", "Image ingestion cancelled");
+    assertCodexImageSpoolLineage(this.outputs.store, attempt, owned.spool.id);
     const id = digest({ version: 1, projectId: attempt.projectId, attemptId: attempt.id, port: output.port, spoolId: owned.spool.id });
     return { id, projectId: attempt.projectId, attemptId: attempt.id,
       artifact: { artifactId: id, sha256: image.sha256, kind: "image" }, path: image.path,

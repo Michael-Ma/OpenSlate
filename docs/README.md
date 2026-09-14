@@ -39,6 +39,8 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Recording transcription workspace](implementation/OWNED-TRANSCRIPTION-WORKSPACE.md) | Authenticated preparation/review, bounded history, sectionless preview and separate spending; explicit browser verification limits |
 | [Ungranted recording proposals](implementation/OWNED-TRANSCRIPTION-PROPOSALS.md) | Exact source/model/full-plan proposals, scoped current-selection fences and media-inclusive restore |
 | [Conversational audio](implementation/CONVERSATIONAL-AUDIO.md) | Versioned audio tools, exact saved-section speech, human review and separate spending |
+| [Automatic Codex images](implementation/CODEX-IMAGE-PROVIDER.md) | Separate native image worker, exact result lineage and finite Codex start permissions |
+| [Manual live production validation](implementation/MANUAL-LIVE-PRODUCTION.md) | Automatic Codex or API images, uploaded narration, one Viggle take and restart checks |
 | [Manual audio testing](implementation/MANUAL-AUDIO-TESTING.md) | Writing-first and recording-first rehearsal with all media APIs disabled |
 | [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration linked |
 | [Unreviewed transcript candidates](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, atomic publication and backup recovery; human adoption remains separate |

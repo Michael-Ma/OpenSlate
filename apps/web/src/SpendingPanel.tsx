@@ -5,19 +5,19 @@ import type { StudioApi } from "./api";
 import { errorText } from "./components";
 import { pendingCommandsFor } from "./pending-command";
 import type { PendingCommand } from "./pending-command";
-import { budgetCommand, canSelectSpending, reviewSpending, revokeSpending, spendingAllowanceStatus, spendingAudioSummary, spendingModelSettings, spendingMoney, spendingOperationLabel, spendingPage, spendingReviewCurrent, spendingWorkStatus } from "./spending-model";
+import { budgetCommand, canSelectSpending, isCodexSpending, reviewSpending, spendingAllowanceUsage, spendingEstimate, revokeSpending, spendingAllowanceStatus, spendingAudioSummary, spendingModelSettings, spendingMoney, spendingOperationLabel, spendingPage, spendingReviewCurrent, spendingWorkStatus } from "./spending-model";
 import type { SpendingCandidate, SpendingReview, SpendingState } from "./spending-model";
 import type { ProjectSnapshot } from "./model";
 import "./spending.css";
 
 type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; focus?: { candidateId: string; requestId: string } };
 export function SpendingPanel(props: Props) { return <SpendingWorkspace key={props.snapshot.project.id} {...props} />; }
-function ProjectBudgetControls({ projectId, budget, disabled, execute }: { projectId: string; budget: SpendingState["projectBudget"]; disabled: boolean; execute(command: PendingCommand): void }) {
+function ProjectBudgetControls({ projectId, budget, disabled, execute, codexUsage }: { projectId: string; budget: SpendingState["projectBudget"]; disabled: boolean; codexUsage: boolean; execute(command: PendingCommand): void }) {
   const [dollars, setDollars] = useState(spendingMoney(budget.capMicros).slice(1, -4));
   const [command, setCommand] = useState<PendingCommand | null>(null), [error, setError] = useState("");
   const body = command?.body as { expectedCapMicros: string; capMicros: string } | undefined;
   return <details className="budget-controls"><summary>Change project estimate limit</summary>
-    <p>This independent limit applies to all generation in this project. Changing it does not issue a work allowance, approve keyframes, cancel work or change existing charges.</p>
+    <p>{codexUsage ? "This limit tracks USD estimates and does not limit Codex subscription quota. Changing it does not issue a work allowance, approve keyframes, cancel work or change existing charges." : "This independent limit applies to all generation in this project. Changing it does not issue a work allowance, approve keyframes, cancel work or change existing charges."}</p>
     {!command ? <form onSubmit={event => { event.preventDefault(); try { setCommand(budgetCommand(projectId, budget, dollars, crypto.randomUUID())); setError(""); } catch (error) { setError(errorText(error)); } }}>
       <label htmlFor="project-budget-usd">New project limit · USD</label><input id="project-budget-usd" inputMode="decimal" value={dollars} maxLength={24} disabled={disabled} onChange={event => setDollars(event.target.value)} />
       <button className="button small" disabled={disabled}>Review project limit</button>
@@ -84,6 +84,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
   const busy = slot.running || !!slot.command;
   const confirmed = !!review && !loadError && spendingReviewCurrent(review, state);
   const profileIds = [...new Set(state?.candidates.map(candidate => candidate.profileId).filter((value): value is string => !!value) ?? [])];
+  const codexUsage = !!state && (state.candidates.some(candidate => isCodexSpending(candidate.providerDisplay)) || state.allowances.some(allowance => isCodexSpending(allowance.providerDisplay)));
   const selectedProfile = state?.candidates.find(candidate => selected.includes(candidate.candidateId))?.profileId;
   const select = (candidate: SpendingCandidate) => {
     setReview(null); setReviewError("");
@@ -98,21 +99,21 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
   };
   if (state && !state.coverage.candidates.total && !state.coverage.allowances.total && !slot.command && !slot.error && !review && !slot.lastSuccess && !focusCandidateId) return null;
   return <section className="spending-panel" aria-labelledby="spending-title">
-    <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">Review generation costs</h3></div><button className="text-button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)}>Refresh costs</button></div>
-    <p>Approve spending for specific work. Permission to generate the exact creative work remains separate, as does keyframe review before video generation.</p>
-    <p className="spending-disabled">Generation also requires enabled provider configuration, available local tools, a configured API key and sufficient project budget. An allowance does not provide that setup, accept narration or authorize a new creative change.</p>
+    <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">{codexUsage ? "Review generation costs and Codex usage" : "Review generation costs"}</h3></div><button className="text-button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)}>{codexUsage ? "Refresh limits" : "Refresh costs"}</button></div>
+    <p>{codexUsage ? "Approve API spending or finite Codex starts for specific work." : "Approve spending for specific work."} Permission to generate the exact creative work remains separate, as does keyframe review before video generation.</p>
+    <p className="spending-disabled">{codexUsage ? "Generation requires enabled providers and local tools. API providers also need a key and sufficient USD budget; Codex checks authentication before each start and its quota remains unverified. There is no automatic switch from Codex to the image API." : "Generation also requires enabled provider configuration, available local tools, a configured API key and sufficient project budget."} An allowance does not provide that setup, accept narration or authorize a new creative change.</p>
     {!!(loadError || reviewError || slot.error) && <p role="alert" className="form-error">{loadError || reviewError || errorText(slot.error)}</p>}
     {!state && !loadError && <p role="status">Loading current work and saved allowances…</p>}
     {state?.focus && <p role="status">{state.focus.found ? "Showing the work from your recording review. Review its allowance below before approving spending." : "That recording operation is no longer current. Return to its recording review before selecting new work."}</p>}
     {slot.command && <div className="notice warning"><span>{slot.running ? "Saving your exact spending request…" : "The result was not confirmed. Retry the saved request to check its outcome."}</span>{!slot.running && <button disabled={recoveryReadOnly} onClick={() => execute(slot.command!)}>Retry same spending action</button>}</div>}
     {slot.lastSuccess && !slot.command && <p role="status">Your spending change was recorded.</p>}
-    {state && <><p className="spending-budget">Project estimate limit: <strong>{spendingMoney(state.projectBudget.capMicros)}</strong> · Reserved or committed: {spendingMoney(state.projectBudget.committedMicros)}. This independent project limit is not raised by an allowance.</p>
-      <ProjectBudgetControls key={`${projectId}:${state.projectBudget.revision}:${state.projectBudget.capMicros}`} projectId={projectId} budget={state.projectBudget} disabled={recoveryReadOnly || busy || !!review || !!loadError} execute={execute} />
+    {state && <><p className="spending-budget">Project estimate limit: <strong>{spendingMoney(state.projectBudget.capMicros)}</strong> · Reserved or committed: {spendingMoney(state.projectBudget.committedMicros)}. This independent project limit is not raised by an allowance.{codexUsage && " Codex subscription quota is outside this USD limit."}</p>
+      <ProjectBudgetControls key={`${projectId}:${state.projectBudget.revision}:${state.projectBudget.capMicros}`} projectId={projectId} budget={state.projectBudget} codexUsage={codexUsage} disabled={recoveryReadOnly || busy || !!review || !!loadError} execute={execute} />
       {profileIds.map(profileId => <fieldset key={profileId} className="spending-group" disabled={recoveryReadOnly || busy || !!review || !!loadError}>
         <legend>{state.candidates.find(candidate => candidate.profileId === profileId)?.providerDisplay?.model ?? "Saved model details unavailable"}</legend>
         {state.candidates.filter(candidate => candidate.profileId === profileId).map(candidate => <label key={candidate.candidateId} className="spending-work">
           <input type="checkbox" checked={selected.includes(candidate.candidateId)} disabled={!canSelectSpending(candidate) || !!selectedProfile && selectedProfile !== profileId} onChange={() => select(candidate)} />
-          <span><strong>{rowLabel(candidate)}</strong>{candidate.providerDisplay && <small>{spendingModelSettings(candidate.providerDisplay)} · profile {candidate.providerDisplay.id} ({candidate.providerDisplay.revision})</small>}<small>{candidate.estimatedMicros !== null ? `${spendingMoney(candidate.estimatedMicros)} configured estimate / attempt` : "Estimate unavailable"}</small>
+          <span><strong>{rowLabel(candidate)}</strong>{candidate.providerDisplay && <small>{spendingModelSettings(candidate.providerDisplay)} · profile {candidate.providerDisplay.id} ({candidate.providerDisplay.revision})</small>}<small>{spendingEstimate(candidate.providerDisplay, candidate.estimatedMicros)}</small>
             {candidate.audioDisplay && <small>{spendingAudioSummary(candidate)}</small>}
             <small>{spendingWorkStatus(candidate)}</small></span>
         </label>)}
@@ -125,14 +126,14 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
         <button disabled={busy || state.coverage.candidates.offset === 0} onClick={() => page("candidates", Math.max(0, state.coverage.candidates.offset - 100))}>Previous work</button>
         <button disabled={busy || state.coverage.candidates.nextOffset === null} onClick={() => page("candidates", state.coverage.candidates.nextOffset!)}>Next work</button></nav>}
     </>}
-    {review && <div className="spending-review" aria-labelledby="allowance-review-title"><h4 id="allowance-review-title">Approve this spending allowance</h4>
-      <p><strong>{review.providerDisplay.model}</strong> · {spendingModelSettings(review.providerDisplay)} · {spendingMoney(review.unitMicros)} configured estimate per attempt</p>
+    {review && <div className="spending-review" aria-labelledby="allowance-review-title"><h4 id="allowance-review-title">{isCodexSpending(review.providerDisplay) ? "Approve this Codex usage" : "Approve this spending allowance"}</h4>
+      <p><strong>{review.providerDisplay.model}</strong> · {spendingModelSettings(review.providerDisplay)} · {isCodexSpending(review.providerDisplay) ? "Codex subscription quota" : `${spendingMoney(review.unitMicros)} configured estimate per attempt`}</p>
       <p>Saved profile: {review.providerDisplay.id} ({review.providerDisplay.revision})</p>
       <ul>{review.labels.map((label, index) => <li key={index}>{label}{review.audioDisplays?.[index] && <span> · {spendingAudioSummary({ audioDisplay: review.audioDisplays[index] })}</span>}</li>)}</ul>
-      <p>Up to <strong>{review.body.maxAttempts} generation {review.body.maxAttempts === 1 ? "start" : "starts"}</strong>, with a total configured estimate of <strong>{spendingMoney(review.body.maxEstimatedMicros)}</strong>. Expires {new Date(review.body.expiresAt).toLocaleString()}.</p>
-      <p>These are configured estimates, not guaranteed provider bills. Every admitted attempt uses a start and its estimate, even if it later fails. This does not permit replacing a result for quality reasons.</p>
+      <p>Up to <strong>{review.body.maxAttempts} {isCodexSpending(review.providerDisplay) ? "Codex native" : "generation"} {review.body.maxAttempts === 1 ? "start" : "starts"}</strong>{isCodexSpending(review.providerDisplay) ? ", using your Codex subscription quota. Quota use and availability are not estimated." : <>, with a total configured estimate of <strong>{spendingMoney(review.body.maxEstimatedMicros)}</strong>.</>} Expires {new Date(review.body.expiresAt).toLocaleString()}.</p>
+      <p>{isCodexSpending(review.providerDisplay) ? "The USD estimate is zero because this route uses Codex, not the image API; it does not mean usage is free. Every admitted attempt uses one start permission, even if it cannot start or later fails. This approval does not authorize an API fallback or limit quota consumed within a native turn." : "These are configured estimates, not guaranteed provider bills. Every admitted attempt uses a start and its estimate, even if it later fails."} This does not permit replacing a result for quality reasons.</p>
       {!confirmed && !busy && <p role="alert">The selected work is no longer current or could not be refreshed. Return to selection before approving.</p>}
-      <div className="spending-actions"><button className="button primary" disabled={recoveryReadOnly || busy || !confirmed} onClick={() => execute(review.command)}>Approve spending allowance</button>
+      <div className="spending-actions"><button className="button primary" disabled={recoveryReadOnly || busy || !confirmed} onClick={() => execute(review.command)}>{isCodexSpending(review.providerDisplay) ? "Approve Codex usage" : "Approve spending allowance"}</button>
         <button className="button small" disabled={busy} onClick={() => { setReview(null); setSelected([]); }}>Back to selection</button></div>
     </div>}
     {!!state?.allowances.length && <details className="spending-history" open><summary>Saved allowances · {state.coverage.allowances.total}</summary>
@@ -141,7 +142,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
         <ul>{allowance.work.map(work => <li key={work.candidateId}>{work.historyAvailable ? `${work.alias} · ${spendingOperationLabel(work.operation)}${work.current ? "" : " · historical work"}` : "Historical work details unavailable"}
           {(work.operation === "speech" || work.operation === "transcription") && <span> · {spendingAudioSummary(work)}</span>}</li>)}</ul>
         <p>Recorded {new Date(allowance.createdAt).toLocaleString()} · allowance {allowance.id.slice(0, 8)}</p>
-        <p>{allowance.usedAttempts} / {allowance.maxAttempts} starts used · {spendingMoney(allowance.usedEstimatedMicros)} / {spendingMoney(allowance.maxEstimatedMicros)} configured estimate used</p>
+        <p>{spendingAllowanceUsage(allowance)}</p>
         {allowance.restoredHistory && <p>This saved allowance cannot authorize new work. Recorded usage and existing results remain in history.</p>}
         <p>Expires {new Date(allowance.expiresAt).toLocaleString()}</p>
         {!allowance.revoked && (!allowance.expired || allowance.restoredHistory) && <button disabled={recoveryReadOnly || busy} onClick={() => execute(revokeSpending(projectId, allowance.id, crypto.randomUUID()))}>{allowance.restoredHistory ? "Revoke saved allowance" : "Revoke remaining allowance"}</button>}

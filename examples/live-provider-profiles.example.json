@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "label": "Codex images \u00b7 uses Codex subscription allowance",
+      "profile": {
+        "id": "codex-keyframes",
+        "revision": "manual-live-1",
+        "kind": "image",
+        "adapter": "codex-image",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "codex-image-generation",
+          "settings": {
+            "runtimeVersion": "0.153.4",
+            "directorModel": "gpt-6-astra",
+            "width": 1024,
+            "height": 1024
+          }
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "0",
+        "maxRetries": 0
+      }
+    },
+    {
+      "label": "GPT Image 2 \u00b7 medium keyframes",
+      "profile": {
+        "id": "openai-keyframes-medium",
+        "revision": "example-1",
+        "kind": "image",
+        "adapter": "openai-image",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "gpt-image-2-2026-04-21",
+          "settings": {
+            "width": 1024,
+            "height": 1024,
+            "quality": "medium"
+          }
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "100000",
+        "maxRetries": 0
+      }
+    },
+    {
+      "label": "Viggle H3 \u00b7 first 6-second live shot",
+      "profile": {
+        "id": "viggle-live-six-seconds",
+        "revision": "manual-live-1",
+        "kind": "video",
+        "adapter": "viggle-h3",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "MiniMax-H3",
+          "settings": {
+            "quality": "low",
+            "resolution": "768p",
+            "aspectRatio": "16:9"
+          }
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "100000",
+        "maxRetries": 0,
+        "minFrames": 180,
+        "maxFrames": 180
+      }
+    },
+    {
+      "label": "OpenAI narration \u00b7 manual review example",
+      "profile": {
+        "id": "openai-narration-review",
+        "revision": "manual-review-1",
+        "kind": "speech",
+        "adapter": "openai-speech",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "gpt-4o-mini-tts-2025-12-15",
+          "settings": {}
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "100000",
+        "maxRetries": 0
+      }
+    },
+    {
+      "label": "OpenAI word transcription \u00b7 manual review example",
+      "profile": {
+        "id": "openai-transcription-review",
+        "revision": "manual-review-1",
+        "kind": "transcription",
+        "adapter": "openai-transcription",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "whisper-1",
+          "settings": {}
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "100000",
+        "maxRetries": 0
+      }
+    }
+  ]
+}

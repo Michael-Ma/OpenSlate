@@ -7,7 +7,9 @@ import { assertAudioOperationOptions, preflightAudioProfile } from "../execution
 
 interface DisplayIdentity { id: string; revision: string; definitionDigest: string }
 export type SpendingProviderDisplay = DisplayIdentity & (
-  { adapter: "openai-image"; model: string; settings: { width: number; height: number; quality: string } }
+  { adapter: "codex-image"; model: string; settings: { runtimeVersion: string; directorModel: string; width: number; height: number };
+    usage: { kind: "codex_subscription"; unit: "native_turn"; quotaEstimateAvailable: false } }
+  | { adapter: "openai-image"; model: string; settings: { width: number; height: number; quality: string } }
   | { adapter: "minimax-h3"; model: string; settings: { resolution: string } }
   | { adapter: "viggle-h3"; model: string; settings: { quality: string; resolution: string; aspectRatio: string } }
   | { adapter: "openai-speech" | "openai-transcription"; model: string; settings: Record<string, never> }
@@ -48,6 +50,10 @@ export function spendingProviderDisplay(value: unknown, expectedDefinitionDigest
     if (policy.fixture || digest(profile) !== expectedDefinitionDigest) return null;
     const identity = { id: profile.id, revision: profile.revision, definitionDigest: expectedDefinitionDigest };
     const { model, settings } = profile.configuration!;
+    if (profile.adapter === "codex-image") return { ...identity, adapter: "codex-image", model,
+      settings: { runtimeVersion: settings!.runtimeVersion as string, directorModel: settings!.directorModel as string,
+        width: settings!.width as number, height: settings!.height as number },
+      usage: { kind: "codex_subscription", unit: "native_turn", quotaEstimateAvailable: false } };
     if (profile.adapter === "openai-image") return { ...identity, adapter: "openai-image", model,
       settings: { width: settings!.width as number, height: settings!.height as number, quality: settings!.quality as string } };
     if (profile.adapter === "minimax-h3") return { ...identity, adapter: "minimax-h3", model,

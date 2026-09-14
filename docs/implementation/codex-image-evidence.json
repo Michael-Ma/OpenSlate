@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "date": "2026-09-14",
+  "scope": "Automatic Codex image provider and manual live-validation preparation",
+  "liveMediaCalls": 0,
+  "nativeProbe": {
+    "runtimeVersion": "0.153.4",
+    "authentication": "chatgpt",
+    "readiness": "ready",
+    "modelStarts": 0,
+    "imageCalls": 0,
+    "cleanupComplete": true
+  },
+  "focusedChecks": {
+    "nativeWorkerProtocol": 26,
+    "serverBridgeAndRecovery": 23,
+    "runtimeAndUsage": "Included in full regression suite"
+  },
+  "verifiedOffline": [
+    "Finite zero-USD start allowance without API fallback",
+    "Exact native turn/item to winning PNG receipt lineage",
+    "Large PNG capture and actual local PNG decoding",
+    "Uncertain acknowledgement and original-history recovery with injected native protocol",
+    "Current-shot, edit-hold, pause and original-lease fences",
+    "Filesystem-only output recovery and actual same-root backup/restore"
+  ],
+  "unverified": [
+    "First actual Codex image generation and actual image-history recovery",
+    "Actual OpenAI image/audio and Viggle requests",
+    "Account quota consumption and actual billed amounts",
+    "Complete manual live commercial and release readiness"
+  ],
+  "nativeHistoryProbe": {
+    "checksPassed": 9,
+    "source": "Known prior completed director turn",
+    "newModelStarts": 0,
+    "imageCalls": 0,
+    "result": "Nonempty legacy thread/read supported; actual image history remains unverified"
+  },
+  "fullVerification": {
+    "command": "pnpm check with the pinned no-turn Codex probe enabled",
+    "nodeVersion": "24.15.0",
+    "tests": 1903,
+    "passed": 1903,
+    "failed": 0,
+    "skipped": 0,
+    "builds": "passed",
+    "typechecks": "passed",
+    "capturedSourceFiles": 418,
+    "changedSourceFilesDuringCheck": 0
+  },
+  "reviewFixes": [
+    "Chunk large PNGs within output-store bounds",
+    "Idempotent exact native run/result replay",
+    "Bound observation callback and shutdown during lazy setup",
+    "Scope new Store and backup artifact checks to Codex images; preserve legacy fixtures"
+  ]
+}

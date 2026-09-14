@@ -1,3 +1,7 @@
+import { CODEX_IMAGE_RECORD_KINDS, assertCodexImageArtifact } from "../execution/codex-image-lineage.js";
+import { resolveCodexImageAdmission, assertCodexImageMappingAdmission } from "../execution/codex-image-authority.js";
+import { assertCodexImageExecutionDispatch, assertCodexImageExecutionRun, assertCodexImageExecutionResult } from "../execution/codex-image-receipts.js";
+import type { CodexImageExecutionMapping, CodexImageExecutionDispatch, CodexImageExecutionRun, CodexImageExecutionResult } from "../execution/codex-image-receipts.js";
 import { assertNarrationSpeechProposal } from "../narration/narration-speech-records.js";
 import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput } from "../narration/narration-speech-authorization.js";
 import type { NarrationSpeechReview } from "../narration/narration-speech-types.js";
@@ -321,11 +325,39 @@ export class Store {
       const imported = this.get<{ artifactId: string }>("image_import", id)!;
       invariant(imported.artifactId === artifact?.artifactId, "IDENTITY_MISMATCH", "Image receipt must match its import artifact identity");
     }
+    if (kind === "artifact" && typeof body.attemptId === "string") {
+      const attempt = this.get<Attempt>("attempt", body.attemptId);
+      if (attempt?.request.execution?.adapter === "codex-image") {
+        reference("attempt", body.attemptId);
+        assertCodexImageArtifact(this, attempt, { ...body, id, projectId } as unknown as ArtifactRecord);
+      }
+    }
+    if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(kind)) {
+      reference("attempt", id); const attempt = this.get<Attempt>("attempt", id)!;
+      const mapping = this.get<CodexImageExecutionMapping>("codex_image_execution_mapping", id), dispatch = this.get<CodexImageExecutionDispatch>("codex_image_execution_dispatch", id);
+      const run = this.get<CodexImageExecutionRun>("codex_image_execution_run", id), result = this.get<CodexImageExecutionResult>("codex_image_execution_result", id);
+      const value = { ...body, id, projectId }, pin = kind === "codex_image_execution_mapping" ? value as unknown as CodexImageExecutionMapping : mapping;
+      const admission = resolveCodexImageAdmission(this, attempt.request, pin);
+      if (pin) assertCodexImageMappingAdmission(admission, pin);
+      if (kind === "codex_image_execution_mapping") invariant(!result || !!mapping, "CODEX_IMAGE_EXECUTION_CONFLICT", "Terminal native preparation cannot acquire a mapping");
+      else if (kind === "codex_image_execution_dispatch") {
+        invariant(mapping && (!result || !!dispatch), "CODEX_IMAGE_EXECUTION_CONFLICT", "Native marker cannot follow terminal preparation");
+        assertCodexImageExecutionDispatch(attempt, mapping, value as unknown as CodexImageExecutionDispatch);
+      } else if (kind === "codex_image_execution_run") {
+        invariant(mapping && dispatch, "CODEX_IMAGE_EXECUTION_CONFLICT", "Native turn requires a marker");
+        assertCodexImageExecutionRun(attempt, mapping, dispatch, value as unknown as CodexImageExecutionRun);
+      } else {
+        const completed = (value as unknown as CodexImageExecutionResult).observation;
+        if (completed.kind === "completed") reference("execution_output_receipt", completed.outputReceiptId);
+        assertCodexImageExecutionResult(attempt, mapping, dispatch, run, value as unknown as CodexImageExecutionResult,
+          completed.kind === "completed" ? this.get("execution_output_receipt", completed.outputReceiptId) : undefined);
+      }
+    }
     if (kind === "execution_output_receipt") {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
       invariant(body.requestDigest === digest(attempt.request), "IDENTITY_MISMATCH", "Output receipt must bind its immutable attempt request");
-      if (attempt.request.kind === "speech" || attempt.request.kind === "transcription" || body.kind === "audio" || body.kind === "data")
+      if (attempt.request.execution?.adapter === "codex-image" || attempt.request.kind === "speech" || attempt.request.kind === "transcription" || body.kind === "audio" || body.kind === "data")
         assertOutputReceiptIdentity({ ...body, id, projectId } as unknown as OutputReceipt, attempt);
     }
     if (kind === "execution_output_spool") {
@@ -638,6 +670,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "H3 execution receipts are immutable");
       if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Viggle execution receipts are immutable");
+      if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(kind)) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Native image receipts are immutable");
       if (kind === "viggle_h3_poll_schedule") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])

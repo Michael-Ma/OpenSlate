@@ -1,3 +1,4 @@
+import { assertCodexImageSpoolLineage, assertCodexImageArtifact } from "./codex-image-lineage.js";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, constants, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -977,6 +978,7 @@ export class Engine {
       for (const { output, record, normalized, transcript } of outputs) {
         if (normalized) this.validateDerived(current, output, normalized);
         if (transcript) this.validateTranscript(current, output, transcript);
+        assertCodexImageArtifact(this.store, current, record);
         this.store.insert("artifact", record.id, attempt.projectId, record); mapped[output.port] = record.artifact;
         if (normalized) {
           this.store.insert(normalized.type === "normalized_audio" ? "audio_derivation_receipt" : "video_derivation_receipt",
@@ -1065,6 +1067,10 @@ export class Engine {
         const snapshot = structuredClone(received);
         const normalized = "type" in snapshot && (snapshot.type === "normalized_video" || snapshot.type === "normalized_audio") ? snapshot : undefined;
         const transcript = "type" in snapshot && snapshot.type === "transcript_candidate" ? snapshot : undefined;
+        if (attempt.request.execution?.adapter === "codex-image") {
+          invariant(isSpoolOutput(output) && output.kind === "image" && !normalized && !transcript, "CODEX_IMAGE_EXECUTION_CONFLICT", "Native image requires its exact PNG spool");
+          assertCodexImageSpoolLineage(this.store, attempt, output.storage.spoolId);
+        }
         if (attempt.request.execution?.adapter === "viggle-h3") {
           invariant(isSpoolOutput(output) && output.kind === "video" && normalized?.type === "normalized_video",
             "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle output requires its exact normalized video derivation");
@@ -1078,6 +1084,7 @@ export class Engine {
         if (transcript) this.validateTranscript(attempt, output, transcript);
         const record = normalized ? normalized.artifact : transcript ? transcript.artifact : snapshot as ArtifactRecord;
         await this.validateIngested(attempt, output, record, signal, normalized);
+        assertCodexImageArtifact(this.store, attempt, record);
         outputs.push({ output, record, ...(normalized ? { normalized } : {}), ...(transcript ? { transcript } : {}) });
       }
       return outputs;

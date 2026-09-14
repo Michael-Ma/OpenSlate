@@ -1,3 +1,6 @@
+import type { ArtifactRecord } from "../execution/engine.js";
+import { codexImageBackupClosure } from "./codex-image-backup.js";
+import { CODEX_IMAGE_RECORD_KINDS } from "../execution/codex-image-lineage.js";
 import { composeSpeechPlanIsolated } from "@openslate/core";
 import { assertNarrationSpeechProposal } from "../narration/narration-speech-records.js";
 import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput, resolveNarrationSpeechApplication } from "../narration/narration-speech-authorization.js";
@@ -103,6 +106,10 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       fail(Number.isSafeInteger(frame.byteLength) && frame.byteLength! > 0 && frame.byteLength! <= 32 * 1024 ** 2,
         "Viggle frame exceeds its backup verification bound");
       return read(relative(originalRoot, frame.path).split(sep).join("/"));
+    });
+    const codexImage = codexImageBackupClosure(speechReader, json, async image => {
+      artifact(image); fail(Number.isSafeInteger(image.byteLength) && image.byteLength! > 0 && image.byteLength! <= 32 * 1024 ** 2, "Native image exceeds its backup bound");
+      return read(relative(originalRoot, image.path).split(sep).join("/"));
     });
     const checkedSpeech = new Set<string>();
     const checkedOwnedSources = new Map<string, string>();
@@ -343,6 +350,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           assertOutputReceiptIdentity(receipt as OutputReceipt, attempt as Attempt);
         fail(receipt.source?.kind === "protected_locator" || (receipt.source?.kind === "returned_bytes"
           && receipt.source.sha256 === spool.sha256 && receipt.source.byteLength === spool.byteLength), "Spool differs from its returned byte receipt");
+        if (codexImage.applicable(attempt as Attempt)) { await codexImage.records(attempt.id); assertOutputReceiptIdentity(receipt as OutputReceipt, attempt as Attempt); }
         if (viggle.applicable(attempt as Attempt)) { await viggle.records(attempt.id); assertOutputReceiptIdentity(receipt as OutputReceipt, attempt as Attempt); }
         required(`execution-output/blobs/${spool.blobKey}`, spool.sha256, spool.byteLength);
       } else if (path.startsWith("execution-output/slots/")) {
@@ -351,6 +359,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           && path === `execution-output/slots/${slot.id}.json` && slot.projectId === spool.projectId && slot.attemptId === spool.attemptId
           && slot.port === spool.port && slot.sha256 === spool.sha256 && slot.byteLength === spool.byteLength, "Winning output slot differs");
         const attempt = get("attempt", slot.attemptId) as Attempt;
+        if (codexImage.applicable(attempt)) await codexImage.winning(attempt, spool.id);
         if (viggle.applicable(attempt)) await viggle.winning(attempt, spool.id);
       } else if (path.startsWith("video-derivations/completions/")) {
         const receipt = await json(path), intent = get("video_derivation_intent", receipt.id);
@@ -381,6 +390,11 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const value: RecordValue = JSON.parse(row.body);
       if (row.kind === "artifact") {
         artifact(value);
+        const nativeAttempt = typeof value.attemptId === "string" ? speechReader.get<Attempt>("attempt", value.attemptId) : undefined;
+        if (nativeAttempt?.request.execution?.adapter === "codex-image") {
+          fail(value.id === row.id && value.projectId === row.project_id, "Native artifact row identity differs");
+          await codexImage.artifact(value as ArtifactRecord);
+        }
         if (value.origin === "generated_video" && value.attemptId && viggle.applicable(get("attempt", value.attemptId) as Attempt))
           await viggle.derivation(get("video_derivation_intent", value.derivationId) as VideoDerivationIntent,
             get("video_derivation_receipt", value.derivationId) as VideoDerivationReceipt, true);
@@ -479,6 +493,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           fail(value.id === row.id && value.projectId === row.project_id, "Speech attempt row identity differs");
           await speechProposal(speech.proposal, row.project_id);
         }
+        if (codexImage.applicable(value as Attempt)) { fail(value.id === row.id && value.projectId === row.project_id, "Native attempt row identity differs"); await codexImage.records(row.id); }
         if (viggle.applicable(value as Attempt)) {
           fail(value.id === row.id && value.projectId === row.project_id, "Viggle attempt row identity differs");
           await viggle.records(row.id);
@@ -502,6 +517,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         if (viggle.applicable(attempt as Attempt)) await viggle.records(attempt.id);
         if (viggle.applicable(attempt as Attempt) || value.kind === "audio" || value.kind === "data" || attempt.request.kind === "speech" || attempt.request.kind === "transcription")
           assertOutputReceiptIdentity(value as OutputReceipt, attempt as Attempt);
+      } else if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(row.kind)) {
+        fail(value.id === row.id && value.projectId === row.project_id && value.attemptId === row.id, "Native receipt row identity differs"); await codexImage.records(row.id);
       } else if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(row.kind)) {
         fail(value.id === row.id && value.projectId === row.project_id
           && (row.kind === "viggle_h3_execution_observation" || row.id === value.attemptId), "Viggle receipt row identity differs");

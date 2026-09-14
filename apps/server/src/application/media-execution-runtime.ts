@@ -1,8 +1,10 @@
 import { accessSync, constants, mkdirSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { CodexImageWorkerTransport } from "@openslate/director";
 import { invariant, snapshotLocalExecution } from "@openslate/core";
 import { ExecutionRegistry } from "@openslate/providers";
-import type { ExecutionIdentity, ExecutionProvider, FakeProvider } from "@openslate/providers";
+import type { CodexImageTransport, ExecutionIdentity, ExecutionProvider, FakeProvider } from "@openslate/providers";
 import type { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
 import type { ExternalExecutionAdmission, NodeBinding } from "../execution/engine.js";
@@ -18,6 +20,8 @@ import { TranscriptionAudioService } from "../execution/transcription-audio-serv
 import { TranscriptionAudioStore } from "../media/transcription-audio-store.js";
 import { LocalMediaExecutor } from "../execution/local-media-executor.js";
 import { DurableExternalAdmission } from "../execution/durable-external-admission.js";
+import { CodexImageExecution } from "../execution/codex-image-execution.js";
+import { assertCodexImageOperationOptions } from "../execution/codex-image-receipts.js";
 import { OpenAIImageExecution } from "../execution/openai-image-execution.js";
 import { MiniMaxH3Execution } from "../execution/minimax-h3-execution.js";
 import { ViggleH3Execution } from "../execution/viggle-h3-execution.js";
@@ -37,7 +41,7 @@ export interface MediaExecutionRuntimeOptions {
   ffmpegPath: string | null; ffprobePath: string | null;
   credentials?: EnvironmentMediaCredentials; providerConfiguration?: unknown;
   /** Trusted host/test dependencies only; never populated from a browser or model request. */
-  transport?: { imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch; viggleFetch?: typeof globalThis.fetch;
+  transport?: { codexImage?: CodexImageTransport; imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch; viggleFetch?: typeof globalThis.fetch;
     speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch;
     download?: Pick<VideoDownloadOptions, "lookup" | "request">;
     viggleDownload?: Pick<VideoDownloadOptions, "lookup" | "request"> };
@@ -51,17 +55,37 @@ function executable(path: string | null): path is string {
 export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOptions) {
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
   const captured = structuredClone(options.configuration);
-  const configuration = { ...captured, speech: captured.speech === undefined ? false : captured.speech,
+  const configuration = { ...captured, codexImage: captured.codexImage === undefined ? false : captured.codexImage, speech: captured.speech === undefined ? false : captured.speech,
     transcription: captured.transcription === undefined ? false : captured.transcription,
     viggleH3: captured.viggleH3 === undefined ? false : captured.viggleH3,
     viggleH3DownloadHosts: captured.viggleH3DownloadHosts === undefined ? [] : captured.viggleH3DownloadHosts };
-  invariant(typeof configuration.image === "boolean" && typeof configuration.h3 === "boolean"
+  invariant(typeof configuration.image === "boolean" && typeof configuration.codexImage === "boolean" && typeof configuration.h3 === "boolean"
     && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && typeof configuration.viggleH3 === "boolean"
     && Array.isArray(configuration.h3DownloadHosts) && Array.isArray(configuration.viggleH3DownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
-  const enabled = configuration.image || configuration.h3 || configuration.viggleH3 || configuration.speech || configuration.transcription,
+  const enabled = configuration.image || configuration.codexImage || configuration.h3 || configuration.viggleH3 || configuration.speech || configuration.transcription,
     haveTools = executable(ffmpegPath) && executable(ffprobePath);
   invariant(!enabled || haveTools, "MEDIA_EXECUTION_TOOLS_REQUIRED", "Enabled media generation requires executable FFmpeg and ffprobe on this computer");
+  invariant([configuration.codexImageBinary, configuration.codexImageHome].every(path => path === undefined
+    || typeof path === "string" && isAbsolute(path) && path.length <= 4096 && !path.includes("\0")),
+    "MEDIA_EXECUTION_CONFIGURATION", "Use bounded absolute Codex image paths");
+  const injectedCodex = options.transport?.codexImage;
+  invariant(injectedCodex === undefined || injectedCodex !== null && typeof injectedCodex === "object"
+    && [injectedCodex.prepare, injectedCodex.start, injectedCodex.lookup].every(method => typeof method === "function")
+    && (injectedCodex.release === undefined || typeof injectedCodex.release === "function"),
+    "MEDIA_EXECUTION_CONFIGURATION", "Use a complete trusted Codex image transport");
+  const codexImageConfigured = injectedCodex !== undefined || executable(configuration.codexImageBinary ?? null);
+  invariant(!configuration.codexImage || codexImageConfigured, "MEDIA_EXECUTION_CODEX_REQUIRED",
+    "Enabled Codex image generation requires an executable pinned native binary");
+  const nativeWorker = !injectedCodex && configuration.codexImage ? new CodexImageWorkerTransport({ directory: join(resolve(options.dataDirectory), "codex-images"),
+    command: { file: configuration.codexImageBinary! }, nativeHome: homedir(), codexHome: configuration.codexImageHome ?? join(homedir(), ".codex"),
+    env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", CI: "1", NO_COLOR: "1" } }) : undefined;
+  let closing: Promise<void> | undefined;
+  // Capture the trusted instance and methods once. Later option mutation cannot replace the route.
+  const codexTransport: CodexImageTransport | undefined = injectedCodex ? {
+    prepare: injectedCodex.prepare.bind(injectedCodex), start: injectedCodex.start.bind(injectedCodex), lookup: injectedCodex.lookup.bind(injectedCodex),
+    ...(injectedCodex.release ? { release: injectedCodex.release.bind(injectedCodex) } : {}),
+  } : nativeWorker;
   const viggleFetch = options.transport?.viggleFetch, viggleDownload = options.transport?.viggleDownload;
   invariant(viggleDownload === undefined || viggleDownload !== null && typeof viggleDownload === "object" && !Array.isArray(viggleDownload),
     "MEDIA_EXECUTION_CONFIGURATION", "Use valid trusted Viggle download dependencies");
@@ -85,6 +109,10 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   const transcriptionFiles = localMedia ? new TranscriptionAudioStore({ rootDir: join(directory, "audio-derivatives") }) : null;
   const providers: ExecutionProvider[] = [fakeProvider], enabledExecutions: ExecutionIdentity[] = [];
   let transcriptionExecution: OpenAITranscriptionExecution | undefined;
+  if (configuration.codexImage) {
+    providers.push(new CodexImageExecution({ store, outputStore, artifactRoot: artifactDir, transport: codexTransport! }));
+    enabledExecutions.push({ adapter: "codex-image", version: "1" });
+  }
   if (configuration.image) {
     providers.push(new OpenAIImageExecution({ store, outputStore, artifactRoot: artifactDir, credentials,
       ...(options.transport?.imageFetch ? { fetch: options.transport.imageFetch } : {}) }));
@@ -115,12 +143,24 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   const registry = new ExecutionRegistry(providers);
   const durable = new DurableExternalAdmission(store, profile => {
     const policy = profilePolicy(profile); registry.forProfile(profile);
+    if (profile.adapter === "codex-image") {
+      invariant(configuration.codexImage && codexImageConfigured, "EXTERNAL_EXECUTION_DISABLED", "Codex image generation is not configured");
+      // Native ChatGPT authentication is checked by prepare before a turn marker; no API key or quota estimate is substituted.
+      return;
+    }
     invariant(!policy.fixture && policy.credential, "EXTERNAL_EXECUTION_DISABLED", "Only an explicitly enabled external media route can use spending allowances");
     invariant(credentials.status().credentials.some(value => value.id === policy.credential && value.configured),
       "MEDIA_CREDENTIAL_MISSING", "Configure the selected media provider credential on the local server");
   });
   const externalAdmission: ExternalExecutionAdmission = {
     authorize(input) {
+      if (input.profile.adapter === "codex-image") {
+        const binding = store.get<NodeBinding>("node_binding", input.nodeId);
+        invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "image",
+          "ALLOWANCE_SELECTION_STALE", "Codex preflight requires the exact current image candidate");
+        invariant(typeof binding.node.shotId === "string", "CODEX_IMAGE_PREFLIGHT_INVALID", "Codex image version 1 supports shot keyframes only");
+        assertCodexImageOperationOptions(input.profile, binding.node.args);
+      }
       if (input.profile.adapter === "openai-speech" || input.profile.adapter === "openai-transcription") {
         const binding = store.get<NodeBinding>("node_binding", input.nodeId);
         invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId,
@@ -155,8 +195,8 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     ...(transcriptionExecution ? { submissionPreparation: transcriptionExecution } : {}),
     ...(localMedia ? { localExecution: new LocalMediaExecutor(store, localMedia, { artifactDir }) } : {}) });
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
-    registry, credentials, enabledExecutions, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
+    registry, credentials, enabledExecutions, codexImageConfigured, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
   const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3
     ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video" } : {};
-  return { engine, localMedia, imageStore, outputStore, allowances: new ExternalAllowanceService(store), providerCatalog, uploadDirectory, productionOptions };
+  return { close: () => closing ??= nativeWorker?.close() ?? Promise.resolve(), engine, localMedia, imageStore, outputStore, allowances: new ExternalAllowanceService(store), providerCatalog, uploadDirectory, productionOptions };
 }

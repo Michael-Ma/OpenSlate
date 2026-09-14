@@ -1,7 +1,9 @@
 import type { PendingCommand } from "./pending-command";
 
 export type SpendingProviderDisplay = { id: string; revision: string; model: string; definitionDigest: string } & (
-  { adapter: "openai-image"; settings: { width: number; height: number; quality: string } }
+  { adapter: "codex-image"; settings: { runtimeVersion: string; directorModel: string; width: number; height: number };
+    usage: { kind: "codex_subscription"; unit: "native_turn"; quotaEstimateAvailable: false } }
+  | { adapter: "openai-image"; settings: { width: number; height: number; quality: string } }
   | { adapter: "minimax-h3"; settings: { resolution: string } }
   | { adapter: "viggle-h3"; settings: { quality: string; resolution: string; aspectRatio: string } }
   | { adapter: "openai-speech" | "openai-transcription"; settings: Record<string, never> });
@@ -61,13 +63,27 @@ export function spendingMoney(value: string): string {
   const fraction = (amount % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "").padEnd(2, "0");
   return `$${whole}.${fraction} USD`;
 }
+export function isCodexSpending(display: SpendingProviderDisplay | null | undefined): display is SpendingProviderDisplay & { adapter: "codex-image" } {
+  return display?.adapter === "codex-image";
+}
+export function spendingEstimate(display: SpendingProviderDisplay | null, estimate: string | null): string {
+  if (isCodexSpending(display)) return "Uses Codex subscription quota · quota use is not estimated";
+  return estimate !== null ? `${spendingMoney(estimate)} configured estimate / attempt` : "Estimate unavailable";
+}
+export function spendingAllowanceUsage(allowance: SpendingAllowance): string {
+  if (isCodexSpending(allowance.providerDisplay)) return `${allowance.usedAttempts} / ${allowance.maxAttempts} Codex start permissions used · quota use is not measured`;
+  return `${allowance.usedAttempts} / ${allowance.maxAttempts} starts used · ${spendingMoney(allowance.usedEstimatedMicros)} / ${spendingMoney(allowance.maxEstimatedMicros)} configured estimate used`;
+}
 export function canSelectSpending(candidate: SpendingCandidate): boolean {
-  const expected = { image: ["openai-image"], video: ["minimax-h3", "viggle-h3"], speech: ["openai-speech"], transcription: ["openai-transcription"] }[candidate.operation];
+  const expected = { image: ["openai-image", "codex-image"], video: ["minimax-h3", "viggle-h3"], speech: ["openai-speech"], transcription: ["openai-transcription"] }[candidate.operation];
   const audio = candidate.operation === "speech" || candidate.operation === "transcription";
   return candidate.unavailableCode !== "RESTORED_AUTHORITY_REQUIRES_NEW" && candidate.selectionCurrent && candidate.suggestedForIssue && !!expected
     && (!audio || !candidate.audioUnavailableCode && validAudioDisplay(candidate.audioDisplay) && candidate.audioDisplay.operation === candidate.operation)
     && (candidate.matchingAllowanceCount ?? 0) === 0 && !!candidate.providerDisplay
     && expected!.includes(candidate.providerDisplay.adapter)
+    && (!isCodexSpending(candidate.providerDisplay) || candidate.estimatedMicros === "0"
+      && candidate.providerDisplay.usage?.kind === "codex_subscription" && candidate.providerDisplay.usage.unit === "native_turn"
+      && candidate.providerDisplay.usage.quotaEstimateAvailable === false)
     && candidate.providerDisplay.definitionDigest === candidate.profileDefinitionDigest && candidate.providerDisplay.id === candidate.profileId
     && candidate.providerDisplay.revision === candidate.profileRevision;
 }
@@ -84,13 +100,14 @@ export function spendingWorkStatus(candidate: SpendingCandidate): string {
     return "Recording selection changed · prepare and review the current recording before approving new spending";
   if (!candidate.providerDisplay) return "Saved model details unavailable · refresh or request new work";
   return (candidate.matchingAllowanceCount ?? 0) > 0 ? "Matching allowance recorded; remaining limits are shared."
-    : canSelectSpending(candidate) ? "Available for cost review" : candidate.workState === "uncertain" ? "Outcome uncertain · waiting for recovery"
+    : canSelectSpending(candidate) ? isCodexSpending(candidate.providerDisplay) ? "Available for Codex usage review" : "Available for cost review" : candidate.workState === "uncertain" ? "Outcome uncertain · waiting for recovery"
       : candidate.workState === "completed" ? "Completed" : candidate.workState === "in_progress" ? "Already in progress" : "Not available for another attempt";
 }
 export function spendingAllowanceStatus(allowance: SpendingAllowance): string {
   return allowance.status === "restored_history" ? "Restored history · cannot start new work" : allowance.status.replaceAll("_", " ");
 }
 export function spendingModelSettings(display: SpendingProviderDisplay): string {
+  if (display.adapter === "codex-image") return `Codex · ${display.settings.directorModel} · requested ${display.settings.width} × ${display.settings.height} (output size may differ)`;
   if (display.adapter === "openai-speech") return "Speech recording · WAV · normal speed";
   if (display.adapter === "openai-transcription") return "Transcription · word timestamps";
   if (display.adapter === "viggle-h3") return `Viggle · ${display.settings.quality} · ${display.settings.resolution} · ${display.settings.aspectRatio} · configured upper estimate per attempt`;
@@ -143,6 +160,12 @@ export function spendingReviewCurrent(review: SpendingReview, state: SpendingSta
     && candidate.candidateId === selected.candidateId && candidate.nodeId === selected.nodeId && candidate.specDigest === selected.specDigest
     && candidate.profileDigest === review.body.profileDigest && candidate.profileDefinitionDigest === review.body.profileDefinitionDigest
     && candidate.estimatedMicros === review.unitMicros && candidate.operation === review.operation
+    && (!isCodexSpending(review.providerDisplay) || isCodexSpending(candidate.providerDisplay)
+      && candidate.providerDisplay.model === review.providerDisplay.model
+      && candidate.providerDisplay.settings.runtimeVersion === review.providerDisplay.settings.runtimeVersion
+      && candidate.providerDisplay.settings.directorModel === review.providerDisplay.settings.directorModel
+      && candidate.providerDisplay.settings.width === review.providerDisplay.settings.width
+      && candidate.providerDisplay.settings.height === review.providerDisplay.settings.height)
     && (!(review.operation === "speech" || review.operation === "transcription") || !!review.audioDisplays?.[index]
       && !!candidate.audioDisplay && audioKey(candidate.audioDisplay) === audioKey(review.audioDisplays[index]!))));
 }

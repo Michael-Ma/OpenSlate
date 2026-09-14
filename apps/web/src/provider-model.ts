@@ -3,7 +3,8 @@ export interface ProviderView {
   id: string; label: string; installedDefinition: boolean;
   profile: { kind: ProviderKind; adapter: string; configuration?: { model: string; settings?: Record<string, unknown> } } | null;
   estimatedCost: { currency: "USD"; unitMicros: string; basis: "fixture" | "host_configured"; actualVendorPriceVerified: false } | null;
-  readiness: { configurationValid: boolean; registered: boolean; mediaTools: { required: boolean; available: boolean };
+  usage?: { kind: "codex_subscription"; unit: "native_turn"; quotaEstimateAvailable: false };
+  readiness: { nativeAccess?: { configured: boolean; authentication: "checked_before_dispatch"; quota: "unverified" }; configurationValid: boolean; registered: boolean; mediaTools: { required: boolean; available: boolean };
     credential: { required: boolean; present: boolean | null; backendUnavailable: boolean; apiValidated: false };
     spendingPermissionRequired: boolean; enabledByHost?: boolean; realExecutionEnabled: boolean };
   projectExecution?: { compatible: boolean; code: string | null; message: string | null };
@@ -38,6 +39,7 @@ export function projectCreationCommand(name: string, key: string, selection: Pro
 }
 
 export function providerEstimate(provider: ProviderView): string {
+  if (provider.profile?.adapter === "codex-image") return "Uses Codex subscription quota · quota use is not estimated";
   if (provider.estimatedCost?.basis === "fixture") return "Demo · no media API calls";
   const value = provider.estimatedCost?.unitMicros;
   if (!value || !/^(0|[1-9][0-9]{0,17})$/.test(value)) return "Estimate unavailable";
@@ -54,6 +56,11 @@ export function canUseDemo(providers: ProviderView[]): boolean {
 export function providerExecutionStatus(provider: ProviderView): string {
   if (provider.projectExecution?.compatible === false)
     return provider.projectExecution.message ?? "This project's saved execution mode is incompatible. Create a new project to use this provider.";
+  if (provider.profile?.adapter === "codex-image") {
+    if (provider.readiness.realExecutionEnabled) return "Codex runtime configured · authentication is checked before each start. Quota is unverified; a Codex usage approval is still required.";
+    return provider.readiness.enabledByHost ? "Codex generation enabled · local setup is incomplete. Authentication and quota are not verified."
+      : "Codex generation is disabled on this computer. A usage approval does not enable it.";
+  }
   if (provider.readiness.realExecutionEnabled) return "Provider ready · generation permission and a spending allowance are still required.";
   return provider.readiness.enabledByHost ? "Enabled on this computer · setup is incomplete."
     : "Generation is disabled on this computer. Key setup does not authorize spending.";

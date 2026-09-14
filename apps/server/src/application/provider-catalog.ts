@@ -41,6 +41,18 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
   invariant(profile.executionVersion === "1", "PROVIDER_CATALOG_INVALID", "Unsupported execution mapping version");
   exact(profile.configuration, ["model", "settings"]);
   const configuration = profile.configuration;
+  if (profile.adapter === "codex-image") {
+    invariant(profile.kind === "image" && profile.configuration?.model === "codex-image-generation"
+      && profile.maxConcurrency === 1 && profile.maxRetries === 0 && profile.unitCostMicros === "0"
+      && profile.minFrames === undefined && profile.maxFrames === undefined,
+    "PROVIDER_CATALOG_INVALID", "Codex images require one concurrent turn, no automatic retries and zero API-dollar accounting");
+    exact(configuration.settings, ["runtimeVersion", "directorModel", "width", "height"]);
+    const settings = configuration.settings;
+    invariant(settings.runtimeVersion === "0.153.4" && settings.directorModel === "gpt-6-astra"
+      && settings.width === 1024 && settings.height === 1024,
+    "PROVIDER_CATALOG_INVALID", "Use the pinned Codex runtime, director model and 1024-square canvas preferences");
+    return { credential: null, media: "image", fixture: false };
+  }
   if (profile.adapter === "openai-speech" || profile.adapter === "openai-transcription") {
     // Shared pure preflight owns the exact model/profile contract. Voice, instructions and language remain reviewed operation inputs.
     preflightAudioProfile(profile);
@@ -118,17 +130,19 @@ export class InstalledProviderCatalog {
   readonly #mediaTools: Readonly<{ image: boolean; video: boolean; audio: boolean }>;
   readonly #enabledExecutions: ReadonlySet<string>;
   readonly #digest: string;
+  readonly #codexImageConfigured: boolean;
   get digest(): string { return this.#digest; }
   constructor(options: { configuration?: unknown; registry?: ExecutionRegistry; credentials?: EnvironmentMediaCredentials;
-    mediaTools?: { image: boolean; video: boolean; audio?: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
+    codexImageConfigured?: boolean; mediaTools?: { image: boolean; video: boolean; audio?: boolean }; enabledExecutions?: readonly ExecutionIdentity[] } = {}) {
     const configuration = options.configuration === undefined ? { version: 1 as const, profiles: [] } : validateConfiguration(options.configuration);
     this.#definitions = [...BUILT_IN_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile: structuredClone(profile) })), ...configuration.profiles];
     this.#digest = digest({ version: 1, profiles: this.#definitions }); this.#registry = options.registry;
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
+    this.#codexImageConfigured = options.codexImageConfigured === true;
     const enabled = options.enabledExecutions ?? [];
-    invariant(Array.isArray(enabled) && enabled.length <= 5 && enabled.every(value => object(value)
-      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription"].includes(value.adapter) && value.version === "1"),
+    invariant(Array.isArray(enabled) && enabled.length <= 6 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "codex-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription"].includes(value.adapter) && value.version === "1"),
     "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
     this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
     invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");
@@ -137,7 +151,7 @@ export class InstalledProviderCatalog {
     const profiles = this.#definitions.map(definition => this.describe(definition.profile, definition.label));
     return { catalogDigest: this.digest, defaults: BUILT_IN_PROFILES.map(profile => profile.id),
       profiles, realExecutionEnabled: profiles.some(profile => profile.readiness.realExecutionEnabled),
-      notice: this.#enabledExecutions.size ? "Enabled models still require configured keys, exact generation permission and a spending allowance. Check each model's readiness."
+      notice: this.#enabledExecutions.has(canonical({ adapter: "codex-image", version: "1" })) ? "Enabled models require their own authentication, exact generation permission and a finite allowance. Codex image usage is not a dollar estimate; login is checked before dispatch." : this.#enabledExecutions.size ? "Enabled models still require configured keys, exact generation permission and a spending allowance. Check each model's readiness."
         : "Model selection does not grant generation or spending permission. Real execution is not enabled." };
   }
   projectView(profiles: unknown, provenance?: unknown, localExecution?: unknown) {
@@ -183,16 +197,19 @@ export class InstalledProviderCatalog {
       catch { credentialUnavailable = true; }
     }
     const enabledByHost = !!profile && !policy?.fixture && this.#enabledExecutions.has(canonical({ adapter: profile.adapter, version: profile.executionVersion }));
+    const codexImage = profile?.adapter === "codex-image";
     const realExecutionEnabled = enabledByHost && registered && valid && !!policy?.media && this.#mediaTools[policy.media]
-      && credentialPresent === true && !credentialUnavailable;
+      && (codexImage ? this.#codexImageConfigured : credentialPresent === true && !credentialUnavailable);
     return { id: object(input) && typeof input.id === "string" && ID.test(input.id) ? input.id : "unavailable",
       label: name ?? current?.label ?? (profile ? `${profile.kind}: ${profile.id}` : "Unsupported saved provider"),
+      ...(codexImage ? { usage: { kind: "codex_subscription" as const, unit: "native_turn" as const, quotaEstimateAvailable: false as const } } : {}),
       profile, definitionDigest: profile ? digest(profile) : null, installedDefinition: !!current,
       estimatedCost: profile ? { currency: "USD" as const, unitMicros: profile.unitCostMicros,
         basis: policy?.fixture ? "fixture" as const : "host_configured" as const, actualVendorPriceVerified: false as const } : null,
       readiness: { configurationValid: valid, registered,
         mediaTools: { required: !!policy?.media, available: policy?.media ? this.#mediaTools[policy.media] : valid },
         credential: { required: !!policy?.credential, present: credentialPresent, backendUnavailable: credentialUnavailable, apiValidated: false as const },
+        ...(codexImage ? { nativeAccess: { configured: this.#codexImageConfigured, authentication: "checked_before_dispatch" as const, quota: "unverified" as const } } : {}),
         spendingPermissionRequired: !policy?.fixture, enabledByHost, realExecutionEnabled } };
   }
 }

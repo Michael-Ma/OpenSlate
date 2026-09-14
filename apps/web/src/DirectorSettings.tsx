@@ -43,7 +43,7 @@ export function DirectorSettings({ api, projectId, close, changed }: { api: Stud
   }}>
     <button className="text-button settings-close" onClick={close} disabled={busy}>Close</button>
     <span className="eyebrow">THIS PROJECT</span><h2 id="director-settings-title">Choose your director</h2>
-    <p>Codex handles live conversations using its existing sign-in on this computer. Setup checks the connection without starting a model conversation.</p>
+    <p>Codex handles live conversations using its local ChatGPT sign-in or API-key login. Setup checks the connection without starting a model conversation.</p>
     {settings?.locked ? <div className="notice"><p>This project uses {settings.selection.mode === "native" ? `Codex (${settings.selection.model})` : "the demo director"}. Its conversation has already started. Create a new project to choose a different director.</p></div>
       : <form onSubmit={event => void submit(event)}>
         <label htmlFor="director-mode">Director</label><select id="director-mode" value={selection.mode} disabled={recoveryReadOnly || busy || !!pending} onChange={event => { setSelection(value => ({ ...value, mode: event.target.value as Selection["mode"] })); setSaved(false); }}>
@@ -51,7 +51,8 @@ export function DirectorSettings({ api, projectId, close, changed }: { api: Stud
         </select>
         {selection.mode === "native" && <><label htmlFor="director-model">Model</label><input id="director-model" value={selection.model ?? ""} disabled={recoveryReadOnly || busy || !!pending} onChange={event => { setSelection(value => ({ ...value, model: event.target.value })); setSaved(false); }} />
           <details open={!selection.binaryPath}><summary>Local installation</summary><label htmlFor="director-binary">Codex executable</label><input id="director-binary" value={selection.binaryPath ?? ""} disabled={recoveryReadOnly || busy || !!pending} onChange={event => setSelection(value => ({ ...value, binaryPath: event.target.value }))} placeholder="Absolute path to Codex" />
-            <p className="field-help">OpenSlate found this installation automatically when available. Authentication stays with Codex; no media keys are needed for conversation.</p></details></>}
+            <label htmlFor="director-home">Codex account folder (optional)</label><input id="director-home" value={selection.codexHome ?? ""} disabled={recoveryReadOnly || busy || !!pending} onChange={event => { const home = event.target.value; setSelection(value => { const next = { ...value }; if (home) next.codexHome = home; else delete next.codexHome; return next; }); }} placeholder="Default: your existing Codex account" />
+            <p className="field-help">Leave the account folder blank for your existing login, or use a separate absolute folder with a Codex API-key login. Authentication stays with Codex. Image, video and audio providers have independent settings.</p></details></>}
         <button className="button primary full-width" disabled={recoveryReadOnly || busy || !settings}>{busy ? "Checking local setup…" : pending ? "Retry setup check" : selection.mode === "native" ? "Check and use Codex" : "Use demo director"}</button>
         {pending && !busy && <button type="button" className="text-button" onClick={() => setPending(null)}>Edit setup choices</button>}
       </form>}

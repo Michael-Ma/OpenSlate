@@ -382,3 +382,21 @@ test("Viggle and MiniMax remain different saved choices and default profile byte
   assert.notEqual(new InstalledProviderCatalog({ configuration: configuration(video(), changed), credentials: noViggleTestKeys }).digest, catalog.digest);
   assert.equal(catalog.projectView([changed.profile]).profiles[0].installedDefinition, false);
 });
+
+test("Codex image catalog pins the supported worker without claiming a media API credential or quota estimate", () => {
+  const row = { label: "Codex images", profile: { id: "codex-keyframes", revision: "manual-live-1", kind: "image", adapter: "codex-image", executionVersion: "1",
+    configuration: { model: "codex-image-generation", settings: { runtimeVersion: "0.153.4", directorModel: "gpt-6-astra", width: 1024, height: 1024 } }, maxConcurrency: 1, unitCostMicros: "0", maxRetries: 0 } };
+  assert.deepEqual(profilePolicy(row.profile), { credential: null, media: "image", fixture: false });
+  const catalog = new InstalledProviderCatalog({ configuration: configuration(row) });
+  const visible = catalog.view().profiles.find(value => value.profile.id === row.profile.id);
+  assert.deepEqual(visible.usage, { kind: "codex_subscription", unit: "native_turn", quotaEstimateAvailable: false });
+  assert.equal(visible.readiness.nativeAccess.configured, false);
+  assert.equal(visible.readiness.nativeAccess.authentication, "checked_before_dispatch");
+  assert.equal(visible.readiness.nativeAccess.quota, "unverified");
+  for (const mutate of [p => { p.maxRetries = 1; }, p => { p.maxConcurrency = 2; }, p => { p.unitCostMicros = "1"; },
+    p => { p.configuration.settings.directorModel = "other"; }, p => { p.configuration.settings.runtimeVersion = "latest"; },
+    p => { p.configuration.settings.width = 2048; }, p => { p.configuration.settings.quality = "high"; }]) {
+    const invalid = structuredClone(row); mutate(invalid.profile);
+    assert.throws(() => new InstalledProviderCatalog({ configuration: configuration(invalid) }), error => error.code === "PROVIDER_CATALOG_INVALID");
+  }
+});
