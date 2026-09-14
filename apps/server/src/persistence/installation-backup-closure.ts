@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { viggleBackupClosure } from "./viggle-backup.js";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { canonical, composeTranscriptionPlanIsolated, digest, invariant, snapshotLocalExecution } from "@openslate/core";
 import type { CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
@@ -94,6 +95,12 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         fail(row, "Speech admission project is missing"); return JSON.parse(row.body);
       },
     };
+    const viggle = viggleBackupClosure(speechReader, json, async frame => {
+      artifact(frame);
+      fail(Number.isSafeInteger(frame.byteLength) && frame.byteLength! > 0 && frame.byteLength! <= 32 * 1024 ** 2,
+        "Viggle frame exceeds its backup verification bound");
+      return read(relative(originalRoot, frame.path).split(sep).join("/"));
+    });
     const checkedSpeech = new Set<string>();
     const checkedOwnedSources = new Map<string, string>();
     const ownedSource = async (value: unknown, projectId: string): Promise<void> => {
@@ -317,16 +324,20 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
           assertOutputReceiptIdentity(receipt as OutputReceipt, attempt as Attempt);
         fail(receipt.source?.kind === "protected_locator" || (receipt.source?.kind === "returned_bytes"
           && receipt.source.sha256 === spool.sha256 && receipt.source.byteLength === spool.byteLength), "Spool differs from its returned byte receipt");
+        if (viggle.applicable(attempt as Attempt)) { await viggle.records(attempt.id); assertOutputReceiptIdentity(receipt as OutputReceipt, attempt as Attempt); }
         required(`execution-output/blobs/${spool.blobKey}`, spool.sha256, spool.byteLength);
       } else if (path.startsWith("execution-output/slots/")) {
         const slot = await json(path), spool = await json(`execution-output/manifests/${slot.spoolId}.json`);
         fail(slot.version === 1 && slot.storageId === storageId && slot.id === digest({ projectId: slot.projectId, attemptId: slot.attemptId, port: slot.port })
           && path === `execution-output/slots/${slot.id}.json` && slot.projectId === spool.projectId && slot.attemptId === spool.attemptId
           && slot.port === spool.port && slot.sha256 === spool.sha256 && slot.byteLength === spool.byteLength, "Winning output slot differs");
+        const attempt = get("attempt", slot.attemptId) as Attempt;
+        if (viggle.applicable(attempt)) await viggle.winning(attempt, spool.id);
       } else if (path.startsWith("video-derivations/completions/")) {
         const receipt = await json(path), intent = get("video_derivation_intent", receipt.id);
         fail(path === `video-derivations/completions/${receipt.id}.json`, "Video derivation filename differs");
         assertVideoDerivationReceipt(intent as VideoDerivationIntent, receipt as VideoDerivationReceipt, false); await source(receipt.source);
+        await viggle.derivation(intent as VideoDerivationIntent, receipt as VideoDerivationReceipt);
         const spool = await json(`execution-output/manifests/${intent.spoolId}.json`);
         fail(spool.sha256 === intent.rawSha256 && spool.byteLength === intent.rawByteLength && spool.attemptId === intent.attemptId, "Video derivation raw source differs");
         const slot = await json(`execution-output/slots/${intent.slotId}.json`);
@@ -346,11 +357,14 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         await transcriptionCompletion(receipt);
       }
     }
-    for (const row of db.prepare("SELECT kind,id,body FROM entities").iterate() as Iterable<{ kind: string; id: string; body: string }>) {
+    for (const row of db.prepare("SELECT kind,id,project_id,body FROM entities").iterate() as Iterable<{ kind: string; id: string; project_id: string; body: string }>) {
       fail(Buffer.byteLength(row.body) <= 16 * 1024 ** 2, "Saved record exceeds backup verification bound");
       const value: RecordValue = JSON.parse(row.body);
       if (row.kind === "artifact") {
         artifact(value);
+        if (value.origin === "generated_video" && value.attemptId && viggle.applicable(get("attempt", value.attemptId) as Attempt))
+          await viggle.derivation(get("video_derivation_intent", value.derivationId) as VideoDerivationIntent,
+            get("video_derivation_receipt", value.derivationId) as VideoDerivationReceipt, true);
         if (value.origin === "generated_audio") fail(get("audio_derivation_receipt", value.derivationId).source.artifactId === value.id,
           "Generated audio artifact lost its derivation receipt");
         if (value.origin === "transcription_response") fail(get("transcript_candidate", value.transcriptCandidateId).artifactId === value.id,
@@ -371,6 +385,9 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       }
       else if (row.kind === "media_source") {
         await source(value.source);
+        if (value.origin === "generated_video" && value.attemptId && viggle.applicable(get("attempt", value.attemptId) as Attempt))
+          await viggle.derivation(get("video_derivation_intent", value.derivationId) as VideoDerivationIntent,
+            get("video_derivation_receipt", value.derivationId) as VideoDerivationReceipt, true);
         if (value.origin === "generated_audio") {
           const receipt = get("audio_derivation_receipt", value.derivationId);
           fail(canonical(value) === canonical({ id: receipt.source.artifactId, projectId: receipt.projectId, source: receipt.source,
@@ -414,7 +431,10 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       else if (row.kind === "execution_output_spool" || row.kind === "execution_output_slot") {
         const path = `execution-output/${row.kind === "execution_output_spool" ? "manifests" : "slots"}/${row.id}.json`;
         fail(canonical(await json(path)) === canonical(value), "Saved output metadata differs from its published receipt");
+      } else if (row.kind === "video_derivation_intent") {
+        await viggle.derivation(value as VideoDerivationIntent);
       } else if (row.kind === "video_derivation_receipt") {
+        await viggle.derivation(get("video_derivation_intent", row.id) as VideoDerivationIntent, value as VideoDerivationReceipt, true);
         fail(canonical(await json(`video-derivations/completions/${row.id}.json`)) === canonical(value), "Saved derivation differs from its published receipt");
       } else if (row.kind === "audio_derivation_intent") {
         await audioIntent(value as AudioDerivationIntent);
@@ -425,6 +445,10 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         assertNormalizedAudioIngestion(intent, attempt, output, { type: "normalized_audio", artifact: get("artifact", intent.artifactId) as any,
           derivation: value as AudioDerivationReceipt, mediaSource: get("media_source", intent.artifactId) as any });
       } else if (row.kind === "attempt") {
+        if (viggle.applicable(value as Attempt)) {
+          fail(value.id === row.id && value.projectId === row.project_id, "Viggle attempt row identity differs");
+          await viggle.records(row.id);
+        }
         const owned = assertOwnedTranscriptionAttemptInput(speechReader, value as Attempt);
         if (owned) await ownedProposal(owned.proposal, value.projectId);
         await waitingPreparation(value as Attempt);
@@ -441,8 +465,13 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         await transcriptionCompletion(value as TranscriptionAudioReceipt);
       } else if (row.kind === "execution_output_receipt") {
         const attempt = get("attempt", value.attemptId);
-        if (value.kind === "audio" || value.kind === "data" || attempt.request.kind === "speech" || attempt.request.kind === "transcription")
+        if (viggle.applicable(attempt as Attempt)) await viggle.records(attempt.id);
+        if (viggle.applicable(attempt as Attempt) || value.kind === "audio" || value.kind === "data" || attempt.request.kind === "speech" || attempt.request.kind === "transcription")
           assertOutputReceiptIdentity(value as OutputReceipt, attempt as Attempt);
+      } else if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(row.kind)) {
+        fail(value.id === row.id && value.projectId === row.project_id
+          && (row.kind === "viggle_h3_execution_observation" || row.id === value.attemptId), "Viggle receipt row identity differs");
+        await viggle.records(value.attemptId);
       } else if (["speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result"].includes(row.kind)) {
         speechRecords(row.id);
       } else if (["transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result"].includes(row.kind)) {

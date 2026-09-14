@@ -329,3 +329,56 @@ test("host configuration rejects a FIFO without waiting for a writer", t => {
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", source, fifo], { encoding: "utf8", timeout: 3000 });
   assert.equal(child.error, undefined, child.error?.message); assert.equal(child.status, 0, child.stderr);
 });
+
+
+const noViggleTestKeys = new EnvironmentMediaCredentials(() => undefined);
+const viggle = () => ({ label: "Viggle H3", profile: { id: "viggle-h3-pinned", revision: "viggle-config-1", kind: "video", adapter: "viggle-h3", executionVersion: "1",
+  configuration: { model: "MiniMax-H3", settings: { quality: "low", resolution: "480p", aspectRatio: "16:9" } },
+  maxConcurrency: 1, unitCostMicros: "900000", maxRetries: 0, minFrames: 90, maxFrames: 450 } });
+
+test("Viggle profiles reuse exact transport settings with explicit whole-second3..15 bounds without changing MiniMax", () => {
+  assert.deepEqual(profilePolicy(viggle().profile), { credential: "viggle-video", media: "video", fixture: false });
+  assert.deepEqual(profilePolicy(video().profile), { credential: "minimax-video", media: "video", fixture: false });
+  for (const quality of ["low", "high"]) for (const resolution of ["480p", "768p", "1080p"]) for (const aspectRatio of ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]) {
+    const entry = viggle(); entry.profile.configuration.settings = { quality, resolution, aspectRatio };
+    assert.equal(new InstalledProviderCatalog({ configuration: configuration(entry), credentials: noViggleTestKeys }).view().profiles.at(-1).readiness.configurationValid, true);
+  }
+  for (const change of [p => p.minFrames = 89, p => p.minFrames = 91, p => p.maxFrames = 451, p => p.maxFrames = 119,
+    p => p.configuration.model = "MiniMax-H3-Max", p => p.configuration.settings.resolution = "480P", p => p.configuration.settings.quality = "standard",
+    p => p.configuration.settings.aspectRatio = "auto", p => p.configuration.settings.watermark = false, p => delete p.configuration.settings.aspectRatio,
+    p => p.configuration.apiKey = "synthetic-private-key", p => p.executionVersion = "2", p => p.kind = "image"]) {
+    const entry = viggle(); change(entry.profile);
+    assert.throws(() => new InstalledProviderCatalog({ configuration: configuration(entry), credentials: noViggleTestKeys }), error => error.code === "PROVIDER_CATALOG_INVALID" && !error.message.includes("synthetic-private"));
+  }
+  const exact = viggle(); exact.profile.minFrames = 450;
+  assert.equal(new InstalledProviderCatalog({ configuration: configuration(exact), credentials: noViggleTestKeys }).view().profiles.at(-1).readiness.configurationValid, true);
+});
+
+test("Viggle readiness requires its own key, host switch, route and saved assembly pin", () => {
+  let viggleKey = false, calls = 0;
+  const provider = adapter => registerExecutionProvider({ submit: async () => { calls++; }, poll: async () => { calls++; }, lookup: async () => { calls++; } }, { adapter, version: "1" });
+  const registry = new ExecutionRegistry([provider("viggle-h3"), provider("minimax-h3")]);
+  const credentials = new EnvironmentMediaCredentials(name => name === "OPENSLATE_VIGGLE_API_KEY" ? viggleKey ? "synthetic-viggle-key" : undefined : "synthetic-other-provider-key");
+  const configured = { configuration: configuration(video(), viggle()), registry, credentials, mediaTools: { image: false, video: true } };
+  const enabled = [{ adapter: "viggle-h3", version: "1" }], catalog = new InstalledProviderCatalog({ ...configured, enabledExecutions: enabled });
+  const row = () => catalog.view().profiles.find(item => item.id === viggle().profile.id);
+  assert.equal(row().readiness.enabledByHost, true); assert.equal(row().readiness.registered, true); assert.equal(row().readiness.realExecutionEnabled, false);
+  viggleKey = true; assert.equal(row().readiness.realExecutionEnabled, true);
+  enabled[0].adapter = "minimax-h3"; assert.equal(row().readiness.enabledByHost, true);
+  assert.equal(catalog.view().profiles.find(item => item.id === video().profile.id).readiness.enabledByHost, false);
+  assert.equal(new InstalledProviderCatalog(configured).view().profiles.find(item => item.id === viggle().profile.id).readiness.realExecutionEnabled, false);
+  const legacy = catalog.projectView([viggle().profile]); assert.equal(legacy.realExecutionEnabled, false); assert.equal(legacy.profiles[0].projectExecution.code, "LOCAL_EXECUTION_UPGRADE_REQUIRED");
+  assert.equal(catalog.projectView([viggle().profile], undefined, { adapter: "local-media", version: "1" }).realExecutionEnabled, true);
+  assert.equal(calls, 0); assert.equal(JSON.stringify(catalog.view()).includes("synthetic-viggle-key"), false);
+});
+
+test("Viggle and MiniMax remain different saved choices and default profile bytes stay exact", () => {
+  const catalog = new InstalledProviderCatalog({ configuration: configuration(video(), viggle()), credentials: noViggleTestKeys });
+  const selected = selectedProviderProfiles(catalog.select(catalog.digest, [viggle().profile.id]));
+  assert.deepEqual(selected.profiles, DEFAULT_PROFILES.map(p => p.kind === "video" ? viggle().profile : p));
+  assert.throws(() => catalog.select(catalog.digest, [video().profile.id, viggle().profile.id]), { code: "PROVIDER_SELECTION_INVALID" });
+  assert.equal(new InstalledProviderCatalog().digest, digest({ version: 1, profiles: DEFAULT_PROFILES.map(profile => ({ label: `Demo ${profile.kind}`, profile })) }));
+  const changed = viggle(); changed.profile.configuration.settings.quality = "high";
+  assert.notEqual(new InstalledProviderCatalog({ configuration: configuration(video(), changed), credentials: noViggleTestKeys }).digest, catalog.digest);
+  assert.equal(catalog.projectView([changed.profile]).profiles[0].installedDefinition, false);
+});

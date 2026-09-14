@@ -14,6 +14,10 @@ import { assertTranscriptionAudioIntent, assertTranscriptionAudioReceipt, resolv
 import type { TranscriptionAudioIntent, TranscriptionAudioReceipt, TranscriptionAudioSourceRecord } from "../execution/transcription-audio.js";
 import { assertSpeechMappingAdmission, resolveSpeechAdmission } from "../execution/audio-execution-authority.js";
 import { assertSpeechSpoolLineage } from "../execution/audio-execution-lineage.js";
+import { assertViggleSpoolLineage } from "../execution/viggle-h3-lineage.js";
+import { resolveViggleAdmission, assertViggleMappingAdmission } from "../execution/viggle-h3-authority.js";
+import { assertViggleH3ExecutionMapping, assertViggleH3ExecutionDispatch, assertViggleH3ExecutionSubmit, assertViggleH3ExecutionObservation, assertViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
+import type { ViggleH3ExecutionMapping, ViggleH3ExecutionDispatch, ViggleH3ExecutionSubmit, ViggleH3ExecutionObservation, ViggleH3PollSchedule } from "../execution/viggle-h3-receipts.js";
 import { assertSpeechExecutionDispatch, assertSpeechExecutionResult } from "../execution/audio-execution-receipts.js";
 import type { SpeechExecutionMapping, SpeechExecutionDispatch, SpeechExecutionResult } from "../execution/audio-execution-receipts.js";
 import { assertTranscriptionMappingAdmission, resolveTranscriptionAdmission, resolveTranscriptionPreparation } from "../execution/transcription-execution-authority.js";
@@ -459,12 +463,44 @@ export class Store {
         }
       }
     }
+    if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation", "viggle_h3_poll_schedule"].includes(kind)) {
+      reference("attempt", body.attemptId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      const mapping = this.get<ViggleH3ExecutionMapping>("viggle_h3_execution_mapping", attempt.id), dispatch = this.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
+      const submit = this.get<ViggleH3ExecutionSubmit>("viggle_h3_execution_submit", attempt.id), value = { ...body, id, projectId };
+      const retainedMapping = kind === "viggle_h3_execution_mapping" ? value as unknown as ViggleH3ExecutionMapping : mapping;
+      if (retainedMapping) assertViggleMappingAdmission(resolveViggleAdmission(this, attempt.request, retainedMapping), retainedMapping);
+      if (kind === "viggle_h3_execution_mapping") {
+        invariant(!submit || !!mapping, "VIGGLE_H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a mapping");
+        assertViggleH3ExecutionMapping(attempt, value as unknown as ViggleH3ExecutionMapping); reference("artifact", (body.firstFrame as ViggleH3ExecutionMapping["firstFrame"]).artifactId);
+      } else if (kind === "viggle_h3_execution_dispatch") {
+        reference("viggle_h3_execution_mapping", attempt.id);
+        invariant(!submit || !!dispatch, "VIGGLE_H3_EXECUTION_CONFLICT", "Closed H3 preparation cannot acquire a dispatch");
+        assertViggleH3ExecutionDispatch(attempt, mapping!, value as unknown as ViggleH3ExecutionDispatch);
+      } else if (kind === "viggle_h3_execution_submit") assertViggleH3ExecutionSubmit(attempt, mapping, dispatch, value as unknown as ViggleH3ExecutionSubmit);
+      else {
+        reference("viggle_h3_execution_mapping", attempt.id); reference("viggle_h3_execution_dispatch", attempt.id); reference("viggle_h3_execution_submit", attempt.id);
+        if (kind === "viggle_h3_execution_observation") {
+          const observation = value as unknown as ViggleH3ExecutionObservation, outputId = observation.observation?.kind === "completed" ? observation.observation.outputReceiptId : undefined;
+          if (outputId !== undefined) reference("execution_output_receipt", outputId);
+          assertViggleH3ExecutionObservation(attempt, mapping!, dispatch!, submit!, observation, outputId ? this.get("execution_output_receipt", outputId) : undefined);
+        } else {
+          const schedule = value as unknown as ViggleH3PollSchedule; assertViggleH3PollSchedule(attempt, submit!, schedule);
+          if (schedule.lastObservationId !== null) {
+            reference("viggle_h3_execution_observation", schedule.lastObservationId);
+            invariant(this.get<ViggleH3ExecutionObservation>("viggle_h3_execution_observation", schedule.lastObservationId)!.attemptId === attempt.id,
+              "VIGGLE_H3_EXECUTION_CONFLICT", "Polling schedule cannot adopt another attempt's observation");
+          }
+        }
+      }
+    }
     if (kind === "video_derivation_intent") {
       reference("attempt", body.attemptId); reference("execution_output_slot", body.slotId); reference("execution_output_spool", body.spoolId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
       const slot = this.get<{ spoolId: string; attemptId: string; port: string }>("execution_output_slot", String(body.slotId))!;
       const spool = this.get<{ sha256: string; byteLength: number }>("execution_output_spool", String(body.spoolId))!;
       invariant(slot.spoolId === body.spoolId && slot.attemptId === body.attemptId && slot.port === "video", "IDENTITY_MISMATCH", "Video derivation must bind the exact winning raw slot");
+      assertViggleSpoolLineage(this, attempt, String(body.spoolId));
       assertVideoDerivationIntent({ ...body, id, projectId } as unknown as VideoDerivationIntent, attempt,
         { port: "video", kind: "video", mimeType: "video/mp4", extension: "mp4", sha256: spool.sha256, byteLength: spool.byteLength,
           fixture: false, storage: { type: "spool", spoolId: String(body.spoolId) } });
@@ -472,6 +508,7 @@ export class Store {
     if (kind === "video_derivation_receipt") {
       reference("video_derivation_intent", id);
       const intent = this.get<VideoDerivationIntent>("video_derivation_intent", id)!;
+      assertViggleSpoolLineage(this, this.get<Attempt>("attempt", intent.attemptId)!, intent.spoolId);
       const receipt = { ...body, id, projectId } as unknown as VideoDerivationReceipt;
       assertVideoDerivationReceipt(intent, receipt); reference("artifact", receipt.source.artifactId);
       const artifact = this.get<ArtifactRecord>("artifact", receipt.source.artifactId)!;
@@ -583,6 +620,14 @@ export class Store {
       const encoded = this.checkedBody(kind, id, projectId, body);
       if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "H3 execution receipts are immutable");
+      if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Viggle execution receipts are immutable");
+      if (kind === "viggle_h3_poll_schedule") {
+        const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
+        for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Viggle poll identity and host policy are immutable");
+        invariant(Number(next.count) >= Number(previous.count), "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle polling cannot rewind");
+      }
       if (kind === "h3_poll_schedule") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])

@@ -129,3 +129,22 @@ test("real projection retains display and work after lock/plan changes and datab
   assert.deepEqual(projectSpendingProjection(service, project.id).allowances[0].work, result.allowances[0].work);
   assert.equal(provider.acceptedCount(), 0); assert.equal(store.list("attempt", project.id).length, 0);
 });
+
+
+test("Viggle spending displays preserve only exact full-definition settings and distinguish MiniMax history", () => {
+  const profile = { ...video(), id: "viggle-video", adapter: "viggle-h3", minFrames: 90,
+    configuration: { model: "MiniMax-H3", settings: { quality: "low", resolution: "480p", aspectRatio: "16:9" } } };
+  const display = spendingProviderDisplay(profile, digest(profile));
+  assert.deepEqual(display, { id: profile.id, revision: profile.revision, adapter: "viggle-h3", model: "MiniMax-H3",
+    settings: { quality: "low", resolution: "480p", aspectRatio: "16:9" }, definitionDigest: digest(profile) });
+  display.settings.quality = "high"; assert.equal(profile.configuration.settings.quality, "low");
+  for (const patch of [{ unitCostMicros: "1" }, { configuration: { ...profile.configuration, settings: { ...profile.configuration.settings, aspectRatio: "9:16" } } }])
+    assert.equal(spendingProviderDisplay({ ...profile, ...patch }, digest(profile)), null);
+  const secret = { ...profile, configuration: { ...profile.configuration, settings: { ...profile.configuration.settings, apiKey: "synthetic-private" } } };
+  assert.equal(spendingProviderDisplay(secret, digest(secret)), null);
+  const history = spendingHistoryDisplay("project", [lock(profile), lock(video())], [plan([node(profile, { kind: "video", alias: "viggle-take" })])]);
+  const result = history(allowance(profile), []);
+  assert.equal(result.providerDisplay.adapter, "viggle-h3"); assert.equal(result.work[0].alias, "viggle-take");
+  assert.equal(spendingProviderDisplay(video(), digest(video())).adapter, "minimax-h3");
+  assert.equal(Object.hasOwn(result.providerDisplay, "unitCostMicros"), false);
+});

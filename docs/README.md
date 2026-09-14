@@ -44,6 +44,7 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Generated audio ingestion](implementation/GENERATED-AUDIO-INGESTION.md) | Verified raw storage, complete PCM normalization, provenance and six-minute recovery; later transcript phases |
 | [OpenAI audio transports](implementation/OPENAI-AUDIO-TRANSPORTS.md) | Standalone speech/transcription transports, exact wire identity, cancellation and offline evidence |
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
+| [Viggle H3 integration](implementation/VIGGLE-H3.md) | In-progress first live H3 provider, local key setup, exact reviewed-frame submission and bounded live-test allowance |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |
 | [H3 application execution](implementation/MINIMAX-H3-EXECUTION.md) | Exact reviewed PNG transfer, one POST, durable polling and protected output recovery |
 | [Human spending review](implementation/SPENDING-REVIEW.md) | Exact browser allowance/revocation, separate project-budget review and actual browser evidence |

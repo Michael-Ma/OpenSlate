@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "label": "Viggle H3 \u00b7 768p \u00b7 low",
+      "profile": {
+        "id": "viggle-video-768p-low",
+        "revision": "example-1",
+        "kind": "video",
+        "adapter": "viggle-h3",
+        "executionVersion": "1",
+        "configuration": {
+          "model": "MiniMax-H3",
+          "settings": {
+            "quality": "low",
+            "resolution": "768p",
+            "aspectRatio": "16:9"
+          }
+        },
+        "maxConcurrency": 1,
+        "unitCostMicros": "150000",
+        "maxRetries": 0,
+        "minFrames": 90,
+        "maxFrames": 450
+      }
+    }
+  ]
+}

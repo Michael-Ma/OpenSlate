@@ -1,8 +1,8 @@
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { canonical, DEFAULT_PROFILES, digest, invariant, moneyMicros, providerProfileArguments, snapshotLocalExecution } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
-import { describeOpenAIImageRequest } from "@openslate/providers";
-import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality } from "@openslate/providers";
+import { describeOpenAIImageRequest, validateViggleH3Settings } from "@openslate/providers";
+import type { ExecutionIdentity, ExecutionRegistry, OpenAIImageModel, OpenAIImageQuality, ViggleH3Settings } from "@openslate/providers";
 import { preflightAudioProfile } from "../execution/audio-preflight.js";
 import { EnvironmentMediaCredentials } from "./provider-credentials.js";
 import type { MediaCredentialId } from "./provider-credentials.js";
@@ -53,6 +53,16 @@ export function profilePolicy(profile: ProviderProfile): { credential: MediaCred
     describeOpenAIImageRequest({ mode: "generate", model: configuration.model as OpenAIImageModel, prompt: "Local configuration validation",
       width: configuration.settings.width as number, height: configuration.settings.height as number, quality: configuration.settings.quality as OpenAIImageQuality });
     return { credential: "openai-media", media: "image", fixture: false };
+  }
+  if (profile.adapter === "viggle-h3") {
+    invariant(profile.kind === "video" && configuration.model === "MiniMax-H3"
+      && integer(profile.minFrames, 90, 450) && integer(profile.maxFrames, Number(profile.minFrames), 450)
+      && Number(profile.minFrames) % 30 === 0 && Number(profile.maxFrames) % 30 === 0,
+    "PROVIDER_CATALOG_INVALID", "Viggle H3 profiles require explicit whole-second bounds within 3 to 15 seconds");
+    exact(configuration.settings, ["quality", "resolution", "aspectRatio"]);
+    // Reuse the fixed transport settings policy without bytes, credentials or a network request.
+    validateViggleH3Settings(configuration.settings as unknown as ViggleH3Settings);
+    return { credential: "viggle-video", media: "video", fixture: false };
   }
   invariant(profile.adapter === "minimax-h3" && profile.kind === "video", "PROVIDER_CATALOG_INVALID", "Only installed fixed media mappings may be configured");
   exact(configuration.settings, ["resolution"]);
@@ -117,8 +127,8 @@ export class InstalledProviderCatalog {
     this.#credentials = options.credentials ?? new EnvironmentMediaCredentials();
     this.#mediaTools = Object.freeze({ image: options.mediaTools?.image === true, video: options.mediaTools?.video === true, audio: options.mediaTools?.audio === true });
     const enabled = options.enabledExecutions ?? [];
-    invariant(Array.isArray(enabled) && enabled.length <= 4 && enabled.every(value => object(value)
-      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "minimax-h3", "openai-speech", "openai-transcription"].includes(value.adapter) && value.version === "1"),
+    invariant(Array.isArray(enabled) && enabled.length <= 5 && enabled.every(value => object(value)
+      && Object.keys(value).length === 2 && typeof value.adapter === "string" && ["openai-image", "minimax-h3", "viggle-h3", "openai-speech", "openai-transcription"].includes(value.adapter) && value.version === "1"),
     "PROVIDER_CATALOG_INVALID", "Only explicit supported external execution identities can be enabled");
     this.#enabledExecutions = new Set(enabled.map(value => canonical(value)));
     invariant(this.#enabledExecutions.size === enabled.length, "PROVIDER_CATALOG_INVALID", "Enabled execution identities must be distinct");
@@ -135,7 +145,7 @@ export class InstalledProviderCatalog {
     let localAssemblyCompatible = false;
     try { snapshotLocalExecution(localExecution); localAssemblyCompatible = true; } catch { /* Absence and unsupported saved pins require a new project for H3. */ }
     const described = profiles.map(profile => {
-      const row = this.describe(profile), compatible = row.profile?.adapter !== "minimax-h3" || localAssemblyCompatible;
+      const row = this.describe(profile), compatible = !(["minimax-h3", "viggle-h3"].includes(row.profile?.adapter ?? "")) || localAssemblyCompatible;
       return { ...row, projectExecution: { compatible,
         code: compatible ? null : "LOCAL_EXECUTION_UPGRADE_REQUIRED",
         message: compatible ? null : "Create a new project with video generation enabled on this computer. This project's saved assembly mode cannot generate H3 video." } };

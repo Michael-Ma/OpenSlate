@@ -3,6 +3,7 @@ import type { PendingCommand } from "./pending-command";
 export type SpendingProviderDisplay = { id: string; revision: string; model: string; definitionDigest: string } & (
   { adapter: "openai-image"; settings: { width: number; height: number; quality: string } }
   | { adapter: "minimax-h3"; settings: { resolution: string } }
+  | { adapter: "viggle-h3"; settings: { quality: string; resolution: string; aspectRatio: string } }
   | { adapter: "openai-speech" | "openai-transcription"; settings: Record<string, never> });
 export type SpendingAudioDisplay = { operation: "speech"; voice: string; textBytes: number; instructionsPresent: boolean }
   | { operation: "transcription"; language: string | null; timing: "word" };
@@ -61,12 +62,12 @@ export function spendingMoney(value: string): string {
   return `$${whole}.${fraction} USD`;
 }
 export function canSelectSpending(candidate: SpendingCandidate): boolean {
-  const expected = { image: "openai-image", video: "minimax-h3", speech: "openai-speech", transcription: "openai-transcription" }[candidate.operation];
+  const expected = { image: ["openai-image"], video: ["minimax-h3", "viggle-h3"], speech: ["openai-speech"], transcription: ["openai-transcription"] }[candidate.operation];
   const audio = candidate.operation === "speech" || candidate.operation === "transcription";
   return candidate.unavailableCode !== "RESTORED_AUTHORITY_REQUIRES_NEW" && candidate.selectionCurrent && candidate.suggestedForIssue && !!expected
     && (!audio || !candidate.audioUnavailableCode && validAudioDisplay(candidate.audioDisplay) && candidate.audioDisplay.operation === candidate.operation)
     && (candidate.matchingAllowanceCount ?? 0) === 0 && !!candidate.providerDisplay
-    && candidate.providerDisplay.adapter === expected
+    && expected!.includes(candidate.providerDisplay.adapter)
     && candidate.providerDisplay.definitionDigest === candidate.profileDefinitionDigest && candidate.providerDisplay.id === candidate.profileId
     && candidate.providerDisplay.revision === candidate.profileRevision;
 }
@@ -91,6 +92,7 @@ export function spendingAllowanceStatus(allowance: SpendingAllowance): string {
 export function spendingModelSettings(display: SpendingProviderDisplay): string {
   if (display.adapter === "openai-speech") return "Speech recording · WAV · normal speed";
   if (display.adapter === "openai-transcription") return "Transcription · word timestamps";
+  if (display.adapter === "viggle-h3") return `Viggle · ${display.settings.quality} · ${display.settings.resolution} · ${display.settings.aspectRatio} · configured upper estimate per attempt`;
   return display.adapter === "minimax-h3" ? display.settings.resolution : `${display.settings.width} × ${display.settings.height} · ${display.settings.quality}`;
 }
 function validAudioDisplay(value: SpendingAudioDisplay | null | undefined): value is SpendingAudioDisplay {

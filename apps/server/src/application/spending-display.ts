@@ -9,6 +9,7 @@ interface DisplayIdentity { id: string; revision: string; definitionDigest: stri
 export type SpendingProviderDisplay = DisplayIdentity & (
   { adapter: "openai-image"; model: string; settings: { width: number; height: number; quality: string } }
   | { adapter: "minimax-h3"; model: string; settings: { resolution: string } }
+  | { adapter: "viggle-h3"; model: string; settings: { quality: string; resolution: string; aspectRatio: string } }
   | { adapter: "openai-speech" | "openai-transcription"; model: string; settings: Record<string, never> }
 );
 export type SpendingAudioDisplay = { operation: "speech"; voice: string; textBytes: number; instructionsPresent: boolean }
@@ -51,6 +52,8 @@ export function spendingProviderDisplay(value: unknown, expectedDefinitionDigest
       settings: { width: settings!.width as number, height: settings!.height as number, quality: settings!.quality as string } };
     if (profile.adapter === "minimax-h3") return { ...identity, adapter: "minimax-h3", model,
       settings: { resolution: settings!.resolution as string } };
+    if (profile.adapter === "viggle-h3") return { ...identity, adapter: "viggle-h3", model,
+      settings: { quality: settings!.quality as string, resolution: settings!.resolution as string, aspectRatio: settings!.aspectRatio as string } };
     return null;
   } catch { return null; }
 }

@@ -122,3 +122,31 @@ test('lost allowance response survives remount with the exact request and expiry
   assert.equal(calls,2); assert.equal(remount.snapshot('project').command,null);
   assert.deepEqual(revokeSpending('project','saved','revoke-key'),{path:'/api/projects/project/spending/allowances/saved/revoke',key:'revoke-key',body:{}});
 });
+
+
+test('Viggle allowance review uses a flat upper estimate per attempt and preserves the exact distinct provider settings', () => {
+  const current = candidate(1, { operation: 'video', profileId: 'viggle-profile', estimatedMicros: '900000',
+    providerDisplay: { id: 'viggle-profile', revision: 'version-1', adapter: 'viggle-h3', model: 'MiniMax-H3', definitionDigest: hash('c'),
+      settings: { quality: 'low', resolution: '480p', aspectRatio: '16:9' } } });
+  const another = { ...structuredClone(current), candidateId: 'candidate-2', nodeId: 'node-2' };
+  const reviewed = reviewSpending(state({ candidates: [current, another] }), [current.candidateId, another.candidateId], 'viggle-review', 1000);
+  assert.equal(reviewed.body.maxAttempts, 2); assert.equal(reviewed.body.maxEstimatedMicros, '1800000');
+  assert.deepEqual(reviewed.providerDisplay, current.providerDisplay); assert.notEqual(reviewed.providerDisplay.settings, current.providerDisplay.settings);
+  assert.match(spendingModelSettings(reviewed.providerDisplay), /Viggle.*low.*480p.*16:9.*per attempt/);
+  assert.equal(spendingModelSettings({ adapter: 'minimax-h3', settings: { resolution: '768P' } }), '768P');
+  current.profileDefinitionDigest = hash('f'); current.providerDisplay.settings.quality = 'high';
+  assert.equal(spendingReviewCurrent(reviewed, state({ candidates: [current, another] }), 1001), false);
+  assert.equal(reviewed.providerDisplay.settings.quality, 'low'); assert.equal(reviewed.command.body.maxEstimatedMicros, '1800000');
+});
+
+test('Viggle cannot borrow approval identities from another video provider or a different operation', () => {
+  const viggle = candidate(1, { operation: 'video', profileId: 'viggle-profile', providerDisplay: { id: 'viggle-profile', revision: 'version-1', adapter: 'viggle-h3',
+    model: 'MiniMax-H3', settings: { quality: 'low', resolution: '480p', aspectRatio: '16:9' }, definitionDigest: hash('c') } });
+  assert.equal(canSelectSpending(viggle), true);
+  assert.equal(canSelectSpending({ ...viggle, operation: 'image' }), false);
+  assert.equal(canSelectSpending({ ...viggle, profileId: 'minimax-profile' }), false);
+  const minimax = { ...structuredClone(viggle), candidateId: 'candidate-2', nodeId: 'node-2', profileId: 'minimax-profile', profileDefinitionDigest: hash('d'),
+    providerDisplay: { id: 'minimax-profile', revision: 'version-1', adapter: 'minimax-h3', model: 'MiniMax-H3', settings: { resolution: '768P' }, definitionDigest: hash('d') } };
+  assert.throws(() => reviewSpending(state({ candidates: [viggle, minimax] }), [viggle.candidateId, minimax.candidateId], 'mixed-provider'));
+  assert.equal(canSelectSpending({ ...viggle, providerDisplay: { ...viggle.providerDisplay, adapter: 'unknown-video' } }), false);
+});

@@ -26,3 +26,5 @@ export type { OpenAITranscriptionRequest, OpenAITranscriptionDescription, OpenAI
   OpenAITranscriptionOutcome, OpenAITranscriptionAdapterOptions, TranscriptionWaveform,
   TranscriptionWord, TranscriptionTimingIssue, OpenAITranscriptionResponseInput, OpenAITranscriptionParseOptions,
   ParsedOpenAITranscriptionResponse, OpenAITranscriptionProjection } from "./openai-transcription.js";
+
+export * from "./viggle-h3.js";

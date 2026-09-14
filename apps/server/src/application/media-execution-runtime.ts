@@ -7,6 +7,7 @@ import type { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
 import type { ExternalExecutionAdmission, NodeBinding } from "../execution/engine.js";
 import { assertAudioOperationOptions } from "../execution/audio-preflight.js";
+import { assertViggleH3OperationOptions } from "../execution/viggle-h3-receipts.js";
 import { ExecutionOutputStore } from "../execution/output-store.js";
 import { ExecutionIngestionRouter } from "../execution/ingestion-router.js";
 import { SpoolImageIngestor } from "../execution/spool-image-ingester.js";
@@ -19,6 +20,7 @@ import { LocalMediaExecutor } from "../execution/local-media-executor.js";
 import { DurableExternalAdmission } from "../execution/durable-external-admission.js";
 import { OpenAIImageExecution } from "../execution/openai-image-execution.js";
 import { MiniMaxH3Execution } from "../execution/minimax-h3-execution.js";
+import { ViggleH3Execution } from "../execution/viggle-h3-execution.js";
 import { OpenAISpeechExecution } from "../execution/openai-speech-execution.js";
 import { OpenAITranscriptionExecution } from "../execution/openai-transcription-execution.js";
 import { ProtectedVideoDownloader } from "../execution/video-download.js";
@@ -35,9 +37,10 @@ export interface MediaExecutionRuntimeOptions {
   ffmpegPath: string | null; ffprobePath: string | null;
   credentials?: EnvironmentMediaCredentials; providerConfiguration?: unknown;
   /** Trusted host/test dependencies only; never populated from a browser or model request. */
-  transport?: { imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch;
+  transport?: { imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch; viggleFetch?: typeof globalThis.fetch;
     speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch;
-    download?: Pick<VideoDownloadOptions, "lookup" | "request"> };
+    download?: Pick<VideoDownloadOptions, "lookup" | "request">;
+    viggleDownload?: Pick<VideoDownloadOptions, "lookup" | "request"> };
 }
 function executable(path: string | null): path is string {
   if (!path || !isAbsolute(path)) return false;
@@ -49,18 +52,30 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
   const captured = structuredClone(options.configuration);
   const configuration = { ...captured, speech: captured.speech === undefined ? false : captured.speech,
-    transcription: captured.transcription === undefined ? false : captured.transcription };
+    transcription: captured.transcription === undefined ? false : captured.transcription,
+    viggleH3: captured.viggleH3 === undefined ? false : captured.viggleH3,
+    viggleH3DownloadHosts: captured.viggleH3DownloadHosts === undefined ? [] : captured.viggleH3DownloadHosts };
   invariant(typeof configuration.image === "boolean" && typeof configuration.h3 === "boolean"
-    && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && Array.isArray(configuration.h3DownloadHosts),
+    && typeof configuration.speech === "boolean" && typeof configuration.transcription === "boolean" && typeof configuration.viggleH3 === "boolean"
+    && Array.isArray(configuration.h3DownloadHosts) && Array.isArray(configuration.viggleH3DownloadHosts),
     "MEDIA_EXECUTION_CONFIGURATION", "Use validated local generation configuration");
-  const enabled = configuration.image || configuration.h3 || configuration.speech || configuration.transcription,
+  const enabled = configuration.image || configuration.h3 || configuration.viggleH3 || configuration.speech || configuration.transcription,
     haveTools = executable(ffmpegPath) && executable(ffprobePath);
   invariant(!enabled || haveTools, "MEDIA_EXECUTION_TOOLS_REQUIRED", "Enabled media generation requires executable FFmpeg and ffprobe on this computer");
+  const viggleFetch = options.transport?.viggleFetch, viggleDownload = options.transport?.viggleDownload;
+  invariant(viggleDownload === undefined || viggleDownload !== null && typeof viggleDownload === "object" && !Array.isArray(viggleDownload),
+    "MEDIA_EXECUTION_CONFIGURATION", "Use valid trusted Viggle download dependencies");
+  const viggleLookup = viggleDownload?.lookup, viggleRequest = viggleDownload?.request;
+  invariant([viggleFetch, viggleLookup, viggleRequest].every(value => value === undefined || typeof value === "function"),
+    "MEDIA_EXECUTION_CONFIGURATION", "Use callable trusted Viggle transport dependencies");
   const credentials = options.credentials ?? new EnvironmentMediaCredentials();
   const directory = resolve(options.dataDirectory), artifactDir = join(directory, "artifacts"), uploadDirectory = join(directory, "uploads");
   const downloader = configuration.h3 ? new ProtectedVideoDownloader({ allowedHosts: configuration.h3DownloadHosts,
     ...(options.transport?.download?.lookup ? { lookup: options.transport.download.lookup } : {}),
     ...(options.transport?.download?.request ? { request: options.transport.download.request } : {}) }) : undefined;
+  const viggleDownloader = configuration.viggleH3 ? new ProtectedVideoDownloader({ allowedHosts: configuration.viggleH3DownloadHosts,
+    ...(viggleLookup === undefined ? {} : { lookup: viggleLookup }),
+    ...(viggleRequest === undefined ? {} : { request: viggleRequest }) }) : undefined;
   mkdirSync(uploadDirectory, { recursive: true, mode: 0o700 });
   const outputStore = new ExecutionOutputStore(store, { rootDir: join(directory, "execution-output") });
   const localMedia = haveTools ? new LocalMediaService({ rootDir: join(directory, "media"),
@@ -79,6 +94,11 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     providers.push(new MiniMaxH3Execution({ store, outputStore, artifactRoot: artifactDir, credentials, downloader: downloader!,
       ...(options.transport?.h3Fetch ? { fetch: options.transport.h3Fetch } : {}) }));
     enabledExecutions.push({ adapter: "minimax-h3", version: "1" });
+  }
+  if (configuration.viggleH3) {
+    providers.push(new ViggleH3Execution({ store, outputStore, artifactRoot: artifactDir, credentials, downloader: viggleDownloader!,
+      ...(viggleFetch === undefined ? {} : { fetch: viggleFetch }) }));
+    enabledExecutions.push({ adapter: "viggle-h3", version: "1" });
   }
   if (configuration.speech) {
     providers.push(new OpenAISpeechExecution({ store, outputStore, credentials,
@@ -108,7 +128,15 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
         // Pure option validation precedes consumption. Durable admission below rechecks the full active selection.
         assertAudioOperationOptions(input.profile, binding.node.args);
       }
-      if (input.profile.adapter === "minimax-h3") {
+      if (input.profile.adapter === "viggle-h3") {
+        const binding = store.get<NodeBinding>("node_binding", input.nodeId);
+        invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "video",
+          "ALLOWANCE_SELECTION_STALE", "Viggle preflight requires the exact current video candidate");
+        // The shared bridge policy rejects unsupported options before any allowance or reservation is consumed.
+        // Durable admission below synchronously rechecks the full active node, profile definition and allowance.
+        assertViggleH3OperationOptions(input.profile, binding.node.args);
+      }
+      if (input.profile.adapter === "minimax-h3" || input.profile.adapter === "viggle-h3") {
         const project = store.getProject(input.projectId), lock = store.get<{ projectId: string; localExecution?: unknown }>("capability_lock", project.capabilityLockId);
         let pinned = false;
         try { if (lock?.projectId === project.id && Object.hasOwn(lock, "localExecution")) { snapshotLocalExecution(lock.localExecution); pinned = true; } } catch { /* Historical projects cannot silently inherit a new runtime. */ }
@@ -128,7 +156,7 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     ...(localMedia ? { localExecution: new LocalMediaExecutor(store, localMedia, { artifactDir }) } : {}) });
   const providerCatalog = new InstalledProviderCatalog({ ...(options.providerConfiguration === undefined ? {} : { configuration: options.providerConfiguration }),
     registry, credentials, enabledExecutions, mediaTools: { image: !!imageStore, video: !!localMedia, audio: !!localMedia } });
-  const productionOptions: ProductionServiceOptions = configuration.h3
+  const productionOptions: ProductionServiceOptions = configuration.h3 || configuration.viggleH3
     ? { newProjectLocalExecution: { adapter: "local-media", version: "1" }, newProjectLocalExecutionFor: "external-video" } : {};
   return { engine, localMedia, imageStore, outputStore, allowances: new ExternalAllowanceService(store), providerCatalog, uploadDirectory, productionOptions };
 }

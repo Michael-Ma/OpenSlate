@@ -11,6 +11,7 @@ import { InstallationRecoveryGuard } from "../application/installation-recovery.
 import { ExecutionOutputStore } from "./output-store.js";
 import { materializeFixtureOutput } from "./fixture-ingester.js";
 import { assertNormalizedVideoIngestion } from "./video-derivation.js";
+import { assertViggleSpoolLineage } from "./viggle-h3-lineage.js";
 import type { NormalizedVideoIngestion, VideoDerivationIntent } from "./video-derivation.js";
 import { assertNormalizedAudioIngestion } from "./audio-derivation.js";
 import type { AudioDerivationIntent, NormalizedAudioIngestion } from "./audio-derivation.js";
@@ -1055,6 +1056,11 @@ export class Engine {
         const snapshot = structuredClone(received);
         const normalized = "type" in snapshot && (snapshot.type === "normalized_video" || snapshot.type === "normalized_audio") ? snapshot : undefined;
         const transcript = "type" in snapshot && snapshot.type === "transcript_candidate" ? snapshot : undefined;
+        if (attempt.request.execution?.adapter === "viggle-h3") {
+          invariant(isSpoolOutput(output) && output.kind === "video" && normalized?.type === "normalized_video",
+            "VIGGLE_H3_EXECUTION_CONFLICT", "Viggle output requires its exact normalized video derivation");
+          assertViggleSpoolLineage(this.store, attempt, output.storage.spoolId);
+        }
         if (isSpoolOutput(output) && output.kind === "audio") invariant(normalized?.type === "normalized_audio",
           "AUDIO_DERIVATION_CONFLICT", "Real audio requires its exact normalized derivation result");
         if (attempt.request.kind === "transcription" && attempt.request.execution?.adapter === "openai-transcription"
@@ -1083,6 +1089,7 @@ export class Engine {
     }
     const intent = this.store.get<VideoDerivationIntent>("video_derivation_intent", result.derivation?.id);
     invariant(intent, "VIDEO_DERIVATION_CONFLICT", "Generated video requires its durable pre-transcode intent");
+    assertViggleSpoolLineage(this.store, attempt, intent.spoolId);
     assertNormalizedVideoIngestion(intent, attempt, output, result); return intent;
   }
 

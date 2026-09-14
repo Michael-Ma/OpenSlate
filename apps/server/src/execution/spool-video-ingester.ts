@@ -5,6 +5,7 @@ import { canonical, digest, invariant } from "@openslate/core";
 import { isSpoolOutput } from "@openslate/providers";
 import type { Attempt, ExecutionOutputIngestor } from "./engine.js";
 import { ExecutionOutputStore } from "./output-store.js";
+import { assertViggleSpoolLineage } from "./viggle-h3-lineage.js";
 import { LocalMediaService } from "../media/local-media.js";
 import { installManagedVideo } from "../media/managed-video.js";
 import { assertNormalizedVideoIngestion, assertVideoDerivationIntent, assertVideoDerivationReceipt,
@@ -40,6 +41,7 @@ export class SpoolVideoIngestor implements ExecutionOutputIngestor {
     activeRoots.add(this.rootDir);
     try {
       const owned = await this.outputs.resolveOutput(attempt.projectId, attempt.id, output, { signal });
+      assertViggleSpoolLineage(this.outputs.store, attempt, owned.spool.id);
       const id = videoDerivationId(attempt.projectId, attempt.id), saved = this.outputs.store.get<VideoDerivationIntent>("video_derivation_intent", id);
       let intent = saved;
       if (!intent) {
@@ -83,7 +85,8 @@ export class SpoolVideoIngestor implements ExecutionOutputIngestor {
           origin: "generated_video", physicalDurationSeconds: source.probe.video!.frames / 30, byteLength: source.byteLength,
           outputReceiptId: owned.spool.receiptId, outputSpoolId: owned.spool.id, derivationId: id, sourceDescriptorId: source.id },
         mediaSource: { id: intent.artifactId, projectId: attempt.projectId, source, origin: "generated_video", attemptId: attempt.id, derivationId: id } };
-      assertNormalizedVideoIngestion(intent, attempt, output, result); cancelled(signal);
+      assertNormalizedVideoIngestion(intent, attempt, output, result);
+      assertViggleSpoolLineage(this.outputs.store, attempt, owned.spool.id); cancelled(signal);
       return result;
     } finally { activeRoots.delete(this.rootDir); }
   }

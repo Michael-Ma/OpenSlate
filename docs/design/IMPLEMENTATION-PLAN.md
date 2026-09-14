@@ -5,6 +5,8 @@
 
 This plan follows the [detailed component designs](../technical/README.md). The [architecture overview](README.md) remains the product direction.
 
+The September 13 Viggle milestone now passes 1,725 tests (72 additions), builds/typechecks and the installed no-turn Codex probe. It adds a separate Viggle profile/credential/transport, exact first-frame multipart execution, durable polling/recovery, pre-allowance option validation and media-inclusive backup/restore. The earlier detailed 1,653-test paragraph above is historical. Current scope is to finish conversational audio preparation/review next, then stop for the user's manual testing before real production validation or release. All live Viggle tests remain explicitly on hold, including with a configured key.
+
 ## 1. Confirmed release scope
 
 Single-user, single-machine local application; user-configured model/credential profiles; up to 360 seconds of resolved output; uploaded or conversationally developed/generated narration; scene/shot plans and debug records; human-reviewed conditioning keyframes for every video shot; user-directed creative regeneration; bounded technical recovery; conversational creative edits and visual review/playback. Initial production integrations are Codex, GPT Image 2, H3 cloud and selected speech/transcription profiles. Same-machine Python H3 inference, ten/thirty-minute releases and a direct timeline editor follow later. V0 keeps the app, SQLite, media, workers and native Codex on one computer. Cloud providers remain external services; local deployment does not mean offline generation. Multi-host applications, remote GPU workers, distributed scheduling and shared-database deployment are outside v0.
