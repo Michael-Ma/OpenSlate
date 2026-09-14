@@ -4,10 +4,11 @@ import type { JsonObject } from "./contracts.js";
 import { changeProposalSchema, parseChangeProposal } from "./workflow/index.js";
 
 export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"] as const);
-export const ALL_TOOL_NAMES = Object.freeze([...TOOL_NAMES, "revise_narration_draft"] as const);
+export const V2_TOOL_NAMES = Object.freeze([...TOOL_NAMES, "revise_narration_draft"] as const);
+export const ALL_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transcription", "prepare_narration_speech"] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
-export type ToolContractVersion = "1.0.0" | "2.0.0";
+export type ToolContractVersion = "1.0.0" | "2.0.0" | "3.0.0";
 export interface ParsedToolCall { name: ToolName; arguments: JsonObject }
 export interface ToolDescriptor {
   name: ToolName;
@@ -61,14 +62,35 @@ const v2Descriptors = freeze(TOOL_DESCRIPTORS.map(tool => tool.name === "prepare
   : tool.name === "read_context" ? { ...tool, description: `${tool.description} Select narration for draft sections, recording inventory and independently derived readiness.`,
     inputSchema: object({ section: { type: "string", enum: ["overview", "shots", "scenes", "plan", "grants", "receipts", "aliases", "narration"] }, offset: { type: "integer", minimum: 0, maximum: 10_000_000 } }) }
   : tool).concat(descriptor("revise_narration_draft", "Atomically save requested narration script/source drafts at an exact narration version. Read narration context first. Changed sections lose their exact acceptances; unrelated sections remain intact. This does not accept text/audio/timing, attach audio, commit canonical cues, buy media, or release execution holds. Add first, then reorder with returned saved IDs.", draftChangeSchema, false)));
+const hash = { type: "string", pattern: "^[a-f0-9]{64}$" };
+const headVersion = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
+const recordingTarget = { oneOf: [object({ kind: { const: "recording" } }, ["kind"]),
+  object({ kind: { const: "section" }, segmentId: id, segmentRevisionId: id, audioId: id }, ["kind", "segmentId", "segmentRevisionId", "audioId"])] };
+const v3Descriptors = freeze(v2Descriptors.map(tool => tool.name === "read_context" ? { ...tool,
+  description: `${tool.description} Select audio_operations for bounded owned recording identities, exact speech/transcription choices and saved proposals. Preparing an audio proposal never approves or starts generation.`,
+  inputSchema: object({ section: { type: "string", enum: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration", "audio_operations"] },
+    offset: { type: "integer", minimum: 0, maximum: 10_000_000 } }) } : tool).concat(
+  descriptor("prepare_recording_transcription", "Prepare one transcription proposal for the exact owned recording and optional selected section from audio_operations context. Preserves the current plan. No script is required for an independent recording. Human review and separate finite spending approval remain required; this never approves, submits, attaches or adopts anything.",
+    object({ expectedHeadVersion: headVersion, audioId: id, sourceRecordDigest: hash, profileId: id,
+      language: { type: "string", minLength: 1, maxLength: 64 }, target: recordingTarget },
+    ["expectedHeadVersion", "audioId", "sourceRecordDigest", "profileId", "language", "target"]), false),
+  descriptor("prepare_narration_speech", "Prepare one speech proposal from the exact saved narration section revision. Read narration and audio_operations first. The application uses the saved text; this tool cannot replace it. Human review and separate finite spending approval remain required. It never generates, attaches or accepts audio.",
+    object({ expectedHeadVersion: headVersion, segmentId: id, segmentRevisionId: id, profileId: id, voice: id,
+      instructions: { type: "string", maxLength: 256 } }, ["expectedHeadVersion", "segmentId", "segmentRevisionId", "profileId", "voice", "instructions"]), false),
+));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },
-  "2.0.0": { version: "2.0.0", names: ALL_TOOL_NAMES, descriptors: v2Descriptors, digest: digest({ version: "2.0.0", tools: v2Descriptors }) },
+  "2.0.0": { version: "2.0.0", names: V2_TOOL_NAMES, descriptors: v2Descriptors, digest: digest({ version: "2.0.0", tools: v2Descriptors }) },
+  "3.0.0": { version: "3.0.0", names: ALL_TOOL_NAMES, descriptors: v3Descriptors, digest: digest({ version: "3.0.0", tools: v3Descriptors }) },
 });
 export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalog {
   invariant(Object.hasOwn(TOOL_CATALOGS, version), "CAPABILITY_MISMATCH", "Unsupported director tool contract");
   return TOOL_CATALOGS[version as ToolContractVersion];
+}
+/** Exact implementation identity for each immutable catalog. */
+export function toolHandlerId(version: ToolContractVersion): string {
+  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3" } as const)[toolCatalog(version).version];
 }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
 const validators = new Map(Object.values(TOOL_CATALOGS).map(catalog => [catalog.version,

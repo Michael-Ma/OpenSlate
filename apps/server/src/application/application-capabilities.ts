@@ -1,13 +1,13 @@
 /** Implementation facts authored by the application, not provider profiles or model input. */
 export interface DirectorApplicationCapabilities {
-  version: 4;
+  version: 5;
   authority: "application_implementation";
   scope: string;
   narration: {
-    speechSynthesis: { implemented: false; available: false; reason: string };
-    transcription: { implemented: true; available: false; toolAvailable: false;
+    speechSynthesis: { implemented: true; available: false; toolAvailable: boolean; reason: string };
+    transcription: { implemented: true; available: false; toolAvailable: boolean;
       workflow: "human_review_owned_recording"; hostReadiness: "not_evaluated"; reason: string; requirements: string };
-    generatedSourceIntent: { meaning: "future_synthesis_intent_only"; configurationEnablesSynthesis: false; guidance: string };
+    generatedSourceIntent: { meaning: "requires_reviewed_synthesis_proposal"; configurationEnablesSynthesis: false; guidance: string };
     suppliedRecordings: {
       implemented: true;
       workflow: "human_upload_bind_and_review";
@@ -35,19 +35,19 @@ export interface DirectorApplicationCapabilities {
 }
 
 /** A fresh detached value on every read; no host credentials or mutable configuration are inspected. */
-export function projectApplicationCapabilities(): DirectorApplicationCapabilities {
+export function projectApplicationCapabilities(toolVersion = "1.0.0"): DirectorApplicationCapabilities {
   return {
-    version: 4,
+    version: 5,
     authority: "application_implementation",
     scope: "Implementation facts only. These do not add tools to the locked catalog, verify host setup or API access, or grant permission.",
     narration: {
-      speechSynthesis: { implemented: false, available: false, reason: "OpenSlate has no connected speech synthesis workflow." },
-      transcription: { implemented: true, available: false, toolAvailable: false, workflow: "human_review_owned_recording",
-        hostReadiness: "not_evaluated", reason: "Human browser transcription is implemented; this director catalog has no tool to prepare or approve it.",
+      speechSynthesis: { implemented: true, available: false, toolAvailable: toolVersion === "3.0.0", reason: "Speech preparation and human review are implemented. V3 can prepare one exact saved finished section; older catalogs require an explicit upgrade. Human plan review, separate spending allowance, enabled provider, key and local media tools are required. This context does not verify host readiness. Completed takes are not automatically attached or accepted." },
+      transcription: { implemented: true, available: false, toolAvailable: toolVersion === "3.0.0", workflow: "human_review_owned_recording",
+        hostReadiness: "not_evaluated", reason: "Human browser transcription is implemented. V3 can prepare an exact owned recording without a script; older catalogs require an explicit upgrade. The director cannot approve generation or spending.",
         requirements: "The human selects an owned recording in Story & narration, reviews the exact model/language proposal, then separately approves finite spending. A script or section is not required first. Execution also requires a supported saved profile, enabled provider, API key and local audio tools. None of that host setup is verified by this context. A transcript remains an unreviewed suggestion; words, timing and narration acceptance stay separate.", },
       generatedSourceIntent: {
-        meaning: "future_synthesis_intent_only", configurationEnablesSynthesis: false,
-        guidance: "A generated source choice, voice or speech profile records intent; configuring them or an API key does not enable synthesis. An authenticated human can attach an existing verified OpenSlate recording or supply externally generated audio. Neither action creates new audio.",
+        meaning: "requires_reviewed_synthesis_proposal", configurationEnablesSynthesis: false,
+        guidance: "A generated source choice, voice or speech profile records intent. Prepare an exact saved-section speech proposal, obtain human plan review and separate spending permission, then use the configured provider. V3 tools never grant this permission. An existing completed take still needs human attachment and independent acceptance.",
       },
       suppliedRecordings: {
         implemented: true, workflow: "human_upload_bind_and_review", origins: ["uploaded", "externally_generated"],

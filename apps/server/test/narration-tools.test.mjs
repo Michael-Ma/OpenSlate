@@ -80,7 +80,7 @@ test('old locks and unbound old epochs cannot acquire v2 capabilities from model
   await assert.rejects(r.tools.invoke(other.id, unbound.actor, 'new-tool', 'revise_narration_draft', { expectedVersion: 0, patch: { add: [draft('x')] } }), { code: 'NOT_FOUND' });
 });
 
-test('new project configuration defaults to v2 and existing epochs retain their selected lock', async t => {
+test('new project configuration defaults to v3 and existing epochs retain their selected lock', async t => {
   const f = fixture(t, '1.0.0'), successor = createDirectorSkillLock(f.config, '2.0.0');
   new DirectorContextService(f.service, successor.environment).installLock(f.project.id, f.human, successor.lock);
   const same = f.input({ id: 'same-turn', projectId: f.project.id, requestId: f.human.requestId }, f.human, f.bridge);
@@ -89,7 +89,7 @@ test('new project configuration defaults to v2 and existing epochs retain their 
   assert.equal(f.activate('Fresh request after explicit upgrade').runInput.bridge.toolContractVersion, '2.0.0');
   const project = f.service.createProject('New default'), human = f.service.beginRequest(project.id, 'human', 'Hello', { editing: false }), bridge = f.service.openEpoch(project.id, human);
   const fresh = f.input({ id: 'new-turn', projectId: project.id, requestId: human.requestId }, human, bridge);
-  assert.equal(fresh.bridge.toolContractVersion, '2.0.0'); assert.equal(f.store.list('hold', project.id).length, 0);
+  assert.equal(fresh.bridge.toolContractVersion, '3.0.0'); assert.equal(f.store.list('hold', project.id).length, 0);
 });
 
 test('draft command replay survives restart and old versions cannot append duplicate sections', async t => {

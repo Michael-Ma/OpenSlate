@@ -55,7 +55,7 @@ class ProjectionLimit extends DomainError {
 /** One request-wide budget, including shared historical closure, before body retrieval/JSON allocation.
  * Cache hits do not hydrate again. The only direct body read in the reused validators is a small keyed event.
  */
-class ProjectionReader {
+export class ProjectionReader {
   readonly reader: TranscriptionAuthorityStore;
   readBytes = 0;
   private readonly cache = new Map<string, unknown>();

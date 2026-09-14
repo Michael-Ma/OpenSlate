@@ -1,3 +1,6 @@
+import { composeSpeechPlanIsolated } from "@openslate/core";
+import { assertNarrationSpeechProposal } from "../narration/narration-speech-records.js";
+import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput, resolveNarrationSpeechApplication } from "../narration/narration-speech-authorization.js";
 import Database from "better-sqlite3";
 import { viggleBackupClosure } from "./viggle-backup.js";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -136,6 +139,22 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       fail(canonical(compiled) === canonical(value.compiled) && canonical(logicalIds) === canonical(value.logicalIds),
         "Owned transcription proposal differs from isolated historical recomposition");
       checkedOwnedProposals.set(value.id, identity);
+    };
+    const checkedSpeechProposals = new Set<string>();
+    const speechProposal = async (value: unknown, projectId: string): Promise<void> => {
+      assertNarrationSpeechProposal(speechReader, projectId, value);
+      if (checkedSpeechProposals.has(value.id)) return;
+      const project = get("project_revision", value.baseProject.revisionId).project as ProjectRecord;
+      const lock = get("capability_lock", value.capabilityLock.id) as { profiles: ProviderProfile[]; localExecution?: unknown };
+      const base = value.basePlan ? get("plan", value.basePlan.id).compiled as CompiledPlan : null;
+      const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
+      for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
+      const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
+      const compiled = await composeSpeechPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+        allocateId: () => { fail(false, "Speech proposal lost its saved logical identity"); return ""; }, transcriptionInputs: catalog,
+        ...(localExecution ? { localExecution } : {}) });
+      fail(canonical(compiled) === canonical(value.compiled) && canonical(logicalIds) === canonical(value.logicalIds), "Speech proposal differs from isolated historical recomposition");
+      checkedSpeechProposals.add(value.id);
     };
     const checkedGeneratedNarration = new Map<string, string>();
     const generatedNarration = async (value: RecordValue): Promise<void> => {
@@ -370,6 +389,16 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         if (value.origin === "transcription_response") fail(get("transcript_candidate", value.transcriptCandidateId).artifactId === value.id,
           "Raw transcription artifact lost its unreviewed candidate");
       }
+      else if (row.kind.startsWith("narration_speech_")) {
+        fail(value.id === row.id && value.projectId === row.project_id, "Speech record identity differs from its row");
+        if (row.kind === "narration_speech_proposal") await speechProposal(value, row.project_id);
+        else if (row.kind === "narration_speech_review") { assertNarrationSpeechReview(speechReader, row.project_id, value); await speechProposal(get("narration_speech_proposal", value.proposal.id), row.project_id); }
+        else if (row.kind === "narration_speech_application") { assertNarrationSpeechApplication(speechReader, row.project_id, value); await speechProposal(resolveNarrationSpeechApplication(speechReader, row.project_id, row.id).proposal, row.project_id); }
+        else fail(false, "Unsupported speech record family");
+      } else if (row.kind === "candidate" && (speechReader.get("narration_speech_review", value.grantId) || speechReader.get("narration_speech_application", value.id))) {
+        fail(value.id === row.id && value.projectId === row.project_id, "Speech candidate row identity differs");
+        await speechProposal(resolveNarrationSpeechApplication(speechReader, row.project_id, row.id).proposal, row.project_id);
+      }
       else if (row.kind === "owned_transcription_source") await ownedSource(value, value.projectId);
       else if (row.kind === "owned_transcription_proposal") await ownedProposal(value, value.projectId);
       else if (row.kind === "owned_transcription_review") {
@@ -445,6 +474,11 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         assertNormalizedAudioIngestion(intent, attempt, output, { type: "normalized_audio", artifact: get("artifact", intent.artifactId) as any,
           derivation: value as AudioDerivationReceipt, mediaSource: get("media_source", intent.artifactId) as any });
       } else if (row.kind === "attempt") {
+        const speech = assertNarrationSpeechAttemptInput(speechReader, value as Attempt);
+        if (speech) {
+          fail(value.id === row.id && value.projectId === row.project_id, "Speech attempt row identity differs");
+          await speechProposal(speech.proposal, row.project_id);
+        }
         if (viggle.applicable(value as Attempt)) {
           fail(value.id === row.id && value.projectId === row.project_id, "Viggle attempt row identity differs");
           await viggle.records(row.id);

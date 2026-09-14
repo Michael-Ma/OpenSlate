@@ -8,6 +8,8 @@ import { assertExternalAllowance, assertExternalAllowanceConsumption } from "./e
 import type { AllowanceHumanRequest, ExternalAllowance, ExternalAllowanceConsumption } from "./external-allowance-records.js";
 import { assertSpeechExecutionProfile, assertSpeechExecutionMapping } from "./audio-execution-receipts.js";
 import type { SpeechExecutionMapping } from "./audio-execution-receipts.js";
+import { assertNarrationSpeechAttemptInput } from "../narration/narration-speech-authorization.js";
+import { assertNarrationSpeechAttemptCurrent } from "./narration-speech-execution.js";
 
 export interface SpeechCapabilityLock { id: string; projectId: string; profiles: ProviderProfile[]; [key: string]: unknown }
 export interface SpeechReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
@@ -54,6 +56,7 @@ export function resolveSpeechAdmission(store: SpeechAuthorityStore, input: Reado
   fail(attempt && canonical(attempt.request) === canonical(request) && attempt.candidateId && attempt.reservationId,
     "Speech requires an unchanged stored admission");
   const current = attempt!;
+  assertNarrationSpeechAttemptInput(store, current);
   const candidate = store.get<Candidate>("candidate", current.candidateId!), grant = candidate ? store.get<Grant>("grant", candidate.grantId) : undefined;
   const reservation = store.get<SpeechReservation>("reservation", current.reservationId!);
   const allowance = store.get<ExternalAllowance>("external_allowance", request.externalAllowanceId ?? "");
@@ -100,4 +103,5 @@ export function assertSpeechFirstDispatch(store: Store, original: SpeechAdmissio
     && current.attempt.leaseEpoch === expectedLease.epoch && current.attempt.leaseExpiresAt > Date.now()
     && current.attempt.phase === "submitting" && current.reservation.state === "reserved",
   "SPEECH_EXECUTION_NOT_DISPATCHABLE", "Speech no longer owns its original unexpired submitting lease");
+  assertNarrationSpeechAttemptCurrent(store, current.attempt);
 }

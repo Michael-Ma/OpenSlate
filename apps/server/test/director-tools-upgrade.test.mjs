@@ -39,7 +39,7 @@ function fixture(t) {
 test("tool status is read-only and new projects use the current contract without an upgrade", async t => {
   const f = fixture(t), project = f.service.createProject("New project"), cursor = f.store.cursor(project.id);
   const response = await f.req("GET", project.id); assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), { currentVersion: "2.0.0", lockId: null, lockDigest: null, availableVersion: "2.0.0", upgradeAvailable: false, busy: false });
+  assert.deepEqual(response.json(), { currentVersion: "3.0.0", lockId: null, lockDigest: null, availableVersion: "3.0.0", upgradeAvailable: false, busy: false });
   assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.list("director_skill_lock", project.id).length, 0);
 });
 test("explicit upgrade installs one successor while preserving old locks, canonical state and edit authority", async t => {
@@ -50,7 +50,7 @@ test("explicit upgrade installs one successor while preserving old locks, canoni
   f.store.put("epoch", bridge.actor.epochId, project.id, { ...f.store.get("epoch", bridge.actor.epochId), state: "revoked" });
   const before = digest(f.store.getProject(project.id)), messages = f.store.list("message", project.id), holds = f.store.list("hold", project.id);
   const response = await f.req("POST", project.id, prior.input, "upgrade", "/upgrade"); assert.equal(response.statusCode, 200, response.body);
-  const result = response.json(); assert.equal(result.currentVersion, "2.0.0"); assert.equal(result.upgradeAvailable, false); assert.notEqual(result.lockId, prior.lock.id);
+  const result = response.json(); assert.equal(result.currentVersion, "2.0.0"); assert.equal(result.upgradeAvailable, true); assert.notEqual(result.lockId, prior.lock.id);
   assert.deepEqual(f.store.get("director_skill_lock", prior.lock.id).lock, prior.lock);
   assert.equal(f.store.get("director_epoch_lock", bridge.actor.epochId).lockId, prior.lock.id);
   assert.equal(digest(f.store.getProject(project.id)), before); assert.deepEqual(f.store.list("message", project.id), messages); assert.deepEqual(f.store.list("hold", project.id), holds);
@@ -84,7 +84,7 @@ test("setup, wrong-project predecessors and stale predecessor digests cannot ins
 test("the upgrade endpoint requires local authentication and rejects model-supplied actor or package fields", async t => {
   const f = fixture(t), project = f.service.createProject("Route"), prior = f.legacy(project.id), url = `/api/projects/${project.id}/director/tools/upgrade`;
   assert.equal((await f.app.inject({ method: "POST", url, payload: prior.input, headers: { host: "127.0.0.1" } })).statusCode, 403);
-  for (const extra of [{ actor: "human" }, { snapshotRoot: "/tmp/arbitrary" }, { targetVersion: "3.0.0" }]) {
+  for (const extra of [{ actor: "human" }, { snapshotRoot: "/tmp/arbitrary" }, { targetVersion: "4.0.0" }]) {
     const response = await f.req("POST", project.id, { ...prior.input, ...extra }, newId(), "/upgrade"); assert.equal(response.statusCode, 400, response.body);
   }
   assert.equal(f.store.list("director_skill_lock", project.id).length, 1);
@@ -103,4 +103,27 @@ test("fresh requests after upgrade bind the new tool catalog while legacy epoch 
   assert.equal(f.store.get("director_epoch_lock", bridge.actor.epochId).lockId, upgraded.lockId);
   assert.equal(f.store.get("director_epoch_lock", beforeBridge.actor.epochId).lockId, prior.lock.id);
   assert.match(after.context, /revise_narration_draft/);
+});
+
+for (const version of ["1.0.0", "2.0.0"]) test(`explicit ${version} to V3 upgrade preserves its predecessor and requires no creative authority`, t => {
+  const f = fixture(t), project = f.service.createProject("V3 upgrade"), saved = createDirectorSkillLock(f.configuration, version);
+  new DirectorContextService(f.service, saved.environment).bootstrapLock(project.id, saved.lock);
+  const before = digest(f.store.getProject(project.id)), input = { expectedLockId: saved.lock.id, expectedLockDigest: saved.lock.lockDigest, targetVersion: "3.0.0" };
+  const result = f.director.upgradeTools(project.id, input, "v3-upgrade");
+  assert.equal(result.currentVersion, "3.0.0"); assert.equal(result.upgradeAvailable, false); assert.equal(result.receipt.toolContract, "3.0.0");
+  assert.deepEqual(f.store.get("director_skill_lock", saved.lock.id).lock, saved.lock); assert.equal(digest(f.store.getProject(project.id)), before);
+  assert.deepEqual(f.director.upgradeTools(project.id, input, "v3-upgrade"), result);
+  for (const kind of ["message", "epoch", "grant", "candidate", "attempt", "external_allowance", "narration_revision"]) assert.equal(f.store.list(kind, project.id).length, 0);
+  const lock = f.store.get("director_skill_lock", result.lockId).lock;
+  assert.ok(lock.bindings.some(row => row.id === "director-tools@3")); assert.ok(lock.skills.every(row => row.version === "3.0.0"));
+});
+test("historical V2 upgrade replay survives a later V3 update without accessing obsolete package configuration", t => {
+  const f = fixture(t), project = f.service.createProject("Two upgrades"), prior = f.legacy(project.id);
+  const first = f.director.upgradeTools(project.id, prior.input, "v2-command"), second = f.director.upgradeTools(project.id,
+    { expectedLockId: first.lockId, expectedLockDigest: first.lockDigest, targetVersion: "3.0.0" }, "v3-command");
+  const settings = new DirectorToolSettings(f.service, () => { throw Error("No package reload during replay"); }), cursor = f.store.cursor(project.id);
+  const replay = settings.upgrade(project.id, prior.input, "v2-command");
+  assert.deepEqual(replay.receipt, first.receipt); assert.equal(replay.currentVersion, "3.0.0"); assert.equal(replay.selectionMatchesCommand, false);
+  assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.list("director_skill_lock", project.id).length, 3);
+  assert.throws(() => f.director.upgradeTools(project.id, { expectedLockId: second.lockId, expectedLockDigest: second.lockDigest, targetVersion: "2.0.0" }, "downgrade"), { code: "DIRECTOR_TOOLS_STALE" });
 });

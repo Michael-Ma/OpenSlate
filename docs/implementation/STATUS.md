@@ -6,13 +6,28 @@ OpenSlate has a local conversation/review workspace, per-project native Codex se
 
 V0 runs for one user on one computer. Cloud model/media APIs remain part of the architecture. The accepted [runtime trust decision](RUNTIME-TRUST-DECISION.md) trusts the pinned installed runtime/sandbox while retaining application authority; independent code-host/authentication isolation remains unverified. The user authorizes local milestone commits and bounded live Codex tests. Live Viggle H3 testing is explicitly on hold, even if its key is configured. Other real media calls require a test allowance; pushing is not authorized.
 
+## Current delivery checkpoints
+
+| Stage | State | Next action |
+|---|---|---|
+| 1. Offline Viggle integration | Complete; local commit `1452803` | Live API tests remain on hold |
+| 2. Conversational audio preparation/review | Complete; offline and bounded native checks pass | User manual rehearsal |
+| 3. Real production validation | Not started | Requires manual feedback and explicit media-test allowance |
+| 4. Release | Not started | Waits for production validation and a release decision |
+
+The [manual rehearsal](MANUAL-AUDIO-TESTING.md) covers exact speech plans, scoped edits, recording upload/transcription planning and restart with every media API disabled. Native conversation uses a separate pinned Codex 0.153.4 installation because the bundled app binary has updated. No media API key is needed for this checkpoint.
+
 ## Latest evidence
 
-**Latest completed milestone:** Offline Viggle integration passes **1,725 tests** (72 additions), all builds/typechecks and the installed no-turn Codex probe. All 376 captured source/test/configuration/style files were unchanged throughout verification. Focused checks cover exact multipart transport, reviewed frame and consumed allowance, original lease/edit fences, durable polling and signed-URL refresh, exact output lineage, actual normalization and same-root backup/restore. The PNG chunk-name finding and historical human-review command closure were fixed and independently reviewed. See [Viggle integration](VIGGLE-H3.md).
+**Latest completed milestone:** Conversational audio preparation/review passes **1,833 tests** (108 additions), all builds/typechecks and the installed pinned no-turn Codex probe. All 401 captured source/test/configuration/style files were unchanged during the final check. V3 tools preserve V1/V2 catalog identities; exact saved-section speech composes the existing plan, requires human generation review and separate spending, and enforces current-section boundaries before dispatch. Checks cover bounded history/context, authenticated HTTP, replay/cancellation, atomic rollback, changed-section spending feedback, actual FFmpeg recovery after SQL failure and same-root backup/restore. An independent review found and fixed projection paging/state issues and backup row identity validation; negative controls reproduced the storage gap. One prior full run had a stale capability-version test expectation, corrected before this green final run.
+
+One actual native Codex 0.153.4 turn passed **18 checks in 28.451 seconds**, preparing one exact ungranted speech proposal through the real controller/tool HTTP path. It made no media call or spending/acceptance change; replay and reopen preserved the result without another start. An isolated official npm installation supplied the pinned runtime because the bundled app binary updated to 0.154.0-alpha.6.2. See [conversational audio](CONVERSATIONAL-AUDIO.md), [sanitized evidence](conversational-audio-evidence.json) and the [manual rehearsal](MANUAL-AUDIO-TESTING.md).
+
+**Previous completed milestone:** Offline Viggle integration passes **1,725 tests** (72 additions), all builds/typechecks and the installed no-turn Codex probe. All 376 captured source/test/configuration/style files were unchanged throughout verification. Focused checks cover exact multipart transport, reviewed frame and consumed allowance, original lease/edit fences, durable polling and signed-URL refresh, exact output lineage, actual normalization and same-root backup/restore. The PNG chunk-name finding and historical human-review command closure were fixed and independently reviewed. See [Viggle integration](VIGGLE-H3.md).
 
 **Live Viggle H3 API testing remains explicitly on hold, even if a key is configured.** The earlier $1 total ceiling does not authorize testing until the user resumes it. No live media calls have run.
 
-**Current scope:** Finish (1) offline Viggle integration and (2) conversational audio preparation/review, then give the user a manual-testing guide and stop before (3) real production validation and (4) release. Further bounded native Codex director checks remain authorized; live image/audio calls require an explicit allowance.
+**Current scope:** (1) offline Viggle integration and (2) conversational audio preparation/review are complete. The manual-testing guide is ready; stop for user feedback before (3) real production validation and (4) release. Further bounded native Codex director checks remain authorized; live image/audio calls require an explicit allowance.
 
 - Authenticated recording-plan preparation/review, bounded exact history, focused spending navigation and sectionless transcript-view components now pass **1,653 tests**, including 60 additions, with builds/typechecks and the installed no-turn Codex probe. HTTP/projection checks cover cancellation, current-section changes, actual local preparation and restore. The built browser reached upload-first narration and explicit conversation continuation; its file upload was denied by browser permission policy, so full browser generation/reopen remains unverified. No native or live media calls. See [workspace contracts and limits](OWNED-TRANSCRIPTION-WORKSPACE.md) and [evidence](owned-transcription-browser-evidence.json).
 

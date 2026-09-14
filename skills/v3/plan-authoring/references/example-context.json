@@ -1,0 +1,120 @@
+{
+  "project": {
+    "id": "10000000-0000-4000-8000-000000000001",
+    "revisionId": "10000000-0000-4000-8000-000000000002",
+    "headVersion": 1,
+    "name": "Offline skill compiler fixture",
+    "brief": "A six-second craftsmanship study",
+    "story": "Reveal the stitching detail",
+    "scenes": [
+      {
+        "id": "10000000-0000-4000-8000-000000000003",
+        "revisionId": "10000000-0000-4000-8000-000000000009",
+        "purpose": "Craftsmanship detail"
+      }
+    ],
+    "narration": {
+      "script": "Crafted leather stitching",
+      "source": "uploaded"
+    },
+    "maxFrames": 10800,
+    "capabilityLockId": "10000000-0000-4000-8000-000000000010",
+    "shots": [
+      {
+        "id": "10000000-0000-4000-8000-000000000004",
+        "revisionId": "10000000-0000-4000-8000-000000000008",
+        "sceneId": "10000000-0000-4000-8000-000000000003",
+        "purpose": "Show the boot craftsmanship",
+        "action": "The boot rests on a workshop bench",
+        "framing": "Close-up of stitching",
+        "motion": "Slow push toward the stitching",
+        "desiredFrames": 180,
+        "imagePrompt": "Brown leather boot on a workshop bench, close-up of stitching",
+        "videoPrompt": "Slow camera push toward the boot stitching; the boot remains still",
+        "referenceArtifactIds": [
+          "10000000-0000-4000-8000-000000000005"
+        ],
+        "cueId": "10000000-0000-4000-8000-000000000007",
+        "promptIntent": {
+          "image": "6fdd8e1738566a0652ee61b49b1357737796f1bab4155e6419157cbae561b02f",
+          "video": "6e34dc9431202dfc32e3f4afedf7c9706b7fe7a20f551c3128b161ffe0fe28ab"
+        }
+      }
+    ],
+    "cues": [
+      {
+        "id": "10000000-0000-4000-8000-000000000007",
+        "meaning": "Crafted leather stitching",
+        "durationFrames": 180,
+        "placementFrames": 0,
+        "audio": {
+          "artifactId": "10000000-0000-4000-8000-000000000006",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "kind": "audio"
+        },
+        "accepted": true,
+        "measured": true
+      }
+    ],
+    "artifacts": [
+      {
+        "artifactId": "10000000-0000-4000-8000-000000000005",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "kind": "image"
+      },
+      {
+        "artifactId": "10000000-0000-4000-8000-000000000006",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "audio"
+      }
+    ],
+    "activePlanId": null
+  },
+  "profiles": [
+    {
+      "id": "fake-image-v1",
+      "revision": "1",
+      "kind": "image",
+      "adapter": "fake",
+      "maxConcurrency": 2,
+      "unitCostMicros": "100",
+      "maxRetries": 1
+    },
+    {
+      "id": "fake-video-v1",
+      "revision": "1",
+      "kind": "video",
+      "adapter": "fake",
+      "maxConcurrency": 2,
+      "unitCostMicros": "1000",
+      "maxRetries": 1,
+      "minFrames": 120,
+      "maxFrames": 450
+    },
+    {
+      "id": "fake-speech-v1",
+      "revision": "1",
+      "kind": "speech",
+      "adapter": "fake",
+      "maxConcurrency": 2,
+      "unitCostMicros": "100",
+      "maxRetries": 1
+    },
+    {
+      "id": "fake-transcription-v1",
+      "revision": "1",
+      "kind": "transcription",
+      "adapter": "fake",
+      "maxConcurrency": 2,
+      "unitCostMicros": "100",
+      "maxRetries": 1
+    }
+  ],
+  "logicalIds": {
+    "shot-1/keyframe": "10000000-0000-4000-8000-000000000011",
+    "shot-1/review": "10000000-0000-4000-8000-000000000012",
+    "shot-1/take": "10000000-0000-4000-8000-000000000013",
+    "film/edit": "10000000-0000-4000-8000-000000000014",
+    "film/preview": "10000000-0000-4000-8000-000000000015"
+  }
+}

@@ -5,12 +5,18 @@ import type { CompileContext } from "../contracts.js";
 import type { CompiledPlan } from "../contracts.js";
 import { composeTranscriptionPlan } from "./transcription-composition.js";
 import type { TranscriptionCompositionOperation } from "./transcription-composition.js";
+import { composeSpeechPlan } from "./speech-composition.js";
+import type { SpeechCompositionOperation } from "./speech-composition.js";
 
-type CompositionData = { mode: "compose_transcription"; basePlan: CompiledPlan | null; operation: TranscriptionCompositionOperation; context: Omit<CompileContext, "allocateId"> };
+type CompositionData = { mode: "compose_transcription"; basePlan: CompiledPlan | null; operation: TranscriptionCompositionOperation; context: Omit<CompileContext, "allocateId"> }
+  | { mode: "compose_speech"; basePlan: CompiledPlan | null; operation: SpeechCompositionOperation; context: Omit<CompileContext, "allocateId"> };
 const data = workerData as (Omit<CompileContext, "allocateId"> & { source: string; mode?: undefined }) | CompositionData;
 try {
   if (data.mode === "compose_transcription") {
     const context = { ...data.context, allocateId: newId }, plan = composeTranscriptionPlan(data.basePlan, data.operation, context);
+    parentPort!.postMessage({ ok: true, plan, logicalIds: context.logicalIds });
+  } else if (data.mode === "compose_speech") {
+    const context = { ...data.context, allocateId: newId }, plan = composeSpeechPlan(data.basePlan, data.operation, context);
     parentPort!.postMessage({ ok: true, plan, logicalIds: context.logicalIds });
   } else {
     const plan = compilePlan(data.source, { ...data, allocateId: newId });

@@ -114,8 +114,8 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.tools(request.params.projectId);
   });
-  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
-    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { const: "2.0.0" } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
+  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" | "3.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
+    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: ["2.0.0", "3.0.0"] } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
   }, async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.upgradeTools(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
@@ -253,12 +253,19 @@ export function createApp(options: AppOptions = {}) {
     reply.raw.on("close", close);
     pump();
   });
-  app.post<{ Params: { projectId: string; tool: string }; Body: Record<string, unknown> }>("/internal/projects/:projectId/tools/:tool", async request => {
+  app.post<{ Params: { projectId: string; tool: string }; Body: Record<string, unknown> }>("/internal/projects/:projectId/tools/:tool", async (request, reply) => {
     const actor = actors.get(request)!;
     const { projectId, tool } = request.params;
     const callId = request.headers["x-openslate-tool-call-id"];
     invariant(typeof callId === "string", "VALIDATION_ERROR", "One tool call identity is required");
-    return new ToolInvocationService(service()).invoke(projectId, actor, callId, tool, request.body);
+    const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
+    request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
+    const ports = options.narrationRoutes;
+    try { return await new ToolInvocationService(service(), {
+      ...(ports?.ownedTranscription ? { ownedTranscription: ports.ownedTranscription } : {}),
+      ...(ports?.narrationSpeech ? { narrationSpeech: ports.narrationSpeech } : {}),
+    }).invoke(projectId, actor, callId, tool, request.body, { signal: abort.signal }); }
+    finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
   });
   return app;
 }

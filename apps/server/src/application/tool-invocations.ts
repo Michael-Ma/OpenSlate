@@ -1,9 +1,13 @@
-import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog, toolHandlerId } from "@openslate/core";
 import type { ActorContext, JsonValue, ToolName, ToolContractVersion } from "@openslate/core";
 import type { SkillCapabilityLock } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { NarrationService } from "../narration/service.js";
 import type { NarrationSnapshot, ReviseSegments } from "../narration/types.js";
+import type { OwnedTranscriptionService } from "../narration/owned-transcription-service.js";
+import type { PrepareOwnedTranscription } from "../narration/owned-transcription-types.js";
+import type { NarrationSpeechService } from "../narration/narration-speech-service.js";
+import type { PrepareNarrationSpeech } from "../narration/narration-speech-types.js";
 
 export const TOOL_RESULT_MAX_BYTES = 1024 * 1024;
 export interface ToolInvocation {
@@ -23,7 +27,8 @@ export interface ToolInvocation {
   resultDigest: string | null;
   error: { code: string; message: string } | null;
   /** Minimal domain correlation; credentials and full context never belong here. */
-  recovery?: { preparedId?: string; proposalDigest?: string; narrationCommand?: { key: string; digest: string } };
+  recovery?: { preparedId?: string; proposalDigest?: string; narrationCommand?: { key: string; digest: string };
+    audioProposalCommand?: { kind: "recording_transcription" | "narration_speech"; key: string; digest: string } };
 }
 
 /** Full text and media descriptors stay in domain storage and paged context, never this receipt. */
@@ -36,10 +41,33 @@ function narrationReceipt(snapshot: NarrationSnapshot) {
     next: "Read narration context; human review accepts exact script, recording and timing. No canonical state, grants or holds changed." };
 }
 
+const audioTool = (name: string): name is "prepare_recording_transcription" | "prepare_narration_speech" =>
+  name === "prepare_recording_transcription" || name === "prepare_narration_speech";
+const audioKind = (name: string): "recording_transcription" | "narration_speech" => name === "prepare_recording_transcription" ? "recording_transcription" : "narration_speech";
+const AUDIO_PROPOSAL_MAX_BYTES = 16 * 1024 ** 2;
+/** A proposal identity directs human review; it is never an apply_change identity or spending authority. */
+function audioProposalReceipt(value: unknown, kind: "recording_transcription" | "narration_speech", projectId: string, actor: Pick<ActorContext, "principalId" | "requestId">, epochId: string, inputDigest: string) {
+  invariant(value && typeof value === "object" && !Array.isArray(value), "TOOL_CALL_UNRESOLVED", "Audio proposal receipt is unavailable");
+  const proposal = value as Record<string, unknown>;
+  invariant(typeof proposal.id === "string" && proposal.id.length > 0 && proposal.id.length <= 160 && proposal.projectId === projectId
+    && proposal.principalId === actor.principalId && proposal.requestId === actor.requestId && proposal.epochId === epochId
+    && proposal.inputDigest === inputDigest && proposal.state === "ungranted" && Buffer.byteLength(canonical(proposal)) <= AUDIO_PROPOSAL_MAX_BYTES,
+    "TOOL_CALL_UNRESOLVED", "Audio proposal differs from its exact originating request");
+  return { id: proposal.id, proposalId: proposal.id, proposalDigest: digest(proposal), kind, state: "ungranted",
+    next: "Read audio_operations for the saved proposal. Human plan review and separate finite spending approval are required. No generation, attachment, adoption or acceptance was performed." };
+}
+
 /** Transport receipts supplement, but never replace, domain command/grant deduplication. */
 export class ToolInvocationService {
   readonly narration: NarrationService;
-  constructor(readonly service: ProductionService) { this.narration = new NarrationService(service); }
+  readonly #ownedTranscription: OwnedTranscriptionService | undefined;
+  readonly #narrationSpeech: NarrationSpeechService | undefined;
+  constructor(readonly service: ProductionService, options: { ownedTranscription?: OwnedTranscriptionService; narrationSpeech?: NarrationSpeechService } = {}) {
+    this.narration = new NarrationService(service);
+    this.#ownedTranscription = options.ownedTranscription; this.#narrationSpeech = options.narrationSpeech;
+    invariant([this.#ownedTranscription, this.#narrationSpeech].every(port => !port || port.narration.production === service),
+      "TOOL_CONFIGURATION_INVALID", "Audio proposal tools must use this application's production service");
+  }
 
   private catalog(projectId: string, actor: ActorContext) {
     invariant(actor.kind === "director", "ACTOR_DENIED", "A director epoch is required");
@@ -52,12 +80,17 @@ export class ToolInvocationService {
     const { lockDigest, ...body } = record.lock;
     invariant(digest(body) === lockDigest, "CAPABILITY_MISMATCH", "Tool skill lock content changed");
     const catalog = toolCatalog(record.lock.compatibility.toolContract);
-    invariant(record.lock.bindings.some(handler => handler.kind === "handler" && handler.id === (catalog.version === "1.0.0" ? "five-tools@1" : "director-tools@2") && handler.digest === catalog.digest),
+    invariant(record.lock.bindings.some(handler => handler.kind === "handler" && handler.id === toolHandlerId(catalog.version) && handler.digest === catalog.digest),
       "CAPABILITY_MISMATCH", "Tool implementation differs from its immutable lock");
     return { catalog, lockId: binding.lockId };
   }
 
-  async invoke(projectId: string, actor: ActorContext, callId: string, tool: string, input: unknown): Promise<JsonValue> {
+  async invoke(projectId: string, actor: ActorContext, callId: string, tool: string, input: unknown,
+    options: { signal?: AbortSignal } = {}): Promise<JsonValue> {
+    const signal = options.signal;
+    invariant(signal === undefined || signal instanceof AbortSignal, "VALIDATION_ERROR", "Use an original tool invocation cancellation signal");
+    const stopped = (): void => invariant(!signal?.aborted, "TOOL_CALL_CANCELLED", "Tool invocation was cancelled");
+    stopped(); actor = structuredClone(actor);
     this.service.recovery.assertWritable(projectId, actor.requestId);
     invariant(actor.kind === "director", "ACTOR_DENIED", "Tool transport requires a director epoch");
     this.service.assertActor(projectId, actor);
@@ -67,6 +100,7 @@ export class ToolInvocationService {
     const argumentHash = digest(parsed.arguments);
     const id = digest({ projectId, epochId: actor.epochId, callId });
     const store = this.service.store;
+    const commandKey = `director-tool:${id}`, proposalInput = audioTool(parsed.name) ? { ...parsed.arguments, key: commandKey } : null;
     const existing = store.transaction(() => {
       this.service.assertActor(projectId, actor);
       invariant(canonical(this.catalog(projectId, actor)) === canonical(selected), "CAPABILITY_MISMATCH", "Tool catalog changed before invocation");
@@ -82,7 +116,8 @@ export class ToolInvocationService {
       const record: ToolInvocation = { id, projectId, requestId: actor.requestId, epochId: actor.epochId, callId,
         tool: parsed.name, toolContractVersion: selected.catalog.version, catalogDigest: selected.catalog.digest, skillLockId: selected.lockId,
         argumentsDigest: argumentHash, state: "started", result: null, resultDigest: null, error: null,
-        recovery: parsed.name === "apply_change" ? { preparedId: parsed.arguments.preparedId as string }
+        recovery: audioTool(parsed.name) ? { audioProposalCommand: { kind: audioKind(parsed.name), key: commandKey, digest: digest(proposalInput) } }
+          : parsed.name === "apply_change" ? { preparedId: parsed.arguments.preparedId as string }
           : parsed.name === "prepare_change" ? { proposalDigest: digest(parsed.arguments) }
           : parsed.name === "revise_narration_draft" ? { narrationCommand: { key: `director-tool:${id}`,
             digest: digest({ action: "revise", expectedVersion: parsed.arguments.expectedVersion, arguments: parsed.arguments.patch }) } } : {} };
@@ -98,6 +133,7 @@ export class ToolInvocationService {
 
     let value: unknown;
     try {
+      stopped();
       switch (parsed.name) {
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {
@@ -114,13 +150,27 @@ export class ToolInvocationService {
         case "apply_change": value = this.service.apply(projectId, actor, parsed.arguments.preparedId as string); break;
         case "inspect_artifact": value = this.service.inspectArtifact(projectId, actor, parsed.arguments.artifactId as string); break;
         case "control_execution": value = this.service.holdRequest(projectId, actor); break;
+        case "prepare_recording_transcription": {
+          const port = this.#ownedTranscription;
+          invariant(port, "TOOL_CAPABILITY_UNAVAILABLE", "Recording proposal preparation is not configured on this server");
+          const proposal = await port.prepare(projectId, actor, proposalInput as unknown as PrepareOwnedTranscription, signal ? { signal } : {});
+          stopped(); value = audioProposalReceipt(proposal, "recording_transcription", projectId, actor, actor.epochId, digest(proposalInput)); break;
+        }
+        case "prepare_narration_speech": {
+          const port = this.#narrationSpeech;
+          invariant(port, "TOOL_CAPABILITY_UNAVAILABLE", "Speech proposal preparation is not configured on this server");
+          const proposal = await port.prepare(projectId, actor, proposalInput as unknown as PrepareNarrationSpeech, signal ? { signal } : {});
+          stopped(); value = audioProposalReceipt(proposal, "narration_speech", projectId, actor, actor.epochId, digest(proposalInput)); break;
+        }
         case "revise_narration_draft": value = narrationReceipt(this.narration.reviseSegments(projectId, actor,
           parsed.arguments.expectedVersion as number, `director-tool:${id}`, parsed.arguments.patch as unknown as ReviseSegments)); break;
       }
     } catch (error) {
       // A rejected proposal can still have created a hold. "failed" means a known error,
       // not proof that the application had no effects. Unexpected failures stay unresolved.
-      const known = error instanceof DomainError;
+      // A late cancellation can follow a committed domain command. Keep new
+      // proposal calls reconcilable instead of inferring that no effect occurred.
+      const known = error instanceof DomainError && !(audioTool(parsed.name) && (error.code.endsWith("CANCELLED") || error.code === "TOOL_CALL_UNRESOLVED"));
       this.finish(id, projectId, known ? "failed" : "unresolved", null,
         known ? { code: error.code, message: error.message.slice(0, 2000) } : { code: "TOOL_CALL_UNRESOLVED", message: "Tool outcome needs application reconciliation" });
       if (known) throw error;
@@ -161,7 +211,7 @@ export class ToolInvocationService {
             .find(row => row.requestId === call.requestId && row.epochId === epochId && row.proposalDigest === call.recovery!.proposalDigest);
           if (prepared) receipt = { preparedId: prepared.id, proposalDigest: prepared.proposalDigest };
         }
-        if (call.tool === "revise_narration_draft" && call.toolContractVersion === "2.0.0" && call.recovery?.narrationCommand) {
+        if (call.tool === "revise_narration_draft" && ["2.0.0", "3.0.0"].includes(call.toolContractVersion ?? "1.0.0") && call.recovery?.narrationCommand) {
           const command = call.recovery.narrationCommand;
           if (command.key === `director-tool:${call.id}`) {
             const row = store.db.prepare("SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?")
@@ -169,6 +219,25 @@ export class ToolInvocationService {
             if (row) {
               const snapshot = JSON.parse(row.result) as NarrationSnapshot;
               if (snapshot.state.projectId === projectId) receipt = narrationReceipt(snapshot);
+            }
+          }
+        }
+        if (call.toolContractVersion === "3.0.0" && call.catalogDigest === toolCatalog("3.0.0").digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
+          const command = call.recovery.audioProposalCommand, kind = audioKind(call.tool);
+          if (command.kind === kind && command.key === `director-tool:${call.id}`) {
+            const suffix = kind === "recording_transcription" ? "owned-transcription" : "narration-speech";
+            const row = store.db.prepare("SELECT CASE WHEN length(CAST(result AS BLOB))<=? THEN result ELSE NULL END AS result FROM commands WHERE actor_scope=? AND key=? AND digest=?")
+              .get(AUDIO_PROPOSAL_MAX_BYTES, `${epoch.principalId}:${projectId}:${call.requestId}:${suffix}:${epochId}`, command.key, command.digest) as { result: string | null } | undefined;
+            if (row?.result) {
+              try {
+                const proposal = JSON.parse(row.result) as { id: string };
+                const family = kind === "recording_transcription" ? "owned_transcription_proposal" : "narration_speech_proposal";
+                this.service.recovery.assertFreshAuthority(projectId, family, proposal.id);
+                const saved = store.db.prepare("SELECT CASE WHEN length(CAST(body AS BLOB))<=? THEN body ELSE NULL END AS body FROM entities WHERE kind=? AND id=? AND project_id=?")
+                  .get(AUDIO_PROPOSAL_MAX_BYTES, family, proposal.id, projectId) as { body: string | null } | undefined;
+                if (saved?.body && canonical(JSON.parse(saved.body)) === canonical(proposal))
+                  receipt = audioProposalReceipt(proposal, kind, projectId, epoch, epochId, command.digest);
+              } catch { /* Missing, restored or inconsistent evidence cannot authorize a new proposal. */ }
             }
           }
         }

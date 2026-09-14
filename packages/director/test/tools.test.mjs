@@ -8,7 +8,7 @@ import { dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PassThrough, Writable } from "node:stream";
-import { TOOL_NAMES, TOOL_DESCRIPTORS, TOOL_CATALOG_DIGEST, TOOL_CONTRACT_VERSION, parseToolArguments, changeProposalSchema, digest, toolCatalog } from "@openslate/core";
+import { TOOL_NAMES, TOOL_DESCRIPTORS, TOOL_CATALOG_DIGEST, TOOL_CONTRACT_VERSION, parseToolArguments, changeProposalSchema, digest, toolCatalog, toolHandlerId } from "@openslate/core";
 import { ToolBridge, runStdioToolBridge, STDIO_LIMITS } from "../dist/tools/index.js";
 
 const entry = fileURLToPath(new URL("../dist/tools/mcp.js", import.meta.url));
@@ -248,4 +248,48 @@ test("stdio output backpressure has a deadline", async () => {
   const running = runStdioToolBridge({ input, output, bridge: { call() { throw new Error("No tool expected"); } }, limits: { writeTimeoutMs: 25 } });
   input.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) + "\n");
   await bounded(running, 1000); assert.equal(input.destroyed, true); output.destroy();
+});
+
+
+test("V3 leaves complete V1/V2 catalogs byte-identical and adds only bounded proposal tools", () => {
+  assert.equal(digest(toolCatalog("1.0.0")), "b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa");
+  assert.equal(digest(toolCatalog("2.0.0")), "c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df");
+  const v3 = toolCatalog("3.0.0"); assert.equal(v3.names.length, 8); assert.equal(toolHandlerId(v3.version), "director-tools@3");
+  assert.equal(toolHandlerId("1.0.0"), "five-tools@1"); assert.equal(toolHandlerId("2.0.0"), "director-tools@2");
+  assert.ok(Object.isFrozen(v3)); assert.ok(Object.isFrozen(v3.descriptors[0].inputSchema));
+  for (const version of ["1.0.0", "2.0.0"]) {
+    for (const name of ["prepare_recording_transcription", "prepare_narration_speech"]) assert.throws(() => parseToolArguments(name, {}, version), code("NOT_FOUND"));
+    assert.throws(() => parseToolArguments("read_context", { section: "audio_operations" }, version), code("VALIDATION_ERROR"));
+  }
+  assert.deepEqual(parseToolArguments("read_context", { section: "audio_operations", offset: 20 }, "3.0.0").arguments, { section: "audio_operations", offset: 20 });
+});
+const v3Recording = () => ({ expectedHeadVersion: 0, audioId: "owned-audio", sourceRecordDigest: "a".repeat(64), profileId: "saved-asr", language: "auto", target: { kind: "recording" } });
+const v3Speech = () => ({ expectedHeadVersion: 0, segmentId: "saved-section", segmentRevisionId: "saved-revision", profileId: "saved-speech", voice: "coral", instructions: "" });
+test("V3 proposal schemas reject supplied authority, paths, replacement text, keys and coercion", () => {
+  for (const [name, input] of [["prepare_recording_transcription", v3Recording()], ["prepare_narration_speech", v3Speech()]]) {
+    assert.deepEqual(parseToolArguments(name, input, "3.0.0").arguments, input);
+    for (const extra of [{ actor: "human" }, { key: "caller-key" }, { approved: true }, { path: "/private/input" }, { text: "replacement words" }, { expectedHeadVersion: "0" }, { profileId: "x".repeat(161) }])
+      assert.throws(() => parseToolArguments(name, { ...input, ...extra }, "3.0.0"), code("VALIDATION_ERROR"));
+  }
+  for (const patch of [{ instructions: "x".repeat(257) }, { instructions: null }, { voice: "" }]) assert.throws(() => parseToolArguments("prepare_narration_speech", { ...v3Speech(), ...patch }, "3.0.0"), code("VALIDATION_ERROR"));
+  for (const patch of [{ sourceRecordDigest: "bad" }, { target: { kind: "section", segmentId: "s" } }, { target: { kind: "recording", audioId: "extra" } }]) assert.throws(() => parseToolArguments("prepare_recording_transcription", { ...v3Recording(), ...patch }, "3.0.0"), code("VALIDATION_ERROR"));
+  const input = { ...v3Recording(), target: { kind: "section", segmentId: "s", segmentRevisionId: "r", audioId: "owned-audio" } }, captured = parseToolArguments("prepare_recording_transcription", input, "3.0.0");
+  input.target.audioId = "changed"; assert.equal(captured.arguments.target.audioId, "owned-audio");
+});
+test("actual V3 stdio child lists its exact catalog and forwards both proposal schemas without media calls", async t => {
+  const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: "3.0.0" });
+  const initialized = await c.initialize(); assert.equal(initialized.result.serverInfo.version, "3.0.0");
+  assert.deepEqual((await c.request("tools/list", {}).response).result.tools, toolCatalog("3.0.0").descriptors); assert.equal(f.calls.length, 0);
+  for (const [name, args] of [["prepare_recording_transcription", v3Recording()], ["prepare_narration_speech", v3Speech()]]) {
+    const result = await c.request("tools/call", { name, arguments: args }).response; assert.equal(result.result.isError, false);
+    assert.deepEqual(f.calls.at(-1).body, args); assert.equal(f.calls.at(-1).url.endsWith("/" + name), true);
+  }
+  assert.equal(f.calls.length, 2);
+});
+test("V3 cancellation preserves the original transport identity and makes no second proposal request", async t => {
+  const f = await fixture(t, () => {}), c = await childFixture(t, { ...f.options, toolContractVersion: "3.0.0" }); await c.initialize();
+  const call = c.request("tools/call", { name: "prepare_narration_speech", arguments: v3Speech() });
+  await bounded(f.arrived.promise); c.notify("notifications/cancelled", { requestId: call.id });
+  const result = await call.response; assert.equal(result.result.isError, true); assert.equal(JSON.parse(result.result.content[0].text).error.code, "TOOL_CALL_UNRESOLVED");
+  assert.equal(f.calls.length, 1); assert.deepEqual((await c.request("ping", {}).response).result, {});
 });

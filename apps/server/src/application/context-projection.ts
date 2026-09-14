@@ -4,11 +4,12 @@ import type { ProductionService } from "./service.js";
 import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
 import { NarrationService } from "../narration/service.js";
 import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from "../narration/generated-audio.js";
+import { contextToolVersion, projectAudioOperations } from "./audio-operation-context.js";
 import { projectApplicationCapabilities } from "./application-capabilities.js";
 import type { DirectorApplicationCapabilities } from "./application-capabilities.js";
 
 export const DIRECTOR_PROJECTION_LIMITS = Object.freeze({ bytes: 512 * 1024, records: 20, sourceCharacters: 64 * 1024, maximumOffset: 10_000_000 });
-export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts" | "narration";
+export type DirectorContextSection = "overview" | "shots" | "scenes" | "plan" | "aliases" | "grants" | "receipts" | "narration" | "audio_operations";
 export interface DirectorContextQuery { section?: DirectorContextSection; offset?: number }
 interface Message { id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: string; contextDigest: string | null }
 interface Hold { id: string; scopeId: string; ownerId: string; active: boolean }
@@ -52,7 +53,7 @@ export interface DirectorContextProjection {
 function query(input: DirectorContextQuery): { section: DirectorContextSection; offset: number } {
   invariant(input && typeof input === "object" && !Array.isArray(input) && Object.keys(input).every(key => ["section", "offset"].includes(key)), "VALIDATION_ERROR", "Context query supports only section and offset");
   const section = input.section ?? "overview"; const offset = input.offset ?? 0;
-  invariant(["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration"].includes(section), "VALIDATION_ERROR", "Unknown context section");
+  invariant(["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration", "audio_operations"].includes(section), "VALIDATION_ERROR", "Unknown context section");
   invariant(Number.isSafeInteger(offset) && offset >= 0 && offset <= DIRECTOR_PROJECTION_LIMITS.maximumOffset, "VALIDATION_ERROR", "Invalid context offset");
   return { section, offset };
 }
@@ -155,7 +156,8 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     const { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames } = saved;
     const cursor = service.store.cursor(projectId);
     const domainCursor = (service.store.db.prepare("SELECT coalesce(max(sequence),0) AS cursor FROM events WHERE project_id=? AND json_extract(body,'$.kind') NOT IN ('tool.started','tool.finished','director.context_captured')").get(projectId) as { cursor: number }).cursor;
-    const applicationCapabilities = projectApplicationCapabilities();
+    const toolVersion = contextToolVersion(service.store, projectId, actor);
+    const applicationCapabilities = projectApplicationCapabilities(toolVersion);
     const base: DirectorContextProjection = {
       section, project: { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames, shots: [], scenes: [] },
       headVersion, revisionId, activePlanId, cursor,
@@ -165,12 +167,19 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
       execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,
         scopedHoldSemantics: "Director pause creates a request-owned scope hold. Applying a matching plan releases that request's hold. This is separate from the human global pause. Read current context after mutations before describing execution state." },
-      coverage: { sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts"], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
+      coverage: { sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", ...(toolVersion === "3.0.0" ? ["audio_operations"] : [])], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
     };
     const itemsPage = (items: unknown[]): DirectorContextProjection => {
       base.guard.dataDigest = digest(items);
       return adaptive(offset, items.length, count => ({ ...base, items: items.slice(offset, offset + count), page: page(offset, count, items.length) }));
     };
+    if (section === "audio_operations") {
+      invariant(toolVersion === "3.0.0", "CAPABILITY_MISMATCH", "Audio preparation context requires the explicit V3 guidance update");
+      base.guard.dataDigest = digest({ domainCursor, narrationVersion: service.store.get<NarrationState>("narration_state", projectId)?.version ?? 0 });
+      const audio = projectAudioOperations(service, projectId, offset, value => bytes({ ...base, items: [value],
+        page: page(offset, value.coverage.returned, value.coverage.total), coverage: { ...base.coverage, audioOperations: value.coverage } }) <= DIRECTOR_PROJECTION_LIMITS.bytes);
+      return withinBudget({ ...base, items: [audio], page: page(offset, audio.coverage.returned, audio.coverage.total), coverage: { ...base.coverage, audioOperations: audio.coverage } });
+    }
     if (section === "narration") {
       const snapshot = new NarrationService(service).snapshot(projectId, actor);
       const recording = (audio: NarrationAudio) => isVerifiedGeneratedNarrationAudio(audio) ? (() => {

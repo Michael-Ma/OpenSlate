@@ -272,7 +272,7 @@ export class ProductionService {
     for (let count = 0; count < continuations.length; count++) for (const continuation of continuations)
       if (authorities.has(continuation.toRequestId)) authorities.add(continuation.fromRequestId);
     const grants = this.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id) && authorities.has(grant.authorityId)
-      && !this.recovery.isImported(projectId, "grant", grant.id) && !this.store.get("owned_transcription_review", grant.id));
+      && !this.recovery.isImported(projectId, "grant", grant.id) && !this.store.get("owned_transcription_review", grant.id) && !this.store.get("narration_speech_review", grant.id));
     const grantBindings: Record<string, string> = {};
     for (const change of impact.filter(change => change.kind === "new" || change.kind === "replace")) {
       const node = compiled!.nodes.find(n => n.id === change.nodeId)!;
@@ -346,6 +346,55 @@ export class ProductionService {
           projectRevision: { id: applied.revisionId, digest: digest(this.store.get("project_revision", applied.revisionId)) }, receipt: applied };
         this.store.insert("owned_transcription_application", application.id, projectId, application);
         this.store.appendEvent(projectId, "narration.transcription_reviewed", { proposalId: owned.id, reviewId: review.id,
+          applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, requestId: human.requestId });
+        return { proposalId: owned.id, proposalDigest: input.proposalDigest, reviewId: review.id,
+          applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, applied };
+      });
+      stopped(); return receipt;
+    });
+  }
+
+  /** Exact human speech review; grants and application publication remain atomic. */
+  commitNarrationSpeechReview(projectId: string, human: ActorContext, input: ReviewNarrationSpeech,
+    options: { signal?: AbortSignal } = {}): NarrationSpeechApplyReceipt {
+    const signal = options.signal;
+    const stopped = (): void => invariant(!signal?.aborted, "NARRATION_SPEECH_CANCELLED", "Narration speech review was cancelled");
+    stopped();
+    human = snapshotOwnedTranscriptionData(human, 16384); input = captureNarrationSpeechReviewInput(input);
+    const authority = (): void => {
+      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human can approve narration speech");
+      this.assertActor(projectId, human, true);
+      invariant(this.request(projectId, human).scopeIds.includes(projectId), "SCOPE_DENIED", "Narration speech review requires editable project scope");
+      this.recovery.assertFreshAuthority(projectId, "narration_speech_proposal", input.proposalId);
+    };
+    authority();
+    return this.store.transaction(() => {
+      authority();
+      const receipt = this.store.command(narrationSpeechReviewScope(projectId, human), input.key, digest(input), () => {
+        const { proposal: owned, before, lock } = currentNarrationSpeechReview(this.store, projectId, input);
+        const proposal = parseChangeProposal({ variant: "plan", expectedHeadVersion: before.headVersion, source: owned.compiled.source });
+        const captured: PreparedChangeCapture = { before, next: structuredClone(before), lock: lock as ProjectCapabilityLock,
+          proposal, proposalDigest: digest(proposal), compiled: owned.compiled, logicalIds: owned.logicalIds };
+        const assessment = this.assessCompiledChange(captured, human);
+        invariant(digest(assessment.impact) === digest(owned.impact) && digest(assessment.stages) === digest(owned.stages),
+          "NARRATION_SPEECH_STALE", "Narration speech proposal assessment changed since human review");
+        const node = owned.compiled.nodes.find(item => item.alias === owned.operation.alias)!;
+        const grant = this.engine.createGrant(projectId, projectId, "speech", human.requestId, "user_change");
+        const review: NarrationSpeechReview = { id: grant.id, version: 1, projectId, requestId: human.requestId,
+          principalId: human.principalId, proposal: { id: owned.id, digest: input.proposalDigest }, grantDigest: digest(grant),
+          section: owned.section, nodeId: node.id, specDigest: node.specDigest, compiledDigest: digest(owned.compiled) };
+        this.store.insert("narration_speech_review", review.id, projectId, review);
+        const prepared = this.recordPreparedChange(projectId, human, captured, assessment, { [node.id]: grant.id });
+        const applied = this.publishPreparedChange(projectId, human, prepared);
+        const binding = this.store.get<{ candidateId: string }>("node_binding", node.id)!;
+        const candidate = this.store.get("candidate", binding.candidateId)!;
+        const application: NarrationSpeechApplication = { id: binding.candidateId, version: 1, projectId,
+          review: { id: review.id, digest: digest(review) }, candidateDigest: digest(candidate),
+          prepared: { id: prepared.id, digest: digest(this.store.get("prepared", prepared.id)) },
+          plan: { id: applied.activePlanId!, digest: digest(this.store.get("plan", applied.activePlanId!)) },
+          projectRevision: { id: applied.revisionId, digest: digest(this.store.get("project_revision", applied.revisionId)) }, receipt: applied };
+        this.store.insert("narration_speech_application", application.id, projectId, application);
+        this.store.appendEvent(projectId, "narration.speech_reviewed", { proposalId: owned.id, reviewId: review.id,
           applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, requestId: human.requestId });
         return { proposalId: owned.id, proposalDigest: input.proposalDigest, reviewId: review.id,
           applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, applied };
@@ -511,3 +560,5 @@ export class ProductionService {
       physicalDurationSeconds: artifact.physicalDurationSeconds ?? null };
   }
 }
+import { captureNarrationSpeechReviewInput, currentNarrationSpeechReview, narrationSpeechReviewScope } from "../narration/narration-speech-review-state.js";
+import type { NarrationSpeechApplication, NarrationSpeechApplyReceipt, NarrationSpeechReview, ReviewNarrationSpeech } from "../narration/narration-speech-types.js";

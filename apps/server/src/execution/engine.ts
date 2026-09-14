@@ -22,6 +22,8 @@ import type { LocalExecutionBinding, LocalExecutionCompletion, LocalExecutionDis
 import type { PreparationEligibility, PreparationSubmissionOutcome, SubmissionPreparationContext, SubmissionPreparationPort } from "./submission-preparation.js";
 import { resolveTranscriptionPreparationIntent } from "./transcription-preparation.js";
 import { assertOwnedTranscriptionInstallation, assertOwnedTranscriptionCurrent, assertOwnedTranscriptionAttemptCurrent, resolveOwnedTranscriptionNode } from "./owned-transcription-execution.js";
+import { assertNarrationSpeechInstallation, assertNarrationSpeechCurrent, resolveNarrationSpeechNode } from "./narration-speech-execution.js";
+import type { NarrationSpeechAttemptInput } from "../narration/narration-speech-types.js";
 import type { OwnedTranscriptionAttemptInput } from "../narration/owned-transcription-types.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
@@ -40,6 +42,7 @@ export interface Attempt {
   failure: { id: string; technical: boolean; source: string; retryAllowed: boolean } | null;
   preparation?: { intentId: string; intentDigest: string; waitCount: number; nextEligibleAt: number };
   applicationInput?: OwnedTranscriptionAttemptInput;
+  narrationSpeech?: NarrationSpeechAttemptInput;
   outputs: Record<string, ArtifactRef>; createdAt: string;
 }
 export interface ArtifactRecord {
@@ -148,6 +151,7 @@ export class Engine {
       this.recovery.assertWritable(projectId);
       const project = this.store.getProject(projectId);
       assertOwnedTranscriptionInstallation(this.store, project, planId, compiled, grantBindings);
+      assertNarrationSpeechInstallation(this.store, project, planId, compiled, grantBindings);
       if (!this.store.get("budget", projectId)) this.store.insert("budget", projectId, projectId, { capMicros: this.defaultBudgetMicros, currency: "USD" });
       const saved = this.store.get<PlanRecord>("plan", planId);
       if (saved) {
@@ -309,6 +313,8 @@ export class Engine {
         const project = this.store.getProject(binding.projectId);
         const ownedInput = resolveOwnedTranscriptionNode(this.store, project, binding.node, binding.candidateId);
         if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, binding.node, binding.candidateId, ownedInput.resolved);
+        const speechInput = resolveNarrationSpeechNode(this.store, project, binding.node, binding.candidateId);
+        if (speechInput) assertNarrationSpeechCurrent(this.store, project, binding.node, binding.candidateId, speechInput.resolved);
         const lock = this.store.get<{ localExecution?: unknown }>("capability_lock", this.store.getProject(binding.projectId).capabilityLockId);
         if (Object.hasOwn(binding.node.args, "localExecution") || ((binding.node.kind === "timeline" || binding.node.kind === "render") && lock && Object.hasOwn(lock, "localExecution"))) {
           const outcome = await this.runLocalReady(binding);
@@ -688,6 +694,8 @@ export class Engine {
       const project = this.store.getProject(projectId); const binding = this.currentBinding(projectId, nodeId); const node = binding.node;
       const ownedInput = resolveOwnedTranscriptionNode(this.store, project, node, binding.candidateId);
       if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, node, binding.candidateId, ownedInput.resolved);
+      const speechInput = resolveNarrationSpeechNode(this.store, project, node, binding.candidateId);
+      if (speechInput) assertNarrationSpeechCurrent(this.store, project, node, binding.candidateId, speechInput.resolved);
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
       invariant(!this.held(project, nodeId), "EXECUTION_HELD", "Dispatch is paused or held");
       this.checkIntent(project, node);
@@ -757,6 +765,7 @@ export class Engine {
         phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId, failure: null, outputs: {}, createdAt: new Date().toISOString(),
         ...(ownedInput ? { applicationInput: structuredClone(ownedInput.input) } : {}),
+        ...(speechInput ? { narrationSpeech: structuredClone(speechInput.input) } : {}),
       };
       this.store.insert("attempt", id, projectId, attempt);
       if (reservationId) this.store.insert("reservation", reservationId, projectId, { attemptId: id, micros: cost.toString(), state: "reserved" });

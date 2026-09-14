@@ -79,6 +79,7 @@ export function spendingWorkStatus(candidate: SpendingCandidate): string {
     return "Restored work · request a new take with fresh approval";
   }
   if (candidate.audioUnavailableCode) return spendingAudioSummary(candidate);
+  if (candidate.unavailableCode === "NARRATION_SPEECH_STALE") return "This narration section changed. Prepare and review a fresh speech plan.";
   if (candidate.unavailableCode === "SUBMISSION_PREPARATION_OBSOLETE" || candidate.unavailableCode === "APPLICATION_INPUT_UNAVAILABLE")
     return "Recording selection changed · prepare and review the current recording before approving new spending";
   if (!candidate.providerDisplay) return "Saved model details unavailable · refresh or request new work";

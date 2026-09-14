@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "label": "OpenAI narration · manual review example",
+      "profile": {
+        "id": "openai-narration-review", "revision": "manual-review-1", "kind": "speech",
+        "adapter": "openai-speech", "executionVersion": "1",
+        "configuration": { "model": "gpt-4o-mini-tts-2025-12-15", "settings": {} },
+        "maxConcurrency": 1, "unitCostMicros": "100000", "maxRetries": 0
+      }
+    },
+    {
+      "label": "OpenAI word transcription · manual review example",
+      "profile": {
+        "id": "openai-transcription-review", "revision": "manual-review-1", "kind": "transcription",
+        "adapter": "openai-transcription", "executionVersion": "1",
+        "configuration": { "model": "whisper-1", "settings": {} },
+        "maxConcurrency": 1, "unitCostMicros": "100000", "maxRetries": 0
+      }
+    }
+  ]
+}

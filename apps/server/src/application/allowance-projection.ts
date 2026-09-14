@@ -10,6 +10,8 @@ import { projectBudgetSnapshot } from "./project-budget.js";
 import { spendingAudioDetails, spendingHistoryDisplay, spendingProviderDisplay } from "./spending-display.js";
 import { assertOwnedTranscriptionCurrent, resolveOwnedTranscriptionNode } from "../execution/owned-transcription-execution.js";
 
+import { assertNarrationSpeechCurrent, resolveNarrationSpeechNode } from "../execution/narration-speech-execution.js";
+
 export const SPENDING_PAGE_LIMITS = Object.freeze({ candidates: 100, allowances: 40 });
 const coverage = (offset: number, returned: number, total: number) => ({ offset, returned, total, nextOffset: offset + returned < total ? offset + returned : null });
 
@@ -46,6 +48,8 @@ export function projectSpendingProjection(service: ProductionService, projectId:
             const owned = resolveOwnedTranscriptionNode(store, project, binding.node, selection.candidateId);
             if (owned) assertOwnedTranscriptionCurrent(store, project, binding.node, selection.candidateId, owned.resolved);
           }
+          const speech = resolveNarrationSpeechNode(store, project, binding.node, selection.candidateId);
+          if (speech) assertNarrationSpeechCurrent(store, project, binding.node, selection.candidateId, speech.resolved);
           if (audioDetails?.audioUnavailableCode) throw new DomainError(audioDetails.audioUnavailableCode, "Saved audio options are unavailable for cost review");
           selectionCurrent = true;
         } catch (error) { if (!(error instanceof DomainError)) throw error; unavailableCode = error.code; }

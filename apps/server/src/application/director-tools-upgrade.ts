@@ -7,9 +7,9 @@ import type { DirectorSkillConfiguration } from "./director-capabilities.js";
 export interface DirectorToolsUpgrade {
   expectedLockId: string;
   expectedLockDigest: string;
-  targetVersion: "2.0.0";
+  targetVersion: "2.0.0" | "3.0.0";
 }
-interface UpgradeReceipt { lockId: string; previousLockId: string; toolContract: "2.0.0" }
+interface UpgradeReceipt { lockId: string; previousLockId: string; toolContract: "2.0.0" | "3.0.0" }
 
 /** Authenticated local configuration only; never registered as a model tool. */
 export class DirectorToolSettings {
@@ -27,9 +27,9 @@ export class DirectorToolSettings {
   }
   status(projectId: string) {
     const saved = this.latest(projectId);
-    return { currentVersion: saved?.lock.compatibility.toolContract ?? "2.0.0", lockId: saved?.id ?? null,
-      lockDigest: saved?.lock.lockDigest ?? null, availableVersion: "2.0.0" as const,
-      upgradeAvailable: saved?.lock.compatibility.toolContract === "1.0.0", busy: this.busy(projectId) };
+    return { currentVersion: saved?.lock.compatibility.toolContract ?? "3.0.0", lockId: saved?.id ?? null,
+      lockDigest: saved?.lock.lockDigest ?? null, availableVersion: "3.0.0" as const,
+      upgradeAvailable: !!saved && ["1.0.0", "2.0.0"].includes(saved.lock.compatibility.toolContract), busy: this.busy(projectId) };
   }
 
   upgrade(projectId: string, input: DirectorToolsUpgrade, key: string) {
@@ -37,7 +37,7 @@ export class DirectorToolSettings {
     invariant(input && Object.keys(input).every(field => ["expectedLockId", "expectedLockDigest", "targetVersion"].includes(field))
       && typeof input.expectedLockId === "string" && input.expectedLockId.length > 0 && input.expectedLockId.length <= 160
       && typeof input.expectedLockDigest === "string" && /^[a-f0-9]{64}$/.test(input.expectedLockDigest)
-      && input.targetVersion === "2.0.0", "VALIDATION_ERROR", "Choose the displayed narration tools update");
+      && ["2.0.0", "3.0.0"].includes(input.targetVersion), "VALIDATION_ERROR", "Choose the displayed narration tools update");
     invariant(typeof key === "string" && key.length > 0 && key.length <= 160, "VALIDATION_ERROR", "Use one update command identity");
     const payload = structuredClone(input), requestDigest = digest(payload), store = this.service.store;
     const scope = `local-user:${projectId}:director-tools-upgrade`;
@@ -51,20 +51,21 @@ export class DirectorToolSettings {
     const check = () => {
       const current = this.latest(projectId);
       invariant(current?.id === payload.expectedLockId && current.lock.lockDigest === payload.expectedLockDigest
-        && current.lock.compatibility.toolContract === "1.0.0", "DIRECTOR_TOOLS_STALE", "The project's saved tools changed; reload before updating");
+        && (current.lock.compatibility.toolContract === "1.0.0"
+          || payload.targetVersion === "3.0.0" && current.lock.compatibility.toolContract === "2.0.0"), "DIRECTOR_TOOLS_STALE", "The project's saved tools changed; reload before updating");
       invariant(!this.busy(projectId), "DIRECTOR_TOOLS_BUSY", "Wait for the current conversation and setup to finish before updating tools");
     };
     check();
     const configuration = this.configuration(projectId), configurationDigest = digest(configuration);
     // Verify and snapshot shipped packages outside the write transaction.
-    const { lock } = createDirectorSkillLock(configuration, "2.0.0");
+    const { lock } = createDirectorSkillLock(configuration, payload.targetVersion);
     const receipt = store.command(scope, key, requestDigest, (): UpgradeReceipt => {
       check();
       invariant(digest(this.configuration(projectId)) === configurationDigest, "DIRECTOR_TOOLS_STALE", "The local runtime changed while tools were verified");
       store.insert("director_skill_lock", lock.id, projectId, { id: lock.id, projectId, lock });
       store.appendEvent(projectId, "director.lock_installed", { lockId: lock.id, lockDigest: lock.lockDigest,
         previousLockId: payload.expectedLockId, source: "local_user_upgrade", principalId: "local-user" });
-      return { lockId: lock.id, previousLockId: payload.expectedLockId, toolContract: "2.0.0" };
+      return { lockId: lock.id, previousLockId: payload.expectedLockId, toolContract: payload.targetVersion };
     });
     return this.response(projectId, receipt);
   }

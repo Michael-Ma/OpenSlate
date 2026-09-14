@@ -6,4 +6,5 @@ export * from "./local-execution.js";
 export * from "./workflow/index.js";
 export * from "./planning/index.js";
 export * from "./planning/transcription-composition.js";
+export * from "./planning/speech-composition.js";
 export * from "./tools.js";

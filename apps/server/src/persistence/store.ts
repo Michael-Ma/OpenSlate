@@ -1,3 +1,6 @@
+import { assertNarrationSpeechProposal } from "../narration/narration-speech-records.js";
+import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput } from "../narration/narration-speech-authorization.js";
+import type { NarrationSpeechReview } from "../narration/narration-speech-types.js";
 import Database from "better-sqlite3";
 import { mkdirSync, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -151,6 +154,11 @@ export class Store {
       invariant(body.origin === "initial_slot" || body.origin === "user_change", "ORIGIN_NOT_AUTHORIZED", "Invalid candidate origin");
       const grant = this.get<{ origin: string }>("grant", String(body.grantId))!;
       invariant(body.origin === grant.origin, "ORIGIN_NOT_AUTHORIZED", "Candidate must retain its grant's origin");
+      const speechReview = this.get<NarrationSpeechReview>("narration_speech_review", String(body.grantId));
+      if (speechReview) {
+        assertNarrationSpeechReview(this, projectId, speechReview);
+        invariant(body.nodeId === speechReview.nodeId, "NARRATION_SPEECH_AUTHORIZATION_INVALID", "Speech grant belongs to its exact reviewed node");
+      }
       const review = this.get<OwnedTranscriptionReview>("owned_transcription_review", String(body.grantId));
       if (review) {
         assertOwnedTranscriptionReview(this, projectId, review);
@@ -161,10 +169,18 @@ export class Store {
       if (body.candidateId !== null) reference("candidate", body.candidateId);
       else invariant(typeof body.workKey === "string", "REFERENCE_REQUIRED", "Local work requires a work key");
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
+      assertNarrationSpeechAttemptInput(this, { ...body, id, projectId } as unknown as Attempt);
       assertOwnedTranscriptionAttemptInput(this, { ...body, id, projectId } as unknown as Attempt);
       assertTranscriptionPreparationAttemptState(this, { ...body, id, projectId } as unknown as Attempt);
     }
     if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "narration_speech_proposal") assertNarrationSpeechProposal(this, projectId, { ...body, id, projectId });
+    if (kind === "narration_speech_review") {
+      assertNarrationSpeechReview(this, projectId, { ...body, id, projectId });
+      if (!this.get(kind, id)) invariant(!this.db.prepare("SELECT 1 FROM entities WHERE kind='candidate' AND json_extract(body,'$.grantId')=? LIMIT 1").get(id),
+        "NARRATION_SPEECH_AUTHORIZATION_INVALID", "Consumed grant cannot acquire a later speech review");
+    }
+    if (kind === "narration_speech_application") assertNarrationSpeechApplication(this, projectId, { ...body, id, projectId });
     if (kind === "owned_transcription_source") assertOwnedTranscriptionSource(this, projectId, { ...body, id, projectId });
     if (kind === "owned_transcription_proposal") assertOwnedTranscriptionProposal(this, projectId, { ...body, id, projectId });
     if (kind === "owned_transcription_review") {
@@ -640,7 +656,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Local execution receipts are immutable");
       if (["audio_derivation_intent", "audio_derivation_receipt", "transcription_audio_intent", "transcription_audio_receipt",
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
-        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection", "owned_transcription_source", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application"].includes(kind))
+        "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection", "owned_transcription_source", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
@@ -670,6 +686,9 @@ export class Store {
       if (kind === "attempt") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
+        invariant(Object.hasOwn(previous, "narrationSpeech") === Object.hasOwn(next, "narrationSpeech")
+          && (!Object.hasOwn(previous, "narrationSpeech") || canonical(previous.narrationSpeech) === canonical(next.narrationSpeech)),
+          "IMMUTABLE_RECORD", "Attempt speech review evidence is immutable");
         invariant(Object.hasOwn(previous, "applicationInput") === Object.hasOwn(next, "applicationInput")
           && (!Object.hasOwn(previous, "applicationInput") || canonical(previous.applicationInput) === canonical(next.applicationInput)),
         "IMMUTABLE_RECORD", "Attempt application input presence and evidence are immutable");

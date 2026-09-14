@@ -1,0 +1,40 @@
+{
+  "milestone": "conversational-audio-v3",
+  "date": "2026-09-13",
+  "validation": {
+    "command": "pnpm check",
+    "node": "24.15.0",
+    "tests": 1833,
+    "passed": 1833,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "addedSinceOfflineViggle": 108,
+    "builds": "passed",
+    "typechecks": "passed",
+    "noTurnCodexProbe": "passed",
+    "testDurationMs": 153312.615541,
+    "unchangedCapturedFiles": 401
+  },
+  "native": {
+    "runtime": "0.153.4",
+    "source": "isolated official @openai/codex package",
+    "modelStarts": 1,
+    "durationSeconds": 28.451,
+    "checksPassed": 18,
+    "contextReads": 4,
+    "speechProposals": 1,
+    "state": "ungranted",
+    "mediaCalls": 0,
+    "exactWords": true,
+    "replayNoExtraStart": true,
+    "readonlyReopen": true,
+    "cleanup": "processes exited; thread archived"
+  },
+  "limits": [
+    "No live media API validated",
+    "Browser recording upload and end-to-end usability await user manual feedback",
+    "Bundled runtime updated; manual guide uses pinned separate installation",
+    "Stages 3 and 4 remain on hold"
+  ]
+}

@@ -16,6 +16,9 @@ import { projectTranscriptCandidates, projectTranscriptSelection, projectTranscr
 import type { OwnedTranscriptionService } from "./owned-transcription-service.js";
 import { registerOwnedTranscriptionRoutes } from "./owned-transcription-routes.js";
 
+import type { NarrationSpeechService } from "./narration-speech-service.js";
+import { registerNarrationSpeechRoutes } from "./narration-speech-routes.js";
+
 interface Session { id: string; projectId: string; requestId: string; principalId: "local-user" }
 interface Params { projectId: string }
 const id = { type: "string", minLength: 1, maxLength: 160 };
@@ -33,7 +36,7 @@ const edit = (properties: object, required: string[]) => object({ sessionId: id,
 const key = (request: FastifyRequest): string => { const value = request.headers["idempotency-key"]; invariant(typeof value === "string" && value.length > 0 && value.length <= 160, "VALIDATION_ERROR", "A bounded Idempotency-Key is required"); return value; };
 
 /** Register only under the application's inherited authenticated local HTTP boundary. */
-export function registerNarrationRoutes(app: FastifyInstance, options: { production: ProductionService; narration: NarrationService; canonical: NarrationCanonicalService; uploadDirectory: string; ownedTranscription?: OwnedTranscriptionService }): void {
+export function registerNarrationRoutes(app: FastifyInstance, options: { production: ProductionService; narration: NarrationService; canonical: NarrationCanonicalService; uploadDirectory: string; ownedTranscription?: OwnedTranscriptionService; narrationSpeech?: NarrationSpeechService }): void {
   const { production, narration, canonical } = options, store = production.store;
   const uploads = new ManagedUploadStore({ rootDir: options.uploadDirectory });
   const actorFor = (projectId: string, sessionId: string): ActorContext => {
@@ -69,6 +72,7 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
 
   app.register(async scoped => {
     const base = "/api/projects/:projectId/narration";
+    registerNarrationSpeechRoutes(scoped, { production, narration, ...(options.narrationSpeech ? { narrationSpeech: options.narrationSpeech } : {}), actorFor });
     registerOwnedTranscriptionRoutes(scoped, { production, narration, ownedTranscription: options.ownedTranscription, actorFor });
     // Authentication inherited from createApp runs before a handler consumes this stream.
     scoped.addContentTypeParser("application/octet-stream", (_request, payload, done) => done(null, payload));

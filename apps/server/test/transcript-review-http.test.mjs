@@ -76,7 +76,7 @@ test('human recognized-word adoption changes draft only and records additive bou
   const changes = f.changes(), context = projectDirectorContext(f.production, f.project.id, actor, { section: 'narration' });
   assert.equal(context.narrationDraft.segments[0].transcriptAdoption.writingSelectionId, row.script.transcriptSelectionId);
   assert.equal(context.narrationDraft.segments[0].transcriptAdoption.timingSelectionId, null); assert.notEqual(context.guard.dataDigest, priorContext.guard.dataDigest);
-  assert.equal(context.applicationCapabilities.version, 4); assert.equal(context.applicationCapabilities.narration.transcriptReview.automaticAdoption, false);
+  assert.equal(context.applicationCapabilities.version, 5); assert.equal(context.applicationCapabilities.narration.transcriptReview.automaticAdoption, false);
   assert.equal(context.applicationCapabilities.narration.transcription.available, false); assert.ok(Buffer.byteLength(canonical(context)) <= DIRECTOR_PROJECTION_LIMITS.bytes);
   const digestBefore = context.guard.dataDigest; context.narrationDraft.segments[0].transcriptAdoption.writingSelectionId = 'invented';
   assert.equal(projectDirectorContext(f.production, f.project.id, actor, { section: 'narration' }).guard.dataDigest, digestBefore);

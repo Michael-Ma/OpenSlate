@@ -38,13 +38,15 @@ The design documents describe OpenSlate's intended architecture. The repository 
 | [Human recording review and execution](implementation/OWNED-TRANSCRIPTION-REVIEW.md) | Atomic one-use review/application, retained plan reuse, exact source admission and historical recovery |
 | [Recording transcription workspace](implementation/OWNED-TRANSCRIPTION-WORKSPACE.md) | Authenticated preparation/review, bounded history, sectionless preview and separate spending; explicit browser verification limits |
 | [Ungranted recording proposals](implementation/OWNED-TRANSCRIPTION-PROPOSALS.md) | Exact source/model/full-plan proposals, scoped current-selection fences and media-inclusive restore |
+| [Conversational audio](implementation/CONVERSATIONAL-AUDIO.md) | Versioned audio tools, exact saved-section speech, human review and separate spending |
+| [Manual audio testing](implementation/MANUAL-AUDIO-TESTING.md) | Writing-first and recording-first rehearsal with all media APIs disabled |
 | [Audio execution bridge plan](implementation/AUDIO-APPLICATION-BRIDGES.md) | Implemented speech/transcription mappings, dispatch and raw-result recovery; candidate integration linked |
 | [Unreviewed transcript candidates](implementation/TRANSCRIPT-CANDIDATES.md) | Exact recording/dispatch provenance, atomic publication and backup recovery; human adoption remains separate |
 | [Transcription audio preparation](implementation/TRANSCRIPTION-AUDIO-PREPARATION.md) | Verified complete-source 16 kHz derivative, six-minute recovery, parser and timing helper |
 | [Generated audio ingestion](implementation/GENERATED-AUDIO-INGESTION.md) | Verified raw storage, complete PCM normalization, provenance and six-minute recovery; later transcript phases |
 | [OpenAI audio transports](implementation/OPENAI-AUDIO-TRANSPORTS.md) | Standalone speech/transcription transports, exact wire identity, cancellation and offline evidence |
 | [GPT Image 2 transport](implementation/OPENAI-IMAGE.md) | Offline transport and required application integration |
-| [Viggle H3 integration](implementation/VIGGLE-H3.md) | In-progress first live H3 provider, local key setup, exact reviewed-frame submission and bounded live-test allowance |
+| [Viggle H3 integration](implementation/VIGGLE-H3.md) | Offline-verified H3 adapter, exact reviewed-frame submission and recovery; live testing on hold |
 | [MiniMax H3 transport](implementation/MINIMAX-H3.md) | Offline cloud transport, capability limits and uncertainty handling |
 | [H3 application execution](implementation/MINIMAX-H3-EXECUTION.md) | Exact reviewed PNG transfer, one POST, durable polling and protected output recovery |
 | [Human spending review](implementation/SPENDING-REVIEW.md) | Exact browser allowance/revocation, separate project-budget review and actual browser evidence |
