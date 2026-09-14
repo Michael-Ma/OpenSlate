@@ -34,6 +34,10 @@ const INSPECTION_ROUTES = new Set([
   "/api/projects/:projectId/review", "/api/projects/:projectId/events",
   "/api/projects/:projectId/artifacts/:artifactId/content", "/api/projects/:projectId/images",
   "/api/projects/:projectId/narration", "/api/projects/:projectId/narration/audio/:audioId/content",
+  "/api/projects/:projectId/narration/transcription-options", "/api/projects/:projectId/narration/transcription-proposals",
+  "/api/projects/:projectId/narration/transcription-proposals/:proposalId",
+  "/api/projects/:projectId/narration/generated-recordings", "/api/projects/:projectId/narration/audio/:audioId/transcripts",
+  "/api/projects/:projectId/narration/transcripts/:candidateId/words", "/api/projects/:projectId/narration/transcripts/:candidateId/selection",
   "/api/projects/:projectId/media", "/api/projects/:projectId/media/renders/:jobId",
   "/api/projects/:projectId/spending",
 ]);

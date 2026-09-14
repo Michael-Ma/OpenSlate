@@ -262,6 +262,35 @@ test("candidate paging retains exact current selection identities without mintin
   assert.deepEqual(counts(f), before);
 });
 
+test("recording review can focus exact spending work beyond the first page without creating approval", async t => {
+  const f = fixture(t, { count: 101 });
+  const page = (await f.request("GET", `${url(f)}?candidateOffset=100`)).json(), candidate = page.candidates[0], before = counts(f);
+  const focused = (await f.request("GET", `${url(f)}?focusCandidateId=${candidate.candidateId}`)).json();
+  assert.deepEqual(focused.focus, { candidateId: candidate.candidateId, found: true });
+  assert.equal(focused.coverage.candidates.offset, 100); assert.deepEqual(focused.candidates, [candidate]);
+  assert.deepEqual(counts(f), before); assert.equal(f.calls(), 0);
+  assert.equal(rows(f, "external_allowance").length, 0); assert.equal(rows(f, "external_allowance_consumption").length, 0);
+});
+
+test("missing or foreign spending focus is explicit and never exposes another project's work", async t => {
+  const f = fixture(t), otherId = f.addProject(), foreign = projectSpendingProjection(f.service, otherId).candidates[0], before = counts(f);
+  for (const id of [randomUUID(), foreign.candidateId]) {
+    const response = await f.request("GET", `${url(f)}?focusCandidateId=${id}`), value = response.json();
+    assert.equal(response.statusCode, 200, response.body); assert.deepEqual(value.focus, { candidateId: id, found: false });
+    assert.equal(value.coverage.candidates.offset, 0); assert.ok(value.candidates.every(candidate => candidate.candidateId !== foreign.candidateId));
+  }
+  assert.deepEqual(counts(f), before);
+});
+
+test("spending focus rejects ambiguous page selectors and malformed IDs without mutations", async t => {
+  const f = fixture(t), before = counts(f);
+  for (const query of ['focusCandidateId=exact&candidateOffset=0', 'focusCandidateId=%2Fprivate%2Fpath', 'focusCandidateId=']) {
+    const response = await f.request("GET", `${url(f)}?${query}`); assert.equal(response.statusCode, 400, response.body);
+    assert.equal(response.json().error.code, "VALIDATION_ERROR");
+  }
+  assert.deepEqual(counts(f), before);
+});
+
 test("stale displayed selections fail atomically and issuing an allowance never raises the independent project budget", async t => {
   const f = fixture(t), input = await f.inputFor(), budget = f.engine.budget(f.projectId);
   assert.equal((await f.request("POST", `${url(f)}/allowances`, { ...input, maxEstimatedMicros: "9000000" })).statusCode, 200);

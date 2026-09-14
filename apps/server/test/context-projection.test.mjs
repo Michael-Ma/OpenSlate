@@ -142,14 +142,16 @@ test("saved speech profiles and generated voice selections cannot enable absent 
   assert.deepEqual(view.profiles.slice(-2), [speech, transcription], "saved provider information is preserved separately");
   assert.equal(view.narrationDraft.segments[0].script.source.profileRevisionId, "configured-speech@7");
   assert.equal(capabilities.speechSynthesis.implemented, false); assert.equal(capabilities.speechSynthesis.available, false);
-  assert.equal(capabilities.transcription.implemented, false); assert.equal(capabilities.transcription.available, false);
+  assert.equal(capabilities.transcription.implemented, true); assert.equal(capabilities.transcription.available, false);
+  assert.equal(capabilities.transcription.toolAvailable, false); assert.equal(capabilities.transcription.hostReadiness, "not_evaluated");
+  assert.equal(capabilities.transcription.workflow, "human_review_owned_recording");
   assert.equal(capabilities.generatedSourceIntent.meaning, "future_synthesis_intent_only");
   assert.equal(capabilities.generatedSourceIntent.configurationEnablesSynthesis, false);
   assert.equal(capabilities.timing.method, "human_supplied_or_reviewed_transcript_ranges"); assert.equal(capabilities.timing.automaticAlignmentAvailable, false);
   assert.equal(capabilities.suppliedRecordings.implemented, true); assert.equal(capabilities.suppliedRecordings.hostReadiness, "not_evaluated");
   assert.deepEqual(capabilities.suppliedRecordings.origins, ["uploaded", "externally_generated"]);
   assert.equal(capabilities.suppliedRecordings.provenance, "human_declared_not_provider_verified");
-  assert.equal(view.applicationCapabilities.version, 3);
+  assert.equal(view.applicationCapabilities.version, 4);
   assert.deepEqual(capabilities.generatedRecordingAttachment, original.applicationCapabilities.narration.generatedRecordingAttachment);
   assert.equal(capabilities.generatedRecordingAttachment.workflow, "human_select_existing_verified_recording");
   assert.equal(capabilities.generatedRecordingAttachment.createsAudio, false); assert.equal(capabilities.generatedRecordingAttachment.toolAvailable, false);

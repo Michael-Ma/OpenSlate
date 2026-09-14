@@ -10,6 +10,7 @@ import { Store } from "./persistence/store.js";
 import { LocalDirectorController } from "./application/local-director.js";
 import { ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from "./media/index.js";
 import { NarrationService, NarrationCanonicalService } from "./narration/index.js";
+import { OwnedTranscriptionService } from "./narration/owned-transcription-service.js";
 import { ManagedUploadStore } from "./narration/managed-upload.js";
 import { assertWebDataSeparation, loadWebAssets } from "./web-assets.js";
 import { acquireInstallationOwner } from "./persistence/installation-owner.js";
@@ -69,7 +70,8 @@ const app = createApp({ service, director, runtimeSettings: director, providerCa
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },
-  narrationRoutes: { production: service, narration, canonical: new NarrationCanonicalService(narration), uploadDirectory },
+  narrationRoutes: { production: service, narration, canonical: new NarrationCanonicalService(narration), uploadDirectory,
+    ...(localMedia ? { ownedTranscription: new OwnedTranscriptionService(narration, join(directory, "artifacts")) } : {}) },
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
 let running = false;
 const timer = setInterval(() => {

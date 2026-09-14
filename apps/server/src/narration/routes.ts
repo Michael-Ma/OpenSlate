@@ -13,6 +13,8 @@ import { ManagedUploadStore } from "./managed-upload.js";
 import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from "./generated-audio.js";
 import { projectGeneratedRecordings } from "./generated-recording-projection.js";
 import { projectTranscriptCandidates, projectTranscriptSelection, projectTranscriptWords } from "./transcript-projection.js";
+import type { OwnedTranscriptionService } from "./owned-transcription-service.js";
+import { registerOwnedTranscriptionRoutes } from "./owned-transcription-routes.js";
 
 interface Session { id: string; projectId: string; requestId: string; principalId: "local-user" }
 interface Params { projectId: string }
@@ -31,7 +33,7 @@ const edit = (properties: object, required: string[]) => object({ sessionId: id,
 const key = (request: FastifyRequest): string => { const value = request.headers["idempotency-key"]; invariant(typeof value === "string" && value.length > 0 && value.length <= 160, "VALIDATION_ERROR", "A bounded Idempotency-Key is required"); return value; };
 
 /** Register only under the application's inherited authenticated local HTTP boundary. */
-export function registerNarrationRoutes(app: FastifyInstance, options: { production: ProductionService; narration: NarrationService; canonical: NarrationCanonicalService; uploadDirectory: string }): void {
+export function registerNarrationRoutes(app: FastifyInstance, options: { production: ProductionService; narration: NarrationService; canonical: NarrationCanonicalService; uploadDirectory: string; ownedTranscription?: OwnedTranscriptionService }): void {
   const { production, narration, canonical } = options, store = production.store;
   const uploads = new ManagedUploadStore({ rootDir: options.uploadDirectory });
   const actorFor = (projectId: string, sessionId: string): ActorContext => {
@@ -52,15 +54,22 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     const project = store.getProject(projectId);
     const recordings = store.list<NarrationAudio>("narration_audio", projectId).reverse();
     invariant(audioOffset <= recordings.length, "VALIDATION_ERROR", "Recording library offset is beyond its current size");
-    const audioLibrary = recordings.slice(audioOffset, audioOffset + 400).map(audio => isVerifiedGeneratedNarrationAudio(audio) ? summarizeGeneratedNarrationAudio(audio) : { id: audio.id, declaredOrigin: audio.declaredOrigin, media: audio.media });
+    const audioLibrary = recordings.slice(audioOffset, audioOffset + 400).map(audio => ({ ...(isVerifiedGeneratedNarrationAudio(audio) ? summarizeGeneratedNarrationAudio(audio) : { id: audio.id, declaredOrigin: audio.declaredOrigin, media: audio.media }), sourceRecordDigest: digest(audio) }));
     const snapshot = narration.workspaceSnapshot(projectId);
+    const session = selectedSession(projectId);
+    const continuationRequest = session?.state === "active" ? null : store.db.prepare(`SELECT id, substr(json_extract(body,'$.text'),1,240) text FROM entities
+      WHERE kind='message' AND project_id=? AND json_extract(body,'$.projectId')=? AND json_extract(body,'$.principalId')='local-user'
+      AND json_extract(body,'$.editing')=1 AND json_extract(body,'$.state')='active'
+      AND EXISTS (SELECT 1 FROM json_each(body,'$.scopeIds') WHERE value=?) ORDER BY rowid DESC LIMIT 1`)
+      .get(projectId, projectId, projectId) ?? null;
     return { capabilities: { audioImport: narration.mediaAvailable, audioPlayback: narration.mediaAvailable }, audioLibrary, coverage: { audioLibrary: { offset: audioOffset, returned: audioLibrary.length, total: recordings.length, nextOffset: audioOffset + audioLibrary.length < recordings.length ? audioOffset + audioLibrary.length : null } }, headVersion: project.headVersion, revisionId: project.revisionId,
       snapshot: { ...snapshot, segments: snapshot.segments.map(segment => segment.audio && isVerifiedGeneratedNarrationAudio(segment.audio) ? { ...segment, audio: summarizeGeneratedNarrationAudio(segment.audio) } : segment) },
-      canonical: canonical.workspaceCurrent(projectId), session: selectedSession(projectId) };
+      canonical: canonical.workspaceCurrent(projectId), session, continuationRequest };
   });
 
   app.register(async scoped => {
     const base = "/api/projects/:projectId/narration";
+    registerOwnedTranscriptionRoutes(scoped, { production, narration, ownedTranscription: options.ownedTranscription, actorFor });
     // Authentication inherited from createApp runs before a handler consumes this stream.
     scoped.addContentTypeParser("application/octet-stream", (_request, payload, done) => done(null, payload));
     scoped.get<{ Params: Params; Querystring: { audioOffset?: string } }>(base, { schema: { querystring: object({ audioOffset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" } }, []) } }, async request => view(request.params.projectId, Number(request.query.audioOffset ?? 0)));
@@ -88,8 +97,8 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
         return reply.header("X-Content-Type-Options", "nosniff").header("Cache-Control", "private, no-store").header("X-Content-SHA256", recording.media.sha256).type("audio/wav").send(bytes);
       } finally { await file.close(); }
     });
-    scoped.post<{ Params: Params; Body: { text?: string; continuationSessionId?: string } }>(`${base}/sessions`, {
-      schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 4000 }, continuationSessionId: id }, []) },
+    scoped.post<{ Params: Params; Body: { text?: string; continuationSessionId?: string; continuationRequestId?: string } }>(`${base}/sessions`, {
+      schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 4000 }, continuationSessionId: id, continuationRequestId: id }, []) },
     }, async request => {
       const { projectId } = request.params;
       const session = store.command(`local-user:${projectId}:narration-session`, key(request), digest(request.body), () => {
@@ -97,9 +106,14 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
         invariant(!old || request.body.continuationSessionId === old.id, "NARRATION_SESSION_EXISTS", "Continue the displayed narration session explicitly");
         const previous = request.body.continuationSessionId ? store.get<Session>("narration_session", request.body.continuationSessionId) : undefined;
         invariant(!request.body.continuationSessionId || previous?.projectId === projectId && previous.principalId === "local-user", "NARRATION_SESSION_STALE", "Previous narration session is unavailable");
+        const explicit = request.body.continuationRequestId ? store.get<{ projectId: string; principalId: string; editing: boolean; state: string; scopeIds: string[] }>("message", request.body.continuationRequestId) : undefined;
+        invariant(!request.body.continuationRequestId || explicit?.projectId === projectId && explicit.principalId === "local-user"
+          && explicit.editing && explicit.state === "active" && explicit.scopeIds.includes(projectId),
+        "NARRATION_SESSION_STALE", "The displayed conversation request changed; refresh before explicitly continuing it");
+        const continuationRequestId = request.body.continuationRequestId ?? previous?.requestId;
         const actor = production.beginRequest(projectId, "local-user", request.body.text ?? "Edit narration and review its recording and timing", {
           scopeIds: [projectId], editing: true, key: `narration:${digest(key(request))}`,
-          ...(previous ? { continuationRequestId: previous.requestId } : {}),
+          ...(continuationRequestId ? { continuationRequestId } : {}),
         });
         const session: Session = { id: newId(), projectId, requestId: actor.requestId, principalId: "local-user" };
         store.insert("narration_session", session.id, projectId, session); store.put("narration_session_head", projectId, projectId, { sessionId: session.id }); return session;

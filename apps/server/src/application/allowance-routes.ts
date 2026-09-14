@@ -26,10 +26,12 @@ export function registerAllowanceRoutes(app: FastifyInstance, options: Allowance
   const { service, allowances } = options;
   invariant(service.store === allowances.store, "ALLOWANCE_CONFIGURATION_INVALID", "Spending routes and application must share one Store");
   const budgets = new ProjectBudgetService(service);
-  app.get<{ Params: { projectId: string }; Querystring: { candidateOffset?: string; allowanceOffset?: string } }>("/api/projects/:projectId/spending", {
-    schema: { params: object({ projectId: id }, ["projectId"]), querystring: object({ candidateOffset: offset, allowanceOffset: offset }) },
+  app.get<{ Params: { projectId: string }; Querystring: { candidateOffset?: string; allowanceOffset?: string; focusCandidateId?: string } }>("/api/projects/:projectId/spending", {
+    schema: { params: object({ projectId: id }, ["projectId"]), querystring: object({ candidateOffset: offset, allowanceOffset: offset, focusCandidateId: id }) },
   }, async (request, reply) => reply.header("Cache-Control", "private, no-store").send(projectSpendingProjection(service, request.params.projectId,
-    { candidateOffset: Number(request.query.candidateOffset ?? 0), allowanceOffset: Number(request.query.allowanceOffset ?? 0) })));
+    { ...(request.query.candidateOffset === undefined ? {} : { candidateOffset: Number(request.query.candidateOffset) }),
+      ...(request.query.focusCandidateId === undefined ? {} : { focusCandidateId: request.query.focusCandidateId }),
+      allowanceOffset: Number(request.query.allowanceOffset ?? 0) })));
   app.post<{ Params: { projectId: string }; Body: ProjectBudgetInput }>("/api/projects/:projectId/spending/budget", {
     schema: { params: object({ projectId: id }, ["projectId"]), querystring: object({}), body: object({
       expectedRevision: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 },

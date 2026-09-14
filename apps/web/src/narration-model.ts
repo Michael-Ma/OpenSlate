@@ -1,7 +1,7 @@
 export interface NarrationDraft { text: string; textKind: "notes" | "outline" | "draft"; language: string; meaning: string; source: { kind: "undecided" | "uploaded" } | { kind: "generated"; voice: string | null; profileRevisionId: string | null } }
 interface RecordingMedia { artifactId: string; sha256: string; byteLength: number; probe: { audio?: { samples: number | null; durationSeconds: number } } }
 export interface GeneratedRecordingIdentity { artifactDigest: string; generationEvidenceDigest: string }
-export type Recording = { id: string; media: RecordingMedia } & (
+export type Recording = { id: string; media: RecordingMedia; sourceRecordDigest?: string } & (
   { declaredOrigin: "uploaded" | "generated"; originEvidence?: never } |
   { originEvidence: "verified_generated_audio"; selection: GeneratedRecordingIdentity; generation?: { model: string; voice: string } }
 );
@@ -39,12 +39,19 @@ export interface NarrationView {
   capabilities?: { audioImport: boolean; audioPlayback: boolean };
   headVersion: number; revisionId: string;
   session: { id: string; requestId: string; state: "active" | "stale" } | null;
+  continuationRequest?: { id: string; text: string } | null;
   snapshot: { state: { version: number }; segments: NarrationSegment[]; readiness: { gaps: Array<{ key: string; category: string }> } };
   canonical: { id: string; preparedId: string; narrationVersion: number; shotMappings: Array<{ shotId: string; segmentId: string | null }> } | null;
   audioLibrary: Recording[];
   coverage: { audioLibrary: { total: number; nextOffset: number | null } };
 }
 export interface NarrationPreparation { id: string; requestId: string; expectedHeadVersion: number; expectedNarrationVersion: number; shotImpact: Array<{ shotId: string; visual: "reuse" | "replan"; reason: string }>; projection: { segments: unknown[] } }
+/** Only called after the human explicitly chooses the displayed continuation. */
+export function narrationContinuation(view: NarrationView): { continuationSessionId?: string; continuationRequestId?: string } {
+  if (view.session?.state === "active") throw new Error("This narration session is already active.");
+  return { ...(view.session ? { continuationSessionId: view.session.id } : {}),
+    ...(view.continuationRequest ? { continuationRequestId: view.continuationRequest.id } : {}) };
+}
 export function secondsToSamples(value: string): number {
   if (!/^(0|[1-9]\d*)(\.\d{1,6})?$/.test(value.trim())) throw new Error("Enter seconds as a positive number, with up to six decimal places.");
   const [whole, fraction = ""] = value.trim().split(".");

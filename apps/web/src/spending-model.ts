@@ -38,6 +38,7 @@ export interface SpendingState {
   projectBudget: { capMicros: string; committedMicros: string; currency: "USD"; revision: number };
   candidates: SpendingCandidate[]; allowances: SpendingAllowance[];
   coverage: { candidates: Coverage; allowances: Coverage };
+  focus?: { candidateId: string; found: boolean };
 }
 interface IssueBody {
   profileDigest: string; profileDefinitionDigest: string; selections: Array<{ candidateId: string; nodeId: string; specDigest: string }>;
@@ -77,6 +78,8 @@ export function spendingWorkStatus(candidate: SpendingCandidate): string {
     return "Restored work · request a new take with fresh approval";
   }
   if (candidate.audioUnavailableCode) return spendingAudioSummary(candidate);
+  if (candidate.unavailableCode === "SUBMISSION_PREPARATION_OBSOLETE" || candidate.unavailableCode === "APPLICATION_INPUT_UNAVAILABLE")
+    return "Recording selection changed · prepare and review the current recording before approving new spending";
   if (!candidate.providerDisplay) return "Saved model details unavailable · refresh or request new work";
   return (candidate.matchingAllowanceCount ?? 0) > 0 ? "Matching allowance recorded; remaining limits are shared."
     : canSelectSpending(candidate) ? "Available for cost review" : candidate.workState === "uncertain" ? "Outcome uncertain · waiting for recovery"

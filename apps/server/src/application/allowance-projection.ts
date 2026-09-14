@@ -1,4 +1,4 @@
-import { DomainError, digest, moneyMicros, providerProfileArguments } from "@openslate/core";
+import { DomainError, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import { isLegacyExecution, profileExecutionIdentity } from "@openslate/providers";
 import type { ProductionService } from "./service.js";
@@ -8,14 +8,18 @@ import type { ExternalAllowance, ExternalAllowanceRevocation } from "../executio
 import { MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS } from "../execution/external-allowance-records.js";
 import { projectBudgetSnapshot } from "./project-budget.js";
 import { spendingAudioDetails, spendingHistoryDisplay, spendingProviderDisplay } from "./spending-display.js";
+import { assertOwnedTranscriptionCurrent, resolveOwnedTranscriptionNode } from "../execution/owned-transcription-execution.js";
 
 export const SPENDING_PAGE_LIMITS = Object.freeze({ candidates: 100, allowances: 40 });
 const coverage = (offset: number, returned: number, total: number) => ({ offset, returned, total, nextOffset: offset + returned < total ? offset + returned : null });
 
 /** Caller must already be the authenticated local human. No application request is minted for a read. */
 export function projectSpendingProjection(service: ProductionService, projectId: string,
-  offsets: { candidateOffset?: number; allowanceOffset?: number } = {}) {
+  offsets: { candidateOffset?: number; allowanceOffset?: number; focusCandidateId?: string } = {}) {
   const store = service.store;
+  invariant(offsets.focusCandidateId === undefined || typeof offsets.focusCandidateId === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(offsets.focusCandidateId) && offsets.candidateOffset === undefined,
+  "VALIDATION_ERROR", "Choose a candidate focus or a work page, not both");
   // A deferred read transaction gives every projection field the same SQLite snapshot without claiming a writer.
   return store.db.transaction(() => {
     const project = store.getProject(projectId), attempts = store.list<Attempt>("attempt", projectId);
@@ -38,6 +42,10 @@ export function projectSpendingProjection(service: ProductionService, projectId:
           const args = providerProfileArguments(profile); profileDigest = typeof args.profileDigest === "string" ? args.profileDigest : null;
           profileDefinitionDigest = digest(profile); estimatedMicros = moneyMicros(profile.unitCostMicros).toString();
           currentAllowanceSelection(store, projectId, selection, profileDigest ?? "", profileDefinitionDigest);
+          if (Object.hasOwn(binding.node, "applicationInput") || store.get("owned_transcription_application", selection.candidateId)) {
+            const owned = resolveOwnedTranscriptionNode(store, project, binding.node, selection.candidateId);
+            if (owned) assertOwnedTranscriptionCurrent(store, project, binding.node, selection.candidateId, owned.resolved);
+          }
           if (audioDetails?.audioUnavailableCode) throw new DomainError(audioDetails.audioUnavailableCode, "Saved audio options are unavailable for cost review");
           selectionCurrent = true;
         } catch (error) { if (!(error instanceof DomainError)) throw error; unavailableCode = error.code; }
@@ -64,7 +72,10 @@ export function projectSpendingProjection(service: ProductionService, projectId:
     const allAllowances = store.list<ExternalAllowance>("external_allowance", projectId).reverse();
     const historyDisplay = spendingHistoryDisplay(projectId,
       store.list<{ projectId: string; profiles: unknown }>("capability_lock", projectId), store.list<PlanRecord>("plan", projectId));
-    const candidateOffset = offsets.candidateOffset ?? 0, allowanceOffset = offsets.allowanceOffset ?? 0;
+    const focusIndex = offsets.focusCandidateId === undefined ? -1 : candidates.findIndex(candidate => candidate.candidateId === offsets.focusCandidateId);
+    const candidateOffset = offsets.focusCandidateId === undefined ? offsets.candidateOffset ?? 0
+      : focusIndex < 0 ? 0 : Math.floor(focusIndex / SPENDING_PAGE_LIMITS.candidates) * SPENDING_PAGE_LIMITS.candidates;
+    const allowanceOffset = offsets.allowanceOffset ?? 0;
     const projectedAllowances = allAllowances.map(allowance => {
       const restoredHistory = service.recovery.isImported(projectId, "external_allowance", allowance.id);
       const used = allowanceUsage(store, allowance), revocation = store.get<ExternalAllowanceRevocation>("external_allowance_revocation", allowance.id);
@@ -97,6 +108,7 @@ export function projectSpendingProjection(service: ProductionService, projectId:
       notice: "Amounts are configured estimates, not guaranteed provider bills. Spending permission does not approve creative work, accept narration, enable a provider or retry uncertain work.",
       limits: { maxSelections: 800, maxAttempts: 10000, maxLifetimeMs: MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS },
       candidates: selectedCandidates, allowances,
+      ...(offsets.focusCandidateId === undefined ? {} : { focus: { candidateId: offsets.focusCandidateId, found: focusIndex >= 0 } }),
       coverage: { candidates: coverage(candidateOffset, selectedCandidates.length, candidates.length),
         allowances: coverage(allowanceOffset, allowances.length, allAllowances.length) } };
   }).deferred();

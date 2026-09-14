@@ -1,0 +1,13 @@
+.owned-transcription { grid-column: 1 / -1; border-top: 1px solid var(--border, #d9ddd9); margin-top: 18px; padding-top: 18px; min-width: 0; }
+.owned-transcription h4 { margin: 0; font-size: 16px; }
+.owned-transcription p { line-height: 1.5; }
+.owned-transcription label { display: grid; gap: 7px; font-size: 13px; }
+.owned-transcription select { width: 100%; min-width: 0; padding: 9px; }
+.owned-transcription-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 14px 0; }
+.owned-transcription-history { margin-top: 20px; }
+.owned-transcription-proposal { margin-top: 16px; padding: 18px; border: 1px solid var(--border, #d9ddd9); border-radius: 10px; background: #fcfdfb; }
+.owned-transcription-proposal dl { display: grid; gap: 12px; margin: 16px 0; }
+.owned-transcription-proposal dl > div { display: grid; grid-template-columns: minmax(100px, 150px) 1fr; gap: 12px; }
+.owned-transcription-proposal dt { color: #616b63; font-size: 13px; }
+.owned-transcription-proposal dd { margin: 0; overflow-wrap: anywhere; font-size: 14px; }
+@media (max-width: 600px) { .owned-transcription-proposal dl > div { grid-template-columns: 1fr; gap: 3px; } }

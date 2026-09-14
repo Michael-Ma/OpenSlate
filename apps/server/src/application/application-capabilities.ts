@@ -1,11 +1,12 @@
 /** Implementation facts authored by the application, not provider profiles or model input. */
 export interface DirectorApplicationCapabilities {
-  version: 3;
+  version: 4;
   authority: "application_implementation";
   scope: string;
   narration: {
     speechSynthesis: { implemented: false; available: false; reason: string };
-    transcription: { implemented: false; available: false; reason: string };
+    transcription: { implemented: true; available: false; toolAvailable: false;
+      workflow: "human_review_owned_recording"; hostReadiness: "not_evaluated"; reason: string; requirements: string };
     generatedSourceIntent: { meaning: "future_synthesis_intent_only"; configurationEnablesSynthesis: false; guidance: string };
     suppliedRecordings: {
       implemented: true;
@@ -36,12 +37,14 @@ export interface DirectorApplicationCapabilities {
 /** A fresh detached value on every read; no host credentials or mutable configuration are inspected. */
 export function projectApplicationCapabilities(): DirectorApplicationCapabilities {
   return {
-    version: 3,
+    version: 4,
     authority: "application_implementation",
     scope: "Implementation facts only. These do not add tools to the locked catalog, verify host setup or API access, or grant permission.",
     narration: {
       speechSynthesis: { implemented: false, available: false, reason: "OpenSlate has no connected speech synthesis workflow." },
-      transcription: { implemented: false, available: false, reason: "OpenSlate has no connected audio transcription workflow." },
+      transcription: { implemented: true, available: false, toolAvailable: false, workflow: "human_review_owned_recording",
+        hostReadiness: "not_evaluated", reason: "Human browser transcription is implemented; this director catalog has no tool to prepare or approve it.",
+        requirements: "The human selects an owned recording in Story & narration, reviews the exact model/language proposal, then separately approves finite spending. A script or section is not required first. Execution also requires a supported saved profile, enabled provider, API key and local audio tools. None of that host setup is verified by this context. A transcript remains an unreviewed suggestion; words, timing and narration acceptance stay separate.", },
       generatedSourceIntent: {
         meaning: "future_synthesis_intent_only", configurationEnablesSynthesis: false,
         guidance: "A generated source choice, voice or speech profile records intent; configuring them or an API key does not enable synthesis. An authenticated human can attach an existing verified OpenSlate recording or supply externally generated audio. Neither action creates new audio.",

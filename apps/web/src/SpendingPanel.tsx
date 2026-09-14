@@ -10,7 +10,7 @@ import type { SpendingCandidate, SpendingReview, SpendingState } from "./spendin
 import type { ProjectSnapshot } from "./model";
 import "./spending.css";
 
-type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void };
+type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; focus?: { candidateId: string; requestId: string } };
 export function SpendingPanel(props: Props) { return <SpendingWorkspace key={props.snapshot.project.id} {...props} />; }
 function ProjectBudgetControls({ projectId, budget, disabled, execute }: { projectId: string; budget: SpendingState["projectBudget"]; disabled: boolean; execute(command: PendingCommand): void }) {
   const [dollars, setDollars] = useState(spendingMoney(budget.capMicros).slice(1, -4));
@@ -28,13 +28,21 @@ function ProjectBudgetControls({ projectId, budget, disabled, execute }: { proje
     {error && <p role="alert" className="form-error">{error}</p>}
   </details>;
 }
-function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
+function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
   const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/spending`;
   const [state, setState] = useState<SpendingState | null>(null), [loadError, setLoadError] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [review, setReview] = useState<SpendingReview | null>(null), [reviewError, setReviewError] = useState("");
   const [offsets, setOffsets] = useState({ candidates: 0, allowances: 0 }), [refresh, setRefresh] = useState(0);
+  const [focusCandidateId, setFocusCandidateId] = useState<string | null>(null);
+  const focusedRequest = useRef<string | null>(null), selectedFocus = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focus || focusedRequest.current === focus.requestId) return;
+    focusedRequest.current = focus.requestId; selectedFocus.current = null;
+    setFocusCandidateId(focus.candidateId); setSelected([]); setReview(null); setReviewError("");
+    setOffsets(value => ({ ...value, candidates: 0 })); setRefresh(value => value + 1);
+  }, [focus?.candidateId, focus?.requestId]);
   const registry = pendingCommandsFor(api, "spending");
   const slot = useSyncExternalStore(useCallback(listener => registry.subscribe(projectId, listener), [registry, projectId]),
     useCallback(() => registry.snapshot(projectId), [registry, projectId]));
@@ -50,13 +58,23 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const next = await api.request<SpendingState>(`${base}?candidateOffset=${offsets.candidates}&allowanceOffset=${offsets.allowances}`, { signal: abort.signal });
-        if (!abort.signal.aborted) { setState(next); setLoadError(""); }
+        const query = new URLSearchParams({ allowanceOffset: String(offsets.allowances),
+          ...(focusCandidateId ? { focusCandidateId } : { candidateOffset: String(offsets.candidates) }) });
+        const next = await api.request<SpendingState>(`${base}?${query}`, { signal: abort.signal });
+        if (!abort.signal.aborted) {
+          setState(next); setLoadError("");
+          if (focusCandidateId && next.focus?.candidateId === focusCandidateId && selectedFocus.current !== focusedRequest.current) {
+            const candidate = next.candidates.find(item => item.candidateId === focusCandidateId);
+            selectedFocus.current = focusedRequest.current;
+            setSelected(candidate && canSelectSpending(candidate) ? [candidate.candidateId] : []);
+            document.getElementById("spending-title")?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
       } catch (error) { if (!abort.signal.aborted) setLoadError(errorText(error)); }
       finally { if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 4000); }
     };
     setState(null); void poll(); return () => { abort.abort(); clearTimeout(timer); };
-  }, [api, base, offsets.candidates, offsets.allowances, refresh, snapshot.project.headVersion]);
+  }, [api, base, offsets.candidates, offsets.allowances, focusCandidateId, refresh, snapshot.project.headVersion]);
   function execute(command: PendingCommand) {
     if (recoveryReadOnly) return;
     setReviewError("");
@@ -71,18 +89,21 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
     setReview(null); setReviewError("");
     setSelected(ids => ids.includes(candidate.candidateId) ? ids.filter(id => id !== candidate.candidateId) : [...ids, candidate.candidateId]);
   };
-  const page = (kind: "candidates" | "allowances", next: number) => { setSelected([]); setReview(null); setOffsets(value => ({ ...value, [kind]: next })); };
+  const page = (kind: "candidates" | "allowances", next: number) => { setSelected([]); setReview(null);
+    if (kind === "candidates") setFocusCandidateId(null);
+    setOffsets(value => ({ ...value, [kind]: next })); };
   const rowLabel = (candidate: SpendingCandidate) => {
     const shotIndex = snapshot.project.shots.findIndex(shot => shot.id === candidate.shotId);
     return `${shotIndex >= 0 ? `Shot ${shotIndex + 1}` : candidate.alias} · ${spendingOperationLabel(candidate.operation)}`;
   };
-  if (state && !state.coverage.candidates.total && !state.coverage.allowances.total && !slot.command && !slot.error && !review && !slot.lastSuccess) return null;
+  if (state && !state.coverage.candidates.total && !state.coverage.allowances.total && !slot.command && !slot.error && !review && !slot.lastSuccess && !focusCandidateId) return null;
   return <section className="spending-panel" aria-labelledby="spending-title">
     <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">Review generation costs</h3></div><button className="text-button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)}>Refresh costs</button></div>
     <p>Approve spending for specific work. Permission to generate the exact creative work remains separate, as does keyframe review before video generation.</p>
     <p className="spending-disabled">Generation also requires enabled provider configuration, available local tools, a configured API key and sufficient project budget. An allowance does not provide that setup, accept narration or authorize a new creative change.</p>
     {!!(loadError || reviewError || slot.error) && <p role="alert" className="form-error">{loadError || reviewError || errorText(slot.error)}</p>}
     {!state && !loadError && <p role="status">Loading current work and saved allowances…</p>}
+    {state?.focus && <p role="status">{state.focus.found ? "Showing the work from your recording review. Review its allowance below before approving spending." : "That recording operation is no longer current. Return to its recording review before selecting new work."}</p>}
     {slot.command && <div className="notice warning"><span>{slot.running ? "Saving your exact spending request…" : "The result was not confirmed. Retry the saved request to check its outcome."}</span>{!slot.running && <button disabled={recoveryReadOnly} onClick={() => execute(slot.command!)}>Retry same spending action</button>}</div>}
     {slot.lastSuccess && !slot.command && <p role="status">Your spending change was recorded.</p>}
     {state && <><p className="spending-budget">Project estimate limit: <strong>{spendingMoney(state.projectBudget.capMicros)}</strong> · Reserved or committed: {spendingMoney(state.projectBudget.committedMicros)}. This independent project limit is not raised by an allowance.</p>
@@ -101,7 +122,7 @@ function SpendingWorkspace({ api, snapshot, onChanged }: Props) {
         catch (error) { setReviewError(errorText(error)); }
       }}>Review allowance for {selected.length} {selected.length === 1 ? "item" : "items"}</button><button className="text-button" disabled={busy} onClick={() => { setSelected([]); setReviewError(""); }}>Clear selected work</button></div>}
       {spendingPage(state.coverage.candidates, 100).visible && <nav className="spending-pagination" aria-label="Generation work pages"><span>{spendingPage(state.coverage.candidates, 100).label}</span>
-        <button disabled={busy || offsets.candidates === 0} onClick={() => page("candidates", Math.max(0, offsets.candidates - 100))}>Previous work</button>
+        <button disabled={busy || state.coverage.candidates.offset === 0} onClick={() => page("candidates", Math.max(0, state.coverage.candidates.offset - 100))}>Previous work</button>
         <button disabled={busy || state.coverage.candidates.nextOffset === null} onClick={() => page("candidates", state.coverage.candidates.nextOffset!)}>Next work</button></nav>}
     </>}
     {review && <div className="spending-review" aria-labelledby="allowance-review-title"><h4 id="allowance-review-title">Approve this spending allowance</h4>

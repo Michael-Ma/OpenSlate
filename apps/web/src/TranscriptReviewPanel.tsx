@@ -17,7 +17,11 @@ const errorText = (error: unknown) => error instanceof ApiError ? narrationError
 export function TranscriptReviewPanel(props: Props) {
   return props.row.audio ? <TranscriptReview key={props.row.audio.id} {...props} audioId={props.row.audio.id} /> : null;
 }
-function TranscriptReview({ api, projectId, row, disabled, useSelection, audioId }: Props & { audioId: string }) {
+/** An independent recording can be read without creating a section or granting adoption authority. */
+export function TranscriptViewer(props: { api: StudioApi; projectId: string; audioId: string }) {
+  return <TranscriptReview key={`${props.projectId}:${props.audioId}`} {...props} disabled />;
+}
+function TranscriptReview({ api, projectId, row, disabled, useSelection, audioId }: Omit<Props, "row" | "useSelection"> & { audioId: string; row?: NarrationSegment; useSelection?: Props["useSelection"] }) {
   const base = `/api/projects/${encodeURIComponent(projectId)}/narration`;
   const [open, setOpen] = useState(false), [refresh, setRefresh] = useState(0);
   const [list, setList] = useState<TranscriptList | null>(null), [listError, setListError] = useState(""), [listBusy, setListBusy] = useState(false);
@@ -73,7 +77,7 @@ function TranscriptReview({ api, projectId, row, disabled, useSelection, audioId
     } catch (error) { if (!abort.signal.aborted) setListError(errorText(error)); } finally { if (!abort.signal.aborted) setListBusy(false); }
   }
   function adopt(action: "words" | "timing") {
-    if (!ready || !preview || disabled) return;
+    if (!ready || !preview || disabled || !row || !useSelection) return;
     try { useSelection(action, transcriptSelectionFields(row, preview, action)); } catch (error) { setPreviewError(errorText(error)); }
   }
   const chooseStart = (index: number) => { setFirst(String(index + 1)); if (end <= index) setLast(String(index + 1)); };
@@ -84,7 +88,7 @@ function TranscriptReview({ api, projectId, row, disabled, useSelection, audioId
       <div className="narration-actions"><button className="text-button" disabled={listBusy} onClick={() => setRefresh(value => value + 1)}>Refresh transcripts</button>
         {list?.coverage.nextOffset !== null && list && <button className="button" disabled={listBusy} onClick={() => void more()}>Load more transcripts</button>}</div>
       {listError && <p role="alert">{listError}</p>}{listBusy && <p role="status">Loading transcripts…</p>}
-      {list && !list.candidates.length && <p>No completed transcript is listed for this recording{list.coverage.nextOffset !== null ? " on this page. Load more to continue." : ". New transcription is not enabled here."}</p>}
+      {list && !list.candidates.length && <p>No completed transcript is listed for this recording{list.coverage.nextOffset !== null ? " on this page. Load more to continue." : " yet."}</p>}
       {!!list?.candidates.length && <label>Transcript<select value={selected} onChange={event => { setSelected(event.target.value); setOffset(0); setPageHistory([]); setFirst(""); setLast(""); }}><option value="">Choose a transcript</option>{list.candidates.map((value, index) => <option key={value.id} value={value.id}>Transcript {index + 1} · {value.wordCount} words · {value.reportedLanguage} · {value.id.slice(0, 8)}</option>)}</select></label>}
       {candidate && <><div className="transcript-range"><label>First word<input aria-label="First transcript word" inputMode="numeric" value={first} onChange={event => setFirst(event.target.value)} /></label><label>Last word<input aria-label="Last transcript word" inputMode="numeric" value={last} onChange={event => setLast(event.target.value)} /></label><span>Choose one continuous range, from 1 to {candidate.wordCount}.</span></div>
         {pageError && <p role="alert">{pageError}</p>}{!page && !pageError && <p role="status">Loading recognized words…</p>}
@@ -96,12 +100,12 @@ function TranscriptReview({ api, projectId, row, disabled, useSelection, audioId
           <div className="narration-actions"><button className="button" disabled={!pageHistory.length} onClick={() => { const previous = pageHistory.at(-1); if (previous !== undefined) { setOffset(previous); setPageHistory(values => values.slice(0, -1)); } }}>Previous words</button><span>{page.words.length ? `${page.page.offset + 1}–${page.page.offset + page.page.returned}` : "0"} of {page.page.total}</span><button className="button" disabled={page.page.nextOffset === null} onClick={() => { if (page.page.nextOffset !== null) { setPageHistory(values => [...values, offset]); setOffset(page.page.nextOffset); } }}>Next words</button></div></>}
         {first && last && !rangeValid && <p role="alert">Choose a first and last word within this transcript, in that order.</p>}
         {previewError && <p role="alert">{previewError}</p>}{rangeValid && !ready && !previewError && <p role="status">Checking this selection…</p>}
-        {ready && preview && <><div className="transcript-compare"><div><h4>Saved script</h4><p>{row.script.text || "This section has no words yet."}</p></div><div><h4>Recognized words to use</h4>{preview.text === null ? <p>Too many words for one section. Choose fewer words to use them as your script.</p> : <p>{preview.text}</p>}</div></div>
+        {ready && preview && <><div className="transcript-compare">{row && <div><h4>Saved script</h4><p>{row.script.text || "This section has no words yet."}</p></div>}<div><h4>Recognized words{row ? " to use" : ""}</h4>{preview.text === null ? <p>Too many words for one section. Choose fewer words to use them as your script.</p> : <p>{preview.text}</p>}</div></div>
           {preview.warnings.map(issue => <p className="transcript-warning" key={issue.code}>{transcriptIssueText(issue.code)}</p>)}
-          <p>{preview.timing.startSample !== null && preview.timing.endSample !== null ? `Suggested recording range: ${sampleSeconds(preview.timing.startSample)}–${sampleSeconds(preview.timing.endSample)}s.` : "No usable recording range is available for this selection."} The section's video position stays the same.</p>
+          <p>{preview.timing.startSample !== null && preview.timing.endSample !== null ? `Suggested recording range: ${sampleSeconds(preview.timing.startSample)}–${sampleSeconds(preview.timing.endSample)}s.` : "No usable recording range is available for this selection."}{row ? " The section's video position stays the same." : ""}</p>
           {!preview.timing.allowed && <div className="transcript-warning" role="status">{reasons.map(reason => <p key={reason}>{reason}</p>)}<p>Choose a smaller valid range, or enter recording timing manually.</p>{preview.timing.issueCoverage.total > preview.timing.issueCoverage.returned && <p>More selected words have timing issues. Review their word pages for details.</p>}</div>}
-          {disabled && <p className="field-help">Open a current narration session and save or revert edits before using this selection.</p>}
-          <div className="narration-actions"><button className="button" disabled={disabled || !preview.writing.allowed} onClick={() => adopt("words")}>Use recognized words</button><button className="button" disabled={disabled || !preview.timing.allowed} onClick={() => adopt("timing")}>Use suggested timing</button></div></>}
+          {row && disabled && <p className="field-help">Open a current narration session and save or revert edits before using this selection.</p>}
+          {row && useSelection ? <div className="narration-actions"><button className="button" disabled={disabled || !preview.writing.allowed} onClick={() => adopt("words")}>Use recognized words</button><button className="button" disabled={disabled || !preview.timing.allowed} onClick={() => adopt("timing")}>Use suggested timing</button></div> : <p className="field-help">To use these suggestions, add or choose a section above, choose its recording source and attach this recording. Review words and timing separately in that section.</p>}</>}
       </>}
     </div>}
   </details>;

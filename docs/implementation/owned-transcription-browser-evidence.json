@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "date": "2026-09-13",
+  "scope": "Authenticated recording proposal/review routes, bounded exact history and upload-first browser components",
+  "fullCheckout": {
+    "passed": 1653,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "addedTests": 60,
+    "durationMilliseconds": 145468.735,
+    "allBuildsAndTypechecksPassed": true,
+    "installedCodexProbe": "passed; no model turn",
+    "unchangedSourceFiles": 365
+  },
+  "focusedChecks": {
+    "newHttp": 23,
+    "newProjection": 21,
+    "newWebModel": 13,
+    "newSpendingPage": 3,
+    "adjacentHttpContextRecovery": 64,
+    "combinedWebModels": 45,
+    "overlapFullSuite": true
+  },
+  "independentReview": {
+    "httpSessionAndSpending": "passed",
+    "projectionAndUi": "root reviewed agent-authored projection and UI; separate reviewer approved HTTP/session/spending"
+  },
+  "browser": {
+    "connected": true,
+    "sectionlessRecordingWorkflowVisible": true,
+    "explicitNamedRequestContinued": true,
+    "upload": "denied by browser permission policy; no workaround attempted",
+    "planReviewSpendingTranscriptAndReopen": "not exercised",
+    "ownedTabAndServerClosed": true,
+    "syntheticCalls": 0,
+    "fixtureLimitations": [
+      "Focused fixture omitted unrelated image and clip routes"
+    ],
+    "readOnlyDatabaseAudit": {
+      "explicitNamedContinuation": true,
+      "originalHoldTransferred": true,
+      "newNarrationHoldPreserved": true,
+      "narrationSessions": 1,
+      "zeroRecordKinds": [
+        "narration_audio",
+        "narration_segment",
+        "narration_acceptance",
+        "owned_transcription_proposal",
+        "owned_transcription_review",
+        "owned_transcription_application",
+        "grant",
+        "candidate",
+        "attempt",
+        "external_allowance",
+        "external_allowance_consumption",
+        "allowance_consumption",
+        "transcript_candidate"
+      ],
+      "allSyntheticCallCountersZero": true
+    }
+  },
+  "actualNativeStartsThisSlice": 0,
+  "historicalNativeStarts": 24,
+  "liveMediaCalls": 0,
+  "pushed": false,
+  "next": "Viggle H3 integration, then versioned conversational recording preparation and speech chunks"
+}
