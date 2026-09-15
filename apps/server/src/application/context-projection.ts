@@ -32,6 +32,7 @@ export interface DirectorContextProjection {
   request: { id: string; scopeIds: string[]; editing: boolean; state: string };
   plan: PlanMetadata;
   profiles: ProviderProfile[];
+  preferredProfileIds?: Record<string, string | null>;
   applicationCapabilities: DirectorApplicationCapabilities;
   page: { offset: number; returned: number; total: number; nextOffset: number | null; offsetUnit: "records" | "utf16_characters" };
   items: unknown[];
@@ -145,7 +146,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     const saved = service.store.getProject(projectId);
     const active = saved.activePlanId ? service.store.get<{ projectId: string; compiled: CompiledPlan }>("plan", saved.activePlanId) : undefined;
     invariant(!saved.activePlanId || active?.projectId === projectId, "CONTEXT_STATE_INVALID", "Active plan is missing or belongs to another project");
-    const lock = service.store.get<{ projectId: string; profiles: ProviderProfile[] }>("capability_lock", saved.capabilityLockId);
+    const lock = service.store.get<{ projectId: string; profiles: ProviderProfile[]; preferredProfileIds?: Record<string, string | null> }>("capability_lock", saved.capabilityLockId);
     invariant(lock?.projectId === projectId && Array.isArray(lock.profiles), "CONTEXT_STATE_INVALID", "Project capability lock is missing");
     const logical = service.store.get<{ projectId: string; aliases: Record<string, string> }>("logical_ids", projectId);
     invariant(!logical || logical.projectId === projectId, "CONTEXT_STATE_INVALID", "Alias registry belongs to another project");
@@ -163,6 +164,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       headVersion, revisionId, activePlanId, cursor,
       guard: { projectId, headVersion, revisionId, activePlanId, graphDigest: plan.graphDigest, capabilityLockId, applicationCapabilitiesDigest: digest(applicationCapabilities), domainCursor, dataDigest: "" },
       request: { id: request.id, scopeIds: request.scopeIds, editing: request.editing, state: request.state }, plan, profiles: lock.profiles,
+      ...(lock.preferredProfileIds ? { preferredProfileIds: lock.preferredProfileIds } : {}),
       applicationCapabilities,
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
       execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,

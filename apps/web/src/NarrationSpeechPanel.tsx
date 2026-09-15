@@ -1,3 +1,4 @@
+import { useProjectRefreshVersion } from "./project-updates";
 import { useEffect, useRef, useState } from 'react';
 import type { StudioApi } from './api';
 import type { NarrationView } from './narration-model';
@@ -10,6 +11,7 @@ interface Props { api: StudioApi; projectId: string; view: NarrationView; disabl
   execute(command: PendingCommand): void; onReviewSpending?(candidateId: string): void }
 const errorText = (error: unknown) => error instanceof Error ? error.message : 'The speech plan could not be loaded.';
 export function NarrationSpeechPanel({ api, projectId, view, disabled, completion, execute, onReviewSpending }: Props) {
+  const projectUpdate = useProjectRefreshVersion();
   const base = `/api/projects/${encodeURIComponent(projectId)}/narration`;
   const [options, setOptions] = useState<SpeechOptions | null>(null), [page, setPage] = useState<SpeechPage | null>(null);
   const [sectionId, setSectionId] = useState(''), [profileId, setProfileId] = useState(''), [voice, setVoice] = useState('cedar'), [instructions, setInstructions] = useState('');
@@ -17,7 +19,7 @@ export function NarrationSpeechPanel({ api, projectId, view, disabled, completio
   const [error, setError] = useState(''), [detailError, setDetailError] = useState(''), [checking, setChecking] = useState(false), [loadingMore, setLoadingMore] = useState(false);
   const observed = useRef(0), moreRequest = useRef<AbortController | null>(null);
   useEffect(() => () => moreRequest.current?.abort(), []);
-  useEffect(() => { const timer = setInterval(() => { if (!document.hidden) setRefresh(value => value + 1); }, 8000); return () => clearInterval(timer); }, []);
+  useEffect(() => { setRefresh(value => value + 1); }, [projectUpdate]);
   useEffect(() => {
     if (completion.settledVersion <= observed.current) return; observed.current = completion.settledVersion;
     if (!completion.lastSuccess) return;

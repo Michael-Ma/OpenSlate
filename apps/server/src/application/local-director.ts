@@ -10,10 +10,13 @@ import { createDirectorInput } from "./director-input.js";
 import { directorInputDigest } from "./director-input-identity.js";
 import { DirectorImageProjector } from "./director-images.js";
 import type { SelectedDirectorImage } from "./director-images.js";
-import type { ActorContext } from "@openslate/core";
+import type { ActorContext, ToolContractVersion } from "@openslate/core";
 import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
+import { createDirectorSkillLock } from "./director-capabilities.js";
+import type { SkillCapabilityLock } from "@openslate/director";
+import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
 interface SavedSelection { id: string; projectId: string; selection: LocalDirectorSelection; digest: string }
@@ -97,8 +100,64 @@ export class LocalDirectorController {
   settings(projectId: string) {
     this.service.store.getProject(projectId);
     const saved = this.service.store.get<SavedSelection>("project_director_selection", projectId);
-    return { selection: saved?.selection ?? { mode: "fake" as const }, defaults: this.defaults, locked: this.locked(projectId),
+    const busy = this.configuring.has(projectId) || this.conversationBusy(projectId);
+    return { selection: saved?.selection ?? { mode: "fake" as const }, selectionDigest: saved?.digest ?? digest({ mode: "fake" }),
+      busy, changeAvailable: !busy, changeAppliesTo: "next_turn" as const, defaults: this.defaults, locked: this.locked(projectId),
       modelCalls: this.service.store.list("native_model_start", projectId).length };
+  }
+  private conversationBusy(projectId: string): boolean {
+    return !!this.service.store.db.prepare("SELECT 1 FROM entities WHERE kind='director_turn' AND project_id=? AND json_extract(body,'$.state') IN ('queued','running') LIMIT 1").get(projectId);
+  }
+  /** Explicit local choice for the next turn. Never interrupts or resumes an existing turn. */
+  async changeSelection(projectId: string, supplied: { expectedSelectionDigest: string; selection: LocalDirectorSelection }, key: string) {
+    const input = snapshotOwnedTranscriptionData(supplied, 16384);
+    invariant(input && Object.keys(input).length === 2 && /^[a-f0-9]{64}$/.test(input.expectedSelectionDigest)
+      && typeof key === "string" && key.length > 0 && key.length <= 160, "VALIDATION_ERROR", "Choose the displayed director and one command identity");
+    const selection = this.validate(input.selection), identity = digest(selection), requestDigest = digest(input), store = this.service.store;
+    this.service.recovery.assertWritable(projectId); store.getProject(projectId);
+    const scope = `local-user:${projectId}:director-change`;
+    const previous = store.commandReplay<{ selectionDigest: string }>(scope, key, requestDigest);
+    if (previous) return { ...this.settings(projectId), readiness: null, readinessSelectionDigest: null,
+      selectionMatchesCommand: this.settings(projectId).selectionDigest === previous.result.selectionDigest };
+    invariant(!this.configuring.has(projectId) && !this.conversationBusy(projectId), "DIRECTOR_SETUP_BUSY", "Wait for the current conversation and setup to finish");
+    const before = this.settings(projectId);
+    invariant(before.selectionDigest === input.expectedSelectionDigest, "DIRECTOR_SELECTION_STALE", "Director choices changed; refresh before applying");
+    const latestLock = () => store.list<{ id: string; lock: SkillCapabilityLock }>("director_skill_lock", projectId).at(-1);
+    const oldLock = latestLock();
+    const turns = () => store.db.prepare("SELECT count(*) count,coalesce(max(rowid),0) newest FROM entities WHERE kind='director_turn' AND project_id=?").get(projectId);
+    const turnDigest = digest(turns());
+    this.configuring.add(projectId);
+    try {
+      const prepared = selection.mode === "native" ? await this.prepare(projectId, selection) : null;
+      const changedMode = before.selection.mode !== selection.mode;
+      invariant(!oldLock || ["1.0.0", "2.0.0", "3.0.0"].includes(oldLock.lock.compatibility.toolContract), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
+      const replacement = changedMode && oldLock ? createDirectorSkillLock({ repositoryRoot: this.config.repositoryRoot,
+        snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
+        runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" }, oldLock.lock.compatibility.toolContract as ToolContractVersion).lock : null;
+      store.transaction(() => {
+        this.service.recovery.assertWritable(projectId);
+        store.command(scope, key, requestDigest, () => {
+          invariant(!this.conversationBusy(projectId) && digest(turns()) === turnDigest, "DIRECTOR_SETUP_BUSY", "A conversation started during setup; wait and refresh");
+          invariant(this.settings(projectId).selectionDigest === input.expectedSelectionDigest && latestLock()?.id === oldLock?.id,
+            "DIRECTOR_SELECTION_STALE", "Director choices or guidance changed during setup");
+          if (identity !== before.selectionDigest) {
+            if (replacement) {
+              store.insert("director_skill_lock", replacement.id, projectId, { id: replacement.id, projectId, lock: replacement });
+              store.appendEvent(projectId, "director.lock_installed", { lockId: replacement.id, lockDigest: replacement.lockDigest,
+                previousLockId: oldLock!.id, source: "local_director_change", principalId: "local-user" });
+            }
+            store.put("project_director_selection", projectId, projectId, { id: projectId, projectId, selection, digest: identity });
+            for (const epoch of store.list<{ id: string; state: string }>("epoch", projectId)) if (epoch.state !== "revoked")
+              store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+            store.appendEvent(projectId, "director.configured", { mode: selection.mode, model: selection.model ?? null,
+              selectionDigest: identity, appliesTo: "next_turn", principalId: "local-user" });
+          }
+          return { selectionDigest: identity };
+        });
+      });
+      this.configuring.delete(projectId);
+      return { ...this.settings(projectId), readiness: prepared?.readiness ?? null, readinessSelectionDigest: identity, selectionMatchesCommand: true };
+    } finally { this.configuring.delete(projectId); }
   }
   tools(projectId: string) { return this.toolSettings.status(projectId); }
   upgradeTools(projectId: string, input: DirectorToolsUpgrade, key: string) {

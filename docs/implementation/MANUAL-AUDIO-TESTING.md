@@ -24,7 +24,7 @@ Do not load `.env.local` for this rehearsal. All real media execution switches a
 
 Open [OpenSlate locally](http://127.0.0.1:3001). The launcher prints the local token file's path. Open that file yourself and paste its contents into the connection screen; do not send the token in chat. Stop the server with Ctrl+C. Restart using the same command and data directory.
 
-When creating a new project, expand **Media models** and select the speech and transcription profiles from the example. Image/video can remain the defaults. Existing projects retain their saved model choices; loading a new profile file does not replace them.
+When creating a new project, expand **Media models** and select the speech and transcription profiles from the example. Image/video can remain the defaults. Existing projects retain their saved model choices; loading a new profile file does not replace them. Use **Project settings → Models & usage** to preview and apply a change. Audio work with an existing dedicated review is preserved and requires a new audio proposal/review to adopt a different model.
 
 OpenSlate currently tests Codex **0.153.4**. The installed Codex app updated to **0.154.0-alpha.6.2** during this work, so its bundled binary will be rejected by the compatibility check. Keep a separate pinned installation for this rehearsal:
 

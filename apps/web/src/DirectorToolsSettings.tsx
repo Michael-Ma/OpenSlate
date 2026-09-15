@@ -1,3 +1,4 @@
+import { useProjectRefreshVersion } from "./project-updates";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
@@ -9,6 +10,7 @@ import type { PendingCommand } from "./pending-command";
 interface ToolStatus { currentVersion: string; availableVersion: string; lockId: string | null; lockDigest: string | null; upgradeAvailable: boolean; busy: boolean }
 
 export function DirectorToolsSettings({ api, projectId }: { api: StudioApi; projectId: string }) {
+  const projectUpdate = useProjectRefreshVersion();
   const recoveryReadOnly = useRecoveryReadOnly();
   const base = `/api/projects/${encodeURIComponent(projectId)}/director/tools`;
   const registry = pendingCommandsFor(api, "director-tools");
@@ -16,14 +18,14 @@ export function DirectorToolsSettings({ api, projectId }: { api: StudioApi; proj
     useCallback(() => registry.snapshot(projectId), [registry, projectId]));
   const [status, setStatus] = useState<ToolStatus | null>(null), [loadError, setLoadError] = useState("");
   useEffect(() => {
-    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const abort = new AbortController();
     const refresh = async () => {
       try { const result = await api.request<ToolStatus>(base, { signal: abort.signal }); if (!abort.signal.aborted) { setStatus(result); setLoadError(""); } }
       catch (error) { if (!abort.signal.aborted) setLoadError(errorText(error)); }
-      finally { if (!abort.signal.aborted) timer = setTimeout(() => void refresh(), 4000); }
+
     };
-    void refresh(); return () => { abort.abort(); clearTimeout(timer); };
-  }, [api, base, slot.settledVersion]);
+    void refresh(); return () => { abort.abort(); };
+  }, [api, base, slot.settledVersion, projectUpdate]);
   function execute(command: PendingCommand) {
     if (recoveryReadOnly) return;
     void registry.run(projectId, command, saved => api.request(saved.path, { method: "POST", body: saved.body, key: saved.key }),

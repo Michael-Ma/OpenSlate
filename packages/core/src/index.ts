@@ -8,3 +8,5 @@ export * from "./planning/index.js";
 export * from "./planning/transcription-composition.js";
 export * from "./planning/speech-composition.js";
 export * from "./tools.js";
+
+export * from "./planning/model-profile-composition.js";

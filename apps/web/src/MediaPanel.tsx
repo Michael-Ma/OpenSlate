@@ -1,3 +1,4 @@
+import { useProjectRefreshVersion } from "./project-updates";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { StudioApi } from "./api";
@@ -27,6 +28,7 @@ function OwnedPlayback({ api, projectId, artifact }: { api: StudioApi; projectId
 type MediaPanelProps = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; onContinue?: ((requestId: string) => void) | undefined };
 export function MediaPanel(props: MediaPanelProps) { return <MediaWorkspace key={props.snapshot.project.id} {...props} />; }
 function MediaWorkspace({ api, snapshot, onChanged, onContinue }: MediaPanelProps) {
+  const projectUpdate = useProjectRefreshVersion();
   const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/media`;
   const [state, setState] = useState<MediaState | null>(null), [loadError, setLoadError] = useState("");
@@ -48,14 +50,14 @@ function MediaWorkspace({ api, snapshot, onChanged, onContinue }: MediaPanelProp
   }, [registry, slot.settledVersion, slot.lastSuccess, slot.lastWasUpload]);
   const renderNode = snapshot.plan?.nodes?.find(node => node.kind === "render");
   useEffect(() => {
-    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const abort = new AbortController();
     const poll = async () => {
       try { const next = await api.request<MediaState>(base, { signal: abort.signal }); if (!abort.signal.aborted) { setState(next); setLoadError(""); } }
       catch (error) { if (!abort.signal.aborted) setLoadError(errorText(error)); }
-      finally { if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 4000); }
+
     };
-    void poll(); return () => { abort.abort(); clearTimeout(timer); };
-  }, [api, base, refresh, snapshot.project.headVersion]);
+    void poll(); return () => { abort.abort(); };
+  }, [api, base, refresh, snapshot.project.headVersion, projectUpdate]);
   function execute(command: PendingCommand) {
     if (recoveryReadOnly) return;
     void registry.run(projectId, command, saved => saved.file ? api.upload(saved.path, saved.file, saved.key)

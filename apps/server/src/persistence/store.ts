@@ -671,6 +671,7 @@ export class Store {
       if (["viggle_h3_execution_mapping", "viggle_h3_execution_dispatch", "viggle_h3_execution_submit", "viggle_h3_execution_observation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Viggle execution receipts are immutable");
       if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(kind)) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Native image receipts are immutable");
+      if (kind === "project_model_preview") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Model previews are immutable");
       if (kind === "viggle_h3_poll_schedule") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])

@@ -190,6 +190,40 @@ export class Engine {
     });
   }
 
+  /** Trusted settings publication. Pending bindings lose authority; no candidate is minted here. */
+  installModelSettingsPlan(projectId: string, planId: string, compiled: CompiledPlan, resetNodeIds: readonly string[]): void {
+    this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      const project = this.store.getProject(projectId), reset = new Set(resetNodeIds);
+      invariant(reset.size === resetNodeIds.length && reset.size > 0, "MODEL_SETTINGS_INVALID", "Expected distinct pending work");
+      assertOwnedTranscriptionInstallation(this.store, project, planId, compiled, {});
+      assertNarrationSpeechInstallation(this.store, project, planId, compiled, {});
+      const inventory = this.store.db.prepare("SELECT id,length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='node_binding' AND project_id=? AND json_extract(body,'$.state')='active' AND json_extract(body,'$.planId')=? ORDER BY rowid LIMIT 1601").all(projectId, project.activePlanId) as { id: string; bytes: number }[];
+      invariant(inventory.length <= 1600 && inventory.every(row => row.bytes <= 65536) && inventory.reduce((total, row) => total + row.bytes, 0) <= 16 * 1024 ** 2, "MODEL_SETTINGS_LIMIT", "Current plan exceeds its settings bound");
+      const previous = inventory.map(row => this.store.get<NodeBinding>("node_binding", row.id)!);
+      invariant(previous.length === compiled.nodes.length && !this.store.get("plan", planId), "MODEL_SETTINGS_STALE", "Current plan changed");
+      const active = this.store.db.prepare("SELECT DISTINCT json_extract(body,'$.nodeId') nodeId FROM entities WHERE kind='attempt' AND project_id=? AND json_extract(body,'$.phase') NOT IN ('succeeded','failed') LIMIT 1601").all(projectId) as { nodeId: string }[];
+      invariant(active.length <= 1600, "MODEL_SETTINGS_LIMIT", "Active work exceeds its settings bound");
+      const activeIds = new Set(active.map(row => row.nodeId));
+      for (const node of compiled.nodes) {
+        const old = previous.find(binding => binding.id === node.id);
+        invariant(old, "MODEL_SETTINGS_STALE", "Model settings cannot add or remove operations");
+        if (reset.has(node.id)) {
+          const candidate = old.candidateId ? this.store.get<Candidate>("candidate", old.candidateId) : undefined;
+          invariant(Object.keys(old.outputs).length === 0 && !activeIds.has(node.id)
+            && (!candidate || !this.store.get("owned_transcription_review", candidate.grantId) && !this.store.get("narration_speech_review", candidate.grantId)),
+          "MODEL_SETTINGS_STALE", "Completed, running and reviewed audio work must retain its model");
+        } else invariant(canonical(old.node) === canonical(node) && !node.inputs.some(input => input.source.kind === "output" && reset.has(input.source.nodeId)),
+          "MODEL_SETTINGS_STALE", "Preserved operations must retain their exact dependencies");
+        this.store.put("node_binding", node.id, projectId, { ...old, planId, node,
+          ...(reset.has(node.id) ? { candidateId: null, outputs: {} } : {}) });
+      }
+      invariant([...reset].every(id => compiled.nodes.some(node => node.id === id)), "MODEL_SETTINGS_INVALID", "Pending work is absent");
+      this.store.insert("plan", planId, projectId, { id: planId, projectId, compiled });
+      this.store.appendEvent(projectId, "execution.plan_installed", { planId, source: "model_settings", generationAuthorized: false });
+    });
+  }
+
   setHold(projectId: string, value: { scopeId: string; ownerId: string; id?: string }): Hold {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId, value.ownerId);

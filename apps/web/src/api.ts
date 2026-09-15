@@ -1,3 +1,4 @@
+import { EventStreamParser, type StreamEvent } from "./event-stream";
 import { errorMessage, hex } from "./model";
 import type { Artifact } from "./model";
 
@@ -10,8 +11,49 @@ type RequestOptions = { method?: "GET" | "POST"; body?: unknown; rawBody?: Blob;
 export class StudioApi {
   #token: string;
   #controllers = new Set<AbortController>();
+  #closed = false;
+  get closed(): boolean { return this.#closed; }
   constructor(token: string) { this.#token = token; }
-  close() { for (const controller of this.#controllers) controller.abort(); this.#controllers.clear(); this.#token = ""; }
+  close() { this.#closed = true; for (const controller of this.#controllers) controller.abort(); this.#controllers.clear(); this.#token = ""; }
+  async events(projectId: string, options: { after?: number; signal: AbortSignal; onOpen(): void; onEvent(event: StreamEvent): void }): Promise<void> {
+    const signal = options.signal, onOpen = options.onOpen, onEvent = options.onEvent, after = options.after;
+    if (this.#closed) throw new ApiError("SESSION_CLOSED");
+    if (!projectId || projectId.length > 160 || after !== undefined && (!Number.isSafeInteger(after) || after < 0)) throw new ApiError("INVALID_PATH");
+    const controller = new AbortController(); this.#controllers.add(controller);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined, idle: ReturnType<typeof setTimeout> | undefined;
+    const cancelReader = () => { void reader?.cancel().catch(() => {}); };
+    controller.signal.addEventListener("abort", cancelReader, { once: true });
+    const abort = () => controller.abort();
+    const activity = () => { clearTimeout(idle); idle = setTimeout(abort, 45000); };
+    signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort(); activity();
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/events`, { credentials: "omit", redirect: "error", signal: controller.signal,
+        headers: { authorization: `Bearer ${this.#token}`, accept: "text/event-stream", ...(after === undefined ? {} : { "last-event-id": String(after) }) } });
+      if (!response.ok) {
+        // These statuses are sufficient for cursor reset/auth handling; never accumulate an error page as JSON.
+        void response.body?.cancel().catch(() => {});
+        throw new ApiError(response.status === 400 ? "VALIDATION_ERROR" : response.status === 403 ? "AUTH_REQUIRED" : "EVENT_STREAM_UNAVAILABLE");
+      }
+      if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream") || !response.body) throw new ApiError("EVENT_STREAM_UNAVAILABLE");
+      if (controller.signal.aborted) throw new DOMException("Stream cancelled", "AbortError");
+      reader = response.body.getReader(); onOpen(); activity();
+      const parser = new EventStreamParser(event => { if (!controller.signal.aborted) onEvent(event); });
+      for (;;) {
+        if (controller.signal.aborted) throw new DOMException("Stream cancelled", "AbortError");
+        const next = await reader.read(); if (next.done) break;
+        activity(); parser.push(next.value);
+      }
+      parser.finish();
+      if (!controller.signal.aborted) throw new ApiError("EVENT_STREAM_ENDED");
+    } catch (error) {
+      if (signal.aborted || this.#closed) throw new DOMException("Stream cancelled", "AbortError");
+      if (error instanceof ApiError) throw error;
+      throw new ApiError("EVENT_STREAM_UNAVAILABLE");
+    } finally {
+      clearTimeout(idle); signal.removeEventListener("abort", abort); controller.abort(); controller.signal.removeEventListener("abort", cancelReader);
+      void reader?.cancel().catch(() => {}); this.#controllers.delete(controller);
+    }
+  }
   async request<T>(path: string, options: { method?: "GET" | "POST"; body?: unknown; key?: string; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
     return this.#fetch(path, options, response => response.json() as Promise<T>);
   }
@@ -20,6 +62,7 @@ export class StudioApi {
     return this.#fetch(path, { method: "POST", rawBody: file, key, ...(signal ? { signal } : {}), timeoutMs: 180000 }, response => response.json() as Promise<T>);
   }
   async #fetch<T>(path: string, options: RequestOptions, consume: (response: Response) => Promise<T>): Promise<T> {
+    if (this.#closed) throw new ApiError("SESSION_CLOSED");
     if (!path.startsWith("/api/")) throw new ApiError("INVALID_PATH");
     const controller = new AbortController(); this.#controllers.add(controller);
     const abort = () => controller.abort(); options.signal?.addEventListener("abort", abort, { once: true });

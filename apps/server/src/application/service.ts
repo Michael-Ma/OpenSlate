@@ -11,7 +11,7 @@ import type {
 } from "@openslate/core";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
-import type { ArtifactRecord } from "../execution/engine.js";
+import type { ArtifactRecord, NodeBinding } from "../execution/engine.js";
 import { projectDirectorContext } from "./context-projection.js";
 import type { DirectorContextQuery } from "./context-projection.js";
 import { selectedProviderProfiles } from "./provider-catalog.js";
@@ -240,6 +240,15 @@ export class ProductionService {
     const { before, next, proposal, compiled } = captured;
     const oldPlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
     const impact = compiled ? diffPlans(oldPlan, compiled) : [];
+    // Settings deliberately leave changed pending work without a candidate. A subsequent
+    // ordinary plan review must select a fresh grant even when the new spec is unchanged.
+    for (const change of impact) if (change.kind === "reuse") {
+      const binding = this.store.get<NodeBinding>("node_binding", change.nodeId);
+      if (binding?.state === "active" && binding.planId === before.activePlanId && binding.candidateId === null
+        && ["image", "video", "speech", "transcription"].includes(binding.node.kind)) {
+        change.kind = "replace"; change.reason = "Pending work requires fresh generation approval";
+      }
+    }
     const extra = new Set(proposal.requestNewTakes ?? []);
     invariant(extra.size === (proposal.requestNewTakes?.length ?? 0), "VALIDATION_ERROR", "Duplicate extra take requests");
     for (const id of extra) {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { canonical, digest, invariant } from "@openslate/core";
 
-export const IMPORTED_AUTHORITY_KINDS = ["message", "prepared", "epoch", "director_turn", "grant", "candidate", "external_allowance", "attempt", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application"] as const;
+export const IMPORTED_AUTHORITY_KINDS = ["message", "prepared", "epoch", "director_turn", "grant", "candidate", "external_allowance", "attempt", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application", "project_model_preview"] as const;
 export type ImportedAuthorityKind = typeof IMPORTED_AUTHORITY_KINDS[number];
 export interface VerifiedRecoveryOrigin {
   restoreId: string; backupId: string; backupManifestSha256: string; sourceDatabaseSha256: string;

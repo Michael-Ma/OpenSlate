@@ -1,3 +1,4 @@
+import { useProjectRefreshVersion } from "./project-updates";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
@@ -21,6 +22,7 @@ const message = (error: unknown) => error instanceof ApiError ? narrationError(e
 
 export function NarrationPanel(props: Props) { return <NarrationWorkspace key={props.projectId} {...props} />; }
 function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, onChanged, onContinue, onReviewSpending }: Props) {
+  const projectUpdate = useProjectRefreshVersion();
   const recoveryReadOnly = useRecoveryReadOnly();
   const base = `/api/projects/${encodeURIComponent(projectId)}/narration`;
   const registry = pendingCommandsFor(api, "narration");
@@ -55,8 +57,7 @@ function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, 
     } catch (cause) { if (mounted.current) setGeneratedError(message(cause)); }
     finally { if (mounted.current) setLoadingMore(false); }
   }
-  useEffect(() => { void load(); const timer = setInterval(() => { if (!document.hidden) void load(); }, 8000); return () => clearInterval(timer); }, [api, projectId]);
-  useEffect(() => { void load(); }, [headVersion]);
+  useEffect(() => { void load(); }, [api, projectId, headVersion, projectUpdate]);
   const observed = useRef({ registry, version: 0 });
   const changed = useRef(onChanged); changed.current = onChanged;
   useEffect(() => {

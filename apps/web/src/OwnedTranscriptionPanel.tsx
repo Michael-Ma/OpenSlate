@@ -1,3 +1,4 @@
+import { useProjectRefreshVersion } from "./project-updates";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
 import type { StudioApi } from "./api";
@@ -15,6 +16,7 @@ interface Props { api: StudioApi; projectId: string; view: NarrationView; record
 const errorText = (value: unknown) => value instanceof ApiError ? narrationError(value.code, value.message) : value instanceof Error ? value.message : "The transcription plan could not be loaded.";
 
 export function OwnedTranscriptionPanel({ api, projectId, view, recording, disabled, completion, execute, onReviewSpending }: Props) {
+  const projectUpdate = useProjectRefreshVersion();
   const base = `/api/projects/${encodeURIComponent(projectId)}/narration`;
   const [options, setOptions] = useState<TranscriptionOptions | null>(null), [page, setPage] = useState<TranscriptionProposalPage | null>(null);
   const [profileId, setProfileId] = useState(""), [language, setLanguage] = useState("auto"), [targetId, setTargetId] = useState("");
@@ -23,7 +25,7 @@ export function OwnedTranscriptionPanel({ api, projectId, view, recording, disab
   const moreRequest = useRef<AbortController | null>(null), observed = useRef(0);
   useEffect(() => () => moreRequest.current?.abort(), []);
   useEffect(() => { setTargetId(""); }, [recording?.id]);
-  useEffect(() => { const timer = setInterval(() => { if (!document.hidden) setRefresh(value => value + 1); }, 8000); return () => clearInterval(timer); }, []);
+  useEffect(() => { setRefresh(value => value + 1); }, [projectUpdate]);
   useEffect(() => {
     if (completion.settledVersion <= observed.current) return;
     observed.current = completion.settledVersion;

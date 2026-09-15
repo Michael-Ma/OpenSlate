@@ -1,3 +1,4 @@
+import { useProjectRefreshVersion } from "./project-updates";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
 import type { StudioApi } from "./api";
@@ -13,6 +14,7 @@ export const useRecoveryReadOnly = () => useContext(RecoveryReadOnly);
 export function RecoveryPanel({ api, refreshKey, onState, onChanged }: {
   api: StudioApi; refreshKey: number; onState(readOnly: boolean): void; onChanged(): void;
 }) {
+  const projectUpdate = useProjectRefreshVersion();
   const [state, setState] = useState<RecoveryState | null>(null), [loadError, setLoadError] = useState("");
   const [review, setReview] = useState<PendingCommand | null>(null), [refresh, setRefresh] = useState(0);
   const registry = pendingCommandsFor(api, "installation-recovery"), slotId = "installation";
@@ -27,7 +29,7 @@ export function RecoveryPanel({ api, refreshKey, onState, onChanged }: {
     setRefresh(value => value + 1); callbacks.current.onChanged();
   }, [slot.settledVersion, slot.lastSuccess]);
   useEffect(() => {
-    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const abort = new AbortController();
     const poll = async () => {
       try {
         const next = await api.request<RecoveryState>("/api/installation/recovery", { signal: abort.signal });
@@ -36,10 +38,10 @@ export function RecoveryPanel({ api, refreshKey, onState, onChanged }: {
         if (previous.current && previous.current !== next.state) callbacks.current.onChanged();
         previous.current = next.state;
       } catch (error) { if (abort.signal.aborted) return; setLoadError(errorText(error)); callbacks.current.onState(true); }
-      if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 5000);
+
     };
-    void poll(); return () => { abort.abort(); clearTimeout(timer); };
-  }, [api, refreshKey, refresh]);
+    void poll(); return () => { abort.abort(); };
+  }, [api, refreshKey, refresh, projectUpdate]);
   function execute(command: PendingCommand) {
     void registry.run(slotId, command, saved => api.request(saved.path, { method: "POST", body: saved.body, key: saved.key }),
       error => !(error instanceof ApiError) || ["NETWORK_ERROR", "INTERNAL_ERROR", "REQUEST_FAILED"].includes(error.code));

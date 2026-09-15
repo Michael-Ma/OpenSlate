@@ -85,7 +85,7 @@ In the project's director **Local installation** section, set **Codex account fo
 
 ## 2. Create a production project
 
-Create a new project, expand **Media models**, and select:
+Create a new project and expand **Media models**, or open an existing project’s **Project settings → Models & usage**, and select:
 
 - **Keyframes:** Codex images OR GPT Image 2 · medium keyframes.
 - **Video:** Viggle H3 · first 6-second live shot.
@@ -180,3 +180,9 @@ For each checkpoint, report pass/fail and any confusing screen:
 Do not include keys, local tokens, signed download URLs or native credential files. A blocked/uncertain run is useful validation feedback; keep its saved state for diagnosis.
 
 References: [Codex image generation and usage](https://learn.chatgpt.com/docs/image-generation), [OpenAI API authentication](https://developers.openai.com/api/reference/overview), [Viggle creation contract](https://docs.viggle.ai/v1/api-reference/videos/create-from-text). Provider access, current quotas and actual pricing are checked by you during the live run.
+
+### Changing choices and watching progress
+
+Existing projects now have **Project settings** in the header and sidebar. Preview and apply media model changes there; review the preserved work and start the next planning conversation explicitly. Director choices apply to the next idle turn. Saving settings never starts generation or grants spending. See [settings and live updates](PROJECT-SETTINGS-AND-UPDATES.md) for compatibility limits and a no-spend walkthrough.
+
+The browser uses one authenticated SSE stream while visible. **Live updates** means streaming is connected; **Periodic updates** indicates the slow reconnect fallback. Provider job polling remains separate. Restart the local app after upgrading this build, then reconnect the browser with your existing token.

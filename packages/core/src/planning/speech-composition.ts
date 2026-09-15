@@ -50,6 +50,11 @@ function copier(): (value: unknown) => unknown {
   }
   return value => copy(value, 0);
 }
+/** Shared bounded own-data capture for isolated application plan transformations. */
+export function snapshotPlanCompositionData<T>(value: T): T { return copier()(value) as T; }
+export function assertPlanCompositionContext(context: unknown): asserts context is CompileContext {
+  fields(context, ["project", "profiles", "logicalIds", "allocateId"], ["localExecution", "transcriptionInputs"]);
+}
 function wellFormed(value: string): boolean {
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index);

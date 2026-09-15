@@ -1,4 +1,7 @@
+import { registerProjectEventStream } from "./application/project-event-stream.js";
 import Fastify from "fastify";
+import { ProjectModelSettings } from "./application/project-model-settings.js";
+import type { ProjectModelPreviewInput } from "./application/project-model-settings.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -40,8 +43,6 @@ export function createApp(options: AppOptions = {}) {
   const actors = new WeakMap<object, ActorContext>();
   const recovery = options.service ? new InstallationRecoveryGuard(options.service.store) : undefined;
   const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
-  const eventStreams = new Set<() => void>();
-  app.addHook("preClose", async () => { for (const close of eventStreams) close(); });
   const service = () => { invariant(options.service, "SERVICE_UNAVAILABLE", "Application storage is not configured"); return options.service; };
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
@@ -92,6 +93,27 @@ export function createApp(options: AppOptions = {}) {
     invariant(lock?.projectId === project.id, "PROVIDER_CATALOG_INVALID", "The project provider lock is unavailable");
     return providerCatalog().projectView(lock.profiles, lock.providerSelection, lock.localExecution);
   });
+  const modelSettings = () => new ProjectModelSettings(service(), providerCatalog());
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/settings/models", async request => modelSettings().status(request.params.projectId));
+  app.post<{ Params: { projectId: string }; Body: ProjectModelPreviewInput }>("/api/projects/:projectId/settings/models/preview", {
+    schema: { body: object({ expectedHeadVersion: { type: "integer", minimum: 0 }, expectedSelectionDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string },
+      scope: { oneOf: [object({ kind: { const: "unfinished" } }, ["kind"]), object({ kind: { const: "shots" }, shotIds: { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: string } }, ["kind", "shotIds"])] } },
+      ["expectedHeadVersion", "expectedSelectionDigest", "expectedCatalogDigest", "profileIds", "scope"]) },
+  }, async (request, reply) => {
+    const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
+    request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
+    try { return await modelSettings().preview(request.params.projectId, request.body, { signal: abort.signal }); }
+    finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
+  });
+  app.post<{ Params: { projectId: string }; Body: { previewId: string; previewDigest: string } }>("/api/projects/:projectId/settings/models/apply", {
+    schema: { body: object({ previewId: string, previewDigest: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["previewId", "previewDigest"]) },
+  }, async (request, reply) => {
+    const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
+    request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
+    try { return await modelSettings().apply(request.params.projectId, { ...request.body, key: request.headers["idempotency-key"] as string | undefined ?? newId() }, { signal: abort.signal }); }
+    finally { request.raw.off("aborted", disconnected); reply.raw.off("close", disconnected); }
+  });
   app.post<{ Body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }>("/api/projects", {
     schema: { body: { ...object({ name: string, expectedCatalogDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
       profileIds: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: string } }, ["name"]),
@@ -125,6 +147,12 @@ export function createApp(options: AppOptions = {}) {
   }, async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.configure(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
+  });
+  app.post<{ Params: { projectId: string }; Body: { expectedSelectionDigest: string; selection: LocalDirectorSelection } }>("/api/projects/:projectId/director/change", {
+    schema: { body: object({ expectedSelectionDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, selection: object({ mode: { enum: ["fake", "native"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) }, ["expectedSelectionDigest", "selection"]) },
+  }, async request => {
+    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
+    return options.runtimeSettings.changeSelection(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
   app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
     schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, replyToReviewId: string, replyToQuestionId: string,
@@ -232,27 +260,7 @@ export function createApp(options: AppOptions = {}) {
     });
     options.director?.tick(); return result;
   });
-  app.get<{ Params: { projectId: string }; Querystring: { after?: string } }>("/api/projects/:projectId/events", async (request, reply) => {
-    let cursor = Number(request.headers["last-event-id"] ?? request.query.after ?? 0);
-    invariant(Number.isSafeInteger(cursor) && cursor >= 0 && cursor <= service().store.cursor(request.params.projectId), "VALIDATION_ERROR", "Invalid event cursor");
-    reply.hijack();
-    reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-    let closed = false;
-    const pump = () => {
-      if (closed) return;
-      try {
-        if (reply.raw.writableLength > 1024 * 1024) { reply.raw.end(); return; }
-        const events = service().store.readEvents(request.params.projectId, cursor).slice(0, 100);
-        for (const event of events) { reply.raw.write(`id: ${event.sequence}\nevent: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`); cursor = event.sequence; }
-        if (!events.length) reply.raw.write(": heartbeat\n\n");
-      } catch { reply.raw.end(); }
-    };
-    const timer = setInterval(pump, 1000);
-    const close = () => { if (closed) return; closed = true; clearInterval(timer); eventStreams.delete(close); reply.raw.end(); };
-    eventStreams.add(close);
-    reply.raw.on("close", close);
-    pump();
-  });
+  if (options.service) registerProjectEventStream(app, { store: options.service.store });
   app.post<{ Params: { projectId: string; tool: string }; Body: Record<string, unknown> }>("/internal/projects/:projectId/tools/:tool", async (request, reply) => {
     const actor = actors.get(request)!;
     const { projectId, tool } = request.params;

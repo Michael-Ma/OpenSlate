@@ -1,3 +1,4 @@
+import { useProjectRefreshVersion } from "./project-updates";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
@@ -29,13 +30,17 @@ function ProjectBudgetControls({ projectId, budget, disabled, execute, codexUsag
   </details>;
 }
 function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
+  const projectUpdate = useProjectRefreshVersion();
   const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/spending`;
   const [state, setState] = useState<SpendingState | null>(null), [loadError, setLoadError] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [review, setReview] = useState<SpendingReview | null>(null), [reviewError, setReviewError] = useState("");
   const [offsets, setOffsets] = useState({ candidates: 0, allowances: 0 }), [refresh, setRefresh] = useState(0);
+  const [loadedIdentity, setLoadedIdentity] = useState("");
   const [focusCandidateId, setFocusCandidateId] = useState<string | null>(null);
+  const loadIdentity = JSON.stringify([base, offsets, focusCandidateId, refresh, snapshot.project.headVersion, projectUpdate]);
+  const fresh = loadedIdentity === loadIdentity && !loadError;
   const focusedRequest = useRef<string | null>(null), selectedFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focus || focusedRequest.current === focus.requestId) return;
@@ -55,14 +60,14 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
     setRefresh(value => value + 1); changed.current();
   }, [slot.settledVersion, slot.lastSuccess]);
   useEffect(() => {
-    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
+    const abort = new AbortController();
     const poll = async () => {
       try {
         const query = new URLSearchParams({ allowanceOffset: String(offsets.allowances),
           ...(focusCandidateId ? { focusCandidateId } : { candidateOffset: String(offsets.candidates) }) });
         const next = await api.request<SpendingState>(`${base}?${query}`, { signal: abort.signal });
         if (!abort.signal.aborted) {
-          setState(next); setLoadError("");
+          setState(next); setLoadedIdentity(loadIdentity); setLoadError("");
           if (focusCandidateId && next.focus?.candidateId === focusCandidateId && selectedFocus.current !== focusedRequest.current) {
             const candidate = next.candidates.find(item => item.candidateId === focusCandidateId);
             selectedFocus.current = focusedRequest.current;
@@ -71,18 +76,18 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
           }
         }
       } catch (error) { if (!abort.signal.aborted) setLoadError(errorText(error)); }
-      finally { if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 4000); }
+
     };
-    setState(null); void poll(); return () => { abort.abort(); clearTimeout(timer); };
-  }, [api, base, offsets.candidates, offsets.allowances, focusCandidateId, refresh, snapshot.project.headVersion]);
+    void poll(); return () => { abort.abort(); };
+  }, [api, base, offsets.candidates, offsets.allowances, focusCandidateId, refresh, snapshot.project.headVersion, projectUpdate]);
   function execute(command: PendingCommand) {
-    if (recoveryReadOnly) return;
+    if (recoveryReadOnly || (!fresh && !slot.command)) return;
     setReviewError("");
     void registry.run(projectId, command, saved => api.request(saved.path, { method: "POST", body: saved.body, key: saved.key }),
       error => !(error instanceof ApiError) || ["NETWORK_ERROR", "INTERNAL_ERROR", "REQUEST_FAILED"].includes(error.code));
   }
-  const busy = slot.running || !!slot.command;
-  const confirmed = !!review && !loadError && spendingReviewCurrent(review, state);
+  const busy = slot.running || !!slot.command || !fresh;
+  const confirmed = fresh && !!review && !loadError && spendingReviewCurrent(review, state);
   const profileIds = [...new Set(state?.candidates.map(candidate => candidate.profileId).filter((value): value is string => !!value) ?? [])];
   const codexUsage = !!state && (state.candidates.some(candidate => isCodexSpending(candidate.providerDisplay)) || state.allowances.some(allowance => isCodexSpending(allowance.providerDisplay)));
   const selectedProfile = state?.candidates.find(candidate => selected.includes(candidate.candidateId))?.profileId;

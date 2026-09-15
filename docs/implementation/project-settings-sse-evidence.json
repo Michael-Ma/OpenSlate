@@ -1,0 +1,73 @@
+{
+  "date": "2026-09-15",
+  "scope": "Project model settings, next-turn director selection, shared SSE and workspace guidance",
+  "liveModelTurns": 0,
+  "liveMediaCalls": 0,
+  "browser": {
+    "installation": "isolated disposable local installation; no personal credentials",
+    "checks": [
+      "Empty project image model changed through preview and apply",
+      "No automatic provider attempts, director turns or allowances after settings save",
+      "Saved selection retained after server restart and page reload",
+      "One SSE connection and no new status requests for observed 38.4-second idle interval",
+      "Server interruption retained last view and disabled actions; automatic reconnect restored Live updates",
+      "Desktop and 390x844 settings layout inspected",
+      "Escape closes settings and restores focus to header opener"
+    ],
+    "limits": [
+      "Existing-shot model changes verified by integration tests, not browser generation",
+      "No actual native setup or media generation was invoked",
+      "Hidden-tab and stream fallback behavior covered by synthetic subscription tests"
+    ]
+  },
+  "focused": {
+    "modelCompilerDirectorAndSettings": 34,
+    "sseBrowserServerAndCompatibility": 25,
+    "settingsUiHelpers": 5,
+    "activityHelpers": 5,
+    "timeoutRecheck": {
+      "tests": 56,
+      "pass": 56,
+      "durationMs": 25378.919708
+    }
+  },
+  "review": {
+    "corrected": [
+      "SSE refresh freshness gates on approvals and spending",
+      "Idle watcher avoided repeated director history scans",
+      "Model composer allows exact downstream fingerprint updates",
+      "Current-plan hydration bounded before parsing retired history"
+    ],
+    "remainingBlockers": []
+  },
+  "firstFullRun": {
+    "tests": 1964,
+    "pass": 1955,
+    "fail": 9,
+    "skipped": 0,
+    "failureDescription": "Existing media suites timed out or cancelled during long process stalls; all 56 tests in those suites passed isolated without source changes."
+  },
+  "sourceFreeze": {
+    "files": 436,
+    "unchangedAfterFirstRun": true,
+    "unchangedAfterFinalChecks": true
+  },
+  "finalFullRun": {
+    "tests": 1964,
+    "pass": 1963,
+    "fail": 1,
+    "skipped": 0,
+    "durationMs": 1989035.988625,
+    "failure": "Existing generated-narration human acceptance test cancelled after media operation stalled for 1805598.71325 ms; no source change was made to suppress it."
+  },
+  "finalAffectedSuiteRecheck": {
+    "tests": 16,
+    "pass": 16,
+    "fail": 0,
+    "skipped": 0,
+    "durationMs": 10219.884541
+  },
+  "build": "passed",
+  "allPackageTypechecks": "passed",
+  "verificationConclusion": "All new feature checks and affected isolated suites pass. Both complete runs encountered existing media timeout/cancellation failures; no clean complete-run claim."
+}
