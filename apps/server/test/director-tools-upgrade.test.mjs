@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -127,3 +127,32 @@ test("historical V2 upgrade replay survives a later V3 update without accessing 
   assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.list("director_skill_lock", project.id).length, 3);
   assert.throws(() => f.director.upgradeTools(project.id, { expectedLockId: second.lockId, expectedLockDigest: second.lockDigest, targetVersion: "2.0.0" }, "downgrade"), { code: "DIRECTOR_TOOLS_STALE" });
 });
+
+for (const version of ["1.0.0", "2.0.0", "3.0.0"]) test(
+  `director receives every declared reference from its immutable ${version} skill lock`, t => {
+    const f = fixture(t), project = f.service.createProject("Complete references");
+    const saved = createDirectorSkillLock(f.configuration, version);
+    new DirectorContextService(f.service, saved.environment).bootstrapLock(project.id, saved.lock);
+    const human = f.service.beginRequest(project.id, "local-user", "Draft the commercial", { editing: false });
+    const bridge = f.service.openEpoch(project.id, human);
+    const prepare = createDirectorInput(f.service, { ...f.configuration, endpoint: "http://127.0.0.1:3001" });
+    const input = prepare({ id: newId(), projectId: project.id, requestId: human.requestId }, human, bridge);
+    const context = JSON.parse(input.context), reads = f.store.list("skill_read", project.id);
+    let count = 0;
+    for (const skill of saved.lock.skills) {
+      const root = join(f.configuration.snapshotRoot, skill.packageDigest);
+      const manifest = JSON.parse(readFileSync(join(root, "openslate.skill.json"), "utf8"));
+      for (const path of manifest.files) {
+        count++;
+        const reference = context.references.find(row => row.skillId === skill.id && row.path === path);
+        assert.ok(reference, `${skill.id}/${path}`);
+        assert.equal(reference.content, readFileSync(join(root, path), "utf8"));
+        assert.ok(reads.some(row => row.requestId === human.requestId && row.epochId === bridge.actor.epochId
+          && row.evidence.skillId === skill.id && row.evidence.path === path && row.evidence.sha256 === reference.sha256));
+      }
+    }
+    assert.equal(context.references.length, count);
+    assert.equal(reads.length, count);
+    assert.equal(f.store.list("attempt", project.id).length, 0);
+    assert.equal(f.store.getProject(project.id).activePlanId, null);
+  });

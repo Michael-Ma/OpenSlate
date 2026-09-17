@@ -1,5 +1,6 @@
 import { canonical, invariant, toolCatalog } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
+import { verifySkillLock } from "@openslate/director";
 import type { SkillCapabilityLock, DirectorRunInput } from "@openslate/director";
 import { join } from "node:path";
 import type { ProductionService } from "./service.js";
@@ -24,12 +25,12 @@ export function createDirectorInput(service: ProductionService, options: { repos
     const catalog = toolCatalog(lock.compatibility.toolContract);
     const contexts = new DirectorContextService(service, directorSkillEnvironment(options, catalog.version));
     const captured = contexts.capture(turn.projectId, bridge.actor, { lockId: lock.id, selectedSkillIds: ["production", "plan-authoring"] });
-    const selected = [
-      { skillId: "production", path: "SKILL.md" },
-      { skillId: "production", path: "references/current-contract.md" },
-      { skillId: "plan-authoring", path: "SKILL.md" },
-      { skillId: "plan-authoring", path: "references/grammar.md" },
-    ];
+    // The director has no filesystem reader. Supply all declared references from
+    // activated immutable packages through the epoch-bound, hash-verified read path.
+    const activated = new Set(captured.activation.skills.map(skill => skill.id));
+    const selected = verifySkillLock(lock, contexts.environment)
+      .filter(skill => activated.has(skill.id))
+      .flatMap(skill => skill.manifest.files.map(path => ({ skillId: skill.id, path })));
     const references = selected.map(selection => ({ ...selection, ...contexts.readSkill(turn.projectId, bridge.actor, captured.activation.activationId, selection) }));
     return { projectId: turn.projectId, requestId: turn.requestId, epochId: bridge.actor.epochId, turnId: turn.id,
       text: service.store.get<{ text: string }>("message", human.requestId)!.text,

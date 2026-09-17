@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-17",
+  "change": "Deliver complete verified skill references through native developer instructions",
+  "build": "Server and package dependency TypeScript builds passed on Node 24.15.0",
+  "focusedTests": {
+    "passed": 104,
+    "failed": 0
+  },
+  "live": {
+    "passed": true,
+    "contextBytes": 63279,
+    "referenceCount": 18,
+    "modelTurns": 1,
+    "mediaCalls": 0,
+    "exactContextInNativeTranscript": true,
+    "outputs": [
+      "All four texts are available in the supplied references.\n\n| Reference | Heading | One specific rule |\n|---|---|---|\n| production `references/current-contract.md` | Current production contract | Audio proposal IDs must never be passed to `apply_change`. |\n| plan-authoring `references/grammar.md` | Implemented planning language 1.0.0 | A video's `firstFrame` must use `p.approvedImage(...)`, never a bare image. |\n| plan-authoring `references/example.md` | Offline compiled example | Use actual context rather than the example’s synthetic IDs in a real project. |\n| production `references/stages/intake.md` | production/intake@1 | Do not invent attachment IDs or import unregistered paths into a plan. |\n\nNo tools were called or project state changed."
+    ]
+  },
+  "limits": [
+    "One isolated read-only native turn; no IB continuation or media generation.",
+    "Native resume covered by protocol fixtures only.",
+    "Full repository suite not rerun for this focused fix."
+  ]
+}

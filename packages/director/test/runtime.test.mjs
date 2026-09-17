@@ -73,7 +73,8 @@ test("fixed launch, exact skills, canonical context and complete lifecycle are m
   assert.equal(launch.credentialDigest, hash(originalCredential)); assert.equal(launch.parentSecretAbsent, true);
   const starts = records.filter(row => row.method === "turn/start"); assert.equal(starts.length, 1);
   assert.deepEqual(starts[0].params.input, [{ type: "text", text: f.input.text }, { type: "skill", ...f.input.skills[0] }]);
-  assert.equal(starts[0].params.additionalContext.openslate.value, f.input.context);
+  assert.equal(starts[0].params.additionalContext, undefined);
+  assert.ok(records.find(row => row.method === "thread/start").params.developerInstructions.endsWith(f.input.context));
   assert.equal(starts[0].params.permissions, "fixture"); assert.equal(starts[0].params.approvalPolicy, "never");
 });
 
@@ -234,4 +235,30 @@ test("fake runtime abort does not falsely claim an unresolved handler stopped", 
   const promise = runtime.start(f.input, { signal: controller.signal }); const signal = await invoked.promise;
   controller.abort(); const result = await deadline(promise);
   assert.equal(signal.aborted, true); assert.equal(result.status, "unknown"); assert.equal(result.dispatched, true);
+});
+
+test("large required references survive start and resume outside the truncating hint channel", async t => {
+  const f = await fixture(t);
+  const contract = "Contract sentinel: approvedImage is a dependency, not approval.\n".repeat(400);
+  const grammar = "Grammar sentinel: preserve saved aliases.\n".repeat(400);
+  const context = headVersion => JSON.stringify({ snapshot: { headVersion }, references: [
+    { skillId: "production", path: "references/current-contract.md", content: contract },
+    { skillId: "plan-authoring", path: "references/grammar.md", content: grammar },
+  ] });
+  const firstInput = { ...f.input, context: context(3) };
+  const first = await deadline(f.runtime.start(firstInput));
+  assert.equal(first.status, "completed");
+  const secondInput = { ...f.input, context: context(4), resumeThreadId: first.nativeThreadId,
+    requestId: "request-2", epochId: "epoch-2", turnId: "turn-2" };
+  assert.equal((await deadline(f.runtime.start(secondInput))).status, "completed");
+  const records = await f.records();
+  for (const [method, expected] of [["thread/start", firstInput.context], ["thread/resume", secondInput.context]]) {
+    const instructions = records.find(row => row.method === method).params.developerInstructions;
+    assert.ok(instructions.endsWith(expected));
+    const delivered = JSON.parse(instructions.slice(instructions.length - expected.length));
+    assert.equal(delivered.references[0].content, contract);
+    assert.equal(delivered.references[1].content, grammar);
+    assert.equal(delivered.snapshot.headVersion, method === "thread/start" ? 3 : 4);
+  }
+  for (const turn of records.filter(row => row.method === "turn/start")) assert.equal(turn.params.additionalContext, undefined);
 });
