@@ -35,6 +35,10 @@ Events carry replay cursors. Reconnection refreshes current state, and gaps or o
 
 The server shares a lightweight database/status watcher across active streams. It stops when no clients remain. Provider-side job polling is separate and remains necessary where the provider API does not push completion.
 
+## Stopping work
+
+Use **Stop** in the chat composer to interrupt conversation and prevent new generation. A new chat message continues from saved state; no separate Resume button is needed. SSE continues delivering saved progress. See [Chat Stop](CHAT-STOP.md) for provider-job limitations and verification.
+
 ## Manual check without media spending
 
 - Open an existing project and locate **Project settings** in the header.

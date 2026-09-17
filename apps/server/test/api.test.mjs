@@ -334,3 +334,41 @@ test("loopback SSE replays after a snapshot and reconnects from Last-Event-ID wi
   const final = await f.request("GET", f.path);
   assert.equal(final.json().cursor, snapshot.cursor + 3);
 });
+
+
+test('chat stop and continuation retries never override newer human intent or mutate provider attempts',async t=>{
+  const f=fixture(t);
+  const original=await f.request('POST',`${f.path}/messages`,{text:'Plan a film'},{'idempotency-key':'original'});
+  assert.equal(original.statusCode,200);
+  const attemptsBefore=f.engine.attempts(f.project.id);
+  const stop=await f.request('POST',`${f.path}/controls`,{action:'stop'},{'idempotency-key':'stop-1'});
+  assert.equal(stop.statusCode,200,stop.body);
+  const state=(await f.request('GET',f.path)).json();
+  assert.equal(state.control.paused,true);
+  const body={text:'Change direction using the saved work',editing:true,scopeIds:[f.project.id],resumeFromStopId:state.control.authorityId};
+  const follow=await f.request('POST',`${f.path}/messages`,body,{'idempotency-key':'follow'});
+  assert.equal(follow.statusCode,200,follow.body);
+  assert.equal(f.service.snapshot(f.project.id).control.paused,false);
+  // Replaying the first Stop must not interrupt the fresh follow-up.
+  await f.request('POST',`${f.path}/controls`,{action:'stop'},{'idempotency-key':'stop-1'});
+  assert.equal(f.service.snapshot(f.project.id).control.paused,false);
+  await f.request('POST',`${f.path}/controls`,{action:'stop'},{'idempotency-key':'stop-2'});
+  const second=f.service.snapshot(f.project.id).control;
+  await f.request('POST',`${f.path}/messages`,body,{'idempotency-key':'follow'});
+  assert.deepEqual(f.service.snapshot(f.project.id).control,second);
+  const stale=await f.request('POST',`${f.path}/messages`,body,{'idempotency-key':'stale-new-message'});
+  error(stale,409,'STOP_CHANGED');
+  assert.deepEqual(f.engine.attempts(f.project.id),attemptsBefore);
+  const holds=f.service.snapshot(f.project.id).holds.filter(h=>h.active);
+  assert.equal(holds.length,1);assert.equal(holds[0].ownerId,follow.json().requestId);
+});
+
+test('stopped continuation is project-wide and cannot be smuggled through a review reply',async t=>{
+  const f=fixture(t);await f.request('POST',`${f.path}/controls`,{action:'stop'});
+  const resumeFromStopId=f.service.snapshot(f.project.id).control.authorityId;
+  const before=f.store.list('message',f.project.id).length;
+  const readOnly=await f.request('POST',`${f.path}/messages`,{text:'Continue',editing:false,resumeFromStopId});
+  assert.notEqual(readOnly.statusCode,200);assert.equal(f.store.list('message',f.project.id).length,before);
+  const review=await f.request('POST',`${f.path}/messages`,{text:'approve',replyToReviewId:'review',resumeFromStopId});
+  assert.notEqual(review.statusCode,200);assert.equal(f.service.snapshot(f.project.id).control.paused,true);
+});

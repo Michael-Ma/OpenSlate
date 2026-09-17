@@ -13,7 +13,7 @@ export interface ProjectSnapshot {
   outputs: { nodeId: string; candidateId: string | null; port: string; artifact: Artifact; fixture?: ArtifactFixture }[];
   attempts: { id: string; nodeId: string; phase: string; createdAt?: string }[];
   holds: { id: string; scopeId: string; ownerId: string; active: boolean }[];
-  control?: { paused: boolean };
+  control?: { paused: boolean; authorityId?: string };
   plan?: { id: string; graphDigest: string; canonicalSource: string; nodes?: { id: string; kind: string; alias: string; shotId: string | null }[] } | null;
   workflow?: { narration?: { inputState?: string } };
   cursor: number;
@@ -21,7 +21,7 @@ export interface ProjectSnapshot {
 export interface ReviewMember { videoNodeId: string; shotId: string; keyframe: Artifact | null; keyframeFixture?: ArtifactFixture; approvalDigest: string | null; ready: boolean; approved?: boolean; motionPrompt?: string; durationFrames?: number; profileLabel?: string }
 export interface ReviewSnapshot { id: string | null; planId: string | null; projectId?: string; headVersion: number; revisionId: string; members: ReviewMember[] }
 export interface DirectorStatus { mode: "offline" | "fake" | "native"; status: "idle" | "running" | "waiting_user" | "error" | "not_connected"; message?: string; activeRequestId?: string | null; imageAttachmentsAvailable?: boolean }
-export type MessageBody = { text: string; scopeIds: string[]; editing: boolean; continuationRequestId?: string; images?: { artifactId: string; sha256: string }[] } | { text: string; replyToQuestionId: string };
+export type MessageBody = { text: string; scopeIds: string[]; editing: boolean; continuationRequestId?: string; resumeFromStopId?: string; images?: { artifactId: string; sha256: string }[] } | { text: string; replyToQuestionId: string };
 export interface MessageCommand { key: string; projectId: string; body: MessageBody }
 
 export function makeMessageCommand(project: ProjectSnapshot["project"], draft: string, selectedIds: readonly string[], key: string, editing = true): MessageCommand {
@@ -31,6 +31,18 @@ export function makeMessageCommand(project: ProjectSnapshot["project"], draft: s
   const scopeIds = [...new Set(selectedIds)];
   if (scopeIds.some(id => !project.shots.some(shot => shot.id === id))) throw new Error("A selected shot changed. Refresh and select it again.");
   return { key, projectId: project.id, body: { text, scopeIds: scopeIds.length ? scopeIds : [project.id], editing } };
+}
+/** Bind continuation to the stop the human saw; stale retries cannot undo a later stop. */
+export function continueStoppedWork(command: MessageCommand, control: ProjectSnapshot["control"]): MessageCommand {
+  if (!control?.paused) return command;
+  if (!control.authorityId) throw new Error("Refresh to load the stopped conversation before continuing.");
+  if (!("scopeIds" in command.body)) throw new Error("Send a new direction to continue stopped work.");
+  return { ...command, body: { ...command.body, scopeIds: [command.projectId], editing: true, resumeFromStopId: control.authorityId } };
+}
+export function canStopWork(snapshot: ProjectSnapshot | null, director: DirectorStatus): boolean {
+  return !!snapshot && !snapshot.control?.paused && (director.status === "running"
+    || snapshot.attempts.some(attempt => ["preparing", "submitting", "remote_pending", "ingesting"].includes(attempt.phase))
+    || !!snapshot.plan?.nodes?.some(node => !snapshot.outputs.some(output => output.nodeId === node.id)));
 }
 export function makeQuestionReply(projectId: string, question: PendingQuestion, draft: string, key: string): MessageCommand {
   const text = draft.trim();
@@ -128,7 +140,8 @@ export function errorMessage(code: string): string {
     ARTIFACT_TOO_LARGE: "This preview is too large to load here.",
     UPLOAD_TOO_LARGE: "Choose a nonempty file up to 128 MiB.",
     MEDIA_HELD: "A pending edit holds this render. Continue that edit and apply a matching plan first.",
-    MEDIA_PAUSED: "Execution is paused. Resume it when you are ready to render.",
+    MEDIA_PAUSED: "Generation is stopped. Send a new direction in the conversation before rendering.",
+    STOP_CHANGED: "The stop state changed. Your draft is kept; refresh and send it again.",
     MEDIA_NARRATION_REQUIRED: "Review and apply narration that matches the current plan before rendering.",
     MEDIA_ARTIFACT_UNAVAILABLE: "The plan needs a real, owned clip. Demo fixture media cannot be used for this render.",
     MEDIA_STALE_TARGET: "The plan changed. Prepare a render from the current version.",

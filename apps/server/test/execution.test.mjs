@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
+import { ProductionService } from "../dist/application/service.js";
 import { Store } from "../dist/persistence/index.js";
 import { Engine } from "../dist/execution/index.js";
 import { FakeProvider } from "../../../packages/providers/dist/index.js";
@@ -200,4 +201,28 @@ test("narrated dispatch requires measured cue, shot and requested video duration
   await f.engine.runReady(); await f.engine.reconcile(); const snapshot = f.engine.reviewSnapshot(f.projectId);
   assert.equal(snapshot.members[0].ready, true); f.engine.approve(f.projectId, snapshot.id, [video.id], "human-review");
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "TIMING_REQUIRED"); assert.equal(f.provider.acceptedCount(), 1);
+});
+
+
+test("chat Stop persists across restart, recovers an uncertain accepted job, and blocks remaining generation",async t=>{
+  const f=setup(t),service=new ProductionService(f.store,f.engine);
+  service.beginRequest(f.projectId,'human','Hold the second shot',{scopeIds:['shot-1']});
+  const firstImage=f.plan.nodes.find(n=>n.kind==='image'&&n.shotId==='shot-0');
+  f.provider.setMode(firstImage.id,'unknown_after_accept');
+  await f.engine.runReady();assert.equal(f.provider.acceptedCount(),1);
+  assert.equal(f.engine.attempts(f.projectId)[0].phase,'submission_unknown');
+  const stop=service.beginRequest(f.projectId,'human','Stop',{editing:false});service.control(f.projectId,stop,'stop');
+  const before=f.engine.attempts(f.projectId)[0];
+  f.store.close();f.provider.close();
+  const store=new Store(f.dbPath),provider=new FakeProvider(f.providerPath),engine=new Engine(store,provider,{artifactDir:f.artifactDir});
+  try {
+    assert.equal(store.get('execution_control',f.projectId).paused,true);
+    await engine.reconcile();assert.equal(engine.attempts(f.projectId)[0].phase,'succeeded');
+    assert.equal(engine.attempts(f.projectId)[0].id,before.id);
+    assert.equal((await engine.runReady()).dispatched,0);assert.equal(provider.acceptedCount(),1);
+    const continued=new ProductionService(store,engine).beginRequest(f.projectId,'human','Change the second shot',{resumeFromStopId:stop.requestId});
+    assert.equal(store.get('execution_control',f.projectId).paused,false);
+    assert.ok(store.list('hold',f.projectId).some(h=>h.active&&h.ownerId===continued.requestId&&h.scopeId===f.projectId));
+    assert.equal((await engine.runReady()).dispatched,0);assert.equal(provider.acceptedCount(),1);
+  } finally {store.close();provider.close();}
 });

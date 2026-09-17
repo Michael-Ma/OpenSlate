@@ -154,10 +154,11 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.changeSelection(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
-  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
-    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, replyToReviewId: string, replyToQuestionId: string,
+  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
+    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
       images: { type: "array", minItems: 1, maxItems: 4, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, ["text"]) },
   }, async request => {
+    invariant(!request.body.resumeFromStopId || (!request.body.replyToQuestionId && !request.body.replyToReviewId), "VALIDATION_ERROR", "Continue stopped work with a fresh conversation message");
     const images = request.body.images ? selectedDirectorImages(request.body.images) : undefined;
     invariant(!images || (options.director && options.runtimeSettings && directorMode(request.params.projectId) === "native" && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_IMAGES_UNAVAILABLE", "Attach references to a new native conversation request");
     if (request.body.replyToQuestionId) {
@@ -250,12 +251,12 @@ export function createApp(options: AppOptions = {}) {
     const actor = service().beginRequest(request.params.projectId, "local-user", "Review the displayed keyframes", { editing: false, contextDigest: digest({ snapshotId: request.body.snapshotId, videoNodeIds: [...request.body.videoNodeIds].sort() }), key: `review:${request.headers["idempotency-key"] ?? digest(request.body)}` });
     return service().approve(request.params.projectId, actor, request.body.snapshotId, request.body.videoNodeIds);
   });
-  app.post<{ Params: { projectId: string }; Body: { action: "pause" | "resume" } }>("/api/projects/:projectId/controls", {
-    schema: { body: object({ action: { enum: ["pause", "resume"] } }, ["action"]) },
+  app.post<{ Params: { projectId: string }; Body: { action: "pause" | "resume" | "stop" } }>("/api/projects/:projectId/controls", {
+    schema: { body: object({ action: { enum: ["pause", "resume", "stop"] } }, ["action"]) },
   }, async request => {
     const key = request.headers["idempotency-key"] as string | undefined ?? newId();
     const result = service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
-      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action, { editing: false, key: `control:${key}` });
+      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action === "stop" ? "Stop the current conversation and new generation." : request.body.action, { editing: false, key: `control:${key}` });
       return service().control(request.params.projectId, actor, request.body.action);
     });
     options.director?.tick(); return result;

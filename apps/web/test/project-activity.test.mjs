@@ -5,7 +5,7 @@ const director={mode:'native',status:'idle'};
 const state=()=>({project:{id:'p',activePlanId:'plan',headVersion:1,revisionId:'rev',shots:[{id:'s'}]},attempts:[],holds:[],outputs:[],questions:[],plan:{id:'plan',nodes:[]}});
 test('connection loss hides stale activity and pauses explain provider work may continue',()=>{
  const s=state();s.attempts=[{phase:'remote_pending'}];assert.equal(projectActivity(s,director,null,false).label,'Connecting');
- s.control={paused:true};const v=projectActivity(s,director,null);assert.equal(v.label,'Paused');assert.match(v.detail,/may still run/);
+ s.control={paused:true};const v=projectActivity(s,director,null);assert.equal(v.label,'Stopped');assert.match(v.detail,/may still run/);
 });
 test('unconfirmed prior outcomes are not labelled idle or failed and never suggest regeneration',()=>{
  const s=state();s.attempts=[{phase:'submission_unknown'}];const v=projectActivity(s,director,null);assert.equal(v.label,'Checking a previous job');assert.match(v.detail,/without submitting a replacement/);assert.equal(v.next.target,'usage');

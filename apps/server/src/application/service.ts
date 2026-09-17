@@ -97,12 +97,21 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
     invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
     const key = options.key ?? newId();
-    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null }), () => {
+    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
       const project = this.store.getProject(projectId);
+      if (options.resumeFromStopId) {
+        const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
+        const stopped = this.store.get<RequestRecord>("message", options.resumeFromStopId);
+        const recovery = this.recovery.snapshot();
+        const releasedRestore = recovery.state === "released" && recovery.receipt?.restoreId === options.resumeFromStopId && recovery.receipt.projectIds.includes(projectId);
+        invariant(control?.paused && control.authorityId === options.resumeFromStopId && (releasedRestore || stopped?.projectId === projectId && stopped.principalId === principalId),
+          "STOP_CHANGED", "The stop state changed. Refresh before sending a new direction.");
+        invariant(options.editing !== false && (!options.scopeIds || options.scopeIds.includes(projectId)), "SCOPE_DENIED", "Continue stopped work with a project-wide edit");
+      }
       const scopeIds = [...new Set(options.scopeIds ?? [projectId])];
       invariant(scopeIds.length > 0 && scopeIds.length <= 400, "VALIDATION_ERROR", "A request requires a bounded scope");
       scopeIds.forEach(scopeId => validateStageScope(project, scopeId));
@@ -124,6 +133,20 @@ export class ProductionService {
           this.store.insert("request_continuation", newId(), projectId, { fromRequestId: prior.id, toRequestId: request.id });
         }
       }
+      if (options.resumeFromStopId) {
+        // A fresh human follow-up takes ownership before execution can continue.
+        // This runs only on first acceptance, never on an idempotent replay.
+        const owners = new Set<string>();
+        for (const hold of this.store.list<Hold>("hold", projectId).filter(h => h.active && h.ownerId !== request.id)) {
+          const prior = this.store.get<RequestRecord>("message", hold.ownerId);
+          if (prior?.principalId !== principalId || prior.projectId !== projectId) continue;
+          this.engine.releaseHold(projectId, hold.id, prior.id); owners.add(prior.id);
+        }
+        for (const fromRequestId of owners) this.store.insert("request_continuation", newId(), projectId, { fromRequestId, toRequestId: request.id });
+        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.state === "active")
+          this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+        this.engine.setPaused(projectId, false, request.id);
+      }
       this.store.appendEvent(projectId, "message.recorded", { requestId: request.id, text, editing: options.editing ?? true });
       return { kind: "human", principalId, requestId: request.id };
     });
@@ -135,6 +158,7 @@ export class ProductionService {
     this.assertActor(projectId, human);
     invariant(human.kind === "human", "ACTOR_DENIED", "Only the human request handler can open a director bridge");
     const request = this.request(projectId, human);
+    invariant(request.state === "active", "ACTOR_DENIED", "This conversation request has been stopped or superseded");
     if (request.editing) this.assertActor(projectId, human, true);
     const token = randomBytes(32).toString("base64url");
     const epoch: Epoch = { id: newId(), projectId, requestId: human.requestId, principalId: human.principalId, tokenHash: digest(token), state: request.editing ? "active" : "read_only", scopeIds: request.scopeIds };
@@ -506,11 +530,11 @@ export class ProductionService {
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts: this.engine.attempts(projectId),
       assessments: this.store.list("stage_assessment", projectId),
       holds: this.store.list("hold", projectId), messages, conversation,
-      control: { paused: this.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false },
+      control: this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId) ?? { paused: false },
       plan: plan ? { id: plan.id, graphDigest: plan.compiled.graphDigest, canonicalSource: plan.compiled.canonicalSource, nodes: plan.compiled.nodes } : null,
       questions: this.store.list<{ id: string; requestId: string; turnId: string }>("director_question", projectId).map(question =>
         this.recovery.isQuarantined() || this.recovery.isImported(projectId, "message", question.requestId)
-          || this.recovery.isImported(projectId, "director_turn", question.turnId) ? { ...question, canAnswer: false } : question),
+          || this.recovery.isImported(projectId, "director_turn", question.turnId) || this.store.get<RequestRecord>("message", question.requestId)?.state === "superseded" ? { ...question, canAnswer: false } : question),
       previousPreviews: this.engine.attempts(projectId).filter(attempt => attempt.request.kind === "render" && attempt.phase === "succeeded")
         .reverse().flatMap(attempt => Object.values(attempt.outputs).map(artifact => ({ artifact, nodeId: attempt.nodeId, fixture: this.artifactFixture(projectId, artifact) }))).slice(0, 3),
       reconciliations: this.store.list("tool_reconciliation", projectId),
@@ -542,12 +566,20 @@ export class ProductionService {
     return { status: "approved" as const, approvals: this.approve(projectId, human, snapshotId, snapshot.members.map(member => member.videoNodeId)) };
   }
 
-  control(projectId: string, actor: ActorContext, action: "pause" | "resume") {
-    this.recovery.assertWritable(projectId, actor.requestId);
-    this.assertActor(projectId, actor);
-    invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Global pause and resume require a human project command");
-    this.engine.setPaused(projectId, action === "pause", actor.requestId);
-    return { action };
+  control(projectId: string, actor: ActorContext, action: "pause" | "resume" | "stop") {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId, actor.requestId);
+      this.assertActor(projectId, actor);
+      invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Execution controls require a human project command");
+      if (action === "stop") {
+        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== actor.requestId && prior.state === "active")
+          this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+        for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked")
+          this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+      }
+      this.engine.setPaused(projectId, action !== "resume", actor.requestId);
+      return { action, cursor: this.store.cursor(projectId) };
+    });
   }
 
   holdRequest(projectId: string, actor: ActorContext) {

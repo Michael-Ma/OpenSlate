@@ -109,3 +109,16 @@ test("restored keyframes stay visible without creating approval snapshots, and r
   assert.equal(released.statusCode, 200, released.body);
   const current = (await request(`${path}/review`)).json(); assert.ok(current.id); assert.notEqual(current.id, prior.id);
 });
+
+
+test("chat continuation resumes a released restoration under fresh authority, never during quarantine",async t=>{
+  const f=fixture(t);f.quarantine();const state=(await f.request("GET",statusPath)).json();
+  const body={text:"Continue the restored project with a new direction",editing:true,scopeIds:[f.project.id],resumeFromStopId:state.receipt.restoreId};
+  denied(await f.request("POST",`${f.path}/messages`,body,"fresh-after-restore"));
+  assert.equal((await f.request("POST",releasePath,exact(state),"reviewed-restore")).statusCode,200);
+  const result=await f.request("POST",`${f.path}/messages`,body,"fresh-after-restore");
+  assert.equal(result.statusCode,200,result.body);
+  assert.equal(f.service.snapshot(f.project.id).control.paused,false);
+  assert.ok(f.service.snapshot(f.project.id).holds.some(h=>h.active&&h.ownerId===result.json().requestId));
+  assert.equal(f.provider.acceptedCount(),0);
+});

@@ -207,3 +207,36 @@ test('lost tool completion is reconciled from the domain receipt without invokin
   assert.equal(f.store.getProject(f.project.id).headVersion,1);
   assert.equal(f.store.list('tool_reconciliation',f.project.id).length,1);
 });
+
+
+test('chat stop aborts reasoning, fences read-only queued work, and fresh direction continues saved holds', async t => {
+  const ready=deferred(); let calls=0;
+  const f=fixture(t,async(input,options)=>{
+    calls++;
+    if(calls===1){ready.resolve();await new Promise(resolve=>options.signal.addEventListener('abort',resolve,{once:true}));}
+    return completed(input);
+  });
+  const first=f.enqueue();f.supervisor.tick();await ready.promise;
+  const readOnly=f.enqueue('Discuss only',{editing:false});
+  const stop=f.service.beginRequest(f.project.id,'human','Stop',{editing:false});
+  f.service.control(f.project.id,stop,'stop');
+  assert.equal(f.service.snapshot(f.project.id).control.paused,true);
+  // Follow up before tick observes the paused state: revoked authority must still abort the old turn.
+  const next=f.service.beginRequest(f.project.id,'human','Use the saved plan, change the setting',{resumeFromStopId:stop.requestId,key:'next'});
+  f.supervisor.enqueue(f.project.id,next);f.supervisor.tick();await f.supervisor.settle();
+  assert.equal(f.store.get('director_turn',first.id).state,'interrupted');
+  assert.equal(f.store.get('director_turn',readOnly.id).state,'interrupted');
+  assert.equal(f.service.snapshot(f.project.id).control.paused,false);
+  assert.ok(f.store.list('hold',f.project.id).filter(h=>h.active).every(h=>h.ownerId===next.requestId));
+  assert.ok(f.store.list('request_continuation',f.project.id).some(c=>c.fromRequestId===first.requestId&&c.toRequestId===next.requestId));
+  f.supervisor.tick();await f.supervisor.settle();assert.equal(calls,2);
+});
+
+test('stop between claim and runtime dispatch prevents read-only model calls',async t=>{
+  let calls=0;const f=fixture(t,async input=>{calls++;return completed(input)});
+  f.enqueue('Discuss',{editing:false});f.supervisor.tick();
+  const stop=f.service.beginRequest(f.project.id,'human','Stop',{editing:false});f.service.control(f.project.id,stop,'stop');
+  await f.supervisor.settle();assert.equal(calls,0);
+  const restarted=f.make();restarted.tick();await restarted.settle();assert.equal(calls,0);
+  assert.equal(f.service.snapshot(f.project.id).control.authorityId,stop.requestId);
+});
