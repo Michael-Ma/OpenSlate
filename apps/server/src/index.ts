@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { StudioSessions } from "./studio-sessions.js";
+import { openStudioBrowser, studioUrl } from "./studio-launcher.js";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,7 +68,8 @@ const service = new ProductionService(store, engine, undefined, runtime.producti
 const narration = new NarrationService(service, localMedia ?? undefined);
 // Each project starts in demo mode until its user chooses and checks local Codex.
 const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
-const app = createApp({ service, director, runtimeSettings: director, providerCatalog, localToken, logger: true,
+const studioSessions = new StudioSessions();
+const app = createApp({ service, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
   allowanceRoutes: { service, allowances: runtime.allowances },
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
@@ -94,6 +97,12 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => 
 try {
   await app.listen({ host: "127.0.0.1", port: 3001 });
   if (recoveryPending) process.stdout.write("Restored workspace: inspect your saved work and finish recovery review before making changes.\n");
-  process.stdout.write(`\nOpenSlate ${serveWeb ? "is ready" : "API is ready"} at http://127.0.0.1:3001${serveWeb ? "" : "/api/health"}\nLocal data: ${directory}\n${process.env.OPENSLATE_LOCAL_TOKEN ? "Local session token: provided by OPENSLATE_LOCAL_TOKEN" : `Local session token file: ${tokenPath}`}\n${serveWeb ? "Paste the local session token into the connection screen.\n" : "Open the development interface at http://127.0.0.1:5173\n"}Stop with Ctrl+C.\n\n`);
+  process.stdout.write(`\nOpenSlate ${serveWeb ? "is ready" : "API is ready"} at http://127.0.0.1:3001${serveWeb ? "" : "/api/health"}\nLocal data: ${directory}\n${process.env.OPENSLATE_LOCAL_TOKEN ? "Local launcher credential: configured" : `Local launcher credential file: ${tokenPath}`}\nStop with Ctrl+C.\n\n`);
+  // API-only development starts before Vite; open that browser explicitly with pnpm studio --dev.
+  if (serveWeb && !process.argv.includes("--no-open")) {
+    const url = studioUrl(studioSessions.issueLaunch());
+    if (await openStudioBrowser(url)) process.stdout.write("Open studio: connected launch opened in your browser.\n");
+    else process.stdout.write(`Open studio (valid for 60 seconds): ${url}\n`);
+  }
 }
 catch (error) { clearInterval(timer); app.log.error(error); await close(); process.exitCode = 1; }

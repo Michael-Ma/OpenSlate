@@ -17,17 +17,24 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
-export function Connect({ onConnect }: { onConnect: (token: string) => Promise<void> }) {
-  const [token, setToken] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+export function Connect({ onConnect }: { onConnect: () => Promise<void> }) {
+  const [busy, setBusy] = useState(true); const [error, setError] = useState("");
+  const startup = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    let active = true;
+    // StrictMode replays effects; a single-use launch code must be exchanged only once.
+    startup.current ??= onConnect();
+    void startup.current.catch(error => { if (active) setError(errorText(error)); }).finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, []);
   async function submit(event: FormEvent) {
     event.preventDefault(); if (busy) return;
-    if (!/^[A-Za-z0-9_-]{20,256}$/.test(token.trim())) { setError("Enter the local access token from your OpenSlate server."); return; }
     setBusy(true); setError("");
-    try { await onConnect(token.trim()); setToken(""); } catch (error) { setError(errorText(error)); } finally { setBusy(false); }
+    try { await onConnect(); } catch (error) { setError(errorText(error)); } finally { setBusy(false); }
   }
   return <div className="connect-page"><header className="connect-brand"><span className="brand-mark"><Icon name="slate" /></span><strong>{APP_NAME}</strong><span className="quiet-label">LOCAL STUDIO</span></header>
     <main className="connect-layout"><div className="connect-story"><span className="eyebrow">A FILM STARTS WITH A CONVERSATION</span><h1>Give your story<br />a place to take shape.</h1><p>Work through the idea, shape each shot, and review the frames before the video begins.</p><div className="process-strip"><span>01 <b>Imagine</b></span><span>02 <b>Shape</b></span><span>03 <b>Review</b></span></div><p className="connect-footnote">Open source. Your workspace, on your computer.</p></div>
-    <form className="connect-card" onSubmit={event => void submit(event)}><span className="small-mark"><Icon name="slate" size={27} /></span><h2>Open your studio</h2><p>Connect to the OpenSlate server running on this computer.</p><label htmlFor="access-token">Local access token</label><input id="access-token" type="password" autoComplete="off" spellCheck={false} value={token} onChange={event => setToken(event.target.value)} placeholder="Paste your local token" disabled={busy} aria-describedby="token-help" /><p id="token-help" className="field-help">Kept only in this tab’s memory. Disconnecting clears it.</p>{error && <p role="alert" className="form-error">{error}</p>}<button className="button primary full-width" disabled={busy}>{busy ? "Connecting…" : "Connect to OpenSlate"}<Icon name="arrow" size={17} /></button><div className="connection-help">The local server must be running before you connect.</div></form></main><footer className="connect-footer">BUILT FOR THE WORK BETWEEN IDEA AND FILM <span>OpenSlate · Early preview</span></footer></div>;
+    <form className="connect-card" onSubmit={event => void submit(event)}><span className="small-mark"><Icon name="slate" size={27} /></span><h2>Open your studio</h2><p>Your projects stay on this computer. The OpenSlate launcher connects your browser automatically.</p>{error && <p role="alert" className="form-error">{error}</p>}<button className="button primary full-width" disabled={busy}>{busy ? "Opening studio…" : "Open studio"}<Icon name="arrow" size={17} /></button><div className="connection-help">Starting fresh? Run <code>pnpm start</code> in your OpenSlate folder. If it is already running, use <code>pnpm studio</code> to open a connected window.</div></form></main><footer className="connect-footer">BUILT FOR THE WORK BETWEEN IDEA AND FILM <span>OpenSlate · Early preview</span></footer></div>;
 }
 function useArtifact(api: StudioApi, projectId: string, artifact: Artifact | null) {
   const [url, setUrl] = useState<string | null>(null); const [error, setError] = useState("");

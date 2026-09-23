@@ -1,25 +1,28 @@
 # Implementation status
 
-September 17, 2026. This page describes working code; technical designs describe the broader target.
+September 23, 2026. This page describes working code; technical designs describe the broader target.
 
-OpenSlate has a local conversation/review workspace, per-project native Codex setup, durable planning and fake execution, versioned conversational narration drafts, accepted narration ingestion, a PNG reference library, and application-owned local clip rendering. Native Codex has passed scoped edits across restart, browser conversations, and a small image/structured-question experiment. A synthetic six-minute render passed decoded picture/audio checks. **The app does not yet generate a real commercial.** Image and H3 application bridges, recoverable generated-video normalization and durable spending allowances are implemented offline. The browser can select installed image/video/speech/transcription profiles at creation and preview changes to eligible unfinished work in Project settings. Shared authenticated SSE drives workspace updates. The launcher now supports explicit image/H3 activation, human allowance/budget review and automatic real local assembly. Default generation stays fake. A complete injected-provider pipeline passed through real rendering; no live media API has been validated.
+OpenSlate has a local conversation/review workspace, configurable providers, durable planning and execution, narration review, a reference library, and local rendering. The Precision UI supports project model changes, authenticated SSE, conversational Stop, and shot-scoped generation permission. The launcher connects the browser using a short-lived code and an HttpOnly session instead of asking users to paste a long-lived token.
 
-V0 runs for one user on one computer. Cloud model/media APIs remain part of the architecture. The accepted [runtime trust decision](RUNTIME-TRUST-DECISION.md) trusts the pinned installed runtime/sandbox while retaining application authority; independent code-host/authentication isolation remains unverified. The user authorizes local milestone commits and bounded live Codex tests. Live Viggle H3 testing is explicitly on hold, even if its key is configured. Other real media calls require a test allowance; pushing is not authorized.
+**One real six-second pipeline has passed:** automatic Codex image generation → human frame review → Viggle H3 → local export. Reopening preserved completed work without another provider submission. This is a scripted one-shot integration proof, not proof of a complete conversational commercial or a six-minute real production. Speech, transcription and API-image validation still need the configured OpenAI key. See [live validation evidence and limits](LIVE-VALIDATION.md).
+
+V0 is single-user and single-machine. The user authorized bounded live validation up to $5 total across paid APIs, with Codex subscription usage separate, and local milestone commits. Pushing is not authorized. Historical hold statements below describe earlier checkpoints and are superseded for this validation run.
 
 ## Current delivery checkpoints
 
 | Stage | State | Next action |
 |---|---|---|
-| 1. Offline Viggle integration | Complete; local commit `1452803` | Live API tests remain on hold |
-| 2. Conversational audio preparation/review | Complete; offline and bounded native checks pass | User manual rehearsal |
-| 3. Real production validation | Automatic Codex/API image choices and live guide prepared; live validation pending | User runs the one-shot live walkthrough |
-| 4. Release | Not started | Waits for production validation and a release decision |
+| 1. Offline integration | Complete; full regression and type checks pass | Maintain regression coverage |
+| 2. Conversational audio preparation/review | Implemented and tested offline; earlier native proposal proof passed | Configure OpenAI key for real audio |
+| 3. Real production validation | Codex image, Viggle video, export and reopen passed | Real speech/transcription, API image, native conversational end-to-end and longer production |
+| 4. Release | Pending | Complete production validation and user acceptance |
 
-The [manual rehearsal](MANUAL-AUDIO-TESTING.md) covers exact speech plans, scoped edits, recording upload/transcription planning and restart with every media API disabled. Native conversation uses a separate pinned Codex 0.153.4 installation because the bundled app binary has updated. No media API key is needed for this checkpoint.
-
-The [manual live production guide](MANUAL-LIVE-PRODUCTION.md) covers independent director billing choices, automatic Codex or OpenAI API images, real recording acceptance, one Viggle take and export/restart checks. Codex images consume subscription usage and need ChatGPT login; the API image/audio routes and Viggle retain separate keys. The automatic worker is described in [Codex image execution](CODEX-IMAGE-PROVIDER.md). Live media validation remains user-led; unattended development stays paused.
+The [manual live guide](MANUAL-LIVE-PRODUCTION.md) covers provider configuration, narration acceptance, explicit shot permission, separate spending, keyframe review and export. Default generation remains fake unless real routes are explicitly enabled.
 
 ## Latest evidence
+
+**September 23 live-validation milestone:** 1,989 tests passed, one opt-in native connection test skipped, zero failures, and all package type checks passed. Browser rehearsal verified the new selected-shot permission flow. The real isolated run made one Codex image turn and one Viggle submission; download-host recovery reused the same job. Four execution attempts (image, video, timeline, render) succeeded and remained unchanged after reopening. The native skill-read assertion now verifies each locked manifest reference and its hash rather than an obsolete fixed count. Earlier complete-suite limitations below are historical.
+
 
 **September 17 context-delivery fix:** Required director context now travels in native developer instructions on thread start/resume instead of the truncating additional-context hint channel. All declared files from activated immutable skills are included through verified, epoch-bound reads, so linked examples and stage guidance remain available without enabling filesystem tools or changing tool catalogs. Server/dependency builds and 104 focused tests pass. One isolated read-only native turn received all 18 references (63,279 context bytes) intact and correctly described contract, grammar, example and intake rules; zero media calls or IB project changes. Native resume is covered by protocol fixtures, not a second live turn. See [sanitized evidence](director-context-delivery-evidence.json).
 

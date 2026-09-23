@@ -10,13 +10,38 @@ const { StudioApi, ApiError } = await import('../src/api.ts'); hooks.deregister(
 const nativeFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = nativeFetch; });
 
+test('browser exchanges a launch code once and restores sessions without sending a bearer credential', async () => {
+  const calls = [], csrf = 'c'.repeat(43), code = 'a'.repeat(43);
+  globalThis.fetch = async (path, options) => { calls.push({ path, options }); return Response.json({ csrf }); };
+  const paired = await StudioApi.connect(code), restored = await StudioApi.connect();
+  assert.equal(calls[0].path, '/api/session'); assert.equal(calls[0].options.method, 'POST');
+  assert.equal(calls[0].options.body, JSON.stringify({ code }));
+  assert.equal(calls[0].options.headers['x-openslate-client'], 'studio');
+  assert.equal(calls[1].options.method, 'GET'); assert.equal(calls[1].options.body, undefined);
+  await paired.request('/api/projects', { method: 'POST', body: { name: 'Local project' } });
+  assert.equal(calls[2].options.headers['x-openslate-csrf'], csrf);
+  assert.ok(calls.every(call => call.options.credentials === 'same-origin' && call.options.headers.authorization === undefined && !call.path.includes(code)));
+  paired.close(); restored.close();
+});
+
+test('logout uses the current CSRF and rejected sessions notify the workspace', async () => {
+  const api = new StudioApi('c'.repeat(43)); let notified = 0;
+  api.onSessionExpired = () => notified++;
+  globalThis.fetch = async (_path, options) => {
+    assert.equal(options.headers['x-openslate-csrf'], 'c'.repeat(43));
+    return Response.json({ error: { code: 'AUTH_REQUIRED' } }, { status: 403 });
+  };
+  await assert.rejects(api.request('/api/session/logout', { method: 'POST' }), error => error.code === 'AUTH_REQUIRED');
+  assert.equal(notified, 1); api.close();
+});
+
 test('authenticated requests keep token out of URLs and replay the exact command key and body', async () => {
   const requests = []; globalThis.fetch = async (path, options) => { requests.push({ path, options }); return Response.json({ ok: true }); };
   const api = new StudioApi('synthetic-token'); const command = { method: 'POST', body: { text: 'Keep shot 2' }, key: 'same-request' };
   await api.request('/api/projects/project/messages', command); await api.request('/api/projects/project/messages', command);
   assert.deepEqual(requests[0], requests[1]);
-  assert.equal(requests[0].options.headers.authorization, 'Bearer synthetic-token'); assert.equal(requests[0].options.headers['idempotency-key'], 'same-request');
-  assert.equal(requests[0].options.credentials, 'omit'); assert.equal(requests[0].options.redirect, 'error');
+  assert.equal(requests[0].options.headers['x-openslate-csrf'], 'synthetic-token'); assert.equal(requests[0].options.headers['idempotency-key'], 'same-request');
+  assert.equal(requests[0].options.credentials, 'same-origin'); assert.equal(requests[0].options.redirect, 'error');
   assert.ok(!requests[0].path.includes('synthetic-token')); api.close();
 });
 
@@ -47,7 +72,7 @@ test('an existing generated WAV uses the authenticated artifact path before narr
   const api = new StudioApi('fixture'), sha256 = createHash('sha256').update(bytes).digest('hex');
   const url = await api.artifact('project', { artifactId: 'existing-take', sha256, kind: 'audio' }, new AbortController().signal);
   assert.equal(calls[0].path, '/api/projects/project/artifacts/existing-take/content'); assert.equal(calls[0].options.method, 'GET');
-  assert.equal(calls[0].options.headers.authorization, 'Bearer fixture'); assert.equal(calls[0].options.body, undefined);
+  assert.equal(calls[0].options.headers['x-openslate-csrf'], 'fixture'); assert.equal(calls[0].options.body, undefined);
   assert.match(url, /^blob:/); URL.revokeObjectURL(url);
   await assert.rejects(api.artifact('project', { artifactId: 'existing-take', sha256: 'f'.repeat(64), kind: 'audio' }, new AbortController().signal), error => error.code === 'ARTIFACT_CHANGED'); api.close();
 });
@@ -63,8 +88,8 @@ test('event streams authenticate only through headers and deliver bounded frames
  globalThis.fetch=async(path,options)=>{calls.push({path,options});return new Response(new ReadableStream({start(controller){source=controller;}}),{headers:{'content-type':'text/event-stream'}});};
  const api=new StudioApi('private-synthetic-token'),promise=api.events('project',{after:8,signal:abort.signal,onOpen(){},onEvent:event=>frames.push(event)});
  await new Promise(resolve=>setImmediate(resolve));source.enqueue(new TextEncoder().encode('id: 9\nevent: changed\ndata: {"projectId":"project","sequence":9}\n\n'));
- await new Promise(resolve=>setImmediate(resolve));assert.equal(frames.length,1);assert.equal(calls[0].options.headers['last-event-id'],'8');assert.equal(calls[0].options.headers.authorization,'Bearer private-synthetic-token');
- assert.equal(calls[0].path,'/api/projects/project/events');assert.equal(calls[0].options.credentials,'omit');assert.equal(calls[0].options.redirect,'error');
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(frames.length,1);assert.equal(calls[0].options.headers['last-event-id'],'8');assert.equal(calls[0].options.headers['x-openslate-csrf'],'private-synthetic-token');
+ assert.equal(calls[0].path,'/api/projects/project/events');assert.equal(calls[0].options.credentials,'same-origin');assert.equal(calls[0].options.redirect,'error');
  abort.abort();await promise.catch(error=>assert.equal(error.name,'AbortError'));assert.equal(calls[0].options.signal.aborted,true);api.close();
 });
 test('event stream rejects JSON/error pages, oversized frames and expired sessions; closing API aborts readers',async()=>{

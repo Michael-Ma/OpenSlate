@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FakeProvider } from '@openslate/providers';
 import { Store } from '../dist/persistence/store.js';
@@ -61,7 +61,16 @@ test('browser API drives a persistent offline demo, exact review, and a scoped r
   assert.equal((await f.req('GET',`${path}/artifacts/${response.previousPreviews[0].artifact.artifactId}/content`)).statusCode,200);
   assert.equal(f.store.list('skill_activation',project.id).length,2);
   assert.equal(f.store.list('director_skill_lock',project.id).length,1);
-  assert.equal(f.store.list('skill_read',project.id).length,8);
+  const reads=f.store.list('skill_read',project.id);
+  for(const {activation} of f.store.list('skill_activation',project.id)) {
+    const expected=activation.skills.flatMap(skill=>{
+      const root=dirname(skill.entryPath),manifest=JSON.parse(readFileSync(join(root,'openslate.skill.json'),'utf8'));
+      return manifest.files.map(path=>({skillId:skill.id,path,sha256:createHash('sha256').update(readFileSync(join(root,path))).digest('hex')}));
+    });
+    const actual=reads.filter(read=>read.evidence.activationId===activation.activationId).map(({evidence:{skillId,path,sha256}})=>({skillId,path,sha256}));
+    const sort=rows=>rows.sort((a,b)=>`${a.skillId}:${a.path}`.localeCompare(`${b.skillId}:${b.path}`));
+    assert.deepEqual(sort(actual),sort(expected),'each turn receives every declared immutable reference exactly once');
+  }
 });
 
 test('demo retries preserve one turn and one set of generation grants',async t=>{

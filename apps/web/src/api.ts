@@ -7,14 +7,23 @@ export class ApiError extends Error {
   constructor(code: string) { super(errorMessage(code)); this.name = "ApiError"; this.code = code; }
 }
 type RequestOptions = { method?: "GET" | "POST"; body?: unknown; rawBody?: Blob; key?: string; signal?: AbortSignal; timeoutMs?: number };
-/** Access tokens exist only in this tab's memory and are never placed in URLs. */
+/** Authentication stays in an HttpOnly cookie; only the CSRF value lives in tab memory. */
 export class StudioApi {
-  #token: string;
+  #csrf: string;
   #controllers = new Set<AbortController>();
   #closed = false;
   get closed(): boolean { return this.#closed; }
-  constructor(token: string) { this.#token = token; }
-  close() { this.#closed = true; for (const controller of this.#controllers) controller.abort(); this.#controllers.clear(); this.#token = ""; }
+  constructor(csrf: string) { this.#csrf = csrf; }
+  onSessionExpired?: () => void;
+  static async connect(code?: string): Promise<StudioApi> {
+    const api = new StudioApi("");
+    try {
+      const result = await api.request<{ csrf: string }>("/api/session", code === undefined ? {} : { method: "POST", body: { code } });
+      if (!/^[A-Za-z0-9_-]{43}$/.test(result.csrf)) throw new ApiError("AUTH_REQUIRED");
+      api.#csrf = result.csrf; return api;
+    } catch (error) { api.close(); throw error; }
+  }
+  close() { this.#closed = true; for (const controller of this.#controllers) controller.abort(); this.#controllers.clear(); this.#csrf = ""; }
   async events(projectId: string, options: { after?: number; signal: AbortSignal; onOpen(): void; onEvent(event: StreamEvent): void }): Promise<void> {
     const signal = options.signal, onOpen = options.onOpen, onEvent = options.onEvent, after = options.after;
     if (this.#closed) throw new ApiError("SESSION_CLOSED");
@@ -27,11 +36,12 @@ export class StudioApi {
     const activity = () => { clearTimeout(idle); idle = setTimeout(abort, 45000); };
     signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort(); activity();
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/events`, { credentials: "omit", redirect: "error", signal: controller.signal,
-        headers: { authorization: `Bearer ${this.#token}`, accept: "text/event-stream", ...(after === undefined ? {} : { "last-event-id": String(after) }) } });
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/events`, { credentials: "same-origin", redirect: "error", signal: controller.signal,
+        headers: { "x-openslate-csrf": this.#csrf, accept: "text/event-stream", ...(after === undefined ? {} : { "last-event-id": String(after) }) } });
       if (!response.ok) {
         // These statuses are sufficient for cursor reset/auth handling; never accumulate an error page as JSON.
         void response.body?.cancel().catch(() => {});
+        if (response.status === 403) this.onSessionExpired?.();
         throw new ApiError(response.status === 400 ? "VALIDATION_ERROR" : response.status === 403 ? "AUTH_REQUIRED" : "EVENT_STREAM_UNAVAILABLE");
       }
       if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream") || !response.body) throw new ApiError("EVENT_STREAM_UNAVAILABLE");
@@ -69,10 +79,10 @@ export class StudioApi {
     if (options.signal?.aborted) controller.abort();
     const timer = setTimeout(abort, Math.min(180000, Math.max(1000, options.timeoutMs ?? 15000)));
     try {
-      const response = await fetch(path, { method: options.method ?? "GET", credentials: "omit", redirect: "error", signal: controller.signal,
-        headers: { authorization: `Bearer ${this.#token}`, ...(options.rawBody ? { "content-type": "application/octet-stream" } : options.body === undefined ? {} : { "content-type": "application/json" }), ...(options.key ? { "idempotency-key": options.key } : {}) },
+      const response = await fetch(path, { method: options.method ?? "GET", credentials: "same-origin", redirect: "error", signal: controller.signal,
+        headers: { "x-openslate-client": "studio", "x-openslate-csrf": this.#csrf, ...(options.rawBody ? { "content-type": "application/octet-stream" } : options.body === undefined ? {} : { "content-type": "application/json" }), ...(options.key ? { "idempotency-key": options.key } : {}) },
         ...(options.rawBody ? { body: options.rawBody } : options.body === undefined ? {} : { body: JSON.stringify(options.body) }) });
-      if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: { code?: string } }; throw new ApiError(body.error?.code ?? "REQUEST_FAILED"); }
+      if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: { code?: string } }; if (body.error?.code === "AUTH_REQUIRED") this.onSessionExpired?.(); throw new ApiError(body.error?.code ?? "REQUEST_FAILED"); }
       return await consume(response);
     } catch (error) {
       if (options.signal?.aborted) throw new DOMException("Request cancelled", "AbortError");

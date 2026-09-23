@@ -1,4 +1,6 @@
+import { registerGenerationPermission } from "./generation-permission.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
+import { registerStudioSessions, type StudioSessions } from "./studio-sessions.js";
 import Fastify from "fastify";
 import { ProjectModelSettings } from "./application/project-model-settings.js";
 import type { ProjectModelPreviewInput } from "./application/project-model-settings.js";
@@ -26,6 +28,7 @@ import { InstallationRecoveryGuard } from "./application/installation-recovery.j
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+  studioSessions?: StudioSessions;
   allowanceRoutes?: Parameters<typeof registerAllowanceRoutes>[1];
   providerCatalog?: InstalledProviderCatalog;
   webAssets?: WebAssets;
@@ -49,13 +52,13 @@ export function createApp(options: AppOptions = {}) {
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
-      const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED"].includes(error.code) ? 403
+      const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403
         : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : error.code === "VALIDATION_ERROR" ? 400 : 409;
       void reply.status(status).send({ error: { code: error.code, message: error.message } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });
-  app.addHook("preHandler", async request => {
+  app.addHook("preHandler", async (request, reply) => {
     const host = request.headers.host?.split(":")[0];
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
@@ -63,12 +66,24 @@ export function createApp(options: AppOptions = {}) {
     const commandKey = request.headers["idempotency-key"];
     invariant(commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
+    if (options.studioSessions && request.routeOptions.url === "/api/session" && request.method === "POST") {
+      invariant(origin && request.headers["x-openslate-client"] === "studio", "ORIGIN_DENIED", "Pair from the local studio page");
+      return;
+    }
     const bearer = request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{20,256})$/)?.[1];
-    invariant(bearer, "AUTH_REQUIRED", "A local session or director bridge token is required");
     if (request.routeOptions.url?.startsWith("/internal/")) {
+      invariant(bearer, "AUTH_REQUIRED", "A director bridge token is required");
       const projectId = (request.params as { projectId: string }).projectId;
       actors.set(request, service().actorForBridge(projectId, bearer));
-    } else invariant(options.localToken && timingSafeEqual(Buffer.from(digest(bearer)), Buffer.from(digest(options.localToken))), "AUTH_REQUIRED", "Invalid local session token");
+    } else if (request.headers.authorization || request.routeOptions.url === "/api/studio/launch") {
+      invariant(bearer && options.localToken && timingSafeEqual(Buffer.from(digest(bearer)), Buffer.from(digest(options.localToken))), "AUTH_REQUIRED", "Invalid local launcher credential");
+    } else {
+      invariant(options.studioSessions, "AUTH_REQUIRED", "Open studio from the local launcher");
+      options.studioSessions.authorize(request);
+      reply.header("Cache-Control", "no-store");
+    }
+    // Pairing/logout are independent of installation recovery and grant no execution authority.
+    if (options.studioSessions && ["/api/session", "/api/session/logout", "/api/studio/launch"].includes(request.routeOptions.url ?? "")) return;
     // Authenticate first. The narrow release endpoint is independent of project/model authority;
     // all other writes (including raw upload handlers) stay closed during recovery review.
     if (recovery?.isQuarantined()) invariant(recoveryInspectionAllowed(request.method, request.routeOptions.url)
@@ -77,6 +92,7 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
   options.webAssets?.register(app);
+  if (options.studioSessions) registerStudioSessions(app, options.studioSessions);
   if (options.service) registerRecoveryRoutes(app, options.service);
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
@@ -123,6 +139,7 @@ export function createApp(options: AppOptions = {}) {
     const selection = request.body.profileIds ? providerCatalog().select(request.body.expectedCatalogDigest!, request.body.profileIds) : undefined;
     return service().createProject(request.body.name, selection);
   }));
+  registerGenerationPermission(app, service, options.director);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director", async request => {
     service().store.getProject(request.params.projectId);
@@ -261,7 +278,8 @@ export function createApp(options: AppOptions = {}) {
     });
     options.director?.tick(); return result;
   });
-  if (options.service) registerProjectEventStream(app, { store: options.service.store });
+  if (options.service) registerProjectEventStream(app, { store: options.service.store,
+    authorize: request => { if (!request.headers.authorization) options.studioSessions?.authorize(request); } });
   app.post<{ Params: { projectId: string; tool: string }; Body: Record<string, unknown> }>("/internal/projects/:projectId/tools/:tool", async (request, reply) => {
     const actor = actors.get(request)!;
     const { projectId, tool } = request.params;

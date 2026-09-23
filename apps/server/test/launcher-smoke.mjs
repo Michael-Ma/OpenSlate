@@ -16,7 +16,7 @@ const root = mkdtempSync(join(tmpdir(), "openslate-launcher-smoke-"));
 const data = join(root, "data");
 const env = { ...process.env, OPENSLATE_DATA_DIR: data };
 delete env.OPENSLATE_LOCAL_TOKEN;
-const child = spawn(process.execPath, [join(repository, "apps/server/dist/index.js"), "--serve-web"], { cwd: repository, env, stdio: ["ignore", "pipe", "pipe"] });
+const child = spawn(process.execPath, [join(repository, "apps/server/dist/index.js"), "--serve-web", "--no-open"], { cwd: repository, env, stdio: ["ignore", "pipe", "pipe"] });
 let output = "", exit;
 child.stdout.on("data", value => { output += value.toString(); }); child.stderr.on("data", value => { output += value.toString(); });
 const completion = new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", (code, signal) => { exit = { code, signal }; resolve(exit); }); });
@@ -40,7 +40,7 @@ try {
   const ownerPath = join(data, "installation-owner.sqlite"), ownerBefore = statSync(ownerPath);
   // The invalid token override proves the duplicate is refused before credentials,
   // project storage or worker recovery are reached, rather than just failing to bind the port.
-  const duplicate = spawn(process.execPath, [join(repository, "apps/server/dist/index.js"), "--serve-web"], {
+  const duplicate = spawn(process.execPath, [join(repository, "apps/server/dist/index.js"), "--serve-web", "--no-open"], {
     cwd: repository, env: { ...env, OPENSLATE_LOCAL_TOKEN: "invalid" }, stdio: ["ignore", "pipe", "pipe"],
   });
   let duplicateOutput = "", duplicateExit;

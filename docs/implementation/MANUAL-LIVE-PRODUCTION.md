@@ -67,7 +67,13 @@ chmod 600 .env.live.local
 node --env-file=.env.live.local apps/server/dist/index.js --serve-web
 ```
 
-Open http://127.0.0.1:3001. Read the local token file identified by the launcher and paste it into the connection screen yourself. That token is unrelated to API keys. Restart with the same command/data directory to keep your projects and attempt history.
+The server opens a connected browser window automatically. To reconnect to an already running server, use the same environment and data directory:
+
+```sh
+node --env-file=.env.live.local apps/server/dist/studio-cli.js
+```
+
+The launcher uses a one-time link valid for 60 seconds. The browser removes the code from its address bar and stores an HttpOnly local session. Do not share the link. Restart with the same command/data directory to preserve projects and attempts. The local session is independent of provider API keys.
 
 ## Conversation: Codex usage or API billing
 
@@ -127,7 +133,9 @@ Do this before reviewing the final keyframe/video specification: applying narrat
 
 ## 4. Generate and review one keyframe
 
-Ask the director to prepare and apply the plan for the one shot. In the spending/usage review, inspect the exact image candidate and selected profile. Approve only one start:
+In **Assets → Generation permissions & spending**, select the saved shot and the required image/video operations. Review the exact saved prompts, then choose **Allow and continue planning**. If work was stopped, send a fresh direction first. Permission allows one operation of each selected kind per shot; it does not approve spending or skip keyframe review. If the project changes while reviewing, review the current version again.
+
+The director can then prepare and apply the plan for that scope. In the spending/usage review, inspect the exact image candidate and selected profile. Approve only one start:
 
 - Codex image choice: confirm that it uses Codex allowance. The amount of subscription quota is unknown in advance.
 - API image choice: inspect the configured estimate and approve a small finite API allowance you are comfortable spending.

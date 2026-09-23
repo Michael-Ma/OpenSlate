@@ -1,13 +1,15 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ServerResponse } from "node:http";
 import { invariant } from "@openslate/core";
 import type { Store } from "../persistence/store.js";
 
-interface Client { projectId: string; cursor: number; response: ServerResponse; heartbeatAt: number; status: string; close(): void }
+interface Client { projectId: string; cursor: number; response: ServerResponse; heartbeatAt: number; status: string; close(): void; authorize(): void }
 export interface ProjectEventStreamOptions {
   store: Store;
   /** Read-only in-memory status. Database-only changes are detected independently. */
   directorStatus?: (projectId: string) => unknown;
+  /** Revalidate expiring/revoked browser sessions before emitting more project data. */
+  authorize?: (request: FastifyRequest) => void;
   /** Trusted test/host timing overrides; never browser input. */
   intervalMs?: number; heartbeatMs?: number;
 }
@@ -34,6 +36,7 @@ export function registerProjectEventStream(app: FastifyInstance, options: Projec
     `${event === "project.resync" ? `id: ${cursor}\n` : ""}event: ${event}\ndata: ${JSON.stringify({ version: 1, projectId: client.projectId, cursor })}\n\n`);
   const pump = (client: Client, changed: boolean, now: number) => {
     try {
+      client.authorize();
       const latest = store.cursor(client.projectId), nextStatus = status(client.projectId), statusChanged = nextStatus !== client.status;
       client.status = nextStatus;
       if (latest < client.cursor || latest - client.cursor > pageLimit) {
@@ -78,7 +81,8 @@ export function registerProjectEventStream(app: FastifyInstance, options: Projec
       if (!reply.raw.writableEnded) reply.raw.end();
       if (!clients.size) { clearInterval(timer); timer = undefined; }
     };
-    const client: Client = { projectId, cursor, response: reply.raw, heartbeatAt: 0, status: initialStatus, close };
+    const client: Client = { projectId, cursor, response: reply.raw, heartbeatAt: 0, status: initialStatus, close,
+      authorize: () => options.authorize?.(request) };
     clients.add(client); reply.raw.on("close", close); request.raw.on("aborted", close);
     if (!timer) { previous = stamp(); timer = setInterval(tick, intervalMs); timer.unref(); }
     pump(client, false, Date.now());
