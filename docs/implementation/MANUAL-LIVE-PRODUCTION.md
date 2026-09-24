@@ -19,6 +19,8 @@ Audio generation/transcription still use the OpenAI API key. Viggle video uses i
 
 ## 1. Prepare the local installation
 
+For an already configured checkout, run `./start.sh` from the repository. It loads `.env.live.local`, checks prerequisites, installs dependencies, builds and opens the complete studio. Run `./start.sh --check` to inspect readiness without launching. An already-running server is reused; stop it first to load changed keys/settings. The following steps document first-time setup and manual alternatives.
+
 Use Node 24, pnpm 10.33.0, FFmpeg and ffprobe. From the repository:
 
 ```sh

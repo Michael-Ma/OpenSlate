@@ -23,6 +23,16 @@ Local deployment does not mean offline generation. The initial production adapte
 
 ## Quick start
 
+For the complete local studio, run:
+
+```sh
+./start.sh
+```
+
+The script selects Node 24 through an existing nvm installation if needed, checks enabled-provider prerequisites, loads `.env.live.local` when present, installs locked dependencies with the pinned pnpm version, builds all packages, and opens the connected app. Keep the terminal open; Ctrl+C stops the server. It preserves keys, provider enable switches and saved projects. If a server is already running, it reconnects without rebuilding or restarting it; stop that server first to apply configuration/code changes.
+
+Use `./start.sh --check` for prerequisite checks or `./start.sh --no-open` to leave the browser closed. Missing FFmpeg, pinned Codex, or credentials get actionable errors; system installation and Codex sign-in remain explicit setup steps. The commands below are the manual alternative.
+
 Prerequisites: Node.js 24 and pnpm 10.33.0. The SQLite dependency invokes native build tooling; the verified macOS setup also had Python 3 and Xcode command-line build tools. See [fresh checkout evidence](docs/implementation/CLEAN-CHECKOUT-VALIDATION.md) for the tested environment. If needed, install pnpm with `npm install -g pnpm@10.33.0`.
 
 ```sh
