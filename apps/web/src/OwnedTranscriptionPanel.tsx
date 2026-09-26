@@ -1,3 +1,4 @@
+import { IconButton } from "./components";
 import { useProjectRefreshVersion } from "./project-updates";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
@@ -85,7 +86,7 @@ export function OwnedTranscriptionPanel({ api, projectId, view, recording, disab
   const executionNotice = detail ? transcriptionExecutionNotice(detail.execution) : null;
   const proposalTarget = proposal?.target;
   const sectionIndex = proposalTarget?.kind === "section" ? view.snapshot.segments.findIndex(row => row.entry.segmentId === proposalTarget.segmentId && row.script.id === proposalTarget.segmentRevisionId) : -1;
-  return <section className="owned-transcription" aria-labelledby="owned-transcription-title"><div className="narration-section-header"><h4 id="owned-transcription-title">Transcribe a recording</h4><button className="text-button" onClick={() => setRefresh(value => value + 1)}>Refresh transcription plans</button></div>
+  return <section className="owned-transcription" aria-labelledby="owned-transcription-title"><div className="narration-section-header"><h4 id="owned-transcription-title">Transcribe a recording</h4><IconButton onClick={() => setRefresh(value => value + 1)} label="Refresh transcription plans" icon="refresh" /></div>
     <p>Review a plan for this recording, then approve its spending separately. You can read the transcript before creating a section.</p>
     {error && <p role="alert">{error}</p>}
     {!options && !error && <p role="status">Loading transcription choices…</p>}

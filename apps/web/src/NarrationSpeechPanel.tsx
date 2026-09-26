@@ -1,3 +1,4 @@
+import { IconButton } from "./components";
 import { useProjectRefreshVersion } from "./project-updates";
 import { useEffect, useRef, useState } from 'react';
 import type { StudioApi } from './api';
@@ -59,7 +60,7 @@ export function NarrationSpeechPanel({ api, projectId, view, disabled, completio
   }
   const sections = view.snapshot.segments.filter(row => row.script.source.kind === 'generated' && row.script.textKind === 'draft' && row.script.text.trim());
   const proposal = detail?.proposal;
-  return <section className="owned-transcription" aria-labelledby="speech-review-title"><div className="narration-section-header"><h4 id="speech-review-title">Generate narration</h4><button className="text-button" onClick={() => setRefresh(value => value + 1)}>Refresh speech plans</button></div>
+  return <section className="owned-transcription" aria-labelledby="speech-review-title"><div className="narration-section-header"><h4 id="speech-review-title">Generate narration</h4><IconButton onClick={() => setRefresh(value => value + 1)} label="Refresh speech plans" icon="refresh" /></div>
     <p>Ask the director to prepare speech from a saved section, or choose one here. Review the exact words and delivery before approving spending.</p>
     {error && <p role="alert">{error}</p>}
     {options && !options.profiles.length && <p>This project has no speech model selected. Create a project with a speech model to prepare narration.</p>}

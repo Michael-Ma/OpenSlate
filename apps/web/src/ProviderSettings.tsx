@@ -1,3 +1,4 @@
+import { IconButton, HelpTip } from "./components";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
@@ -39,7 +40,7 @@ export function NewProjectProviderFields({ api, selection, changed, disabled }: 
         : "These models will be saved for this project. Generation also requires model readiness and your exact spending allowance." : "Demo models are selected. No paid media calls."}</p></>}
     {stale && <p role="alert">The model catalog changed. Refresh the choices before creating this project.</p>}
     {error && <p role="alert">{error} Reset the choices to create a default demo project.</p>}
-    {(selection || error || stale) && <button type="button" disabled={disabled} onClick={() => { changed(null); setRefresh(value => value + 1); }}>Reset and refresh choices</button>}
+    {(selection || error || stale) && <IconButton type="button" disabled={disabled} onClick={() => { changed(null); setRefresh(value => value + 1); }} label="Reset and refresh choices" icon="refresh" />}
   </details>;
 }
 
@@ -63,7 +64,7 @@ export function ProjectProviderSummary({ api, projectId }: { api: StudioApi; pro
       {provider.readiness.spendingPermissionRequired && <span>{providerExecutionStatus(provider)}</span>}
     </li>)}</ul>}
     {error && <p role="alert" className="form-error">{error}</p>}
-    <button type="button" className="text-button" onClick={() => setRefresh(value => value + 1)}>Refresh model status</button>
+    <IconButton type="button" onClick={() => setRefresh(value => value + 1)} label="Refresh model status" icon="refresh" />
   </section>;
 }
 
@@ -91,7 +92,7 @@ export function ProviderSetupAccounts({ api, projectId, refreshKey = 0 }: { api:
   }, [api, projectId, refresh, refreshKey]);
   return <section className="project-settings-section" aria-labelledby="settings-accounts-title">
     <div className="project-settings-section-heading"><div><h3 id="settings-accounts-title">Setup & accounts</h3><p>These providers use separate accounts. Saving model choices does not enable a provider or approve its usage.</p></div>
-      <button type="button" className="text-button" onClick={() => setRefresh(value => value + 1)}>Refresh setup status</button></div>
+      <IconButton type="button" onClick={() => setRefresh(value => value + 1)} label="Refresh setup status" icon="refresh" /></div>
     {error && <p role="alert" className="form-error">{error} Previously shown setup information may be out of date.</p>}
     {!status && !error && <p role="status">Loading provider setup…</p>}
     <div className="settings-account-grid">{status?.options.map(provider => <article key={provider.id} className="settings-account-card"><h4>{provider.label}</h4>
@@ -162,8 +163,8 @@ export function ProjectModelsSettings({ api, projectId, snapshot, changed, onCon
   const applied = slot.lastSuccess && slot.settledCommand?.path.endsWith("/apply") ? slot.result as ModelSettingsApplied : null;
   const continuationSent = modelContinuationSent(applied, continuation);
   return <section className="project-settings-section" aria-labelledby="project-models-title">
-    <div className="project-settings-section-heading"><div><h3 id="project-models-title">Models & usage</h3><p>Choose models for future plans and safely replace eligible unfinished work. Completed assets, in-flight jobs and their required inputs are kept.</p></div>
-      <button type="button" className="text-button" disabled={busy} onClick={() => setRefresh(value => value + 1)}>Refresh choices</button></div>
+    <div className="project-settings-section-heading"><div><h3 id="project-models-title">Models & usage <HelpTip label="About model changes">Choose models for future plans and eligible unfinished work. Completed assets, in-flight jobs and their required inputs are kept.</HelpTip></h3></div>
+      <IconButton type="button" disabled={busy} onClick={() => setRefresh(value => value + 1)} label="Refresh choices" icon="refresh" /></div>
     <div className="settings-model-grid">{PROVIDER_KIND_CHOICES.map(({ kind, label }) => {
       const choices = status?.options.filter(provider => provider.profile?.kind === kind) ?? [], provider = choices.find(provider => provider.id === selected[kind]);
       return <article className="settings-model-card" key={kind}><label htmlFor={`settings-model-${kind}`}>{label}</label>

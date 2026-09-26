@@ -135,7 +135,7 @@ Do this before reviewing the final keyframe/video specification: applying narrat
 
 ## 4. Generate and review one keyframe
 
-In **Assets → Generation permissions & spending**, select the saved shot and the required image/video operations. Review the exact saved prompts, then choose **Allow and continue planning**. If work was stopped, send a fresh direction first. Permission allows one operation of each selected kind per shot; it does not approve spending or skip keyframe review. If the project changes while reviewing, review the current version again.
+In **Storyline → Generation & costs**, select the saved shot and the required image/video operations. Review the exact saved prompts, then choose **Allow and continue planning**. If work was stopped, send a fresh direction first. Permission allows one operation of each selected kind per shot; it does not approve spending or skip keyframe review. If the project changes while reviewing, review the current version again.
 
 The director can then prepare and apply the plan for that scope. In the spending/usage review, inspect the exact image candidate and selected profile. Approve only one start:
 

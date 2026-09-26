@@ -1,3 +1,4 @@
+import { registerAssetLibrary } from "./asset-library.js";
 import { registerGenerationPermission } from "./generation-permission.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
 import { registerStudioSessions, type StudioSessions } from "./studio-sessions.js";
@@ -140,6 +141,7 @@ export function createApp(options: AppOptions = {}) {
     return service().createProject(request.body.name, selection);
   }));
   registerGenerationPermission(app, service, options.director);
+  registerAssetLibrary(app, service);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director", async request => {
     service().store.getProject(request.params.projectId);

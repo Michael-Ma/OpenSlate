@@ -1,6 +1,6 @@
 # Implementation status
 
-September 23, 2026. This page describes working code; technical designs describe the broader target.
+September 26, 2026. This page describes working code; technical designs describe the broader target.
 
 OpenSlate has a local conversation/review workspace, configurable providers, durable planning and execution, narration review, a reference library, and local rendering. The Precision UI supports project model changes, authenticated SSE, conversational Stop, and shot-scoped generation permission. The launcher connects the browser using a short-lived code and an HttpOnly session instead of asking users to paste a long-lived token.
 
@@ -20,6 +20,8 @@ V0 is single-user and single-machine. The user authorized bounded live validatio
 The [manual live guide](MANUAL-LIVE-PRODUCTION.md) covers provider configuration, narration acceptance, explicit shot permission, separate spending, keyframe review and export. Default generation remains fake unless real routes are explicitly enabled.
 
 ## Latest evidence
+
+**September 26 UI simplification:** icon utilities and contextual help, consolidated unfinished-edit disclosure, conditional frame approval, and a paginated image/video asset library are implemented. Generation and costs now live beside the storyboard. Full checks passed: 1,990 tests, zero failures, one optional test skipped. Desktop and 390px mobile browser review covered the actual IB layout; isolated fixture checks covered asset filtering, media inspection, upload disclosure and frame selection. No paid generation was performed. See [simplified flow and remaining protocol work](../design/SIMPLIFIED-VIDEO-FLOW.md).
 
 **September 23 live-validation milestone:** 1,989 tests passed, one opt-in native connection test skipped, zero failures, and all package type checks passed. Browser rehearsal verified the new selected-shot permission flow. The real isolated run made one Codex image turn and one Viggle submission; download-host recovery reused the same job. Four execution attempts (image, video, timeline, render) succeeded and remained unchanged after reopening. The native skill-read assertion now verifies each locked manifest reference and its hash rather than an obsolete fixed count. Earlier complete-suite limitations below are historical.
 

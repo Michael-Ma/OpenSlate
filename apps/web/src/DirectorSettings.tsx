@@ -1,3 +1,4 @@
+import { IconButton } from "./components";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
@@ -44,7 +45,7 @@ export function DirectorSettingsPanel({ api, projectId, changed, refreshKey = 0,
   const disabled = readOnly || slot.running || !!slot.command || checking || !!loadError || !status || status.busy || !status.changeAvailable;
   return <section className="project-settings-section" aria-labelledby="project-director-title">
     <div className="project-settings-section-heading"><div><h3 id="project-director-title">Conversation director</h3><p>Choose who helps plan this film. Media models and their usage approvals are separate.</p></div>
-      <button type="button" className="text-button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)}>Refresh status</button></div>
+      <IconButton type="button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)} label="Refresh status" icon="refresh" /></div>
     {status && <div className="settings-status-card"><strong>{status.selection.mode === "fake" ? "Demo director" : status.selection.model ?? "Codex"}</strong><span>{directorSetupSummary(status)}</span></div>}
     {status?.busy && <p role="status" className="notice">The current conversation or setup check must finish first. This control does not interrupt it.</p>}
     <form onSubmit={event => { event.preventDefault(); if (disabled || !status) return; try { execute(directorChangeCommand(projectId, status, draft, crypto.randomUUID())); setFormError(""); } catch (error) { setFormError(errorText(error)); } }}>
@@ -76,6 +77,6 @@ export function DirectorSettingsPanel({ api, projectId, changed, refreshKey = 0,
 
 /** Compatibility entry point until the app mounts the full Project settings shell. */
 export function DirectorSettings({ api, projectId, close, changed }: { api: StudioApi; projectId: string; close(): void; changed(): void }) {
-  return <div className="modal-scrim"><section className="settings-dialog" role="dialog" aria-modal="true" aria-label="Director settings"><button type="button" className="text-button settings-close" onClick={close}>Close</button>
+  return <div className="modal-scrim"><section className="settings-dialog" role="dialog" aria-modal="true" aria-label="Director settings"><IconButton type="button" className="text-button settings-close" onClick={close} label="Close director settings" icon="close" />
     <DirectorSettingsPanel api={api} projectId={projectId} changed={changed} /></section></div>;
 }

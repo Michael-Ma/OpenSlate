@@ -1,3 +1,4 @@
+import { IconButton, HelpTip } from "./components";
 import { useEffect, useRef, useState } from "react";
 import type { StudioApi } from "./api";
 import type { ProjectSnapshot } from "./model";
@@ -21,8 +22,8 @@ export function ProjectSettings({ api, projectId, snapshot, close, changed, onCo
     if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog.current)) { event.preventDefault(); first.focus(); }
   }}>
-    <header className="project-settings-header"><div><span className="eyebrow">{snapshot?.project.name ?? "THIS PROJECT"}</span><h2 id="project-settings-title">Project settings</h2><p>Choose models, understand usage, and check local setup.</p></div>
-      <button type="button" className="text-button" onClick={close} disabled={busy}>Close settings</button></header>
+    <header className="project-settings-header"><div><span className="eyebrow">{snapshot?.project.name ?? "THIS PROJECT"}</span><h2 id="project-settings-title">Project settings <HelpTip label="About project settings">Choose models, understand usage, and check local setup. Changes never start generation.</HelpTip></h2></div>
+      <IconButton type="button" className="text-button" onClick={close} disabled={busy} label="Close settings" icon="close" /></header>
     <nav className="project-settings-tabs" aria-label="Project settings sections">
       {([["models", "Models & usage"], ["director", "Director"], ["setup", "Setup & accounts"]] as const).map(([value, label]) => <button key={value} type="button" disabled={busy} aria-current={section === value ? "page" : undefined}
         className={section === value ? "active" : ""} onClick={() => setSection(value)}>{label}</button>)}

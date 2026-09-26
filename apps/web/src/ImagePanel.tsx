@@ -10,7 +10,7 @@ import "./media.css";
 
 interface Reference { artifact: Artifact; width: number; height: number; byteLength: number }
 interface Library { headVersion: number; images: Reference[]; capabilities: { import: boolean; maxBytes: number; unavailableReason: string | null }; coverage: { offset: number; returned: number; total: number; nextOffset: number | null } }
-type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; onDiscuss?: ((artifact: Artifact) => void) | undefined; discussDisabled?: boolean; discussionUnavailable?: boolean };
+type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; uploadOnly?: boolean; onDiscuss?: ((artifact: Artifact) => void) | undefined; discussDisabled?: boolean; discussionUnavailable?: boolean };
 function importError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "UPLOAD_TOO_LARGE") return "Choose a nonempty PNG image up to 32 MiB.";
@@ -36,7 +36,7 @@ function ImagePreview({ api, projectId, reference }: { api: StudioApi; projectId
 }
 
 export function ImagePanel(props: Props) { return <ImageWorkspace key={props.snapshot.project.id} {...props} />; }
-function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, discussionUnavailable }: Props) {
+function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, discussionUnavailable, uploadOnly = false }: Props) {
   const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/images`, registry = pendingCommandsFor(api, "images");
   const slot = useSyncExternalStore(useCallback(listener => registry.subscribe(projectId, listener), [registry, projectId]), useCallback(() => registry.snapshot(projectId), [registry, projectId]));
@@ -67,8 +67,8 @@ function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, 
   }
   const error = fileError || (slot.error ? importError(slot.error) : "") || loadError;
   return <section className="media-panel" aria-labelledby="reference-images-title">
-    <div className="media-heading"><div><span className="eyebrow">REFERENCE IMAGES</span><h3 id="reference-images-title">Set the visual direction</h3></div><span className="tag">Your images</span></div>
-    <p>Import a PNG reference, review it here, and discuss which shots should use it. Importing an image does not approve video generation.</p>
+    <div className="media-heading"><div><h3 id="reference-images-title">Upload an image</h3></div><span className="tag">Your images</span></div>
+
     {error && <p role="alert" className="form-error">{error}</p>}
     {library && !library.capabilities.import && <p role="status">{library.capabilities.unavailableReason}</p>}
     {slot.command && slot.running && <p role="status">Your saved import is running. Switching projects will not start it again.</p>}
@@ -86,6 +86,7 @@ function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, 
       {currentRequest && <label className="check-row"><input type="checkbox" checked={reuse} disabled={blocked} onChange={event => setReuse(event.target.checked)} />Add this reference to the current edit</label>}
       <button className="button small" disabled={blocked || !file || !!fileError || !library?.capabilities.import}>{slot.running ? "Importing…" : "Import reference"}</button>
     </form>
+    {!uploadOnly && <>
     {loading && <p role="status">Loading reference library…</p>}
     {!loading && library && !library.coverage.total && <p>No reference images yet.</p>}
     {!!library?.images.length && <div className="supplied-clips">{library.images.map((reference, index) => <button className="supplied-clip" key={reference.artifact.artifactId} aria-pressed={selected?.artifact.artifactId === reference.artifact.artifactId} onClick={() => setSelected(reference)}>
@@ -94,6 +95,7 @@ function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, 
     {library && library.coverage.total > 40 && <div className="render-actions"><button disabled={loading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 40))}>Previous references</button><span>{library.coverage.offset + 1}–{library.coverage.offset + library.coverage.returned} of {library.coverage.total}</span><button disabled={loading || library.coverage.nextOffset === null} onClick={() => setOffset(library.coverage.nextOffset!)}>More references</button></div>}
     {selected && <><ImagePreview key={selected.artifact.artifactId} api={api} projectId={projectId} reference={selected} />
       {onDiscuss && <><button className="text-button" disabled={blocked || discussDisabled || discussionUnavailable} onClick={() => onDiscuss(selected.artifact)}>Attach and discuss</button><p>{discussionUnavailable ? "Local FFmpeg is needed to prepare an image for Codex." : "Send a reduced image to Codex for this discussion. Your project stays unchanged; request edits in the conversation. Later messages do not automatically include the image."}</p></>}
+    </>}
     </>}
   </section>;
 }

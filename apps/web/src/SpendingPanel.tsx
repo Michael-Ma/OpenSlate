@@ -1,3 +1,4 @@
+import { IconButton } from "./components";
 import { useProjectRefreshVersion } from "./project-updates";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -104,7 +105,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
   };
   if (state && !state.coverage.candidates.total && !state.coverage.allowances.total && !slot.command && !slot.error && !review && !slot.lastSuccess && !focusCandidateId) return null;
   return <section className="spending-panel" aria-labelledby="spending-title">
-    <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">{codexUsage ? "Review generation costs and Codex usage" : "Review generation costs"}</h3></div><button className="text-button" disabled={slot.running} onClick={() => setRefresh(value => value + 1)}>{codexUsage ? "Refresh limits" : "Refresh costs"}</button></div>
+    <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">{codexUsage ? "Review generation costs and Codex usage" : "Review generation costs"}</h3></div><IconButton icon="refresh" label="Refresh costs and usage" disabled={slot.running} onClick={() => setRefresh(value => value + 1)} /></div>
     <p>{codexUsage ? "Approve API spending or finite Codex starts for specific work." : "Approve spending for specific work."} Permission to generate the exact creative work remains separate, as does keyframe review before video generation.</p>
     <p className="spending-disabled">{codexUsage ? "Generation requires enabled providers and local tools. API providers also need a key and sufficient USD budget; Codex checks authentication before each start and its quota remains unverified. There is no automatic switch from Codex to the image API." : "Generation also requires enabled provider configuration, available local tools, a configured API key and sufficient project budget."} An allowance does not provide that setup, accept narration or authorize a new creative change.</p>
     {!!(loadError || reviewError || slot.error) && <p role="alert" className="form-error">{loadError || reviewError || errorText(slot.error)}</p>}
@@ -126,7 +127,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
       {!review && selected.length > 0 && <div className="spending-actions"><button className="button small" disabled={busy || !!loadError} onClick={() => {
         try { const next = reviewSpending(state, selected, crypto.randomUUID()); setReview({ ...next, labels: selected.map(id => rowLabel(state.candidates.find(candidate => candidate.candidateId === id)!)) }); setReviewError(""); }
         catch (error) { setReviewError(errorText(error)); }
-      }}>Review allowance for {selected.length} {selected.length === 1 ? "item" : "items"}</button><button className="text-button" disabled={busy} onClick={() => { setSelected([]); setReviewError(""); }}>Clear selected work</button></div>}
+      }}>Review allowance for {selected.length} {selected.length === 1 ? "item" : "items"}</button><IconButton disabled={busy} onClick={() => { setSelected([]); setReviewError(""); }} label="Clear selected work" icon="close" /></div>}
       {spendingPage(state.coverage.candidates, 100).visible && <nav className="spending-pagination" aria-label="Generation work pages"><span>{spendingPage(state.coverage.candidates, 100).label}</span>
         <button disabled={busy || state.coverage.candidates.offset === 0} onClick={() => page("candidates", Math.max(0, state.coverage.candidates.offset - 100))}>Previous work</button>
         <button disabled={busy || state.coverage.candidates.nextOffset === null} onClick={() => page("candidates", state.coverage.candidates.nextOffset!)}>Next work</button></nav>}

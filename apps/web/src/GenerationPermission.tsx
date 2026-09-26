@@ -1,3 +1,4 @@
+import { HelpTip } from "./components";
 import { useState } from "react";
 import type { ProjectSnapshot } from "./model";
 import { durationLabel } from "./model";
@@ -10,8 +11,7 @@ export function GenerationPermission({ snapshot, disabled, authorize }: { snapsh
   const blocked = disabled || !!snapshot.control?.paused || owners.length > 1;
   const fresh = review?.headVersion === project.headVersion && review.revisionId === project.revisionId && review.cursor === snapshot.cursor;
   if (!project.shots.length) return null;
-  return <section className="story-card" aria-labelledby="generation-permission-title"><span className="eyebrow">BEFORE THE EXECUTION PLAN</span><h3 id="generation-permission-title">Allow generation planning</h3>
-    <p>Choose which shots may receive new images or video takes. This grants one operation of each selected type per shot. Replacing a result is allowed only for these shots. Paid providers still require a separate spending allowance; video still waits for keyframe and motion review.</p>
+  return <section className="story-card" aria-labelledby="generation-permission-title"><h3 id="generation-permission-title">1. Choose shots <HelpTip label="About generation permission">Allow one new image or video per selected shot, including a replacement. This lets the director prepare the work; it does not approve spending or skip frame review.</HelpTip></h3>
     {snapshot.control?.paused && <p className="field-help">Send a new direction in the Director to continue stopped work first.</p>}
     {owners.length > 1 && <p className="field-help">Continue the pending edits in the Director before reviewing generation permission.</p>}
     {!review ? <><fieldset className="permission-options"><legend>Shots</legend>{project.shots.map((shot, index) => <label key={shot.id}><input type="checkbox" checked={selected.includes(shot.id)} disabled={blocked} onChange={() => setSelected(ids => ids.includes(shot.id) ? ids.filter(id => id !== shot.id) : [...ids, shot.id])} />Shot {index + 1} · {shot.purpose} · {durationLabel(shot.desiredFrames)}</label>)}</fieldset>

@@ -1,3 +1,4 @@
+import { IconButton } from "./components";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
 import type { StudioApi } from "./api";
@@ -85,7 +86,7 @@ function TranscriptReview({ api, projectId, row, disabled, useSelection, audioId
   const reasons = ready && preview ? [...new Set(preview.timing.issues.map(issue => transcriptIssueText(issue.code)))] : [];
   return <details className="transcript-review" open={open} onToggle={event => setOpen(event.currentTarget.open)}><summary>Review an existing transcript</summary>
     {open && <div className="transcript-review-body"><p>Recognized words and timing are suggestions for this recording. Using them does not accept your script, recording or timing.</p>
-      <div className="narration-actions"><button className="text-button" disabled={listBusy} onClick={() => setRefresh(value => value + 1)}>Refresh transcripts</button>
+      <div className="narration-actions"><IconButton disabled={listBusy} onClick={() => setRefresh(value => value + 1)} label="Refresh transcripts" icon="refresh" />
         {list?.coverage.nextOffset !== null && list && <button className="button" disabled={listBusy} onClick={() => void more()}>Load more transcripts</button>}</div>
       {listError && <p role="alert">{listError}</p>}{listBusy && <p role="status">Loading transcripts…</p>}
       {list && !list.candidates.length && <p>No completed transcript is listed for this recording{list.coverage.nextOffset !== null ? " on this page. Load more to continue." : " yet."}</p>}

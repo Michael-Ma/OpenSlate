@@ -1,3 +1,4 @@
+import { IconButton } from "./components";
 import { useProjectRefreshVersion } from "./project-updates";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
@@ -50,7 +51,7 @@ export function RecoveryPanel({ api, refreshKey, onState, onChanged }: {
   if (state.state === "ordinary" && !slot.command) return null;
   const current = !loadError && recoveryReviewCurrent(review, state), counts = state.counts;
   return <section className="recovery-panel" aria-labelledby="recovery-title">
-    <div className="recovery-heading"><div><span className="eyebrow">RESTORED LOCAL WORKSPACE</span><h2 id="recovery-title">{state.state === "quarantined" ? "Review your recovery" : "Recovery review completed"}</h2></div><button className="text-button" onClick={() => setRefresh(value => value + 1)}>Refresh recovery</button></div>
+    <div className="recovery-heading"><div><span className="eyebrow">RESTORED LOCAL WORKSPACE</span><h2 id="recovery-title">{state.state === "quarantined" ? "Review your recovery" : "Recovery review completed"}</h2></div><IconButton onClick={() => setRefresh(value => value + 1)} label="Refresh recovery" icon="refresh" /></div>
     {state.state === "quarantined" ? <><p>Your saved projects and media are available to inspect. Changes, generation and director requests are paused until you finish this review.</p>
       <p>Backup created: <strong>{state.receipt ? new Date(state.receipt.backupCreatedAt).toLocaleString() : "Unavailable"}</strong>. Work completed after that backup may be absent.</p>
       <dl className="recovery-counts"><div><dt>Projects</dt><dd>{counts.projects}</dd></div><div><dt>Known pending jobs</dt><dd>{counts.knownJobs}</dd></div><div><dt>Uncertain jobs</dt><dd>{counts.unknownJobs}</dd></div>{!!counts.preparingJobs && <div><dt>Local preparation, not submitted</dt><dd>{counts.preparingJobs}</dd></div>}<div><dt>Saved director requests</dt><dd>{counts.nativeRequests}</dd></div><div><dt>Unused saved allowances</dt><dd>{counts.unusedAllowances}</dd></div></dl>
