@@ -1,6 +1,6 @@
 # Viggle H3 integration
 
-September 13, 2026. Offline integration is implemented and verified. Live generation is explicitly on hold and has not been validated.
+Offline integration is implemented and verified. A real six-second Viggle submission and export passed on September 23; see [live evidence](LIVE-VALIDATION.md). The adapter contracts below retain their original September 13 scope.
 
 The first live H3 provider for OpenSlate is Viggle. It uses a separate `viggle-h3` execution identity and `viggle-video` credential alias. Existing MiniMax-direct project locks and historical receipts retain their original meaning.
 
@@ -50,9 +50,9 @@ The POST acknowledges a queued `vid_` identity. [Get Video](https://docs.viggle.
 
 Store validation and media-inclusive backup inspection must preserve the same chain. Valid unresolved dispatches and accepted jobs remain recoverable records; restoration never grants permission to submit imported attempts for the first time.
 
-## First live-test allowance
+## Live-test scope and cost estimates
 
-The user approved **up to $1 total** for the initial Viggle tests, then explicitly put live Viggle API testing **on hold**. Do not run live tests until the user resumes them, even if a key is configured. No call has used this allowance. Other image/audio providers are not covered.
+The original $1 test proposal and subsequent hold are superseded by the September 23 bounded validation run. That run had a $5 total API cap and issued one Viggle submission. Recorded allowances are historical evidence, not reusable approval for unlimited future runs; confirm the applicable budget for new validation.
 
 The supplied contract and the independently checked [pricing page](https://docs.viggle.ai/v1/pricing) state one credit ($0.01) per rounded-up generated second for both qualities. The public rate makes a three-second test $0.03; this is not evidence of an actual account charge. Before a live POST, verify the applicable account rate and use an exact short-duration profile. The existing `unitCostMicros` field reserves a flat per-attempt upper bound, not a per-second rate. Maintain a cumulative test ledger; count uncertain submissions conservatively against the ceiling and never retry them blindly. Start with one candidate and one authorized attempt. A key alone does not remove the separate application review and spending gates.
 
@@ -66,4 +66,4 @@ The shared fixture independently passed reviewed PNG import, exact human frame a
 
 ## Manual testing gate
 
-Finish offline Viggle integration and conversational audio preparation/review first. The user will manually test those flows before real production validation or release work. Keep all live Viggle calls on hold, even with a configured key. Real speech, transcription and image tests also need a separate explicit allowance.
+Continue the remaining live audio/API-image and complete conversational production checks described in [status](STATUS.md) and the [manual live guide](MANUAL-LIVE-PRODUCTION.md). Preserve exact human reviews and explicit test spending limits.

@@ -1,8 +1,6 @@
 # Audio execution bridges
 
-September 12, 2026. **Both explicitly constructed application bridges are implemented offline.** See [speech execution](OPENAI-SPEECH-EXECUTION.md) and [transcription execution](OPENAI-TRANSCRIPTION-EXECUTION.md). Neither workflow is activated in the launcher or exposed as built-in narration generation. This follows [audio ingestion](GENERATED-AUDIO-INGESTION.md), [transcription preparation](TRANSCRIPTION-AUDIO-PREPARATION.md) and the standalone transport contracts. It precedes [transcript candidate ingestion](TRANSCRIPT-CANDIDATES.md), because a candidate must know exactly which recording was uploaded.
-
-Speech and transcription mapping/dispatch/recovery and [unreviewed candidate ingestion](TRANSCRIPT-CANDIDATES.md) are complete. [Human generated-recording attachment](GENERATED-NARRATION-ATTACHMENT.md), transcript review/adoption and activation follow. Keep activation, narration adoption and user-facing generation controls separate. All initial verification uses injected HTTP and synthetic audio; no real media API calls or API keys are needed.
+Both application bridges are implemented and composed into the opt-in local runtime. See [speech execution](OPENAI-SPEECH-EXECUTION.md), [transcription execution](OPENAI-TRANSCRIPTION-EXECUTION.md), and [conversational audio](CONVERSATIONAL-AUDIO.md). The contract discussion below records the original adapter design; live-provider acceptance is tracked in [status](STATUS.md).
 
 ## Components and identities
 
@@ -39,7 +37,7 @@ A dispatch marker without a durable response, or completed response metadata who
 
 Local pre-marker failure publication also requires the original current lease. An obsolete worker must not install a terminal not-dispatched decision after awaiting preparation and preempt its replacement. This differs from an actual provider response after the irreversible POST, which may be retained as late evidence without selecting current work. Do not copy an unfenced local-failure path from another adapter.
 
-For speech, the existing normalized-audio ingester completes publication. For transcription, first complete the exact mapping/result/raw-spool chain; candidate ingestion then validates that chain and the derivative receipt before publishing an unreviewed raw data artifact/candidate. Until that ingester ships, retained JSON is incomplete local processing, not accepted narration.
+For speech, the existing normalized-audio ingester completes publication. For transcription, first complete the exact mapping/result/raw-spool chain; candidate ingestion then validates that chain and the derivative receipt before publishing an unreviewed raw data artifact/candidate. Retained JSON alone is not accepted narration; the implemented candidate ingester and separate human adoption preserve this boundary.
 
 Engine may recover a winning raw spool before calling provider lookup. Therefore each new adapter's ingester must independently validate the exact admission/mapping/dispatch/result-to-winning-receipt chain before conversion or publication. Matching bytes alone cannot substitute another receipt. Backup and published derivation closure preserve the same link. This constraint is specific to the new adapter contracts and does not reinterpret legacy fixture identities.
 

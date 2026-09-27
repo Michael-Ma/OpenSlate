@@ -4,7 +4,7 @@ An open-source video agent for turning a story into a finished film.
 
 OpenSlate is designed to plan scenes and shots, create reference assets, generate video takes, and assemble an editable timeline for rendering and post-processing.
 
-**Status: an early local studio with native Codex conversations, supplied-media workflows and opt-in media generation.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images and accept exact narration. Explicitly enabled image/H3 bridges use saved profiles, human spending allowances and keyframe review; real local assembly produces a compatible timeline export. Speech/transcription configuration, recoverable local preparation waiting, separate recording/transcript review and audio cost summaries are implemented; conversational audio proposals and exact human review are implemented. The default remains a fake demo. The complete generation path has been verified with injected provider responses and real local rendering; live media validation is still pending. For your first real run, use the [manual live guide](docs/implementation/MANUAL-LIVE-PRODUCTION.md), with automatic Codex images or OpenAI API images. See [verified status](docs/implementation/STATUS.md).
+**Status: an early local studio with native Codex conversations, supplied-media workflows and opt-in media generation.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images and accept exact narration. Explicitly enabled image/H3 bridges use saved profiles, human spending allowances and keyframe review; real local assembly produces a compatible timeline export. Speech/transcription configuration, recoverable local preparation waiting, separate recording/transcript review and audio cost summaries are implemented; conversational audio proposals and exact human review are implemented. The default remains a fake demo. The complete generation path has offline integration coverage, and one real Codex-image/Viggle six-second export passed. Real audio, API-image and complete conversational production validation remain pending. For your first real run, use the [manual live guide](docs/implementation/MANUAL-LIVE-PRODUCTION.md), with automatic Codex images or OpenAI API images. See [verified status](docs/implementation/STATUS.md).
 
 ## Direction
 
@@ -29,9 +29,9 @@ For the complete local studio, run:
 ./start.sh
 ```
 
-The script selects Node 24 through an existing nvm installation if needed, checks enabled-provider prerequisites, loads `.env.live.local` when present, installs locked dependencies with the pinned pnpm version, builds all packages, and opens the connected app. Keep the terminal open; Ctrl+C stops the server. It preserves keys, provider enable switches and saved projects. If a server is already running, it reconnects without rebuilding or restarting it; stop that server first to apply configuration/code changes.
+The script selects Node 24 through an existing nvm installation if needed, checks enabled-provider prerequisites, loads `.env.live.local` when present, installs locked dependencies with the pinned pnpm version, builds all packages, and opens the connected app. Keep the terminal open; Ctrl+C stops the server. It preserves keys, provider enable switches and saved projects. If a server is already running, it verifies the service and installation credential, then reconnects. This is success, not an error. Run `./start.sh --restart` to gracefully stop the verified server from this checkout, rebuild, and apply changed code/configuration. It refuses unrelated listeners and never force-kills a process.
 
-Use `./start.sh --check` for prerequisite checks or `./start.sh --no-open` to leave the browser closed. Missing FFmpeg, pinned Codex, or credentials get actionable errors; system installation and Codex sign-in remain explicit setup steps. The commands below are the manual alternative.
+Use `./start.sh --status` to check whether this installation can connect, `./start.sh --check` for prerequisite checks or `./start.sh --no-open` to leave the browser closed. Missing FFmpeg, pinned Codex, or credentials get actionable errors; system installation and Codex sign-in remain explicit setup steps. The commands below are the manual alternative.
 
 Prerequisites: Node.js 24 and pnpm 10.33.0. The SQLite dependency invokes native build tooling; the verified macOS setup also had Python 3 and Xcode command-line build tools. See [fresh checkout evidence](docs/implementation/CLEAN-CHECKOUT-VALIDATION.md) for the tested environment. If needed, install pnpm with `npm install -g pnpm@10.33.0`.
 
@@ -43,7 +43,7 @@ pnpm build
 pnpm start
 ```
 
-Open [the local app](http://127.0.0.1:3001). One process serves the built interface and API on loopback. Startup prints the absolute data directory and local token file location, without printing the token itself. Paste that file's token into the connection screen. Stop with Ctrl+C.
+Open [the local app](http://127.0.0.1:3001). One process serves the built interface and API on loopback. Startup opens a short-lived pairing link that connects the browser automatically. If the browser does not open, use the printed link or run `pnpm studio` with the same environment/data directory. Manual token entry remains a fallback. Stop with Ctrl+C.
 
 For development, use `pnpm dev` and open [the development interface](http://127.0.0.1:5173). Vite proxies `/api` to the local service on port 3001. Shared packages build before development starts; restart `pnpm dev` after editing them. Production serves the bundle captured at startup; rebuild and restart to use changed interface files.
 
@@ -55,7 +55,7 @@ The server stores local state in `.openslate/` relative to its working directory
 OPENSLATE_DATA_DIR=/absolute/path/to/openslate-data pnpm start
 ```
 
-The service creates a private `local-session.token` in that directory unless `OPENSLATE_LOCAL_TOKEN` is configured. The browser keeps this token in tab memory; enter it again after a full reload. The built interface and health endpoint are public on loopback; project/media APIs and director tools require their appropriate bearer tokens. Host and Origin checks also apply to the built interface. No model-credential saving API is enabled. Keep the data directory separate from `apps/web/dist`, which contains public build output.
+The service creates a private `local-session.token` in that directory unless `OPENSLATE_LOCAL_TOKEN` is configured. Normal launch pairing creates an HttpOnly browser session. The manual-token fallback keeps its token only in tab memory and requires reconnection after reload. The built interface and health endpoint are public on loopback; project/media APIs and director tools require their appropriate bearer tokens. Host and Origin checks also apply to the built interface. No model-credential saving API is enabled. Keep the data directory separate from `apps/web/dist`, which contains public build output.
 
 Create a project and choose its director. Native Codex setup checks the pinned local installation using its existing sign-in, without starting a model conversation. To try the offline workflow, close setup or choose Demo, then select **Create a 2-shot demo**. Inspect and select the keyframes, then approve the selection to release their sample videos. Use a shot's **Discuss** action and the demo framing choices to exercise a scoped change. In demo mode, ordinary chat receives canned guidance. Native mode handles live conversations through the validated application tools. The application preserves the previous preview during a revision. All sample outputs are explicitly fake.
 
@@ -67,7 +67,7 @@ OPENSLATE_PROVIDER_CONFIG=/absolute/path/to/provider-profiles.json pnpm start
 
 Use [the example catalog](examples/provider-profiles.example.json) as a template. Its prices are **illustrative configured estimates, not verified vendor pricing**; replace them with your own estimates and revise profile versions when changing definitions. Keep API keys out of this file. The project saves the exact selected definitions; later installation changes do not replace them. Unselected kinds keep demo profiles. External generation is off by default. Selecting a model or configuring a key does not authorize spending. See [catalog contracts](docs/implementation/PROVIDER-CATALOG.md).
 
-To enable a provider, follow [local media execution setup](docs/implementation/MEDIA-EXECUTION-LAUNCHER.md). Image and H3 have separate startup switches and backend credentials; H3 also requires exact allowed output hostnames. Enabled generation needs FFmpeg/ffprobe. New H3 projects receive the real local assembly mode, while historical project locks retain their saved behavior. Before generation, review the configured estimate and grant an exact spending allowance; video additionally requires approval of its exact keyframe and motion plan. Live provider access and actual billing have not yet been validated.
+To enable a provider, follow [local media execution setup](docs/implementation/MEDIA-EXECUTION-LAUNCHER.md). Image and H3 have separate startup switches and backend credentials; H3 also requires exact allowed output hostnames. Enabled generation needs FFmpeg/ffprobe. New H3 projects receive the real local assembly mode, while historical project locks retain their saved behavior. Before generation, review the configured estimate and grant an exact spending allowance; video additionally requires approval of its exact keyframe and motion plan. One real Codex-image/Viggle pipeline has passed; configured cost estimates are not verified account charges. Other live provider paths remain pending.
 
 Run `pnpm demo:headless` for a reproducible two-shot example. It generates clearly labeled fake keyframes and one-second placeholder clips, simulates exact human reviews, edits only one shot, then restarts during an uncertain submission. It prints a new temporary output directory, preview path and JSON summary. A successful run records six fake accepts and zero duplicate accepts. This is an execution proof, not a finished film or a quality sample.
 
@@ -141,9 +141,8 @@ Start with the [documentation index](docs/README.md).
 - [Commercial walkthrough](docs/design/COMMERCIAL-WALKTHROUGH.md)
 - [Codex and model providers](docs/design/CODEX-AND-PROVIDERS.md)
 - [Implementation plan](docs/design/IMPLEMENTATION-PLAN.md)
-- [Design review notes](docs/design/REVIEW-NOTES.md)
 
-See the [verified implementation status](docs/implementation/STATUS.md) for remaining gates and the next work, and the [workspace/runtime/local-media implementation](docs/implementation/CONVERSATION-WORKSPACE.md) for the latest slice. See [Contributing](CONTRIBUTING.md) for development guidance.
+See the [verified implementation status](docs/implementation/STATUS.md) for remaining gates and the next work, and the [workspace/runtime/local-media implementation](docs/implementation/CONVERSATION-WORKSPACE.md) for the original workspace contract. See [Contributing](CONTRIBUTING.md) for development guidance.
 
 ## License
 

@@ -1,6 +1,6 @@
 # OpenAI speech application execution
 
-September 12, 2026. Implemented as an explicitly constructed, offline-tested execution bridge. The launcher and director do not yet expose built-in narration generation. No live media API has been called. The fixtures use synthetic audio and configured test estimates, not verified provider prices.
+September 12, 2026. Implemented as an explicitly constructed, offline-tested execution bridge. The opt-in launcher and conversational audio workflow now expose narration preparation and reviewed execution; see [conversational audio](CONVERSATIONAL-AUDIO.md). No live media API has been called. The fixtures use synthetic audio and configured test estimates, not verified provider prices.
 
 `OpenAISpeechExecution` connects the [speech transport](OPENAI-AUDIO-TRANSPORTS.md), durable human allowances and [generated-audio ingestion](GENERATED-AUDIO-INGESTION.md). A successful attempt publishes complete, unadopted audio. It does not accept script, attach narration, set timing or change the film.
 

@@ -121,7 +121,7 @@ The [detailed technical design set](../technical/README.md) adds implementation 
 | [Commercial walkthrough](COMMERCIAL-WALKTHROUGH.md) | A 150-second leather boots example, narration branches, services and saved records |
 | [Codex and providers](CODEX-AND-PROVIDERS.md) | Native runtime responsibilities, application ownership, and model extension boundaries |
 | [Implementation plan](IMPLEMENTATION-PLAN.md) | Milestones and acceptance criteria |
-| [Review notes](REVIEW-NOTES.md) | Design review findings and unresolved validation gates |
+| [Development plan](IMPLEMENTATION-PLAN.md) | Remaining release work and acceptance gates |
 
 ## 8. Runtime and provider boundaries
 

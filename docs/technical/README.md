@@ -1,7 +1,7 @@
 # OpenSlate — Detailed Technical Design
 
 **Version:** 0.8 · September 12, 2026
-**Status:** target technical design with an integrated local workspace, per-project native setup, durable director supervisor, versioned narration tools, owned image/clip imports and local rendering. Native scoped conversations, images/questions and a synthetic six-minute render have separate recorded evidence. Real media dispatch, speech/transcription, portable restore and broader acceptance remain pending. Independent code-host/authentication isolation is unverified under the accepted local runtime trust policy. Consult [implementation status](../implementation/STATUS.md) before treating a design contract as shipped.
+**Status:** target technical design. The local workspace, native director, media execution and same-root recovery are implemented; complete live-production acceptance remains pending. Use [implementation status](../implementation/STATUS.md) for current verification and limitations.
 
 The [architecture overview](../design/README.md) and [component overview](../design/COMPONENT-DESIGN.md) explain direction. This set defines implementation boundaries, records, interfaces, algorithms, failure handling and verification. Examples describe target contracts, not a stable public SDK. The [development plan](../design/IMPLEMENTATION-PLAN.md) orders the work after these designs.
 

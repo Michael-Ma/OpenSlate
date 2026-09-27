@@ -99,9 +99,9 @@ try {
   if (recoveryPending) process.stdout.write("Restored workspace: inspect your saved work and finish recovery review before making changes.\n");
   process.stdout.write(`\nOpenSlate ${serveWeb ? "is ready" : "API is ready"} at http://127.0.0.1:3001${serveWeb ? "" : "/api/health"}\nLocal data: ${directory}\n${process.env.OPENSLATE_LOCAL_TOKEN ? "Local launcher credential: configured" : `Local launcher credential file: ${tokenPath}`}\nStop with Ctrl+C.\n\n`);
   // API-only development starts before Vite; open that browser explicitly with pnpm studio --dev.
-  if (serveWeb && !process.argv.includes("--no-open")) {
+  if (serveWeb) {
     const url = studioUrl(studioSessions.issueLaunch());
-    if (await openStudioBrowser(url)) process.stdout.write("Open studio: connected launch opened in your browser.\n");
+    if (!process.argv.includes("--no-open") && await openStudioBrowser(url)) process.stdout.write("Sent the connected studio link to your default browser. If it did not appear, run ./start.sh --no-open for a fresh link.\n");
     else process.stdout.write(`Open studio (valid for 60 seconds): ${url}\n`);
   }
 }

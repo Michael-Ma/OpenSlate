@@ -1,6 +1,6 @@
 # Native skills, scoped edits and isolation validation
 
-Observed September 11, 2026 PDT (September 12 UTC), using Codex **0.153.4**, Node **24.15.0** and **GPT-6 Astra**, low reasoning effort. This consumed all three starts in the [approved validation allowance](CODEX-NEXT-VALIDATION.md): nine starts across the three experiments. No image/video APIs or real production projects were used.
+Observed September 11, 2026 PDT (September 12 UTC), using Codex **0.153.4**, Node **24.15.0** and **GPT-6 Astra**, low reasoning effort. This consumed all three starts in the then-approved validation experiment: nine starts across the three experiments. No image/video APIs or real production projects were used.
 
 **Result: two application-backed creative edits passed; command sandbox enforcement passed; code-host isolation remains inconclusive.** The final model turn declined the canary script before execution. That refusal is not evidence of an enforced host boundary.
 
