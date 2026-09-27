@@ -21,7 +21,7 @@ Component implementation does not imply complete live-production acceptance. Con
 
 | Priority | Work | Acceptance |
 |---|---|---|
-| 1 | Complete the ordinary conversational production path | A new real project reaches export from conversation; narration choices and multiple pending edits do not loop or require database repair |
+| 1 | Unify the film plan and complete the ordinary conversational production path | Brief, narration and shots are shown by scene; supplied material populates a proposed plan for confirmation; next actions follow actual gaps. A new real project reaches export without repeated intake or manual edit-hold repair. See [the interaction design](SIMPLIFIED-VIDEO-FLOW.md). |
 | 2 | Combine generation preparation and spending into a guided review | Clear next action and exact cost/usage disclosure; preserve immutable proposals, frame approval, freshness and durable replay |
 | 3 | Validate remaining real providers | Short speech/transcription and API-image runs with recorded dispatches, outputs, cost estimates and reopen behavior under an explicit budget |
 | 4 | Validate multi-shot production and edits | Produce a 2–3-minute film, replace one shot conversationally, reuse unaffected work, then validate the six-minute boundary |

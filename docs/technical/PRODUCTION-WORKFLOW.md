@@ -1,7 +1,7 @@
 # Production Workflow and Stage Contracts
 
 **Version:** 0.5 · September 10, 2026
-**Status:** proposed implementation; application code is still a skeleton.
+**Status:** target workflow contract; consult [implementation status](../implementation/STATUS.md) for shipped behavior and verification. The [unified film-plan design](../design/SIMPLIFIED-VIDEO-FLOW.md) defines the next user-facing projection and material-first intake flow.
 
 ## 1. Responsibility and decision boundary
 
