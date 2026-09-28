@@ -69,7 +69,7 @@ function MediaWorkspace({ api, snapshot, onChanged, onContinue, mode = "render" 
   const show = selected ?? state?.preview?.artifact;
   return <section className="media-panel" aria-labelledby={mode === "upload" ? "uploaded-video-title" : "local-media-title"}>
     <div className="media-heading"><div><h3 id={mode === "upload" ? "uploaded-video-title" : "local-media-title"}>{mode === "upload" ? "Upload a video" : "Export"}</h3></div><span className="tag">Local rendering</span></div>
-    {mode === "upload" && <p>Uploaded video audio is removed. Add narration in Brief & narration.</p>}
+    {mode === "upload" && <p>Uploaded video audio is removed. Add narration from a shot in the storyboard.</p>}
     {(error || loadError) && <p role="alert" className="form-error">{error || loadError}</p>}
     {pending && busy && <p role="status">Your saved request is still running. Switching projects will not start it again.</p>}
     {pending && !busy && <div className="notice warning"><span>The result was not confirmed. Retry the saved request to check its outcome.</span><button disabled={recoveryReadOnly} onClick={() => void execute(pending)}>Retry same action</button></div>}

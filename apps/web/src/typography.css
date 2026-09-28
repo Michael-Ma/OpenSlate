@@ -1,0 +1,118 @@
+/* Shared type hierarchy. Load after component skins; #root prevents older
+   component-specific rules from silently shrinking headings and body copy. */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --type-page: 28px;
+  --type-section: 24px;
+  --type-subsection: 20px;
+  --type-card: 18px;
+  --type-body: 14px;
+  --type-caption: 12px;
+  font-family: var(--font-ui);
+  font-size: var(--type-body);
+}
+#root { font-family: var(--font-ui); font-size: var(--type-body); }
+#root :is(h1,h2,h3,h4,h5,h6) {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+#root h1 { font-size: var(--type-page); }
+#root h2 { font-size: var(--type-section); }
+#root h3 { font-size: var(--type-subsection); }
+#root :is(h4,h5,h6) { font-size: var(--type-card); }
+#root :is(p,li,blockquote,dd,td,.message,.notice,.inline-error,.form-error) {
+  font-size: var(--type-body);
+  font-weight: 400;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+#root :is(input,textarea,select) {
+  font-family: var(--font-ui);
+  font-size: var(--type-body);
+  font-weight: 400;
+  line-height: 1.5;
+}
+#root :is(label,dt,th) { font-size: var(--type-body); font-weight: 600; }
+#root :is(legend,summary) { font-size: 16px; font-weight: 700; line-height: 1.5; }
+#root :is(small,.tag,.eyebrow,.tiny-label,.message-byline,.connection,
+  .composer-note,.scope-chip,.director-working,.film-meta,.asset-pagination,
+  .board-profile,.board-media-state,.board-placeholder,.timeline-player-label,
+  .narration-actions>span,.narration-card>summary div>span) {
+  font-size: var(--type-caption);
+  line-height: 1.5;
+}
+#root :is(small,.field-help,.settings-model-card span,.settings-account-card span) { font-weight: 400; }
+#root :is(.eyebrow,.tiny-label,.tag,.message-byline) { font-weight: 600; }
+#root :is(.button,.text-button,.tabs>button,.project-settings-tabs button,
+  .mobile-workspace-switch button,.board-add-scene,.quick-actions button) {
+  font-family: var(--font-ui);
+  font-size: var(--type-body);
+  font-weight: 600;
+  line-height: 1.4;
+}
+#root :is(.button,.text-button) { white-space: normal; }
+#root .tabs>button.active { font-weight: 700; }
+#root .project-switcher select { font-size: 16px; font-weight: 700; }
+#root .panel-title h2 { font-size: var(--type-card); }
+#root .composer textarea { font-size: var(--type-body); }
+#root :is(.project-activity strong,.pending-edit strong,.settings-status-card strong,
+  .asset-row strong,.narration-card>summary strong,.project-provider-summary strong,
+  .spending-work strong,.spending-history strong,.review-guidance strong,
+  .settings-model-card>label,.narration-empty strong,
+  .approval-bar strong,.video-flow strong) {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+#root :is(.settings-status-card span,.project-provider-summary span) {
+  font-size: var(--type-body); font-weight: 400;
+}
+
+/* The labels are headings; purpose, direction and scripts remain body copy. */
+#root .board-scene-head { align-items: flex-start; flex-wrap: wrap; }
+#root .board-scene-copy { flex: 1 1 60%; min-width: 0; }
+#root .board-scene-copy h3 { margin: 0 0 8px; }
+#root .board-scene-head>small { padding-top: 5px; }
+#root .board-shot-heading { margin: 0 4px 8px; }
+#root .board-edit { font-size: var(--type-body); font-weight: 400; }
+#root .board-shot-description { margin-bottom: 7px; }
+#root .board-shot-body textarea { min-height: 0; }
+#root .board-direction>span { font-size: 16px; font-weight: 700; line-height: 1.4; }
+#root .board-shot-body { padding: 16px; }
+#root .board-grip { font-size: 18px; min-width: 28px; line-height: 1.2; }
+#root .board-duration, #root .board-duration .board-edit { font-size: var(--type-caption); }
+#root .board-duration .board-edit { width: 34px; }
+#root .board-shot-footer select { font-size: var(--type-caption); }
+
+/* Timeline labels stay compact, but readable; long track text is inspectable
+   through its existing title or accessible label. */
+#root .timeline-scenes>span { font-size: var(--type-caption); font-weight: 700; }
+#root .timeline-lane>span, #root .timeline-music>span { font-size: var(--type-body); font-weight: 700; }
+#root .timeline-clip strong { font-size: var(--type-caption); font-weight: 700; }
+#root .timeline-clip small, #root .timeline-voice { font-size: var(--type-caption); }
+#root .timeline-voice { height: 34px; }
+#root .timeline-transport { flex-wrap: wrap; font-size: var(--type-body); }
+#root .timeline-player-label { max-width: calc(100% - 20px); overflow-wrap: anywhere; }
+#root :is(.section-heading,.library-heading,.spending-heading,.playback-heading) { gap: 12px; }
+#root .section-heading :is(h2,h3) { min-width: 0; }
+#root .section-heading .icon-button { flex-shrink: 0; }
+#root :is(.new-project-form,.settings-model-card,.settings-account-card,.clip-upload) { min-width: 0; }
+#root :is(.debug-panel pre,code) { font-family: ui-monospace, SFMono-Regular, monospace; font-size: var(--type-caption); }
+@media (max-width:720px) {
+  :root { --type-page:26px; --type-section:22px; --type-subsection:20px; }
+  #root .project-switcher select { font-size: var(--type-body); }
+  #root .board-scene-copy { flex-basis: 100%; }
+  #root .board-scene-head>small { margin-left: 0; margin-right: auto; }
+  #root :is(.section-heading,.library-heading) { flex-wrap: wrap; }
+  #root .project-settings-tabs { flex-wrap: wrap; }
+  #root .timeline-transport small { flex-basis: 100%; }
+}
+
+#root label:has(input[type=checkbox]), #root label:has(input[type=radio]) { font-weight: 400; }
+/* New-project controls previously inherited pale text from the retired sidebar. */
+#root .new-provider-fields :is(summary,label,button) { color: var(--ink); }
+#root .new-provider-fields p { color: var(--muted); }
+#root .new-provider-fields select { background: white; border-color: var(--line); }

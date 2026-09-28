@@ -17,6 +17,8 @@ Updated September 28, 2026. This page describes implemented behavior and verifie
 
 ## Latest verification
 
+- September 28 app-wide typography: shared heading/body/caption scale; explicit scene and shot headings, wrapped descriptions, readable legacy labels and corrected setup contrast. Web build/typecheck and 126 web tests passed; desktop and 390px browser review. No provider calls. See [typography scope and checks](../design/STORYBOARD-STUDIO.md#app-wide-typography).
+
 - September 28 storyboard rebuild: **2,026 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. revision-checked direct manipulation, scoped candidate invalidation, soundtrack selection and actual FFmpeg mix test. One native Codex read-only turn completed with zero grants/media attempts. See [delivered behavior and limits](../design/STORYBOARD-STUDIO.md).
 
 - September 27 Film plan: **2,016 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. A separate native Codex interpreted one synthetic three-scene, three-shot outline; the proposed import survived reload, then human confirmation saved one revision with zero generation grants and zero media attempts. Optional music stayed outside the draft and narration stayed undecided. Phone layout measured 390px content/390px viewport; scoped chat, saved-edit continuation, narration, final navigation and the Markdown file picker passed. Tests cover stale/different drafts, interrupted work, model mutation rejection, idempotency, reopen, restored authority and scoped discard. See [delivered scope and limitations](../design/SIMPLIFIED-VIDEO-FLOW.md).
