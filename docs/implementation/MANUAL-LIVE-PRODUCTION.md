@@ -109,6 +109,8 @@ Send:
 
 Check that there is one shot and the selected model names are correct. Request changes in conversation if the agent chose the wrong intent. Do not approve an image or video allowance until its saved prompt and operation match your intent.
 
+For an existing brief or scene breakdown, use **Film plan → Bring a brief**. Paste it or choose a UTF-8 `.txt`/`.md` file. Select **Interpret material**, inspect the proposed scenes/shots and source comparison, then **Confirm film plan**. This runs the director but starts no media and approves no spending. Optional suggestions stay in chat until chosen. Continue from the displayed next step; use a shot's chat icon for a scoped revision. Narration controls are under **Film plan → Narration & recordings**. PDF/Word documents currently require copied text.
+
 ## 3. Supply real timing before video
 
 Current video execution requires an accepted, measured audio cue whose duration equals the shot and requested video duration. Detaching narration or merely saying “silent video” does not satisfy that requirement. Automatic script alignment and automatic duration repair are not implemented.

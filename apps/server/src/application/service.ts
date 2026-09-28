@@ -237,6 +237,9 @@ export class ProductionService {
   async prepare(projectId: string, actor: ActorContext, input: unknown): Promise<Prepared> {
     this.assertActor(projectId, actor, true);
     const proposal = parseChangeProposal(input);
+    if (actor.kind === "director" && this.store.get("plan_import", actor.requestId)) {
+      invariant(!proposal.source && !proposal.requestNewTakes?.length && !!proposal.creative, "IMPORT_REVIEW_REQUIRED", "Prepare only a creative interpretation of the supplied material. No executable plan or generation; the human confirms the exact draft in Film plan.");
+    }
     invariant(!proposal.source || !proposal.creative?.createShots?.length, "VALIDATION_ERROR", "Create shot intents first, then reference their saved IDs in the executable plan");
     const proposalDigest = digest(proposal);
     const same = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
@@ -437,6 +440,7 @@ export class ProductionService {
   }
 
   apply(projectId: string, actor: ActorContext, preparedId: string): ApplyReceipt {
+    invariant(actor.kind !== "director" || !this.store.get("plan_import", actor.requestId), "IMPORT_REVIEW_REQUIRED", "The supplied-material draft must be confirmed by the human in Film plan.");
     this.assertActor(projectId, actor, true);
     return this.store.transaction(() => {
       this.assertActor(projectId, actor, true);
@@ -444,6 +448,33 @@ export class ProductionService {
       invariant(prepared && prepared.projectId === projectId && prepared.requestId === actor.requestId && prepared.principalId === actor.principalId && prepared.epochId === (actor.kind === "director" ? actor.epochId : null), "ACTOR_DENIED", "Prepared change is not owned by this request");
       return this.store.command(`${actor.principalId}:${projectId}:apply`, preparedId, prepared.proposalDigest,
         () => this.publishPreparedChange(projectId, actor, prepared));
+    });
+  }
+
+  /** Human-only import acceptance: retain the exact reviewed draft and recheck all publication predicates. */
+  confirmPlanImport(projectId: string, requestId: string, preparedId: string, proposalDigest: string, key: string): ApplyReceipt {
+    this.recovery.assertWritable(projectId);
+    return this.store.command(`local-user:${projectId}:confirm-plan-import`, key, digest({ requestId, preparedId, proposalDigest }), () => {
+      const material = this.store.get<{ projectId: string; state: string }>("plan_import", requestId);
+      invariant(material?.projectId === projectId && material.state === "pending", "IMPORT_STALE", "This import is no longer pending.");
+      this.recovery.assertFreshAuthority(projectId, "message", requestId);
+      const request = this.store.get<RequestRecord>("message", requestId);
+      invariant(request?.principalId === "local-user" && request.state === "active" && this.store.list<RequestRecord>("message", projectId).filter(row => row.editing).at(-1)?.id === requestId,
+        "IMPORT_STALE", "Newer direction superseded this import. Re-import against the current film plan.");
+      invariant(!this.store.get<{ paused: boolean }>("execution_control", projectId)?.paused, "IMPORT_STALE", "The conversation is stopped. Resume with a fresh request before importing again.");
+      invariant(!this.store.list<{ requestId: string; state: string }>("director_turn", projectId).some(turn => turn.requestId === requestId && ["queued", "running"].includes(turn.state)), "IMPORT_NOT_READY", "Wait for the director to finish interpreting the source.");
+      const prepared = this.store.get<Prepared>("prepared", preparedId);
+      const latest = this.store.list<Prepared>("prepared", projectId).filter(row => row.requestId === requestId).at(-1);
+      invariant(prepared?.projectId === projectId && prepared.requestId === requestId && latest?.id === preparedId && prepared.proposalDigest === proposalDigest && !prepared.compiled && !prepared.proposal.source,
+        "IMPORT_STALE", "Review the current import draft before confirming.");
+      invariant(prepared.baseVersion === this.store.getProject(projectId).headVersion, "REVISION_CONFLICT", "The film plan changed. Re-import against its current version.");
+      const human = this.beginRequest(projectId, "local-user", "Confirm the reviewed supplied-material plan. No generation is authorized.", { editing: true, continuationRequestId: requestId, key: `confirm-import:${key}`, contextDigest: digest({ preparedId, proposalDigest }) });
+      const reviewed: Prepared = { ...prepared, id: newId(), requestId: human.requestId, principalId: human.principalId, epochId: null };
+      this.store.insert("prepared", reviewed.id, projectId, reviewed);
+      const result = this.apply(projectId, human, reviewed.id);
+      this.store.put("plan_import", requestId, projectId, { ...material, state: "confirmed", preparedId, confirmation: result });
+      this.store.appendEvent(projectId, "plan_import.confirmed", { requestId, preparedId });
+      return result;
     });
   }
 

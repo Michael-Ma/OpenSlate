@@ -134,6 +134,8 @@ export class ToolInvocationService {
     let value: unknown;
     try {
       stopped();
+      if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution"].includes(parsed.name),
+        "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {

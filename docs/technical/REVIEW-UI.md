@@ -1,11 +1,11 @@
 # Review Workspace and Conversational Editing
 
-**Version:** 0.7 · September 12, 2026
-**Status:** broader target design. The workspace implements project conversations with native or scripted direction, exact keyframe review, playback, scoped demo edits, previous-preview retention and pause/resume. Narration drafts/recordings, independent acceptance, canonical review and supplied-clip rendering have HTTP/browser controls. It polls durable snapshots; the browser does not yet consume SSE. Browser file-picker verification, real generation and broader editing/accessibility flows remain open. See [current implementation](../implementation/STATUS.md) and [browser evidence](../implementation/NARRATION-BROWSER-VALIDATION.md).
+**Version:** 0.8 · September 27, 2026
+**Status:** the local studio implements authenticated SSE, a unified Film plan organized by scene, reviewed text/Markdown import, exact keyframe review, scene-scoped chat and conversational Stop. Narration controls expand within Film plan; Assets contains media and Preview contains the assembled cut. Broader acceptance and playback concepts below remain target design where not identified as implemented. See [current status](../implementation/STATUS.md) and [delivered interaction design](../design/SIMPLIFIED-VIDEO-FLOW.md).
 
 ## 1. Product contract
 
-V0 gives the user a conversation, a scene-oriented review workspace and playback. Every creative edit is expressed through conversation. Selecting a frame/shot/timecode supplies context for that conversation; approve, pause and playback controls are available directly. A timeline editor is a later interface over existing change services.
+V0 gives the user a conversation, a scene-oriented review workspace and playback. Every creative edit is expressed through conversation. Selecting a frame/shot/timecode supplies context for that conversation; approval, conversational Stop and playback controls are available directly. A timeline editor is a later interface over existing change services.
 
 The primary flow is: brief and narration options → concise production plan → narrated storyboard/keyframe review → clip/scene draft review → final playback/export. Each stage can coexist with progress in other scenes. The application keeps the last usable preview visible during revision.
 
@@ -26,6 +26,24 @@ flowchart LR
 
 ## 2. Components and data contracts
 
+The implemented `FilmPlan` reads canonical project/review/narration state and the pending import projection. `film-plan-model` derives progress and a next action without mutating business state. The director receives `filmPlanningGuidance` with a fresh inventory on each turn. `registerPlanImports` persists sources and serves pending review; `ProductionService.confirmPlanImport` atomically rechecks and publishes the exact prepared draft. SSE invalidation refreshes these projections.
+
+```mermaid
+flowchart LR
+    Source[Supplied text or Markdown] --> Import[Persist source and human request]
+    Import --> Director[Read context and prepare creative draft]
+    Director --> Review[Proposed Film plan by scene]
+    Review -->|human confirms exact draft| Apply[Validate freshness and apply]
+    Review -->|discard| Fence[Revoke only import work]
+    Apply --> Saved[Canonical film revision]
+    Saved --> Next[Next missing decision]
+    Next --> Chat[Scoped conversation]
+```
+
+Document content is data. Interpretation is not permission to apply, spend or generate. Ordinary conversations still use existing typed prepare/apply tools; import confirmation adds a human boundary for supplied documents. Original source and draft remain durable audit records.
+
+The table below describes the broader component responsibilities:
+
 | React component | Reads | Actions |
 |---|---|---|
 | `ProjectShell` | Project head, stages, pending decisions and connection status | Navigate review sections, reconnect |
@@ -36,7 +54,7 @@ flowchart LR
 | `ShotReviewCard` | Keyframe, intended motion, duration, candidate/attempt status | Play take, compare to keyframe/history, attach shot/timecode to chat |
 | `PreviewPlayer` | Frozen timeline/render target and shot interval map | Play/seek, select active shot, download current chosen export |
 | `DecisionTray` | Review, scope, budget, conflict and failure decisions | Resolve exact decision or continue conversation |
-| `ExecutionStatus` | Ready/running/held/failed counts and estimated/observed usage | User pause/resume within scope |
+| `ExecutionStatus` | Ready/running/held/failed counts and estimated/observed usage | Conversational Stop; fresh direction to continue |
 | `DebugInspector` | Detailed shot spec, plan source/graph and event lineage | Read/copy/download redacted diagnostic bundle |
 
 These names describe future module ownership, not a mandatory component library. Reuse React and native media elements; choose visual styling primitives in implementation. Keep provider and filesystem details out of ordinary creative review.

@@ -13,6 +13,7 @@ Single-user local app, TypeScript orchestration, Codex as the first replaceable 
 | T00–T04 | Runtime/toolchain probes, domain identities, persistence, commands/events, workflow stage contracts, restricted compiler, durable fake execution and human approval |
 | T05–T08 | Conversation/review UI, native Codex, versioned skills/tools, narration preparation and owned media/timeline/rendering |
 | T09–T12 integration | Provider adapters, durable dispatch/output recovery, independent spending, audio review/adoption, model changes, SSE, backup/restore and local launcher |
+| Film-plan workflow | Unified scene/brief/narration view, state-based next action, persistent text/Markdown interpretation and human confirmation; bounded native import and responsive browser validation |
 | Initial T13 evidence | Offline six-minute workflow and one real six-second Codex-image/Viggle/export run |
 
 Component implementation does not imply complete live-production acceptance. Consult the linked status for tested boundaries.
@@ -21,7 +22,7 @@ Component implementation does not imply complete live-production acceptance. Con
 
 | Priority | Work | Acceptance |
 |---|---|---|
-| 1 | Unify the film plan and complete the ordinary conversational production path | Brief, narration and shots are shown by scene; supplied material populates a proposed plan for confirmation; next actions follow actual gaps. A new real project reaches export without repeated intake or manual edit-hold repair. See [the interaction design](SIMPLIFIED-VIDEO-FLOW.md). |
+| 1 | Complete the ordinary conversational production path | The unified view and explicit supplied-material review are delivered. A new real project must reach export without repeated intake or manual edit-hold repair. See [the interaction design](SIMPLIFIED-VIDEO-FLOW.md). |
 | 2 | Combine generation preparation and spending into a guided review | Clear next action and exact cost/usage disclosure; preserve immutable proposals, frame approval, freshness and durable replay |
 | 3 | Validate remaining real providers | Short speech/transcription and API-image runs with recorded dispatches, outputs, cost estimates and reopen behavior under an explicit budget |
 | 4 | Validate multi-shot production and edits | Produce a 2–3-minute film, replace one shot conversationally, reuse unaffected work, then validate the six-minute boundary |

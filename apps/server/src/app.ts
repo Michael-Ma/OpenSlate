@@ -1,3 +1,4 @@
+import { registerPlanImports } from "./plan-imports.js";
 import { registerAssetLibrary } from "./asset-library.js";
 import { registerGenerationPermission } from "./generation-permission.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
@@ -91,6 +92,7 @@ export function createApp(options: AppOptions = {}) {
       || request.method === "POST" && request.routeOptions.url === RECOVERY_RELEASE_PATH,
     "INSTALLATION_QUARANTINED", "Review this restored installation before making changes");
   });
+  registerPlanImports(app, service, options.director);
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
   options.webAssets?.register(app);
   if (options.studioSessions) registerStudioSessions(app, options.studioSessions);

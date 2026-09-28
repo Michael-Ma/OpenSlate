@@ -39,7 +39,7 @@ const INSPECTION_ROUTES = new Set([
   "/api/projects/:projectId/narration/generated-recordings", "/api/projects/:projectId/narration/audio/:audioId/transcripts",
   "/api/projects/:projectId/narration/transcripts/:candidateId/words", "/api/projects/:projectId/narration/transcripts/:candidateId/selection",
   "/api/projects/:projectId/media", "/api/projects/:projectId/media/renders/:jobId",
-  "/api/projects/:projectId/spending",
+  "/api/projects/:projectId/spending", "/api/projects/:projectId/plan-imports",
 ]);
 
 /** Route patterns, not user-supplied URL strings. Public assets/health are handled before this check. */

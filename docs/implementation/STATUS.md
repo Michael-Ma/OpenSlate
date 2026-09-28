@@ -12,10 +12,12 @@ Updated September 27, 2026. This page describes implemented behavior and verifie
 | Visual production | Uploaded images/video, Codex or API image adapters, Viggle and MiniMax adapters, keyframe/motion review | One actual Codex image → Viggle clip → export passed; OpenAI image API live validation remains pending |
 | Narration | Drafts, uploaded recordings, speech/transcription proposals, human review, canonical audio/timing and adoption | Implemented and tested with synthetic media/injected providers; real speech/transcription validation remains pending |
 | Assembly | Owned media, timeline composition, FFmpeg export, local recovery | Actual six-second provider output and synthetic six-minute workflow verified |
-| Review UI | Storyboard, compact help/icons, grouped edits, image/video asset list, preview/export | Actual IB layout checked on desktop and 390px mobile; fixture filtering, playback, upload disclosure and frame selection checked |
+| Review UI | Unified Film plan with brief and scene narration/shots, progress navigation, next action, reviewed text import; Assets and Preview retained | Real native three-scene import, reload and human confirmation; desktop/390px navigation and scope checks; no paid media in this slice |
 | Installation recovery | Verified media-inclusive backup, same-root restore, quarantine and human release | Offline and browser recovery evidence; portable relocation and installer packaging remain pending |
 
 ## Latest verification
+
+- September 27 Film plan: **2,016 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. A separate native Codex interpreted one synthetic three-scene, three-shot outline; the proposed import survived reload, then human confirmation saved one revision with zero generation grants and zero media attempts. Optional music stayed outside the draft and narration stayed undecided. Phone layout measured 390px content/390px viewport; scoped chat, saved-edit continuation, narration, final navigation and the Markdown file picker passed. Tests cover stale/different drafts, interrupted work, model mutation rejection, idempotency, reopen, restored authority and scoped discard. See [delivered scope and limitations](../design/SIMPLIFIED-VIDEO-FLOW.md).
 
 - September 27 launcher maintenance: builds/typechecks and 20 focused startup/session/ownership tests passed. A disposable real-process run exercised fresh install/build/start, verified restart, reconnect, credential mismatch and Ctrl+C. The launcher smoke test passed with zero model/media calls and graceful ownership release. Documentation file links passed; two obsolete review/approval histories were removed and status/roadmap histories consolidated.
 
