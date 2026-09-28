@@ -62,3 +62,7 @@ These checks do not establish a complete real-provider film, personal voice clon
 Build with Node 24 and pnpm 10.33.0. `node scripts/storyboard-review.mjs` serves a disposable six-shot integration studio on port 5173 and prints a short-lived pairing URL. `--fixtures` adds labeled FakeProvider keyframes. `--native` performs one read-only native director turn using existing sign-in; supply `OPENSLATE_CODEX_BINARY` if automatic discovery does not find the pinned runtime. Do not combine the modes when measuring zero-media native evidence. FFmpeg/ffprobe must be available at the paths configured in that harness.
 
 For the regular installation, run `./start.sh --restart` to load the rebuilt app. Existing projects, artifacts and credentials remain in their existing local data directory.
+
+### Typography refinement
+
+Storyboard uses the existing system sans-serif family: Treatment heading 24px/700 (22px on phones), scene titles 20px/700 (19px on phones), shot titles 17px/700, and descriptive content 14px/400. Scene and shot titles wrap as editable text areas rather than clipped single-line fields. The treatment brief is body copy under its heading. Web build and typecheck passed; the live IB Project was visually checked at desktop and 390px phone width, including long titles and no horizontal overflow. No provider calls or project edits were made for this visual check.
