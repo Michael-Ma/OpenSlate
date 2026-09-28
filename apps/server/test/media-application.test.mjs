@@ -252,3 +252,19 @@ test("actor revocation during preparation or import cannot publish durable resul
   await assert.rejects(f.app.importVideo(f.project.id, current, { expectedHeadVersion: f.head().headVersion, path: red, key: "fenced-import" }), code("ACTOR_DENIED"));
   assert.equal(f.store.list("artifact", f.project.id).length, 2);
 });
+
+test('owned soundtrack is frozen into the rendered mix with bounded gain and duration', async t => {
+  const f = await fixture(t);
+  const { NarrationService } = await import('../dist/narration/service.js');
+  const narrator = new NarrationService(f.production, f.media);
+  const actor = f.production.beginRequest(f.project.id, 'human', 'Add music', { editing: true });
+  const recording = await narrator.importAudio(f.project.id, actor, { path: voice, declaredOrigin: 'uploaded', key: 'music-import' });
+  f.store.saveProject({ ...f.head(), soundtrack: { audioId: recording.id, gainMilliDb: -18000 } }, f.head().headVersion);
+  for (const hold of f.store.list('hold', f.project.id)) if (hold.active && hold.ownerId === actor.requestId) f.engine.releaseHold(f.project.id, hold.id, actor.requestId);
+  f.plan(); const job = await f.prepare('music-render');
+  assert.equal(job.manifest.audio.length, 1);
+  assert.equal(job.manifest.audio[0].gainMilliDb, -18000);
+  const result = await f.app.run(f.project.id, f.renderActor, job.id);
+  assert.equal(result.state, 'published');
+  assert.equal(f.provider.acceptedCount(), 0);
+});

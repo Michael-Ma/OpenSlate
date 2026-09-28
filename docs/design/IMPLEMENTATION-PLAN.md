@@ -1,6 +1,6 @@
 # OpenSlate development plan
 
-Updated September 27, 2026. Current evidence is maintained in [implementation status](../implementation/STATUS.md), rather than repeated here as a chronological development log.
+Updated September 28, 2026. Current evidence is maintained in [implementation status](../implementation/STATUS.md), rather than repeated here as a chronological development log.
 
 ## Fixed scope
 
@@ -13,6 +13,7 @@ Single-user local app, TypeScript orchestration, Codex as the first replaceable 
 | T00–T04 | Runtime/toolchain probes, domain identities, persistence, commands/events, workflow stage contracts, restricted compiler, durable fake execution and human approval |
 | T05–T08 | Conversation/review UI, native Codex, versioned skills/tools, narration preparation and owned media/timeline/rendering |
 | T09–T12 integration | Provider adapters, durable dispatch/output recovery, independent spending, audio review/adoption, model changes, SSE, backup/restore and local launcher |
+| Storyboard rebuild | Direct shot/scene/treatment commands, stable reorder/delete/undo, shot narration intent, light timeline and owned soundtrack mix; [scope and remaining limits](STORYBOARD-STUDIO.md) |
 | Film-plan workflow | Unified scene/brief/narration view, state-based next action, persistent text/Markdown interpretation and human confirmation; bounded native import and responsive browser validation |
 | Initial T13 evidence | Offline six-minute workflow and one real six-second Codex-image/Viggle/export run |
 
@@ -22,7 +23,9 @@ Component implementation does not imply complete live-production acceptance. Con
 
 | Priority | Work | Acceptance |
 |---|---|---|
-| 1 | Complete the ordinary conversational production path | The unified view and explicit supplied-material review are delivered. A new real project must reach export without repeated intake or manual edit-hold repair. See [the interaction design](SIMPLIFIED-VIDEO-FLOW.md). |
+| 1 | Complete the ordinary conversational production path | The unified view and explicit supplied-material review are delivered. A new real project must reach export without repeated intake or manual edit-hold repair. See [the current storyboard design](STORYBOARD-STUDIO.md). |
+| 2a | Connect personal voice generation | Select a voice provider, implement enrollment/consent and persistent voice identity, validate a short approved live sample |
+| 2b | Refine timeline audition and shot audio setup | Synchronized local audio preview and a shorter shot-focused acceptance dialog; preserve canonical audio review |
 | 2 | Combine generation preparation and spending into a guided review | Clear next action and exact cost/usage disclosure; preserve immutable proposals, frame approval, freshness and durable replay |
 | 3 | Validate remaining real providers | Short speech/transcription and API-image runs with recorded dispatches, outputs, cost estimates and reopen behavior under an explicit budget |
 | 4 | Validate multi-shot production and edits | Produce a 2–3-minute film, replace one shot conversationally, reuse unaffected work, then validate the six-minute boundary |

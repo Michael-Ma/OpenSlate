@@ -20,7 +20,7 @@ import { ownedTranscriptionCatalog, snapshotOwnedTranscriptionData } from "../na
 import { captureOwnedTranscriptionReviewInput, currentOwnedTranscriptionReview, ownedTranscriptionReviewScope } from "../narration/owned-transcription-review-state.js";
 import type { OwnedTranscriptionApplication, OwnedTranscriptionApplyReceipt, OwnedTranscriptionReview, ReviewOwnedTranscription } from "../narration/owned-transcription-types.js";
 
-interface RequestRecord { id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
+interface RequestRecord { source?: "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
 interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 interface Grant { id: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
@@ -549,7 +549,7 @@ export class ProductionService {
       const conversation = this.store.readEvents(projectId).flatMap(event => {
         if (event.kind === "message.recorded") {
           const message = messages.find(message => message.id === event.payload.requestId);
-          return message ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
+          return message && message.source !== "storyboard" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
         }
         if (event.kind === "director.message") {
           const output = outputs.find(output => output.id === event.payload.outputId);
@@ -557,7 +557,7 @@ export class ProductionService {
         }
         return [];
       });
-      return { project, workflow: workflowReadiness(project),
+      return { project, latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts: this.engine.attempts(projectId),
       assessments: this.store.list("stage_assessment", projectId),
       holds: this.store.list("hold", projectId), messages, conversation,

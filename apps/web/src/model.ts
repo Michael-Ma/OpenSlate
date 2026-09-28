@@ -1,11 +1,12 @@
 export interface Artifact { artifactId: string; sha256: string; kind: "image" | "video" | "audio" | "data" }
 export type ArtifactFixture = boolean | null;
-export interface Shot { id: string; revisionId: string; sceneId: string; purpose: string; action: string; framing: string; motion: string; desiredFrames: number; imagePrompt: string; videoPrompt: string; cueId: string | null }
+export interface Shot { narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: "stock" | "personal" }; id: string; revisionId: string; sceneId: string; purpose: string; action: string; framing: string; motion: string; desiredFrames: number; imagePrompt: string; videoPrompt: string; cueId: string | null }
 export interface ProjectSummary { id: string; name: string; headVersion: number; activePlanId: string | null; shotCount?: number }
 export interface ConversationMessage { id: string; role: "user" | "assistant"; text: string; state?: string; requestId?: string }
 export interface PendingQuestion { id: string; requestId: string; state: "pending" | "answered"; canAnswer?: boolean; questions: { id: string; header: string; question: string; options: { label: string; description: string }[] }[]; answerRequestId?: string }
 export interface ProjectSnapshot {
-  project: ProjectSummary & { revisionId: string; brief: string; story: string; shots: Shot[]; scenes: { id: string; revisionId: string; purpose: string }[]; narration: { script: string; source: string }; cues: { id: string; meaning: string; accepted: boolean; measured: boolean }[] };
+  latestStoryboardEdit?: { id: string; headVersion: number; requestId: string } | null;
+  project: ProjectSummary & { soundtrack?: { audioId: string; gainMilliDb: number } | null; revisionId: string; brief: string; story: string; shots: Shot[]; scenes: { id: string; revisionId: string; purpose: string }[]; narration: { script: string; source: string }; cues: { id: string; meaning: string; accepted: boolean; measured: boolean }[] };
   messages: { id: string; text: string; state?: string; requestId?: string; editing?: boolean; scopeIds?: string[] }[];
   conversation?: ConversationMessage[];
   questions?: PendingQuestion[];

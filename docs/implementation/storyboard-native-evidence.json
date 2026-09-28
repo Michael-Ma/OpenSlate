@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-28",
+  "runtime": "codex-cli 0.153.4",
+  "model": "gpt-6-astra",
+  "fixture": "Disposable three-scene six-shot caf\u00e9 film",
+  "turns": [
+    {
+      "state": "completed"
+    }
+  ],
+  "mediaAttempts": 0,
+  "grants": 0,
+  "response": "### Current storyboard\n\u201cBefore the city wakes\u201d: a planned 36-second caf\u00e9 film, with six 6-second shots, all using slow camera pushes.\n\n1. **Opening the caf\u00e9:** dawn exterior \u2192 sunlight across the oak counter.\n2. **The ritual:** beans entering the grinder \u2192 steam rising from a pour-over.\n3. **A moment to stay:** hands placing a cup by the window \u2192 coffee beside an open book.\n\n### Narration\nPer-shot writing intent belongs on each **Storyboard shot card** (`shot.narration`): mode, script and voice preference. These are intentions\u2014not accepted audio or timing. The saved details currently contain no per-shot narration; project narration remains undecided.\n\n### After a direct shot edit\nThe edit saves immediately and invalidates older director authority. Subsequent work rereads current shot IDs and choices, preserves unaffected media, and recompiles only affected work, with fresh authorization and exact frame review where required.\n\nNothing was modified or generated; no grants or media API calls were made.",
+  "limits": [
+    "Read-only context rehearsal, not an end-to-end production",
+    "No paid media providers",
+    "Setup required execution outside the tool sandbox"
+  ]
+}

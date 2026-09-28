@@ -1,5 +1,7 @@
 # A quieter studio and a clearer video flow
 
+> Screen arrangement superseded by [Storyboard studio](STORYBOARD-STUDIO.md), September 28, 2026. Import and authorization behavior described below remains relevant.
+
 Updated September 27, 2026. Refinement of the existing Precision design for a single-user local creative tool. The unified scene-based Film plan and reviewed text import are implemented; the broader interaction targets below are distinguished from the delivered slice.
 
 ## Unified film plan

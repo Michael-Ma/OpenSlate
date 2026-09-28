@@ -11,6 +11,8 @@ export interface ArtifactRef {
 }
 
 export interface ShotRecord {
+  /** Shot-level writing intent; acceptance and measured audio remain in narration records. */
+  narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: "stock" | "personal" };
   id: Id;
   revisionId: Id;
   sceneId: Id;
@@ -54,6 +56,7 @@ export interface ProviderProfile {
 export interface ProviderConfiguration { model: string; settings?: JsonObject }
 
 export interface ProjectRecord {
+  soundtrack?: { audioId: string; gainMilliDb: number } | null;
   id: Id;
   revisionId: Id;
   headVersion: number;

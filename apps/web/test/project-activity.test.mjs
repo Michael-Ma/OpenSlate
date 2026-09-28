@@ -25,3 +25,8 @@ test('only exact current review yields review action, and current export yields 
  assert.equal(projectActivity(s,director,{...r,headVersion:0}).label,'Idle');
  s.plan.nodes=[{id:'render',kind:'render'}];s.outputs=[{nodeId:'render',artifact:{kind:'video'}}];assert.equal(projectActivity(s,director,null).next.target,'export');
 });
+
+test('saved storyboard changes stay quiet without hiding unrelated holds',()=>{
+ const s=state();s.latestStoryboardEdit={requestId:'edit'};s.holds=[{active:true,ownerId:'edit'}];assert.equal(projectActivity(s,director,null).label,'Changes saved');
+ s.holds.push({active:true,ownerId:'other'});assert.equal(projectActivity(s,director,null).label,'Waiting for your edit');
+});

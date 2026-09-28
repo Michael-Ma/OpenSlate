@@ -10,7 +10,7 @@ Start with the current status or the local run guide. Architecture documents des
 | [Local launcher](implementation/LOCAL-LAUNCHER.md) | Lifecycle, troubleshooting and process ownership |
 | [Manual live run](implementation/MANUAL-LIVE-PRODUCTION.md) | Configure providers and validate a real production |
 | [Manual audio rehearsal](implementation/MANUAL-AUDIO-TESTING.md) | Test narration with media APIs disabled |
-| [Video creation flow](design/SIMPLIFIED-VIDEO-FLOW.md) | Brief → storyboard → frames → clips → export |
+| [Storyboard studio](design/STORYBOARD-STUDIO.md) | Treatment → scenes/shots → reviewed media → timeline/export |
 | [Backup and recovery](implementation/INSTALLATION-RECOVERY.md) | Same-machine backup, restore and review |
 
 ## Current delivery and design

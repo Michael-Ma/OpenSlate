@@ -133,6 +133,6 @@ test('binary suggestions preserve explicit overrides and prefer installed app bi
   assert.equal(explicit.defaults.binaryPath,realpathSync(process.execPath));
   delete process.env.OPENSLATE_CODEX_BINARY;
   const suggested=new LocalDirectorController(f.service,{...f.config,defaults:undefined});t.after(()=>suggested.close());
-  const installed=['/Applications/ChatGPT.app/Contents/Resources/codex','/Applications/Codex.app/Contents/Resources/codex'].find(existsSync);
+  const installed=['/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex','/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex','/Applications/ChatGPT.app/Contents/Resources/codex','/Applications/Codex.app/Contents/Resources/codex'].find(existsSync);
   assert.equal(suggested.defaults.binaryPath,realpathSync(installed??process.execPath));assert.equal(f.setups.length,0);
 });

@@ -14,7 +14,7 @@ import { NarrationSpeechPanel } from "./NarrationSpeechPanel";
 import { OwnedTranscriptionPanel } from "./OwnedTranscriptionPanel";
 import "./narration.css";
 
-interface Props { api: StudioApi; projectId: string; headVersion: number; shots: Array<{ id: string; purpose?: string }>; directorMode?: string; onChanged(): void; onContinue?(requestId: string): void; onReviewSpending?(candidateId: string): void }
+interface Props { api: StudioApi; projectId: string; headVersion: number; shots: Array<{ id: string; purpose?: string; narration?: { mode: string; text: string; voice: string } }>; directorMode?: string; onChanged(): void; onContinue?(requestId: string): void; onReviewSpending?(candidateId: string): void }
 type CompletionEffect = { kind: "prepare" | "apply" | "add" | "upload" } | { kind: "writing" | "trim" | "placement" | "restore" | "transcript_words" | "transcript_timing"; segmentId: string };
 interface CommandMetadata { label: string; effect?: CompletionEffect }
 const commandMetadata = (command: PendingCommand | null) => command?.metadata as CommandMetadata | undefined;
@@ -32,7 +32,7 @@ function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, 
   const [view, setView] = useState<NarrationView | null>(null), [error, setError] = useState(""), [loadError, setLoadError] = useState(""), [notice, setNotice] = useState("");
   const [generated, setGenerated] = useState<GeneratedRecordingPage | null>(null), [generatedError, setGeneratedError] = useState(""), [loadingMore, setLoadingMore] = useState(false);
   const [prepared, setPrepared] = useState<NarrationPreparation | null>(null);
-  const [adding, setAdding] = useState(false), [newDraft, setNewDraft] = useState<NarrationDraft>(() => draftOf());
+  const [adding, setAdding] = useState(shots.length === 1 && !!shots[0]?.narration?.text), [newDraft, setNewDraft] = useState<NarrationDraft>(() => { const intent = shots.length === 1 ? shots[0]?.narration : undefined; return intent ? { text: intent.text, textKind: 'draft', language: 'en', meaning: shots[0]!.purpose ?? "", source: intent.mode === 'generated' ? { kind: 'generated', voice: null, profileRevisionId: null } : { kind: 'uploaded' } } : draftOf(); });
   const [mappings, setMappings] = useState<Record<string, string>>({}), [librarySelection, setLibrarySelection] = useState("");
   const [unsaved, setUnsaved] = useState<Record<string, NarrationDraft>>({});
   const [unsavedTiming, setUnsavedTiming] = useState<Record<string, boolean>>({});
@@ -124,7 +124,7 @@ function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, 
     {pending && busy && <p role="status">Your saved narration request is still running. Switching projects will not start it again.</p>}
     {pending && !busy && <div className="narration-feedback"><p>The response was uncertain. Retry the same saved request to check its result.</p><button className="button primary" disabled={recoveryReadOnly} onClick={() => void execute(pending)}>Retry exact request</button></div>}
     {!view ? <p className="narration-empty">Loading your saved narration…</p> : <>
-      <div className="narration-steps"><span>01 · Write</span><span>02 · Listen & time</span><span>03 · Review changes</span></div>
+      {shots.length === 1 && <p className="field-help">Audio for {shots[0]!.purpose}. Other shot links are preserved. {shots[0]!.narration?.voice === "personal" && "Personal voice enrollment is not connected. Do not generate a stock voice as a substitute."}</p>}<div className="narration-steps"><span>01 · Write</span><span>02 · Listen & time</span><span>03 · Review changes</span></div>
       <div className="narration-section-header"><h3>Your sections <span>{view.snapshot.segments.length}</span></h3><IconButton label={adding ? "Close new section" : "Add a section"} icon={adding ? "close" : "plus"} disabled={disabled} onClick={() => setAdding(value => !value)} /></div>
       {!view.snapshot.segments.length && !adding && <div className="narration-empty"><strong>Start with words or a recording.</strong><p>Add a section for notes or a script, or upload a recording below and review its transcript first. Nothing is filled in or accepted for you.</p></div>}
       {adding && <div className="narration-card new"><h3>New narration section</h3><DraftFields draft={newDraft} update={setNewDraft} disabled={disabled} prefix="new-narration" /><div className="narration-actions"><button className="button primary" disabled={disabled} onClick={() => edit("/segments", { patch: { add: [newDraft] } }, "Section saved.", { kind: "add" })}>Save section</button><span>Notes and outlines can be refined before approval.</span></div></div>}
@@ -139,7 +139,7 @@ function NarrationWorkspace({ api, projectId, headVersion, shots, directorMode, 
         {generatedError && <p className="narration-feedback error" role="alert">{generatedError}</p>}
         {generated && <p className="field-help">{generated.recordings.length} completed OpenSlate recording{generated.recordings.length === 1 ? "" : "s"} listed. Preview a take, attach it to a section, then review its audio and timing.</p>}
         {generated?.coverage.nextOffset !== null && generated && <button className="button" disabled={loadingMore} onClick={() => void loadMoreGenerated()}>{loadingMore ? "Loading recordings…" : "Load older generated recordings"}</button>}
-        <NarrationSpeechPanel api={api} projectId={projectId} view={view} disabled={disabled} completion={slot} execute={execute} {...(onReviewSpending ? { onReviewSpending } : {})} />
+        {shots.length === 1 && shots[0]?.narration?.voice === "personal" ? <p role="status">Personal voice generation is awaiting a connected voice provider. Choose Provider voice on the shot to use a stock voice.</p> : <NarrationSpeechPanel api={api} projectId={projectId} view={view} disabled={disabled} completion={slot} execute={execute} {...(onReviewSpending ? { onReviewSpending } : {})} />}
         <OwnedTranscriptionPanel api={api} projectId={projectId} view={view} recording={selectedRecording ?? null} disabled={disabled} completion={slot} execute={execute} {...(onReviewSpending ? { onReviewSpending } : {})} />
       </section>
       <section className="narration-commit" aria-labelledby="narration-commit-title"><span className="eyebrow">REVIEW CHANGES</span><h3 id="narration-commit-title">Connect narration to your shots</h3><p>A section sets its shot's narration and duration. Choose links deliberately; one changed section does not rewrite your other shots.</p>

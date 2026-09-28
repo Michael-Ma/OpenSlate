@@ -65,7 +65,8 @@ export class LocalDirectorController {
   private findBinary(): string {
     // Prefer bundled native executables over optional npm launchers that may lack platform binaries.
     // This is a UI suggestion only: setup still checks the selected executable's exact version.
-    const candidates = [process.env.OPENSLATE_CODEX_BINARY, "/Applications/ChatGPT.app/Contents/Resources/codex",
+    const candidates = [process.env.OPENSLATE_CODEX_BINARY, "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+      "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex", "/Applications/ChatGPT.app/Contents/Resources/codex",
       "/Applications/Codex.app/Contents/Resources/codex", ...((process.env.PATH ?? "").split(":").filter(Boolean).map(path => join(path, "codex")))];
     for (const candidate of candidates) if (candidate && isAbsolute(candidate) && existsSync(candidate)) {
       try { return realpathSync(candidate); } catch { /* A disappeared suggestion must not prevent server startup. */ }

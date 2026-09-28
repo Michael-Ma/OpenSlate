@@ -1,3 +1,4 @@
+import type { NarrationAudio } from '../narration/types.js';
 import { canonical, invariant, shotIntentDigest } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, CueRecord, InputSource, PlanNode } from "@openslate/core";
 import type { NodeBinding } from "../execution/engine.js";
@@ -91,10 +92,19 @@ function timelineCapture(context: ReturnType<typeof currentPlan>, timeline: Plan
     const audio = resolve(input.source, "audio");
     invariant(selected.some(segment => canonical(segment.cue.audio) === canonical(audio)), "MEDIA_NARRATION_REQUIRED", "Narration input is not part of the frozen cue placements");
   }
+  const audio = selected.map(segment => segment.audioPlacement);
+  if (project.soundtrack) {
+    const recording = store.get<NarrationAudio>('narration_audio', project.soundtrack.audioId);
+    invariant(recording?.projectId === projectId && recording.media.kind === 'audio', 'MEDIA_ARTIFACT_UNAVAILABLE', 'Selected soundtrack is unavailable.');
+    const samples = recording.media.probe.audio?.samples;
+    invariant(Number.isSafeInteger(samples) && samples! > 0, 'MEDIA_SOURCE_UNAVAILABLE', 'Soundtrack duration is not measured.');
+    inputs.push({ nodeId: null, port: 'soundtrack', artifact: { artifactId: recording.id, sha256: recording.media.sha256, kind: 'audio' } });
+    audio.push({ source: recording.media, startSample: 0, durationSamples: Math.min(samples!, totalFrames * 1600), atSample: 0, gainMilliDb: project.soundtrack.gainMilliDb });
+  }
   return { target: { revisionId: project.revisionId, headVersion: project.headVersion, planId: plan.id, graphDigest: plan.compiled.graphDigest,
     timelineNodeId: timeline.id, canonicalNarrationId: selected.length ? narration!.id : null, inputs,
     dependencyNodeIds: [...dependencyNodeIds].sort(), scopeIds: [...scopeIds].sort() },
-    input: { projectId, targetRevisionId: project.revisionId, clips, audio: selected.map(segment => segment.audioPlacement) } };
+    input: { projectId, targetRevisionId: project.revisionId, clips, audio } };
 }
 
 /** Trusted SQL-only snapshot. Caller still owns authority/holds and subsequent descriptor/byte validation. */

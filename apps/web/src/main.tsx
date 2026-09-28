@@ -8,3 +8,4 @@ if (!root) throw new Error("Missing root element");
 createRoot(root).render(<StrictMode><App /></StrictMode>);
 
 import "./precision.css";
+import './storyboard.css';

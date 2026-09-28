@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated September 27, 2026. This page describes implemented behavior and verified limits. [Technical designs](../technical/README.md) describe the broader target; [the development plan](../design/IMPLEMENTATION-PLAN.md) tracks remaining work.
+Updated September 28, 2026. This page describes implemented behavior and verified limits. [Technical designs](../technical/README.md) describe the broader target; [the development plan](../design/IMPLEMENTATION-PLAN.md) tracks remaining work.
 
 ## Current capability
 
@@ -12,10 +12,12 @@ Updated September 27, 2026. This page describes implemented behavior and verifie
 | Visual production | Uploaded images/video, Codex or API image adapters, Viggle and MiniMax adapters, keyframe/motion review | One actual Codex image → Viggle clip → export passed; OpenAI image API live validation remains pending |
 | Narration | Drafts, uploaded recordings, speech/transcription proposals, human review, canonical audio/timing and adoption | Implemented and tested with synthetic media/injected providers; real speech/transcription validation remains pending |
 | Assembly | Owned media, timeline composition, FFmpeg export, local recovery | Actual six-second provider output and synthetic six-minute workflow verified |
-| Review UI | Unified Film plan with brief and scene narration/shots, progress navigation, next action, reviewed text import; Assets and Preview retained | Real native three-scene import, reload and human confirmation; desktop/390px navigation and scope checks; no paid media in this slice |
+| Review UI | Treatment, scene and shot storyboard; direct text edits, drag ordering, delete/undo, individual frame review, shot narration intent, chat import and light Timeline | Persistent command/revision tests and disposable browser review; detailed audio acceptance dialog retained; personal voice cloning and timeline audio audition pending |
 | Installation recovery | Verified media-inclusive backup, same-root restore, quarantine and human release | Offline and browser recovery evidence; portable relocation and installer packaging remain pending |
 
 ## Latest verification
+
+- September 28 storyboard rebuild: **2,026 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. revision-checked direct manipulation, scoped candidate invalidation, soundtrack selection and actual FFmpeg mix test. One native Codex read-only turn completed with zero grants/media attempts. See [delivered behavior and limits](../design/STORYBOARD-STUDIO.md).
 
 - September 27 Film plan: **2,016 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. A separate native Codex interpreted one synthetic three-scene, three-shot outline; the proposed import survived reload, then human confirmation saved one revision with zero generation grants and zero media attempts. Optional music stayed outside the draft and narration stayed undecided. Phone layout measured 390px content/390px viewport; scoped chat, saved-edit continuation, narration, final navigation and the Markdown file picker passed. Tests cover stale/different drafts, interrupted work, model mutation rejection, idempotency, reopen, restored authority and scoped discard. See [delivered scope and limitations](../design/SIMPLIFIED-VIDEO-FLOW.md).
 
