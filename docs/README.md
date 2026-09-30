@@ -10,7 +10,7 @@ Start with the current status or the local run guide. Architecture documents des
 | [Local launcher](implementation/LOCAL-LAUNCHER.md) | Lifecycle, troubleshooting and process ownership |
 | [Manual live run](implementation/MANUAL-LIVE-PRODUCTION.md) | Configure providers and validate a real production |
 | [Manual audio rehearsal](implementation/MANUAL-AUDIO-TESTING.md) | Test narration with media APIs disabled |
-| [Storyboard studio](design/STORYBOARD-STUDIO.md) | Treatment → scenes/shots → reviewed media → timeline/export |
+| [Storyboard studio](design/STORYBOARD-STUDIO.md) | Current UI, direct-edit backend, audio limits and shared typography |
 | [Backup and recovery](implementation/INSTALLATION-RECOVERY.md) | Same-machine backup, restore and review |
 
 ## Current delivery and design
@@ -31,7 +31,7 @@ Start with the current status or the local run guide. Architecture documents des
 - Providers: [catalog](implementation/PROVIDER-CATALOG.md), [execution activation](implementation/MEDIA-EXECUTION-LAUNCHER.md), [Codex images](implementation/CODEX-IMAGE-PROVIDER.md), [Viggle H3](implementation/VIGGLE-H3.md), [OpenAI image execution](implementation/OPENAI-IMAGE-EXECUTION.md).
 - Audio: [conversational preparation](implementation/CONVERSATIONAL-AUDIO.md), [speech execution](implementation/OPENAI-SPEECH-EXECUTION.md), [recording transcription](implementation/OWNED-TRANSCRIPTION-WORKSPACE.md), [transcript adoption](implementation/TRANSCRIPT-REVIEW-ADOPTION.md).
 - Execution: [spending review](implementation/SPENDING-REVIEW.md), [output recovery](implementation/OUTPUT-SPOOL.md), [assembly](implementation/AUTOMATIC-LOCAL-ASSEMBLY.md), [migrations](implementation/DATABASE-MIGRATIONS.md).
-- UI: [Precision layout](implementation/PRECISION-UI.md), [settings and SSE](implementation/PROJECT-SETTINGS-AND-UPDATES.md), [Stop behavior](implementation/CHAT-STOP.md).
+- UI: [current storyboard and typography](design/STORYBOARD-STUDIO.md), [historical Precision layout](implementation/PRECISION-UI.md), [settings and SSE](implementation/PROJECT-SETTINGS-AND-UPDATES.md), [Stop behavior](implementation/CHAT-STOP.md).
 - Acceptance evidence: [real six-second pipeline](implementation/LIVE-VALIDATION.md), [synthetic six-minute workflow](implementation/SIX-MINUTE-WORKFLOW.md), [clean checkout](implementation/CLEAN-CHECKOUT-VALIDATION.md).
 
 Other files under `implementation/` preserve component contracts and dated experiments. Their old test totals and next steps describe that milestone, not current project status or permission to make new paid calls. Use the status page and development plan for current decisions. Versioned files under `skills/` are runtime inputs, not disposable documentation.

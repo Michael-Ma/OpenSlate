@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated September 28, 2026. This page describes implemented behavior and verified limits. [Technical designs](../technical/README.md) describe the broader target; [the development plan](../design/IMPLEMENTATION-PLAN.md) tracks remaining work.
+Updated September 29, 2026. This page describes implemented behavior and verified limits. [Technical designs](../technical/README.md) describe the broader target; [the development plan](../design/IMPLEMENTATION-PLAN.md) tracks remaining work.
 
 ## Current capability
 

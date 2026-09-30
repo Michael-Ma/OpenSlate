@@ -13,6 +13,7 @@ pnpm build
 OPENSLATE_DATA_DIR="$PWD/.openslate-manual-audio" \
 OPENSLATE_PROVIDER_CONFIG="$PWD/examples/audio-review-profiles.example.json" \
 OPENSLATE_ENABLE_IMAGE_GENERATION=0 \
+OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION=0 \
 OPENSLATE_ENABLE_H3_GENERATION=0 \
 OPENSLATE_ENABLE_VIGGLE_H3_GENERATION=0 \
 OPENSLATE_ENABLE_SPEECH_GENERATION=0 \
@@ -20,13 +21,13 @@ OPENSLATE_ENABLE_TRANSCRIPTION=0 \
 pnpm start
 ```
 
-Do not load `.env.local` for this rehearsal. All real media execution switches are explicitly off, including the legacy H3 route. The profile example contains no key and uses illustrative $0.10-per-attempt estimates for review; these are not vendor prices or an authorization to spend. The separate data directory preserves your existing projects. FFmpeg and ffprobe must be installed for recording import; the launcher checks the usual local paths.
+Do not load `.env.local` or `.env.live.local` for this rehearsal; use the explicit command above rather than `start.sh`. All real media execution switches are explicitly off, including the legacy H3 route. The profile example contains no key and uses illustrative $0.10-per-attempt estimates for review; these are not vendor prices or an authorization to spend. The separate data directory preserves your existing projects. FFmpeg and ffprobe must be installed for recording import; the launcher checks the usual local paths.
 
-Open [OpenSlate locally](http://127.0.0.1:3001). The launcher prints the local token file's path. Open that file yourself and paste its contents into the connection screen; do not send the token in chat. Stop the server with Ctrl+C. Restart using the same command and data directory.
+Open [OpenSlate locally](http://127.0.0.1:3001). Startup opens a short-lived pairing link. If it does not open, use the printed link. Manual token entry is a fallback using the private file at the printed path; do not share either the link or token. Stop the server with Ctrl+C. Restart using the same command and data directory.
 
 When creating a new project, expand **Media models** and select the speech and transcription profiles from the example. Image/video can remain the defaults. Existing projects retain their saved model choices; loading a new profile file does not replace them. Use **Project settings → Models & usage** to preview and apply a change. Audio work with an existing dedicated review is preserved and requires a new audio proposal/review to adopt a different model.
 
-OpenSlate currently tests Codex **0.153.4**. The installed Codex app updated to **0.154.0-alpha.6.2** during this work, so its bundled binary will be rejected by the compatibility check. Keep a separate pinned installation for this rehearsal:
+OpenSlate currently tests Codex **0.153.4**. Desktop-app updates can change its bundled runtime; an incompatible version is rejected by the compatibility check. Keep a separate pinned installation for this rehearsal:
 
 ```sh
 npm install --prefix "$HOME/.local/share/openslate-codex" --save-exact @openai/codex@0.153.4
@@ -41,7 +42,7 @@ Send:
 
 > I want a short leather boots commercial. Please save two finished English narration sections, each one or two sentences, with generated audio as the source. Keep the voice and profile choices unset initially. Do not generate media yet.
 
-Open **Story & narration** and confirm that two separate saved sections appear. The draft should remain unaccepted. Then send:
+Open **chat + → Audio** and confirm that two separate saved sections appear. The draft should remain unaccepted. Then send:
 
 > Prepare a speech plan for the first saved section using the available OpenAI narration profile, cedar voice, and “Warm, calm delivery.” Keep the exact saved words. Stop for my review.
 
@@ -72,7 +73,7 @@ Record a five-to-ten-second voice memo, for example:
 
 > These boots are made one pair at a time. Built by hand, ready for the road.
 
-In a second new project with the transcription profile selected, open **Story & narration**, start the review session if prompted, and use **Choose a narration recording** to upload the file yourself. A script or narration section is not required. Choose the recording in the saved library and listen to it.
+In a second new project with the transcription profile selected, open **chat + → Audio**, start the review session if prompted, and use **Choose a narration recording** to upload the file yourself. A script or narration section is not required. Choose the recording in the saved library and listen to it.
 
 Send:
 
@@ -85,7 +86,7 @@ Expected:
 - You can approve the transcription plan separately from its spending allowance. The disabled provider prevents execution.
 - No transcript text or timing is fabricated. Actual recognition waits for the later live-testing stage.
 
-The browser file-picker path needs your manual confirmation: earlier automation did not complete that upload. Report an upload error rather than repeatedly submitting the same file.
+Verify file selection, import and playback during your manual run. Report an upload error rather than repeatedly submitting the same file.
 
 ## 4. Refresh and restart
 
@@ -102,4 +103,4 @@ When an action reports an uncertain response, use its existing **Check the same�
 - Refresh/restart: saved work retained, no duplicate work.
 - Any confusing screen or error message; omit local tokens and API keys.
 
-After your feedback, we can decide whether to enable a small, explicitly budgeted real speech/transcription test. Live Viggle H3 tests remain on hold until you resume them; the earlier $1 ceiling does not override that hold. Release work also waits until this manual-testing gate is complete.
+After your feedback, we can decide whether to enable a small, explicitly budgeted real speech/transcription test. This rehearsal does not authorize video generation or consume any earlier test allowance. Consult the current status page for release gates.

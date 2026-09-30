@@ -19,7 +19,7 @@ Audio generation/transcription still use the OpenAI API key. Viggle video uses i
 
 ## 1. Prepare the local installation
 
-For an already configured checkout, run `./start.sh` from the repository. It loads `.env.live.local`, checks prerequisites, installs dependencies, builds and opens the complete studio. Run `./start.sh --check` to inspect readiness without launching. An already-running server is reused; stop it first to load changed keys/settings. The following steps document first-time setup and manual alternatives.
+For an already configured checkout, run `./start.sh` from the repository. It loads `.env.live.local`, checks prerequisites, installs dependencies, builds and opens the complete studio. Run `./start.sh --check` to inspect readiness without launching. An already-running server is verified and reused; use `./start.sh --restart` to rebuild and load changed keys, settings or code. The following steps document first-time setup and manual alternatives.
 
 Use Node 24, pnpm 10.33.0, FFmpeg and ffprobe. From the repository:
 
@@ -109,7 +109,7 @@ Send:
 
 Check that there is one shot and the selected model names are correct. Request changes in conversation if the agent chose the wrong intent. Do not approve an image or video allowance until its saved prompt and operation match your intent.
 
-For an existing brief or scene breakdown, use **Film plan → Bring a brief**. Paste it or choose a UTF-8 `.txt`/`.md` file. Select **Interpret material**, inspect the proposed scenes/shots and source comparison, then **Confirm film plan**. This runs the director but starts no media and approves no spending. Optional suggestions stay in chat until chosen. Continue from the displayed next step; use a shot's chat icon for a scoped revision. Narration controls are under **Film plan → Narration & recordings**. PDF/Word documents currently require copied text.
+For an existing brief or scene breakdown, use **Storyboard → treatment folder icon (Bring a brief)**. Paste it or choose a UTF-8 `.txt`/`.md` file. Select **Interpret material**, inspect the proposed scenes/shots and source comparison, then **Confirm film plan**. This runs the director but starts no media and approves no spending. Optional suggestions stay in chat until chosen. Continue in chat; use a shot’s chat icon for a scoped revision. Direct storyboard edits save intent but do not start generation. For narration, choose **Generate voice** or **Upload recording** on a shot, then open its **Audio setup** settings icon. The chat **+ → Audio** opens the project-wide audio workflow. PDF/Word documents currently require copied text.
 
 ## 3. Supply real timing before video
 
@@ -123,7 +123,7 @@ ffmpeg -i /absolute/path/to/your-recording.m4a -af apad -t 6 -ar 48000 -ac 2 -c:
 
 Use a new output filename. Listen to the result: this command would truncate a source longer than six seconds, so do not accept it if any speech was cut off. For a visual-only test, an actual six-second silent WAV is also possible, but describe it honestly as intentionally silent rather than a spoken transcript.
 
-In **Story & narration**:
+In the shot’s **Audio setup** dialog (or **chat + → Audio**):
 
 1. Explicitly continue the current edit into narration if prompted.
 2. Save one finished section containing the actual spoken words and their meaning; choose **My recording** as its source. For intentional silence, use a truthful non-spoken editorial description, such as “Six-second silent product detail; no spoken narration,” with the actual silent recording. Empty writing cannot be accepted.
@@ -137,7 +137,7 @@ Do this before reviewing the final keyframe/video specification: applying narrat
 
 ## 4. Generate and review one keyframe
 
-In **Storyline → Generation & costs**, select the saved shot and the required image/video operations. Review the exact saved prompts, then choose **Allow and continue planning**. If work was stopped, send a fresh direction first. Permission allows one operation of each selected kind per shot; it does not approve spending or skip keyframe review. If the project changes while reviewing, review the current version again.
+In **Storyboard → treatment settings icon (Generation and costs)**, select the saved shot and the required image/video operations. Review the exact saved prompts, then choose **Allow and continue planning**. If work was stopped, send a fresh direction first. Permission allows one operation of each selected kind per shot; it does not approve spending or skip keyframe review. If the project changes while reviewing, review the current version again.
 
 The director can then prepare and apply the plan for that scope. In the spending/usage review, inspect the exact image candidate and selected profile. Approve only one start:
 
@@ -146,7 +146,7 @@ The director can then prepare and apply the plan for that scope. In the spending
 
 The worker should run automatically once the current plan, generation permission, edit holds and allowance permit it. Check the resulting image at full size. It must be an actual image, not a **FIXTURE PREVIEW**. Save its attempt/result identity and note which account's usage changed.
 
-Review the exact keyframe on the shot card. Approving an image-generation start and approving the returned keyframe for video are separate actions. If the image needs changing, request a new take explicitly; OpenSlate should not automatically regenerate it for aesthetic reasons.
+Review the exact keyframe and motion on the shot card, then use its check in the lower-right corner. Approving an image-generation start and approving the returned keyframe for video are separate actions. If the image needs changing, request a new take explicitly; OpenSlate should not automatically regenerate it for aesthetic reasons.
 
 ## 5. Generate one Viggle take and export
 
@@ -156,10 +156,10 @@ Expected flow:
 
 1. One submission produces a saved Viggle video ID.
 2. OpenSlate polls that same job, downloads its result and validates/normalizes the take locally.
-3. The current plan assembles and renders the shot with your accepted narration.
+3. The clip appears in its storyboard card. Open **Timeline** for picture preview and the **Export** section for local rendering of the current plan with accepted narration.
 4. The exported MP4 plays for six seconds with the expected picture and your recording.
 
-Viggle's native generated soundtrack is currently removed by OpenSlate's video normalization. The assembled soundtrack comes from the accepted narration; there is no native-H3-audio mixing, music generation or professional finishing workflow in this validation.
+Viggle's native generated soundtrack is currently removed by OpenSlate's video normalization. The assembled soundtrack comes from accepted narration and, if selected in Timeline, an owned background recording. Leave background music unset for this first test. There is no native-H3-audio mixing or music generation; timeline preview is picture-only, so review audio in the rendered export.
 
 Review the saved job and actual account charge. Refresh, then stop/restart OpenSlate. Confirm the same take/export remains and no additional generation was submitted. If a submission is uncertain, keep that attempt and investigate its existing evidence; an unknown result is not permission to generate again.
 
@@ -195,6 +195,6 @@ References: [Codex image generation and usage](https://learn.chatgpt.com/docs/im
 
 ### Changing choices and watching progress
 
-Existing projects now have **Project settings** in the header and sidebar. Preview and apply media model changes there; review the preserved work and start the next planning conversation explicitly. Director choices apply to the next idle turn. Saving settings never starts generation or grants spending. See [settings and live updates](PROJECT-SETTINGS-AND-UPDATES.md) for compatibility limits and a no-spend walkthrough.
+Existing projects now have **Project settings** behind the header gear icon. Preview and apply media model changes there; review the preserved work and start the next planning conversation explicitly. Director choices apply to the next idle turn. Saving settings never starts generation or grants spending. See [settings and live updates](PROJECT-SETTINGS-AND-UPDATES.md) for compatibility limits and a no-spend walkthrough.
 
-The browser uses one authenticated SSE stream while visible. **Live updates** means streaming is connected; **Periodic updates** indicates the slow reconnect fallback. Provider job polling remains separate. Restart the local app after upgrading this build, then reconnect the browser with your existing token.
+The browser uses one authenticated SSE stream while visible. **Live updates** means streaming is connected; **Periodic updates** indicates the slow reconnect fallback. Provider job polling remains separate. Run `./start.sh --restart` after upgrading to load the rebuilt interface and reopen a paired browser session. Manual local-token entry remains a fallback.

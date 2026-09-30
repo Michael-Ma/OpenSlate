@@ -5,7 +5,7 @@ Implemented September 28, 2026, from the approved First Light prototype. This pa
 ## User flow
 
 1. Start in conversation or bring a text/Markdown brief. The director proposes an interpretation; the user confirms it before it becomes the saved film.
-2. Review the **treatment → scenes → shots** in one storyboard. Edit text in place, add shots, drag their numbered handles, or delete with the corner cross. Alt+Left/Right provides keyboard ordering. Undo restores the most recent edit only while its revision is still current.
+2. Review the **treatment → scenes → shots** in one storyboard. Edit text in place, add shots, drag their top-left handles, or delete with the corner cross. Alt+Left/Right provides keyboard ordering. Undo restores the most recent edit only while its revision is still current.
 3. Set narration per shot: no narration, generated speech script, or uploaded recording. The card stores writing intent; audio setup opens the existing recording, timing and acceptance workflow with that shot as the mapping target.
 4. Continue in conversation to update affected prompts and the execution plan. Direct edits do not launch paid work. Generation permissions and spending remain available behind the treatment settings icon.
 5. Review each actual keyframe and its exact motion plan using the card's check. Video generation still needs its human grant and budget. The generated clip replaces the frame in that card and supports playback, including muted hover preview.

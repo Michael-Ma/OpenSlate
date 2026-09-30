@@ -2,9 +2,19 @@
 
 An open-source video agent for turning a story into a finished film.
 
-OpenSlate is designed to plan scenes and shots, create reference assets, generate video takes, and assemble an editable timeline for rendering and post-processing.
+OpenSlate combines a conversational director with an editable storyboard: **treatment → scenes → shots → reviewed keyframes → video → timeline/export**. It runs locally on one computer; enabled model providers can use cloud services.
 
-**Status: an early local studio with native Codex conversations, supplied-media workflows and opt-in media generation.** Plan and review shots, develop narration, import recordings/clips/PNG references, discuss selected images and accept exact narration. Explicitly enabled image/H3 bridges use saved profiles, human spending allowances and keyframe review; real local assembly produces a compatible timeline export. Speech/transcription configuration, recoverable local preparation waiting, separate recording/transcript review and audio cost summaries are implemented; conversational audio proposals and exact human review are implemented. The default remains a fake demo. The complete generation path has offline integration coverage, and one real Codex-image/Viggle six-second export passed. Real audio, API-image and complete conversational production validation remain pending. For your first real run, use the [manual live guide](docs/implementation/MANUAL-LIVE-PRODUCTION.md), with automatic Codex images or OpenAI API images. See [verified status](docs/implementation/STATUS.md).
+**Status: early local studio, not a finished v1 release.** The app supports native Codex conversations, direct storyboard edits, supplied media, reviewed generation and local rendering. Demo models are the default and require no API keys. One real Codex-image → Viggle H3 → six-second export has passed; complete conversational production and the remaining real audio/API-image paths still need validation. See [verified status](docs/implementation/STATUS.md).
+
+## Current studio
+
+- **Storyboard:** edit the treatment, scene direction and shot descriptions in place. Add shots/scenes, drag shots, delete a shot or undo the latest eligible edit. Stable shot identities preserve unaffected work.
+- **Per-shot review:** inspect one keyframe and its motion plan, then approve it with the card's check. Generated video plays in the same card. Frame approval, generation permission and spending approval remain separate.
+- **Narration:** choose no narration, generated speech or an uploaded recording per shot. Script choices are intent; the detailed audio dialog still handles recording, timing and explicit acceptance. Generating speech in your recorded voice is not connected yet.
+- **Timeline and assets:** preview the picture sequence, select an imported background track, and render locally with FFmpeg. Audio is heard in the rendered export; live audio audition, trimming and waveforms are pending. Assets lists uploaded and generated images/video.
+- **Conversation and setup:** use chat to refine an affected shot, **+** to import media and **Stop** to interrupt work. Header settings change models and the director. Authenticated SSE delivers live updates.
+
+The studio uses one shared typography system: bold section, scene and shot headings above regular-weight content. See the [current UI, backend edit contracts and limits](docs/design/STORYBOARD-STUDIO.md).
 
 ## Direction
 
@@ -19,7 +29,7 @@ OpenSlate is designed to plan scenes and shots, create reference assets, generat
 - Code-authored execution plans with parallel work and targeted edits that reuse existing outputs.
 - A small initial skill/tool set with explicit loading, versioning, and request lifecycle.
 
-Local deployment does not mean offline generation. The initial production adapters will call cloud LLM, GPT Image 2 and H3 services with user-configured credentials. V0 trusts the installed, pinned Codex runtime and its sandbox under an explicit `LocalCodexPolicy` with mode `local` and an exact version/configuration identity. OpenSlate still enforces tool catalogs, request epochs, approvals and generation authority. Independent code-host and authentication isolation are not proven or required as a separate deployment mode. Native setup and browser conversations are connected; projects use the demo director until native Codex is selected. See the [accepted runtime boundary](docs/implementation/RUNTIME-TRUST-DECISION.md).
+Local deployment does not mean offline generation. Enabled production adapters call cloud model services with user-configured credentials or the configured Codex sign-in. V0 trusts the installed, pinned Codex runtime and its sandbox under an explicit `LocalCodexPolicy` with mode `local` and an exact version/configuration identity. OpenSlate still enforces tool catalogs, request epochs, approvals and generation authority. Independent code-host and authentication isolation are not proven or required as a separate deployment mode. Native setup and browser conversations are connected; projects use the demo director until native Codex is selected. See the [accepted runtime boundary](docs/implementation/RUNTIME-TRUST-DECISION.md).
 
 ## Quick start
 
@@ -47,7 +57,7 @@ Open [the local app](http://127.0.0.1:3001). One process serves the built interf
 
 For development, use `pnpm dev` and open [the development interface](http://127.0.0.1:5173). Vite proxies `/api` to the local service on port 3001. Shared packages build before development starts; restart `pnpm dev` after editing them. Production serves the bundle captured at startup; rebuild and restart to use changed interface files.
 
-The default app and fake demo require no API keys, Codex installation, FFmpeg, or GPU. They make no paid generation calls.
+The default app and fake demo require no API keys, Codex installation, FFmpeg, or GPU. They make no paid generation calls. For a real run, follow the [manual live production guide](docs/implementation/MANUAL-LIVE-PRODUCTION.md); configured keys alone do not authorize generation.
 
 The server stores local state in `.openslate/` relative to its working directory, or `OPENSLATE_DATA_DIR`. Root-level `pnpm start` defaults to `<repository>/.openslate/`; `pnpm dev` and the filtered server start default to `<repository>/apps/server/.openslate/`. Set the same explicit directory when switching launch modes to retain the same projects:
 
@@ -57,7 +67,7 @@ OPENSLATE_DATA_DIR=/absolute/path/to/openslate-data pnpm start
 
 The service creates a private `local-session.token` in that directory unless `OPENSLATE_LOCAL_TOKEN` is configured. Normal launch pairing creates an HttpOnly browser session. The manual-token fallback keeps its token only in tab memory and requires reconnection after reload. The built interface and health endpoint are public on loopback; project/media APIs and director tools require their appropriate bearer tokens. Host and Origin checks also apply to the built interface. No model-credential saving API is enabled. Keep the data directory separate from `apps/web/dist`, which contains public build output.
 
-Create a project and choose its director. Native Codex setup checks the pinned local installation using its existing sign-in, without starting a model conversation. To try the offline workflow, close setup or choose Demo, then select **Create a 2-shot demo**. Inspect and select the keyframes, then approve the selection to release their sample videos. Use a shot's **Discuss** action and the demo framing choices to exercise a scoped change. In demo mode, ordinary chat receives canned guidance. Native mode handles live conversations through the validated application tools. The application preserves the previous preview during a revision. All sample outputs are explicitly fake.
+Create a project and choose its director. Native Codex setup checks the pinned local installation using its existing sign-in, without starting a model conversation. To try the offline workflow, close setup or choose Demo, then select **Create a 2-shot demo**. Inspect each keyframe and motion plan, then use that shot card’s check to approve it for sample video generation. Use a shot's chat icon (**Discuss shot…**) and the demo framing choices to exercise a scoped change. In demo mode, ordinary chat receives canned guidance. Native mode handles live conversations through the validated application tools. The application preserves the previous preview during a revision. All sample outputs are explicitly fake.
 
 New projects can also select installed keyframe/video models under **Media models**. To add planning choices, point the local server at a provider catalog:
 
@@ -118,7 +128,7 @@ If interrupted, repeat the exact restore command with the same bundle. The launc
 ## Repository
 
 ```text
-apps/web/             React conversation, storyboard, review and playback workspace
+apps/web/             React chat, editable storyboard, asset library and light timeline
 apps/server/          Application, director supervisor, SQLite, execution and local media
 packages/core/        Domain contracts, workflow predicates and bounded plan compiler
 packages/director/    Skill locks, MCP bridge, fake/native runtime ports and probes
@@ -132,6 +142,7 @@ docs/                 Documentation index and design files
 
 Start with the [documentation index](docs/README.md).
 
+- [Current storyboard studio and typography](docs/design/STORYBOARD-STUDIO.md)
 - [Architecture](docs/design/README.md)
 - [Detailed technical designs](docs/technical/README.md)
 - [Production workflow](docs/technical/PRODUCTION-WORKFLOW.md)

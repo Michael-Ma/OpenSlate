@@ -1,6 +1,6 @@
 # OpenSlate development plan
 
-Updated September 28, 2026. Current evidence is maintained in [implementation status](../implementation/STATUS.md), rather than repeated here as a chronological development log.
+Updated September 29, 2026. Current evidence is maintained in [implementation status](../implementation/STATUS.md), rather than repeated here as a chronological development log.
 
 ## Fixed scope
 
@@ -14,7 +14,8 @@ Single-user local app, TypeScript orchestration, Codex as the first replaceable 
 | T05–T08 | Conversation/review UI, native Codex, versioned skills/tools, narration preparation and owned media/timeline/rendering |
 | T09–T12 integration | Provider adapters, durable dispatch/output recovery, independent spending, audio review/adoption, model changes, SSE, backup/restore and local launcher |
 | Storyboard rebuild | Direct shot/scene/treatment commands, stable reorder/delete/undo, shot narration intent, light timeline and owned soundtrack mix; [scope and remaining limits](STORYBOARD-STUDIO.md) |
-| Film-plan workflow | Unified scene/brief/narration view, state-based next action, persistent text/Markdown interpretation and human confirmation; bounded native import and responsive browser validation |
+| Supplied-material intake | Persistent text/Markdown interpretation and human confirmation; bounded native import and responsive browser validation. Current presentation uses the storyboard above. |
+| Shared UI typography | App-wide heading/body/caption tokens, explicit scene/shot headings, wrapped descriptions and desktop/mobile review |
 | Initial T13 evidence | Offline six-minute workflow and one real six-second Codex-image/Viggle/export run |
 
 Component implementation does not imply complete live-production acceptance. Consult the linked status for tested boundaries.

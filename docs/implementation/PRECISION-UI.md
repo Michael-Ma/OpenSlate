@@ -1,5 +1,7 @@
 # Precision UI rebuild
 
+> Historical milestone, September 23. Its navigation, batch review controls and typography have been superseded by the [current storyboard studio](../design/STORYBOARD-STUDIO.md). Retained below as dated implementation evidence, not current usage instructions.
+
 September 23, 2026. Production React interface rebuilt from the approved Precision minimal iteration. The white/blue, system-font interface puts conversation on the left and film review on the right. At 760px and below, Director/Workspace navigation switches between the two without discarding state.
 
 ## Implemented

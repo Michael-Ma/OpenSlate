@@ -1,6 +1,6 @@
 # Project settings and live workspace updates
 
-Project settings is available in the workspace header and sidebar. It contains Models & usage, Director, and Setup & accounts. Credentials remain server-side; the browser displays setup and billing information, not secret values.
+Project settings is available in the workspace header gear icon. It contains Models & usage, Director, and Setup & accounts. Credentials remain server-side; the browser displays setup and billing information, not secret values.
 
 ## Changing media models
 

@@ -5,6 +5,8 @@
 
 OpenSlate turns a creative brief into an editable film of up to six minutes: conversational narration development, story and shot planning, human-reviewed keyframes, generated takes, timeline assembly, and finishing. It is a single-user, single-machine local application with user-configured credentials and extensible model adapters. The browser workspace, application service, SQLite database, artifact files, operation workers and native Codex process all run on that computer. Codex, GPT Image 2, and H3 cloud are the first director/image/video integrations. A later same-machine Python H3 worker implements the video provider boundary; ten- and thirty-minute films are later validation targets.
 
+The current implemented interface is documented in [Storyboard studio](STORYBOARD-STUDIO.md), including direct edits, per-shot narration intent, the light timeline and shared typography. Older component layouts below describe design history where they differ.
+
 ## 1. Direction
 
 The application should be fast to execute and easy to revise. Once the intent and current project state are clear for a requested scope, the director writes an execution plan in a small TypeScript planning language. OpenSlate compiles it into a durable dependency graph and executes ready operations directly. The user can intervene during production; the director translates the request into a scoped change rather than rebuilding the film.
