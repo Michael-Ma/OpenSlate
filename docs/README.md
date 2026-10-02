@@ -33,6 +33,7 @@ Start with the current status or the local run guide. Architecture documents des
 - Execution: [spending review](implementation/SPENDING-REVIEW.md), [output recovery](implementation/OUTPUT-SPOOL.md), [assembly](implementation/AUTOMATIC-LOCAL-ASSEMBLY.md), [migrations](implementation/DATABASE-MIGRATIONS.md).
 - UI: [current storyboard and typography](design/STORYBOARD-STUDIO.md), [historical Precision layout](implementation/PRECISION-UI.md), [settings and SSE](implementation/PROJECT-SETTINGS-AND-UPDATES.md), [Stop behavior](implementation/CHAT-STOP.md).
 - Setup: [first run and doctor](implementation/LOCAL-SETUP.md).
+- Human testing: [current installation readiness](implementation/HUMAN-TESTING-READINESS.md).
 - Acceptance evidence: [October 1 workflow review](implementation/V1-COMPLETION-REVIEW.md), [real six-second pipeline](implementation/LIVE-VALIDATION.md), [synthetic six-minute workflow](implementation/SIX-MINUTE-WORKFLOW.md), [clean checkout](implementation/CLEAN-CHECKOUT-VALIDATION.md).
 
 Other files under `implementation/` preserve component contracts and dated experiments. Their old test totals and next steps describe that milestone, not current project status or permission to make new paid calls. Use the status page and development plan for current decisions. Versioned files under `skills/` are runtime inputs, not disposable documentation.

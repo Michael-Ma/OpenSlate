@@ -1,0 +1,88 @@
+{
+  "capturedAtUtc": "2026-10-02T06:34:59.135280+00:00",
+  "buildCommit": "842b28c",
+  "server": "http://127.0.0.1:3001",
+  "localDoctorReady": true,
+  "projects": {
+    "count": 2,
+    "headVersionsBeforeAfter": [
+      [
+        2,
+        2
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "activeHoldCountsBeforeAfter": [
+      [
+        3,
+        3
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "pauseStatesBeforeAfter": [
+      [
+        false,
+        false
+      ],
+      [
+        true,
+        true
+      ]
+    ],
+    "mediaAttemptsAfter": 0,
+    "activePlansAfter": 0
+  },
+  "apiAuthentication": {
+    "endpoint": "GET https://api.openai.com/v1/models",
+    "httpStatus": 200,
+    "authenticated": true,
+    "configuredModels": [
+      {
+        "profileId": "openai-keyframes-medium",
+        "model": "gpt-image-2-2026-04-21",
+        "listed": true
+      },
+      {
+        "profileId": "openai-narration-review",
+        "model": "gpt-4o-mini-tts-2025-12-15",
+        "listed": true
+      },
+      {
+        "profileId": "openai-transcription-review",
+        "model": "whisper-1",
+        "listed": true
+      }
+    ],
+    "generationCalls": 0,
+    "mediaSubmitted": 0,
+    "limits": "This checks authentication/model listing, not billing quota, image organization verification or custom-voice eligibility."
+  },
+  "enabledRoutes": {
+    "IMAGE_GENERATION": false,
+    "CODEX_IMAGE_GENERATION": true,
+    "VIGGLE_H3_GENERATION": true,
+    "H3_GENERATION": false,
+    "SPEECH_GENERATION": false,
+    "TRANSCRIPTION": false
+  },
+  "pendingAction": {
+    "status": "approval_required",
+    "enable": [
+      "OPENSLATE_ENABLE_IMAGE_GENERATION",
+      "OPENSLATE_ENABLE_SPEECH_GENERATION",
+      "OPENSLATE_ENABLE_TRANSCRIPTION"
+    ],
+    "then": "Graceful restart; exact generation, cost and frame reviews still required"
+  },
+  "limitations": [
+    "Viggle key is configured; this audit did not call its generation API.",
+    "Model-list authentication does not prove paid endpoint access, remaining quota or custom voice eligibility.",
+    "New voice enrollment remains pending provider/account choice."
+  ]
+}
