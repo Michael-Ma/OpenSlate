@@ -1,5 +1,5 @@
 {
-  "capturedAtUtc": "2026-10-02T06:34:59.135280+00:00",
+  "capturedAtUtc": "2026-10-02T08:10:34.032Z",
   "buildCommit": "842b28c",
   "server": "http://127.0.0.1:3001",
   "localDoctorReady": true,
@@ -64,25 +64,57 @@
     "limits": "This checks authentication/model listing, not billing quota, image organization verification or custom-voice eligibility."
   },
   "enabledRoutes": {
-    "IMAGE_GENERATION": false,
+    "IMAGE_GENERATION": true,
     "CODEX_IMAGE_GENERATION": true,
     "VIGGLE_H3_GENERATION": true,
     "H3_GENERATION": false,
-    "SPEECH_GENERATION": false,
-    "TRANSCRIPTION": false
-  },
-  "pendingAction": {
-    "status": "approval_required",
-    "enable": [
-      "OPENSLATE_ENABLE_IMAGE_GENERATION",
-      "OPENSLATE_ENABLE_SPEECH_GENERATION",
-      "OPENSLATE_ENABLE_TRANSCRIPTION"
-    ],
-    "then": "Graceful restart; exact generation, cost and frame reviews still required"
+    "SPEECH_GENERATION": true,
+    "TRANSCRIPTION": true
   },
   "limitations": [
     "Viggle key is configured; this audit did not call its generation API.",
     "Model-list authentication does not prove paid endpoint access, remaining quota or custom voice eligibility.",
     "New voice enrollment remains pending provider/account choice."
-  ]
+  ],
+  "activation": {
+    "status": "approved_and_applied",
+    "approvedDate": "2026-10-02",
+    "profiles": [
+      {
+        "id": "openai-keyframes-medium",
+        "adapter": "openai-image",
+        "registered": true,
+        "enabled": true,
+        "realExecutionEnabled": true
+      },
+      {
+        "id": "openai-narration-review",
+        "adapter": "openai-speech",
+        "registered": true,
+        "enabled": true,
+        "realExecutionEnabled": true
+      },
+      {
+        "id": "openai-transcription-review",
+        "adapter": "openai-transcription",
+        "registered": true,
+        "enabled": true,
+        "realExecutionEnabled": true
+      }
+    ],
+    "projectStatePreservedExactly": true,
+    "mediaAttemptsCreated": 0,
+    "configMode": "0600"
+  },
+  "voiceEnrollmentAccess": {
+    "capturedAtUtc": "2026-10-02T08:14:21.773Z",
+    "endpoint": "GET /v1/audio/consent_phrases",
+    "httpStatus": 404,
+    "readAccessConfirmed": false,
+    "errorCode": null,
+    "errorType": "invalid_request_error",
+    "voiceSampleUploaded": false,
+    "voiceCreated": false,
+    "limits": "Read-only permission probe. It does not prove voice creation/write access or organization eligibility."
+  }
 }

@@ -1,20 +1,22 @@
 # Human testing readiness
 
-Local installation audited October 1, 2026, after commit `842b28c`. The verified build has been loaded into the real studio at `http://127.0.0.1:3001`, and a paired browser is open at the generation review. This is a readiness checkpoint, not completed live-provider acceptance.
+Local installation audited October 1 and activated with explicit approval October 2, 2026, after code commit `842b28c`. The verified build has been loaded into the real studio at `http://127.0.0.1:3001`, and a paired browser is open at the generation review. This is a readiness checkpoint, not completed live-provider acceptance.
 
 ## Verified current state
 
 - Local doctor passes with Node 24.15.0, pnpm 10.33.0, FFmpeg/ffprobe, the pinned Codex runtime and existing server-side keys.
-- Both saved projects retain their head versions, pause states and active hold counts. Their media attempt and active plan counts remain zero after restart.
-- Existing Codex-image and Viggle routes are enabled. OpenAI API-image, speech and transcription routes remain disabled pending explicit activation approval.
+- The approved activation restart preserves the exact saved project revisions, active hold identities, pause states, plans and attempt identities. Media attempts and active plans remain zero.
+- Codex-image and Viggle routes remain enabled. OpenAI API-image, speech and transcription are now registered, host-enabled and available for exact human generation and spending review.
 - The installed catalog contains the exact API image, speech and transcription choices. The configured OpenAI key returned HTTP 200 from the documented [model-list endpoint](https://developers.openai.com/api/reference/resources/models/methods/list); all three exact configured model IDs were listed. This does not prove paid generation access, quota, image organization verification or custom-voice eligibility.
 - No generation or transcription call was made during this audit. No keys or project text appear in the [sanitized evidence](human-testing-readiness-evidence.json).
 
-## Pending activation
+## Approved activation
 
-The proposed change sets only `OPENSLATE_ENABLE_IMAGE_GENERATION`, `OPENSLATE_ENABLE_SPEECH_GENERATION` and `OPENSLATE_ENABLE_TRANSCRIPTION` to `1`, preserving keys, data path, catalog and other switches, then performs a graceful restart. It is waiting for explicit approval in this chat. Enabling routes does not create an allowance or authorize generation.
+The user approved using the existing key on October 2. Only `OPENSLATE_ENABLE_IMAGE_GENERATION`, `OPENSLATE_ENABLE_SPEECH_GENERATION` and `OPENSLATE_ENABLE_TRANSCRIPTION` were set to `1`; keys, data path, catalog and other switches were preserved. The installation restarted gracefully, all three OpenAI profiles report registered/enabled execution, and the paired browser shows speech/transcription ready. No generation was initiated.
 
-## Human walkthrough after activation
+Task 6 remains partial: saved personal voice identities, consent/revocation and synthesis with existing eligible OpenAI voice IDs are implemented; in-app creation from a recording is not. The documented read-only consent-phrase probe returned HTTP 404, which did not establish custom-voice access. It is not proof of a particular eligibility failure. New enrollment still needs provider/account confirmation and implementation.
+
+## Human walkthrough
 
 1. In an older project, open **Project settings → Director → Project guidance → Enable audio planning** for V4. A new project uses the current guidance automatically. The update does not accept narration or spend usage.
 2. Select **GPT Image 2 · medium keyframes** for API images, **Viggle H3 · first 6-second live shot** for video, and the OpenAI audio choices when testing audio. Model selection has its own impact preview; existing projects keep their saved choices until applied.
