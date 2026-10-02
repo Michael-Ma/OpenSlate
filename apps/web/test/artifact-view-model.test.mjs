@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { artifactIdentity,artifactView } from '../src/artifact-view-model.ts';
+const a={artifactId:'a',sha256:'a'.repeat(64),kind:'image'};
+test('same node receiving a different hash cannot display old bytes under the new review',()=>{
+ const api={},signal=new AbortController().signal,result={api,identity:artifactIdentity('p',a),signal,url:'blob:old-frame',error:''};
+ assert.equal(artifactView(result,api,result.identity).url,'blob:old-frame');
+ assert.equal(artifactView(result,api,artifactIdentity('p',{...a,sha256:'b'.repeat(64)})).url,null);
+});
+test('project, media kind, API session, missing artifact and aborted ownership all fence visible bytes',()=>{
+ const api={},controller=new AbortController(),result={api,identity:artifactIdentity('p',a),signal:controller.signal,url:'blob:old',error:'old error'};
+ for(const identity of [artifactIdentity('q',a),artifactIdentity('p',{...a,kind:'video'}),artifactIdentity('p',null)])assert.deepEqual(artifactView(result,api,identity),{url:null,error:''});
+ assert.equal(artifactView(result,{},result.identity).url,null);
+ controller.abort();assert.deepEqual(artifactView(result,api,result.identity),{url:null,error:''});
+});

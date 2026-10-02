@@ -9,7 +9,7 @@ import { assertTranscriptionAudioCapacity, assertTranscriptionAudioMeasurement, 
 import type { MeasuredTranscriptionAudio, TranscriptionAudioOptions, TranscriptionAudioRecipe } from "./transcription-audio-types.js";
 import type { FrozenRenderManifest, LocalMediaOptions, MediaAudioNormalizationIdentity, MediaLimits, MediaNormalizationIdentity, MediaProbe, RenderCompletion, RenderManifestInput, RenderOptions, RenderResult, SuppliedMedia } from "./types.js";
 
-const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioPlacements: 64, timeoutMs: 120000 };
+const DEFAULTS: MediaLimits = { maxInputBytes: 128 * 1024 * 1024, maxOutputBytes: 256 * 1024 * 1024, maxDurationFrames: 10800, maxClips: 64, maxAudioTracks: 8, maxAudioSources: 65, maxAudioPlacements: 65, timeoutMs: 120000 };
 // No playlists, concat demuxer, devices or network protocols. MOV external data
 // references remain disabled by the demuxer's default; files are copied first.
 const INPUT_OPTIONS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,matroska,webm,avi,wav,mp3,flac,ogg"];
@@ -69,7 +69,8 @@ export class LocalMediaService {
     integer(this.limits.maxDurationFrames, 1, 10800, "duration limit");
     integer(this.limits.maxClips, 1, 64, "clip limit");
     integer(this.limits.maxAudioTracks, 0, 8, "audio track limit");
-    integer(this.limits.maxAudioPlacements, 0, 64, "audio placement limit");
+    integer(this.limits.maxAudioSources, 0, 65, "audio source limit");
+    integer(this.limits.maxAudioPlacements, 0, 65, "audio placement limit");
     integer(this.limits.timeoutMs, 50, 600000, "tool time limit");
   }
 
@@ -269,7 +270,7 @@ export class LocalMediaService {
       const source = await this.readSource(placement.source, signal);
       invariant(source.kind === "audio" && source.probe.audio?.samples !== null && source.probe.audio?.samples !== undefined, "MEDIA_INVALID_INPUT", "Audio placement requires measured normalized audio");
       rememberSource(source); audioStreams.add(source.sha256);
-      invariant(audioStreams.size <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many distinct audio source streams");
+      invariant(audioStreams.size <= this.limits.maxAudioSources, "MEDIA_INVALID_INPUT", "Too many distinct audio source streams");
       integer(placement.startSample, 0, this.limits.maxDurationFrames * SAMPLES_PER_FRAME, "source start sample");
       integer(placement.durationSamples, 1, this.limits.maxDurationFrames * SAMPLES_PER_FRAME, "audio duration");
       integer(placement.atSample, 0, totalSamples, "audio placement");
@@ -307,7 +308,7 @@ export class LocalMediaService {
         const group = audioSources.get(placement.source.sha256) ?? { source: placement.source, indices: [] };
         group.indices.push(index); audioSources.set(placement.source.sha256, group);
       }
-      invariant(audioSources.size <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the current audio source limit");
+      invariant(audioSources.size <= this.limits.maxAudioSources, "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the current audio source limit");
       for (const group of audioSources.values()) { await this.verifySource(group.source, signal); args.push("-threads", "1", ...INPUT_OPTIONS, "-i", this.blobPath(group.source)); }
       const filters: string[] = [];
       manifest.clips.forEach((clip, index) => {

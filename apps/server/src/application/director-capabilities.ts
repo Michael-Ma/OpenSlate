@@ -17,9 +17,9 @@ export function directorSkillEnvironment(options: DirectorSkillConfiguration, ve
 }
 
 /** Trusted configuration helper. Creates/verifies snapshots but does not install or upgrade a project lock. */
-export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "3.0.0"): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
+export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "4.0.0"): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
   const environment = directorSkillEnvironment(options, version);
-  const root = version === "1.0.0" ? join(options.repositoryRoot, "skills") : join(options.repositoryRoot, version === "2.0.0" ? "skills/v2" : "skills/v3");
+  const root = version === "1.0.0" ? join(options.repositoryRoot, "skills") : join(options.repositoryRoot, `skills/v${version.split(".")[0]}`);
   const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(root, "production"), join(root, "plan-authoring")] });
   return { environment, lock: createSkillLock(catalog, { selectedSkillIds: ["production", "plan-authoring"], bindings: environment.bindings!,
     prompts: STAGES.map(stage => ({ id: `production/${stage}@1`, skillId: "production", path: `references/stages/${stage}.md` })) }) };

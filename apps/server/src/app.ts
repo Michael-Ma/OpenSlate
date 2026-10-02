@@ -1,3 +1,4 @@
+import { continueEditsSchema, type ContinueEdits } from './application/pending-edit-continuation.js';
 import { registerStoryboard } from "./storyboard.js";
 import { registerPlanImports } from "./plan-imports.js";
 import { registerAssetLibrary } from "./asset-library.js";
@@ -159,8 +160,8 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.tools(request.params.projectId);
   });
-  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" | "3.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
-    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: ["2.0.0", "3.0.0"] } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
+  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" | "3.0.0" | "4.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
+    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: ["2.0.0", "3.0.0", "4.0.0"] } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
   }, async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.upgradeTools(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
@@ -177,11 +178,12 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.changeSelection(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
-  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
-    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
+  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continueEdits?: ContinueEdits; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
+    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continueEdits: continueEditsSchema, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
       images: { type: "array", minItems: 1, maxItems: 4, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, ["text"]) },
   }, async request => {
     invariant(!request.body.resumeFromStopId || (!request.body.replyToQuestionId && !request.body.replyToReviewId), "VALIDATION_ERROR", "Continue stopped work with a fresh conversation message");
+    invariant(!request.body.continueEdits || (!request.body.replyToQuestionId && !request.body.replyToReviewId && !request.body.resumeFromStopId && !request.body.continuationRequestId), "VALIDATION_ERROR", "Continue reviewed edits with one fresh covering message");
     const images = request.body.images ? selectedDirectorImages(request.body.images) : undefined;
     invariant(!images || (options.director && options.runtimeSettings && directorMode(request.params.projectId) === "native" && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_IMAGES_UNAVAILABLE", "Attach references to a new native conversation request");
     if (request.body.replyToQuestionId) {

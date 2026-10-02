@@ -77,21 +77,32 @@ test('captured original lease fences local failure after slow PNG preparation', 
 for (const mode of ['paused', 'project-hold', 'shot-hold', 'scene-hold', 'retired', 'prompt-changed']) test(`first POST rechecks ${mode} after asynchronous image verification`, async t => {
   const f = await fixture(t), b = barrier(), prepare = f.bridge.prepare.bind(f.bridge);
   f.bridge.prepare = async (...args) => { const result = await prepare(...args); b.enter(); await b.waiting; return result; };
-  const running = f.bridge.submit(f.request, context(f)); const rejected = assert.rejects(running);
+  const running = f.bridge.submit(f.request, context(f));
   await b.entered;
   if (mode === 'paused') f.store.put('execution_control', f.project.id, f.project.id, { paused: true });
   else if (mode.endsWith('hold')) f.engine.setHold(f.project.id, { scopeId: mode === 'project-hold' ? f.project.id : mode === 'shot-hold' ? f.project.shots[0].id : f.project.shots[0].sceneId, ownerId: randomUUID() });
   else { const binding = f.store.get('node_binding', f.node.id); f.store.put('node_binding', binding.id, f.project.id, mode === 'retired'
     ? { ...binding, state: 'retired' } : { ...binding, node: { ...binding.node, args: { ...binding.node.args, prompt: 'Changed motion' } } }); }
-  b.release(); await rejected; assert.equal(f.calls.post, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
-  assert.equal(rows(f, 'viggle_h3_execution_submit').length, 0, 'a stale selector does not publish a local failure');
+  b.release(); const outcome = await running; assert.equal(outcome.type, 'rejected'); assert.equal(f.calls.post, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
+  assert.equal(rows(f, 'viggle_h3_execution_submit').length, 1); assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.kind, 'not_dispatched', 'the original live lease positively closes its own unsent work');
+});
+
+for(const action of ['Stop','edit'])test(`Viggle ${action} before POST releases the Engine reservation with retained non-dispatch proof`,async t=>{
+ const f=await fixture(t,{deferAdmission:true}),b=barrier(),prepare=f.bridge.prepare.bind(f.bridge);
+ f.bridge.prepare=async(...args)=>{const value=await prepare(...args);b.enter();await b.waiting;return value;};
+ const running=f.engine.runReady();await b.entered;
+ if(action==='Stop')f.engine.setPaused(f.project.id,true,'stop-before-post');else f.engine.setHold(f.project.id,{scopeId:f.project.shots[0].id,ownerId:'edit-before-post'});
+ b.release();await running;
+ const attempt=f.engine.attempts(f.project.id)[0];assert.equal(attempt.phase,'failed');assert.equal(f.calls.post,0);assert.equal(rows(f,'viggle_h3_execution_dispatch').length,0);
+ assert.equal(rows(f,'viggle_h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.budget(f.project.id).committedMicros,'0');
+ await f.engine.reconcile();await f.engine.runReady();assert.equal(f.calls.post,0);assert.equal(f.engine.attempts(f.project.id).length,1);
 });
 
 test('original cancellation survives replacement of the caller options signal', async t => {
   const f = await fixture(t), b = barrier(), prepare = f.bridge.prepare.bind(f.bridge), original = new AbortController(), replacement = new AbortController();
   f.bridge.prepare = async (...args) => { const result = await prepare(...args); b.enter(); await b.waiting; return result; };
   const options = { ...context(f), signal: original.signal }, running = f.bridge.submit(f.request, options);
-  await b.entered; options.signal = replacement.signal; original.abort(); b.release(); await running;
+  await b.entered; options.signal = replacement.signal; original.abort(); b.release(); assert.equal((await running).type, 'rejected');
   assert.equal(f.calls.post, 0); assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.code, 'LOCAL_CANCELLED');
   assert.equal((await f.bridge.lookup(f.attempt.id)).type, 'rejected');
 });

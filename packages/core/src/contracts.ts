@@ -11,6 +11,10 @@ export interface ArtifactRef {
 }
 
 export interface ShotRecord {
+  /** App-derived writing gap. Models cannot clear it; canonical human audio acceptance does. */
+  narrationPending?: boolean;
+  /** Protected canonical policy: actual narration may be shorter than this shot's visual slot. */
+  narrationTimingMode?: 'within_shot';
   /** Shot-level writing intent; acceptance and measured audio remain in narration records. */
   narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: "stock" | "personal" };
   id: Id;

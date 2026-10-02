@@ -7,6 +7,12 @@ export interface PrepareNarrationCommit {
   expectedNarrationVersion: number;
   /** Omitted shot mappings retain their previous canonical segment. Null explicitly detaches. */
   shotMappings: NarrationShotMapping[];
+  /** Commit these reviewed sections while retaining other previously accepted canonical sections. */
+  segmentIds?: string[];
+  /** Trusted compact-shot adapter only; accepted ranges travel with their mapped shot. */
+  shotRelativeSegmentIds?: string[];
+  /** Compact human acceptance preserves the planned shot unless its duration change is explicit. */
+  shotDurationMode?: "preserve" | "match_audio";
   key: string;
 }
 export interface NarrationShotImpact {
@@ -22,6 +28,7 @@ export interface PreparedNarrationCommit {
   previousCanonicalId: string | null;
   projection: NarrationProjection;
   snapshot: NarrationSnapshot;
+  shotRelativeSegmentIds?: string[];
   shotMappings: NarrationShotMapping[];
   shotImpact: NarrationShotImpact[];
   next: ProjectRecord;
@@ -43,6 +50,8 @@ export interface GeneratedNarrationProvenance {
 }
 export interface CanonicalNarrationSegment {
   segmentId: string; segmentRevisionId: string; cue: CueRecord;
+  placementMode?: "shot";
+  timingMode?: "within_shot";
   frameCoverage: NarrationProjection["segments"][number]["frameCoverage"];
   audioPlacement: NarrationProjection["segments"][number]["audioPlacement"];
   provenance: SuppliedNarrationProvenance | GeneratedNarrationProvenance;
@@ -64,6 +73,7 @@ export interface NarrationCommitReceipt {
   shotImpact: NarrationShotImpact[];
   /** This adapter never installs a plan or releases an edit hold. */
   requiresMatchingPlan: boolean;
+  planRebase?: { status: "not_needed" | "rebased" | "requires_plan_review"; code?: string; message?: string };
 }
 export interface CanonicalNarrationArtifact {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: "audio/wav";

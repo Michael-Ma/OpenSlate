@@ -105,35 +105,26 @@ Set up the project's native director with the same pinned Codex binary and your 
 
 Send:
 
-> Create a one-shot, six-second leather boots commercial for production validation. Use the models saved in this project. Show a close-up of a brown leather boot on a workshop bench, warm side lighting, a slow camera push-in, no lettering or logos. Save the story, scene and shot intent. I will attach a six-second recording and approve its timing before video generation. Stop for my reviews; do not replace completed media automatically.
+> Create a one-shot, six-second leather boots commercial for production validation. Use the models saved in this project. Show a close-up of a brown leather boot on a workshop bench, warm side lighting, a slow camera push-in, no lettering or logos. Save the story, scene and shot intent. Save no narration explicitly; I may attach a short voiceover later. Stop for my reviews; do not replace completed media automatically.
 
 Check that there is one shot and the selected model names are correct. Request changes in conversation if the agent chose the wrong intent. Do not approve an image or video allowance until its saved prompt and operation match your intent.
 
-For an existing brief or scene breakdown, use **Storyboard → treatment folder icon (Bring a brief)**. Paste it or choose a UTF-8 `.txt`/`.md` file. Select **Interpret material**, inspect the proposed scenes/shots and source comparison, then **Confirm film plan**. This runs the director but starts no media and approves no spending. Optional suggestions stay in chat until chosen. Continue in chat; use a shot’s chat icon for a scoped revision. Direct storyboard edits save intent but do not start generation. For narration, choose **Generate voice** or **Upload recording** on a shot, then open its **Audio setup** settings icon. The chat **+ → Audio** opens the project-wide audio workflow. PDF/Word documents currently require copied text.
+For an existing brief or scene breakdown, use **Storyboard → treatment folder icon (Bring a brief)**. Paste it or choose a UTF-8 `.txt`/`.md` file. Select **Interpret material**, inspect the proposed scenes/shots and source comparison, then **Confirm film plan**. This runs the director but starts no media and approves no spending. Optional suggestions stay in chat until chosen. Continue in chat; use a shot’s chat icon for a scoped revision. Direct storyboard edits save intent but do not start generation. For narration, choose **Generate voice** or **Upload recording** on a shot, then open its **Audio setup** settings icon. Chat **+ → Audio** opens the owned recording library, with advanced narration available separately. PDF/Word documents currently require copied text.
 
-## 3. Supply real timing before video
+## 3. Choose silence or accept voiceover
 
-Current video execution requires an accepted, measured audio cue whose duration equals the shot and requested video duration. Detaching narration or merely saying “silent video” does not satisfy that requirement. Automatic script alignment and automatic duration repair are not implemented.
+For a picture-only run, choose **No narration** on the shot. The saved planned duration drives video; no silent WAV or fake audio cue is needed. An undecided choice does not authorize silence.
 
-For a simple spoken run, record a short line such as “Built by hand. Ready for the miles ahead.” Keep the complete spoken line under six seconds. You can use FFmpeg to pad the recording to exactly six seconds:
+For a spoken run, record a short line such as “Built by hand. Ready for the miles ahead.” Keep it within the planned six-second shot, then open the shot’s **Audio setup**:
 
-```sh
-ffmpeg -i /absolute/path/to/your-recording.m4a -af apad -t 6 -ar 48000 -ac 2 -c:a pcm_s16le /absolute/path/to/boots-six-seconds.wav
-```
+1. Start or continue the displayed shot audio edit.
+2. Choose Upload recording. You may upload and listen before any words exist.
+3. Save the actual words or a truthful description; choose and attach the exact recording.
+4. Review From/To, listen to that range, then explicitly accept the words, recording and timing together.
+5. Keep the planned six-second picture. The optional Match recording duration changes the picture only for a reviewed 3–15 second recording.
+6. Continue with the director to update the affected plan using accepted current narration and the selected providers, stopping at review gates.
 
-Use a new output filename. Listen to the result: this command would truncate a source longer than six seconds, so do not accept it if any speech was cut off. For a visual-only test, an actual six-second silent WAV is also possible, but describe it honestly as intentionally silent rather than a spoken transcript.
-
-In the shot’s **Audio setup** dialog (or **chat + → Audio**):
-
-1. Explicitly continue the current edit into narration if prompted.
-2. Save one finished section containing the actual spoken words and their meaning; choose **My recording** as its source. For intentional silence, use a truthful non-spoken editorial description, such as “Six-second silent product detail; no spoken narration,” with the actual silent recording. Empty writing cannot be accepted.
-3. Upload the six-second WAV using **Choose a narration recording**, listen, and attach it to that section.
-4. Set the source timing to 0–6 seconds and project placement to 0. Save the timing.
-5. Separately accept the saved writing, recording and timing after reviewing each.
-6. Under **Connect narration to your shots**, link shot 1 to that section. Select **Review before applying**, inspect the impact, then **Apply this narration**.
-7. Use **Continue with the director** and ask it to update the shot's prompts and execution plan for that exact accepted six-second cue, retaining the chosen providers and stopping at review gates.
-
-Do this before reviewing the final keyframe/video specification: applying narration can change shot intent and invalidate earlier review. Do not invent acceptance or edit the database to bypass a blocked cue.
+Short voiceover ends naturally while the picture continues; the source is not padded. Overlong audio needs trimming or a deliberate picture-duration change. Advanced project narration retains its separate writing/audio/timing reviews. Do not invent acceptance or repair application state in the database.
 
 ## 4. Generate and review one keyframe
 
@@ -156,10 +147,10 @@ Expected flow:
 
 1. One submission produces a saved Viggle video ID.
 2. OpenSlate polls that same job, downloads its result and validates/normalizes the take locally.
-3. The clip appears in its storyboard card. Open **Timeline** for picture preview and the **Export** section for local rendering of the current plan with accepted narration.
-4. The exported MP4 plays for six seconds with the expected picture and your recording.
+3. The clip appears in its storyboard card. Open **Timeline** to audition picture and accepted sound, then use **Export** for local rendering.
+4. The exported MP4 plays for six seconds with the expected picture and any explicitly accepted voiceover.
 
-Viggle's native generated soundtrack is currently removed by OpenSlate's video normalization. The assembled soundtrack comes from accepted narration and, if selected in Timeline, an owned background recording. Leave background music unset for this first test. There is no native-H3-audio mixing or music generation; timeline preview is picture-only, so review audio in the rendered export.
+Viggle's native generated soundtrack is currently removed by OpenSlate's video normalization. The assembled soundtrack comes from accepted narration and, if selected in Timeline, an owned background recording. Leave background music unset for this first test. Timeline auditions narration/music with muted picture; native H3 sound is not mixed. Review the rendered export for exact final sound and timing.
 
 Review the saved job and actual account charge. Refresh, then stop/restart OpenSlate. Confirm the same take/export remains and no additional generation was submitted. If a submission is uncertain, keep that attempt and investigate its existing evidence; an unknown result is not permission to generate again.
 

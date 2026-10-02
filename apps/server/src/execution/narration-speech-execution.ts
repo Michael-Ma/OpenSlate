@@ -5,6 +5,8 @@ import type { NarrationSpeechReader } from "../narration/narration-speech-record
 import type { NarrationSpeechAttemptInput, NarrationSpeechProposal, NarrationSpeechReview } from "../narration/narration-speech-types.js";
 import { assertNarrationSpeechAttemptInput, assertNarrationSpeechReview, resolveNarrationSpeechApplication } from "../narration/narration-speech-authorization.js";
 import type { NarrationState } from "../narration/types.js";
+import { assertMappedSpeechCurrent } from '../narration/mapped-speech-intent.js';
+import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from '../narration/narration-scope.js';
 
 type Reader = NarrationSpeechReader;
 type Resolved = ReturnType<typeof resolveNarrationSpeechApplication>;
@@ -52,12 +54,17 @@ export function assertNarrationSpeechCurrent(reader: Reader, project: ProjectRec
   invariant(binding?.projectId === project.id && binding.state === "active" && binding.planId === project.activePlanId && binding.candidateId === candidateId
     && same(binding.node, node) && entry?.segmentRevisionId === section.segmentRevisionId,
   "NARRATION_SPEECH_STALE", "The human-reviewed narration section or operation changed before generation");
+  assertMappedSpeechCurrent(reader, project, resolved.proposal);
 }
 export function assertNarrationSpeechAttemptCurrent(reader: Reader, attempt: Readonly<Attempt>): void {
   const resolved = assertNarrationSpeechAttemptInput(reader, attempt); if (!resolved) return;
   const project = reader.getProject(attempt.projectId); assertNarrationSpeechCurrent(reader, project, nodeOf(resolved), attempt.candidateId, resolved);
   invariant(!reader.get<{ paused: boolean }>("execution_control", project.id)?.paused, "EXECUTION_PAUSED", "Execution is paused");
-  // Speech is a project operation without upstream inputs; only project scope intersects it.
-  const hold = reader.db.prepare("SELECT id FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=? LIMIT 1").get(project.id, project.id);
-  invariant(!hold, "EXECUTION_HELD", "Narration generation is held by an editing request");
+  const shotIds = narrationSpeechShotScopes(reader, project.id, attempt.candidateId), sceneIds = project.shots.filter(shot => shotIds.includes(shot.id)).map(shot => shot.sceneId);
+  const exemption = narrationSpeechHoldExemption(reader, project.id, attempt.candidateId);
+  for (const scopeId of [...new Set([project.id, ...shotIds, ...sceneIds])]) {
+    const hold = reader.db.prepare("SELECT id FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=? AND NOT (json_extract(body,'$.scopeId')=? AND json_extract(body,'$.ownerId')=?) LIMIT 1")
+      .get(project.id, scopeId, exemption?.scopeId ?? '', exemption?.ownerId ?? '');
+    invariant(!hold, 'EXECUTION_HELD', 'Narration generation is held by an editing request for this scope');
+  }
 }

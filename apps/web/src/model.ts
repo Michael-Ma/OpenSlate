@@ -1,10 +1,11 @@
 export interface Artifact { artifactId: string; sha256: string; kind: "image" | "video" | "audio" | "data" }
 export type ArtifactFixture = boolean | null;
-export interface Shot { narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: "stock" | "personal" }; id: string; revisionId: string; sceneId: string; purpose: string; action: string; framing: string; motion: string; desiredFrames: number; imagePrompt: string; videoPrompt: string; cueId: string | null }
+export interface Shot { narrationPending?: boolean; narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: "stock" | "personal" }; id: string; revisionId: string; sceneId: string; purpose: string; action: string; framing: string; motion: string; desiredFrames: number; imagePrompt: string; videoPrompt: string; cueId: string | null }
 export interface ProjectSummary { id: string; name: string; headVersion: number; activePlanId: string | null; shotCount?: number }
 export interface ConversationMessage { id: string; role: "user" | "assistant"; text: string; state?: string; requestId?: string }
 export interface PendingQuestion { id: string; requestId: string; state: "pending" | "answered"; canAnswer?: boolean; questions: { id: string; header: string; question: string; options: { label: string; description: string }[] }[]; answerRequestId?: string }
 export interface ProjectSnapshot {
+  pendingEditContinuations?: { requestId: string; scopeIds: string[]; holdsDigest: string }[];
   latestStoryboardEdit?: { id: string; headVersion: number; requestId: string } | null;
   project: ProjectSummary & { soundtrack?: { audioId: string; gainMilliDb: number } | null; revisionId: string; brief: string; story: string; shots: Shot[]; scenes: { id: string; revisionId: string; purpose: string }[]; narration: { script: string; source: string }; cues: { id: string; meaning: string; accepted: boolean; measured: boolean }[] };
   messages: { id: string; text: string; state?: string; requestId?: string; editing?: boolean; scopeIds?: string[] }[];
@@ -22,7 +23,7 @@ export interface ProjectSnapshot {
 export interface ReviewMember { videoNodeId: string; shotId: string; keyframe: Artifact | null; keyframeFixture?: ArtifactFixture; approvalDigest: string | null; ready: boolean; approved?: boolean; motionPrompt?: string; durationFrames?: number; profileLabel?: string }
 export interface ReviewSnapshot { id: string | null; planId: string | null; projectId?: string; headVersion: number; revisionId: string; members: ReviewMember[] }
 export interface DirectorStatus { mode: "offline" | "fake" | "native"; status: "idle" | "running" | "waiting_user" | "error" | "not_connected"; message?: string; activeRequestId?: string | null; imageAttachmentsAvailable?: boolean }
-export type MessageBody = { text: string; scopeIds: string[]; editing: boolean; continuationRequestId?: string; resumeFromStopId?: string; images?: { artifactId: string; sha256: string }[] } | { text: string; replyToQuestionId: string };
+export type MessageBody = { text: string; scopeIds: string[]; editing: boolean; continueEdits?: { headVersion: number; requestIds: string[]; holdsDigest: string }; continuationRequestId?: string; resumeFromStopId?: string; images?: { artifactId: string; sha256: string }[] } | { text: string; replyToQuestionId: string };
 export interface MessageCommand { key: string; projectId: string; body: MessageBody }
 
 export function makeMessageCommand(project: ProjectSnapshot["project"], draft: string, selectedIds: readonly string[], key: string, editing = true): MessageCommand {
@@ -41,7 +42,8 @@ export function continueStoppedWork(command: MessageCommand, control: ProjectSna
   return { ...command, body: { ...command.body, scopeIds: [command.projectId], editing: true, resumeFromStopId: control.authorityId } };
 }
 export function canStopWork(snapshot: ProjectSnapshot | null, director: DirectorStatus): boolean {
-  return !!snapshot && !snapshot.control?.paused && (director.status === "running"
+  return !!snapshot && !snapshot.control?.paused && (director.status === "running" || director.status === "waiting_user"
+    || !!snapshot.questions?.some(question => question.state === "pending" && question.canAnswer !== false)
     || snapshot.attempts.some(attempt => ["preparing", "submitting", "remote_pending", "ingesting"].includes(attempt.phase))
     || !!snapshot.plan?.nodes?.some(node => !snapshot.outputs.some(output => output.nodeId === node.id)));
 }
@@ -99,6 +101,11 @@ export function durationLabel(frames: number): string {
 export function pollingDelay(failures: number, hidden = false): number { return Math.min(30000, Math.max(hidden ? 15000 : 4000, 2000 * 2 ** Math.min(4, Math.max(0, failures)))); }
 export function errorMessage(code: string): string {
   const messages: Record<string, string> = {
+    PERSONAL_VOICE_NOT_ENROLLED: "Register your existing recorded voice in Project settings before generating speech.",
+    PERSONAL_VOICE_REVOKED: "This recorded voice was revoked. Choose another registered voice and prepare a new speech review.",
+    PERSONAL_VOICE_PROVIDER_UNAVAILABLE: "This voice provider is not connected to the selected speech model.",
+    PERSONAL_VOICE_INVALID: "The recorded voice identity could not be verified. Review its setup.",
+    PERSONAL_VOICE_LIMIT: "This project reached its registered-voice limit.",
     INSTALLATION_QUARANTINED: "Finish the restored installation review before making changes.",
     RESTORED_AUTHORITY_REQUIRES_NEW: "This saved request cannot start work after recovery. Start a fresh conversation and review new permissions.",
     RECOVERY_CONFLICT: "The recovery state changed. Refresh and review it again.",

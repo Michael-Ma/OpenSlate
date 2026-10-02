@@ -6,6 +6,7 @@ import type { NarrationService } from './service.js';
 import type { NarrationSpeechService } from './narration-speech-service.js';
 import type { PrepareNarrationSpeech, ReviewNarrationSpeech } from './narration-speech-types.js';
 import { projectNarrationSpeechOptions, projectNarrationSpeechProposals, projectNarrationSpeechProposal, summarizeNarrationSpeechProposal } from './narration-speech-projection.js';
+import { registerPersonalVoiceRoutes } from './personal-voice-routes.js';
 const id = { type: 'string', minLength: 1, maxLength: 160 }, hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
 const object = (properties: object, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const key = (request: FastifyRequest): string => { const value = request.headers['idempotency-key']; invariant(typeof value === 'string' && value.length > 0 && value.length <= 160, 'VALIDATION_ERROR', 'One bounded Idempotency-Key is required'); return value; };
@@ -19,6 +20,7 @@ export function registerNarrationSpeechRoutes(app: FastifyInstance, options: { p
   const { production, narration, narrationSpeech, actorFor } = options;
   invariant(narration.production === production && (!narrationSpeech || narrationSpeech.narration === narration),
     'NARRATION_SPEECH_CONFIGURATION_INVALID', 'Speech routes must share this application narration service');
+  registerPersonalVoiceRoutes(app, production);
   const service = () => { invariant(narrationSpeech, 'NARRATION_SPEECH_UNAVAILABLE', 'Speech planning is unavailable in this installation'); return narrationSpeech; };
   const base = '/api/projects/:projectId/narration', params = object({ projectId: id }, ['projectId']);
   app.get<{ Params: { projectId: string } }>(`${base}/speech-options`, { schema: { params, querystring: object({}) } }, async (request, reply) =>

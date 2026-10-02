@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-01",
+  "scenario": "First completed V4 scoped writing rehearsal discovered unnecessary visual revision invalidation when native Codex reconfirmed unchanged prompts",
+  "runtime": {
+    "model": "gpt-6-astra",
+    "executableVersion": "codex-cli 0.153.4",
+    "toolContractVersion": "4.0.0",
+    "catalogDigest": "978a51d27e316988bdec5674f949dbb353f148ce4bf5422b456ed94ab8300f01",
+    "turns": [
+      {
+        "state": "completed",
+        "errorCode": null
+      }
+    ],
+    "nativeModelStarts": 1
+  },
+  "actualToolCalls": [
+    {
+      "tool": "read_context",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    },
+    {
+      "tool": "prepare_change",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    },
+    {
+      "tool": "apply_change",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    }
+  ],
+  "result": {
+    "selectedShotWritingSaved": true,
+    "otherShotPreserved": true,
+    "globalNarrationCollectionPreserved": true,
+    "noCuesFabricated": true,
+    "allVisualIntentFieldsPreserved": true,
+    "visualRevisionPreserved": false,
+    "changedPayloadFields": [
+      "narration"
+    ],
+    "reconfirmedUnchangedPayloadFields": [
+      "imagePrompt",
+      "videoPrompt"
+    ],
+    "selectedWriting": {
+      "mode": "generated",
+      "text": "Crafted for every step.",
+      "voice": "stock"
+    },
+    "narrationPending": true
+  },
+  "finding": {
+    "cause": "applyCreativePatch classified writing-only edits from submitted field names rather than fields whose values actually changed",
+    "fixed": "Classification now uses actual changed fields. A narration change plus unchanged reconfirmed prompts preserves the visual revision; a changed visual prompt still creates a revision.",
+    "regression": "packages/core/test/video-timing.test.mjs",
+    "finalProof": "scoped-narration-native-evidence.json"
+  },
+  "providerCalls": {
+    "generationGrants": 0,
+    "mediaAttempts": 0,
+    "fakeJobs": 0,
+    "paidMediaCalls": 0
+  },
+  "scope": "Disposable synthetic project. This completed outcome was inspected before one separately authorized bounded rehearsal of the fix; no unknown-outcome retry."
+}

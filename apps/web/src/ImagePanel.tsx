@@ -10,7 +10,7 @@ import "./media.css";
 
 interface Reference { artifact: Artifact; width: number; height: number; byteLength: number }
 interface Library { headVersion: number; images: Reference[]; capabilities: { import: boolean; maxBytes: number; unavailableReason: string | null }; coverage: { offset: number; returned: number; total: number; nextOffset: number | null } }
-type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; uploadOnly?: boolean; onDiscuss?: ((artifact: Artifact) => void) | undefined; discussDisabled?: boolean; discussionUnavailable?: boolean };
+type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; uploadOnly?: boolean; active?: boolean; onDiscuss?: ((artifact: Artifact) => void) | undefined; discussDisabled?: boolean; discussionUnavailable?: boolean };
 function importError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "UPLOAD_TOO_LARGE") return "Choose a nonempty PNG image up to 32 MiB.";
@@ -36,7 +36,7 @@ function ImagePreview({ api, projectId, reference }: { api: StudioApi; projectId
 }
 
 export function ImagePanel(props: Props) { return <ImageWorkspace key={props.snapshot.project.id} {...props} />; }
-function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, discussionUnavailable, uploadOnly = false }: Props) {
+function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, discussionUnavailable, uploadOnly = false, active = true }: Props) {
   const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/images`, registry = pendingCommandsFor(api, "images");
   const slot = useSyncExternalStore(useCallback(listener => registry.subscribe(projectId, listener), [registry, projectId]), useCallback(() => registry.snapshot(projectId), [registry, projectId]));
@@ -54,12 +54,13 @@ function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, 
     setRefresh(value => value + 1); changed.current();
   }, [registry, slot.settledVersion, slot.lastSuccess]);
   useEffect(() => {
+    if (!active) return;
     const abort = new AbortController(); setLoading(true); setLoadError("");
     void api.request<Library>(`${base}?offset=${offset}`, { signal: abort.signal }).then(next => {
       if (!abort.signal.aborted) { setLibrary(next); setSelected(current => current ?? next.images[0] ?? null); }
     }).catch(error => { if (!abort.signal.aborted) setLoadError(errorText(error)); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
-  }, [api, base, offset, refresh, snapshot.project.headVersion]);
+  }, [api, base, offset, refresh, snapshot.project.headVersion, active]);
   function execute(command: PendingCommand) {
     if (recoveryReadOnly) return;
     void registry.run(projectId, command, saved => api.upload(saved.path, saved.file!, saved.key),
@@ -93,7 +94,7 @@ function ImageWorkspace({ api, snapshot, onChanged, onDiscuss, discussDisabled, 
       <strong>Reference {library.coverage.offset + index + 1}</strong><span>{reference.width} × {reference.height} · {(reference.byteLength / 1048576).toFixed(2)} MiB</span><small>Preview</small>
     </button>)}</div>}
     {library && library.coverage.total > 40 && <div className="render-actions"><button disabled={loading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 40))}>Previous references</button><span>{library.coverage.offset + 1}–{library.coverage.offset + library.coverage.returned} of {library.coverage.total}</span><button disabled={loading || library.coverage.nextOffset === null} onClick={() => setOffset(library.coverage.nextOffset!)}>More references</button></div>}
-    {selected && <><ImagePreview key={selected.artifact.artifactId} api={api} projectId={projectId} reference={selected} />
+    {selected && active && <><ImagePreview key={selected.artifact.artifactId} api={api} projectId={projectId} reference={selected} />
       {onDiscuss && <><button className="text-button" disabled={blocked || discussDisabled || discussionUnavailable} onClick={() => onDiscuss(selected.artifact)}>Attach and discuss</button><p>{discussionUnavailable ? "Local FFmpeg is needed to prepare an image for Codex." : "Send a reduced image to Codex for this discussion. Your project stays unchanged; request edits in the conversation. Later messages do not automatically include the image."}</p></>}
     </>}
     </>}

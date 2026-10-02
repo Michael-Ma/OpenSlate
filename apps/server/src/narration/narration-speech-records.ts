@@ -6,6 +6,7 @@ import { assertAudioOperationOptions } from "../execution/audio-preflight.js";
 import { ownedTranscriptionCatalog, snapshotOwnedTranscriptionData } from "./owned-transcription-records.js";
 import type { NarrationState, SegmentRevision } from "./types.js";
 import type { NarrationSpeechProposal, NarrationSpeechSection } from "./narration-speech-types.js";
+import { narrationAuthorScope } from './narration-scope.js';
 
 export type NarrationSpeechReader = Pick<Store, "get" | "getProject" | "db">;
 export const NARRATION_SPEECH_LIMITS = Object.freeze({ proposalBytes: 16 * 1024 ** 2, aliases: 400000 });
@@ -22,13 +23,14 @@ export function narrationSpeechRecord<T>(reader: Reader, projectId: string, kind
   const value = reader.get<T>(kind, key); fail(value); return snapshotOwnedTranscriptionData(value!);
 }
 const owned = narrationSpeechRecord;
-function author(reader: Reader, projectId: string, value: Pick<NarrationSpeechProposal, "requestId" | "principalId" | "epochId">): void {
+function author(reader: Reader, projectId: string, value: Pick<NarrationSpeechProposal, "requestId" | "principalId" | "epochId" | 'section'>): void {
   fail(id(value.requestId) && id(value.principalId) && (value.epochId === null || id(value.epochId)));
   const message = owned<{ projectId: string; principalId: string; editing: boolean; scopeIds: string[] }>(reader, projectId, "message", value.requestId);
-  fail(message.projectId === projectId && message.principalId === value.principalId && message.editing === true && Array.isArray(message.scopeIds) && message.scopeIds.includes(projectId));
+  fail(message.projectId === projectId && message.principalId === value.principalId && message.editing === true && Array.isArray(message.scopeIds));
+  narrationAuthorScope(reader, projectId, value.requestId, value.principalId, value.section?.segmentId);
   if (value.epochId !== null) {
     const epoch = owned<{ projectId: string; requestId: string; principalId: string; scopeIds: string[] }>(reader, projectId, "epoch", value.epochId);
-    fail(epoch.projectId === projectId && epoch.requestId === value.requestId && epoch.principalId === value.principalId && Array.isArray(epoch.scopeIds) && epoch.scopeIds.includes(projectId));
+    fail(epoch.projectId === projectId && epoch.requestId === value.requestId && epoch.principalId === value.principalId && Array.isArray(epoch.scopeIds) && equal(epoch.scopeIds, message.scopeIds));
   }
 }
 /** Exact saved section; historical validity never depends on the current narration selection. */

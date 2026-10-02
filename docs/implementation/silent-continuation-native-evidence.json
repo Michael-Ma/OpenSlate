@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-01",
+  "scenario": "Disposable two-shot silent film and explicitly reviewed covering continuation of two older scoped edits",
+  "runtime": {
+    "model": "gpt-6-astra",
+    "turns": [
+      {
+        "state": "completed",
+        "errorCode": null
+      }
+    ],
+    "executableVersion": "codex-cli 0.153.4"
+  },
+  "project": {
+    "shotCount": 2,
+    "narrationState": "no_narration",
+    "videoTiming": [
+      {
+        "state": "ready",
+        "source": "planned_duration",
+        "frames": 180
+      },
+      {
+        "state": "ready",
+        "source": "planned_duration",
+        "frames": 180
+      }
+    ]
+  },
+  "continuation": {
+    "transferredRequestCount": 2,
+    "activeHoldCount": 1
+  },
+  "providerCalls": {
+    "generationGrants": 0,
+    "mediaAttempts": 0,
+    "fakeJobs": 0,
+    "paidMediaCalls": 0
+  },
+  "assistantResponse": [
+    "**Scene: Product study**\n- Shot 1: three-quarter boot reveal in warm studio light, slow push.\n- Shot 2: macro leather detail, slow push.\n- Both explicitly save `narration.mode: none` and `cueId: null`. No recording, silent audio substitute, or accepted narration cue is needed; the project-level \u201cundecided\u201d source does not override these choices.\n- Saved shot duration is authoritative: **180 frames each at 30 fps = 6 seconds each, 12 seconds total**.\n\n**Continuation:** No individual re-continuations are needed. Both older requests are superseded by the covering message. One project-wide hold remains, owned by that covering request; global pause is off.\n\n**Next:** Obtain OpenSlate permission for the missing keyframes, then proceed under the covering request. No plan, media, or grants currently exist. Generation requires bounded authorization and spending permission; video additionally requires exact human keyframe review covering motion, duration, profile and settings. Current profiles are fake/placeholder profiles.\n\nRead-only audit completed; nothing was changed or started."
+  ],
+  "scope": "One native read-only conversation turn. No media APIs, production database, or production project mutations. This does not verify a complete live-provider production."
+}

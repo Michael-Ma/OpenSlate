@@ -262,3 +262,14 @@ test("large required references survive start and resume outside the truncating 
   }
   for (const turn of records.filter(row => row.method === "turn/start")) assert.equal(turn.params.additionalContext, undefined);
 });
+
+
+test("V4 native launch requires its exact eight-tool catalog before the one bounded turn", async t => {
+  const f = await fixture(t), input = { ...f.input, bridge: { ...f.input.bridge, toolContractVersion: "4.0.0" } };
+  assert.equal((await deadline(f.runtime.start(input))).status, "completed");
+  assert.equal((await f.records()).filter(row => row.method === "turn/start").length, 1);
+  const legacy = await fixture(t, "catalog-legacy"); legacy.input.bridge.toolContractVersion = "4.0.0";
+  const failed = await deadline(legacy.runtime.start(legacy.input));
+  assert.equal(failed.status, "failed"); assert.equal(failed.dispatched, false); assert.equal(failed.error.code, "RUNTIME_CATALOG_UNEXPECTED");
+  assert.equal((await legacy.records()).some(row => row.method === "turn/start"), false);
+});

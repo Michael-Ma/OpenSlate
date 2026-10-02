@@ -1,12 +1,16 @@
 # Explicit project guidance upgrades
 
-Existing projects retain their immutable version 1 director tool/skill lock. New projects use the version 2 narration draft contract when their first context is captured. The project settings dialog offers **Enable narration drafting** for a version 1 project; this is a human configuration action, never a director tool or inferred acceptance.
+Updated October 1. Existing projects retain their exact immutable V1, V2 or V3 director tool/skill lock. New projects use V4 when their first lock is captured. V4 adds optional per-shot narration writing through `prepare_change`; canonical cue acceptance, protected pending/timing fields and generation authority remain outside that schema. Catalog and handler digests for all four versions are pinned by regression tests.
+
+For an older project, open **Project settings → Director → Project guidance → Enable audio planning** after active conversation/setup finishes. This explicit human configuration action installs V4; it does not start a model turn or accept narration. Existing epochs keep their original catalogs and the next request uses the new project lock.
 
 The authenticated local routes are `GET /api/projects/:projectId/director/tools` and `POST /api/projects/:projectId/director/tools/upgrade`. Status reads do not create a lock, request or conversation. The upgrade binds the displayed predecessor lock ID and digest, the exact target version and a command key. The backend loads and verifies the shipped successor packages outside its write transaction, then rechecks predecessor, runtime configuration and idle state before saving one immutable successor and an audit event. Arbitrary package paths, actor tags and target versions are rejected.
 
 Queued/running turns, live authority epochs and ongoing setup block the update. Previously saved questions can remain in history; their eventual answer receives a fresh request using the explicitly selected project guidance. No creative request, epoch, hold, canonical revision, approval or media grant is created by the upgrade itself. Prior epochs keep their original lock bindings. The next native request refreshes local readiness and uses its new lock's catalog; the update starts no model turn.
 
 An exact replay returns the saved command receipt rather than installing another successor. Conflicting payloads under the same key fail. Stale displayed predecessors require refreshing settings. The browser retains a pending update's exact command across dialog/project remounts within the same API session; an uncertain result exposes an explicit same-command check. It does not automatically resubmit on mount. A page reload loses this tab-local command cache, while server receipts remain authoritative.
+
+The following V2 results are historical; current V4 default/upgrade/lock tests and native evidence are recorded in [workflow completion review](V1-COMPLETION-REVIEW.md).
 
 Seven focused synthetic tests passed, covering read-only status, exact predecessor checks, unchanged canonical state/holds/acceptances, preserved old epoch locks, new-request catalog selection, replay/conflicts, active-work/setup exclusion, project isolation and authenticated schema validation. A subsequent [actual native V2 narration request](CODEX-NARRATION-V2-VALIDATION.md) passed after the explicit upgrade, bringing the recorded historical native-start count to 18.
 

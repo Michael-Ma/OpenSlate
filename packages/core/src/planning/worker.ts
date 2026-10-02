@@ -1,3 +1,5 @@
+import { rebaseNarrationPlan } from './narration-rebase.js';
+import type { ProjectRecord } from '../contracts.js';
 import { composeModelProfiles } from "./model-profile-composition.js";
 import type { ModelProfileReplacement } from "./model-profile-composition.js";
 import { parentPort, workerData } from "node:worker_threads";
@@ -10,12 +12,16 @@ import type { TranscriptionCompositionOperation } from "./transcription-composit
 import { composeSpeechPlan } from "./speech-composition.js";
 import type { SpeechCompositionOperation } from "./speech-composition.js";
 
-type CompositionData = { mode: "compose_models"; base: CompiledPlan; replacements: ModelProfileReplacement[]; context: Omit<CompileContext, "allocateId"> }
+type CompositionData = { mode: "rebase_narration"; base: CompiledPlan; originalProject: ProjectRecord; allowedNarrationSourceKeys: string[]; context: Omit<CompileContext, "allocateId"> }
+  | { mode: "compose_models"; base: CompiledPlan; replacements: ModelProfileReplacement[]; context: Omit<CompileContext, "allocateId"> }
   | { mode: "compose_transcription"; basePlan: CompiledPlan | null; operation: TranscriptionCompositionOperation; context: Omit<CompileContext, "allocateId"> }
   | { mode: "compose_speech"; basePlan: CompiledPlan | null; operation: SpeechCompositionOperation; context: Omit<CompileContext, "allocateId"> };
 const data = workerData as (Omit<CompileContext, "allocateId"> & { source: string; mode?: undefined }) | CompositionData;
 try {
-  if (data.mode === "compose_models") {
+  if (data.mode === "rebase_narration") {
+    const context = { ...data.context, allocateId: newId }, plan = rebaseNarrationPlan(data.base, data.originalProject, context, data.allowedNarrationSourceKeys);
+    parentPort!.postMessage({ ok: true, plan, logicalIds: context.logicalIds });
+  } else if (data.mode === "compose_models") {
     const context = { ...data.context, allocateId: newId }, plan = composeModelProfiles(data.base, data.replacements, context);
     parentPort!.postMessage({ ok: true, plan, logicalIds: context.logicalIds });
   } else if (data.mode === "compose_transcription") {

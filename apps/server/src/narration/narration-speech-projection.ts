@@ -12,6 +12,7 @@ import { assertNarrationSpeechAttemptInput, resolveNarrationSpeechApplication } 
 import type { NarrationSpeechProposal, NarrationSpeechApplyReceipt } from './narration-speech-types.js';
 import { assertNarrationSpeechCurrent } from '../execution/narration-speech-execution.js';
 import type { SegmentRevision } from './types.js';
+import { projectPersonalVoices } from './personal-voices.js';
 
 export interface NarrationSpeechSummary {
   version: 1; id: string; proposalDigest: string;
@@ -39,7 +40,8 @@ export function projectNarrationSpeechOptions(production: ProductionService, pro
       try { const checked = preflightAudioProfile(profile); return [{ id: profile.id, revision: profile.revision, provider: 'OpenAI', model: checked.model, estimatedMicros: profile.unitCostMicros, currency: 'USD' }]; }
       catch { return []; }
     });
-    return response({ version: 1 as const, profiles, voices: [...OPENAI_SPEECH_VOICES], limits: { ...OPENAI_SPEECH_BUDGET } });
+    const personalVoices = projectPersonalVoices(production.store, projectId);
+    return response({ version: 1 as const, profiles, voices: [...OPENAI_SPEECH_VOICES, ...personalVoices.filter(voice => voice.ready).map(voice => voice.id)], personalVoices, limits: { ...OPENAI_SPEECH_BUDGET } });
   });
 }
 function summary(view: ProjectionReader, proposalId: string): NarrationSpeechSummary {

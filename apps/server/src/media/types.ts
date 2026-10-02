@@ -3,8 +3,10 @@ export interface MediaLimits {
   maxOutputBytes: number;
   maxDurationFrames: number;
   maxClips: number;
-  /** Distinct normalized audio inputs and maximum simultaneous mixing lanes. */
+  /** Maximum simultaneous mixing lanes; chronological voice clips share one lane. */
   maxAudioTracks: number;
+  /** Distinct normalized recording sources, separately bounded from concurrency. */
+  maxAudioSources: number;
   /** Total cue placements, including sequential uses of one recording. */
   maxAudioPlacements: number;
   timeoutMs: number;

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, constants, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { open } from "node:fs/promises";
-import { DEFAULT_PROFILES, DomainError, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest, snapshotLocalExecution } from "@openslate/core";
+import { DEFAULT_PROFILES, DomainError, canonical, digest, effectiveNodeDigest, invariant, moneyMicros, newId, providerProfileArguments, shotIntentDigest, shotVideoTiming, snapshotLocalExecution } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, InputSource, OperationKind, PlanNode, ProjectRecord, ProviderProfile } from "@openslate/core";
 import { ExecutionRegistry, executionFailureSource, executionIdentity, executionProfileSnapshot, executionSpoolRole, executionTaskId, fixtureOutputs, isLegacyExecution, isSpoolCompletion, isSpoolOutput, profileExecutionIdentity, requestExecutionIdentity, EXECUTION_SPOOL_LIMITS, MAX_EXECUTION_OUTPUT_BYTES, normalizeExecutionOutcome } from "@openslate/providers";
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
@@ -26,6 +26,8 @@ import { assertOwnedTranscriptionInstallation, assertOwnedTranscriptionCurrent, 
 import { assertNarrationSpeechInstallation, assertNarrationSpeechCurrent, resolveNarrationSpeechNode } from "./narration-speech-execution.js";
 import type { NarrationSpeechAttemptInput } from "../narration/narration-speech-types.js";
 import type { OwnedTranscriptionAttemptInput } from "../narration/owned-transcription-types.js";
+import { assertPersonalVoiceCurrent } from '../narration/personal-voices.js';
+import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from '../narration/narration-scope.js';
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
@@ -717,7 +719,11 @@ export class Engine {
       if (visited.has(id)) return false; visited.add(id);
       const binding = this.store.get<NodeBinding>("node_binding", id); if (!binding) return false;
       const sceneId = project.shots.find(shot => shot.id === binding.node.shotId)?.sceneId;
-      if (holds.some(hold => [project.id, binding.node.shotId, sceneId].includes(hold.scopeId))) return true;
+      const speechShotIds = binding.node.kind === 'speech' ? narrationSpeechShotScopes(this.store, project.id, binding.candidateId) : [];
+      const speechSceneIds = project.shots.filter(shot => speechShotIds.includes(shot.id)).map(shot => shot.sceneId);
+      const exemption = binding.node.kind === 'speech' && binding.id === nodeId ? narrationSpeechHoldExemption(this.store, project.id, binding.candidateId) : null;
+      if (holds.some(hold => [project.id, binding.node.shotId, sceneId, ...speechShotIds, ...speechSceneIds].includes(hold.scopeId)
+        && !(exemption && hold.scopeId === exemption.scopeId && hold.ownerId === exemption.ownerId))) return true;
       return binding.node.inputs.some(input => input.source.kind === "output" && visit(input.source.nodeId));
     };
     return visit(nodeId);
@@ -745,6 +751,7 @@ export class Engine {
         const expected = providerProfileArguments(profile);
         invariant(Object.entries(expected).every(([key, value]) => Object.hasOwn(node.args, key) && canonical(node.args[key]) === canonical(value)), "PROFILE_INCOMPATIBLE", "Node does not contain its exact pinned profile configuration");
         provider = this.registry.forProfile(profile);
+        if (node.kind === 'speech') assertPersonalVoiceCurrent(this.store, projectId, String(node.args.voice), profile.adapter);
       } else provider = this.registry.resolve({ adapter: "fake", version: "1" });
       const execution = executionIdentity(provider);
       if (node.kind === "video") {
@@ -752,8 +759,11 @@ export class Engine {
         const cue = shot?.cueId ? project.cues.find(item => item.id === shot.cueId) : undefined;
         const applicationLock = this.store.get<{ recipeDigest?: string }>("capability_lock", project.capabilityLockId);
         if (applicationLock?.recipeDigest) {
-          invariant(shot && cue, "TIMING_REQUIRED", "Narrated production requires a current shot cue before video dispatch");
-          invariant(cue.durationFrames === shot.desiredFrames && shot.desiredFrames === node.args.durationFrames, "TIMING_REQUIRED", "Measured cue, shot, and video durations must match before dispatch");
+          invariant(shot, 'TIMING_REQUIRED', 'Video requires a current shot');
+          const timing = shotVideoTiming(project, shot);
+          invariant(timing.ready, 'TIMING_REQUIRED', 'Choose no narration, or accept this shot’s recording and measured timing before video generation');
+          invariant(typeof node.args.durationFrames === 'number' && Number.isSafeInteger(node.args.durationFrames) && node.args.durationFrames >= timing.frames,
+            'TIMING_REQUIRED', 'Video must cover the accepted or planned shot duration');
         }
         if (cue) invariant(cue.accepted && cue.measured, "TIMING_REQUIRED", "Video requires accepted measured cue timing");
         const plan = this.activePlan(project);
@@ -1030,6 +1040,11 @@ export class Engine {
         if (binding.planId === project.activePlanId) {
           try {
             this.checkIntent(project, binding.node);
+            const speechInput = resolveNarrationSpeechNode(this.store, project, binding.node, binding.candidateId);
+            if (speechInput) {
+              assertNarrationSpeechCurrent(this.store, project, binding.node, binding.candidateId, speechInput.resolved);
+              assertPersonalVoiceCurrent(this.store, current.projectId, String(binding.node.args.voice), String(binding.node.args.adapter));
+            }
             if (this.resolveInputs(current.projectId, binding.node).fingerprint === current.fingerprint)
               this.store.put("node_binding", binding.id, binding.projectId, { ...binding, outputs: mapped });
           } catch (error) { if (!(error instanceof DomainError)) throw error; }

@@ -5,6 +5,8 @@ import { assertNarrationSpeechProposal, resolveNarrationSpeechSection } from "./
 import { snapshotOwnedTranscriptionData } from "./owned-transcription-records.js";
 import type { NarrationSpeechProposal, ReviewNarrationSpeech } from "./narration-speech-types.js";
 import type { NarrationState } from "./types.js";
+import { assertMappedSpeechPreparation } from './mapped-speech-intent.js';
+import { assertPersonalVoiceCurrent } from './personal-voices.js';
 
 export const narrationSpeechReviewScope = (projectId: string, actor: ActorContext): string =>
   `${actor.principalId}:${projectId}:${actor.requestId}:narration-speech-review`;
@@ -37,6 +39,8 @@ export function currentNarrationSpeechReview(store: Store, projectId: string, in
   const entry = store.get<NarrationState>("narration_state", projectId)?.entries.find(item => item.segmentId === proposal.section.segmentId);
   invariant(entry?.segmentRevisionId === proposal.section.segmentRevisionId, "NARRATION_SPEECH_STALE", "The selected narration section changed");
   const script = resolveNarrationSpeechSection(store, projectId, proposal.section);
+  assertMappedSpeechPreparation(store, before, proposal.section.segmentId, proposal.operation.voice);
+  assertPersonalVoiceCurrent(store, projectId, proposal.operation.voice, proposal.profile.adapter);
   for (const [id, version] of Object.entries(proposal.stageVersions)) invariant((store.get<{ bindingVersion: number }>("stage", id)?.bindingVersion ?? 0) === version,
     "STAGE_BINDING_CONFLICT", "Stage binding changed since speech preparation");
   const expectedAliases = { ...proposal.logicalIds }; delete expectedAliases[proposal.operation.alias];

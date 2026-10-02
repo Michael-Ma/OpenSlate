@@ -12,7 +12,7 @@ import type { SpendingCandidate, SpendingReview, SpendingState } from "./spendin
 import type { ProjectSnapshot } from "./model";
 import "./spending.css";
 
-type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; focus?: { candidateId: string; requestId: string } };
+type Props = { api: StudioApi; snapshot: ProjectSnapshot; onChanged(): void; focus?: { candidateId: string; requestId: string }; onState?(state: SpendingState | null): void; guided?: boolean; operations?: readonly string[]; active?: boolean };
 export function SpendingPanel(props: Props) { return <SpendingWorkspace key={props.snapshot.project.id} {...props} />; }
 function ProjectBudgetControls({ projectId, budget, disabled, execute, codexUsage }: { projectId: string; budget: SpendingState["projectBudget"]; disabled: boolean; codexUsage: boolean; execute(command: PendingCommand): void }) {
   const [dollars, setDollars] = useState(spendingMoney(budget.capMicros).slice(1, -4));
@@ -30,7 +30,7 @@ function ProjectBudgetControls({ projectId, budget, disabled, execute, codexUsag
     {error && <p role="alert" className="form-error">{error}</p>}
   </details>;
 }
-function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
+function SpendingWorkspace({ api, snapshot, onChanged, focus, onState, guided, operations, active = true }: Props) {
   const projectUpdate = useProjectRefreshVersion();
   const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id, base = `/api/projects/${encodeURIComponent(projectId)}/spending`;
@@ -40,8 +40,9 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
   const [offsets, setOffsets] = useState({ candidates: 0, allowances: 0 }), [refresh, setRefresh] = useState(0);
   const [loadedIdentity, setLoadedIdentity] = useState("");
   const [focusCandidateId, setFocusCandidateId] = useState<string | null>(null);
-  const loadIdentity = JSON.stringify([base, offsets, focusCandidateId, refresh, snapshot.project.headVersion, projectUpdate]);
+  const loadIdentity = JSON.stringify([base, offsets, focusCandidateId, refresh, snapshot.project.headVersion, projectUpdate, active]);
   const fresh = loadedIdentity === loadIdentity && !loadError;
+  useEffect(() => { onState?.(fresh ? state : null); }, [fresh, state, onState]);
   const focusedRequest = useRef<string | null>(null), selectedFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focus || focusedRequest.current === focus.requestId) return;
@@ -61,6 +62,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
     setRefresh(value => value + 1); changed.current();
   }, [slot.settledVersion, slot.lastSuccess]);
   useEffect(() => {
+    if (!active) return;
     const abort = new AbortController();
     const poll = async () => {
       try {
@@ -80,7 +82,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
 
     };
     void poll(); return () => { abort.abort(); };
-  }, [api, base, offsets.candidates, offsets.allowances, focusCandidateId, refresh, snapshot.project.headVersion, projectUpdate]);
+  }, [api, base, offsets.candidates, offsets.allowances, focusCandidateId, refresh, snapshot.project.headVersion, projectUpdate, active]);
   function execute(command: PendingCommand) {
     if (recoveryReadOnly || (!fresh && !slot.command)) return;
     setReviewError("");
@@ -89,7 +91,8 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
   }
   const busy = slot.running || !!slot.command || !fresh;
   const confirmed = fresh && !!review && !loadError && spendingReviewCurrent(review, state);
-  const profileIds = [...new Set(state?.candidates.map(candidate => candidate.profileId).filter((value): value is string => !!value) ?? [])];
+  const visibleCandidates = state?.candidates.filter(candidate => !operations || operations.includes(candidate.operation)) ?? [];
+  const profileIds = [...new Set(visibleCandidates.map(candidate => candidate.profileId).filter((value): value is string => !!value))];
   const codexUsage = !!state && (state.candidates.some(candidate => isCodexSpending(candidate.providerDisplay)) || state.allowances.some(allowance => isCodexSpending(allowance.providerDisplay)));
   const selectedProfile = state?.candidates.find(candidate => selected.includes(candidate.candidateId))?.profileId;
   const select = (candidate: SpendingCandidate) => {
@@ -106,8 +109,8 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
   if (state && !state.coverage.candidates.total && !state.coverage.allowances.total && !slot.command && !slot.error && !review && !slot.lastSuccess && !focusCandidateId) return null;
   return <section className="spending-panel" aria-labelledby="spending-title">
     <div className="spending-heading"><div><span className="eyebrow">YOUR GENERATION LIMITS</span><h3 id="spending-title">{codexUsage ? "Review generation costs and Codex usage" : "Review generation costs"}</h3></div><IconButton icon="refresh" label="Refresh costs and usage" disabled={slot.running} onClick={() => setRefresh(value => value + 1)} /></div>
-    <p>{codexUsage ? "Approve API spending or finite Codex starts for specific work." : "Approve spending for specific work."} Permission to generate the exact creative work remains separate, as does keyframe review before video generation.</p>
-    <p className="spending-disabled">{codexUsage ? "Generation requires enabled providers and local tools. API providers also need a key and sufficient USD budget; Codex checks authentication before each start and its quota remains unverified. There is no automatic switch from Codex to the image API." : "Generation also requires enabled provider configuration, available local tools, a configured API key and sufficient project budget."} An allowance does not provide that setup, accept narration or authorize a new creative change.</p>
+    <p hidden={guided}>{codexUsage ? "Approve API spending or finite Codex starts for specific work." : "Approve spending for specific work."} Permission to generate the exact creative work remains separate, as does keyframe review before video generation.</p>
+    <p className="spending-disabled" hidden={guided}>{codexUsage ? "Generation requires enabled providers and local tools. API providers also need a key and sufficient USD budget; Codex checks authentication before each start and its quota remains unverified. There is no automatic switch from Codex to the image API." : "Generation also requires enabled provider configuration, available local tools, a configured API key and sufficient project budget."} An allowance does not provide that setup, accept narration or authorize a new creative change.</p>
     {!!(loadError || reviewError || slot.error) && <p role="alert" className="form-error">{loadError || reviewError || errorText(slot.error)}</p>}
     {!state && !loadError && <p role="status">Loading current work and saved allowances…</p>}
     {state?.focus && <p role="status">{state.focus.found ? "Showing the work from your recording review. Review its allowance below before approving spending." : "That recording operation is no longer current. Return to its recording review before selecting new work."}</p>}
@@ -117,7 +120,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
       <ProjectBudgetControls key={`${projectId}:${state.projectBudget.revision}:${state.projectBudget.capMicros}`} projectId={projectId} budget={state.projectBudget} codexUsage={codexUsage} disabled={recoveryReadOnly || busy || !!review || !!loadError} execute={execute} />
       {profileIds.map(profileId => <fieldset key={profileId} className="spending-group" disabled={recoveryReadOnly || busy || !!review || !!loadError}>
         <legend>{state.candidates.find(candidate => candidate.profileId === profileId)?.providerDisplay?.model ?? "Saved model details unavailable"}</legend>
-        {state.candidates.filter(candidate => candidate.profileId === profileId).map(candidate => <label key={candidate.candidateId} className="spending-work">
+        {visibleCandidates.filter(candidate => candidate.profileId === profileId).map(candidate => <label key={candidate.candidateId} className="spending-work">
           <input type="checkbox" checked={selected.includes(candidate.candidateId)} disabled={!canSelectSpending(candidate) || !!selectedProfile && selectedProfile !== profileId} onChange={() => select(candidate)} />
           <span><strong>{rowLabel(candidate)}</strong>{candidate.providerDisplay && <small>{spendingModelSettings(candidate.providerDisplay)} · profile {candidate.providerDisplay.id} ({candidate.providerDisplay.revision})</small>}<small>{spendingEstimate(candidate.providerDisplay, candidate.estimatedMicros)}</small>
             {candidate.audioDisplay && <small>{spendingAudioSummary(candidate)}</small>}
@@ -132,6 +135,7 @@ function SpendingWorkspace({ api, snapshot, onChanged, focus }: Props) {
         <button disabled={busy || state.coverage.candidates.offset === 0} onClick={() => page("candidates", Math.max(0, state.coverage.candidates.offset - 100))}>Previous work</button>
         <button disabled={busy || state.coverage.candidates.nextOffset === null} onClick={() => page("candidates", state.coverage.candidates.nextOffset!)}>Next work</button></nav>}
     </>}
+    {state && operations && !visibleCandidates.length && <p className="field-help">No current {operations.join(" or ")} work on this page. Check the next work page or continue planning.</p>}
     {review && <div className="spending-review" aria-labelledby="allowance-review-title"><h4 id="allowance-review-title">{isCodexSpending(review.providerDisplay) ? "Approve this Codex usage" : "Approve this spending allowance"}</h4>
       <p><strong>{review.providerDisplay.model}</strong> · {spendingModelSettings(review.providerDisplay)} · {isCodexSpending(review.providerDisplay) ? "Codex subscription quota" : `${spendingMoney(review.unitMicros)} configured estimate per attempt`}</p>
       <p>Saved profile: {review.providerDisplay.id} ({review.providerDisplay.revision})</p>

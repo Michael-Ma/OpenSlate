@@ -11,12 +11,13 @@ import { readPlanDocument } from './film-plan-model';
 type Import = { id: string; name: string; text: string; sourceDigest: string; stale: boolean; running: boolean; draft: { preparedId: string; proposalDigest: string; project: ProjectSnapshot['project'] } | null };
 interface Props {
   api: StudioApi; snapshot: ProjectSnapshot; director: DirectorStatus; disabled: boolean;
+  active?: boolean;
   renderShot(shot: Shot): ReactNode; generation: ReactNode;
   onDemo?: (() => void) | undefined; generationOpen: boolean; openGeneration(): void; closeGeneration(): void;
   onDiscuss(text?: string, shotIds?: string[]): void;
   action(path: string, body: unknown, label: string, key?: string): void;
 }
-export function FilmPlan({ api, snapshot, director, disabled, renderShot, generation, onDemo, generationOpen, openGeneration, closeGeneration, onDiscuss, action }: Props) {
+export function FilmPlan({ api, snapshot, director, disabled, renderShot, generation, onDemo, generationOpen, openGeneration, closeGeneration, onDiscuss, action, active = true }: Props) {
   const edit = (body: Record<string, unknown>) => action(`/api/projects/${encodeURIComponent(snapshot.project.id)}/storyboard`, { expectedHeadVersion: snapshot.project.headVersion, ...body }, 'Storyboard saved.');
   const revision = useProjectRefreshVersion(), id = snapshot.project.id, base = `/api/projects/${encodeURIComponent(id)}/plan-imports`;
   const [pending, setPending] = useState<Import | null>(null), [loadError, setLoadError] = useState('');
@@ -25,11 +26,12 @@ export function FilmPlan({ api, snapshot, director, disabled, renderShot, genera
   const fileRef = useRef<HTMLInputElement>(null), generationRef = useRef<HTMLDivElement>(null);
   const importKey = useRef({ text: '', name: '', key: '' });
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     void api.request<{ pending: Import | null }>(base, { signal: controller.signal }).then(value => { if (!controller.signal.aborted) { setPending(value.pending); setLoadError(''); if (value.pending) { setShowImport(false); importKey.current = { text: "", name: "", key: "" }; } } }).catch(error => { if (!controller.signal.aborted) setLoadError(errorText(error)); });
     return () => controller.abort();
-  }, [api, base, id, revision, snapshot.project.headVersion]);
-  useEffect(() => { if (generationOpen) generationRef.current?.scrollIntoView({ block: 'nearest' }); }, [generationOpen]);
+  }, [api, base, id, revision, snapshot.project.headVersion, active]);
+  useEffect(() => { if (active && generationOpen) generationRef.current?.scrollIntoView({ block: 'nearest' }); }, [generationOpen, active]);
   const project = pending?.draft && !pending.stale ? pending.draft.project : snapshot.project;
   const proposed = project !== snapshot.project;
   const importDocument = () => {

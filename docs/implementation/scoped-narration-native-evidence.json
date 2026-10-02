@@ -1,0 +1,92 @@
+{
+  "date": "2026-10-01",
+  "scenario": "One native V4 conversation changes only the selected shot narration writing through prepare_change; app-owned writing remains pending audio acceptance and the original visual revision survives unchanged prompt reconfirmation",
+  "runtime": {
+    "model": "gpt-6-astra",
+    "executableVersion": "codex-cli 0.153.4",
+    "turns": [
+      {
+        "state": "completed",
+        "errorCode": null
+      }
+    ],
+    "toolContractVersion": "4.0.0",
+    "catalogDigest": "978a51d27e316988bdec5674f949dbb353f148ce4bf5422b456ed94ab8300f01",
+    "nativeModelStarts": 1
+  },
+  "verifiedAssertions": {
+    "selectedShotNarration": {
+      "mode": "generated",
+      "text": "Crafted for every step.",
+      "voice": "stock",
+      "narrationPending": true
+    },
+    "visualShotRevisionPreserved": true,
+    "otherShotPreserved": true,
+    "globalNarrationCollectionPreserved": true,
+    "noCuesFabricated": true,
+    "reconfirmedUnchangedPrompts": [
+      "imagePrompt",
+      "videoPrompt"
+    ]
+  },
+  "timing": [
+    {
+      "state": "waiting_evidence",
+      "timing": {
+        "reason": "audio_pending"
+      }
+    },
+    {
+      "state": "ready",
+      "timing": {
+        "source": "planned_duration",
+        "frames": 180
+      }
+    }
+  ],
+  "providerCalls": {
+    "generationGrants": 0,
+    "mediaAttempts": 0,
+    "fakeJobs": 0,
+    "paidMediaCalls": 0
+  },
+  "assistantResponse": [
+    "Saved shot one’s narration writing: “Crafted for every step.” — generated speech, stock voice.\n\nShot two, visuals, durations, and unrelated work remain unchanged. No audio was prepared or accepted, grants created, or generation started."
+  ],
+  "scope": "Disposable synthetic project, one separately authorized scoped native writing turn on the final V4 catalog after a fully inspected preceding turn discovered an unnecessary visual-revision change. No production state or media providers. This proves conversation-to-writing behavior, not complete speech/video production.",
+  "actualToolCalls": [
+    {
+      "tool": "read_context",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    },
+    {
+      "tool": "prepare_change",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    },
+    {
+      "tool": "apply_change",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    },
+    {
+      "tool": "read_context",
+      "state": "succeeded",
+      "toolContractVersion": "4.0.0"
+    }
+  ],
+  "actualToolCallCounts": {
+    "total": 5,
+    "read_context": 3,
+    "prepare_change": 1,
+    "apply_change": 1
+  },
+  "discoveryEvidence": "scoped-narration-v4-native-discovery.json"
+}

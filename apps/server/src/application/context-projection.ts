@@ -1,4 +1,5 @@
 import { canonical, digest, invariant, workflowReadiness } from "@openslate/core";
+import { continuedRequestAuthorities } from './pending-edit-continuation.js';
 import type { ActorContext, CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
 import type { ProductionService } from "./service.js";
 import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
@@ -169,14 +170,14 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
       execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,
         scopedHoldSemantics: "Director pause creates a request-owned scope hold. Applying a matching plan releases that request's hold. This is separate from the human global pause. Read current context after mutations before describing execution state." },
-      coverage: { sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", ...(toolVersion === "3.0.0" ? ["audio_operations"] : [])], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
+      coverage: { sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", ...(["3.0.0", "4.0.0"].includes(toolVersion) ? ["audio_operations"] : [])], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
     };
     const itemsPage = (items: unknown[]): DirectorContextProjection => {
       base.guard.dataDigest = digest(items);
       return adaptive(offset, items.length, count => ({ ...base, items: items.slice(offset, offset + count), page: page(offset, count, items.length) }));
     };
     if (section === "audio_operations") {
-      invariant(toolVersion === "3.0.0", "CAPABILITY_MISMATCH", "Audio preparation context requires the explicit V3 guidance update");
+      invariant(["3.0.0", "4.0.0"].includes(toolVersion), "CAPABILITY_MISMATCH", "Audio preparation context requires compatible audio guidance");
       base.guard.dataDigest = digest({ domainCursor, narrationVersion: service.store.get<NarrationState>("narration_state", projectId)?.version ?? 0 });
       const audio = projectAudioOperations(service, projectId, offset, value => bytes({ ...base, items: [value],
         page: page(offset, value.coverage.returned, value.coverage.total), coverage: { ...base.coverage, audioOperations: value.coverage } }) <= DIRECTOR_PROJECTION_LIMITS.bytes);
@@ -226,9 +227,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     if (section === "receipts") return itemsPage(receipts(service, projectId));
     if (section === "grants") {
       const used = new Set(service.store.list<{ grantId: string }>("candidate", projectId).map(candidate => candidate.grantId));
-      const authorities = new Set([actor.requestId]);
-      const continuations = service.store.list<{ fromRequestId: string; toRequestId: string }>("request_continuation", projectId);
-      for (let round = 0; round < continuations.length; round++) for (const continuation of continuations) if (authorities.has(continuation.toRequestId)) authorities.add(continuation.fromRequestId);
+      const authorities = continuedRequestAuthorities(service.store, projectId, actor.requestId);
       return itemsPage(service.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id)).map(grant => ({ ...grant, unused: true, authorityRelation: authorities.has(grant.authorityId) ? "current_or_explicitly_continued_request" : "other_request", authorization: "informational_only_service_rechecks_scope_origin_and_current_authority" })));
     }
     const messages = service.store.list<Message>("message", projectId).reverse();

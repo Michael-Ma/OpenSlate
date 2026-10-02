@@ -2,13 +2,14 @@ import { Ajv } from "ajv";
 import { canonical, digest, invariant } from "./common.js";
 import type { JsonObject } from "./contracts.js";
 import { changeProposalSchema, parseChangeProposal } from "./workflow/index.js";
+import { legacyChangeProposalSchema } from "./legacy-change-schema.js";
 
 export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"] as const);
 export const V2_TOOL_NAMES = Object.freeze([...TOOL_NAMES, "revise_narration_draft"] as const);
 export const ALL_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transcription", "prepare_narration_speech"] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
-export type ToolContractVersion = "1.0.0" | "2.0.0" | "3.0.0";
+export type ToolContractVersion = "1.0.0" | "2.0.0" | "3.0.0" | "4.0.0";
 export interface ParsedToolCall { name: ToolName; arguments: JsonObject }
 export interface ToolDescriptor {
   name: ToolName;
@@ -36,7 +37,7 @@ export const TOOL_DESCRIPTORS: readonly ToolDescriptor[] = freeze([
     section: { type: "string", enum: ["overview", "shots", "scenes", "plan", "grants", "receipts", "aliases"] },
     offset: { type: "integer", minimum: 0, maximum: 10_000_000 },
   }), true),
-  descriptor("prepare_change", "Validate and prepare a scoped workflow, creative, or plan change. Preparation does not apply the change.", structuredClone(changeProposalSchema), false),
+  descriptor("prepare_change", "Validate and prepare a scoped workflow, creative, or plan change. Preparation does not apply the change.", structuredClone(legacyChangeProposalSchema), false),
   descriptor("apply_change", "Apply an existing prepared change owned by this request. The application checks authority, versions, and generation grants.", object({ preparedId: id }, ["preparedId"]), false),
   descriptor("control_execution", "Hold execution within this request's scope. Only a human command can resume execution.", object({ action: { type: "string", enum: ["pause"] } }, ["action"]), false),
   descriptor("inspect_artifact", "Inspect an artifact belonging to the current project using its saved artifact ID.", object({ artifactId: id }, ["artifactId"]), true),
@@ -54,7 +55,7 @@ const draftChangeSchema = object({ expectedVersion: { type: "integer", minimum: 
   patch: object({ add: items(draft), update: items(object({ segmentId: id, draft }, ["segmentId", "draft"])), remove: items(id), order: items(id) }),
 }, ["expectedVersion", "patch"]);
 // V1 schemas/digests stay exact. V2 removes the alternate canonical narration write path.
-const v2ChangeSchema = structuredClone(changeProposalSchema);
+const v2ChangeSchema = structuredClone(legacyChangeProposalSchema);
 const v2Creative = (v2ChangeSchema.properties as { creative: { properties: Record<string, unknown> } }).creative.properties;
 delete v2Creative.narrationScript;
 delete v2Creative.narrationSource;
@@ -78,11 +79,20 @@ const v3Descriptors = freeze(v2Descriptors.map(tool => tool.name === "read_conte
     object({ expectedHeadVersion: headVersion, segmentId: id, segmentRevisionId: id, profileId: id, voice: id,
       instructions: { type: "string", maxLength: 256 } }, ["expectedHeadVersion", "segmentId", "segmentRevisionId", "profileId", "voice", "instructions"]), false),
 ));
+// V4 adds compact per-shot narration intent without changing any saved catalog.
+const v4ChangeSchema = structuredClone(changeProposalSchema);
+const v4Creative = (v4ChangeSchema.properties as { creative: { properties: Record<string, unknown> } }).creative.properties;
+delete v4Creative.narrationScript;
+delete v4Creative.narrationSource;
+const v4Descriptors = freeze(v3Descriptors.map(tool => tool.name === "prepare_change" ? { ...tool,
+  description: `${tool.description} Save compact shot narration intent with createShots/updateShots.narration; this does not accept audio, timing or spending.`,
+  inputSchema: v4ChangeSchema } : tool));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },
   "2.0.0": { version: "2.0.0", names: V2_TOOL_NAMES, descriptors: v2Descriptors, digest: digest({ version: "2.0.0", tools: v2Descriptors }) },
   "3.0.0": { version: "3.0.0", names: ALL_TOOL_NAMES, descriptors: v3Descriptors, digest: digest({ version: "3.0.0", tools: v3Descriptors }) },
+  "4.0.0": { version: "4.0.0", names: ALL_TOOL_NAMES, descriptors: v4Descriptors, digest: digest({ version: "4.0.0", tools: v4Descriptors }) },
 });
 export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalog {
   invariant(Object.hasOwn(TOOL_CATALOGS, version), "CAPABILITY_MISMATCH", "Unsupported director tool contract");
@@ -90,7 +100,7 @@ export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalo
 }
 /** Exact implementation identity for each immutable catalog. */
 export function toolHandlerId(version: ToolContractVersion): string {
-  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3" } as const)[toolCatalog(version).version];
+  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4" } as const)[toolCatalog(version).version];
 }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
 const validators = new Map(Object.values(TOOL_CATALOGS).map(catalog => [catalog.version,

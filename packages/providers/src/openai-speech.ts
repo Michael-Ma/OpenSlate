@@ -5,7 +5,7 @@ import type { AudioHttpOptions, AudioSubmitContext, AudioTransportOutcome, Prepa
 export const OPENAI_SPEECH_MODEL = "gpt-4o-mini-tts-2025-12-15" as const;
 export type OpenAISpeechModel = typeof OPENAI_SPEECH_MODEL | "gpt-4o-mini-tts";
 export const OPENAI_SPEECH_VOICES = Object.freeze(["alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar"] as const);
-export type OpenAISpeechVoice = typeof OPENAI_SPEECH_VOICES[number];
+export type OpenAISpeechVoice = typeof OPENAI_SPEECH_VOICES[number] | `openai-custom:voice_${string}`;
 export const OPENAI_SPEECH_BUDGET = Object.freeze({ policy: "utf8-cap-v1", maxTotalBytes: 1792, maxInstructionBytes: 256, maxInputCodeUnits: 4096 } as const);
 export interface OpenAISpeechRequest {
   model: OpenAISpeechModel; text: string; voice: OpenAISpeechVoice; instructions: string;
@@ -30,7 +30,8 @@ export type OpenAISpeechAdapterOptions = AudioHttpOptions;
 function prepare(request: OpenAISpeechRequest): { description: OpenAISpeechDescription; transport: PreparedAudioRequest } {
   const own = audioDataObject(request, ["model", "text", "voice", "instructions"]);
   audioEnsure(own.model === OPENAI_SPEECH_MODEL || own.model === "gpt-4o-mini-tts", "UNSUPPORTED_MODEL");
-  audioEnsure(typeof own.voice === "string" && (OPENAI_SPEECH_VOICES as readonly string[]).includes(own.voice), "UNSUPPORTED_VOICE");
+  audioEnsure(typeof own.voice === "string" && ((OPENAI_SPEECH_VOICES as readonly string[]).includes(own.voice)
+    || /^openai-custom:voice_[A-Za-z0-9_-]{1,120}$/.test(own.voice)), "UNSUPPORTED_VOICE");
   const model = own.model as OpenAISpeechModel, voice = own.voice as OpenAISpeechVoice;
   const text = audioUtf8(own.text, OPENAI_SPEECH_BUDGET.maxTotalBytes, "INVALID_TEXT");
   audioEnsure(text.length <= OPENAI_SPEECH_BUDGET.maxInputCodeUnits, "TEXT_TOO_LONG");
@@ -38,7 +39,9 @@ function prepare(request: OpenAISpeechRequest): { description: OpenAISpeechDescr
   const textBytes = Buffer.byteLength(text), instructionBytes = Buffer.byteLength(instructions);
   const totalTextBytes = textBytes + instructionBytes + Buffer.byteLength(model) + Buffer.byteLength(voice);
   audioEnsure(totalTextBytes <= OPENAI_SPEECH_BUDGET.maxTotalBytes, "TEXT_BUDGET_EXCEEDED");
-  const body = Buffer.from(canonical({ model, input: text, voice, instructions, response_format: "wav", stream_format: "audio", speed: 1 }));
+  // Local application consent/ownership is checked before dispatch. This transport maps a pinned selector only.
+  const wireVoice = voice.startsWith('openai-custom:') ? { id: voice.slice('openai-custom:'.length) } : voice;
+  const body = Buffer.from(canonical({ model, input: text, voice: wireVoice, instructions, response_format: "wav", stream_format: "audio", speed: 1 }));
   const semantics = { adapter: "openai-speech-v1" as const, model, voice, responseFormat: "wav" as const, streamFormat: "audio" as const, speed: 1 as const,
     textSha256: audioSha256(text), instructionSha256: audioSha256(instructions), textBytes, instructionBytes, totalTextBytes,
     budgetPolicy: "utf8-cap-v1" as const };

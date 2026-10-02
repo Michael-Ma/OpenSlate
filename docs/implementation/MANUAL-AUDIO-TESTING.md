@@ -42,7 +42,7 @@ Send:
 
 > I want a short leather boots commercial. Please save two finished English narration sections, each one or two sentences, with generated audio as the source. Keep the voice and profile choices unset initially. Do not generate media yet.
 
-Open **chat + → Audio** and confirm that two separate saved sections appear. The draft should remain unaccepted. Then send:
+Open **chat + → Audio → Advanced narration** and confirm that two separate saved sections appear. The draft should remain unaccepted. Then send:
 
 > Prepare a speech plan for the first saved section using the available OpenAI narration profile, cedar voice, and “Warm, calm delivery.” Keep the exact saved words. Stop for my review.
 
@@ -73,7 +73,7 @@ Record a five-to-ten-second voice memo, for example:
 
 > These boots are made one pair at a time. Built by hand, ready for the road.
 
-In a second new project with the transcription profile selected, open **chat + → Audio**, start the review session if prompted, and use **Choose a narration recording** to upload the file yourself. A script or narration section is not required. Choose the recording in the saved library and listen to it.
+In a second new project with the transcription profile selected, open **chat + → Audio** and import the recording into the owned library. Advanced narration exposes transcription and section editing. A script, section or creative edit session is not required for library import. Choose the recording in the library and listen to it.
 
 Send:
 

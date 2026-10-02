@@ -5,6 +5,7 @@ import { setup } from './execution-fixture.mjs';
 import { ProductionService } from '../dist/application/service.js';
 import { createApp } from '../dist/app.js';
 import { editStoryboard } from '../dist/storyboard.js';
+import { shotIntentDigest } from '@openslate/core';
 function fixture(t) {
  const f=setup(t), service=new ProductionService(f.store,f.engine),token=randomBytes(32).toString('base64url');
  const app=createApp({service,localToken:token});t.after(()=>app.close());
@@ -68,4 +69,23 @@ test('soundtrack rejects another project recording and out-of-range gain atomica
  f.edit({kind:'soundtrack',field:'audioId',value:'owned'});assert.throws(()=>f.edit({kind:'soundtrack',field:'gainMilliDb',value:'1'}));
  assert.equal(f.store.getProject(f.projectId).soundtrack.gainMilliDb,-18000);
  f.edit({kind:'soundtrack',field:'audioId',value:''});assert.equal(f.store.getProject(f.projectId).soundtrack,null);
+});
+
+test('no narration detaches just the selected cue and video while retaining frames, other shots and canonical history', t=>{
+ const f=fixture(t), p=f.store.getProject(f.projectId), cue={id:'cue',meaning:'Boot',durationFrames:180,placementFrames:0,audio:{artifactId:'a',sha256:'a'.repeat(64),kind:'audio'},accepted:true,measured:true};
+ p.shots[0].cueId=cue.id;p.cues=[cue];f.store.saveProject(p,p.headVersion);
+ f.store.insert('narration_canonical','canonical',f.projectId,{id:'canonical',projectId:f.projectId,segments:[{cue}]});
+ const bindings=f.store.list('node_binding',f.projectId),receipt=f.edit({kind:'narration',id:'shot-0',field:'mode',value:'none'}),next=f.store.getProject(f.projectId);
+ assert.equal(next.shots[0].cueId,null);assert.deepEqual(next.cues,[cue]);assert.equal(f.store.get('narration_canonical','canonical').segments.length,1);
+ for(const b of bindings){const current=f.store.get('node_binding',b.id);assert.equal(current.candidateId,b.node.shotId==='shot-0'&&b.node.kind==='video'?null:b.candidateId);}
+ f.edit({kind:'undo',commandId:receipt.commandId});assert.equal(f.store.getProject(f.projectId).shots[0].cueId,cue.id);
+});
+
+test('removing ordinary voiceover preserves its already generated picture and visual revision',async t=>{
+ const f=fixture(t),p=f.store.getProject(f.projectId),shot=p.shots[0],cue={id:'overlay-cue',meaning:'Short voiceover',durationFrames:30,placementFrames:0,audio:{artifactId:'voice',sha256:'a'.repeat(64),kind:'audio'},accepted:true,measured:true};
+ shot.narrationTimingMode='within_shot';shot.narration={mode:'uploaded',text:'A short line.',voice:'stock'};shot.cueId=cue.id;p.cues=[cue];shot.promptIntent.video=shotIntentDigest(shot,'video',cue);f.store.saveProject(p,p.headVersion);
+ await f.engine.runReady();await f.engine.reconcile();const review=f.engine.reviewSnapshot(f.projectId);f.engine.approve(f.projectId,review.id,review.members.map(row=>row.videoNodeId),'fixture-review');await f.engine.runReady();await f.engine.reconcile();
+ const before=f.engine.outputs(f.projectId),revision=shot.revisionId,video=f.plan.nodes.find(node=>node.kind==='video'&&node.shotId===shot.id),take=before.find(output=>output.nodeId===video.id);assert.ok(take);
+ f.edit({kind:'narration',id:shot.id,field:'mode',value:'none'});const after=f.store.getProject(f.projectId);
+ assert.equal(after.shots[0].cueId,null);assert.equal(after.shots[0].revisionId,revision);assert.equal(f.engine.outputs(f.projectId).find(output=>output.nodeId===video.id).artifact.artifactId,take.artifact.artifactId);assert.deepEqual(after.cues,p.cues);
 });

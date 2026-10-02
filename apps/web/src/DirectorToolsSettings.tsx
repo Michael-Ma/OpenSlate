@@ -34,12 +34,12 @@ export function DirectorToolsSettings({ api, projectId }: { api: StudioApi; proj
   return <section aria-label="Narration guidance">
     <h3>Narration guidance</h3>
     {status?.upgradeAvailable ? <>
-      <p>Update project guidance so the director can prepare speech and transcription plans from saved narration. Plan approval, spending and acceptance of words, recording and timing remain your decisions.</p>
+      <p>Update project guidance so the director can draft narration for individual shots and prepare speech and transcription plans from saved narration. Plan approval, spending and acceptance of words, recording and timing remain your decisions.</p>
       {status.busy && <p role="status">Wait for the current conversation and setup to finish before updating.</p>}
       <button type="button" className="button secondary" disabled={recoveryReadOnly || status.busy || slot.running || !!slot.command}
         onClick={() => { if (!status.lockId || !status.lockDigest) return; execute({ path: `${base}/upgrade`,
           body: { expectedLockId: status.lockId, expectedLockDigest: status.lockDigest, targetVersion: status.availableVersion }, key: crypto.randomUUID() }); }}>Enable audio planning</button>
-    </> : status?.currentVersion === "3.0.0" ? <p>This project uses current audio planning guidance. In conversation, Codex can draft narration and prepare speech or transcription plans for your review. Provider setup and spending approval are separate.</p>
+    </> : status?.currentVersion === "4.0.0" ? <p>This project uses current audio planning guidance. In conversation, Codex can draft narration and prepare speech or transcription plans for your review. Provider setup and spending approval are separate.</p>
       : status ? <p>This project's saved guidance requires a different application version.</p> : <p role="status">Loading project guidance…</p>}
     {slot.running && <p role="status">Updating this project's guidance…</p>}
     {slot.command && !slot.running && <div className="notice warning"><p>The update result was not confirmed.</p>

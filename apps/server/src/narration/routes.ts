@@ -17,9 +17,13 @@ import type { OwnedTranscriptionService } from "./owned-transcription-service.js
 import { registerOwnedTranscriptionRoutes } from "./owned-transcription-routes.js";
 
 import type { NarrationSpeechService } from "./narration-speech-service.js";
+import { registerShotAudioRoutes } from "./shot-audio-routes.js";
 import { registerNarrationSpeechRoutes } from "./narration-speech-routes.js";
+import { assertNarrationAuthority } from './narration-scope.js';
+import type { NarrationSession } from './narration-scope.js';
+import { registerAudioLibraryRoutes } from './audio-library-routes.js';
 
-interface Session { id: string; projectId: string; requestId: string; principalId: "local-user" }
+type Session = NarrationSession;
 interface Params { projectId: string }
 const id = { type: "string", minLength: 1, maxLength: 160 };
 const sha256 = { type: "string", pattern: "^[a-f0-9]{64}$" };
@@ -44,8 +48,8 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     invariant(session?.projectId === projectId && session.principalId === "local-user", "NARRATION_SESSION_STALE", "Open or explicitly continue this project's narration session");
     const actor: ActorContext = { kind: "human", principalId: "local-user", requestId: session.requestId };
     try { production.assertActor(projectId, actor, true); } catch { invariant(false, "NARRATION_SESSION_STALE", "Narration session was superseded; explicitly continue it before editing"); }
-    const request = store.get<{ scopeIds: string[] }>("message", actor.requestId);
-    invariant(request?.scopeIds.includes(projectId), "NARRATION_SESSION_STALE", "Narration session no longer has project scope"); return actor;
+    const scope = assertNarrationAuthority(production, projectId, actor);
+    invariant(scope ? scope.sessionId === session.id && scope.shotId === session.shotId : !session.shotId, 'NARRATION_SESSION_STALE', 'Narration session no longer matches its issued scope'); return actor;
   };
   const selectedSession = (projectId: string) => {
     const head = store.get<{ sessionId: string }>("narration_session_head", projectId), session = head ? store.get<Session>("narration_session", head.sessionId) : undefined;
@@ -72,10 +76,12 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
 
   app.register(async scoped => {
     const base = "/api/projects/:projectId/narration";
+    registerShotAudioRoutes(scoped, { production, narration, canonical, actorFor });
     registerNarrationSpeechRoutes(scoped, { production, narration, ...(options.narrationSpeech ? { narrationSpeech: options.narrationSpeech } : {}), actorFor });
     registerOwnedTranscriptionRoutes(scoped, { production, narration, ownedTranscription: options.ownedTranscription, actorFor });
     // Authentication inherited from createApp runs before a handler consumes this stream.
     scoped.addContentTypeParser("application/octet-stream", (_request, payload, done) => done(null, payload));
+    registerAudioLibraryRoutes(scoped, { production, narration, uploads });
     scoped.get<{ Params: Params; Querystring: { audioOffset?: string } }>(base, { schema: { querystring: object({ audioOffset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" } }, []) } }, async request => view(request.params.projectId, Number(request.query.audioOffset ?? 0)));
     scoped.get<{ Params: Params; Querystring: { offset?: string; expectedDigest?: string } }>(`${base}/generated-recordings`, {
       schema: { querystring: object({ offset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" }, expectedDigest: sha256 }, []) },
@@ -160,8 +166,8 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     scoped.post<{ Params: Params; Body: { sessionId: string; expectedVersion: number; targets: Array<{ segmentRevisionId: string; audioId: string }> } }>(`${base}/audio-acceptances`, {
       schema: { body: edit({ targets: array(object({ segmentRevisionId: id, audioId: id }, ["segmentRevisionId", "audioId"])) }, ["targets"]) },
     }, async request => { const b = request.body; return narration.acceptAudio(request.params.projectId, actorFor(request.params.projectId, b.sessionId), b.expectedVersion, key(request), b.targets); });
-    scoped.post<{ Params: Params; Body: { sessionId: string; expectedHeadVersion: number; expectedNarrationVersion: number; shotMappings: NarrationShotMapping[] } }>(`${base}/prepare`, {
-      schema: { body: object({ sessionId: id, expectedHeadVersion: version, expectedNarrationVersion: version, shotMappings: array(object({ shotId: id, segmentId: { anyOf: [id, { type: "null" }] } }, ["shotId", "segmentId"]), 0) }, ["sessionId", "expectedHeadVersion", "expectedNarrationVersion", "shotMappings"]) },
+    scoped.post<{ Params: Params; Body: { sessionId: string; expectedHeadVersion: number; expectedNarrationVersion: number; segmentIds?: string[]; shotMappings: NarrationShotMapping[] } }>(`${base}/prepare`, {
+      schema: { body: object({ sessionId: id, expectedHeadVersion: version, expectedNarrationVersion: version, segmentIds: array(id), shotMappings: array(object({ shotId: id, segmentId: { anyOf: [id, { type: "null" }] } }, ["shotId", "segmentId"]), 0) }, ["sessionId", "expectedHeadVersion", "expectedNarrationVersion", "shotMappings"]) },
     }, async request => { const { sessionId, ...input } = request.body; return canonical.prepare(request.params.projectId, actorFor(request.params.projectId, sessionId), { ...input, key: key(request) }); });
     scoped.post<{ Params: Params; Body: { sessionId: string; preparedId: string } }>(`${base}/apply`, {
       schema: { body: object({ sessionId: id, preparedId: id }, ["sessionId", "preparedId"]) },

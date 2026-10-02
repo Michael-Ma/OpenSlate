@@ -91,7 +91,7 @@ test('physical bounds reject overruns, malformed normalized sources and conflict
     v => v.clips[0].startFrame = 29, v => v.clips[0].durationFrames = 0,
     v => v.audio[0].startSample = 47999, v => v.audio[0].atSample = 21 * 1600,
     v => v.audio[0].gainMilliDb = -60001, v => v.clips = [],
-    v => v.clips = Array(65).fill(v.clips[0]), v => v.audio = Array(65).fill(v.audio[0]),
+    v => v.clips = Array(65).fill(v.clips[0]), v => v.audio = Array(66).fill(v.audio[0]),
     v => v.audio = Array(9).fill(v.audio[0]),
     v => v.clips[0].source = reidentify({ ...video, probe: { ...video.probe, audio: audio.probe.audio } }),
     v => v.audio[0].source = reidentify({ ...audio, probe: { ...audio.probe, audio: { ...audio.probe.audio, samples: null } } }),
@@ -205,4 +205,14 @@ test('pre-cancelled operations perform no source validation and no storage write
   await assert.rejects(store.put(createLocalTimelineDocument(input()), { signal: abort.signal }), cancelled);
   await assert.rejects(store.read(receipt(createLocalTimelineDocument(input())), { signal: abort.signal }), cancelled);
   assert.equal(calls, 0); assert.deepEqual(await readdir(join(store.rootDir, 'tmp')), []); assert.deepEqual(await readdir(join(store.rootDir, 'documents')), []);
+});
+
+test('six-minute recipe permits 64 separate chronological voices plus music while preserving eight simultaneous lanes', () => {
+  const picture = reidentify({ ...video, probe: { durationSeconds: 360, video: { ...video.probe.video, frames: 10800, durationSeconds: 360 } } });
+  const voices = Array.from({ length: 64 }, (_, index) => ({ source: reidentify({ ...audio, artifactId: `voice-${index}`, sha256: index.toString(16).padStart(64, '0') }), startSample: 0, durationSamples: 48000, atSample: index * 240000, gainMilliDb: 0 }));
+  const music = reidentify({ ...audio, artifactId: 'music', sha256: 'e'.repeat(64), probe: { durationSeconds: 360, audio: { ...audio.probe.audio, samples: 17280000, durationSeconds: 360 } } });
+  const value = { projectId: 'many-voices', clips: [{ source: picture, startFrame: 0, durationFrames: 10800, fit: 'contain' }], audio: [...voices, { source: music, startSample: 0, durationSamples: 17280000, atSample: 0, gainMilliDb: -18000 }] };
+  const document = createLocalTimelineDocument(value); assert.equal(document.audio.length, 65); assert.equal(new Set(document.audio.map(placement => placement.source.sha256)).size, 65); assert.deepEqual(parseLocalTimelineDocument(document), document);
+  assert.throws(() => createLocalTimelineDocument({ ...value, audio: [...value.audio, voices[0]] }), invalid);
+  assert.throws(() => createLocalTimelineDocument({ ...value, audio: voices.slice(0, 9).map(placement => ({ ...placement, atSample: 0 })) }), invalid);
 });

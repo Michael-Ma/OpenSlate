@@ -1,6 +1,7 @@
 import { Ajv } from "ajv";
 import { digest, invariant, newId } from "../common.js";
 import type { CompiledPlan, CueRecord, ProjectRecord, ShotRecord } from "../contracts.js";
+import { shotVideoTiming } from '../video-timing.js';
 
 export const STAGES = ["intake", "story", "scene_plan", "shot_plan", "narration", "storyboard", "video", "assembly", "review"] as const;
 export type StageId = typeof STAGES[number];
@@ -21,6 +22,7 @@ export interface StageProposal {
 }
 
 export interface ShotDraft {
+  narration?: NonNullable<ShotRecord['narration']>;
   key: string;
   sceneId: string;
   purpose: string;
@@ -35,6 +37,7 @@ export interface ShotDraft {
 }
 
 export interface ShotUpdate {
+  narration?: NonNullable<ShotRecord['narration']>;
   id: string;
   purpose?: string;
   action?: string;
@@ -74,6 +77,7 @@ const shotProperties = {
   purpose: text, action: text, framing: text, motion: text,
   desiredFrames: { type: "integer", minimum: 1, maximum: 10800 }, imagePrompt: text, videoPrompt: text,
 };
+const narrationIntent = object({ mode: { enum: ['undecided', 'none', 'generated', 'uploaded'] }, text: { type: 'string', maxLength: 16000 }, voice: { enum: ['stock', 'personal'] } }, ['mode', 'text', 'voice']);
 
 export const changeProposalSchema = object({
   variant: { enum: ["workflow", "project", "plan"] },
@@ -85,8 +89,8 @@ export const changeProposalSchema = object({
     brief: text, story: text,
     createScenes: arr(object({ key: short, purpose: text }, ["key", "purpose"])),
     updateScenes: arr(object({ id: short, purpose: text }, ["id", "purpose"])),
-    createShots: arr(object({ key: short, sceneId: short, ...shotProperties, referenceArtifactIds: arr(short), cueId: { type: ["string", "null"], maxLength: 160 } }, ["key", "sceneId", ...Object.keys(shotProperties), "referenceArtifactIds", "cueId"])),
-    updateShots: arr(object({ id: short, ...shotProperties, reauthorPrompts: { type: "boolean" } }, ["id"])),
+    createShots: arr(object({ key: short, sceneId: short, ...shotProperties, narration: narrationIntent, referenceArtifactIds: arr(short), cueId: { type: ["string", "null"], maxLength: 160 } }, ["key", "sceneId", ...Object.keys(shotProperties), "referenceArtifactIds", "cueId"])),
+    updateShots: arr(object({ id: short, ...shotProperties, narration: narrationIntent, reauthorPrompts: { type: "boolean" } }, ["id"])),
     narrationScript: text, narrationSource: { enum: ["undecided", "uploaded", "generated", "mixed"] },
   }),
 }, ["variant", "expectedHeadVersion"]);
@@ -139,6 +143,7 @@ export function applyCreativePatch(
     invariant(next.scenes.some(scene => scene.id === sceneId), "SCOPE_DENIED", "Shot references an unknown scene");
     invariant(draft.referenceArtifactIds.every(id => next.artifacts.some(a => a.artifactId === id)), "SCOPE_DENIED", "Shot references an unknown artifact");
     invariant(draft.cueId === null || next.cues.some(cue => cue.id === draft.cueId), "SCOPE_DENIED", "Shot references an unknown cue");
+    invariant(draft.narration?.mode !== 'none' || draft.cueId === null, 'VALIDATION_ERROR', 'A shot with no narration cannot reference an audio cue');
     const { key: _key, ...fields } = draft;
     const shot: ShotRecord = { ...fields, sceneId, id: newId(), revisionId: newId(), promptIntent: { image: "", video: "" } };
     next.shots.push(bind(shot, next.cues.find(cue => cue.id === shot.cueId)));
@@ -150,10 +155,14 @@ export function applyCreativePatch(
     invariant(index >= 0, "SCOPE_DENIED", "Shot does not belong to project");
     const original = next.shots[index]!;
     const { id: _id, reauthorPrompts, ...fields } = update;
-    const changed = Object.entries(fields).some(([key, value]) => original[key as keyof ShotRecord] !== value);
-    if (!changed && !reauthorPrompts) continue;
+    const changedFields = Object.entries(fields).filter(([key, value]) => digest(original[key as keyof ShotRecord] ?? null) !== digest(value ?? null));
+    if (!changedFields.length && !reauthorPrompts) continue;
     invariant(reauthorPrompts === true, "STALE_PROMPT_INTENT", "Shot changes require explicit prompt reauthoring or reconfirmation");
-    const shot = { ...original, ...fields, revisionId: newId() };
+    const writingChanged = fields.narration !== undefined && digest(fields.narration) !== digest(original.narration ?? null);
+    const onlyWriting = writingChanged && changedFields.every(([key]) => key === 'narration');
+    const shot = { ...original, ...fields, ...(fields.narration?.mode === 'none' ? { cueId: null } : {}),
+      ...(writingChanged ? { narrationPending: fields.narration?.mode !== 'none' } : {}),
+      revisionId: onlyWriting && (fields.narration?.mode !== 'none' || original.cueId === null || original.narrationTimingMode === 'within_shot') ? original.revisionId : newId() };
     next.shots[index] = bind(shot, next.cues.find(cue => cue.id === shot.cueId));
   }
   invariant(next.scenes.length <= 400 && next.shots.length <= 400, "VALIDATION_ERROR", "Project exceeds current planning limits");
@@ -207,16 +216,25 @@ export function stageInputDigest(project: ProjectRecord, stage: StageRequirement
 }
 
 export function workflowReadiness(project: ProjectRecord) {
+  const timings = project.shots.map(shot => shotVideoTiming(project, shot));
+  const readyShots = timings.filter(timing => timing.ready).length;
+  const noNarration = project.shots.length > 0 && project.shots.every(shot => shot.narration?.mode === 'none' && shot.cueId === null);
+  const hasShotWriting = project.shots.some(shot => Boolean(shot.narration?.text.trim())), pendingWriting = project.shots.some(shot => shot.narrationPending
+    || shot.narration?.mode !== 'none' && Boolean(shot.narration?.text.trim()) && !shotVideoTiming(project, shot).ready);
+  const activeCueIds = new Set(project.shots.filter(shot => { const timing = shotVideoTiming(project, shot); return timing.ready && timing.source === 'accepted_audio'; }).map(shot => shot.cueId).filter(id => id !== null));
+  const activeCues = project.shots.length ? project.cues.filter(cue => activeCueIds.has(cue.id)) : project.cues;
   return {
     recipe: RECIPE,
-    narration: { hasScript: !!project.narration.script.trim(), source: project.narration.source,
-      inputState: project.cues.length && project.cues.every(c => c.accepted && c.measured) ? "accepted_audio" : project.narration.script.trim() ? "script_without_accepted_audio" : project.brief.trim() ? "notes_only" : "missing",
-      acceptedMeasuredCues: project.cues.filter(c => c.accepted && c.measured).map(c => c.id) },
-    scopes: project.shots.map(shot => ({
+    narration: { hasScript: !!project.narration.script.trim() || hasShotWriting, source: project.narration.source,
+      inputState: noNarration ? 'no_narration' : activeCues.length && activeCues.every(c => c.accepted && c.measured) ? "accepted_audio" : pendingWriting || project.narration.script.trim() || hasShotWriting ? "script_without_accepted_audio" : project.brief.trim() ? "notes_only" : "missing",
+      timingCoverage: { total: timings.length, ready: readyShots, pending: timings.length - readyShots },
+      acceptedMeasuredCues: activeCues.filter(c => c.accepted && c.measured).map(c => c.id) },
+    scopes: project.shots.map((shot, index) => { const timing = timings[index]!; return {
       shotId: shot.id,
       sceneId: shot.sceneId,
       planning: "available" as const,
-      videoTiming: project.cues.some(c => c.id === shot.cueId && c.accepted && c.measured && c.durationFrames === shot.desiredFrames) ? "ready" : "waiting_evidence",
-    })),
+      videoTiming: timing.ready ? "ready" : "waiting_evidence",
+      timing: timing.ready ? { source: timing.source, frames: timing.frames } : { reason: timing.reason },
+    }; }),
   };
 }

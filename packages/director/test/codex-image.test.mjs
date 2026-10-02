@@ -11,10 +11,10 @@ import { CODEX_RUNTIME_LIMITS } from "../dist/runtime/policy.js";
 const entry=fileURLToPath(new URL("codex-image-fixture.mjs",import.meta.url));
 const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6XsAAAAASUVORK5CYII=","base64");
 const input=()=>({attemptId:"attempt-1",requestDigest:"a".repeat(64),prompt:"A small blue boot",width:1024,height:1024,runtimeVersion:"0.153.4",model:"gpt-6-astra",images:[]});
-async function fixture(t,scenario="inline") {
+async function fixture(t,scenario="inline",timeoutMs=2000) {
  const root=await realpath(await mkdtemp(join(tmpdir(),"openslate-codex-image-"))),nativeHome=join(root,"home"),codexHome=join(nativeHome,".codex");
  await mkdir(codexHome,{recursive:true});
- const options={command:{file:process.execPath,args:[entry]},nativeHome,codexHome,directory:join(root,"images"),timeoutMs:2000,
+ const options={command:{file:process.execPath,args:[entry]},nativeHome,codexHome,directory:join(root,"images"),timeoutMs,
   env:{SETUP_FIXTURE_LOG:join(root,"calls.jsonl"),SETUP_FIXTURE_SKILL:join(codexHome,"skills/private/SKILL.md"),SETUP_FIXTURE_MODEL:"gpt-6-astra",IMAGE_FIXTURE_SCENARIO:scenario,IMAGE_FIXTURE_CONTROL:join(root,"control")}};
  const workers=[],make=()=>{const worker=new CodexImageWorkerTransport(options);workers.push(worker);return worker;};
  const worker=make();t.after(async()=>{await Promise.all(workers.map(w=>w.close()));await rm(root,{recursive:true,force:true});});
@@ -45,7 +45,8 @@ test("one exact turn yields a unique structured image and preserves model/canvas
  assert.equal((await f.worker.start(prepared,value,{observeTurn:async()=>{throw Error("must not observe another turn");}})).kind,"unknown");
 });
 test("large inline PNG exceeds the director line budget without exceeding the separate image limit",async t=>{
- const f=await fixture(t,"large"),{outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);assert.ok(outcome.bytes.length>4*1024*1024);
+ // This tests the image payload limit, not a two-second CPU budget under parallel FFmpeg load.
+ const f=await fixture(t,"large",10000),{outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);assert.ok(outcome.bytes.length>4*1024*1024);
 });
 test("native default generated_images path is read exactly and survives worker reconstruction without authentication",async t=>{
  const f=await fixture(t,"path"),{prepared,outcome}=await run(f);assert.equal(outcome.kind,"completed",outcome.code);

@@ -10,6 +10,7 @@ import { InstallationRecoveryGuard } from "../application/installation-recovery.
 import { Store } from "../persistence/store.js";
 import type { ArtifactRecord, Attempt } from "./engine.js";
 import { ExecutionOutputStore } from "./output-store.js";
+import { assertCurrentGeneratedSelection } from './current-generated-selection.js';
 import { assertImageExecutionDispatch, assertImageExecutionMapping, assertImageExecutionResult } from "./openai-image-receipts.js";
 import type { ImageExecutionDispatch, ImageExecutionMapping, ImageExecutionObservation, ImageExecutionResult } from "./openai-image-receipts.js";
 
@@ -45,7 +46,9 @@ export class OpenAIImageExecution implements ExecutionProvider {
     const signal = options.signal, expectedLease = options.expectedLease ? { ...options.expectedLease } : undefined;
     const request = structuredClone(input), attempt = this.admitted(request);
     if (this.hasDispatchOrResult(attempt.id)) return this.recover(attempt, signal);
-    this.dispatchable(attempt, expectedLease);
+    this.leaseOwned(attempt, expectedLease);
+    try { this.dispatchable(attempt, expectedLease); }
+    catch { return this.notDispatched(attempt, expectedLease, 'LOCAL_CANCELLED', signal); }
     let prepared: OpenAIImageRequest, mapping: ImageExecutionMapping;
     try {
       stopped(signal); prepared = await this.prepare(attempt, signal); stopped(signal);
@@ -69,13 +72,19 @@ export class OpenAIImageExecution implements ExecutionProvider {
     } catch {
       return this.notDispatched(attempt, expectedLease, signal?.aborted ? "LOCAL_CANCELLED" : "LOCAL_CREDENTIAL_UNAVAILABLE", signal);
     }
-    const claimed = this.#store.transaction(() => {
-      if (this.hasDispatchOrResult(attempt.id)) return false;
-      stopped(signal); this.dispatchable(attempt, expectedLease);
-      const intent: ImageExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
-        transportDigest: mapping.transport.requestDigest, externalAllowanceId: request.externalAllowanceId!, createdAt: new Date().toISOString() };
-      this.#store.insert("image_execution_dispatch", attempt.id, attempt.projectId, intent); return true;
-    });
+    let claimed: boolean;
+    try {
+      claimed = this.#store.transaction(() => {
+        if (this.hasDispatchOrResult(attempt.id)) return false;
+        stopped(signal); this.dispatchable(attempt, expectedLease);
+        const intent: ImageExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
+          transportDigest: mapping.transport.requestDigest, externalAllowanceId: request.externalAllowanceId!, createdAt: new Date().toISOString() };
+        this.#store.insert("image_execution_dispatch", attempt.id, attempt.projectId, intent); return true;
+      });
+    } catch {
+      this.leaseOwned(attempt, expectedLease);
+      return this.notDispatched(attempt, expectedLease, 'LOCAL_CANCELLED', signal);
+    }
     if (!claimed) return this.recover(attempt, signal);
     let observation: ImageExecutionObservation;
     let bytes: Uint8Array | undefined;
@@ -143,6 +152,10 @@ export class OpenAIImageExecution implements ExecutionProvider {
     return attempt;
   }
   private dispatchable(previous: Attempt, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+    this.leaseOwned(previous, expectedLease);
+    assertCurrentGeneratedSelection(this.#store, previous, 'IMAGE_EXECUTION_NOT_DISPATCHABLE');
+  }
+  private leaseOwned(previous: Attempt, expectedLease: ExecutionCallOptions["expectedLease"]): void {
     this.#recovery.assertFirstSubmit(previous.projectId, previous.id);
     const current = this.admitted(previous.request);
     const reservation = this.#store.get<{ state: string }>("reservation", current.reservationId!);
@@ -165,7 +178,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
     this.#store.transaction(() => {
       if (this.hasDispatchOrResult(attempt.id)) return;
       // A local failure describes only this worker. It cannot close a replacement worker's still-open admission.
-      try { this.dispatchable(attempt, expectedLease); }
+      try { this.leaseOwned(attempt, expectedLease); }
       catch (error) { if (error instanceof DomainError && error.code === "IMAGE_EXECUTION_NOT_DISPATCHABLE") return; throw error; }
       this.saveResult(attempt, { kind: "not_dispatched", code });
     });

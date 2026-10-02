@@ -190,6 +190,35 @@ test("an application narrated lock blocks video without a cue despite exact keyf
   assert.equal(f.provider.acceptedCount(), 1); assert.equal(f.engine.attempts(f.projectId).filter(attempt => attempt.request.kind === "video").length, 0);
 });
 
+test('application video accepts explicit no narration from planned frames after exact review without creating an audio cue', async t => {
+  const f = setup(t, { count: 1 }), project = f.store.getProject(f.projectId);
+  project.shots[0].narration = { mode: 'none', text: '', voice: 'stock' };
+  f.store.saveProject(project, project.headVersion);
+  f.store.insert('capability_lock', project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, recipeDigest: 'narrated-video-fixture' });
+  assert.equal((await f.engine.runReady()).dispatched, 1); await f.engine.reconcile();
+  assert.equal((await f.engine.runReady()).blocked[0].code, 'HUMAN_REVIEW_REQUIRED');
+  const snapshot = f.engine.reviewSnapshot(f.projectId); f.engine.approve(f.projectId, snapshot.id, [snapshot.members[0].videoNodeId], 'review-silent-shot');
+  assert.equal((await f.engine.runReady()).dispatched, 1); await f.engine.reconcile();
+  assert.equal(f.provider.acceptedCount(), 2); assert.equal(f.engine.outputs(f.projectId).filter(x => x.artifact.kind === 'video').length, 1);
+  assert.equal(f.store.getProject(f.projectId).cues.length, 0); assert.equal(f.store.list('narration_canonical', f.projectId).length, 0);
+  assert.equal(f.engine.attempts(f.projectId).find(x => x.request.kind === 'video').request.args.durationFrames, 180);
+});
+
+test('provider duration rounds up a fractional planned silent shot while preserving its exact reviewed request', async t => {
+  const f = setup(t, { count: 1 }), project = f.store.getProject(f.projectId), shot = project.shots[0];
+  shot.desiredFrames = 195; shot.narration = { mode: 'none', text: '', voice: 'stock' }; refreshIntent(shot);
+  const source = sourceFor(project).replaceAll('seconds:6', 'seconds:7');
+  const plan = compilePlan(source, { project, profiles: DEFAULT_PROFILES, logicalIds: f.logicalIds, allocateId: randomUUID }), planId = randomUUID(), video = plan.nodes.find(x => x.kind === 'video');
+  const grant = f.engine.createGrant(f.projectId, shot.id, 'video', 'human-roundup');
+  f.store.transaction(() => { f.engine.installPlan(f.projectId, planId, plan, { [video.id]: grant.id }); f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
+  f.store.insert('capability_lock', project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, recipeDigest: 'narrated-video-fixture' });
+  await f.engine.runReady(); await f.engine.reconcile();
+  const review = f.engine.reviewSnapshot(f.projectId); f.engine.approve(f.projectId, review.id, [video.id], 'human-review-roundup');
+  assert.equal((await f.engine.runReady()).dispatched, 1);
+  assert.equal(f.engine.attempts(f.projectId).find(x => x.request.kind === 'video').request.args.durationFrames, 210);
+  assert.equal(f.store.getProject(f.projectId).shots[0].desiredFrames, 195);
+});
+
 test("narrated dispatch requires measured cue, shot and requested video durations to agree", async t => {
   const f = setup(t, { count: 1 }); const project = f.store.getProject(f.projectId);
   f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES, recipeDigest: "narrated-video-fixture" });

@@ -1,3 +1,4 @@
+import { artifactIdentity, artifactView, type ArtifactViewState } from './artifact-view-model';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, FormEvent, ReactNode } from "react";
 import { APP_NAME } from "@openslate/core/public";
@@ -58,15 +59,22 @@ export function Connect({ onConnect }: { onConnect: () => Promise<void> }) {
     <form className="connect-card" onSubmit={event => void submit(event)}><span className="small-mark"><Icon name="slate" size={27} /></span><h2>Open your studio</h2><p>Your projects stay on this computer. The OpenSlate launcher connects your browser automatically.</p>{error && <p role="alert" className="form-error">{error}</p>}<button className="button primary full-width" disabled={busy}>{busy ? "Opening studio…" : "Open studio"}<Icon name="arrow" size={17} /></button><div className="connection-help">Run <code>./start.sh</code> in your OpenSlate folder to start or reconnect to the studio.</div></form></main><footer className="connect-footer">BUILT FOR THE WORK BETWEEN IDEA AND FILM <span>OpenSlate · Early preview</span></footer></div>;
 }
 export function useArtifact(api: StudioApi, projectId: string, artifact: Artifact | null) {
-  const [url, setUrl] = useState<string | null>(null); const [error, setError] = useState("");
+  const identity = artifactIdentity(projectId, artifact);
+  const [result, setResult] = useState<ArtifactViewState<StudioApi> | null>(null);
   useEffect(() => {
-    setUrl(null); setError(""); if (!artifact) return;
+    if (!artifact || !identity) return;
     const controller = new AbortController(); let objectUrl: string | null = null;
-    void api.artifact(projectId, artifact, controller.signal).then(result => { if (controller.signal.aborted) { URL.revokeObjectURL(result); return; } objectUrl = result; setUrl(result); }).catch(error => { if (!controller.signal.aborted) setError(errorText(error)); });
+    setResult({ api, identity, signal: controller.signal, url: null, error: '' });
+    void api.artifact(projectId, artifact, controller.signal).then(url => {
+      if (controller.signal.aborted) { URL.revokeObjectURL(url); return; }
+      objectUrl = url; setResult({ api, identity, signal: controller.signal, url, error: '' });
+    }).catch(error => { if (!controller.signal.aborted) setResult({ api, identity, signal: controller.signal, url: null, error: errorText(error) }); });
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [api, projectId, artifact?.artifactId, artifact?.sha256]);
-  return { url, error };
+  }, [api, identity]);
+  // A new review must never render yesterday's bytes with today's onLoad/hash.
+  return artifactView(result, api, identity);
 }
+
 export function ShotCard({ api, projectId, shot, index, member, chosen, scoped, stale, onChoose, onScope, onDisplayed, onEnlarge, take }: {
   api: StudioApi; projectId: string; shot: Shot; index: number; member: ReviewMember | undefined; chosen: boolean; scoped: boolean; stale: boolean;
   onChoose: () => void; onScope: () => void; onDisplayed: (id: string, sha: string) => void; onEnlarge: (url: string, shot: Shot, fixture: ArtifactFixture) => void;

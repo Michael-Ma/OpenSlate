@@ -82,7 +82,8 @@ function frames(value: Value | undefined, label = "seconds"): number {
 /** Prompt freshness intentionally excludes mutable revision IDs and prompt strings. */
 export function shotIntentDigest(shot: ShotRecord, kind: "image" | "video", cue?: CueRecord): string {
   const common = { purpose: shot.purpose, action: shot.action, framing: shot.framing, references: shot.referenceArtifactIds };
-  return digest(kind === "image" ? common : { ...common, motion: shot.motion, desiredFrames: shot.desiredFrames, cue: cue ? { meaning: cue.meaning, durationFrames: cue.durationFrames } : null });
+  // A protected voiceover overlay does not author picture content or timing. The real cue remains separate acceptance evidence.
+  return digest(kind === "image" ? common : { ...common, motion: shot.motion, desiredFrames: shot.desiredFrames, cue: cue && shot.narrationTimingMode !== 'within_shot' ? { meaning: cue.meaning, durationFrames: cue.durationFrames } : null });
 }
 
 /** Review and dispatch must resolve the same exact, role-labelled input bytes. */

@@ -8,6 +8,7 @@ import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
 import { createTranscriptSelection, resolvePublishedTranscriptCandidate } from "./transcript-selection.js";
 import type { ResolvedPublishedTranscriptCandidate } from "./transcript-selection.js";
 import { verifyTranscriptSelectionEvidence } from "./transcript-selection-media.js";
+import { assertNarrationAuthority, assertNarrationMutation } from './narration-scope.js';
 
 export interface AttachGeneratedNarrationAudio {
   expectedVersion: number; segmentId: string; segmentRevisionId: string;
@@ -128,7 +129,7 @@ export class NarrationService {
   async attachGeneratedAudio(projectId: string, human: ActorContext, input: AttachGeneratedNarrationAudio, options: { signal?: AbortSignal } = {}): Promise<NarrationSnapshot> {
     const signal = options.signal; human = structuredClone(human); input = structuredClone(input);
     const stopped = () => invariant(!signal?.aborted, "NARRATION_CANCELLED", "Generated recording selection was cancelled");
-    this.authority(projectId, human, true); stopped();
+    this.authority(projectId, human, true, input.segmentId); stopped();
     invariant(input && Object.keys(input).sort().join("\0") === ["expectedVersion", "segmentId", "segmentRevisionId", "artifactId", "artifactDigest", "generationEvidenceDigest", "key"].sort().join("\0"),
       "NARRATION_INVALID_INPUT", "Choose one exact generated recording for a saved section");
     integer(input.expectedVersion, 0, Number.MAX_SAFE_INTEGER);
@@ -187,7 +188,7 @@ export class NarrationService {
     options: { signal?: AbortSignal }): Promise<NarrationSnapshot> {
     const signal = options.signal; human = structuredClone(human); input = structuredClone(input);
     const stopped = () => invariant(!signal?.aborted, "NARRATION_CANCELLED", "Transcript selection was cancelled");
-    this.authority(projectId, human, true); stopped();
+    this.authority(projectId, human, true, input.segmentId); stopped();
     invariant(input && Object.keys(input).sort().join("\0") === ["expectedVersion", "segmentId", "segmentRevisionId", "audioId", "candidateId", "candidateDigest",
       "startWordIndex", "endWordIndex", "selectedTextDigest", "key"].sort().join("\0"), "NARRATION_INVALID_INPUT", "Select an exact transcript range for one saved section");
     integer(input.expectedVersion, 0, Number.MAX_SAFE_INTEGER); integer(input.startWordIndex, 0, 8191); integer(input.endWordIndex, input.startWordIndex + 1, 8192);
@@ -283,17 +284,23 @@ export class NarrationService {
   }
 
   exportProjection(projectId: string, actor: ActorContext, options: { requireAccepted?: boolean } = {}): NarrationProjection {
-    const view = this.snapshot(projectId, actor);
+    return this.projectSnapshot(this.snapshot(projectId, actor), options);
+  }
+
+  /** Trusted canonical adapter projection; callers must establish current authority and verify saved acceptances. */
+  projectSnapshot(view: NarrationSnapshot, options: { requireAccepted?: boolean; shotRelativeSegmentIds?: string[] } = {}): NarrationProjection {
+    const projectId = view.state.projectId;
     const segments: NarrationProjection["segments"] = [], gaps = [...view.readiness.gaps];
     let end = 0;
     for (const segment of view.segments) {
       if (!segment.cue || !segment.audio) continue;
       const cue = segment.cue, samples = cue.endSample - cue.startSample, timing = sampleIntervalToFrames(segment.entry.atSample, samples);
-      const relativeDurationFrames = sampleIntervalToFrames(0, samples).durationFrames;
-      if (segment.entry.atSample < end) gaps.push(gap(segment.entry.segmentId, "overlapping_or_unordered_narration", "export"));
+      const shotRelative = options.shotRelativeSegmentIds?.includes(segment.entry.segmentId) ?? false;
+      const relativeDurationFrames = shotRelative ? Math.ceil(samples / 1600) : sampleIntervalToFrames(0, samples).durationFrames;
+      if (!shotRelative && segment.entry.atSample < end) gaps.push(gap(segment.entry.segmentId, "overlapping_or_unordered_narration", "export"));
       end = segment.entry.atSample + samples;
       if (end > MAX_SAMPLES || relativeDurationFrames < 1) gaps.push(gap(segment.entry.segmentId, "export_duration", "export"));
-      segments.push({ segmentId: segment.entry.segmentId, segmentRevisionId: segment.script.id, cue: { id: cue.id, meaning: segment.script.meaning, placementFrames: timing.placementFrames, durationFrames: relativeDurationFrames, audio: { artifactId: segment.audio.id, sha256: segment.audio.media.sha256, kind: "audio" }, accepted: segment.accepted.script && segment.accepted.audio && segment.accepted.timing, measured: true }, frameCoverage: { startFrame: timing.placementFrames, endFrame: timing.placementFrames + timing.durationFrames }, audioPlacement: { source: segment.audio.media, startSample: cue.startSample, durationSamples: samples, atSample: segment.entry.atSample, gainMilliDb: 0 } });
+      segments.push({ segmentId: segment.entry.segmentId, segmentRevisionId: segment.script.id, cue: { id: cue.id, meaning: segment.script.meaning, placementFrames: timing.placementFrames, durationFrames: relativeDurationFrames, audio: { artifactId: segment.audio.id, sha256: segment.audio.media.sha256, kind: "audio" }, accepted: segment.accepted.script && segment.accepted.audio && segment.accepted.timing, measured: true }, frameCoverage: { startFrame: timing.placementFrames, endFrame: timing.placementFrames + (shotRelative ? relativeDurationFrames : timing.durationFrames) }, audioPlacement: { source: segment.audio.media, startSample: cue.startSample, durationSamples: samples, atSample: segment.entry.atSample, gainMilliDb: 0 } });
     }
     const accepted = view.segments.length > 0 && segments.length === view.segments.length && gaps.length === 0 && segments.every(s => s.cue.accepted);
     invariant(!options.requireAccepted || accepted, "NARRATION_NOT_READY", "Narration still requires current human acceptance or timing choices");
@@ -355,8 +362,13 @@ export class NarrationService {
       return this.store.command(`${actor.principalId}:${projectId}:${actor.requestId}:narration`, key, digest({ action, expectedVersion, arguments: argumentsValue }), () => {
         const state = this.read(projectId).state;
         invariant(state.version === expectedVersion, "REVISION_CONFLICT", "Narration changed before this edit");
+        const before = structuredClone(state), scope = assertNarrationAuthority(this.production, projectId, actor);
+        // Refuse foreign targets before the callback creates any records or verifies media.
+        assertNarrationMutation(this.store, scope, before, before, action, argumentsValue);
         // Only new transcript callbacks return false. Legacy no-op mutation behavior is unchanged.
-        if (fn(state) === false) return this.read(projectId);
+        const changed = fn(state);
+        assertNarrationMutation(this.store, scope, before, state, action, argumentsValue);
+        if (changed === false) return this.read(projectId);
         const revisionId = newId();
         const next = { ...state, version: state.version + 1, revisionId };
         this.store.insert("narration_revision", revisionId, projectId, { state: next, requestId: actor.requestId });
@@ -366,11 +378,10 @@ export class NarrationService {
       });
     });
   }
-  private authority(projectId: string, actor: ActorContext, humanOnly = false): void {
+  private authority(projectId: string, actor: ActorContext, humanOnly = false, segmentId?: string): void {
     this.production.assertActor(projectId, actor, true);
     invariant(!humanOnly || actor.kind === "human", "ACTOR_DENIED", "This narration decision requires an authenticated human");
-    const request = this.store.get<{ scopeIds: string[]; projectId: string }>("message", actor.requestId);
-    invariant(request?.projectId === projectId && request.scopeIds.includes(projectId), "SCOPE_DENIED", "Narration collection changes require project scope");
+    assertNarrationAuthority(this.production, projectId, actor, segmentId);
   }
   private entry(state: NarrationState, id: string): NarrationEntry { const entry = state.entries.find(e => e.segmentId === id); invariant(entry, "SCOPE_DENIED", "Unknown narration segment"); return entry; }
   private record<T extends { projectId: string }>(kind: string, id: string, projectId: string): T { const record = this.store.get<T>(kind, id); invariant(record?.projectId === projectId, "SCOPE_DENIED", "Narration reference belongs to another project or is absent"); return record; }

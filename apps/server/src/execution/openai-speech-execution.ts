@@ -9,6 +9,7 @@ import { ExecutionOutputStore } from "./output-store.js";
 import { assertSpeechFirstDispatch, assertSpeechMappingAdmission, resolveSpeechAdmission } from "./audio-execution-authority.js";
 import { assertSpeechExecutionDispatch, assertSpeechExecutionMapping, assertSpeechExecutionResult, prepareSpeechExecutionRequest } from "./audio-execution-receipts.js";
 import type { SpeechExecutionDispatch, SpeechExecutionMapping, SpeechExecutionObservation, SpeechExecutionResult } from "./audio-execution-receipts.js";
+import { assertPersonalVoiceCurrent } from '../narration/personal-voices.js';
 
 const unknown = (diagnostic: string): ExecutionOutcome => ({ type: "unknown", diagnostic });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "SPEECH_EXECUTION_CANCELLED", "Speech preparation was cancelled");
@@ -36,7 +37,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
     assertSpeechFirstDispatch(this.#store, admission, expectedLease);
     let prepared: ReturnType<typeof prepareSpeechExecutionRequest>, mapping: SpeechExecutionMapping;
     try {
-      stopped(signal); prepared = prepareSpeechExecutionRequest(request);
+      stopped(signal); assertPersonalVoiceCurrent(this.#store, attempt.projectId, String(request.args.voice)); prepared = prepareSpeechExecutionRequest(request);
       const proposed: SpeechExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile,
         capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
@@ -64,14 +65,22 @@ export class OpenAISpeechExecution implements ExecutionProvider {
     } catch {
       return this.notDispatched(admission, expectedLease, signal?.aborted ? "LOCAL_CANCELLED" : "LOCAL_CREDENTIAL_UNAVAILABLE", signal);
     }
-    const claimed = this.#store.transaction(() => {
-      if (this.hasDispatchOrResult(attempt.id)) return false;
-      stopped(signal); assertSpeechFirstDispatch(this.#store, admission, expectedLease);
-      const marker: SpeechExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
-        transportDigest: mapping.transport.requestDigest, bodySha256: mapping.transport.bodySha256,
-        allowanceId: admission.allowance.id, createdAt: new Date().toISOString() };
-      this.#store.insert("speech_execution_dispatch", attempt.id, attempt.projectId, marker); return true;
-    });
+    let claimed: boolean;
+    try {
+      claimed = this.#store.transaction(() => {
+        if (this.hasDispatchOrResult(attempt.id)) return false;
+        stopped(signal); assertSpeechFirstDispatch(this.#store, admission, expectedLease);
+        assertPersonalVoiceCurrent(this.#store, attempt.projectId, String(request.args.voice));
+        const marker: SpeechExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
+          transportDigest: mapping.transport.requestDigest, bodySha256: mapping.transport.bodySha256,
+          allowanceId: admission.allowance.id, createdAt: new Date().toISOString() };
+        this.#store.insert("speech_execution_dispatch", attempt.id, attempt.projectId, marker); return true;
+      });
+    } catch (error) {
+      if (!(error instanceof DomainError) || !error.code.startsWith('PERSONAL_VOICE_')) throw error;
+      // Consent was revoked before the irreversible marker: positively retain that no request was sent.
+      return this.notDispatched(admission, expectedLease, 'LOCAL_INPUT_INVALID', signal);
+    }
     if (!claimed) return this.recover(attempt, signal);
 
     let bytes: Uint8Array | undefined;

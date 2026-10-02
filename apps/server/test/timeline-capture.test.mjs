@@ -16,7 +16,7 @@ function descriptor(artifactId, kind, sha256, frames = 30) {
     toolchainDigest: hash("e"), probe: kind === "video" ? { durationSeconds: frames / 30, video: { streamIndex: 0, width: 160, height: 90, frameRate: "30/1", frames, durationSeconds: frames / 30, codec: "h264" } }
       : { durationSeconds: 2, audio: { streamIndex: 0, sampleRate: 48000, channels: 2, samples: 96000, durationSeconds: 2, codec: "pcm_s16le" } } };
 }
-function fixture(t, { narrated = false, render = true, generated = false, alterRecord = () => {}, alterSource = () => {} } = {}) {
+function fixture(t, { narrated = false, render = true, generated = false, mixed = false, alterRecord = () => {}, alterSource = () => {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "openslate-timeline-capture-")), store = new Store(join(dir, "db.sqlite"));
   const provider = new FakeProvider(join(dir, "fake.sqlite")), engine = new Engine(store, provider, { artifactDir: join(dir, "artifacts") });
   const production = new ProductionService(store, engine), initial = production.createProject("SQL-only capture");
@@ -40,12 +40,20 @@ function fixture(t, { narrated = false, render = true, generated = false, alterR
     shot.promptIntent = { image: shotIntentDigest(shot, "image"), video: shotIntentDigest(shot, "video") }; return shot;
   }) : cues.map(cue => ({ id: newId(), revisionId: newId(), sceneId: scene.id, purpose: cue.meaning, action: "Standing", framing: "Wide", motion: "Push", desiredFrames: 15,
     imagePrompt: "Boot", videoPrompt: "Push", referenceArtifactIds: [], cueId: cue.id, promptIntent: { image: "unused", video: "unused" } }));
+  if (mixed) {
+    shots[0].narration = { mode: 'none', text: '', voice: 'stock' };
+    cues[1].durationFrames = 180; cues[1].placementFrames = 180;
+    shots[1].cueId = cues[1].id; shots[1].narration = { mode: 'uploaded', text: 'Line 1', voice: 'stock' };
+    shots[1].promptIntent.video = shotIntentDigest(shots[1], 'video', cues[1]);
+    audioSource.probe.durationSeconds = 12; audioSource.probe.audio.samples = 576000; audioSource.probe.audio.durationSeconds = 12;
+  }
   const frame = { artifactId: newId(), kind: "image", sha256: hash("d") };
   if (narrated) addArtifact(audio);
   const project = store.saveProject({ ...initial, revisionId: newId(), artifacts: [...videos, ...(narrated ? [audio] : []), ...(generated ? [frame] : [])],
     scenes: shots.length ? [scene] : [], shots, cues, narration: { script: narrated ? "Line 0 Line 1" : "", source: narrated ? "uploaded" : "undecided" } }, initial.headVersion);
   const narration = narrated ? { id: newId(), projectId: project.id, script: project.narration.script, segments: cues.map((cue, index) => ({ cue,
     audioPlacement: { source: audioSource, startSample: index * 1600, durationSamples: 24000, atSample: index * 48000, gainMilliDb: index ? 2000 : -1000 } })) } : null;
+  if (narration && mixed) { narration.segments[1].audioPlacement = { source: audioSource, startSample: 0, durationSamples: 288000, atSample: 288000, gainMilliDb: 0 }; }
   if (narration) { store.insert("narration_canonical", narration.id, project.id, narration); store.put("narration_canonical_head", project.id, project.id, { canonicalId: narration.id }); }
   const generatedDeclarations = generated ? shots.map((shot, index) => `const shot${index}=p.shot(${JSON.stringify(shot.id)});const review${index}=p.humanReview("review${index}",{shots:[{intent:shot${index},keyframe:p.asset(${JSON.stringify(frame.artifactId)}),videoProfile:"fake-video-v1",motionPrompt:"Push",seconds:6}]});const video${index}=p.video("video${index}",{intent:shot${index},profile:"fake-video-v1",firstFrame:p.approvedImage(p.asset(${JSON.stringify(frame.artifactId)}),review${index}),prompt:"Push",seconds:6});`).join("") : "";
   const source = `definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{${generatedDeclarations}
@@ -147,4 +155,15 @@ test("withdrawn narration acceptance or changed script cannot fulfill a timeline
       assert.throws(() => captureTimeline(f.store, f.projectId, f.timelineId), { code: "MEDIA_NARRATION_REQUIRED" });
     });
   }
+});
+
+
+test('generated timeline combines explicit silent planned timing with one accepted narrated take', t => {
+  const f = fixture(t, { generated: true, narrated: true, mixed: true });
+  const captured = captureTimeline(f.store, f.projectId, f.timelineId);
+  assert.deepEqual(captured.input.clips.map(clip => clip.durationFrames), [180, 180]);
+  assert.equal(captured.input.audio.length, 1); assert.equal(captured.input.audio[0].atSample, 288000);
+  assert.equal(captured.input.audio[0].durationSamples, 288000); assert.equal(captured.target.canonicalNarrationId, f.narration.id);
+  const current = f.store.getProject(f.projectId); current.shots[0].narration.mode = 'undecided'; f.store.saveProject(current, current.headVersion);
+  assert.throws(() => captureTimeline(f.store, f.projectId, f.timelineId), { code: 'MEDIA_NARRATION_REQUIRED' });
 });

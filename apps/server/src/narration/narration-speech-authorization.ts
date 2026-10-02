@@ -5,6 +5,7 @@ import type { Attempt, Candidate, Grant, PlanRecord } from "../execution/engine.
 import type { NarrationSpeechReader } from "./narration-speech-records.js";
 import { assertNarrationSpeechProposal, NARRATION_SPEECH_LIMITS } from "./narration-speech-records.js";
 import { snapshotOwnedTranscriptionData } from "./owned-transcription-records.js";
+import { narrationAuthorScope } from './narration-scope.js';
 import type { NarrationSpeechApplication, NarrationSpeechAttemptInput, NarrationSpeechProposal, NarrationSpeechReview } from "./narration-speech-types.js";
 
 type Reader = NarrationSpeechReader;
@@ -43,7 +44,8 @@ function reviewEvidence(reader: Reader, projectId: string, input: unknown): Omit
     kind: "speech", authorityId: review.requestId, origin: "user_change" }));
   const request = get<{ id: string; projectId: string; principalId: string; editing: boolean; scopeIds: string[] }>(reader, projectId, "message", review.requestId);
   fail(request.id === review.requestId && request.projectId === projectId && request.principalId === review.principalId
-    && request.editing === true && Array.isArray(request.scopeIds) && request.scopeIds.length <= 400 && request.scopeIds.includes(projectId));
+    && request.editing === true && Array.isArray(request.scopeIds) && request.scopeIds.length <= 400);
+  narrationAuthorScope(reader, projectId, review.requestId, review.principalId, review.section.segmentId);
   // Every message is created by the human request channel. The review has no epoch: its live caller must be human.
   // A superseded historical human request remains evidence, never current execution authority.
   return { review, proposal };

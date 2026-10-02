@@ -1,0 +1,13 @@
+.audio-library-panel { display: grid; gap: 14px; }
+.audio-library-panel .section-heading { margin: 0; }
+.audio-library-panel h3 { margin: 0; }
+.audio-library-upload { display: flex; gap: 12px; align-items: center; }
+.audio-library-upload input { min-width: 0; width: 100%; }
+.audio-library-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.audio-library-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; text-align: left; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink, #18243a); }
+.audio-library-row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.audio-library-row span, .audio-library-row small { color: var(--muted, #68758a); white-space: nowrap; }
+.audio-library-row:hover, .audio-library-row.selected { background: var(--blue-soft, #eef3ff); border-color: var(--line, #e0e6ef); }
+.audio-library-selected, .audio-library-pending, .audio-library-pages { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.library-audio-player audio { width: 100%; }
+@media (max-width: 520px) { .audio-library-row small { display: none; } }

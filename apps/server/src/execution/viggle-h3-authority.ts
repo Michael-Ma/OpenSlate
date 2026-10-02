@@ -1,4 +1,4 @@
-import { canonical, digest, effectiveNodeDigest, invariant, shotIntentDigest } from "@openslate/core";
+import { canonical, digest, effectiveNodeDigest, invariant, shotIntentDigest, shotVideoTiming } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionCallOptions, ExecutionRequest } from "@openslate/providers";
 import type { Store } from "../persistence/store.js";
@@ -158,7 +158,7 @@ export function resolveViggleAdmission(store: ViggleAuthorityStore, input: Reado
 }
 
 /** Use inside the short pre-marker/local-failure transaction; late provider observations use no first-submit check. */
-export function assertViggleFirstDispatch(store: Store, original: ViggleAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+export function assertViggleDispatchLease(store: Store, original: ViggleAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): ViggleAdmission {
   new InstallationRecoveryGuard(store).assertFirstSubmit(original.attempt.projectId, original.attempt.id);
   const current = resolveViggleAdmission(store, original.attempt.request, { capabilityLockId: original.capabilityLock.id,
     capabilityLockDigest: digest(original.capabilityLock), profileDefinition: original.profile });
@@ -167,6 +167,10 @@ export function assertViggleFirstDispatch(store: Store, original: ViggleAdmissio
     && current.attempt.leaseEpoch === expectedLease.epoch && current.attempt.leaseExpiresAt > Date.now()
     && current.attempt.phase === "submitting" && current.reservation.state === "reserved",
   "VIGGLE_H3_EXECUTION_NOT_DISPATCHABLE", "Viggle no longer owns its original unexpired submitting lease");
+  return current;
+}
+export function assertViggleFirstDispatch(store: Store, original: ViggleAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+  const current = assertViggleDispatchLease(store, original, expectedLease);
   const lock = store.get<ViggleCapabilityLock>("capability_lock", store.getProject(current.attempt.projectId).capabilityLockId);
   invariant(lock?.projectId === current.attempt.projectId && lock.profiles.some(profile => canonical(profile) === canonical(current.profile)),
     "VIGGLE_H3_SELECTION_CHANGED", "Current capability lock no longer contains the consumed profile");
@@ -183,10 +187,11 @@ export function assertViggleCurrentSelection(store: ViggleAuthorityStore, attemp
   const node = binding.node, plan = store.get<PlanRecord>("plan", binding.planId), shot = project.shots.find(item => item.id === node.shotId);
   const cue = shot?.cueId ? project.cues.find(item => item.id === shot.cueId) : undefined;
   invariant(shot && (!shot.cueId || cue) && node.intentDigest === shotIntentDigest(shot, "video", cue) && shot.promptIntent.video === node.intentDigest
-    && node.args.prompt === shot.videoPrompt && (!cue || cue.accepted && cue.measured && cue.durationFrames === shot.desiredFrames && cue.durationFrames === node.args.durationFrames),
+    && node.args.prompt === shot.videoPrompt && (!cue || shotVideoTiming(project, shot).ready)
+    && typeof node.args.durationFrames === 'number' && node.args.durationFrames >= shot.desiredFrames,
   "VIGGLE_H3_SELECTION_CHANGED", "Current shot intent or timing changed before submission");
   const lock = store.get<{ recipeDigest?: string }>("capability_lock", project.capabilityLockId);
-  invariant(!lock?.recipeDigest || cue, "VIGGLE_H3_SELECTION_CHANGED", "Narrated production requires its current measured cue");
+  invariant(!lock?.recipeDigest || shotVideoTiming(project, shot).ready, "VIGGLE_H3_SELECTION_CHANGED", "Current shot requires an explicit narration decision or accepted measured audio");
   invariant(plan?.projectId === project.id && node.requires.length > 0 && node.requires.every(id => plan.compiled.gates.some(gate => gate.id === id
     && gate.members.some(member => member.videoNodeId === node.id && member.recipeDigest === node.specDigest))), "VIGGLE_H3_SELECTION_CHANGED", "Current plan lost the exact review gate");
   const inputs = node.inputs.map(input => {

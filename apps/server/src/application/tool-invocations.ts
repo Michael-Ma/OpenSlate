@@ -213,7 +213,7 @@ export class ToolInvocationService {
             .find(row => row.requestId === call.requestId && row.epochId === epochId && row.proposalDigest === call.recovery!.proposalDigest);
           if (prepared) receipt = { preparedId: prepared.id, proposalDigest: prepared.proposalDigest };
         }
-        if (call.tool === "revise_narration_draft" && ["2.0.0", "3.0.0"].includes(call.toolContractVersion ?? "1.0.0") && call.recovery?.narrationCommand) {
+        if (call.tool === "revise_narration_draft" && ["2.0.0", "3.0.0", "4.0.0"].includes(call.toolContractVersion ?? "1.0.0") && call.recovery?.narrationCommand) {
           const command = call.recovery.narrationCommand;
           if (command.key === `director-tool:${call.id}`) {
             const row = store.db.prepare("SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?")
@@ -224,7 +224,7 @@ export class ToolInvocationService {
             }
           }
         }
-        if (call.toolContractVersion === "3.0.0" && call.catalogDigest === toolCatalog("3.0.0").digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
+        if ((call.toolContractVersion === "3.0.0" || call.toolContractVersion === "4.0.0") && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
           const command = call.recovery.audioProposalCommand, kind = audioKind(call.tool);
           if (command.kind === kind && command.key === `director-tool:${call.id}`) {
             const suffix = kind === "recording_transcription" ? "owned-transcription" : "narration-speech";

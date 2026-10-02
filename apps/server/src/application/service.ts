@@ -19,6 +19,10 @@ import type { InstalledProviderSelection } from "./provider-catalog.js";
 import { ownedTranscriptionCatalog, snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 import { captureOwnedTranscriptionReviewInput, currentOwnedTranscriptionReview, ownedTranscriptionReviewScope } from "../narration/owned-transcription-review-state.js";
 import type { OwnedTranscriptionApplication, OwnedTranscriptionApplyReceipt, OwnedTranscriptionReview, ReviewOwnedTranscription } from "../narration/owned-transcription-types.js";
+import { assertContinueEdits, continuationCovers, continuedRequestAuthorities, pendingEditContinuations, reviewPendingEdits } from './pending-edit-continuation.js';
+import type { ContinueEdits } from './pending-edit-continuation.js';
+import { isScopedAssemblyRebuild } from './scoped-assembly.js';
+import { assertNarrationAuthority } from '../narration/narration-scope.js';
 
 interface RequestRecord { source?: "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
@@ -97,11 +101,11 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
     invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
     const key = options.key ?? newId();
-    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
+    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
       const project = this.store.getProject(projectId);
       if (options.resumeFromStopId) {
         const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
@@ -115,6 +119,8 @@ export class ProductionService {
       const scopeIds = [...new Set(options.scopeIds ?? [projectId])];
       invariant(scopeIds.length > 0 && scopeIds.length <= 400, "VALIDATION_ERROR", "A request requires a bounded scope");
       scopeIds.forEach(scopeId => validateStageScope(project, scopeId));
+      invariant(!options.continueEdits || (options.editing !== false && !options.continuationRequestId && !options.resumeFromStopId), 'VALIDATION_ERROR', 'Continue selected edits using one fresh editable conversation.');
+      if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
       const request: RequestRecord = { id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
       if (options.editing !== false) {
@@ -123,11 +129,12 @@ export class ProductionService {
         for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked")
           this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
         for (const scopeId of scopeIds) this.engine.setHold(projectId, { scopeId, ownerId: request.id });
-        if (options.continuationRequestId) {
-          const prior = this.store.get<RequestRecord>("message", options.continuationRequestId);
+        const continuedIds = options.continueEdits?.requestIds ?? (options.continuationRequestId ? [options.continuationRequestId] : []);
+        for (const priorId of continuedIds) {
+          const prior = this.store.get<RequestRecord>("message", priorId);
           invariant(prior?.projectId === projectId && prior.principalId === principalId && prior.editing, "ACTOR_DENIED", "Continuation does not refer to an editable human request");
           for (const hold of this.store.list<Hold>("hold", projectId).filter(h => h.ownerId === prior.id && h.active)) {
-            invariant(scopeIds.includes(projectId) || scopeIds.includes(hold.scopeId), "SCOPE_DENIED", "Continuation must cover the previous edit hold");
+            invariant(continuationCovers(project, scopeIds, hold.scopeId), "SCOPE_DENIED", "Continuation must cover the previous edit hold");
             this.engine.releaseHold(projectId, hold.id, prior.id);
           }
           this.store.insert("request_continuation", newId(), projectId, { fromRequestId: prior.id, toRequestId: request.id });
@@ -151,6 +158,12 @@ export class ProductionService {
       return { kind: "human", principalId, requestId: request.id };
     });
     this.recovery.assertFreshAuthority(projectId, "message", actor.requestId); return actor;
+  }
+
+  /** A single human follow-up may explicitly continue all covered edits captured in the current snapshot. */
+  pendingEditContinuation(projectId: string, principalId: string, scopeIds: string[]) {
+    const project = this.store.getProject(projectId); scopeIds.forEach(id => validateStageScope(project, id));
+    return reviewPendingEdits(this.store, projectId, principalId, scopeIds);
   }
 
   openEpoch(projectId: string, human: ActorContext): { actor: ActorContext; token: string } {
@@ -196,7 +209,7 @@ export class ProductionService {
     return scopes.includes(project.id) || scopes.includes(scopeId) || project.shots.some(shot => shot.id === scopeId && scopes.includes(shot.sceneId));
   }
 
-  private checkFootprint(before: ProjectRecord, next: ProjectRecord, actor: ActorContext, plan: CompiledPlan | null, impact: NodeImpact[]): void {
+  private checkFootprint(before: ProjectRecord, next: ProjectRecord, actor: ActorContext, plan: CompiledPlan | null, impact: NodeImpact[], reviewedSpeechNodeId?: string): void {
     const globalChanged = ["brief", "story", "narration"].some(key => digest(before[key as keyof ProjectRecord]) !== digest(next[key as keyof ProjectRecord]));
     if (globalChanged) invariant(this.allows(before, actor, before.id), "SCOPE_DENIED", "Project-wide changes require project scope");
     for (const scene of next.scenes) {
@@ -211,9 +224,12 @@ export class ProductionService {
       if (!node) continue;
       if (node.shotId) invariant(this.allows(next, actor, node.shotId), "SCOPE_DENIED", "Media change exceeds request scope");
       else if (!this.allows(next, actor, next.id)) {
+        // Only the dedicated human speech review can supply this pin, after exact composition/section validation.
+        // Generic model-authored preparation never receives a project-wide operation exception.
+        if (node.id === reviewedSpeechNodeId && node.kind === 'speech' && change.kind === 'new') continue;
         const previous = oldPlan?.nodes.find(n => n.id === node.id);
         // A shot edit may rebuild its existing assembly; it may not invent project-wide work.
-        invariant(previous && ["timeline", "render"].includes(node.kind) && change.kind === "replace" && digest(previous.args) === digest(node.args) && digest(previous.inputs) === digest(node.inputs),
+        invariant(change.kind === 'replace' && plan && isScopedAssemblyRebuild(previous, node, next, plan),
           "SCOPE_DENIED", "Global media changes require project scope");
       }
     }
@@ -263,7 +279,7 @@ export class ProductionService {
   }
 
   /** Shared post-compile validation. This assessment creates neither records nor generation authority. */
-  private assessCompiledChange(captured: PreparedChangeCapture, actor: ActorContext): CompiledChangeAssessment {
+  private assessCompiledChange(captured: PreparedChangeCapture, actor: ActorContext, reviewedSpeechNodeId?: string): CompiledChangeAssessment {
     const { before, next, proposal, compiled } = captured;
     const oldPlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
     const impact = compiled ? diffPlans(oldPlan, compiled) : [];
@@ -283,7 +299,7 @@ export class ProductionService {
       const change = impact.find(item => item.nodeId === id)!;
       change.kind = "replace"; change.reason = "Human-authorized additional take";
     }
-    this.checkFootprint(before, next, actor, compiled, impact);
+    this.checkFootprint(before, next, actor, compiled, impact, reviewedSpeechNodeId);
     const stages = requiredStages(before, next, compiled);
     for (const proposed of proposal.stages ?? []) validateStageScope(next, proposed.scopeId);
     validateStageRequirements(next, stages);
@@ -303,10 +319,7 @@ export class ProductionService {
     invariant(!noProgress || this.store.list<Prepared>("prepared", projectId).filter(item => item.requestId === actor.requestId && !item.semanticChange && !item.compiled).length < 3,
       "WAITING_USER", "No production progress after three assessments; ask the user for the missing information");
     const used = new Set(this.store.list<Candidate>("candidate", projectId).map(candidate => candidate.grantId));
-    const authorities = new Set([actor.requestId]);
-    const continuations = this.store.list<{ fromRequestId: string; toRequestId: string }>("request_continuation", projectId);
-    for (let count = 0; count < continuations.length; count++) for (const continuation of continuations)
-      if (authorities.has(continuation.toRequestId)) authorities.add(continuation.fromRequestId);
+    const authorities = continuedRequestAuthorities(this.store, projectId, actor.requestId);
     const grants = this.store.list<Grant>("grant", projectId).filter(grant => !used.has(grant.id) && authorities.has(grant.authorityId)
       && !this.recovery.isImported(projectId, "grant", grant.id) && !this.store.get("owned_transcription_review", grant.id) && !this.store.get("narration_speech_review", grant.id));
     const grantBindings: Record<string, string> = {};
@@ -400,7 +413,9 @@ export class ProductionService {
     const authority = (): void => {
       invariant(human.kind === "human", "ACTOR_DENIED", "Only a human can approve narration speech");
       this.assertActor(projectId, human, true);
-      invariant(this.request(projectId, human).scopeIds.includes(projectId), "SCOPE_DENIED", "Narration speech review requires editable project scope");
+      const selected = this.store.get<NarrationSpeechProposal>('narration_speech_proposal', input.proposalId);
+      invariant(selected?.projectId === projectId, 'SCOPE_DENIED', 'Narration speech proposal belongs to this film');
+      assertNarrationAuthority(this, projectId, human, selected.section.segmentId);
       this.recovery.assertFreshAuthority(projectId, "narration_speech_proposal", input.proposalId);
     };
     authority();
@@ -411,17 +426,18 @@ export class ProductionService {
         const proposal = parseChangeProposal({ variant: "plan", expectedHeadVersion: before.headVersion, source: owned.compiled.source });
         const captured: PreparedChangeCapture = { before, next: structuredClone(before), lock: lock as ProjectCapabilityLock,
           proposal, proposalDigest: digest(proposal), compiled: owned.compiled, logicalIds: owned.logicalIds };
-        const assessment = this.assessCompiledChange(captured, human);
+        const node = owned.compiled.nodes.find(item => item.alias === owned.operation.alias)!;
+        assertNarrationAuthority(this, projectId, human, owned.section.segmentId);
+        const assessment = this.assessCompiledChange(captured, human, node.id);
         invariant(digest(assessment.impact) === digest(owned.impact) && digest(assessment.stages) === digest(owned.stages),
           "NARRATION_SPEECH_STALE", "Narration speech proposal assessment changed since human review");
-        const node = owned.compiled.nodes.find(item => item.alias === owned.operation.alias)!;
         const grant = this.engine.createGrant(projectId, projectId, "speech", human.requestId, "user_change");
         const review: NarrationSpeechReview = { id: grant.id, version: 1, projectId, requestId: human.requestId,
           principalId: human.principalId, proposal: { id: owned.id, digest: input.proposalDigest }, grantDigest: digest(grant),
           section: owned.section, nodeId: node.id, specDigest: node.specDigest, compiledDigest: digest(owned.compiled) };
         this.store.insert("narration_speech_review", review.id, projectId, review);
         const prepared = this.recordPreparedChange(projectId, human, captured, assessment, { [node.id]: grant.id });
-        const applied = this.publishPreparedChange(projectId, human, prepared);
+        const applied = this.publishPreparedChange(projectId, human, prepared, !!assertNarrationAuthority(this, projectId, human, owned.section.segmentId));
         const binding = this.store.get<{ candidateId: string }>("node_binding", node.id)!;
         const candidate = this.store.get("candidate", binding.candidateId)!;
         const application: NarrationSpeechApplication = { id: binding.candidateId, version: 1, projectId,
@@ -479,7 +495,7 @@ export class ProductionService {
   }
 
   /** Shared synchronous publication kernel; callers retain exact actor ownership and command authority. */
-  private publishPreparedChange(projectId: string, actor: ActorContext, prepared: Prepared): ApplyReceipt {
+  private publishPreparedChange(projectId: string, actor: ActorContext, prepared: Prepared, retainHolds = false): ApplyReceipt {
     const preparedId = prepared.id;
     const before = this.store.getProject(projectId);
     invariant(digest(this.store.get("capability_lock", before.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Project capability lock changed");
@@ -506,7 +522,7 @@ export class ProductionService {
       if (bindingVersion !== previous?.bindingVersion) this.store.insert("stage_revision", newId(), projectId, { binding, preparedId });
     }
     for (const proposal of prepared.proposal.stages ?? []) this.store.insert("stage_assessment", newId(), projectId, { ...proposal, preparedId, advisory: true });
-    if (prepared.compiled) this.releaseResolvedHolds(projectId, actor, prepared);
+    if (prepared.compiled && !retainHolds) this.releaseResolvedHolds(projectId, actor, prepared);
     this.store.appendEvent(projectId, "change.applied", { preparedId, revisionId: next.revisionId, planId, headVersion: next.headVersion });
     return { preparedId, projectId, revisionId: next.revisionId, headVersion: next.headVersion, activePlanId: next.activePlanId, cursor: this.store.cursor(projectId) };
   }
@@ -546,13 +562,14 @@ export class ProductionService {
       const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : undefined;
       const messages = this.store.list<RequestRecord>("message", projectId);
       const outputs = this.store.list<{ id: string; requestId: string; text: string; phase: string }>("director_output", projectId);
+      const messageById = new Map(messages.map(message => [message.id, message])), outputById = new Map(outputs.map(output => [output.id, output]));
       const conversation = this.store.readEvents(projectId).flatMap(event => {
         if (event.kind === "message.recorded") {
-          const message = messages.find(message => message.id === event.payload.requestId);
+          const message = messageById.get(String(event.payload.requestId));
           return message && message.source !== "storyboard" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
         }
         if (event.kind === "director.message") {
-          const output = outputs.find(output => output.id === event.payload.outputId);
+          const output = outputById.get(String(event.payload.outputId));
           return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId }] : [];
         }
         return [];
@@ -560,7 +577,7 @@ export class ProductionService {
       return { project, latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts: this.engine.attempts(projectId),
       assessments: this.store.list("stage_assessment", projectId),
-      holds: this.store.list("hold", projectId), messages, conversation,
+      holds: this.store.list("hold", projectId), pendingEditContinuations: pendingEditContinuations(this.store, projectId, 'local-user'), messages, conversation,
       control: this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId) ?? { paused: false },
       plan: plan ? { id: plan.id, graphDigest: plan.compiled.graphDigest, canonicalSource: plan.compiled.canonicalSource, nodes: plan.compiled.nodes } : null,
       questions: this.store.list<{ id: string; requestId: string; turnId: string }>("director_question", projectId).map(question =>
@@ -633,4 +650,4 @@ export class ProductionService {
   }
 }
 import { captureNarrationSpeechReviewInput, currentNarrationSpeechReview, narrationSpeechReviewScope } from "../narration/narration-speech-review-state.js";
-import type { NarrationSpeechApplication, NarrationSpeechApplyReceipt, NarrationSpeechReview, ReviewNarrationSpeech } from "../narration/narration-speech-types.js";
+import type { NarrationSpeechApplication, NarrationSpeechApplyReceipt, NarrationSpeechProposal, NarrationSpeechReview, ReviewNarrationSpeech } from "../narration/narration-speech-types.js";

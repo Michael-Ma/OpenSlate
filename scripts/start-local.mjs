@@ -1,59 +1,46 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { loadEnvFile } from 'node:process';
 import { inspectServer, serverPid, stopServer, studioOrigin } from './local-server.mjs';
+import { inspectSetup, formatSetup } from './setup-readiness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 process.chdir(root);
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
-  console.log('Usage: ./start.sh [--check | --status | --restart] [--no-open]\nLoads .env.live.local, installs locked dependencies, builds and runs the local studio.\n--check checks prerequisites without installation, build, server or API calls.\n--status checks the local server and this installation credential, without starting anything.\n--restart gracefully stops the verified server for this checkout, rebuilds and starts it with current configuration.\nDefault: start if stopped, or reopen an existing studio without changing it.');
+  console.log('Usage: ./start.sh [--check | --doctor | --status | --restart | --init-config] [--no-open] [--json]\nLoads .env.live.local, installs locked dependencies, builds and runs the local studio.\n--check / --doctor reports all local setup issues without installation, build, server or API calls. Add --json for a redacted machine-readable report.\n--init-config creates a private .env.live.local template only when missing; never overwrites an existing file.\n--status checks the local server and this installation credential, without starting anything.\n--restart gracefully stops the verified server for this checkout, rebuilds and starts it with current configuration.\nDefault: start if stopped, or reopen an existing studio without changing it.');
   process.exit(0);
 }
-if (args.some(arg => !['--check', '--no-open', '--status', '--restart'].includes(arg))) {
+if (args.some(arg => !['--check', '--doctor', '--json', '--no-open', '--status', '--restart', '--init-config'].includes(arg))) {
   console.error('Unknown option. Use ./start.sh --help.'); process.exit(1);
 }
-if (args.filter(arg => ['--check', '--status', '--restart'].includes(arg)).length > 1) { console.error('Choose only one of --check, --status or --restart.'); process.exit(1); }
+if (args.filter(arg => ['--check', '--doctor', '--status', '--restart', '--init-config'].includes(arg)).length > 1) { console.error('Choose one startup action. Use ./start.sh --help.'); process.exit(1); }
+if (args.includes('--json') && !args.some(arg => ['--check', '--doctor'].includes(arg))) { console.error('--json requires --check or --doctor.'); process.exit(1); }
 const fail = message => { console.error(`OpenSlate: ${message}`); process.exit(1); };
 if (process.versions.node.split('.')[0] !== '24') fail('Node 24 is required. Run ./start.sh.');
+if (args.includes('--init-config')) {
+  if (existsSync('.env.live.local')) console.log('Existing .env.live.local preserved. Edit it locally, then run ./start.sh --check.');
+  else {
+    writeFileSync('.env.live.local', readFileSync('.env.example'), { flag: 'wx', mode: 0o600 });
+    console.log('Created private .env.live.local. Add only the providers you want, then run ./start.sh --check. No provider, server or installation action was performed.');
+  }
+  process.exit(0);
+}
 if (existsSync('.env.live.local')) { try { loadEnvFile('.env.live.local'); } catch { fail('Could not read .env.live.local. Check its permissions and syntax.'); } }
-else console.log('No .env.live.local found; using shell configuration or demo defaults.');
+else if (!args.includes('--json')) console.log('No .env.live.local found; using shell configuration or demo defaults. Use ./start.sh --init-config to create a private template.');
 process.env.OPENSLATE_DATA_DIR = resolve(process.env.OPENSLATE_DATA_DIR ?? '.openslate');
 let pnpm;
 if (!args.includes('--status')) {
-  const probe = (command, options = ['--version']) => spawnSync(command, options, { encoding: 'utf8', timeout: 15000 });
-  const enabled = name => process.env[name] === '1';
-  const switches = ['IMAGE_GENERATION', 'H3_GENERATION', 'VIGGLE_H3_GENERATION', 'CODEX_IMAGE_GENERATION', 'SPEECH_GENERATION', 'TRANSCRIPTION'];
-  for (const kind of switches) {
-    const key = `OPENSLATE_ENABLE_${kind}`;
-    if (process.env[key] && !['0', '1'].includes(process.env[key])) fail(`${key} must be 0 or 1.`);
-  }
-  if (['IMAGE_GENERATION', 'SPEECH_GENERATION', 'TRANSCRIPTION'].some(kind => enabled(`OPENSLATE_ENABLE_${kind}`)) && !process.env.OPENSLATE_OPENAI_API_KEY?.trim()) fail('Enabled OpenAI media needs OPENSLATE_OPENAI_API_KEY in .env.live.local.');
-  if (enabled('OPENSLATE_ENABLE_VIGGLE_H3_GENERATION') && !process.env.OPENSLATE_VIGGLE_API_KEY?.trim()) fail('Enabled Viggle video needs OPENSLATE_VIGGLE_API_KEY in .env.live.local.');
-  if (process.env.OPENSLATE_PROVIDER_CONFIG) {
-    try { JSON.parse(readFileSync(resolve(process.env.OPENSLATE_PROVIDER_CONFIG), 'utf8')); }
-    catch { fail('OPENSLATE_PROVIDER_CONFIG must point to a readable JSON provider catalog.'); }
-  }
-  if (switches.some(kind => enabled(`OPENSLATE_ENABLE_${kind}`))) {
-    for (const tool of ['ffmpeg', 'ffprobe']) {
-      const variable = `OPENSLATE_${tool.toUpperCase()}`;
-      const candidates = process.env[variable] ? [process.env[variable]] : [...(process.env.PATH ?? '').split(':').filter(Boolean).map(directory => join(directory, tool)), `/opt/homebrew/bin/${tool}`, `/usr/local/bin/${tool}`];
-      const found = candidates.find(candidate => probe(candidate, ['-version']).status === 0);
-      if (!found) fail(`${tool} is missing. On macOS install FFmpeg with: brew install ffmpeg`);
-      process.env[variable] = found;
-    }
-  }
-  if (enabled('OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION')) {
-    const binary = process.env.OPENSLATE_CODEX_IMAGE_BINARY;
-    if (!binary || probe(binary).stdout?.trim() !== 'codex-cli 0.153.4') fail('Codex images need the pinned Codex 0.153.4 binary. See docs/implementation/MANUAL-LIVE-PRODUCTION.md for installation and sign-in.');
-  }
-  const version = JSON.parse(readFileSync('package.json', 'utf8')).packageManager.split('@')[1];
-  const installed = probe('pnpm');
-  pnpm = installed.status === 0 && installed.stdout.trim() === version ? ['pnpm', []] : ['npx', ['--yes', `pnpm@${version}`]];
-  console.log(`Prerequisites ready. Node ${process.versions.node}; pnpm ${version}. Provider settings preserved.`);
-  if (args.includes('--check')) process.exit(0);
+  const report = inspectSetup({ root });
+  const checking = args.some(arg => ['--check', '--doctor'].includes(arg));
+  if (checking) { console.log(args.includes('--json') ? JSON.stringify(report, null, 2) : formatSetup(report)); process.exit(report.ready ? 0 : 1); }
+  if (!report.ready) fail(`${formatSetup(report)}\nFix the reported settings, then retry. For a redacted report run ./start.sh --doctor --json.`);
+  for (const tool of ['ffmpeg', 'ffprobe']) if (report.tools[tool]) process.env[`OPENSLATE_${tool.toUpperCase()}`] = report.tools[tool];
+  pnpm = report.checks.find(check => check.id === 'pnpm').state === 'ready' ? ['pnpm', []] : ['npx', ['--yes', `pnpm@${report.packageManager}`]];
+  console.log(`Prerequisites ready. Node ${process.versions.node}; pnpm ${report.packageManager}. Provider settings preserved.`);
+  for (const check of report.checks.filter(item => item.state === 'warning')) console.log(`${check.label}: ${check.detail}`);
 }
 const run = (command, commandArgs) => new Promise((resolveRun, reject) => {
   const child = spawn(command, commandArgs, { cwd: root, env: process.env, stdio: 'inherit' });

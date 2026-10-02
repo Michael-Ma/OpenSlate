@@ -1,3 +1,4 @@
+import { ExternalAllowanceService } from '../apps/server/dist/application/external-allowances.js';
 // Disposable integration studio. Uses only FakeProvider; --native uses existing Codex sign-in for one read-only turn.
 // No production database, paid media adapter or provider credentials are loaded.
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -22,7 +23,7 @@ const store = new Store(join(root,'db.sqlite')), provider = new FakeProvider(joi
 const engine = new Engine(store,provider,{ artifactDir:join(root,'artifacts') }), service = new ProductionService(store,engine);
 let project=service.createProject('First Light · integration review');
 const scenes=['Opening the café','The ritual','A moment to stay'];
-project=applyCreativePatch(project,{brief:'Before the city wakes.',story:'A 36-second café film. Warm morning light, tactile close-ups, and an unhurried first sip.',createScenes:scenes.map((purpose,i)=>({key:`scene${i}`,purpose})),createShots:['A new morning','Let the light in','Freshly ground','A slower pour','Your usual corner','Stay a little longer'].map((purpose,i)=>({key:`shot${i}`,sceneId:`scene${Math.floor(i/2)}`,purpose,action:purpose,framing:['Wide café exterior at dawn','Sunlight crosses the oak counter','Coffee beans tumble into the grinder','Steam rises from the pour-over dripper','Hands place a cup by the window','Coffee and an open book'][i],motion:'Slow camera push',desiredFrames:180,imagePrompt:purpose,videoPrompt:purpose,referenceArtifactIds:[],cueId:null}))},(shot,cue)=>({...shot,promptIntent:{image:shotIntentDigest(shot,'image',cue),video:shotIntentDigest(shot,'video',cue)}}));
+project=applyCreativePatch(project,{brief:'Before the city wakes.',story:'A 36-second café film. Warm morning light, tactile close-ups, and an unhurried first sip.',createScenes:scenes.map((purpose,i)=>({key:`scene${i}`,purpose})),createShots:['A new morning','Let the light in','Freshly ground','A slower pour','Your usual corner','Stay a little longer'].map((purpose,i)=>({key:`shot${i}`,sceneId:`scene${Math.floor(i/2)}`,purpose,action:purpose,framing:['Wide café exterior at dawn','Sunlight crosses the oak counter','Coffee beans tumble into the grinder','Steam rises from the pour-over dripper','Hands place a cup by the window','Coffee and an open book'][i],motion:'Slow camera push',narration:{mode:'none',text:'',voice:'stock'},desiredFrames:180,imagePrompt:purpose,videoPrompt:purpose,referenceArtifactIds:[],cueId:null}))},(shot,cue)=>({...shot,promptIntent:{image:shotIntentDigest(shot,'image',cue),video:shotIntentDigest(shot,'video',cue)}}));
 project=store.saveProject({...project,revisionId:randomUUID()},0);store.insert('project_revision',project.revisionId,project.id,{project});
 if(process.argv.includes('--fixtures')) {
  let source=`definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{`;
@@ -41,7 +42,7 @@ const narration=new NarrationService(service,media),canonical=new NarrationCanon
 const mediaApp=new MediaApplicationService(service,media),images=new ImageApplicationService(service,new LocalImageStore({rootDir:join(root,'artifacts','images'),ffmpegPath,ffprobePath}));
 const director=new LocalDirectorController(service,{repositoryRoot:repo,dataDirectory:root,endpoint:'http://127.0.0.1:5173',ffmpegPath, setup:async input=>{const result=await setupLocalCodex(input);console.log(JSON.stringify({readiness:result.readiness}));return result;}});
 const sessions=new StudioSessions();
-const app=createApp({service,director,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
+const app=createApp({service,allowanceRoutes:{service,allowances:new ExternalAllowanceService(store)},director,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
  narrationRoutes:{production:service,narration,canonical,uploadDirectory:join(root,'uploads','audio')},
  mediaRoutes:{production:service,media:mediaApp,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','video')})},
  imageRoutes:{production:service,images,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','image'),maxBytes:PNG_IMPORT_MAX_BYTES})}});
@@ -56,4 +57,6 @@ if(process.argv.includes('--native')) { try {
  writeFileSync(join(root,'native-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({nativeReport:join(root,'native-report.json'),status:report.status,attempts:report.attempts,grants:report.grants}));
 } catch(error) { console.log(JSON.stringify({nativeBlocked:error.code ?? 'SETUP_FAILED', message:error.message})); }
 }
-for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{await director.close();await app.close();store.close();provider.close();process.exit(0);});
+let fixtureTickBusy=false;
+const fixtureTimer = process.argv.includes('--fixtures') ? setInterval(() => { if(fixtureTickBusy)return;fixtureTickBusy=true;void engine.runReady().then(() => engine.reconcile()).catch(error => console.error(error.code ?? 'FIXTURE_RUN_FAILED')).finally(()=>{fixtureTickBusy=false;}); }, 300) : null;
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{if(fixtureTimer)clearInterval(fixtureTimer);await director.close();await app.close();store.close();provider.close();process.exit(0);});

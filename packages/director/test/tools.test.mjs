@@ -73,7 +73,10 @@ test("five immutable descriptors share exact workflow grammar and a stable versi
   assert.equal(TOOL_CATALOG_DIGEST, "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec", "shipped v1 catalog remains byte-identical");
   assert.deepEqual(TOOL_DESCRIPTORS.map(tool => tool.name), TOOL_NAMES);
   assert.equal(new Set(TOOL_NAMES).size, 5);
-  assert.deepEqual(TOOL_DESCRIPTORS.find(tool => tool.name === "prepare_change").inputSchema, changeProposalSchema);
+  const originalSchema = structuredClone(changeProposalSchema);
+  delete originalSchema.properties.creative.properties.createShots.items.properties.narration;
+  delete originalSchema.properties.creative.properties.updateShots.items.properties.narration;
+  assert.deepEqual(TOOL_DESCRIPTORS.find(tool => tool.name === "prepare_change").inputSchema, originalSchema);
   assert.equal(TOOL_CATALOG_DIGEST, digest({ version: TOOL_CONTRACT_VERSION, tools: TOOL_DESCRIPTORS }));
   assert.throws(() => { TOOL_DESCRIPTORS[0].inputSchema.additionalProperties = true; }, TypeError);
   const proposal = { variant: "project", expectedHeadVersion: 0, creative: { brief: "Saved intent" } };
@@ -292,4 +295,43 @@ test("V3 cancellation preserves the original transport identity and makes no sec
   await bounded(f.arrived.promise); c.notify("notifications/cancelled", { requestId: call.id });
   const result = await call.response; assert.equal(result.result.isError, true); assert.equal(JSON.parse(result.result.content[0].text).error.code, "TOOL_CALL_UNRESOLVED");
   assert.equal(f.calls.length, 1); assert.deepEqual((await c.request("ping", {}).response).result, {});
+});
+
+
+test("V4 alone accepts compact shot narration intent while V1–V3 retain their exact grammar", () => {
+  const v4 = toolCatalog("4.0.0");
+  assert.deepEqual(v4.names, toolCatalog("3.0.0").names);
+  assert.equal(toolHandlerId(v4.version), "director-tools@4");
+  const narration = { mode: "generated", text: "Crafted for every step.", voice: "stock" };
+  const update = { variant: "project", expectedHeadVersion: 0, creative: { updateShots: [{ id: "owned-shot", narration, reauthorPrompts: true }] } };
+  const create = { variant: "project", expectedHeadVersion: 0, creative: { createShots: [{ key: "shot", sceneId: "scene", purpose: "Reveal", action: "Boot", framing: "Close", motion: "Slow push", desiredFrames: 180, imagePrompt: "Boot", videoPrompt: "Push", referenceArtifactIds: [], cueId: null, narration }] } };
+  for (const input of [update, create]) {
+    assert.deepEqual(parseToolArguments("prepare_change", input, "4.0.0").arguments, input);
+    for (const version of ["1.0.0", "2.0.0", "3.0.0"]) assert.throws(() => parseToolArguments("prepare_change", input, version), code("VALIDATION_ERROR"));
+  }
+  for (const field of ["narrationScript", "narrationSource"]) assert.throws(() => parseToolArguments("prepare_change", { variant: "project", expectedHeadVersion: 0, creative: { [field]: "uploaded" } }, "4.0.0"), code("VALIDATION_ERROR"));
+  for (const extra of [{ narrationPending: false }, { narrationTimingMode: "within_shot" }, { approved: true }]) assert.throws(() => parseToolArguments("prepare_change", { ...update, creative: { updateShots: [{ ...update.creative.updateShots[0], ...extra }] } }, "4.0.0"), code("VALIDATION_ERROR"));
+});
+
+test("actual V4 stdio child advertises the saved catalog and forwards compact writing once", async t => {
+  const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: "4.0.0" });
+  const initialized = await c.initialize(); assert.equal(initialized.result.serverInfo.version, "4.0.0");
+  assert.deepEqual((await c.request("tools/list", {}).response).result.tools, toolCatalog("4.0.0").descriptors);
+  const input = { variant: "project", expectedHeadVersion: 0, creative: { updateShots: [{ id: "owned-shot", narration: { mode: "none", text: "", voice: "stock" }, reauthorPrompts: true }] } };
+  const reply = await c.request("tools/call", { name: "prepare_change", arguments: input }).response;
+  assert.equal(reply.result.isError, false); assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, input);
+});
+
+
+test("every shipped tool catalog has an immutable complete catalog and handler digest", () => {
+  const hashes = {
+    "1.0.0": ["b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa", "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec"],
+    "2.0.0": ["c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df", "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e"],
+    "3.0.0": ["81199e4880e2e3e4412ae8828abfb9c6a3f7dbbce9f5434ac9d5c345bf716a4b", "f6ecf84a8d5cd48b8114b4055171fba9b21682deccd7adc45b09b7ab9e45789d"],
+    "4.0.0": ["ef3a0a6aaf37ace8b455cb214a63ea0038d4ba5b1735af45f1db35dfd0ffa5be", "978a51d27e316988bdec5674f949dbb353f148ce4bf5422b456ed94ab8300f01"],
+  };
+  for (const [version, [wholeCatalog, handlerSchema]] of Object.entries(hashes)) {
+    assert.equal(digest(toolCatalog(version)), wholeCatalog, `${version} complete saved catalog`);
+    assert.equal(toolCatalog(version).digest, handlerSchema, `${version} schema handler binding`);
+  }
 });

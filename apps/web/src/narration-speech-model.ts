@@ -3,7 +3,7 @@ import type { PendingCommand } from './pending-command';
 
 export interface SpeechOptions {
   version: 1; profiles: Array<{ id: string; revision: string; model: string; estimatedMicros: string }>;
-  voices: string[]; limits: { maxTotalBytes: number; maxInstructionBytes: number };
+  voices: string[]; personalVoices?: Array<{ id: string; label: string; ready: boolean }>; limits: { maxTotalBytes: number; maxInstructionBytes: number };
   capabilities: { configured: boolean; providerReadiness: string };
 }
 export interface SpeechProposal {

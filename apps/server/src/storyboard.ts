@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { digest, invariant, newId } from '@openslate/core';
+import { digest, invariant, newId, shotIntentDigest } from '@openslate/core';
 import type { ProjectRecord, ShotRecord } from '@openslate/core';
 import type { ProductionService } from './application/service.js';
 import type { NarrationAudio } from './narration/types.js';
@@ -45,7 +45,14 @@ export function editStoryboard(s: ProductionService, projectId: string, input: E
       if (input.field === 'mode') { invariant(['none', 'generated', 'uploaded'].includes(input.value ?? ''), 'VALIDATION_ERROR', 'Invalid narration choice.'); draft.mode = input.value as 'none' | 'generated' | 'uploaded'; }
       else if (input.field === 'text') draft.text = input.value ?? '';
       else { invariant(input.field === 'voice' && ['stock', 'personal'].includes(input.value ?? ''), 'VALIDATION_ERROR', 'Invalid voice choice.'); draft.voice = input.value as 'stock' | 'personal'; }
-      row.narration = draft; row.revisionId = newId(); changed.add(row.id);
+      const writingChanged = digest(before.shots.find(shot => shot.id === row.id)?.narration ?? null) !== digest(draft);
+      row.narration = draft;
+      // The human's no-narration choice detaches this shot only. Canonical recordings remain historical evidence.
+      if (draft.mode === 'none') row.cueId = null;
+      if (writingChanged) row.narrationPending = draft.mode !== 'none';
+      const previous = before.shots.find(shot => shot.id === row.id)!;
+      if (shotIntentDigest(previous, 'video', before.cues.find(cue => cue.id === previous.cueId)) !== shotIntentDigest(row, 'video', next.cues.find(cue => cue.id === row.cueId))) row.revisionId = newId();
+      changed.add(row.id);
     } else if (input.kind === 'soundtrack') {
       if (input.field === 'audioId') {
         if (!input.value) next.soundtrack = null;
@@ -66,7 +73,11 @@ export function editStoryboard(s: ProductionService, projectId: string, input: E
     const request = s.store.get<Record<string, unknown>>('message', actor.requestId)!;
     s.store.put('message', actor.requestId, projectId, { ...request, source: 'storyboard' });
     const bindings = s.store.list<NodeBinding>('node_binding', projectId).filter(x => x.state === 'active' && x.planId === before.activePlanId);
-    const affected = new Set(bindings.filter(x => ['timeline', 'render'].includes(x.node.kind) || (input.kind === 'treatment' || input.kind === 'undo' && (next.brief !== before.brief || next.story !== before.story)) || changed.has(x.node.shotId ?? '') && !(input.kind === 'narration' && ['image','video'].includes(x.node.kind)) && !(input.kind === 'shot' && input.field === 'motion' && x.node.kind === 'image')).map(x => x.id));
+    const changedTiming = new Set(next.shots.filter(row => {
+      const previous = before.shots.find(old => old.id === row.id);
+      return previous && shotIntentDigest(previous, 'video', before.cues.find(cue => cue.id === previous.cueId)) !== shotIntentDigest(row, 'video', next.cues.find(cue => cue.id === row.cueId));
+    }).map(row => row.id));
+    const affected = new Set(bindings.filter(x => ['timeline', 'render'].includes(x.node.kind) || (input.kind === 'treatment' || input.kind === 'undo' && (next.brief !== before.brief || next.story !== before.story)) || changed.has(x.node.shotId ?? '') && !(input.kind === 'narration' && (x.node.kind === 'image' || x.node.kind === 'video' && !changedTiming.has(x.node.shotId ?? ''))) && !(input.kind === 'shot' && input.field === 'motion' && x.node.kind === 'image')).map(x => x.id));
     for (let grew = true; grew;) { grew = false; for (const b of bindings) if (!affected.has(b.id) && (b.node.inputs.some(x => x.source.kind === 'output' && affected.has(x.source.nodeId)) || b.node.requires.some(id => affected.has(id)))) { affected.add(b.id); grew = true; } }
     for (const b of bindings.filter(x => affected.has(x.id))) s.store.put('node_binding', b.id, projectId, { ...b, candidateId: null, outputs: {} });
     // Existing in-flight attempts retain their durable receipts and cannot publish into detached candidates.

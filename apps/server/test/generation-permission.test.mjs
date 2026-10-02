@@ -1,3 +1,4 @@
+import { digest } from '@openslate/core';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -39,4 +40,36 @@ test('explicit continuation transfers the selected earlier edit, while a directo
  assert.equal(f.store.list('hold',f.projectId).some(h=>h.ownerId===human.requestId&&h.active),false);
  assert.equal(f.store.list('hold',f.projectId).some(h=>h.ownerId===response.json().requestId&&h.active),true);
  assert.throws(()=>f.service.actorForBridge(f.projectId,epoch.token));
+});
+
+test('reviewed plural continuation transfers all covering edits with grants limited to the selected shots', async t => {
+ const f=fixture(t), a=f.service.beginRequest(f.projectId,'local-user','First pending edit',{scopeIds:[f.projectId]}), b=f.service.beginRequest(f.projectId,'local-user','Second pending edit',{scopeIds:['shot-0']});
+ const snapshot=f.service.snapshot(f.projectId), continueEdits=f.service.pendingEditContinuation(f.projectId,'local-user',[f.projectId]);
+ const body={...f.body,cursor:snapshot.cursor,continueEdits,continuationScope:'project'};
+ const response=await f.post(body);assert.equal(response.statusCode,200,response.body); const result=response.json();
+ assert.ok(f.store.list('hold',f.projectId).filter(h=>h.active).every(h=>h.ownerId===result.requestId));
+ assert.deepEqual(new Set(f.store.list('request_continuation',f.projectId).map(x=>x.fromRequestId)),new Set([a.requestId,b.requestId]));
+ assert.ok(result.grantIds.every(id=>f.store.get('grant',id).scopeId==='shot-0'));assert.equal(f.store.list('external_allowance',f.projectId).length,0);assert.equal(f.engine.attempts(f.projectId).length,0);
+});
+
+test('shot-only plural permission cannot silently take project holds, stale review does not fence new work', async t=>{
+ const f=fixture(t), old=f.service.beginRequest(f.projectId,'local-user','Whole film pending',{scopeIds:[f.projectId]}), epoch=f.service.openEpoch(f.projectId,old);
+ const snap=f.service.snapshot(f.projectId), continueEdits=f.service.pendingEditContinuation(f.projectId,'local-user',[f.projectId]);
+ const response=await f.post({...f.body,cursor:snap.cursor,continueEdits});assert.notEqual(response.statusCode,200);assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'active');
+ const forged=await f.post({...f.body,cursor:snap.cursor,continuationScope:'project'});assert.notEqual(forged.statusCode,200);assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'active');
+});
+
+test('unrelated progress does not stale reviewed creative permission, while stop authority changes do',async t=>{
+ const f=fixture(t),snap=f.service.snapshot(f.projectId),body={...f.body,reviewedControlAuthorityId:snap.control.authorityId??null,reviewedHoldDigest:digest([])};
+ f.store.appendEvent(f.projectId,'test.unrelated_progress',{nodeId:'other'});
+ const r=await f.post(body);assert.equal(r.statusCode,200,r.body);
+ const g=fixture(t),before=g.service.snapshot(g.projectId),old={...g.body,reviewedControlAuthorityId:before.control.authorityId??null,reviewedHoldDigest:digest([])};
+ g.engine.setPaused(g.projectId,true,'new-stop');g.engine.setPaused(g.projectId,false,'new-resume');
+ assert.equal((await g.post(old)).statusCode,409);
+});
+
+test('a new held edit invalidates the selected permission even when the project head and control stay unchanged',async t=>{
+ const f=fixture(t),snap=f.service.snapshot(f.projectId),body={...f.body,reviewedControlAuthorityId:snap.control.authorityId??null,reviewedHoldDigest:digest([])};
+ f.service.beginRequest(f.projectId,'local-user','New edit',{scopeIds:['shot-0']});
+ const before=f.store.list('grant',f.projectId).length;assert.equal((await f.post(body)).statusCode,409);assert.equal(f.store.list('grant',f.projectId).length,before);
 });

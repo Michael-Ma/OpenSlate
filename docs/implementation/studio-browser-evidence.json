@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-01",
+  "scope": "Disposable six-shot local studio. Labeled fake images/videos and synthetic audio tones; no production data or paid media adapters.",
+  "interfaceBundle": "index-BPkpIAt9.js",
+  "verifiedFlows": {
+    "explicitSilentFrameReview": "Two selected fixture shots produced labeled fixture clips using six-second planned slots without an audio cue.",
+    "recordingFirst": "One-second owned source uploaded and played while words were empty; acceptance stayed disabled until a truthful description was saved and bound.",
+    "compactAcceptance": {
+      "recordings": 2,
+      "voiceSecondsEach": 1,
+      "pictureSecondsEach": 6,
+      "filmSeconds": 36,
+      "finalCards": "Accepted narration"
+    },
+    "pluralContinuation": {
+      "continuedSavedEdits": 2,
+      "generationShotCount": 1,
+      "reviewedOperationMaximum": 2,
+      "scope": "Across-film continuation; generation limited to selected shot"
+    },
+    "audioLibrary": {
+      "label": "music.wav",
+      "seconds": 15,
+      "previewPlayed": true,
+      "unfinishedEditCountBeforeAfterImport": [
+        1,
+        1
+      ]
+    },
+    "timeline": {
+      "pictureMuted": true,
+      "musicAndVoicePlayedTogether": true,
+      "futureSecondCueAfterInitialPlay": {
+        "musicTimeSeconds": 6.08766,
+        "voiceSourceTimeSeconds": 0.071679,
+        "voicePaused": false
+      },
+      "pauseAndSeekAllMediaPaused": true,
+      "leavingTimelineAudioElementCount": 0
+    },
+    "v4Upgrade": {
+      "surface": "Project settings / Director / Project guidance / Enable audio planning",
+      "result": "This project uses current audio planning guidance",
+      "recordedConversationAttempts": 0
+    },
+    "responsive": {
+      "viewportWidth": 390,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "audioDialogWidth": 356,
+      "audioDialogScrollWidth": 339
+    }
+  },
+  "screenshots": [
+    "timeline-desktop.png",
+    "timeline-mobile.png",
+    "shot-audio.png",
+    "shot-audio-mobile.png",
+    "generation-review.png",
+    "audio-library.png",
+    "guidance-upgrade.png"
+  ],
+  "limitations": [
+    "Browser fixture clips contain one second of synthetic picture within six-second planned slots; they are not duration evidence for a real provider.",
+    "Synthetic media proves mechanical UI/playback behavior, not speech or picture quality.",
+    "The fixture plan has no export node; exact audio/export behavior is verified separately by actual FFmpeg tests.",
+    "No full real-provider conversation-to-film run or new voice enrollment was performed."
+  ]
+}

@@ -1,3 +1,4 @@
+import { PersonalVoiceSettings } from './PersonalVoiceSettings';
 import { IconButton, HelpTip } from "./components";
 import { useEffect, useRef, useState } from "react";
 import type { StudioApi } from "./api";
@@ -31,7 +32,7 @@ export function ProjectSettings({ api, projectId, snapshot, close, changed, onCo
     <div className="project-settings-body">
       {section === "models" && <ProjectModelsSettings api={api} projectId={projectId} {...(snapshot ? { snapshot } : {})} changed={changed} {...(onContinue ? { onContinue } : {})} refreshKey={refreshKey} busyChanged={setBusy} />}
       {section === "director" && <DirectorSettingsPanel api={api} projectId={projectId} changed={changed} refreshKey={refreshKey} busyChanged={setBusy} />}
-      {section === "setup" && <ProviderSetupAccounts api={api} projectId={projectId} refreshKey={refreshKey} />}
+      {section === "setup" && <><ProviderSetupAccounts api={api} projectId={projectId} refreshKey={refreshKey} /><PersonalVoiceSettings api={api} projectId={projectId} busyChanged={setBusy} /></>}
     </div>
   </section></div>;
 }

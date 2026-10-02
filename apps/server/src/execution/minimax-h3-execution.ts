@@ -11,6 +11,7 @@ import { Store } from "../persistence/store.js";
 import type { ArtifactRecord, Attempt } from "./engine.js";
 import { ExecutionOutputStore } from "./output-store.js";
 import { ProtectedVideoDownloader } from "./video-download.js";
+import { assertCurrentGeneratedSelection } from './current-generated-selection.js';
 import { assertH3ExecutionDispatch, assertH3ExecutionMapping, assertH3ExecutionObservation, assertH3ExecutionSubmit, assertH3PollPolicy, assertH3PollSchedule, h3Fields, h3Hash, h3ObservationId } from "./minimax-h3-receipts.js";
 import type { H3ExecutionDispatch, H3ExecutionMapping, H3ExecutionObservation, H3ExecutionSubmit, H3PollObservation, H3PollPolicy, H3PollSchedule, H3SubmitObservation } from "./minimax-h3-receipts.js";
 
@@ -45,7 +46,9 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     const request = structuredClone(input), signal = options.signal, expected = options.expectedLease ? { ...options.expectedLease } : undefined;
     const attempt = this.admitted(request);
     if (this.started(attempt.id)) return this.replay(attempt, signal);
-    this.dispatchable(attempt, expected);
+    this.leaseOwned(attempt, expected);
+    try { this.dispatchable(attempt, expected); }
+    catch { return this.notDispatched(attempt, expected, 'LOCAL_CANCELLED', signal); }
     let prepared: MiniMaxH3Request, mapping: H3ExecutionMapping;
     try {
       stopped(signal); prepared = await this.prepare(attempt, signal); stopped(signal);
@@ -65,13 +68,16 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     let transport: MiniMaxH3Provider;
     try { stopped(signal); transport = this.transport(mapping.transport.model); }
     catch { return this.notDispatched(attempt, expected, signal?.aborted ? "LOCAL_CANCELLED" : "LOCAL_CREDENTIAL_UNAVAILABLE", signal); }
-    const claimed = this.#store.transaction(() => {
-      if (this.started(attempt.id)) return false;
-      stopped(signal); this.dispatchable(attempt, expected);
-      const dispatch: H3ExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping), bodySha256: mapping.transport.bodySha256,
-        externalAllowanceId: request.externalAllowanceId!, createdAt: this.now() };
-      this.#store.insert("h3_execution_dispatch", attempt.id, attempt.projectId, dispatch); return true;
-    });
+    let claimed: boolean;
+    try {
+      claimed = this.#store.transaction(() => {
+        if (this.started(attempt.id)) return false;
+        stopped(signal); this.dispatchable(attempt, expected);
+        const dispatch: H3ExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping), bodySha256: mapping.transport.bodySha256,
+          externalAllowanceId: request.externalAllowanceId!, createdAt: this.now() };
+        this.#store.insert("h3_execution_dispatch", attempt.id, attempt.projectId, dispatch); return true;
+      });
+    } catch { return this.notDispatched(attempt, expected, 'LOCAL_CANCELLED', signal); }
     if (!claimed) return this.replay(attempt, signal);
     let observation: MiniMaxH3SubmitResult | undefined;
     try {
@@ -176,6 +182,10 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     return attempt;
   }
   private dispatchable(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
+    this.leaseOwned(previous, expected);
+    assertCurrentGeneratedSelection(this.#store, previous, 'H3_EXECUTION_NOT_DISPATCHABLE');
+  }
+  private leaseOwned(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
     this.#recovery.assertFirstSubmit(previous.projectId, previous.id);
     const current = this.admitted(previous.request), reservation = this.#store.get<{ state: string }>("reservation", current.reservationId!);
     invariant(expected && Object.keys(expected).every(key => ["owner", "epoch"].includes(key)) && expected.owner === current.leaseOwner
@@ -210,7 +220,11 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     return this.#store.insert("h3_execution_submit", attempt.id, attempt.projectId, value);
   }
   private async notDispatched(attempt: Attempt, expected: ExecutionCallOptions["expectedLease"], code: Extract<H3SubmitObservation, { kind: "not_dispatched" }>["code"], signal?: AbortSignal): Promise<ExecutionOutcome> {
-    this.#store.transaction(() => { if (!this.started(attempt.id)) { this.dispatchable(attempt, expected); this.saveSubmit(attempt, { kind: "not_dispatched", code }); } });
+    this.#store.transaction(() => {
+      // The original live owner can seal its own known no-POST result even after Stop or selection changes.
+      // A replacement lease or an existing irreversible marker cannot be refunded through this branch.
+      if (!this.started(attempt.id)) { this.leaseOwned(attempt, expected); this.saveSubmit(attempt, { kind: "not_dispatched", code }); }
+    });
     return this.replay(attempt, signal);
   }
   private schedule(attempt: Attempt, submit: H3ExecutionSubmit): H3PollSchedule {
@@ -228,9 +242,13 @@ export class MiniMaxH3Execution implements ExecutionProvider {
       dispatchDigest: digest(dispatch), observedAt: this.now(), observation });
   }
   private async replay(attempt: Attempt, signal?: AbortSignal): Promise<ExecutionOutcome> {
+    const retained = this.submission(attempt);
+    // Definite non-acceptance is SQL evidence. Cancellation or an unavailable output store cannot hide it.
+    if (retained?.observation.kind === 'not_dispatched' || retained?.observation.kind === 'rejected') return { type: 'rejected', certainty: 'not_accepted',
+      failureId: `h3-${digest(retained).slice(0, 32)}`, technical: retained.observation.kind === 'not_dispatched', retryAllowed: false };
     try { const completed = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {}); if (completed) return completed; }
     catch { return unknown("H3 owned output requires local recovery", attempt.taskId ?? undefined); }
-    const submit = this.submission(attempt);
+    const submit = retained ?? this.submission(attempt);
     if (!submit) return unknown("H3 acceptance is unresolved; automatic resubmission is disabled", attempt.taskId ?? undefined);
     const observation = submit.observation;
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",

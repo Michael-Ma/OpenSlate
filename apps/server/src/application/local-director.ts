@@ -131,7 +131,7 @@ export class LocalDirectorController {
     try {
       const prepared = selection.mode === "native" ? await this.prepare(projectId, selection) : null;
       const changedMode = before.selection.mode !== selection.mode;
-      invariant(!oldLock || ["1.0.0", "2.0.0", "3.0.0"].includes(oldLock.lock.compatibility.toolContract), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
+      invariant(!oldLock || ["1.0.0", "2.0.0", "3.0.0", "4.0.0"].includes(oldLock.lock.compatibility.toolContract), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
       const replacement = changedMode && oldLock ? createDirectorSkillLock({ repositoryRoot: this.config.repositoryRoot,
         snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
         runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" }, oldLock.lock.compatibility.toolContract as ToolContractVersion).lock : null;

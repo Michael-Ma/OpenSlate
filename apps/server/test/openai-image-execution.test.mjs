@@ -75,6 +75,36 @@ function fixture(t, options = {}) {
   return { directory, path, store, project, artifactRoot, outputs, credentials, fetch, bridge, calls, attempt, request: attempt?.request, engine, admit, references, profile };
 }
 const context = f => ({ expectedLease: { owner: f.attempt.leaseOwner, epoch: f.attempt.leaseEpoch } });
+function preparationBarrier() { let enter, release; return { entered:new Promise(resolve=>{enter=resolve;}),wait:new Promise(resolve=>{release=resolve;}),enter:()=>enter(),release:()=>release() }; }
+
+for(const change of ['paused','project-hold','shot-hold','scene-hold','retired','candidate-replaced','shot-intent'])test(`OpenAI image first POST rechecks current ${change} after asynchronous preparation`,async t=>{
+ const f=fixture(t,{images:[otherBytes]}),barrier=preparationBarrier(),prepare=f.bridge.prepare.bind(f.bridge);
+ f.bridge.prepare=async(...args)=>{const value=await prepare(...args);barrier.enter();await barrier.wait;return value;};
+ const running=f.bridge.submit(f.request,context(f));
+ await barrier.entered;
+ if(change==='paused')f.engine.setPaused(f.project.id,true,'new-stop');
+ else if(change.endsWith('hold'))f.engine.setHold(f.project.id,{scopeId:change==='project-hold'?f.project.id:change==='shot-hold'?f.project.shots[0].id:f.project.shots[0].sceneId,ownerId:'new-edit'});
+ else if(change==='shot-intent'){const p=f.store.getProject(f.project.id);p.shots[0].framing='New human direction';f.store.saveProject(p,p.headVersion);}
+ else{const binding=f.store.get('node_binding',f.request.nodeId);f.store.put('node_binding',binding.id,f.project.id,change==='retired'?{...binding,state:'retired'}:{...binding,candidateId:null});}
+ barrier.release();const outcome=await running;assert.equal(outcome.type,'rejected');assert.equal(f.calls.http,0);assert.equal(f.store.list('image_execution_dispatch',f.project.id).length,0);assert.equal(f.store.list('image_execution_result',f.project.id).length,1);assert.equal(f.store.list('image_execution_result',f.project.id)[0].observation.kind,'not_dispatched');
+});
+
+test('OpenAI image completed receipt remains recoverable after Stop and detachment without another POST',async t=>{
+ const f=fixture(t),completed=await f.bridge.submit(f.request,context(f));assert.equal(completed.type,'completed');
+ f.engine.setPaused(f.project.id,true,'after-post-stop');const binding=f.store.get('node_binding',f.request.nodeId);f.store.put('node_binding',binding.id,f.project.id,{...binding,candidateId:null,state:'retired'});
+ assert.deepEqual(await f.bridge.lookup(f.attempt.id),completed);assert.deepEqual(await f.bridge.submit(f.request),completed);assert.equal(f.calls.http,1);
+});
+
+for(const action of ['Stop','edit'])test(`OpenAI image ${action} before POST releases the Engine reservation with retained non-dispatch proof`,async t=>{
+ const f=fixture(t,{deferAdmission:true,images:[otherBytes]}),barrier=preparationBarrier(),prepare=f.bridge.prepare.bind(f.bridge);
+ f.bridge.prepare=async(...args)=>{const value=await prepare(...args);barrier.enter();await barrier.wait;return value;};
+ const running=f.engine.runReady();await barrier.entered;
+ if(action==='Stop')f.engine.setPaused(f.project.id,true,'stop-before-post');else f.engine.setHold(f.project.id,{scopeId:f.project.shots[0].id,ownerId:'edit-before-post'});
+ barrier.release();await running;
+ const attempt=f.engine.attempts(f.project.id)[0];assert.equal(attempt.phase,'failed');assert.equal(f.calls.http,0);assert.equal(f.store.list('image_execution_dispatch',f.project.id).length,0);
+ assert.equal(f.store.list('image_execution_result',f.project.id)[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.budget(f.project.id).committedMicros,'0');
+ await f.engine.reconcile();await f.engine.runReady();assert.equal(f.calls.http,0);assert.equal(f.engine.attempts(f.project.id).length,1);
+});
 function restoreImageFixture(f) {
   installRecoveryQuarantine(f.store, { restoreId: randomUUID(), backupId: randomUUID(), backupManifestSha256: "a".repeat(64), sourceDatabaseSha256: "b".repeat(64),
     originalDataRoot: f.directory, backupCreatedAt: "2026-09-11T00:00:00.000Z", restoredAt: "2026-09-12T00:00:00.000Z" });

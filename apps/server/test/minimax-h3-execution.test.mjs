@@ -80,6 +80,7 @@ function fixture(t, options = {}) {
 }
 const rows = (f, kind) => f.store.list(kind, f.project.id);
 const context = f => ({ expectedLease: { owner: f.attempt.leaseOwner, epoch: f.attempt.leaseEpoch } });
+function preparationBarrier() { let enter, release; return { entered:new Promise(resolve=>{enter=resolve;}),wait:new Promise(resolve=>{release=resolve;}),enter:()=>enter(),release:()=>release() }; }
 function due(f) { f.clock.value = rows(f, "h3_poll_schedule")[0].nextPollAt; }
 function attempt(f) { return f.engine.attempts(f.project.id)[0]; }
 function restoreH3Fixture(f) {
@@ -132,6 +133,35 @@ test("missing or replaced caller lease cannot create a first POST or seal anothe
   const old = context(f); f.store.put("attempt", f.attempt.id, f.project.id, { ...f.attempt, leaseOwner: "replacement", leaseEpoch: f.attempt.leaseEpoch + 1 });
   await assert.rejects(f.bridge.submit(f.request, old), { code: "H3_EXECUTION_NOT_DISPATCHABLE" });
   assert.equal(rows(f, "h3_execution_mapping").length, 0); assert.equal(rows(f, "h3_execution_submit").length, 0); assert.equal(f.calls.post, 0);
+});
+
+for (const change of ['paused','project-hold','shot-hold','scene-hold','retired','candidate-replaced','shot-intent']) test(`MiniMax first POST rechecks current ${change} after asynchronous preparation`, async t=>{
+ const f=fixture(t),barrier=preparationBarrier(),prepare=f.bridge.prepare.bind(f.bridge);
+ f.bridge.prepare=async(...args)=>{const value=await prepare(...args);barrier.enter();await barrier.wait;return value;};
+ const running=f.bridge.submit(f.request,context(f));
+ await barrier.entered;
+ if(change==='paused')f.engine.setPaused(f.project.id,true,'new-stop');
+ else if(change.endsWith('hold'))f.engine.setHold(f.project.id,{scopeId:change==='project-hold'?f.project.id:change==='shot-hold'?f.project.shots[0].id:f.project.shots[0].sceneId,ownerId:'new-edit'});
+ else if(change==='shot-intent'){const p=f.store.getProject(f.project.id);p.shots[0].motion='New human direction';f.store.saveProject(p,p.headVersion);}
+ else{const binding=f.store.get('node_binding',f.request.nodeId);f.store.put('node_binding',binding.id,f.project.id,change==='retired'?{...binding,state:'retired'}:{...binding,candidateId:null});}
+ barrier.release();const outcome=await running;assert.equal(outcome.type,'rejected');assert.equal(f.calls.post,0);assert.equal(rows(f,'h3_execution_dispatch').length,0);assert.equal(rows(f,'h3_execution_submit').length,1);assert.equal(rows(f,'h3_execution_submit')[0].observation.kind,'not_dispatched');
+});
+
+test('MiniMax accepted receipt remains recoverable after Stop and candidate detachment without another POST', async t=>{
+ const f=fixture(t);assert.equal((await f.bridge.submit(f.request,context(f))).type,'accepted');
+ f.engine.setPaused(f.project.id,true,'after-post-stop');const binding=f.store.get('node_binding',f.request.nodeId);f.store.put('node_binding',binding.id,f.project.id,{...binding,candidateId:null,state:'retired'});
+ assert.deepEqual(await f.bridge.lookup(f.attempt.id),{type:'accepted',taskId});assert.deepEqual(await f.bridge.submit(f.request),{type:'accepted',taskId});assert.equal(f.calls.post,1);
+});
+
+for(const action of ['Stop','edit'])test(`MiniMax ${action} before POST records definite non-dispatch and releases the Engine reservation`,async t=>{
+ const f=fixture(t,{deferAdmission:true}),barrier=preparationBarrier(),prepare=f.bridge.prepare.bind(f.bridge);
+ f.bridge.prepare=async(...args)=>{const value=await prepare(...args);barrier.enter();await barrier.wait;return value;};
+ const running=f.engine.runReady();await barrier.entered;
+ if(action==='Stop')f.engine.setPaused(f.project.id,true,'stop-before-post');else f.engine.setHold(f.project.id,{scopeId:f.project.shots[0].id,ownerId:'edit-before-post'});
+ barrier.release();await running;
+ const attempt=f.engine.attempts(f.project.id)[0];assert.equal(attempt.phase,'failed');assert.equal(f.calls.post,0);assert.equal(rows(f,'h3_execution_dispatch').length,0);
+ assert.equal(rows(f,'h3_execution_submit')[0].observation.kind,'not_dispatched');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');assert.equal(f.engine.budget(f.project.id).committedMicros,'0');
+ await f.engine.reconcile();await f.engine.runReady();assert.equal(f.calls.post,0);assert.equal(f.engine.attempts(f.project.id).length,1);
 });
 
 test("a caller losing its lease during credential resolution cannot borrow the replacement for HTTP", async t => {

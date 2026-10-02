@@ -1,5 +1,7 @@
+import { projectAudioPlacements } from '../narration/audio-placement.js';
+import type { ShotAudioCut } from '../narration/audio-placement.js';
 import type { NarrationAudio } from '../narration/types.js';
-import { canonical, invariant, shotIntentDigest } from "@openslate/core";
+import { canonical, invariant, shotIntentDigest, shotVideoTiming } from "@openslate/core";
 import type { ArtifactRef, CompiledPlan, CueRecord, InputSource, PlanNode } from "@openslate/core";
 import type { NodeBinding } from "../execution/engine.js";
 import type { Store } from "../persistence/store.js";
@@ -15,7 +17,7 @@ interface Plan { id: string; projectId: string; compiled: CompiledPlan }
 interface Artifact { projectId: string; artifact: ArtifactRef; fixture: boolean }
 interface Narration {
   id: string; projectId: string; script: string;
-  segments: Array<{ cue: CueRecord; audioPlacement: { source: SuppliedMedia; startSample: number; durationSamples: number; atSample: number; gainMilliDb: number } }>;
+  segments: Array<{ cue: CueRecord; placementMode?: "shot"; timingMode?: "within_shot"; audioPlacement: { source: SuppliedMedia; startSample: number; durationSamples: number; atSample: number; gainMilliDb: number } }>;
 }
 
 function currentPlan(store: Store, projectId: string) {
@@ -52,20 +54,24 @@ function timelineCapture(context: ReturnType<typeof currentPlan>, timeline: Plan
     if (source.kind === "artifact") invariant(project.artifacts.some(a => canonical(a) === canonical(ref)), "MEDIA_ARTIFACT_UNAVAILABLE", "Imported artifact is not in the current project");
     inputs.push({ nodeId: source.kind === "output" ? source.nodeId : null, port: source.kind === "output" ? source.port : kind, artifact: ref }); return ref;
   };
-  const selectedCueIds = new Set<string>();
+  const selectedCueIds = new Set<string>(), audioCuts: ShotAudioCut[] = [];
+  let timelineStartFrame = 0;
   const clips = takes.map(take => {
     const ref = resolve(take.source, "video"), owned = store.get<OwnedMediaSource>("media_source", ref.artifactId);
     invariant(owned?.projectId === projectId && owned.source.kind === "video" && owned.source.artifactId === ref.artifactId && owned.source.sha256 === ref.sha256, "MEDIA_SOURCE_UNAVAILABLE", "Video has no measured supplied-media descriptor");
     let frames = owned.source.probe.video?.frames;
     if (take.source.kind === "output") {
       const video = node(take.source.nodeId, "video"), shot = project.shots.find(s => s.id === video.shotId);
-      invariant(shot && video.args.durationFrames === shot.desiredFrames && video.shotRevisionId === shot.revisionId, "MEDIA_STALE_BINDING", "Video timing no longer matches its shot");
+      invariant(shot && Number(video.args.durationFrames) >= shot.desiredFrames && video.shotRevisionId === shot.revisionId, "MEDIA_STALE_BINDING", "Video timing no longer matches its shot");
       const cue = shot.cueId ? project.cues.find(c => c.id === shot.cueId) : undefined;
-      invariant(!shot.cueId || (cue?.accepted && cue.measured && cue.durationFrames === shot.desiredFrames), "MEDIA_NARRATION_REQUIRED", "Current shot timing is not accepted");
+      invariant(shotVideoTiming(project, shot).ready || (!shot.narration && !shot.cueId && !project.narration.script.trim() && project.cues.length === 0), "MEDIA_NARRATION_REQUIRED", "Choose no narration or accept the current shot audio and timing");
       invariant(video.intentDigest === shotIntentDigest(shot, "video", cue) && shot.promptIntent.video === video.intentDigest && video.args.prompt === shot.videoPrompt, "MEDIA_STALE_BINDING", "Selected take intent is stale");
       if (cue) selectedCueIds.add(cue.id); frames = shot.desiredFrames;
     }
     invariant(Number.isSafeInteger(frames) && frames! > 0, "MEDIA_SOURCE_UNAVAILABLE", "Video duration has not been measured");
+    const videoNode = take.source.kind === "output" ? node(take.source.nodeId, "video") : null;
+    const currentShot = videoNode ? project.shots.find(shot => shot.id === videoNode.shotId) : undefined;
+    audioCuts.push({ shotId: currentShot?.id ?? null, cueId: currentShot?.cueId ?? null, startFrame: timelineStartFrame, durationFrames: frames!, ...(currentShot?.narrationTimingMode ? { timingMode: currentShot.narrationTimingMode } : {}) }); timelineStartFrame += frames!;
     return { source: owned.source, startFrame: 0, durationFrames: frames!, fit: "contain" as const };
   });
   const totalFrames = clips.reduce((sum, clip) => sum + clip.durationFrames, 0);
@@ -87,12 +93,12 @@ function timelineCapture(context: ReturnType<typeof currentPlan>, timeline: Plan
   });
   invariant(new Set(selected.map(s => s.cue.id)).size === selected.length && [...selectedCueIds].every(id => selected.some(s => s.cue.id === id)), "MEDIA_NARRATION_REQUIRED", "Timeline does not cover its shot cues exactly");
   if (selected.length) invariant(narration?.projectId === projectId && narration.script === project.narration.script, "MEDIA_NARRATION_REQUIRED", "Narration script changed after acceptance");
-  else invariant(!project.narration.script.trim() && project.cues.length === 0 && narrationInputs.length === 0, "MEDIA_NARRATION_REQUIRED", "A narrated project requires committed timeline cue placements");
+  else invariant(selectedCueIds.size === 0 && narrationInputs.length === 0, "MEDIA_NARRATION_REQUIRED", "Narrated takes require committed timeline cue placements");
   for (const input of narrationInputs) {
     const audio = resolve(input.source, "audio");
     invariant(selected.some(segment => canonical(segment.cue.audio) === canonical(audio)), "MEDIA_NARRATION_REQUIRED", "Narration input is not part of the frozen cue placements");
   }
-  const audio = selected.map(segment => segment.audioPlacement);
+  const audio = selected.flatMap(segment => projectAudioPlacements(segment, audioCuts));
   if (project.soundtrack) {
     const recording = store.get<NarrationAudio>('narration_audio', project.soundtrack.audioId);
     invariant(recording?.projectId === projectId && recording.media.kind === 'audio', 'MEDIA_ARTIFACT_UNAVAILABLE', 'Selected soundtrack is unavailable.');

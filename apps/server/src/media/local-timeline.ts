@@ -101,7 +101,7 @@ function source(value: unknown, kind: "video" | "audio"): SuppliedMedia {
 function create(input: unknown): LocalTimelineDocument {
   const value = object(input, ["projectId", "clips", "audio"]); identity(value.projectId, ID);
   invalid(Array.isArray(value.clips) && value.clips.length > 0 && value.clips.length <= 64, "A timeline needs one to 64 clips");
-  invalid(Array.isArray(value.audio) && value.audio.length <= 64, "A timeline supports at most 64 audio placements");
+  invalid(Array.isArray(value.audio) && value.audio.length <= 65, "A timeline supports at most 65 audio placements");
   const artifacts = new Map<string, string>();
   const remember = (media: SuppliedMedia) => {
     invalid(!artifacts.has(media.artifactId) || artifacts.get(media.artifactId) === media.id, "One artifact cannot name different source descriptors");
@@ -122,7 +122,7 @@ function create(input: unknown): LocalTimelineDocument {
     const gainMilliDb = Object.hasOwn(placement, "gainMilliDb") ? placement.gainMilliDb : 0; integer(gainMilliDb, -60000, 12000);
     invalid(placement.startSample + placement.durationSamples <= media.probe.audio!.samples!, "Audio exceeds measured source samples");
     invalid(placement.atSample + placement.durationSamples <= totalFrames * 1600, "Audio extends beyond the timeline");
-    audioSources.add(media.sha256); invalid(audioSources.size <= 8, "Too many distinct audio sources");
+    audioSources.add(media.sha256); invalid(audioSources.size <= 65, "Too many distinct audio sources");
     return { source: media, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb };
   });
   const ends: number[] = [];

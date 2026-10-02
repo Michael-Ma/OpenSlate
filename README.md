@@ -9,9 +9,9 @@ OpenSlate combines a conversational director with an editable storyboard: **trea
 ## Current studio
 
 - **Storyboard:** edit the treatment, scene direction and shot descriptions in place. Add shots/scenes, drag shots, delete a shot or undo the latest eligible edit. Stable shot identities preserve unaffected work.
-- **Per-shot review:** inspect one keyframe and its motion plan, then approve it with the card's check. Generated video plays in the same card. Frame approval, generation permission and spending approval remain separate.
-- **Narration:** choose no narration, generated speech or an uploaded recording per shot. Script choices are intent; the detailed audio dialog still handles recording, timing and explicit acceptance. Generating speech in your recorded voice is not connected yet.
-- **Timeline and assets:** preview the picture sequence, select an imported background track, and render locally with FFmpeg. Audio is heard in the rendered export; live audio audition, trimming and waveforms are pending. Assets lists uploaded and generated images/video.
+- **Generation review:** follow the guided plan → keyframes → clips → export steps. Review the selected operations and costs, then approve each returned frame and motion plan with its card’s check. Exact generation, spending and frame approvals remain distinct.
+- **Narration:** silent shots use their planned duration. A compact shot dialog supports script-first or recording-first review, listening and exact acceptance. Short voiceover fits inside the planned picture. Existing eligible OpenAI custom voice IDs can be registered with consent; cloning a new voice from a recording still needs provider setup.
+- **Timeline and assets:** play picture, accepted narration and background music together; seek, pause and export locally with FFmpeg. Import and listen to owned audio from chat or Timeline. Assets lists uploaded and generated images/video. Trimming, waveforms and richer mixing remain later work.
 - **Conversation and setup:** use chat to refine an affected shot, **+** to import media and **Stop** to interrupt work. Header settings change models and the director. Authenticated SSE delivers live updates.
 
 The studio uses one shared typography system: bold section, scene and shot headings above regular-weight content. See the [current UI, backend edit contracts and limits](docs/design/STORYBOARD-STUDIO.md).
@@ -41,7 +41,7 @@ For the complete local studio, run:
 
 The script selects Node 24 through an existing nvm installation if needed, checks enabled-provider prerequisites, loads `.env.live.local` when present, installs locked dependencies with the pinned pnpm version, builds all packages, and opens the connected app. Keep the terminal open; Ctrl+C stops the server. It preserves keys, provider enable switches and saved projects. If a server is already running, it verifies the service and installation credential, then reconnects. This is success, not an error. Run `./start.sh --restart` to gracefully stop the verified server from this checkout, rebuild, and apply changed code/configuration. It refuses unrelated listeners and never force-kills a process.
 
-Use `./start.sh --status` to check whether this installation can connect, `./start.sh --check` for prerequisite checks or `./start.sh --no-open` to leave the browser closed. Missing FFmpeg, pinned Codex, or credentials get actionable errors; system installation and Codex sign-in remain explicit setup steps. The commands below are the manual alternative.
+Use `./start.sh --init-config` to create a private configuration template, `./start.sh --doctor` for actionable prerequisite checks, `./start.sh --status` to inspect the current installation or `./start.sh --no-open` to leave the browser closed. See [first-run setup](docs/implementation/LOCAL-SETUP.md). Missing FFmpeg, pinned Codex, or credentials get actionable errors; system installation and Codex sign-in remain explicit setup steps. The commands below are the manual alternative.
 
 Prerequisites: Node.js 24 and pnpm 10.33.0. The SQLite dependency invokes native build tooling; the verified macOS setup also had Python 3 and Xcode command-line build tools. See [fresh checkout evidence](docs/implementation/CLEAN-CHECKOUT-VALIDATION.md) for the tested environment. If needed, install pnpm with `npm install -g pnpm@10.33.0`.
 

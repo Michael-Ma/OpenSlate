@@ -150,3 +150,12 @@ test('Viggle cannot borrow approval identities from another video provider or a 
   assert.throws(() => reviewSpending(state({ candidates: [viggle, minimax] }), [viggle.candidateId, minimax.candidateId], 'mixed-provider'));
   assert.equal(canSelectSpending({ ...viggle, providerDisplay: { ...viggle.providerDisplay, adapter: 'unknown-video' } }), false);
 });
+
+test('registered custom speech voices can receive an exact spending review without accepting arbitrary selectors',()=>{
+ const current=audioCandidate('speech',{audioDisplay:{operation:'speech',voice:'openai-custom:voice_owned1',textBytes:52,instructionsPresent:false}});
+ const source=state({candidates:[current]});assert.equal(canSelectSpending(current),true);
+ const review=reviewSpending(source,[current.candidateId],'custom-voice-review',1000);
+ assert.equal(review.audioDisplays[0].voice,current.audioDisplay.voice);assert.equal(spendingReviewCurrent(review,source,1001),true);
+ assert.equal(spendingReviewCurrent(review,state({candidates:[{...current,audioDisplay:{...current.audioDisplay,voice:'openai-custom:voice_other'}}]}),1001),false);
+ for(const voice of ['openai-custom:https://example.com','openai-custom:voice_a/b','elevenlabs-personal:unconnected','openai-custom:voice_'])assert.equal(canSelectSpending({...current,audioDisplay:{...current.audioDisplay,voice}}),false);
+});

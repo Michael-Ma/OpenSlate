@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated September 29, 2026. This page describes implemented behavior and verified limits. [Technical designs](../technical/README.md) describe the broader target; [the development plan](../design/IMPLEMENTATION-PLAN.md) tracks remaining work.
+Updated October 1, 2026. This page describes implemented behavior and verified limits. [Technical designs](../technical/README.md) describe the broader target; [the development plan](../design/IMPLEMENTATION-PLAN.md) tracks remaining work.
 
 ## Current capability
 
@@ -10,12 +10,16 @@ Updated September 29, 2026. This page describes implemented behavior and verifie
 | Direction and planning | Codex or demo runtime, versioned skills/tools, typed stage outputs and restricted plan compiler | Native scoped conversations and contract delivery tested; complete native conversational production still needs acceptance |
 | Execution | Durable attempts, exact human grants, spending allowances, uncertain-submission recovery and scoped reuse | Offline regression and restart/recovery checks; no blind retry of unknown paid submissions |
 | Visual production | Uploaded images/video, Codex or API image adapters, Viggle and MiniMax adapters, keyframe/motion review | One actual Codex image → Viggle clip → export passed; OpenAI image API live validation remains pending |
-| Narration | Drafts, uploaded recordings, speech/transcription proposals, human review, canonical audio/timing and adoption | Implemented and tested with synthetic media/injected providers; real speech/transcription validation remains pending |
+| Narration | Compact scoped script/recording/listen/accept, canonical exact source ranges, short voiceover within planned shots, relative shot placement, advanced transcripts | Synthetic media/injected-provider tests and actual FFmpeg proofs; real speech/transcription validation remains pending |
 | Assembly | Owned media, timeline composition, FFmpeg export, local recovery | Actual six-second provider output and synthetic six-minute workflow verified |
-| Review UI | Treatment, scene and shot storyboard; direct text edits, drag ordering, delete/undo, individual frame review, shot narration intent, chat import and light Timeline | Persistent command/revision tests and disposable browser review; detailed audio acceptance dialog retained; personal voice cloning and timeline audio audition pending |
+| Review UI | Editable storyboard, plural saved-edit continuation, guided generation review, compact audio, owned recording library and synchronized Timeline | Persistent authority/revision tests, disposable browser/audio review; new voice enrollment and advanced timeline editing remain pending |
+| Local setup | Private configuration template, redacted doctor, provider/prerequisite errors and existing launcher | Node 24/pnpm 10.33.0 checks and zero-network local readiness report; broader OS packaging remains pending |
+| Personal voice | Project-owned consent/revocation registry and existing eligible OpenAI custom voice identity dispatch | Offline exact wire/ownership/race/recovery tests; new cloning enrollment and live synthesis remain pending provider/account choice |
 | Installation recovery | Verified media-inclusive backup, same-root restore, quarantine and human release | Offline and browser recovery evidence; portable relocation and installer packaging remain pending |
 
 ## Latest verification
+
+- October 1 workflow completion: **2,173 passed, zero failed, one optional native probe skipped; all builds/typechecks passed.** explicit silent-shot timing, short accepted voiceover, scoped compact audio, plural edit continuation, guided review, Timeline audio and first-run setup. Four bounded native Codex turns completed with zero media jobs/grants, including a final V4 scoped-writing proof; actual synthetic FFmpeg proofs preserve one-second voice within six-second picture and support 65 audio placements. Final integrated regression/browser results are maintained in [workflow review](V1-COMPLETION-REVIEW.md).
 
 - September 28 app-wide typography: shared heading/body/caption scale; explicit scene and shot headings, wrapped descriptions, readable legacy labels and corrected setup contrast. Web build/typecheck and 126 web tests passed; desktop and 390px browser review. No provider calls. See [typography scope and checks](../design/STORYBOARD-STUDIO.md#app-wide-typography).
 
@@ -37,9 +41,9 @@ These results do not establish commercial quality, a complete conversation-to-fi
 - Run `./start.sh`; use `--status` to inspect and `--restart` to rebuild with changed code/configuration. See [launcher behavior](LOCAL-LAUNCHER.md).
 - Default generation is fake. Real providers require configuration, enabled routes, exact generation permission and separate usage/spending approval. Video also requires exact frame/motion approval.
 - App-owned state and execution remain authoritative. Codex proposes validated actions; it does not own grants, budgets or paid-job recovery.
-- Stop fences old work. Unfinished edits retain individual ownership; grouping them in the UI does not resolve conflicting edit holds. The IB project's three saved unfinished edits were not discarded during UI cleanup.
-- Current generation permission and spending remain separate UI steps. A combined guided review is planned; it must preserve the existing authority and replay guarantees.
-- Local rendering is limited to 360 seconds, 64 cuts/64 audio placements, eight distinct audio inputs and eight simultaneous lanes. Embedded clip audio is removed; automatic ducking/limiting is not implemented.
+- Stop fences old work. Unfinished edits retain individual ownership. A fresh human request may explicitly continue all fully covered owned holds with a revision-bound proof; partial/foreign/stale continuation is rejected atomically. Production IB data was not altered by this milestone.
+- The guided review connects planning, selected operation permission, exact usage/cost approval, returned-frame/motion review and export. These retain separate immutable authority and replay guarantees.
+- Local rendering is limited to 360 seconds, 64 cuts, 65 audio placements and 65 distinct audio sources, with eight simultaneous mixing lanes. Compact narration follows cut order and fits inside planned shots. Embedded clip audio is removed; automatic ducking/limiting is not implemented.
 - Supplied media is bounded and fully verified before playback; no range-streaming support yet. Backups contain private project/media records and must be protected.
 - Pairing uses a short-lived launch code and HttpOnly browser session. Manual bearer-token entry remains a fallback. Neither mechanism exposes provider API keys to the browser.
 

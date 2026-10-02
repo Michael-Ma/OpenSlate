@@ -1,13 +1,13 @@
 # Storyboard studio
 
-Implemented September 28, 2026, from the approved First Light prototype. This page supersedes the older Film plan screen arrangement in [Simplified video flow](SIMPLIFIED-VIDEO-FLOW.md); the import and authorization contracts remain unchanged.
+Implemented September 28, 2026, from the approved First Light prototype; workflow and audio updated October 1. This page supersedes the older Film plan screen arrangement in [Simplified video flow](SIMPLIFIED-VIDEO-FLOW.md); the import and authorization contracts remain unchanged.
 
 ## User flow
 
 1. Start in conversation or bring a text/Markdown brief. The director proposes an interpretation; the user confirms it before it becomes the saved film.
 2. Review the **treatment → scenes → shots** in one storyboard. Edit text in place, add shots, drag their top-left handles, or delete with the corner cross. Alt+Left/Right provides keyboard ordering. Undo restores the most recent edit only while its revision is still current.
-3. Set narration per shot: no narration, generated speech script, or uploaded recording. The card stores writing intent; audio setup opens the existing recording, timing and acceptance workflow with that shot as the mapping target.
-4. Continue in conversation to update affected prompts and the execution plan. Direct edits do not launch paid work. Generation permissions and spending remain available behind the treatment settings icon.
+3. Set narration per shot: no narration, generated speech script, or uploaded recording. The card stores writing intent; audio setup opens the compact script/recording/listen/accept flow scoped to that shot. No narration uses the planned visual duration and needs no silent recording.
+4. Continue in conversation to update affected prompts and the execution plan. Direct edits do not launch paid work. A covering message can explicitly continue multiple saved edits together. The treatment settings icon opens the guided generation review.
 5. Review each actual keyframe and its exact motion plan using the card's check. Video generation still needs its human grant and budget. The generated clip replaces the frame in that card and supports playback, including muted hover preview.
 6. Inspect the light **Timeline**, select optional owned background music, then render and review the export. Assets remains the library of uploaded and generated media. The chat + button opens media import.
 
@@ -30,21 +30,25 @@ flowchart LR
 
 `POST /api/projects/:id/storyboard` supports treatment, scene, addScene, shot, addShot, deleteShot, moveShot, narration, soundtrack and undo. It authenticates the local human, rejects stale revisions and pending imports, writes a revision and receipt atomically, and emits the normal SSE event. Unknown fields, foreign identities and duration limits fail before publication. No model-authored code is evaluated.
 
-Shot IDs survive reorder and undo. A direct-edit request may continue the preceding direct-edit request's holds; unrelated conversation holds retain their owners. The next covering chat request explicitly sends the saved edit's continuation ID. Direct-edit audit records stay available to debugging and director context without filling the conversation with mechanical messages.
+Shot IDs survive reorder and undo. A direct-edit request may continue the preceding direct-edit request’s holds; unrelated conversation holds retain their owners. A new covering human request carries a revision-bound proof for all fully covered saved edit owners. Partial, foreign or changed holds are rejected atomically; grouping never creates a grant. Direct-edit audit records stay available to debugging and director context without filling the conversation with mechanical messages.
 
 Edits retain attempts and provider receipts. Changed image/video intent detaches the corresponding current candidates and downstream outputs; a camera-motion-only edit keeps the keyframe. Late completion is retained as historical evidence, not republished into the changed slot. Topology and music changes invalidate assembly. Undo restores creative data, not spent grants or old approval authority. A matching plan must be applied before held work resumes.
 
 ### Narration
 
-Optional `shot.narration = {mode, text, voice}` is **writing intent**, not a second canonical audio system. Existing accepted sections, recordings, cue identities and measured timings remain authoritative for export. A no-narration choice with a saved cue is shown as a pending removal until explicit narration review. Existing projects need no migration.
+Optional `shot.narration = {mode, text, voice}` is writing intent. Accepted script revisions, recording hashes and source sample ranges remain authoritative. Choosing no narration explicitly detaches the shot’s cue while retaining historical recordings and review evidence. Undecided narration remains blocked; it is not silently treated as none.
 
-The dialog currently reuses the detailed narration acceptance controls; shot selection limits which mappings it submits, while the underlying narration document remains project-wide. It is not yet a one-click voice workflow. Personal voice enrollment and generation are **not connected**: selecting that preference records intent and the dialog blocks stock-voice generation as a substitute. Provider choice/access is still required.
+Compact audio sessions own one shot and an immutable section pin. Script-first and recording-first paths end with explicit acceptance of words/description, recording and range. Short voiceover stays inside the planned 3–15 second picture; an explicit duration option can match a 3–15 second recording. Accepted sources are never padded to pretend they cover the picture. Compact placements follow their shot through reordering and earlier-duration edits; legacy absolute placements keep their original semantics. See [shot audio contracts](../implementation/SHOT-AUDIO.md).
+
+Writing changes keep existing visual media but block stale audio/video dispatch until accepted current audio and a matching production plan exist. Within-shot narration is a voiceover overlay; words alone do not automatically regenerate footage. If they require a visual change, the director proposes that change explicitly.
+
+The [personal voice registry](../implementation/PERSONAL-VOICE.md) supports existing eligible OpenAI custom IDs, explicit consent and revocation. Creating a clone from a recording remains pending provider/account choice. A requested personal voice cannot fall back to stock speech. The advanced project narration workspace remains available from chat + → Audio. Conversational shot writing uses V4 guidance; older projects can explicitly enable it from Project settings → Director → Project guidance. Their earlier catalog identities are preserved.
 
 ### Timeline and soundtrack
 
-The light timeline displays scene groups, current takes/keyframes, a playhead and a narration-script lane. It is a picture preview, not a waveform/trim editor. Sound is reviewed in the rendered export. Missing footage is explicit; generated fixture footage is labeled.
+The Timeline displays scene groups, current takes/keyframes, a playhead and accepted narration. Picture, narration and music play together; pause, seek, buffering, project revision and leaving Timeline stop or reschedule old media. It caches at most eight verified audio files around current/upcoming playback. FFmpeg export remains the exact frame/sample output; browser audition uses media clocks with drift correction. Missing footage and synthetic fixture footage remain explicit. Waveforms and timeline trimming are later work.
 
-Optional `project.soundtrack = {audioId, gainMilliDb}` selects an owned imported recording, with gain from -60 to 0 dB. Timeline capture resolves its measured source and incorporates it into the revision-bound render target. FFmpeg mixes it from time zero, truncating to the shorter of the recording and film. No loop, fade, ducking or generated-music provider is implied. Existing source verification, rendering limits and stale-publication checks remain in force.
+Optional `project.soundtrack = {audioId, gainMilliDb}` selects an owned imported recording, with gain from -60 to 0 dB. Timeline capture resolves its measured source and incorporates it into the revision-bound render target. FFmpeg mixes it from time zero, truncating to the shorter of the recording and film. The + beside Music opens the owned audio library without creating a narration edit. No loop, fade, ducking or generated-music provider is implied. Existing source verification, rendering limits and stale-publication checks remain in force.
 
 ## Verification
 
@@ -55,7 +59,7 @@ Full `pnpm check`: 2,026 passed, zero failed, one optional native probe skipped;
 - Disposable integrated browser checks cover inline edit/reload, Escape cancellation, adding a shot, reorder, deletion/undo, per-shot narration persistence, missing-media states, import/audio dialog and the light timeline. Pointer drag moved shot 1.2 ahead of 1.1; the single-card review check saved approval. At 390px, document width remained 390px. The fixture studio never loads the user's production database or paid provider configuration.
 - A bounded native Codex 0.153.4 / gpt-6-astra read-only rehearsal completed against a three-scene, six-shot project: one completed turn, zero grants, zero media attempts. It correctly read the storyboard and described shot narration intent and edit/recompile boundaries. The tool sandbox blocked initial setup; the authorized native run outside it passed.
 
-These checks do not establish a complete real-provider film, personal voice cloning, interactive audio mixing, touch drag support, or user quality acceptance. See [current status](../implementation/STATUS.md) for release gates.
+The September 28 checks below are historical. For October 1 regression, native, audio and browser evidence see [workflow completion review](../implementation/V1-COMPLETION-REVIEW.md). These checks do not establish a complete real-provider film, new voice-clone enrollment, advanced audio mixing, touch drag support, or user quality acceptance. See [current status](../implementation/STATUS.md) for release gates.
 
 ## Reproduce
 

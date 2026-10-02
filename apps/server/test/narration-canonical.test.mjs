@@ -206,3 +206,29 @@ test('artifact metadata conflicts roll back the entire canonical transaction', a
   assert.deepEqual(f.store.getProject(f.project.id), before); assert.equal(f.store.list('narration_canonical', f.project.id).length, 0);
   assert.equal(f.store.list('narration_commit_receipt', f.project.id).length, 0);
 });
+
+test('scoped section commit retains accepted unrelated narration while unfinished drafts stay outside canonical output', async t => {
+  const f = await fixture(t), { mappings, ids } = await ready(f); await f.apply(f.prepare(mappings));
+  const before = f.store.getProject(f.project.id), previous = f.canonical.current(f.project.id, f.human);
+  f.revise({ update: [{ segmentId: ids[1], draft: draft('Unfinished new meaning') }], add: [{ ...draft('Writing for later'), textKind: 'notes' }] });
+  f.revise({ update: [{ segmentId: ids[0], draft: draft('A revised opening') }] }); f.cue(ids[0], 48000, 336000); f.approve(ids[0]);
+  const prepared = f.prepare([{ shotId: before.shots[0].id, segmentId: ids[0] }], { segmentIds: [ids[0]] });
+  assert.equal(prepared.snapshot.segments.length, 2);
+  assert.equal(prepared.snapshot.segments[1].script.id, previous.segments[1].segmentRevisionId);
+  await f.apply(prepared);
+  const current = f.store.getProject(f.project.id), saved = f.canonical.current(f.project.id, f.human);
+  assert.deepEqual(saved.segments[1], previous.segments[1]);
+  assert.deepEqual(current.shots[1], before.shots[1]);
+  assert.equal(current.narration.script.includes('Unfinished new meaning'), false);
+  assert.equal(current.narration.script.includes('Writing for later'), false);
+  assert.equal(current.narration.script.includes('A revised opening'), true);
+  assert.equal(f.view().segments.length, 3, 'unaccepted drafts remain available in the workspace');
+});
+
+test('scoped narration review rejects unknown sections, foreign remapping and hidden shared-shot changes', async t => {
+  const f = await fixture(t), { mappings, ids } = await ready(f); await f.apply(f.prepare(mappings));
+  assert.throws(() => f.prepare([], { segmentIds: [randomUUID()] }), code('NARRATION_INVALID_INPUT'));
+  assert.throws(() => f.prepare([{ shotId: f.project.shots[0].id, segmentId: ids[1] }], { segmentIds: [ids[0]] }), code('SCOPE_DENIED'));
+  assert.throws(() => f.prepare([{ shotId: f.project.shots[0].id, segmentId: null }], { segmentIds: [ids[0]] }), code('SCOPE_DENIED'));
+  assert.throws(() => f.prepare([], { segmentIds: [ids[0]] }), code('SCOPE_DENIED'), 'cannot update a selected linked section without naming its shot');
+});

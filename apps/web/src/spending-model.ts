@@ -115,7 +115,7 @@ export function spendingModelSettings(display: SpendingProviderDisplay): string 
 }
 function validAudioDisplay(value: SpendingAudioDisplay | null | undefined): value is SpendingAudioDisplay {
   if (!value || typeof value !== "object") return false;
-  return value.operation === "speech" ? typeof value.voice === "string" && /^[a-z]{1,32}$/.test(value.voice)
+  return value.operation === "speech" ? typeof value.voice === "string" && (/^[a-z]{1,32}$/.test(value.voice) || /^openai-custom:voice_[A-Za-z0-9_-]{1,120}$/.test(value.voice))
     && Number.isSafeInteger(value.textBytes) && value.textBytes > 0 && typeof value.instructionsPresent === "boolean"
     : value.operation === "transcription" && value.timing === "word" && (value.language === null || typeof value.language === "string" && /^[a-z]{2}$/.test(value.language));
 }
