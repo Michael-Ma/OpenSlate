@@ -8,9 +8,10 @@ import type { SupervisorOptions } from "./director-supervisor.js";
 import { DirectorContextService } from "./director-context.js";
 import { filmPlanningGuidance } from "./film-planning-guidance.js";
 import { createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
+import type { DirectorToolSettings } from "./director-tools-upgrade.js";
 
 /** Load/version once, activate against fresh canonical state on every request. */
-export function createDirectorInput(service: ProductionService, options: { repositoryRoot: string; snapshotRoot: string; endpoint: string; runtimeId?: string; defaultToolContract?: ToolContractVersion }): NonNullable<SupervisorOptions["prepareInput"]> {
+export function createDirectorInput(service: ProductionService, options: { repositoryRoot: string; snapshotRoot: string; endpoint: string; runtimeId?: string; defaultToolContract?: ToolContractVersion; freshTurnGuidance?: DirectorToolSettings }): NonNullable<SupervisorOptions["prepareInput"]> {
   const defaultVersion = toolCatalog(options.defaultToolContract ?? "4.0.0").version;
   return (turn, human, bridge): DirectorRunInput => {
     if (bridge.actor.kind !== "director") throw new Error("Director actor required");
@@ -19,6 +20,7 @@ export function createDirectorInput(service: ProductionService, options: { repos
     let lock = epochLock ? service.store.get<{ lock: SkillCapabilityLock }>("director_skill_lock", epochLock.lockId)?.lock
       : service.store.list<{ lock: SkillCapabilityLock }>("director_skill_lock", turn.projectId).at(-1)?.lock;
     invariant(!epochLock || lock, "CAPABILITY_MISMATCH", "Pinned director skill lock is missing");
+    if (!epochLock && options.freshTurnGuidance) lock = options.freshTurnGuidance.currentForFreshTurn(turn.projectId, bridge.actor, turn.id);
     if (!lock) {
       const created = createDirectorSkillLock(options, defaultVersion); lock = created.lock;
       new DirectorContextService(service, created.environment).bootstrapLock(turn.projectId, lock);

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { digest, invariant, newId } from "@openslate/core";
-import { CodexDirectorRuntime, setupLocalCodex } from "@openslate/director";
+import { CodexDirectorRuntime, setupLocalCodex, verifySkillLock } from "@openslate/director";
 import type { DirectorRunInput, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorSupervisor } from "./director-supervisor.js";
 import { FakeWorkflowDirector } from "./fake-director.js";
@@ -14,7 +14,7 @@ import type { ActorContext, ToolContractVersion } from "@openslate/core";
 import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
-import { createDirectorSkillLock } from "./director-capabilities.js";
+import { createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
 import type { SkillCapabilityLock } from "@openslate/director";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 
@@ -38,8 +38,10 @@ export class LocalDirectorController {
   readonly fake: DirectorSupervisor;
   readonly native: DirectorSupervisor;
   private readonly setup: Setup;
-  private readonly prepared = new Map<string, Promise<{ runtime: DirectorRuntime; input: ReturnType<typeof createDirectorInput>; readiness: Ready["readiness"] }>>();
+  private readonly prepared = new Map<string, Promise<{ runtime: DirectorRuntime; input: ReturnType<typeof createDirectorInput>; readiness: Ready["readiness"]; runtimeOptions: NonNullable<Ready["runtimeOptions"]> }>>();
   private readonly configuring = new Set<string>();
+  private readonly modelReadiness = new Map<string, Ready["readiness"]>();
+  private readonly modelChecks = new Map<string, Promise<Ready["readiness"]>>();
   readonly defaults: NonNullable<LocalDirectorOptions["defaults"]>;
   private readonly toolSettings: DirectorToolSettings;
   private readonly imageProjector: DirectorImageProjector | null;
@@ -85,6 +87,10 @@ export class LocalDirectorController {
       DIRECTOR_IMAGE_IDENTITY: "The saved image selection or thumbnail receipt no longer matches this request. Start a new discussion with the intended reference.",
       DIRECTOR_IMAGE_TOOL_CHANGED: "The local image tool changed. Restart OpenSlate before preparing a new image discussion.",
       DIRECTOR_IMAGES_UNAVAILABLE: "Image discussion needs a native director and local FFmpeg.",
+      DIRECTOR_GUIDANCE_UNSUPPORTED: "OpenSlate could not verify this project's Director guidance. Saved work is retained. Restore the matching application files, then send a new message.",
+      DIRECTOR_GUIDANCE_IN_FLIGHT: "This conversation began with older Director guidance. Send a new message to use the current application; saved work is retained.",
+      DIRECTOR_TOOLS_BUSY: "Wait for the current conversation or setup to finish, then send a new message.",
+      DIRECTOR_TOOLS_STALE: "Director setup changed while the conversation was being prepared. Send a new message; saved work is retained.",
     };
     return { ...status, message: status.message ?? (status.turn?.state === "failed" ? imageErrors[status.turn.errorCode ?? ""] ?? null : null),
       imageAttachmentsAvailable: this.mode(projectId) === "native" && this.imageProjector !== null };
@@ -102,9 +108,35 @@ export class LocalDirectorController {
     this.service.store.getProject(projectId);
     const saved = this.service.store.get<SavedSelection>("project_director_selection", projectId);
     const busy = this.configuring.has(projectId) || this.conversationBusy(projectId);
+    const catalog = this.modelReadiness.get(this.modelKey(projectId, this.modelSelection(projectId)));
     return { selection: saved?.selection ?? { mode: "fake" as const }, selectionDigest: saved?.digest ?? digest({ mode: "fake" }),
       busy, changeAvailable: !busy, changeAppliesTo: "next_turn" as const, defaults: this.defaults, locked: this.locked(projectId),
-      modelCalls: this.service.store.list("native_model_start", projectId).length };
+      modelCalls: this.service.store.list("native_model_start", projectId).length,
+      modelChoices: structuredClone(catalog?.modelChoices ?? []), modelCatalogStatus: !catalog || catalog.status === "ready" && catalog.modelChoices === undefined ? "unchecked" as const
+        : catalog.status === "ready" ? "ready" as const : "blocked" as const, modelCatalogCheckedAt: catalog?.checkedAt ?? null };
+  }
+  private modelSelection(projectId: string): LocalDirectorSelection {
+    const selection = this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection;
+    return selection?.mode === "native" ? selection : { mode: "native", ...this.defaults };
+  }
+  private modelKey(projectId: string, selection: LocalDirectorSelection): string { return digest({ projectId, selection }); }
+
+  /** Existing read-only local preflight only. No selection, project record, thread or turn is written. */
+  async models(projectId: string) {
+    this.service.store.getProject(projectId); this.service.recovery.assertWritable(projectId);
+    if (this.configuring.has(projectId) || this.conversationBusy(projectId)) return this.settings(projectId);
+    const selection = this.modelSelection(projectId), identity = this.modelKey(projectId, selection);
+    let pending = this.modelChecks.get(identity);
+    if (!pending) {
+      pending = this.checkLocal(projectId, selection).then(result => {
+        this.service.recovery.assertWritable(projectId);
+        if (this.modelKey(projectId, this.modelSelection(projectId)) === identity) this.modelReadiness.set(identity, structuredClone(result.readiness));
+        return result.readiness;
+      });
+      this.modelChecks.set(identity, pending);
+      void pending.finally(() => { if (this.modelChecks.get(identity) === pending) this.modelChecks.delete(identity); }).catch(() => {});
+    }
+    await pending; return this.settings(projectId);
   }
   private conversationBusy(projectId: string): boolean {
     return !!this.service.store.db.prepare("SELECT 1 FROM entities WHERE kind='director_turn' AND project_id=? AND json_extract(body,'$.state') IN ('queued','running') LIMIT 1").get(projectId);
@@ -235,19 +267,52 @@ export class LocalDirectorController {
     const pending = (async () => {
       const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace"), snapshots = join(projection, ".agents", "skills"), storage = join(root, "runtime");
       for (const path of [projection, snapshots, storage]) mkdirSync(path, { recursive: true, mode: 0o700 });
-      const result = await this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
-        env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", NO_COLOR: "1", CI: "1" }, directories: { projection, snapshots, storage } });
+      const result = await this.checkLocal(projectId, selection);
+      this.modelReadiness.set(this.modelKey(projectId, selection), structuredClone(result.readiness));
       invariant(result.readiness.status === "ready" && result.runtimeOptions, "DIRECTOR_SETUP_REQUIRED", "Codex setup checks did not pass. Verify the selected binary, model and existing Codex sign-in.");
       const runtime = this.config.makeRuntime?.(result) ?? new CodexDirectorRuntime(result.runtimeOptions);
-      const input = createDirectorInput(this.service, { repositoryRoot: this.config.repositoryRoot, snapshotRoot: snapshots, endpoint: this.config.endpoint, runtimeId: "codex-app-server" });
-      return { runtime, input, readiness: result.readiness };
+      const input = createDirectorInput(this.service, { repositoryRoot: this.config.repositoryRoot, snapshotRoot: snapshots, endpoint: this.config.endpoint, runtimeId: "codex-app-server", freshTurnGuidance: this.toolSettings });
+      return { runtime, input, readiness: result.readiness, runtimeOptions: result.runtimeOptions };
     })();
     this.prepared.set(key, pending); void pending.catch(() => this.prepared.delete(key)); return pending;
+  }
+  private checkLocal(projectId: string, selection: LocalDirectorSelection): Promise<Ready> {
+    const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace");
+    return this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
+      env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", NO_COLOR: "1", CI: "1" },
+      directories: { projection, snapshots: join(projection, ".agents", "skills"), storage: join(root, "runtime") } });
   }
   private async startNative(input: DirectorRunInput, options: DirectorStartOptions = {}) {
     this.service.recovery.assertWritable(input.projectId, input.requestId);
     this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
-    const { runtime } = await this.ready(input.projectId);
+    const prepared = await this.ready(input.projectId);
+    let runtime = prepared.runtime;
+    if (prepared.runtimeOptions.policy) {
+      // Immutable packages are retained for old epochs and receipts. Packages
+      // installed after setup must not become additional native instructions.
+      const configuration = this.toolSettings.configuration(input.projectId);
+      const paths = new Set<string>();
+      for (const row of this.service.store.list<{ lock: SkillCapabilityLock }>("director_skill_lock", input.projectId)) {
+        if (!row.lock.bindings.some(binding => binding.kind === "runtime" && binding.id === "codex-app-server")) continue;
+        invariant(["1.0.0", "2.0.0", "3.0.0", "4.0.0"].includes(row.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Saved Director guidance is unsupported");
+        const environment = directorSkillEnvironment(configuration, row.lock.compatibility.toolContract as ToolContractVersion);
+        for (const skill of verifySkillLock(row.lock, environment)) paths.add(skill.entryPath);
+      }
+      const policy = prepared.runtimeOptions.policy, configured = policy.config["skills.config"];
+      const disabled = new Map<string, { path: string; enabled: false }>();
+      if (Array.isArray(configured)) for (const row of configured) {
+        invariant(row && typeof row === "object" && !Array.isArray(row) && typeof row.path === "string" && row.enabled === false,
+          "CAPABILITY_MISMATCH", "Saved native setup has an unexpected skill selection");
+        disabled.set(row.path, { path: row.path, enabled: false });
+      }
+      const changed = [...paths].some(path => !disabled.has(path));
+      if (changed) {
+        for (const path of paths) disabled.set(path, { path, enabled: false });
+        const result: Ready = { readiness: prepared.readiness, runtimeOptions: { ...prepared.runtimeOptions,
+          policy: { ...policy, config: { ...policy.config, "skills.config": [...disabled.values()] } } } };
+        runtime = this.config.makeRuntime?.(result) ?? new CodexDirectorRuntime(result.runtimeOptions!);
+      }
+    }
     this.service.recovery.assertWritable(input.projectId, input.requestId);
     this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
     return runtime.start(input, { ...options, onEvent: async event => {

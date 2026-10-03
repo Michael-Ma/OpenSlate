@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MODEL_KINDS, directorChangeCommand, directorSetupSummary, modelApplyCommand, modelAppliedCurrent, modelContinuationSent, modelDraftIdentity, modelPreviewCommand, modelPreviewCurrent, modelSettingsContinuation, restoredModelDraft } from '../src/project-settings-model.ts';
+import { MODEL_KINDS, directorChangeCommand, directorDraftIdentity, directorSetupSummary, restoredDirectorDraft, modelAutomaticApplyCommand, modelApplyCommand, modelAppliedCurrent, modelContinuationSent, modelDraftIdentity, modelPreviewCommand, modelPreviewCurrent, modelSettingsContinuation, restoredModelDraft } from '../src/project-settings-model.ts';
 import { activeProjectEdit, pendingCommandsFor } from '../src/pending-command.ts';
 const hash = char => char.repeat(64);
 function status() {
@@ -99,4 +99,46 @@ test('continuation is one explicit normal message per applied change and preserv
   assert.equal(modelContinuationSent({ ...savedApply, receipt: { ...savedApply.receipt, previewId: 'later-preview' } }, remount.snapshot('project')), false);
   assert.equal('continuationRequestId' in modelSettingsContinuation('project', 'fresh', null, savedApply.receipt).body, false);
   assert.throws(() => modelSettingsContinuation('foreign', 'key', null, savedApply.receipt));
+});
+
+
+test('explicit zero-impact save still requires an exact fresh preview and retains one apply identity', () => {
+  const current = status(), selected = { ...current.selected, image: 'real-image' }, scope = { kind: 'unfinished' };
+  const command = modelPreviewCommand(current, selected, scope, [], 'preview-once');
+  const captured = { preview: preview(current, selected, scope), draftIdentity: modelDraftIdentity(selected, scope) };
+  const automatic = (value = captured, state = current, draft = selected, checking = false, failed = false, head = 4) => modelAutomaticApplyCommand(value, state, draft, scope, command, checking, failed, head);
+  assert.equal(automatic(), null, 'old or ordinary previews never imply another write');
+  command.metadata.zeroImpactApplyKey = 'apply-zero-once';
+  const apply = automatic(); assert.equal(apply.key, 'apply-zero-once'); assert.equal(apply.path, '/api/projects/project/settings/models/apply');
+  assert.deepEqual(apply.body, { previewId: 'preview', previewDigest: hash('c') });
+  assert.equal(automatic(captured, current, selected, true), null); assert.equal(automatic(captured, current, selected, false, true), null);
+  assert.equal(automatic(captured, current, selected, false, false, 5), null); assert.equal(automatic(captured, current, current.selected), null);
+  for (const patch of [{ counts: { changed: 1, preserved: 0 } }, { changes: [{ nodeId: 'image' }] }, { generationApprovalRequired: true }, { allowanceRequired: true }, { selected: current.selected }]) {
+    assert.equal(automatic({ ...captured, preview: { ...captured.preview, ...patch } }), null);
+  }
+  command.metadata.zeroImpactApplyKey = ''; assert.equal(automatic(), null);
+});
+
+test('an unknown automatic apply restores its reviewed model choices and only reconciles the exact saved command', async () => {
+  const api = {}, registry = pendingCommandsFor(api, 'project-model-settings'), current = status(), selected = { ...current.selected, image: 'real-image' }, scope = { kind: 'unfinished' };
+  const captured = { preview: preview(current, selected, scope), draftIdentity: modelDraftIdentity(selected, scope) };
+  await registry.run('project', modelApplyCommand(captured, 'apply-zero-once'), async () => { throw Error('lost apply reply'); }, uncertain);
+  const slot = registry.snapshot('project'), restored = restoredModelDraft(slot);
+  assert.deepEqual(restored.selected, selected); assert.deepEqual(restored.scope, scope); assert.equal(restored.captured.preview.id, 'preview');
+  selected.image = 'demo-image'; captured.preview.previewDigest = hash('f');
+  assert.equal(restored.captured.preview.previewDigest, hash('c')); assert.equal(slot.command.key, 'apply-zero-once');
+  assert.equal(await registry.run('project', { ...slot.command, key: 'new-apply' }, async () => assert.fail('cannot replace unknown save'), uncertain), false);
+  await registry.run('project', slot.command, async exact => { assert.equal(exact.key, 'apply-zero-once'); return applied(); }, uncertain);
+  assert.equal(restoredModelDraft(registry.snapshot('project')), null);
+});
+
+test('an unconfirmed director choice survives reopening and identities ignore irrelevant demo setup', async () => {
+  const api = {}, registry = pendingCommandsFor(api, 'project-director-settings');
+  const current = { selection: { mode: 'fake' }, defaults: {}, locked: false, modelCalls: 0, selectionDigest: hash('a'), busy: false, changeAvailable: true, changeAppliesTo: 'next_turn' };
+  const selection = { mode: 'native', binaryPath: '/local/codex', model: 'account-model', codexHome: '/local/account' };
+  await registry.run('project', directorChangeCommand('project', current, selection, 'director-once'), async () => { throw Error('lost director reply'); }, uncertain);
+  const restored = restoredDirectorDraft(registry.snapshot('project'));
+  assert.deepEqual(restored, selection); selection.model = 'different'; assert.equal(restored.model, 'account-model');
+  assert.equal(directorDraftIdentity({ mode: 'fake', model: 'irrelevant' }), directorDraftIdentity({ mode: 'fake' }));
+  assert.notEqual(directorDraftIdentity(restored), directorDraftIdentity(selection));
 });

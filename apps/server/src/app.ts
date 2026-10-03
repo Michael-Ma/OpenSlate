@@ -156,6 +156,10 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.settings(request.params.projectId);
   });
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/models", async request => {
+    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
+    return options.runtimeSettings.models(request.params.projectId);
+  });
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/tools", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.tools(request.params.projectId);

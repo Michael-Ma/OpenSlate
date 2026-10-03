@@ -41,8 +41,19 @@ const media=new LocalMediaService({rootDir:join(root,'media'),allowedInputRoots:
 const narration=new NarrationService(service,media),canonical=new NarrationCanonicalService(narration);
 const mediaApp=new MediaApplicationService(service,media),images=new ImageApplicationService(service,new LocalImageStore({rootDir:join(root,'artifacts','images'),ffmpegPath,ffprobePath}));
 const director=new LocalDirectorController(service,{repositoryRoot:repo,dataDirectory:root,endpoint:'http://127.0.0.1:5173',ffmpegPath, setup:async input=>{const result=await setupLocalCodex(input);console.log(JSON.stringify({readiness:result.readiness}));return result;}});
+const uiReplay = process.argv.includes('--ui-replay');
+if (uiReplay && process.argv.includes('--native')) throw new Error('UI replay cannot launch a native turn');
+let replayActor = null, replayTimer = null;
+if (uiReplay) {
+ replayActor=service.beginRequest(project.id,'local-user','Review this sample direction before generating anything.',{editing:true});
+ const id=randomUUID(),text='### Proposed change\n\nI will refine **Shot 1.1** around the leather detail.\n\n- Keep the product reference and six-second timing.\n- Preserve Shots 1.2 and 1.3.\n\n| Next step | Your decision |\n| --- | --- |\n| Keyframe | Review direction and usage |\n\n`No new media starts without your review.`';
+ store.insert('director_output',id,project.id,{id,projectId:project.id,requestId:replayActor.requestId,turnId:'ui-replay',text,phase:'final'});
+ store.appendEvent(project.id,'director.message',{outputId:id,requestId:replayActor.requestId,turnId:'ui-replay'});
+ let step=0;replayTimer=setInterval(()=>store.appendEvent(project.id,'ui.replay_progress',{step:++step}),100);
+}
+const visibleDirector=uiReplay?{enqueue(){},tick(){},status(){return{mode:'native',status:'running',activeRequestId:replayActor.requestId,imageAttachmentsAvailable:false};}}:director;
 const sessions=new StudioSessions();
-const app=createApp({service,allowanceRoutes:{service,allowances:new ExternalAllowanceService(store)},director,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
+const app=createApp({service,allowanceRoutes:{service,allowances:new ExternalAllowanceService(store)},director:visibleDirector,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
  narrationRoutes:{production:service,narration,canonical,uploadDirectory:join(root,'uploads','audio')},
  mediaRoutes:{production:service,media:mediaApp,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','video')})},
  imageRoutes:{production:service,images,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','image'),maxBytes:PNG_IMPORT_MAX_BYTES})}});
@@ -59,4 +70,4 @@ if(process.argv.includes('--native')) { try {
 }
 let fixtureTickBusy=false;
 const fixtureTimer = process.argv.includes('--fixtures') ? setInterval(() => { if(fixtureTickBusy)return;fixtureTickBusy=true;void engine.runReady().then(() => engine.reconcile()).catch(error => console.error(error.code ?? 'FIXTURE_RUN_FAILED')).finally(()=>{fixtureTickBusy=false;}); }, 300) : null;
-for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{if(fixtureTimer)clearInterval(fixtureTimer);await director.close();await app.close();store.close();provider.close();process.exit(0);});
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,async()=>{if(fixtureTimer)clearInterval(fixtureTimer);if(replayTimer)clearInterval(replayTimer);await director.close();await app.close();store.close();provider.close();process.exit(0);});

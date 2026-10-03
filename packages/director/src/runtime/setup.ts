@@ -20,11 +20,14 @@ export interface LocalCodexSetupInput {
   limits?: Partial<CodexRuntimeLimits>;
 }
 export type LocalCodexSetupCheck = "passed" | "failed" | "unverified";
+export interface LocalCodexModelChoice { id: string; label: string }
 export interface LocalCodexReadiness {
   status: "ready" | "blocked";
   checkedAt: string;
   runtimeVersion: typeof CODEX_PROTOCOL_VERSION;
   model: string;
+  /** Account-advertised text models supporting this adapter's low reasoning effort. */
+  modelChoices?: LocalCodexModelChoice[];
   checks: Record<"binary" | "account" | "model" | "catalog" | "policy", LocalCodexSetupCheck>;
   disabledMcpCount: number;
   disabledSkillCount: number;
@@ -156,19 +159,28 @@ function readSkills(value: unknown, cwd: string): { path: string; enabled: boole
     return { path: skill.path, enabled: skill.enabled };
   });
 }
-async function checkModel(rpc: (method: string, params: unknown) => Promise<unknown>, model: string): Promise<void> {
-  let cursor: string | undefined; const seen = new Set<string>();
+async function readModelChoices(rpc: (method: string, params: unknown) => Promise<unknown>, model: string) {
+  let cursor: string | undefined, selected: Record<string, unknown> | undefined;
+  const seen = new Set<string>(), identities = new Set<string>(), choices: LocalCodexModelChoice[] = [];
+  const supported = (item: Record<string, unknown>) => Array.isArray(item.supportedReasoningEfforts)
+    && item.supportedReasoningEfforts.some(effort => object(effort).reasoningEffort === "low")
+    && (item.inputModalities === undefined || Array.isArray(item.inputModalities) && item.inputModalities.includes("text"));
   for (let page = 0; page < 20; page++) {
     const value = object(await rpc("model/list", { limit: 100, includeHidden: true, ...(cursor ? { cursor } : {}) }));
     requireRuntime(Array.isArray(value.data) && value.data.length <= 100, "SETUP_MODEL_CATALOG_INVALID", "Native model catalog is invalid");
-    const selected = value.data.map(object).find(item => item.model === model);
-    if (selected) {
-      requireRuntime(Array.isArray(selected.supportedReasoningEfforts) && selected.supportedReasoningEfforts.some(item => object(item).reasoningEffort === "low") &&
-        (selected.inputModalities === undefined || (Array.isArray(selected.inputModalities) && selected.inputModalities.includes("text"))),
-      "SETUP_MODEL_UNSUPPORTED", "Selected model does not advertise the adapter's text and low-effort contract");
-      return;
+    for (const raw of value.data) {
+      const item = object(raw);
+      requireRuntime(typeof item.model === "string" && /^[A-Za-z0-9_.:/-]{1,120}$/.test(item.model) && !identities.has(item.model),
+        "SETUP_MODEL_CATALOG_INVALID", "Native model identities are invalid or duplicated");
+      identities.add(item.model);
+      if (item.model === model) selected = item;
+      if (supported(item) && (item.hidden !== true || item.model === model)) {
+        const label = typeof item.displayName === "string" && item.displayName.trim().length > 0 && item.displayName.length <= 160
+          && !/[\x00-\x1f\x7f]/.test(item.displayName) ? item.displayName.trim() : item.model;
+        choices.push({ id: item.model, label });
+      }
     }
-    if (value.nextCursor === undefined || value.nextCursor === null) throw new RuntimeFault("SETUP_MODEL_UNAVAILABLE", "Selected model is absent from the native model catalog");
+    if (value.nextCursor === undefined || value.nextCursor === null) return { choices, selected, selectedSupported: !!selected && supported(selected) };
     requireRuntime(typeof value.nextCursor === "string" && value.nextCursor.length > 0 && value.nextCursor.length <= 4096 && !seen.has(value.nextCursor),
       "SETUP_MODEL_CATALOG_INVALID", "Native model pagination is invalid");
     cursor = value.nextCursor; seen.add(cursor);
@@ -209,7 +221,11 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
       requireRuntime(account.requiresOpenaiAuth === true && ["chatgpt", "apiKey"].includes(String(object(account.account).type)),
         "SETUP_AUTH_REQUIRED", "Sign in to the selected Codex installation before checking again");
       readiness.checks.account = "passed";
-      checking = "model"; await checkModel(rpc, runtime.model); readiness.checks.model = "passed";
+      checking = "model";
+      const models = await readModelChoices(rpc, runtime.model); readiness.modelChoices = models.choices;
+      requireRuntime(models.selected, "SETUP_MODEL_UNAVAILABLE", "Selected model is absent from the native model catalog");
+      requireRuntime(models.selectedSupported, "SETUP_MODEL_UNSUPPORTED", "Selected model does not advertise the adapter's text and low-effort contract");
+      readiness.checks.model = "passed";
     });
     await session(runtime, cancellation.signal, async rpc => {
       checking = "policy";

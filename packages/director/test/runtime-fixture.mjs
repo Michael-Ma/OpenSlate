@@ -1,5 +1,6 @@
 // Model-free protocol fixture. This file never imports or launches Codex.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
@@ -68,7 +69,16 @@ lines.on("line", line => {
   if (method === "skills/list") {
     if (mode === "skills-config-dedup" && new Set(config.skills.config.map(skill => skill.path)).size !== config.skills.config.length)
       return send({ id, error: { code: -1, message: "Duplicate skill configuration" } });
-    const skills = JSON.parse(process.env.FIXTURE_SKILLS ?? "[]").map(skill => ({ ...skill, enabled: true }));
+    let skills = JSON.parse(process.env.FIXTURE_SKILLS ?? "[]").map(skill => ({ ...skill, enabled: true }));
+    if (mode === "discover-project-skills") {
+      const root = join(process.cwd(), '.agents', 'skills');
+      skills = existsSync(root) ? readdirSync(root).flatMap(directory => {
+        const path = join(root, directory, 'SKILL.md'); if (!existsSync(path)) return [];
+        const name = /^name:\s*([^\n]+)$/m.exec(readFileSync(path, 'utf8'))?.[1]?.replace(/^['"]|['"]$/g, '');
+        return [{ name, path, enabled: !config.skills?.config?.some(row => row.path === path && row.enabled === false) }];
+      }) : [];
+      log({ kind: 'discovered-skills', skills });
+    }
     if (mode === "skill-extra") skills.push({ name: "untrusted", path: "/fake/untrusted/SKILL.md", enabled: true });
     return respond(id, { data: [{ cwd: process.cwd(), skills, errors: mode === "skills-error" ? [{ message: "fixture error" }] : [] }] });
   }

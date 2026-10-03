@@ -68,6 +68,18 @@ lines.on("line", line => {
   if (method === "model/list") {
     if (scenario === "cursor-loop") return respond(id, { data: [], nextCursor: "repeat-cursor" });
     if (scenario === "pagination" && !params.cursor) return respond(id, { data: [], nextCursor: "second-page" });
+    if (scenario === "model-choices" || scenario === "duplicate-model" || scenario === "late-cursor-loop") {
+      const selected = { model: process.env.SETUP_FIXTURE_MODEL, displayName: 'GPT fixture', inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }], privateMetadata: 'PRIVATE_MUST_NOT_LEAK' };
+      if (!params.cursor) return respond(id, { data: [selected], nextCursor: 'second-page' });
+      if (scenario === 'duplicate-model') return respond(id, { data: [selected], nextCursor: null });
+      if (scenario === 'late-cursor-loop') return respond(id, { data: [], nextCursor: 'second-page' });
+      return respond(id, { data: [
+        { model: 'fixture-text', displayName: 'Other fixture model', inputModalities: ['text', 'image'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
+        { model: 'fixture-high', inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'high' }] },
+        { model: 'fixture-image', inputModalities: ['image'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
+        { model: 'fixture-hidden', hidden: true, inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'low' }] },
+      ], nextCursor: null });
+    }
     return respond(id, { data: scenario === "model" ? [] : [{ model: process.env.SETUP_FIXTURE_MODEL,
       inputModalities: ["text"], supportedReasoningEfforts: [{ reasoningEffort: scenario === "effort" ? "high" : "low" }] }], nextCursor: null });
   }

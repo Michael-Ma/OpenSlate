@@ -28,6 +28,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
   assert.equal(result.readiness.status, "ready", result.readiness.issues[0]?.code);
   assert.ok(Object.values(result.readiness.checks).every(check => check === "passed"));
   assert.equal(result.readiness.disabledMcpCount, 2); assert.equal(result.readiness.disabledSkillCount, 1);
+  assert.deepEqual(result.readiness.modelChoices, [{ id: 'gpt-6-astra', label: 'gpt-6-astra' }]);
   assert.equal(result.runtimeOptions.model, "gpt-6-astra");
   assert.doesNotThrow(() => new CodexDirectorRuntime(result.runtimeOptions));
   const policy = result.runtimeOptions.policy;
@@ -58,12 +59,21 @@ for (const [scenario, code] of [
   ["search-drift", "SETUP_CONFIG_MISMATCH"], ["question-feature-drift", "SETUP_CONFIG_MISMATCH"],
   ["skill-error", "SETUP_SKILLS_INVALID"], ["invalid-mcp-name", "SETUP_CATALOG_INVALID"], ["rpc-error", "RUNTIME_RPC_REJECTED"],
   ["hang", "RUNTIME_RPC_TIMEOUT"], ["approval", "SETUP_INTERACTIVE_DENIED"],
+  ["duplicate-model", "SETUP_MODEL_CATALOG_INVALID"], ["late-cursor-loop", "SETUP_MODEL_CATALOG_INVALID"],
 ]) test(`setup blocks ${scenario} without returning launch options or native diagnostics`, async t => {
   const f = await fixture(t, scenario), result = await setupLocalCodex(f.input);
   assert.equal(result.readiness.status, "blocked"); assert.equal(result.runtimeOptions, undefined);
   assert.equal(result.readiness.issues[0].code, code);
   assert.ok(!JSON.stringify(result).includes("PRIVATE")); assert.ok(!JSON.stringify(result).includes(f.root));
   assert.ok(!(await f.records()).some(row => row.kind === "forbidden-method"));
+});
+test('setup lists all account-advertised supported models even when the selected model is on the first page', async t => {
+  const f = await fixture(t, 'model-choices'), result = await setupLocalCodex(f.input);
+  assert.equal(result.readiness.status, 'ready');
+  assert.deepEqual(result.readiness.modelChoices, [{ id: 'gpt-6-astra', label: 'GPT fixture' }, { id: 'fixture-text', label: 'Other fixture model' }]);
+  assert.equal((await f.records()).filter(row => row.method === 'model/list').length, 2);
+  assert.ok(!JSON.stringify(result.readiness).includes('PRIVATE'));
+  assert.ok(!(await f.records()).some(row => row.kind === 'forbidden-method'));
 });
 test("model discovery follows opaque pages and permission comparison accepts only pinned null defaults", async t => {
   for (const scenario of ["pagination", "permissions-null"]) {

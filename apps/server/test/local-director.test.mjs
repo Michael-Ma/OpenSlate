@@ -40,6 +40,30 @@ test('authenticated project setup persists choices without starting a model',asy
   assert.equal((await f.req('POST',path,{mode:'fake'},'configure')).statusCode,409,'a reused identity cannot choose a different director');
   assert.equal(f.director.mode(project.id),'native');
 });
+test('authenticated model listing inspects existing native defaults without configuring a demo project or writing domain state',async t=>{
+  const f=fixture(t,{setup:async input=>({readiness:{status:'ready',model:input.model,checkedAt:'2026-10-03T12:00:00.000Z',modelChoices:[{id:'test-model',label:'Fixture model'}]},runtimeOptions:{}})}),project=f.service.createProject('Models'),path=`/api/projects/${project.id}/director/models`;
+  const before=()=>JSON.stringify(['projects','entities','events','commands'].map(table=>f.store.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())),saved=before();
+  assert.equal((await f.app.inject({method:'GET',url:path,headers:{host:'127.0.0.1'}})).statusCode,403);
+  const response=await f.req('GET',path);assert.equal(response.statusCode,200,response.body);
+  assert.deepEqual(response.json().modelChoices,[{id:'test-model',label:'Fixture model'}]);assert.equal(response.json().modelCatalogStatus,'ready');assert.equal(response.json().selection.mode,'fake');
+  assert.equal(response.json().modelCatalogCheckedAt,'2026-10-03T12:00:00.000Z');assert.equal(before(),saved);assert.equal(f.calls.length,0);
+  assert.deepEqual(f.director.settings(project.id).modelChoices,response.json().modelChoices);assert.equal(f.provider.acceptedCount(),0);
+  const detached=f.director.settings(project.id);detached.modelChoices[0].id='caller-supplied';assert.equal(f.director.settings(project.id).modelChoices[0].id,'test-model');
+});
+test('model choices from setup are cached only for the exact native selection and active conversations do not launch model checks',async t=>{
+  let checks=0;const f=fixture(t,{setup:async input=>{checks++;return{readiness:{status:'ready',model:input.model,checkedAt:'2026-10-03T12:00:00.000Z',modelChoices:[{id:input.model,label:input.model}]},runtimeOptions:{}};}}),project=f.service.createProject('Cached choices');
+  await f.director.configure(project.id,f.native,'setup');assert.equal(checks,1);assert.equal(f.director.settings(project.id).modelCatalogStatus,'ready');
+  f.director.enqueue(project.id,f.service.beginRequest(project.id,'human','A queued conversation'));
+  const response=await f.director.models(project.id);assert.equal(response.busy,true);assert.equal(checks,1);assert.deepEqual(response.modelChoices,[{id:'test-model',label:'test-model'}]);assert.equal(f.calls.length,0);
+  f.director.tick();await f.director.settle();await f.director.changeSelection(project.id,{expectedSelectionDigest:f.director.settings(project.id).selectionDigest,selection:{...f.native,model:'different-model'}},'change');
+  assert.deepEqual(f.director.settings(project.id).modelChoices,[{id:'different-model',label:'different-model'}]);assert.equal(checks,2);
+});
+test('model refresh replaces cached legacy readiness without requiring selection writes or model turns',async t=>{
+  let checks=0;const f=fixture(t,{setup:async input=>({readiness:{status:'ready',model:input.model,...(++checks>1?{checkedAt:'2026-10-03T12:00:00.000Z',modelChoices:[{id:input.model,label:input.model}]}:{})},runtimeOptions:{}})}),project=f.service.createProject('Legacy readiness');
+  await f.director.configure(project.id,f.native,'setup');assert.equal(f.director.settings(project.id).modelCatalogStatus,'unchecked');
+  const before=JSON.stringify(f.store.list('project_director_selection',project.id)),cursor=f.store.cursor(project.id),response=await f.director.models(project.id);
+  assert.equal(response.modelCatalogStatus,'ready');assert.equal(checks,2);assert.equal(f.calls.length,0);assert.equal(f.store.cursor(project.id),cursor);assert.equal(JSON.stringify(f.store.list('project_director_selection',project.id)),before);
+});
 test('fake and native controllers only claim their own projects and preserve separate locks',async t=>{
   const f=fixture(t),native=f.service.createProject('Native'),fake=f.service.createProject('Fake');
   await f.director.configure(native.id,f.native,'setup');

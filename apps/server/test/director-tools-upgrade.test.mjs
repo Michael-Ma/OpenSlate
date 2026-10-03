@@ -138,6 +138,8 @@ for (const version of ["1.0.0", "2.0.0", "3.0.0", "4.0.0"]) test(
     const prepare = createDirectorInput(f.service, { ...f.configuration, endpoint: "http://127.0.0.1:3001" });
     const input = prepare({ id: newId(), projectId: project.id, requestId: human.requestId }, human, bridge);
     const context = JSON.parse(input.context), reads = f.store.list("skill_read", project.id);
+    assert.equal(context.snapshot.applicationCapabilities.narration.speechSynthesis.toolAvailable, ["3.0.0", "4.0.0"].includes(version),
+      "the first captured snapshot must advertise the exact catalog bound to its activation and MCP bridge");
     let count = 0;
     for (const skill of saved.lock.skills) {
       const root = join(f.configuration.snapshotRoot, skill.packageDigest);

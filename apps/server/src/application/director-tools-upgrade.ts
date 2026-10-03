@@ -1,4 +1,6 @@
-import { digest, invariant } from "@openslate/core";
+import { canonical, digest, DomainError, invariant } from "@openslate/core";
+import type { ActorContext, ToolContractVersion } from "@openslate/core";
+import { verifySkillLock } from "@openslate/director";
 import type { SkillCapabilityLock } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { createDirectorSkillLock } from "./director-capabilities.js";
@@ -32,6 +34,67 @@ export class DirectorToolSettings {
     return { currentVersion: saved?.lock.compatibility.toolContract ?? "4.0.0", lockId: saved?.id ?? null,
       lockDigest: saved?.lock.lockDigest ?? null, availableVersion: "4.0.0" as const,
       upgradeAvailable: !!saved && ["1.0.0", "2.0.0", "3.0.0"].includes(saved.lock.compatibility.toolContract), busy: this.busy(projectId) };
+  }
+
+  /** Application maintenance at the first input of a new native turn, never a model tool. */
+  currentForFreshTurn(projectId: string, actor: ActorContext, turnId: string): SkillCapabilityLock | undefined {
+    const store = this.service.store;
+    invariant(actor.kind === "director", "ACTOR_DENIED", "Director guidance requires an application-owned epoch");
+    this.service.recovery.assertWritable(projectId, actor.requestId);
+    this.service.assertActor(projectId, actor);
+    const binding = store.get<{ projectId: string; requestId: string; lockId: string }>("director_epoch_lock", actor.epochId);
+    if (binding) {
+      invariant(binding.projectId === projectId && binding.requestId === actor.requestId, "CAPABILITY_MISMATCH", "Director epoch belongs to different work");
+      const pinned = store.get<{ projectId: string; lock: SkillCapabilityLock }>("director_skill_lock", binding.lockId);
+      invariant(pinned?.projectId === projectId, "CAPABILITY_MISMATCH", "Pinned director guidance is missing");
+      return pinned.lock;
+    }
+    const saved = this.latest(projectId);
+    if (!saved) return undefined;
+    const fresh = () => {
+      this.service.recovery.assertWritable(projectId, actor.requestId);
+      this.service.recovery.assertFreshAuthority(projectId, "director_turn", turnId);
+      this.service.assertActor(projectId, actor);
+      const turn = store.get<{ projectId: string; requestId: string; epochId: string; runtimeId: string; state: string; dispatched: boolean; nativeThreadId: string | null; nativeTurnId: string | null }>("director_turn", turnId);
+      invariant(turn?.projectId === projectId && turn.requestId === actor.requestId && turn.epochId === actor.epochId
+        && turn.runtimeId === "codex-app-server" && turn.state === "running" && turn.dispatched === false && turn.nativeThreadId === null && turn.nativeTurnId === null
+        && !store.get("director_epoch_lock", actor.epochId) && !store.get("native_model_start", turnId)
+        && !store.db.prepare("SELECT 1 FROM entities WHERE project_id=? AND kind IN ('tool_invocation','prepared','director_context','skill_activation') AND json_extract(body,'$.epochId')=? LIMIT 1").get(projectId, actor.epochId),
+        "DIRECTOR_GUIDANCE_IN_FLIGHT", "This conversation already began with its saved Director guidance. Send a new message to use the current application.");
+      invariant(!this.configuring(projectId)
+        && !store.db.prepare("SELECT 1 FROM entities WHERE kind='epoch' AND project_id=? AND id!=? AND json_extract(body,'$.state')!='revoked' LIMIT 1").get(projectId, actor.epochId),
+        "DIRECTOR_TOOLS_BUSY", "Wait for the current conversation or setup to finish, then send a new message.");
+      invariant(canonical(this.latest(projectId)) === canonical(saved), "DIRECTOR_TOOLS_STALE", "Director guidance changed while the new conversation was being prepared. Send a new message.");
+    };
+    fresh();
+    const configuration = this.configuration(projectId), configurationDigest = digest(configuration);
+    let successor: SkillCapabilityLock;
+    try {
+      invariant(["1.0.0", "2.0.0", "3.0.0", "4.0.0"].includes(saved.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported Director guidance");
+      const shipped = createDirectorSkillLock(configuration, saved.lock.compatibility.toolContract as ToolContractVersion);
+      verifySkillLock(saved.lock, shipped.environment);
+      // UUIDs differ per project. Every package, prompt and implementation binding must match the shipped predecessor.
+      const content = ({ id: _id, lockDigest: _digest, ...body }: SkillCapabilityLock) => body;
+      invariant(saved.id === saved.lock.id && canonical(content(saved.lock)) === canonical(content(shipped.lock)), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Customized Director guidance");
+      successor = saved.lock.compatibility.toolContract === "4.0.0" ? saved.lock : createDirectorSkillLock(configuration, "4.0.0").lock;
+    } catch (error) {
+      throw new DomainError("DIRECTOR_GUIDANCE_UNSUPPORTED", "OpenSlate cannot safely load this project's customized or unavailable Director guidance. Saved work is retained. Restore the matching application files, then send a new message.",
+        { cause: error instanceof DomainError ? error.code : "GUIDANCE_VERIFICATION_FAILED" });
+    }
+    fresh();
+    invariant(digest(this.configuration(projectId)) === configurationDigest, "DIRECTOR_TOOLS_STALE", "Director setup changed while the new conversation was being prepared. Send a new message.");
+    if (saved.lock.compatibility.toolContract === "4.0.0") return successor;
+    const input = { requestId: actor.requestId, epochId: actor.epochId, turnId, previousLockId: saved.id,
+      previousLockDigest: saved.lock.lockDigest, configurationDigest, targetVersion: "4.0.0" };
+    const receipt = store.command(`application:${projectId}:director-guidance`, actor.epochId, digest(input), () => {
+      fresh();
+      invariant(digest(this.configuration(projectId)) === configurationDigest, "DIRECTOR_TOOLS_STALE", "Director setup changed while the new conversation was being prepared. Send a new message.");
+      store.insert("director_skill_lock", successor.id, projectId, { id: successor.id, projectId, lock: successor });
+      store.appendEvent(projectId, "director.lock_installed", { lockId: successor.id, lockDigest: successor.lockDigest,
+        previousLockId: saved.id, source: "application_compatible_upgrade", requestId: actor.requestId, epochId: actor.epochId, turnId });
+      return { lockId: successor.id };
+    });
+    return store.get<{ lock: SkillCapabilityLock }>("director_skill_lock", receipt.lockId)!.lock;
   }
 
   upgrade(projectId: string, input: DirectorToolsUpgrade, key: string) {

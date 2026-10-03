@@ -9,7 +9,13 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs"
   },
-  "dependencies": { "@openslate/core": "workspace:*", "react": "19.2.8", "react-dom": "19.2.8" },
+  "dependencies": {
+    "@openslate/core": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
+  },
   "devDependencies": {
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",

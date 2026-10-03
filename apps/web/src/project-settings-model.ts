@@ -44,6 +44,7 @@ export function modelPreviewCurrent(captured: CapturedModelPreview | null, statu
   if (!captured || !status || checking || failed || captured.draftIdentity !== modelDraftIdentity(selected, scope)) return false;
   const { preview } = captured, base = preview.base;
   return preview.projectId === status.projectId && id(preview.id) && hash(preview.previewDigest)
+    && modelDraftIdentity(preview.selected, preview.scope) === modelDraftIdentity(selected, scope)
     && base.headVersion === status.headVersion && (currentHeadVersion === undefined || currentHeadVersion === status.headVersion)
     && base.revisionId === status.revisionId && base.capabilityLockId === status.capabilityLockId
     && base.selectionDigest === status.selectionDigest && base.catalogDigest === status.catalogDigest;
@@ -52,7 +53,19 @@ export function modelApplyCommand(captured: CapturedModelPreview, key: string): 
   const { preview } = captured;
   if (!id(preview.projectId) || !id(preview.id) || !hash(preview.previewDigest) || !key) throw new Error("Review a current model change before applying it.");
   return { path: `/api/projects/${encodeURIComponent(preview.projectId)}/settings/models/apply`, key,
-    body: { previewId: preview.id, previewDigest: preview.previewDigest } };
+    body: { previewId: preview.id, previewDigest: preview.previewDigest },
+    metadata: { draftIdentity: captured.draftIdentity, selected: structuredClone(preview.selected), scope: structuredClone(preview.scope), review: structuredClone(captured) } };
+}
+/** An explicit Save may omit an empty review; it still applies the exact server-validated preview. */
+export function modelAutomaticApplyCommand(captured: CapturedModelPreview | null, status: ModelSettingsStatus | null, selected: ModelSelection, scope: ModelScope,
+  previewCommand: PendingCommand | null, checking: boolean, failed: boolean, currentHeadVersion?: number): PendingCommand | null {
+  if (!captured || !previewCommand || previewCommand.path !== `/api/projects/${encodeURIComponent(captured.preview.projectId)}/settings/models/preview`
+    || !modelPreviewCurrent(captured, status, selected, scope, checking, failed, currentHeadVersion)) return null;
+  const metadata = previewCommand.metadata as { draftIdentity?: string; zeroImpactApplyKey?: string } | undefined;
+  const preview = captured.preview;
+  if (metadata?.draftIdentity !== captured.draftIdentity || !metadata.zeroImpactApplyKey || !id(metadata.zeroImpactApplyKey)
+    || preview.counts.changed !== 0 || preview.changes.length !== 0 || preview.generationApprovalRequired !== false || preview.allowanceRequired !== false) return null;
+  return modelApplyCommand(captured, metadata.zeroImpactApplyKey);
 }
 export function preservedWorkReason(reason: ModelSettingsPreview["preserved"][number]["reason"]): string {
   return { completed: "Completed result kept", in_flight: "Job already in progress", reviewed_audio: "Audio with its own reviewed plan",
@@ -81,6 +94,12 @@ export function modelContinuationSent(applied: ModelSettingsApplied | null, cont
 /** A remounted panel may recover its review; reading a slot never sends a request. */
 export function restoredModelDraft(slot: PendingCommandSnapshot): { selected: ModelSelection; scope: ModelScope; captured: CapturedModelPreview | null } | null {
   const command = slot.command ?? slot.settledCommand;
+  if (slot.command?.path.endsWith("/apply")) {
+    const metadata = slot.command.metadata as { draftIdentity?: string; selected?: ModelSelection; scope?: ModelScope; review?: CapturedModelPreview } | undefined;
+    if (!metadata?.selected || !metadata.scope || !metadata.review || metadata.draftIdentity !== metadata.review.draftIdentity
+      || metadata.draftIdentity !== modelDraftIdentity(metadata.selected, metadata.scope)) return null;
+    return { selected: structuredClone(metadata.selected), scope: structuredClone(metadata.scope), captured: structuredClone(metadata.review) };
+  }
   if (!command?.path.endsWith("/preview")) return null;
   const metadata = command.metadata as { draftIdentity?: string; selected?: ModelSelection; scope?: ModelScope } | undefined;
   if (!metadata?.selected || !metadata.scope || metadata.draftIdentity !== modelDraftIdentity(metadata.selected, metadata.scope)) return null;
@@ -93,6 +112,19 @@ export interface DirectorSettingsStatus {
   selectionDigest: string; busy: boolean; changeAvailable: boolean; changeAppliesTo: "next_turn";
   readiness?: { status: string; issues?: Array<{ code: string; message?: string }> } | null;
   readinessSelectionDigest?: string; selectionMatchesCommand?: boolean;
+  modelChoices?: Array<{ id: string; label: string }>;
+  modelCatalogStatus?: "ready" | "unchecked" | "blocked";
+  modelCatalogCheckedAt?: string | null;
+}
+export function directorDraftIdentity(selection: DirectorSelection): string {
+  return selection.mode === "fake" ? "fake" : JSON.stringify([selection.mode, selection.binaryPath ?? "", selection.model ?? "", selection.codexHome ?? ""]);
+}
+/** Reopening settings retains an unconfirmed director choice, without sending its saved request. */
+export function restoredDirectorDraft(slot: PendingCommandSnapshot): DirectorSelection | null {
+  if (!slot.command?.path.endsWith("/director/change")) return null;
+  const selection = (slot.command.body as { selection?: DirectorSelection } | undefined)?.selection;
+  if (!selection || !["fake", "native"].includes(selection.mode)) return null;
+  return structuredClone(selection);
 }
 export function directorChangeCommand(projectId: string, status: DirectorSettingsStatus, draft: DirectorSelection, key: string): PendingCommand {
   if (!id(projectId) || !hash(status.selectionDigest) || !key || status.busy || !status.changeAvailable)

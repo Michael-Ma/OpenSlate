@@ -51,7 +51,6 @@ export class DirectorContextService {
     this.service.assertActor(projectId, actor);
     const record = this.service.store.get<LockRecord>("director_skill_lock", options.lockId);
     invariant(record?.projectId === projectId, "SCOPE_DENIED", "Skill lock belongs to a different project or is absent");
-    const snapshot = this.service.readContext(projectId, actor);
     const project = this.service.store.getProject(projectId);
     const request = this.service.store.get<{ scopeIds: string[] }>("message", actor.requestId)!;
     for (const binding of options.stageBindings ?? []) {
@@ -66,6 +65,21 @@ export class DirectorContextService {
           "SCOPE_DENIED", "Stage proposal is absent or belongs to other work");
       }
     }
+    // A first snapshot must advertise the same catalog that is actually activated.
+    // Verify immutable files before recording a selection, then retain that binding
+    // even if a later capture is interrupted. An epoch can never select again.
+    verifySkillLock(record.lock, this.environment);
+    this.service.store.transaction(() => {
+      this.service.recovery.assertWritable(projectId, actor.requestId);
+      this.service.assertActor(projectId, actor);
+      invariant(canonical(this.service.store.get<LockRecord>("director_skill_lock", options.lockId)?.lock) === canonical(record.lock), "CAPABILITY_MISMATCH", "Skill lock changed before epoch binding");
+      const prior = this.service.store.get<{ projectId: string; requestId: string; lockId: string }>("director_epoch_lock", actor.epochId);
+      invariant(!prior || prior.projectId === projectId && prior.requestId === actor.requestId && prior.lockId === record.id,
+        "CAPABILITY_MISMATCH", "A director epoch cannot switch its skill lock");
+      if (!prior) this.service.store.insert("director_epoch_lock", actor.epochId, projectId,
+        { id: actor.epochId, projectId, requestId: actor.requestId, epochId: actor.epochId, lockId: record.id });
+    });
+    const snapshot = this.service.readContext(projectId, actor);
     invariant(Buffer.byteLength(canonical(snapshot)) <= DIRECTOR_CONTEXT_MAX_BYTES, "CONTEXT_TOO_LARGE", "Context requires a narrower projection; nothing was silently truncated");
     // File verification stays outside the SQLite write transaction.
     const activation = activateSkills(record.lock, { ...this.environment, requestId: actor.requestId, contextDigest: digest(snapshot), selectedSkillIds: options.selectedSkillIds,
@@ -74,10 +88,9 @@ export class DirectorContextService {
       this.service.assertActor(projectId, actor);
       invariant(digest(this.service.readContext(projectId, actor)) === activation.contextDigest, "CONTEXT_STALE", "Project evidence changed while skills were verified");
       invariant(canonical(this.service.store.get<LockRecord>("director_skill_lock", options.lockId)?.lock) === canonical(record.lock), "CAPABILITY_MISMATCH", "Skill lock changed before context capture");
-      const priorLock = this.service.store.get<{ lockId: string }>("director_epoch_lock", actor.epochId);
-      invariant(!priorLock || priorLock.lockId === record.id, "CAPABILITY_MISMATCH", "A director epoch cannot switch its skill lock");
+      const priorLock = this.service.store.get<{ projectId: string; requestId: string; lockId: string }>("director_epoch_lock", actor.epochId);
+      invariant(priorLock?.projectId === projectId && priorLock.requestId === actor.requestId && priorLock.lockId === record.id, "CAPABILITY_MISMATCH", "A director epoch cannot switch its skill lock");
       const binding = { projectId, requestId: actor.requestId, epochId: actor.epochId };
-      if (!priorLock) this.service.store.insert("director_epoch_lock", actor.epochId, projectId, { id: actor.epochId, ...binding, lockId: record.id });
       this.service.store.insert("director_context", activation.contextSnapshotId, projectId, { id: activation.contextSnapshotId, ...binding, snapshot, contextDigest: activation.contextDigest });
       this.service.store.insert("skill_activation", activation.activationId, projectId, { id: activation.activationId, ...binding, activation });
       this.service.store.appendEvent(projectId, "director.context_captured", { requestId: actor.requestId, epochId: actor.epochId, contextSnapshotId: activation.contextSnapshotId, activationId: activation.activationId, lockId: record.id });
