@@ -2,7 +2,7 @@
 
 September 12, 2026. The standalone offline probe passed a **60-shot, 360-second plan** through the application compiler, durable fake executor, exact review, a one-shot revision and restart recovery. It makes no native model or media API calls. Creative records, cue acceptance and review decisions are explicitly simulated. Its fake video and final preview files are one-second fixtures; this is not a generated six-minute film.
 
-The separate [physical six-minute render](MEDIA-INTEGRATION.md) exercises decoded picture/audio timing. Both checks are needed: the renderer cannot establish generation authority/reuse, and the fake workflow cannot establish media quality or physical duration.
+The separate [physical six-minute render evidence](media-six-minute-evidence.json) exercises decoded picture/audio timing. Both checks are needed: the renderer cannot establish generation authority/reuse, and the fake workflow cannot establish media quality or physical duration.
 
 ## Scenario and assertions
 
@@ -38,4 +38,4 @@ pnpm probe:workflow /absolute/path/to/a/new/probe-directory
 
 Use Node 24 and pnpm 10.33.0. Omitting the directory creates a new temporary directory. The probe refuses an existing application/provider database and retains its synthetic state and `workflow-summary.json` for inspection. It is separate from the ordinary test suite because it runs the full sixty-shot state machine. No credentials or media API allowance are needed.
 
-This does not validate autonomous story/narration planning, real provider output, real paid-job reconciliation, captioning, export/import or the complete six-minute product experience. The real boots-commercial and generated six-minute acceptance remain gated on connected providers and approved live spending.
+This does not validate autonomous story/narration planning, real provider output, real paid-job reconciliation, captioning, portable export/import or the complete six-minute product experience. The real boots-commercial and generated six-minute acceptance remain gated on connected providers and approved live spending.

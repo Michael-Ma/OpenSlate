@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-03",
+  "nativeTurns": 1,
+  "nativeOutcome": "completed",
+  "guidanceBefore": "3.0.0",
+  "guidanceAfter": "4.0.0",
+  "toolInvocations": [
+    {
+      "tool": "read_context",
+      "toolContractVersion": "4.0.0",
+      "catalogDigest": "978a51d27e316988bdec5674f949dbb353f148ce4bf5422b456ed94ab8300f01",
+      "state": "succeeded"
+    },
+    {
+      "tool": "prepare_change",
+      "toolContractVersion": "4.0.0",
+      "catalogDigest": "978a51d27e316988bdec5674f949dbb353f148ce4bf5422b456ed94ab8300f01",
+      "state": "succeeded"
+    },
+    {
+      "tool": "apply_change",
+      "toolContractVersion": "4.0.0",
+      "catalogDigest": "978a51d27e316988bdec5674f949dbb353f148ce4bf5422b456ed94ab8300f01",
+      "state": "succeeded"
+    },
+    {
+      "tool": "read_context",
+      "toolContractVersion": "4.0.0",
+      "catalogDigest": "978a51d27e316988bdec5674f949dbb353f148ce4bf5422b456ed94ab8300f01",
+      "state": "succeeded"
+    }
+  ],
+  "historicalLockPreserved": true,
+  "scopedShotScriptSaved": true,
+  "otherShotPreserved": true,
+  "projectNarrationPreserved": true,
+  "visualShotRevisionPreserved": true,
+  "acceptedAudioCreated": false,
+  "generationGrants": 0,
+  "mediaAttempts": 0,
+  "acceptedFakeJobs": 0,
+  "initialFailure": {
+    "reason": "RUNTIME_SKILLS_UNEXPECTED",
+    "nativeDispatches": 0,
+    "toolInvocations": 0,
+    "mediaAttempts": 0,
+    "remedy": "Per-turn runtime config disables verified historical snapshots and enables only exact activated skills. Immutable bytes retained; unexpected unowned skills still fail."
+  },
+  "limitations": "One disposable native conversation and scoped writing edit. No real media generation or production project mutation. Offline protocol regression verifies exact inventory and historical byte preservation."
+}

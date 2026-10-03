@@ -1,191 +1,77 @@
-# Manual live production validation
+# Human live production testing
 
-This run uses real services and consumes your account usage or API credits. You perform the live generation and choose each allowance in the app. This guide does not authorize unattended tests by the development agent. Release remains on hold.
+Start with one six-second shot and a small finite allowance per operation. This walkthrough uses real account usage/API credits; the human reviews and starts the generation in OpenSlate. Existing keys, route enablement and old allowances do not authorize an unattended test campaign.
 
-Start with one six-second shot. Validate a second image-provider option in a separate project before trying a longer film. The earlier [offline rehearsal](MANUAL-AUDIO-TESTING.md) remains available if you want to inspect the UI without media calls.
+## 1. Prepare the local studio
 
-## Choose how images are generated
+Run `./start.sh --doctor`, then `./start.sh` (or `--restart` after configuration/code changes). Use Node 24, pnpm 10.33.0 and FFmpeg/ffprobe. [Setup](LOCAL-SETUP.md) explains the private ignored `.env.live.local`; [activation](MEDIA-EXECUTION-LAUNCHER.md) lists exact switches and server-only keys. Use an explicit data directory/catalog and preserve existing projects.
 
-| Choice in Media models | Authentication | What is consumed |
-|---|---|---|
-| Codex images | Existing ChatGPT login in the pinned local Codex runtime | Codex subscription usage; amount is not estimated by OpenSlate |
-| GPT Image 2 · medium keyframes | `OPENSLATE_OPENAI_API_KEY` | OpenAI image API billing |
-
-Both choices are automatic: OpenSlate invokes the selected provider, saves the returned PNG and shows it for review. There is no fallback from Codex to the API, or from the API to Codex. The conversation director is configured independently and can keep using your Codex login with either image option.
-
-Codex's built-in image model is managed by Codex. The current official documentation describes GPT Image 2, but the pinned native interface does not expose an exact image-model/snapshot or quality selector. Canvas dimensions are requested preferences; inspect the returned frame. One approved attempt allows one native turn, not a guaranteed single internal image call or known number of quota units. The USD accounting value of zero means no direct image API charge; it does not mean free or unlimited generation.
-
-Audio generation/transcription still use the OpenAI API key. Viggle video uses its own key. Codex login does not replace either of those credentials.
-
-## 1. Prepare the local installation
-
-For an already configured checkout, run `./start.sh` from the repository. It loads `.env.live.local`, checks prerequisites, installs dependencies, builds and opens the complete studio. Run `./start.sh --check` to inspect readiness without launching. An already-running server is verified and reused; use `./start.sh --restart` to rebuild and load changed keys, settings or code. The following steps document first-time setup and manual alternatives.
-
-Use Node 24, pnpm 10.33.0, FFmpeg and ffprobe. From the repository:
+If native Codex is not yet installed, install the supported pinned version in a separate local prefix:
 
 ```sh
-cd /Users/michael/SideProject/OpenSlate
-pnpm install --frozen-lockfile
-pnpm build
 npm install --prefix "$HOME/.local/share/openslate-codex" --save-exact @openai/codex@0.153.4
 "$HOME/.local/share/openslate-codex/node_modules/.bin/codex" --version
 ```
 
-The last command must show `codex-cli 0.153.4`. The bundled desktop-app runtime may have updated. Keep the separate pinned installation; do not point OpenSlate at an incompatible version. If the pinned runtime needs authentication, run its `login` command locally and sign in with ChatGPT. The Codex image worker requires that authentication mode, not an API-key login. OpenSlate does not copy your login credentials.
+Expected version: `codex-cli 0.153.4`. Sign in locally with that binary if needed. Configure its absolute path for the director/image worker; do not copy auth tokens into the repository or chat. The image worker uses ChatGPT login. Director account setup is separate and can use its selected supported Codex account; `OPENSLATE_OPENAI_API_KEY` only configures media API routes.
 
-Create a separate ignored `.env.live.local` file locally. Do not paste its contents into a conversation or commit it. Use absolute paths for the two path settings below:
+| Job | Select installed supported profile | Account consumed |
+|---|---|---|
+| Keyframe | Codex images or OpenAI image profile | Codex usage or separate OpenAI API billing |
+| Video | Viggle H3 (six-second example) | Separate Viggle account |
+| Speech | OpenAI speech profile | OpenAI API billing |
+| Recognition | OpenAI transcription profile | OpenAI API billing |
 
-```dotenv
-OPENSLATE_DATA_DIR=/Users/michael/SideProject/OpenSlate/.openslate/live-validation
-OPENSLATE_PROVIDER_CONFIG=/Users/michael/SideProject/OpenSlate/examples/live-provider-profiles.example.json
-OPENSLATE_CODEX_IMAGE_BINARY=/Users/michael/.local/share/openslate-codex/node_modules/.bin/codex
+Profiles are exact saved definitions, not automatic fallbacks. Example dollar estimates are not vendor quotes. Codex image quota/internal image-call count is unknown before a native start. Video result hosts must be explicitly trusted; correct a failed download to recover the existing job rather than submitting another.
 
-# Fill locally. The OpenAI key is optional for Codex images plus your own recording.
-OPENSLATE_OPENAI_API_KEY=
-OPENSLATE_VIGGLE_API_KEY=
+## 2. Create and refine one shot
 
-# Enable only the image route(s) you intend to test.
-OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION=1
-OPENSLATE_ENABLE_IMAGE_GENERATION=0
+Create a disposable production project and choose its models; in an existing project use the model settings save/review flow. Completed/in-flight work remains on its original definitions. Set up the native Director and complete the zero-turn local check.
 
-# The video profile must be enabled when creating the production project.
-OPENSLATE_ENABLE_VIGGLE_H3_GENERATION=1
-OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS=storage.googleapis.com
-OPENSLATE_ENABLE_H3_GENERATION=0
+Example request:
 
-# Leave audio APIs off for the initial uploaded-recording run.
-OPENSLATE_ENABLE_SPEECH_GENERATION=0
-OPENSLATE_ENABLE_TRANSCRIPTION=0
-```
+> Create one six-second product film shot. Show a brown leather boot on a workshop bench, warm side lighting, slow camera push-in, no lettering. Save story, scene, shot and prompts using this project's models. Save no narration explicitly; stop for my generation reviews.
 
-For API images, set `OPENSLATE_ENABLE_IMAGE_GENERATION=1` and fill the OpenAI key. You may enable both image routes and select one per project. A route's enable switch is separate from its in-app allowance.
+Inspect saved intent, models and one-shot duration. Iterate in chat or edit the card. Existing material can be brought through Bring a brief; confirm the proposed plan after inspecting it. Saving writing/import interpretation starts no media. A selected-shot discussion should preserve other shots.
 
-`storage.googleapis.com` comes from the documented Viggle example. Your account may return a different download hostname. If downloading is blocked, inspect the known job in Viggle and add only its actual trusted hostname to the comma-separated setting. Restart to recover the same job; do not submit another video because a download failed.
+Compatible narration guidance is an application capability, not spending authorization. Before the first context/dispatch of an eligible fresh native turn, shipped older guidance upgrades automatically so the next conversation can write individual shot narration. Already-started epochs retain their saved capability. If customized/unavailable guidance reports an application error, retain the state/error for diagnosis rather than repairing its database.
 
-Set the file's permissions and start the built app:
+## 3. Choose silence or accept short voiceover
 
-```sh
-chmod 600 .env.live.local
-node --env-file=.env.live.local apps/server/dist/index.js --serve-web
-```
+For picture only, choose **No narration**. Undecided is a visible choice, not implicit silence.
 
-The server opens a connected browser window automatically. To reconnect to an already running server, use the same environment and data directory:
+For voiceover, open Audio setup on the shot. Save a short script and generate stock speech under exact review/one-start allowance, or import your owned recording. Listen, bind actual words/description and range, then accept the displayed words/bytes/timing together. A one-second accepted voice may sit inside the planned six-second shot; **do not pad it to six seconds**. Trim overlong audio or deliberately change picture duration. Existing personal voices need eligible registered IDs; creating a new clone is pending.
 
-```sh
-node --env-file=.env.live.local apps/server/dist/studio-cli.js
-```
+Continue the edit to update its plan when needed. Check stale speech proposals are unavailable after script/mode/voice changes. Audio acceptance does not authorize another synthesis call.
 
-The launcher uses a one-time link valid for 60 seconds. The browser removes the code from its address bar and stores an HttpOnly local session. Do not share the link. Restart with the same command/data directory to preserve projects and attempts. The local session is independent of provider API keys.
+## 4. Generate and review a keyframe
 
-## Conversation: Codex usage or API billing
+Open generation review from the treatment controls. Review selected shot/operation intent and confirm the creative permission. Then inspect the exact candidate/profile and approve a finite one-start usage/spending allowance you accept.
 
-The director uses the Codex runtime in both cases. Its existing setup supports ChatGPT login or API-key login; this is not a separate direct Responses API director.
+Once matching plan, holds/readiness and current authority permit, the selected worker runs automatically. Inspect the returned actual image (not a fixture), its dimensions/provenance and account usage. Record attempt/result identity. If it is wrong, request a new take explicitly; aesthetic disappointment is not an automatic retry.
 
-- **Codex usage:** use your existing ChatGPT login and leave the director's optional **Codex account folder** blank.
-- **OpenAI API billing:** create a separate account folder, then log the pinned Codex binary into that folder using its `login --with-api-key` command. The command reads the key from standard input. For example, with `OPENAI_API_KEY` already set privately in your local shell:
+Inspect that actual frame and its motion plan, then use the shot card's approval control. Returned-frame/motion approval is distinct from the image-generation start.
 
-```sh
-mkdir -p "$HOME/.local/share/openslate-director-api"
-printenv OPENAI_API_KEY | CODEX_HOME="$HOME/.local/share/openslate-director-api" "$HOME/.local/share/openslate-codex/node_modules/.bin/codex" login --with-api-key
-```
+## 5. Generate one video and export
 
-In the project's director **Local installation** section, set **Codex account folder** to that folder's absolute path. Choose a model available to that account and complete the setup check before the first conversation. Do not change your ordinary ChatGPT login to test this option: the automatic Codex image worker still requires ChatGPT login in its separately configured account folder. `OPENSLATE_OPENAI_API_KEY` is for media APIs; it does not automatically switch the director's billing route.
+Review a separate six-second video candidate bound to the selected profile, exact approved conditioning frame and effective motion. Check account credit/current price and approve one video start.
 
-## 2. Create a production project
+Expected result: one saved vendor job, polling of that same job, downloaded/normalized owned video and a playable shot card. Audition picture/accepted voice/music in Timeline, export locally, and inspect duration/picture/sound in the actual MP4. Generated clip sound is removed; the soundtrack uses accepted narration and optional owned music.
 
-Create a new project and expand **Media models**, or open an existing project’s **Project settings → Models & usage**, and select:
+Refresh and restart/reopen. Confirm the same attempt/take/export identities remain and no duplicate create occurred. Unknown submission must stay attached to its original attempt/liability until reconciled; missing output is not permission to start over.
 
-- **Keyframes:** Codex images OR GPT Image 2 · medium keyframes.
-- **Video:** Viggle H3 · first 6-second live shot.
-- Audio profiles only if you want the optional audio API tests below.
+## 6. Validate the other live routes and scoped reuse
 
-Do not use the demo button or an old default-demo project. Model choices and local assembly are saved when the project is created; restarting with different environment settings does not replace those saved choices. The included Viggle profile deliberately permits only six-second requests and one concurrent attempt, with no automatic regeneration. Configured dollar estimates are examples, not verified prices or hard vendor billing caps.
+- **API images:** test the alternate image route in a separate small project so account/provider identity stays clear.
+- **Speech:** generate one exact short stock-voice script, listen/accept current bytes/range and verify overlay playback/export.
+- **Transcription:** recognize one short owned recording; compare returned words/timing with what you hear, then explicitly adopt only the intended evidence. Rewritten text is not automatically aligned.
+- **Two-shot edit:** after a successful small run, add a second shot and revise only that shot. Confirm the first image/take is reused, only affected reviews renew and export reflects the edit.
+- **Longer film:** expand only after the small flows pass. Synthetic six-minute tests do not prove real long-form quality.
 
-Set up the project's native director with the same pinned Codex binary and your desired supported model. Complete its setup check. This is separate from the automatic Codex image worker configuration.
+## Report results
 
-Send:
+Record pass/fail, confusing controls, selected models/account route, actual attempt/vendor job identities, latency, generated dimensions, source/export durations, observed account usage and scoped reuse/restart behavior. Configured estimates remain separate from actual charges.
 
-> Create a one-shot, six-second leather boots commercial for production validation. Use the models saved in this project. Show a close-up of a brown leather boot on a workshop bench, warm side lighting, a slow camera push-in, no lettering or logos. Save the story, scene and shot intent. Save no narration explicitly; I may attach a short voiceover later. Stop for my reviews; do not replace completed media automatically.
+For an error, record its code and phase: before submission, unknown create, vendor processing, download, normalization or export. Keep saved state for diagnosis. Exclude keys, local tokens, signed result URLs, credential files and private project text.
 
-Check that there is one shot and the selected model names are correct. Request changes in conversation if the agent chose the wrong intent. Do not approve an image or video allowance until its saved prompt and operation match your intent.
-
-For an existing brief or scene breakdown, use **Storyboard → treatment folder icon (Bring a brief)**. Paste it or choose a UTF-8 `.txt`/`.md` file. Select **Interpret material**, inspect the proposed scenes/shots and source comparison, then **Confirm film plan**. This runs the director but starts no media and approves no spending. Optional suggestions stay in chat until chosen. Continue in chat; use a shot’s chat icon for a scoped revision. Direct storyboard edits save intent but do not start generation. For narration, choose **Generate voice** or **Upload recording** on a shot, then open its **Audio setup** settings icon. Chat **+ → Audio** opens the owned recording library, with advanced narration available separately. PDF/Word documents currently require copied text.
-
-## 3. Choose silence or accept voiceover
-
-For a picture-only run, choose **No narration** on the shot. The saved planned duration drives video; no silent WAV or fake audio cue is needed. An undecided choice does not authorize silence.
-
-For a spoken run, record a short line such as “Built by hand. Ready for the miles ahead.” Keep it within the planned six-second shot, then open the shot’s **Audio setup**:
-
-1. Start or continue the displayed shot audio edit.
-2. Choose Upload recording. You may upload and listen before any words exist.
-3. Save the actual words or a truthful description; choose and attach the exact recording.
-4. Review From/To, listen to that range, then explicitly accept the words, recording and timing together.
-5. Keep the planned six-second picture. The optional Match recording duration changes the picture only for a reviewed 3–15 second recording.
-6. Continue with the director to update the affected plan using accepted current narration and the selected providers, stopping at review gates.
-
-Short voiceover ends naturally while the picture continues; the source is not padded. Overlong audio needs trimming or a deliberate picture-duration change. Advanced project narration retains its separate writing/audio/timing reviews. Do not invent acceptance or repair application state in the database.
-
-## 4. Generate and review one keyframe
-
-In **Storyboard → treatment settings icon (Generation and costs)**, select the saved shot and the required image/video operations. Review the exact saved prompts, then choose **Allow and continue planning**. If work was stopped, send a fresh direction first. Permission allows one operation of each selected kind per shot; it does not approve spending or skip keyframe review. If the project changes while reviewing, review the current version again.
-
-The director can then prepare and apply the plan for that scope. In the spending/usage review, inspect the exact image candidate and selected profile. Approve only one start:
-
-- Codex image choice: confirm that it uses Codex allowance. The amount of subscription quota is unknown in advance.
-- API image choice: inspect the configured estimate and approve a small finite API allowance you are comfortable spending.
-
-The worker should run automatically once the current plan, generation permission, edit holds and allowance permit it. Check the resulting image at full size. It must be an actual image, not a **FIXTURE PREVIEW**. Save its attempt/result identity and note which account's usage changed.
-
-Review the exact keyframe and motion on the shot card, then use its check in the lower-right corner. Approving an image-generation start and approving the returned keyframe for video are separate actions. If the image needs changing, request a new take explicitly; OpenSlate should not automatically regenerate it for aesthetic reasons.
-
-## 5. Generate one Viggle take and export
-
-After reviewing the keyframe, inspect the video candidate: one six-second shot, the Viggle profile, exact motion prompt and reviewed first frame. Approve a separate allowance for one video start. Check the current price/credit balance in your Viggle account yourself before approval; the example profile's estimate is not an actual billing quote.
-
-Expected flow:
-
-1. One submission produces a saved Viggle video ID.
-2. OpenSlate polls that same job, downloads its result and validates/normalizes the take locally.
-3. The clip appears in its storyboard card. Open **Timeline** to audition picture and accepted sound, then use **Export** for local rendering.
-4. The exported MP4 plays for six seconds with the expected picture and any explicitly accepted voiceover.
-
-Viggle's native generated soundtrack is currently removed by OpenSlate's video normalization. The assembled soundtrack comes from accepted narration and, if selected in Timeline, an owned background recording. Leave background music unset for this first test. Timeline auditions narration/music with muted picture; native H3 sound is not mixed. Review the rendered export for exact final sound and timing.
-
-Review the saved job and actual account charge. Refresh, then stop/restart OpenSlate. Confirm the same take/export remains and no additional generation was submitted. If a submission is uncertain, keep that attempt and investigate its existing evidence; an unknown result is not permission to generate again.
-
-## 6. Compare image options and test a scoped edit
-
-Create a second project with the other image provider and repeat the small run. There is deliberately no silent migration of the first project's provider identity. This compares authentication, usage and results without confusing old allowances.
-
-Next expand a successful project to two six-second shots with appropriate accepted timing for each. Request a change to only shot 2. Check that shot 1's image/take identity is retained, only affected reviews are renewed, and the final edit is updated. Avoid a minutes-long batch until these checks pass.
-
-## 7. Optional real speech and transcription APIs
-
-To validate generated narration, select the speech/transcription profiles in a new project's Media models, fill the OpenAI API key, enable the corresponding audio switches and restart. Then follow the [audio review walkthrough](MANUAL-AUDIO-TESTING.md), replacing its disabled-worker rehearsal with your explicit finite live allowances.
-
-- Speech: save a short exact section with **Generated audio** as its source; prepare its speech plan; review words/voice/instructions; approve one API start; listen to and attach the result. Audio attachment and writing/audio/timing acceptance remain separate.
-- Transcription: upload or select a short actual recording; prepare recognition of that exact recording; review the plan; approve one API start; compare the returned words and timings to what you hear. Human adoption remains separate.
-
-Generated speech may not be exactly six seconds. Validate its audio independently first. Before using it for this video profile, choose a valid exact six-second source range only if the recording actually contains that range, or explicitly create and re-import a padded recording as described above. Do not silently trim spoken words or claim that transcription automatically aligns rewritten text.
-
-## What to send back
-
-For each checkpoint, report pass/fail and any confusing screen:
-
-- Selected image provider and account-usage route; actual generated keyframe quality/dimensions.
-- Audio import, playback, acceptance and six-second cue mapping.
-- One Viggle job ID, observed completion time and account charge.
-- Export duration, picture, narration and restart behavior.
-- Scoped-edit reuse; optional speech/transcription quality.
-- Error code and whether failure occurred before submission, during processing or while downloading.
-
-Do not include keys, local tokens, signed download URLs or native credential files. A blocked/uncertain run is useful validation feedback; keep its saved state for diagnosis.
-
-References: [Codex image generation and usage](https://learn.chatgpt.com/docs/image-generation), [OpenAI API authentication](https://developers.openai.com/api/reference/overview), [Viggle creation contract](https://docs.viggle.ai/v1/api-reference/videos/create-from-text). Provider access, current quotas and actual pricing are checked by you during the live run.
-
-### Changing choices and watching progress
-
-Existing projects now have **Project settings** behind the header gear icon. Preview and apply media model changes there; review the preserved work and start the next planning conversation explicitly. Director choices apply to the next idle turn. Saving settings never starts generation or grants spending. See [settings and live updates](PROJECT-SETTINGS-AND-UPDATES.md) for compatibility limits and a no-spend walkthrough.
-
-The browser uses one authenticated SSE stream while visible. **Live updates** means streaming is connected; **Periodic updates** indicates the slow reconnect fallback. Provider job polling remains separate. Run `./start.sh --restart` after upgrading to load the rebuilt interface and reopen a paired browser session. Manual local-token entry remains a fallback.
+See [current status](STATUS.md), [readiness checkpoint](HUMAN-TESTING-READINESS.md), [review semantics](SPENDING-REVIEW.md) and [audio rehearsal](MANUAL-AUDIO-TESTING.md).

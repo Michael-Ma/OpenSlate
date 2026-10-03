@@ -1,53 +1,27 @@
-# Project settings and live workspace updates
+# Project settings and live updates
 
-Project settings is available in the workspace header gear icon. It contains Models & usage, Director, and Setup & accounts. Credentials remain server-side; the browser displays setup and billing information, not secret values.
+Project settings now answer **which model performs which job** in one compact dialog. The entry shows Director, Keyframes, Video and Narration. Transcription sits under Other models; selected accounts, director local paths and existing recorded-voice identities use secondary disclosures. Test-only catalog annotations are trimmed from labels while model/quality distinctions remain.
 
-## Changing media models
+## Director choices
 
-1. Open **Project settings → Models & usage** and choose installed profiles.
-2. Choose unfinished work or a selected shot scope, then **Preview changes**.
-3. Inspect changed work and preserved results, active jobs, reviewed audio and their dependencies.
-4. Apply the captured preview. A project/catalog change requires a fresh preview.
-5. Continue in conversation when ready to prepare the next plan and review its generation requirements.
+The Director picker uses actual compatible choices returned by the configured native account/runtime. Read-only model-catalog refresh saves no selection and starts no model turn. If the list is unavailable, retain the current ID and offer manual entry under local setup; do not invent availability. The Director account is separate from media API keys.
 
-Saving models creates a new project configuration and retains the old definitions needed by history and existing jobs. It does not call a model, regenerate an asset, grant generation approval or approve spending. Changed unfinished work must pass the normal planning and generation boundaries. Previously submitted or uncertain jobs retain their original provider identity.
+**Save director** uses its own durable command and result. Changes apply only to eligible future idle work, with exact selection/setup checks. An unknown result retains the same command; current/earlier result copy is bound to the saved selection.
 
-Director changes apply to a future conversation turn. Active work is not silently interrupted. Local executable/account paths are under advanced setup. An older demo plan without the required local processing configuration cannot be silently converted into an H3 plan; incompatible pending changes are rejected before publication.
+## Media choices and save
 
-## Workspace updates
+**Save media models** creates the existing exact server preview. If it is current and changes no pending work/authority, the explicit Save automatically applies that validated preview with its retained apply identity, omitting an empty confirmation. It does not bypass backend validation or grant generation.
 
-```mermaid
-sequenceDiagram
-  participant UI as Browser workspace
-  participant API as Local server
-  participant Jobs as Director and media workers
-  UI->>API: Authenticated SSE connection
-  Jobs->>API: Persist progress or change director status
-  API-->>UI: Project event or invalidation
-  UI->>API: Fetch current views
-  API-->>UI: Current project, review and panel data
-  Note over UI,API: Idle connection sends heartbeats, not repeated browser status requests
-```
+A preview that changes unfinished operations instead shows the real affected shots and dependent assembly, with kept work disclosed. Apply requires the human to confirm that exact impact. Completed results, in-flight work, protected dependencies and separately reviewed audio stay pinned. Changed pending operations need current generation/usage review. The default scope is eligible unfinished work; routine entry no longer asks for a technical scope choice or another planning continuation.
 
-One stream serves the active project and its panels. Browser actions still send their normal API commands and refresh on completion. SSE covers later background progress, changes from other clients and reopening the page. Stream messages invalidate views; they do not grant execution authority.
+Director and media are deliberately separate saved commands, not an atomic combined transaction. Drafts/pending commands survive compatible refresh/remount in the same API session. A lost apply response restores the reviewed choices and offers **Check saved media request**, sending the same identity. Hard reload can lose browser pending state; server receipts remain authoritative.
 
-Events carry replay cursors. Reconnection refreshes current state, and gaps or oversized history trigger a snapshot resync. Hidden tabs disconnect and resume when visible. If streaming fails, the UI displays **Periodic updates** and uses a 30-second fallback while reconnecting. Normal operation displays **Live updates**.
+Selected-account summaries show only relevant providers and actual setup issues. Key saved/configured does not mean media access/quota verified. Keys/routes remain server-configured; there is no new browser credential-entry or cloning-enrollment feature. See [catalog](PROVIDER-CATALOG.md) and [personal voice](PERSONAL-VOICE.md).
 
-The server shares a lightweight database/status watcher across active streams. It stops when no clients remain. Provider-side job polling is separate and remains necessary where the provider API does not push completion.
+## Guidance and updates
 
-## Stopping work
+Compatible shipped V1–V3 guidance updates to V4 at the first input of an eligible fresh undispatched/unbound native epoch. Old locks/epochs stay immutable. The version switch is absent from normal settings; [guidance compatibility](DIRECTOR-TOOLS-UPGRADE.md) remains an application concern. Ordinary writing requires no generation/spending permission.
 
-Use **Stop** in the chat composer to interrupt conversation and prevent new generation. A new chat message continues from saved state; no separate Resume button is needed. SSE continues delivering saved progress. See [Chat Stop](CHAT-STOP.md) for provider-job limitations and verification.
+The visible project shares authenticated SSE with coalescing/backoff and 30-second fallback refresh. Background reads retain current connection/content instead of briefly showing Connecting or disabling controls. Saved-edit Continue rows stay hidden during Director execution while their holds persist. Stop and continuation still enforce their original scope/authority rules.
 
-## Manual check without media spending
-
-- Open an existing project and locate **Project settings** in the header.
-- Change a model, inspect the preview, and apply. Confirm no media generation begins automatically.
-- Reload and confirm the saved selection persists. Completed results should remain visible.
-- Open Director and Setup & accounts; check plain-language usage labels and collapsed advanced paths.
-- Keep the page idle: the browser should keep one event stream, with no recurring per-panel status requests while connected.
-- Disconnect/reconnect the local server: verify recovery to current state without replaying a mutation.
-- Switch away and back to Story & narration with an unsaved draft; confirm it remains intact.
-- Verify keyboard focus stays inside settings, Escape closes when idle, and focus returns to the opener.
-
-Automated and browser validation evidence is recorded in STATUS.md. This feature does not validate real media API quality or account access.
+Source: web `ProjectSettings.tsx`, `ProviderSettings.tsx`, `DirectorSettings.tsx`, `project-settings-model.ts`, `settings-presentation-model.ts`, `project-subscription.ts` and `App.tsx`; server model/director/event/continuation services. [October 3 verification](OCTOBER-3-REFINEMENT-REVIEW.md) records 2,207 tests, disposable actual-React fixture checks, rapid synthetic SSE and the final integrated gate and repaired bounded native guidance rerun passed. No paid media-generation calls were made for this refinement.

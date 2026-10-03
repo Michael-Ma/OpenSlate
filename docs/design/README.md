@@ -1,132 +1,74 @@
-# OpenSlate — Technical Design
+# OpenSlate architecture
 
-**Version:** 0.6 · September 12, 2026
-**Status:** target architecture with an accepted single-machine v0 boundary. The scripted workspace, supervisor and separate narration/rendering services have working implementations, and a live native backend fixture verified question/restart/scoped-edit behavior; consult [implementation status](../implementation/STATUS.md) for verification and remaining integration.
+OpenSlate is a single-user local video studio. The conversational director develops creative intent; the application preserves an editable production and executes selected media work. V0 supports resolved exports up to six minutes. Its browser, Fastify service, SQLite, artifacts, workers and native Codex run on one computer. Cloud model APIs remain supported; multi-host deployment and remote GPU workers are outside this version.
 
-OpenSlate turns a creative brief into an editable film of up to six minutes: conversational narration development, story and shot planning, human-reviewed keyframes, generated takes, timeline assembly, and finishing. It is a single-user, single-machine local application with user-configured credentials and extensible model adapters. The browser workspace, application service, SQLite database, artifact files, operation workers and native Codex process all run on that computer. Codex, GPT Image 2, and H3 cloud are the first director/image/video integrations. A later same-machine Python H3 worker implements the video provider boundary; ten- and thirty-minute films are later validation targets.
+## Capabilities and design choices
 
-The current implemented interface is documented in [Storyboard studio](STORYBOARD-STUDIO.md), including direct edits, per-shot narration intent, the light timeline and shared typography. Older component layouts below describe design history where they differ.
-
-## 1. Direction
-
-The application should be fast to execute and easy to revise. Once the intent and current project state are clear for a requested scope, the director writes an execution plan in a small TypeScript planning language. OpenSlate compiles it into a durable dependency graph and executes ready operations directly. The user can intervene during production; the director translates the request into a scoped change rather than rebuilding the film.
-
-The AI determines useful production stages and missing information from the user's input and saved evidence. A versioned production workflow supplies the overall guide and enforces critical stage/output protocols in application code. Stage readiness is per scope; there is no fixed global sequence that every request must restart. Storytelling remains a creative task, while prerequisites, revision integrity, approvals and paid execution remain application rules.
-
-| Decision | Purpose |
+| Capability | Implemented design |
 |---|---|
-| One user and one computer for v0 | Keep application state and local process ownership together; no shared-database or distributed deployment |
-| TypeScript application, React UI, Fastify service | Share contracts across the product and execution engine |
-| Codex behind a director adapter | Reuse conversation and reasoning while OpenSlate owns project state |
-| AI stage proposals with coded workflow contracts | Adapt the procedure to available material and enforce critical boundaries |
-| Two initial skills; five agent-facing tools | Prove extensibility and lifecycle before adding specialist features |
-| Uploaded or generated narration | Discover readiness, close gaps through conversation, and time shots against accepted audio |
-| Human-reviewed keyframe for every shot | Confirm composition and intended motion before admitting video generation |
-| Code-authored plan, compiled dependency graph | Batch decisions and remove the agent from routine dispatch/polling |
-| Versioned project and scoped atomic patches | Change one shot while preserving valid completed and running work |
-| SQLite, local artifacts, separate TypeScript worker | Straightforward local installation and durable progress |
-| Role-specific image/video/speech/transcription adapters | Start with GPT Image 2 and H3; add models without changing project logic |
-| Optional same-machine Python H3 worker after v0 | Keep model/GPU dependencies out of the initial cloud-provider installation |
+| Conversational filmmaking | A native/fake director reads saved brief, treatment, scenes, shots, media and pending decisions; compatible shipped guidance updates before eligible fresh native turns |
+| Editable production | Stable identities and revision-checked commands preserve unaffected outputs across scoped edits; a resizable Director pane and safe Markdown support iteration |
+| Declarative planning | Restricted TypeScript compiles into a durable graph; no generated JavaScript is evaluated |
+| Human review | Exact generation permission, finite usage/spending allowance and returned-frame/motion approval govern media execution |
+| Recovery | Service-issued intents/candidates/attempts, durable receipts and uncertain-submission handling survive interruption |
+| Narration | Explicit silence, script-first or recording-first review and accepted short within-shot voiceover |
+| Playback/export | Synchronized picture/narration/music preview and an exact local FFmpeg render manifest |
+| Provider choice | Compact job-based settings, actual Director model choices and separately saved Director/media settings; immutable media definitions remain pinned |
 
-The two skills are `production` and `plan-authoring`. Continuity and asset direction begin as guidance inside `production`, with references loaded when relevant. They can become separate skills when real usage justifies the split.
+These design choices address revision integrity, review and recovery. They do not by themselves establish commercial quality, speed superiority or complete live-provider acceptance.
 
-## 2. Overall architecture
+## Ownership
 
 ```mermaid
 flowchart TB
-    subgraph Computer[One user computer]
-    User[User conversation and review decisions] <--> UI[Web workspace]
-    UI <--> App[Application service]
-    App <--> State[(Project and execution state)]
-    App <--> Director[Codex director adapter]
-    Catalog[Locked skills and tool catalog] --> Director
-    Director --> Tools[Five validated domain tools]
-    Tools --> Workflow[Stage contracts and scoped readiness]
-    Workflow --> Change
-    Tools --> Change[Change service and plan compiler]
-    Change --> State
-    Change --> Graph[Versioned execution graph]
-    Graph --> Scheduler[Ready-work scheduler]
-    Scheduler --> Workers[Trusted operation handlers]
-    Workers --> Cloud[Image video and narration adapters]
-    Workers --> Edit[Timeline and FFmpeg rendering]
-    Workers --> Media[Artifact library]
-    Workers --> State
-    State --> Events[Progress and decision events]
+  subgraph Local[One computer]
+    UI[React studio] <--> App[Application services]
+    App <--> DB[(SQLite canonical state)]
+    App <--> Director[Replaceable director adapter]
+    Director --> Bridge[Locked validated tools]
+    Bridge --> App
+    App --> Compiler[Restricted plan compiler]
+    Compiler --> Graph[Immutable operation graph]
+    Graph --> Engine[Durable execution engine]
+    Engine --> Adapters[Registered provider adapters]
+    Engine --> Artifacts[Owned media and receipts]
+    Artifacts --> Timeline[Timeline capture and FFmpeg]
+    DB --> Events[Authenticated project events]
     Events --> UI
-    Events --> Director
-    Workers -. after v0 .-> Local[Same-machine Python H3 inference]
-    end
-    Cloud --> Services[Cloud image video and narration APIs]
-    Director --> LLM[Cloud model service]
+  end
+  Director --> LLM[Configured LLM service]
+  Adapters --> APIs[Configured media services]
 ```
 
-The director proposes stages, creative decisions and plans. The workflow service validates stage contracts against the actual requested mutations and saved evidence. The compiler validates media plans; the scheduler and workers execute them. Only decisions needing reasoning return to the director; task completion and provider polling do not inherently require a model call. Existing project-only/plan-only tools receive the same workflow checks.
-
-## 3. Five durable record groups
-
-| Artifact | What it preserves |
+| Owner | Source of truth |
 |---|---|
-| **Project revision** | Brief, narration readiness and scripts/cues, story/bible, scenes/shots, references, review decisions, selected takes, editorial intent |
-| **Workflow and stage records** | Locked recipe/task prompts, scoped assessments, consumed inputs, output evidence, pending questions and derived readiness |
-| **Plan revision** | Readable plan source, normalized operation graph, exact input bindings, execution policy and version lock |
-| **Execution records** | Service-owned generation intent/candidate IDs, attempts, receipts, cost reservations, node progress |
-| **Media and timeline revisions** | Immutable outputs/provenance, exact edit selections, render recipes and finished exports |
+| Application services | Human requests/scopes, creative commits, grants, settings and recovery release |
+| SQLite store | Project/plan revisions, immutable decisions, attempts, receipts and event cursors |
+| Director adapter | Conversation/runtime mechanics and creative proposals; no independent production authority |
+| Compiler | Allowed declarations, exact bindings, graph consistency and reuse/replace impact |
+| Execution engine | Ready-work admission, current-state checks, attempts, liabilities and recovery |
+| Media services | Owned bytes, verified measurements, normalization and immutable output provenance |
+| Browser | Display, drafting and authenticated human commands; caches are replaceable |
 
-These records survive conversation resets. Skill loading and conversation summaries are context management, not the production database. A shot is an intended moment, a take is a generated candidate, and a timeline clip is an editorial use of an exact take.
+## Main loop
 
-## 4. Main execution loop
+1. Save the human request, scope and edit holds; revoke incompatible older director authority.
+2. Read current saved evidence and gaps. The director proposes creative changes and a plan through locked typed tools.
+3. Prepare without media effects: validate the mutation footprint, workflow prerequisites, source graph and reuse impact.
+4. Apply against current revisions and request authority. Publish compatible creative/plan changes atomically.
+5. Workers admit only eligible operations. The application checks one-use generation origin, exact reviews, allowances, holds, timing and current selection.
+6. Retain provider receipts and outputs durably. Poll/recover the existing job; an uncertain effect is not a retry instruction.
+7. Show the next useful decision, inspect actual frames/motion and audition the timeline. Scoped revisions preserve valid branches and historical attempts.
 
-1. **Assess stages and gaps.** Read current project state; the AI proposes useful supported stages and missing information for the requested scope. Code derives the applicable contracts and checks known prerequisites.
-2. **Author the creative change.** Use focused stage guidance to develop the story, scenes, shots or narration. Reuse supplied material and settled decisions; ask only about missing decisions that affect the work. Assessment and creative output can share one reasoning pass.
-3. **Write plan code.** Describe operations, dependencies, reference bindings, and review gates for that scope.
-4. **Prepare and inspect.** Compile without side effects. Return a proposed project/plan diff, reused work, new work, holds, and estimated cost/time impact.
-5. **Commit under policy.** Apply validated stage records and approved or already-authorized creative/plan changes atomically. Recheck material inputs and authority; a progress-only update does not invalidate compatible work. Admit media only within the active policy and budget.
-6. **Execute ready work.** Prepare accepted narration and shot keyframes in parallel where independent. Admit a video only after a human approves its exact keyframe and relevant shot intent/settings. Ingest outputs and advance dependencies without routine agent turns.
-7. **Guide at decision points.** Surface storyboard batches, technical failures, material edit impacts, or exhausted budgets. The user decides creative quality; automatic retries handle eligible technical errors only. Resume only eligible branches.
-8. **Finish or revise.** Resolve an editable timeline, render a preview/export, and accept further scoped changes at any time.
+A project revision, a compiled plan, a creative candidate, a provider attempt and a selected artifact are different identities. A retry remains attached to its candidate; a new creative alternative needs its own human origin. Conversation resets do not reset those records.
 
-“Finalizing intent” applies to the scope being executed. It does not require locking the whole project against future changes or waiting for every scene before useful work can start.
+## Current limits
 
-## 5. What must be built first
+- One active director turn per project; independent media operations can proceed within saved concurrency limits.
+- 30 fps picture and 48 kHz audio in the local assembly path, up to 360 seconds/64 cuts/65 audio placements, with eight simultaneous mixing lanes.
+- Within-shot voiceover may be shorter than picture; undecided narration is not silently treated as silence.
+- Video normalization removes embedded generated sound. Accepted narration and optional owned music supply the soundtrack.
+- Existing eligible OpenAI custom voice IDs are supported; in-app enrollment from a recording is pending.
+- Local source-checkout launch, private same-root backups and recovery are implemented. Portable relocation, installer packaging, advanced timeline editing and same-machine H3 inference remain later work.
 
-| Build the framework now | Keep the initial content small |
-|---|---|
-| Skill discovery, compatibility checks, immutable version locks, request activation | Production guidance and plan authoring |
-| Stage registry, typed outputs, scoped readiness, evidence-based transitions | One narrated-video recipe with flexible intake, planning, narration, review and revision paths |
-| Tool registry, schemas, permissions, idempotency, shared handlers | Read context, prepare change, apply change, control execution, inspect artifact |
-| Plan compiler, dependency scheduler, stable identities, revision comparison | Image/video generation, speech synthesis, transcription/alignment, timeline assembly, rendering |
-| Scoped edit protocol, stale-result protection, progress events | Conversational shot replacement, trim/reorder, reference selection; visual playback and review |
-
-The first executable proof should use fake media operations, demonstrate parallel work and editing a running plan, and then connect real providers. Avoid building a large skill library or a professional timeline editor before those behaviors work.
-
-## 6. Confirmed product decisions
-
-The first release is a single-user, single-machine local web app supporting video exports up to 360 seconds. Multi-host application deployment, remote GPU workers, distributed scheduling and shared SQLite deployment are outside v0. Cloud provider jobs remain external requests whose receipts and artifacts are tracked locally; this product is not an offline-generation promise. Users can upload narration, develop and generate it through conversation, or combine sources with explicit segment choices. Imported music and optional native shot audio are supported; a music-generation adapter is deferred. The agent identifies missing script/audio/timing decisions and offers useful options rather than assuming every project starts from scratch.
-
-Users review a concise production plan and scene-grouped keyframes. Every shot requires a human-approved conditioning image before video generation; a batch decision covers exact displayed shots and inputs. Detailed shot plans, prompts, settings, versions, and execution records remain available for debugging. The agent never purchases quality-driven regeneration autonomously. Technical recovery is bounded and preserves uncertain submission liability.
-
-V0 creative edits are conversational. The interface supports playback, frame/take comparison, shot selection for chat context, review decisions, and pause/resume; a direct timeline editor comes later. Six minutes is a release acceptance limit, not a hard-coded shot count. Ten- and thirty-minute support require later scale/quality validation.
-
-Fast execution does not mean unbounded concurrency or speculative paid takes. Optimize the critical path, overlap independent work, cache valid artifacts, and batch reasoning. Measure time to first useful preview and time to apply a shot edit, not only total job throughput.
-
-## 7. Reading map
-
-The [detailed technical design set](../technical/README.md) adds implementation contracts for every component while this document remains the architecture overview.
-
-| Document | Read for |
-|---|---|
-| [Component design](COMPONENT-DESIGN.md) | Architecture diagrams, component ownership, and high-level execution algorithms |
-| [Production workflow](../technical/PRODUCTION-WORKFLOW.md) | AI stage selection, missing information, enforced protocols, reuse and task-prompt versions |
-| [Skills and tools](SKILLS-AND-TOOLS.md) | Loading, versioning, multi-request lifecycle, extension rules, and minimal initial surface |
-| [Execution and editing](EXECUTION-AND-EDITING.md) | Code plan example, scheduler logic, incremental changes, and user intervention |
-| [Commercial walkthrough](COMMERCIAL-WALKTHROUGH.md) | A 150-second leather boots example, narration branches, services and saved records |
-| [Codex and providers](CODEX-AND-PROVIDERS.md) | Native runtime responsibilities, application ownership, and model extension boundaries |
-| [Implementation plan](IMPLEMENTATION-PLAN.md) | Milestones and acceptance criteria |
-| [Development plan](IMPLEMENTATION-PLAN.md) | Remaining release work and acceptance gates |
-
-## 8. Runtime and provider boundaries
-
-Use a same-machine Codex App Server adapter over stdio and loopback OpenSlate MCP tools, subject to a pinned-release compatibility test. The accepted `LocalCodexPolicy` has only mode `local`, bound to an exact runtime version/configuration; v0 trusts that installed runtime and its sandbox. Exact catalogs, epoch fencing and application-owned mutation/media authority remain mandatory. Independent code-host/authentication isolation is unverified and does not create a second externally confined deployment mode. A live backend fixture has verified supervised conversational question/restart/edit behavior. Keep the default fake while local runtime configuration and browser integration are completed; native structured questions and vision remain unverified. See the [accepted decision](../implementation/RUNTIME-TRUST-DECISION.md). A DirectorRuntime interface permits another runtime later; media provider adapters are a separate boundary. Model profiles declare actual capabilities and reference backend-only credentials. Codex custom-provider configuration is not universal LLM compatibility; see the [runtime/provider design](CODEX-AND-PROVIDERS.md). The official documentation covers session integration and skill activation; OpenSlate's version locks, tool policies, and plan execution are application features. [Codex App Server](https://learn.chatgpt.com/docs/app-server), [Codex skills](https://learn.chatgpt.com/docs/build-skills)
-
-Providers expose their actual conditioning modes and limits. Cloud success is not local completion until media is copied and validated. Preserve ambiguous submissions without blindly repeating paid requests. H3 cloud and local Base must remain separate capability profiles. Python owns local inference, while TypeScript retains scheduling, policy, plans, and editing; any hybrid hosted stages are explicit TypeScript jobs. Local H3 inference alone does not make the Codex director or image generation offline.
+See [studio behavior](STORYBOARD-STUDIO.md), [component references](../technical/README.md), [current evidence](../implementation/STATUS.md) and the [accepted runtime trust boundary](../implementation/RUNTIME-TRUST-DECISION.md).

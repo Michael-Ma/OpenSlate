@@ -24,10 +24,8 @@ The returned source media was square; the widescreen export preserves it with si
 - Completed local launcher pairing, HttpOnly sessions, CSRF checks, expiration/logout and SSE session validation. Reopening a link in an existing tab handles the new fragment.
 - Full `pnpm check`: 1,989 passed, zero failures, one opt-in native connection probe skipped; builds and all type checks passed.
 
-## Still needed before release
+## Current acceptance boundary
 
-1. Configure the OpenAI key and explicitly enable speech/transcription for short real audio validation; API-image validation is a separate provider path.
-2. Validate an ordinary native conversation through the new permission UI and the complete production flow. This run used a scripted plan.
-3. Validate a longer real multi-shot production, targeted conversational replacement, and final user acceptance. Existing synthetic six-minute checks do not establish real-provider long-form quality.
+This was a scripted-plan, silent, one-shot run. It did not prove native conversation-to-film, real API image/speech/transcription, longer production or user quality. The October 2 readiness activation changed local route availability without generating media; current remaining work is in [status](STATUS.md) and [human live testing](MANUAL-LIVE-PRODUCTION.md).
 
 Local media and databases are intentionally excluded from Git. The run artifacts remain in the task output folder under `live-validation-20260923`.

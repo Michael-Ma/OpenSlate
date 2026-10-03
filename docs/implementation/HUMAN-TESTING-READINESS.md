@@ -1,32 +1,19 @@
-# Human testing readiness
+# Human testing readiness checkpoint
 
-Local installation audited October 1 and activated with explicit approval October 2, 2026, after code commit `842b28c`. The verified build has been loaded into the real studio at `http://127.0.0.1:3001`, and a paired browser is open at the generation review. This is a readiness checkpoint, not completed live-provider acceptance.
+This is the **October 1 audit / October 2, 2026 approved activation** after local code commit `842b28c`, not a current live-provider production acceptance claim. The later [October 3 refinement](OCTOBER-3-REFINEMENT-REVIEW.md) has separate build/test/browser evidence and a final integrated gate and successful bounded native guidance rerun.
 
-## Verified current state
+## Checkpoint evidence
 
-- Local doctor passes with Node 24.15.0, pnpm 10.33.0, FFmpeg/ffprobe, the pinned Codex runtime and existing server-side keys.
-- The approved activation restart preserves the exact saved project revisions, active hold identities, pause states, plans and attempt identities. Media attempts and active plans remain zero.
-- Codex-image and Viggle routes remain enabled. OpenAI API-image, speech and transcription are now registered, host-enabled and available for exact human generation and spending review.
-- The installed catalog contains the exact API image, speech and transcription choices. The configured OpenAI key returned HTTP 200 from the documented [model-list endpoint](https://developers.openai.com/api/reference/resources/models/methods/list); all three exact configured model IDs were listed. This does not prove paid generation access, quota, image organization verification or custom-voice eligibility.
-- No generation or transcription call was made during this audit. No keys or project text appear in the [sanitized evidence](human-testing-readiness-evidence.json).
+- Local doctor passed Node 24.15.0, pnpm 10.33.0, FFmpeg/ffprobe, pinned Codex and existing server-side keys.
+- The activation restart preserved exact saved revisions, holds, pauses, plan/attempt identities. Media attempts/active plans stayed zero for the inspected installation state.
+- Codex-image/Viggle routes were enabled. With explicit user approval, OpenAI API-image, speech and transcription switches were enabled and registered.
+- The configured OpenAI key returned HTTP 200 from model listing; exact configured image/speech/transcription IDs were present. This did not prove paid-generation entitlement/quota, organization verification or custom-voice eligibility.
+- No media generation/transcription occurred during the audit/activation. [Sanitized evidence](human-testing-readiness-evidence.json) excludes keys/private project text.
 
-## Approved activation
+Only the three approved OpenAI enable switches changed; keys, data path, catalog and other switches were preserved. Readiness means the local route can reach exact human review, not that media acceptance passed.
 
-The user approved using the existing key on October 2. Only `OPENSLATE_ENABLE_IMAGE_GENERATION`, `OPENSLATE_ENABLE_SPEECH_GENERATION` and `OPENSLATE_ENABLE_TRANSCRIPTION` were set to `1`; keys, data path, catalog and other switches were preserved. The installation restarted gracefully, all three OpenAI profiles report registered/enabled execution, and the paired browser shows speech/transcription ready. No generation was initiated.
+## Still required
 
-Task 6 remains partial: saved personal voice identities, consent/revocation and synthesis with existing eligible OpenAI voice IDs are implemented; in-app creation from a recording is not. The documented read-only consent-phrase probe returned HTTP 404, which did not establish custom-voice access. It is not proof of a particular eligibility failure. New enrollment still needs provider/account confirmation and implementation.
+Use [human live testing](MANUAL-LIVE-PRODUCTION.md) for short real API-image/stock-speech/transcription and the native one-shot production flow, then scoped multi-shot reuse/restart and quality acceptance. Ordinary narration writing needs no spending authorization; compatible shipped guidance now refreshes before an eligible fresh native turn.
 
-## Human walkthrough
-
-1. In an older project, open **Project settings → Director → Project guidance → Enable audio planning** for V4. A new project uses the current guidance automatically. The update does not accept narration or spend usage.
-2. Select **GPT Image 2 · medium keyframes** for API images, **Viggle H3 · first 6-second live shot** for video, and the OpenAI audio choices when testing audio. Model selection has its own impact preview; existing projects keep their saved choices until applied.
-3. Start with one six-second shot. Choose **No narration**, or save and explicitly accept a short uploaded/stock-generated voiceover. Choosing a personal voice requires an existing eligible registered voice; new cloning enrollment still needs provider/account selection.
-4. Open **Generation and costs**, select the shot and intended operations, and explicitly continue saved edits across the film when their scope requires it. Review the creative permission, then review the exact candidate and a finite usage/spending allowance.
-5. Inspect the returned keyframe and motion, approve that exact review, and separately approve the video start. An uncertain submission is recovered as the same job.
-6. Audition picture, accepted narration and optional music in **Timeline**. Render the current plan locally and inspect its output. Refresh/reopen and check no duplicate attempt appeared before expanding to more shots.
-
-Record what was selected, actual attempt/job identities, errors, export duration and account usage. Configured cost estimates are not verified vendor prices. The detailed [manual live production guide](MANUAL-LIVE-PRODUCTION.md) and [audio walkthrough](MANUAL-AUDIO-TESTING.md) remain the test instructions.
-
-## Completion boundaries
-
-The implementation gate passed 2,173 tests plus builds/typechecks before this runtime audit. Real API image/speech/transcription acceptance, full conversational production and user quality acceptance are still human testing work. New voice enrollment and broader installer packaging remain pending; this checkpoint does not claim they are finished.
+The October 1 implementation check passed 2,173 tests/builds/typechecks before this activation. It does not verify later changes automatically. Personal voice stores existing eligible provider IDs; new in-app cloning enrollment and broader installer packaging remain pending. The read-only consent-phrase 404 did not establish voice eligibility. See [status](STATUS.md), [personal voice](PERSONAL-VOICE.md) and [remaining work](../design/IMPLEMENTATION-PLAN.md).

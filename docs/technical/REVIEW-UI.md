@@ -1,98 +1,34 @@
-# Review Workspace and Conversational Editing
+# Studio and review UI
 
-**Version:** 0.8 · September 27, 2026
-**Status:** the local studio implements authenticated SSE, a unified Film plan organized by scene, reviewed text/Markdown import, exact keyframe review, scene-scoped chat and conversational Stop. Narration controls expand within Film plan; Assets contains media and Preview contains the assembled cut. Broader acceptance and playback concepts below remain target design where not identified as implemented. See [current status](../implementation/STATUS.md) and [delivered interaction design](../design/SIMPLIFIED-VIDEO-FLOW.md).
+The React studio presents saved production state and sends authenticated human commands. Server projections/revisions own the truth. Component state holds unsaved text, current display and pending command identity; it cannot grant media authority by itself.
 
-## 1. Product contract
+## Workspace
 
-V0 gives the user a conversation, a scene-oriented review workspace and playback. Every creative edit is expressed through conversation. Selecting a frame/shot/timecode supplies context for that conversation; approval, conversational Stop and playback controls are available directly. A timeline editor is a later interface over existing change services.
+The Director conversation sits beside the treatment/scenes/shots storyboard. Shot controls support inline text, narration intent, add/delete/reorder, exact frame/motion review and selected clip preview. The lightweight Timeline auditions picture, accepted narration and music, while Assets retains uploaded/generated media. Chat **+** imports owned media.
 
-The primary flow is: brief and narration options → concise production plan → narrated storyboard/keyframe review → clip/scene draft review → final playback/export. Each stage can coexist with progress in other scenes. The application keeps the last usable preview visible during revision.
+Narration uses a compact shot-scoped script/recording/listen/accept flow, with advanced section/transcript interfaces retained for detailed review. Generation connects planning, intended operations, usage/spending, actual frame/motion review and export.
 
-Treat that flow as orientation, not a mandatory wizard. The [workflow service](PRODUCTION-WORKFLOW.md) supplies scope-specific readiness. Show “scene 2: ready for frame review; scene 3: needs narration ending,” along with the director's proposed next work. Distinguish hard missing requirements from suggested creative improvements. A valid draft, a usable generated take and human acceptance have different labels; an AI stage assessment cannot display them as equivalent.
+The compact header settings dialog shows Director, Keyframes, Video and Narration, with transcription/accounts/local setup/existing voice identities disclosed on demand. Director choices come from the actual compatible account/runtime catalog. Director/media commands save separately; zero-impact media Save applies the exact current server preview, while actual unfinished changes receive a human impact review. Unknown responses retain their command identity for recovery.
 
-```mermaid
-flowchart LR
-    Chat[Conversation and selected context] <--> Store[Server snapshot and event cache]
-    Store --> Plan[Scene plan and narration readiness]
-    Store --> Board[Scene grouped keyframe review]
-    Store --> Playback[Scene and full film player]
-    Store --> Status[Progress and decisions]
-    Board --> Decision[Exact snapshot approval]
-    Decision --> API[Application review service]
-    Chat --> API
-    API --> Store
-```
+## Browser state and safety
 
-## 2. Components and data contracts
+- Shared authenticated project SSE invalidates domain projections; hidden tabs disconnect and streaming failures use backoff/periodic refresh.
+- Unsaved content and pending exact commands survive compatible projection updates; stale revisions prompt refresh/review instead of silent overwrite.
+- Artifact URLs are identity/API/abort gated. An old blob must not flash under a new result's label.
+- Viewport media release, indexed timeline data and bounded audio caching avoid retaining every media file.
+- Long content, empty states, dialogs, keyboard controls and 390px layouts need rendered validation.
 
-The implemented `FilmPlan` reads canonical project/review/narration state and the pending import projection. `film-plan-model` derives progress and a next action without mutating business state. The director receives `filmPlanningGuidance` with a fresh inventory on each turn. `registerPlanImports` persists sources and serves pending review; `ProductionService.confirmPlanImport` atomically rechecks and publishes the exact prepared draft. SSE invalidation refreshes these projections.
+The Director divider supports drag/keyboard, persistent preferred width and container clamping; the composer resizes vertically. Chat uses safe GFM with horizontal table scrolling and no automatic external image loading. Background projection refresh retains connected content/controls and hides Continue rows during Director execution without deleting holds. The [October 3 full/fixture checks](../implementation/OCTOBER-3-REFINEMENT-REVIEW.md) passed, with the reviewed response-order/native inventory fixes included in the final gate. A larger Change / Keep / Next plan card and app-wide minimal theme remain human choices.
 
-```mermaid
-flowchart LR
-    Source[Supplied text or Markdown] --> Import[Persist source and human request]
-    Import --> Director[Read context and prepare creative draft]
-    Director --> Review[Proposed Film plan by scene]
-    Review -->|human confirms exact draft| Apply[Validate freshness and apply]
-    Review -->|discard| Fence[Revoke only import work]
-    Apply --> Saved[Canonical film revision]
-    Saved --> Next[Next missing decision]
-    Next --> Chat[Scoped conversation]
-```
+## Explanation of reviews
 
-Document content is data. Interpretation is not permission to apply, spend or generate. Ordinary conversations still use existing typed prepare/apply tools; import confirmation adds a human boundary for supplied documents. Original source and draft remain durable audit records.
+Ordinary narration writing needs no spending authorization. A guidance upgrade is tool compatibility. Media generation needs explicit operation permission plus finite usage/spending; video also needs actual frame/motion approval. Audio acceptance confirms words/recording/range. The UI should name the concrete action and why it is waiting instead of grouping these as generic authorization.
 
-The table below describes the broader component responsibilities:
+## Source and checks
 
-| React component | Reads | Actions |
-|---|---|---|
-| `ProjectShell` | Project head, stages, pending decisions and connection status | Navigate review sections, reconnect |
-| `ConversationPanel` | Persisted messages plus transient deltas | Send message with explicit selected context and upload references |
-| `NarrationPanel` | Text/audio readiness, gaps, script revision, audio player and cues | Choose offered direction/voice option, attach audio, send scoped feedback |
-| `ProductionPlanCard` | Scene summary, duration, narration direction and preparation estimate | Accept presented plan/allowance or request changes |
-| `StoryboardReview` | Immutable scene review snapshot and member status | Enlarge/compare, select shot for chat, approve explicit displayed subset |
-| `ShotReviewCard` | Keyframe, intended motion, duration, candidate/attempt status | Play take, compare to keyframe/history, attach shot/timecode to chat |
-| `PreviewPlayer` | Frozen timeline/render target and shot interval map | Play/seek, select active shot, download current chosen export |
-| `DecisionTray` | Review, scope, budget, conflict and failure decisions | Resolve exact decision or continue conversation |
-| `ExecutionStatus` | Ready/running/held/failed counts and estimated/observed usage | Conversational Stop; fresh direction to continue |
-| `DebugInspector` | Detailed shot spec, plan source/graph and event lineage | Read/copy/download redacted diagnostic bundle |
+- [App](../../apps/web/src/App.tsx), [typed API](../../apps/web/src/api.ts), [project subscription](../../apps/web/src/project-subscription.ts), [resizable layout](../../apps/web/src/WorkspaceSplit.tsx), [safe Markdown](../../apps/web/src/ChatMarkdown.ts)
+- [Storyboard controls](../../apps/web/src/StoryboardControls.tsx), [shot audio](../../apps/web/src/ShotAudioPanel.tsx), [generation guide](../../apps/web/src/GenerationGuide.tsx), [settings](../../apps/web/src/ProjectSettings.tsx)
+- Shared typography in `apps/web/src/typography.css`; scoped surface/layout styles in web CSS.
+- Web model/command/playback tests plus disposable desktop/narrow-screen review. See [evidence index](../implementation/VALIDATION-EVIDENCE.md).
 
-These names describe future module ownership, not a mandatory component library. Reuse React and native media elements; choose visual styling primitives in implementation. Keep provider and filesystem details out of ordinary creative review.
-
-## 3. State management and transport
-
-The backend owns durable state. Keep query caches keyed by `(projectId, resourceId, revisionId)` and a small UI state store for selected scene/shot, playback position, unsent draft and open panels. Do not duplicate business-state reducers in browser code. The SSE handler invalidates/refetches relevant resources or applies versioned small changes; it cannot grant approval or advance job states locally.
-
-Boot: obtain a consistent snapshot/event cursor, open the event stream after that cursor, and merge events by monotonic sequence. Persist only unsent draft and UI selection locally if desired. After disconnect, mark stale status, retain the preview, and restore canonical state on reconnect. Transient streaming text is replaceable by the final persisted message.
-
-Sending a message creates a client command key that survives a request retry. Optimistically show “sending” text, but never optimistically show paid jobs as admitted or reviews as approved. If server acknowledgment is lost, retry the same command key. Show the persisted server request ID once known.
-
-## 4. Narration and storyboard interactions
-
-The narration panel displays what exists and what is missing, for example: “Script: partial; audio: none; remaining: closing message and voice.” Offer two or three context-relevant choices, plus free text. A user can upload a finished recording without being forced through script writing. Show a transcript as editable through chat; explain when a requested text change requires new audio rather than implying the waveform changed.
-
-Storyboard batches default to scenes. Each frame shows a stable shot label, the image, intended motion, approximate edit duration and narration excerpt. A concise scene summary remains visible; provider prompts and technical settings are in the debug inspector. An optional animatic provides timing context using the approved narration and still frames.
-
-“Approve scene” names the exact displayed batch. Users can exclude members or provide chat feedback against selected cards. The request carries snapshot digest/member IDs, and the backend returns accepted or stale members. If input changes while the user is reviewing, visibly mark changed cards and disable submitting the old full-batch approval until refreshed. Unchanged members retain their valid approval.
-
-The UI separates “keyframe approved,” “video running,” “draft ready” and “user accepted.” A still approval cannot be displayed as proof that the generated motion is good. A technically valid take automatically appearing in a draft remains reviewable; the agent does not purchase a better-looking take without user intent.
-
-## 5. Editing an active production
-
-User selects shot 8 and writes, “Make the toe shape match the uploaded photo.” The client sends that shot plus the current review/preview reference. The application persists a hold before model processing. Show an editing badge for affected work while unrelated approved scenes proceed.
-
-The director returns a compact impact card: changed keyframe/shot, reusable references/takes, affected successor if any, extra generation allowance and pending review. On success, the UI shows the replacement frame and requests renewed approval before video; the old frame/take remains in history. If the edit only changes trim/captions, explain the updated timing/render and preserve video generation.
-
-If the scope is ambiguous, the decision tray asks a focused question and indicates the temporary hold. Completing an edit cannot clear the user's pause. An abandoned/crashed edit exposes “continue this edit” or “discard pending edit and resume prior plan” as explicit actions; it does not resume spending silently.
-
-Selecting an older take for reuse is a conversational change. The preview player displays the exact timeline revision being shown while a newer target is pending, so “current working plan” and “last available preview” do not get confused.
-
-## 6. Review usability and scale
-
-Use stable scene/shot labels and timestamp-to-shot mapping. Support keyboard navigation, visible focus, descriptive labels, audio controls and captions. Thumbnails/proxies keep the grid responsive; fetch full media only on inspection/playback. Paginate or virtualize review batches as shot count grows; six-minute support must not load every full-resolution frame/video into browser memory.
-
-Keep action text concrete: “Approve 6 displayed keyframes,” “Video waiting for frame approval,” “Previous preview; shot 8 replacement is rendering.” Estimated cost and time must be labeled estimates. Show uncertain submissions separately from ordinary failures so the user is not invited to create an accidental duplicate.
-
-## 7. Acceptance tests
-
-Browser tests cover uploaded and generated narration choices, approving a displayed subset, stale approval rejection, full playback/timecode context, editing one active shot, user pause surviving edit completion, and reload/reconnect during a pending decision. A six-minute fake project checks thumbnail loading and event reconnect without unbounded memory growth. Test accessibility with keyboard-only review and media labels. Use stable fake artifacts and a controlled clock; paid provider calls are not UI test prerequisites.
+See the [studio guide](../design/STORYBOARD-STUDIO.md) for current human controls and [status](../implementation/STATUS.md) for accepted scope.

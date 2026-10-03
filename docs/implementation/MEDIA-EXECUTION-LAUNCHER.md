@@ -1,44 +1,24 @@
-# Opt-in media execution
+# Provider activation
 
-The local launcher composes application-owned image/H3/speech/transcription bridges, spending admission, output storage, ingestion and real local assembly through one runtime factory. External generation is **off by default**. Installing a model profile or configuring a key does not enable a provider or issue spending permission.
+Host enablement chooses which compiled-in routes the local service can execute. A key, catalog row or browser model selection cannot enable a route. Enablement itself starts no generation; current in-app operation permission and finite usage/spending remain required.
 
-The trusted startup switches are independent:
+| Route | Enable variable | Credentials/setup |
+|---|---|---|
+| OpenAI image | `OPENSLATE_ENABLE_IMAGE_GENERATION=1` | OpenAI media key |
+| Codex image | `OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION=1` | Absolute pinned image binary; existing ChatGPT login |
+| Viggle H3 | `OPENSLATE_ENABLE_VIGGLE_H3_GENERATION=1` | Viggle key; `OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS` |
+| Direct MiniMax H3 | `OPENSLATE_ENABLE_H3_GENERATION=1` | MiniMax key; `OPENSLATE_H3_DOWNLOAD_HOSTS` |
+| OpenAI speech | `OPENSLATE_ENABLE_SPEECH_GENERATION=1` | OpenAI media key |
+| OpenAI transcription | `OPENSLATE_ENABLE_TRANSCRIPTION=1` | OpenAI media key |
 
-| Setting | Meaning |
-|---|---|
-| `OPENSLATE_ENABLE_IMAGE_GENERATION=1` | Register the image execution bridge and enable its admission path |
-| `OPENSLATE_ENABLE_H3_GENERATION=1` | Register the H3 bridge, durable polling and protected downloading |
-| `OPENSLATE_ENABLE_SPEECH_GENERATION=1` | Register the speech bridge with complete audio ingestion |
-| `OPENSLATE_ENABLE_TRANSCRIPTION=1` | Register exact word transcription with owned derivative preparation and candidate ingestion |
-| `OPENSLATE_H3_DOWNLOAD_HOSTS` | Comma-separated exact lowercase output hostnames; required for H3 |
-| `OPENSLATE_PROVIDER_CONFIG` | Existing bounded JSON model/profile configuration |
-| `OPENSLATE_OPENAI_API_KEY` | Existing shared backend credential for image, speech and transcription |
-| `OPENSLATE_MINIMAX_API_KEY` | Existing backend credential for H3 |
+Switches accept only `0`/`1` (unset is off). FFmpeg/ffprobe are required for enabled media execution. Download allowlists contain exact trusted HTTPS hostnames separated by commas, without scheme/path/wildcards. An output-host error after video creation should recover the known job after correcting the allowlist and restarting; do not create a replacement.
 
-Only `1` enables a generation switch. Omitted, empty and `0` mean disabled; ambiguous values fail configuration validation. Output hosts cannot be wildcards, URLs, IP addresses or host/port strings. They must be established for the user's provider account; the repository does not invent a universal CDN hostname. Validation performs no DNS query. Download-time checks still require HTTPS, public pinned IPv4, bounded bytes and no redirects or credentials.
+Use [local setup](LOCAL-SETUP.md), choose an explicit [provider catalog](PROVIDER-CATALOG.md), then restart with `./start.sh --restart`. The server composes registered adapters, durable receipts/spooling, media ingestion, exact external allowances and local assembly. A catalog readiness view reports local prerequisites; it never verifies media access/quota or starts an API request.
 
-Enabled generation requires executable local FFmpeg and ffprobe. Missing media keys allow the app to open and show that the enabled route is not ready. Readiness checks happen before creating an attempt or consuming an allowance. The model catalog distinguishes host enablement, adapter registration, local tools and credential presence; it does not claim live API access has been verified.
+## Existing projects
 
-## Composition and saved projects
+Projects retain saved profile/assembly definitions. Current model preview/apply changes defaults and eligible unfinished work while protecting completed, in-flight and separately reviewed audio work. Historical locks without the required local assembly pin can remain incompatible for video; the server reports this rather than silently rewriting history.
 
-The fake provider stays installed for default demo projects. One shared local media service owns uploads, narration normalization, generated-video normalization and rendering. The output spool's owned blob directory is included among its trusted import roots. Exact image/video/audio/transcript ingestion uses dedicated handlers; fixture ingestion retains fixture provenance. Construction creates only local storage/configuration objects and performs no network call or generation-authority write.
+Media routes use backend-only credential aliases. Codex conversation setup and the Codex image account are distinct. There is no automatic switch between Codex subscription usage and API billing, or another provider fallback.
 
-With local tools available, real local assembly remains installed even when cloud generation is disabled, so previously rendered production work can still be verified and reused. When H3 is enabled, **new projects that select an external video profile** receive the exact local assembly pin. Default fake projects and image-only external selections with fake video retain their previous demo behavior. Existing project locks are never rewritten by startup configuration.
-
-An older externally configured project without a local assembly pin cannot start H3 work through this launcher. Admission reports that the saved execution mode needs an explicit upgrade, before consuming an allowance or submitting video. Creating a new production project is currently the supported path; an in-place human-reviewed local execution upgrade is separate work. A key or environment switch cannot silently reinterpret an old plan.
-
-An enabled, ready provider still needs an exact current candidate/grant, any required human keyframe review, project budget capacity and an unexpired human allowance. Admission permanently consumes that allowance's start/configured-estimate capacity in the same transaction as the attempt and reservation. A previously saved valid allowance can become usable when its provider becomes ready; toggling startup configuration does not create a new allowance or extend its expiry. Known/unknown submissions retain their existing reconciliation rules and are never blindly resubmitted.
-
-Audio option preflight runs synchronously in admission before any start or reservation is consumed. The exact fixed speech text/voice/instructions or word-transcription language/options must match the saved profile. This does not replace source ownership checks at preparation and ingestion. Both audio switches default off; old programmatic configuration without those fields remains disabled. Completed recovery with its route installed uses retained evidence without resolving a new key or consuming an allowance. Disabling a route leaves its unfinished attempts blocked on missing registration, as for image/video; it does not authorize a recovery POST. Ordinary conversational audio planning and human generation review remain separate follow-through. See [audio activation](AUDIO-ACTIVATION.md).
-
-## Validation scope
-
-The complete checkout passed **842 tests with zero failures/skips**, all builds/typechecks and the installed no-turn Codex probe. Configuration checks prove default-off behavior, that credential presence is not an activation switch, immutable host-list capture, independent switches, sanitized errors and rejection of unsafe or ambiguous configuration. Factory checks cover missing tools/keys, dynamic credential status, actual allowance admission, exact PNG publication, historical H3 denial and one reviewed H3 submission with injected HTTP.
-
-The full factory pipeline also passed: real human narration acceptance and canonical mapping, generated PNG bytes, independent allowance and exact frame review, one injected H3 POST/poll/download, measured video normalization, automatic real timeline/render and restart without repeated submission or rendering. The output contained 180 decoded blue frames and an audible six-second synthetic tone accepted as narration. This does not verify model creativity, vendor access or billing.
-
-A built-browser check started both provider routes with their credential variables explicitly removed. It displayed missing-key setup, explained the historical H3 project's incompatible saved assembly mode, created a newly pinned production project and preserved default demo profiles. Saved setup and corrected conversation guidance survived restart. Authenticated API and read-only database checks verified unchanged historical state and **zero requests, holds, grants, candidates, attempts, approvals, allowances, consumptions, native starts or media dispatches** across these empty projects. The browser console was clear; all application processes were stopped afterward. Local development evidence is retained under `work/openslate-media-activation-browser` outside the repository.
-
-H3 live calls remain deferred until its key is provided; live image/audio generation still requires an explicit test allowance. See [current status](STATUS.md) for subsequent work.
-
-Source: `apps/server/src/application/media-execution-config.ts`, `media-execution-runtime.ts`, `apps/server/src/index.ts` and `provider-catalog.ts`. See [spending review](SPENDING-REVIEW.md), [automatic local assembly](AUTOMATIC-LOCAL-ASSEMBLY.md) and [provider credentials](MEDIA-CREDENTIALS.md).
+Source: `apps/server/src/application/media-execution-config.ts`, `media-execution-runtime.ts`, `provider-credentials.ts`; server bootstrap. Tests cover malformed config, prerequisites, fixed routing, exact admission and zero dispatch on missing authority. Real media acceptance is recorded separately in [status](STATUS.md) and [human testing](MANUAL-LIVE-PRODUCTION.md).

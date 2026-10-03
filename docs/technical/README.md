@@ -1,109 +1,32 @@
-# OpenSlate — Detailed Technical Design
+# Technical references
 
-**Version:** 0.8 · September 12, 2026
-**Status:** target technical design. The local workspace, native director, media execution and same-root recovery are implemented; complete live-production acceptance remains pending. Use [implementation status](../implementation/STATUS.md) for current verification and limitations.
+Current source-backed component references, reconciled October 3, 2026. These are internal implementation boundaries, not a stable public SDK. [Status](../implementation/STATUS.md) records verified scenarios and outstanding live acceptance; [architecture](../design/README.md) explains the system as a whole.
 
-The [architecture overview](../design/README.md) and [component overview](../design/COMPONENT-DESIGN.md) explain direction. This set defines implementation boundaries, records, interfaces, algorithms, failure handling and verification. Examples describe target contracts, not a stable public SDK. The [development plan](../design/IMPLEMENTATION-PLAN.md) orders the work after these designs.
-
-V0 is single-user and single-machine: UI, API, SQLite, media files, workers and native Codex run on the same computer. Cloud LLM and media APIs remain external services; local deployment is not offline generation. Multi-host/remote-GPU/distributed/shared-database deployment is outside v0. The accepted native policy is `LocalCodexPolicy`, mode `local`, with exact pinned version/configuration identity and trust in the installed runtime/sandbox. See the [runtime decision](../implementation/RUNTIME-TRUST-DECISION.md).
-
-## 1. Component map
-
-```mermaid
-flowchart TB
-    UI[Review UI and conversation] --> API[Application API and change services]
-    API <--> Director[Director runtime and context]
-    Director --> Workflow[Stage proposals and workflow contracts]
-    Workflow --> API
-    Director <--> Tools[Locked skills and domain tools]
-    Tools --> API
-    API --> Compiler[Plan parser and compiler]
-    API <--> DB[(SQLite project and execution records)]
-    Compiler --> API
-    Worker[Scheduler and executor] <--> DB
-    Worker --> Providers[Image video speech transcription adapters]
-    Providers --> Assets[Immutable local artifacts]
-    Worker --> Render[Timeline and FFmpeg]
-    Assets --> Render
-    DB --> Events[Durable events and read models]
-    Events --> UI
-```
-
-| Component | Detailed design | Initial code ownership |
+| Component | Reference | Source ownership |
 |---|---|---|
-| Canonical state, revisions, persistence | [Data and persistence](DATA-PERSISTENCE.md) | Core contracts; server persistence repositories |
-| HTTP commands, trusted actors, transactions, events | [Application API](APPLICATION-API.md) | `apps/server/src/application`, `http`, `events` |
-| Codex adapter and context across requests | [Director runtime](DIRECTOR-RUNTIME.md) | `packages/director`; server supervisor |
-| AI stage selection and enforced production protocols | [Production workflow](PRODUCTION-WORKFLOW.md) | Core workflow contracts; server workflow service |
-| Skill locking, registration and versioned tools | [Skills and tools](SKILLS-TOOLS.md) | Director catalog/bridge; shared core contracts |
-| Restricted TypeScript and graph/change compilation | [Plan compiler](PLAN-COMPILER.md) | `packages/core/src/planning` |
-| Admission, scheduling, attempts, budgets, recovery | [Execution engine](EXECUTION-ENGINE.md) | Server executor modules; separate worker entry point |
-| Narration discovery, synthesis and cue changes | [Narration](NARRATION.md) | Core narration domain; director references; audio adapters |
-| Model profiles, adapters and artifact handling | [Providers and artifacts](PROVIDERS-ARTIFACTS.md) | `packages/providers`; server artifact service |
-| Timeline resolution, mixing and exports | [Timeline and rendering](TIMELINE-RENDERING.md) | Core edit domain; server media worker |
-| Human review, playback and conversational editing | [Review UI](REVIEW-UI.md) | `apps/web` |
-| Local installation, diagnostics, testing and operations | [Operations and testing](OPERATIONS-TESTING.md) | Server bootstrap; test fixtures; CI |
+| Canonical state and persistence | [Data](DATA-PERSISTENCE.md) | Core contracts; server persistence |
+| Human commands, transactions and events | [Application API](APPLICATION-API.md) | Server app/application/routes |
+| Native conversation and supervision | [Director runtime](DIRECTOR-RUNTIME.md) | Director adapter; server supervisor |
+| Scoped readiness and mutation rules | [Production workflow](PRODUCTION-WORKFLOW.md) | Core workflow; production service |
+| Immutable instruction/catalog locks | [Skills and tools](SKILLS-TOOLS.md) | Director skills/bridge; core schemas |
+| Restricted declarations and change impact | [Plan compiler](PLAN-COMPILER.md) | Core planning; production service |
+| Admission, attempts and recovery | [Execution engine](EXECUTION-ENGINE.md) | Server execution modules |
+| Writing, recordings and accepted cues | [Narration](NARRATION.md) | Server narration/media; audio adapters |
+| Models, transport and owned outputs | [Providers and artifacts](PROVIDERS-ARTIFACTS.md) | Provider package; server execution/media |
+| Saved edit, playback and local export | [Timeline/rendering](TIMELINE-RENDERING.md) | Server media; web Timeline |
+| Human interaction and browser state | [Review UI](REVIEW-UI.md) | Web studio and typed API |
+| Launch, diagnostics and tests | [Operations/testing](OPERATIONS-TESTING.md) | Scripts; server launch/recovery; tests |
 
-These are module boundaries. Create additional workspace packages only when they acquire independent consumers or lifecycle needs. Runtime/database/provider imports must not enter browser bundles; provider clients do not own canonical project state.
+## Shared invariants
 
-## 2. Shared contract conventions
+- SQLite and owned media preserve production state independently of chat history and browser caches.
+- Revision/spec/review/receipt identities remain immutable; heads and selections advance through trusted commands.
+- Models propose data. The compiler never executes generated code; the tool bridge never accepts model-provided human authority.
+- A generation grant, spending allowance and returned-frame/motion approval serve different predicates.
+- A creative candidate and an attempt are different records. A timeout or expired lease cannot authorize a duplicate paid submission.
+- Scoped edits preserve compatible work, retain old evidence and cannot publish a late old output into a newer selection.
+- Stop, request epochs, edit-hold ownership and recovery quarantine remain independent of progress/status display.
+- Provider presence/readiness is not live access, pricing or quality verification.
+- V0 assumes one user and one computer, including trust in the pinned local Codex runtime/sandbox.
 
-The following conventions resolve cross-document ambiguity. Domain-specific records extend them rather than inventing competing identities.
-
-```ts
-type Id = string;                 // service-issued opaque UUID
-type RevisionId = Id;             // immutable record identity
-type MicrosDecimal = string;      // nonnegative integer decimal at JSON boundary
-type Digest = string;             // lowercase SHA-256 hexadecimal
-
-interface ArtifactRef { artifactId: Id; sha256: Digest }
-interface Money { currency: string; micros: MicrosDecimal }
-interface ProjectHead {
-  projectId: Id;
-  revisionId: RevisionId;
-  headVersion: number;            // optimistic concurrency, not event sequence
-  activePlanRevisionId: RevisionId | null;
-  capabilityLockId: Id | null;
-}
-interface ProjectEvent<T = unknown> {
-  eventId: Id;
-  projectId: Id;
-  sequence: number;               // monotonic per project
-  kind: string;
-  occurredAt: string;             // UTC ISO timestamp
-  correlationId: Id;
-  payload: T;
-}
-```
-
-Use branded TypeScript IDs in implementation to prevent accidental interchange. Model-authored labels such as `shot-7/take` are symbols mapped to service-issued logical IDs. UUIDs themselves do not provide idempotency. Every mutating command needs a trusted intent identity and request digest; duplicate handling is described in the [API](APPLICATION-API.md).
-
-Use integer money micros, `bigint` internally and safe SQLite integer bindings; serialize as decimal strings. Never add different currencies or silently convert credits to money. Initial monetary caps require a conservative enforceable per-call bound; otherwise use an explicit unit/job allowance and label money as an estimate. Admission limits OpenSlate's activity, not unrelated usage of the same vendor account.
-
-Editorial time is integer frames at a rational frame rate, initially 30/1; audio positions are integer samples, initially 48,000 Hz. Seconds in conversational/provider interfaces are converted at explicit boundaries. Absolute rational conversions avoid accumulated rounding drift. The six-minute limit applies to resolved export duration after trims and transitions, not the sum of provider clip lengths.
-
-## 3. Invariants across every component
-
-1. OpenSlate's database is authoritative; conversation history, UI caches and worker memory are not.
-2. Project/plan/spec revisions and artifacts are immutable. Heads, job state and explicit selection bindings may change through owned commands.
-3. Every video admission requires current human approval of its exact reviewed conditioning bytes and effective shot/video specification.
-4. Creative candidates consume immutable service-issued grant slots from an initial authorized plan or a scoped recorded user request. Technical retries retain the candidate and allocate a new attempt backed by trusted failure evidence and retry allowance. Approval plus unused budget is insufficient.
-5. `submission_unknown` remains a potential paid effect; lease expiry, timeout and user edits do not authorize blind resubmission.
-6. Source/graph validation has no media side effects. Preparation can describe pending narration timing; affected dispatch and timeline resolution enforce readiness.
-7. Scoped changes preserve compatible work. Completion of an old candidate cannot replace a newer selected candidate.
-8. A patch clears only its own hold. All user pauses, other holds and remaining gates still apply.
-9. Keys are backend-only references in plans/logs. The embedded production runtime cannot inherit development skills or alternate paid-tool routes.
-10. Technical correctness and creative acceptance are separate. The user controls quality-driven regeneration; useful draft previews need not wait for individual clip acceptance.
-11. The director proposes stages and missing information per scope. Workflow readiness is derived from current evidence and contracts, never a model-authored global stage flag. All production mutations pass the applicable stage rules.
-
-## 4. Proposed implementation baseline
-
-Keep the checked-in Node 24, TypeScript 7 and pnpm baseline. Add dependencies through implementation PRs with lockfile updates, rather than pinning untested versions in prose. Select `better-sqlite3` behind repositories, JSON Schema contracts validated with Ajv/Fastify, a TypeScript-capable `@babel/parser` behind a narrow syntax adapter, and FFmpeg/ffprobe child processes with argument arrays. The pinned TypeScript toolchain is not assumed to expose the older JavaScript compiler API.
-
-The parser choice is supported by Babel's documented TypeScript syntax plugin; it is only a parser, so OpenSlate still rejects every AST form outside its language. [Babel parser](https://babeljs.io/docs/babel-parser)
-
-Target process layout: one loopback HTTP application plus a same-machine TypeScript worker, each with its own SQLite connection and short transactions. Server application services own creative mutations; executor repositories own job progress and admission under shared current-state checks. Additional workers on that computer use the same local ownership/lease checks; v0 does not support remote GPU workers or a shared database across hosts. The native Codex process is launched on that computer by the backend under the pinned local policy. Same-host process crashes and ambiguous cloud submissions still require durable recovery.
-
-## 5. How to use this design
-
-Read shared contracts and data/API boundaries before implementing a component. Work on one vertical slice with its relevant documents and acceptance cases. If a prototype disproves a library or contract assumption, record the evidence and update this set in the same PR. Keep unresolved external compatibility checks explicit; do not replace them with an undocumented assumption.
+Current types live in [core contracts](../../packages/core/src/contracts.ts). Time uses integer 30 fps frames and 48 kHz sample coordinates at the local media boundary; USD estimates/caps use nonnegative integer micros serialized as decimal strings. This is application accounting, not a vendor billing guarantee.

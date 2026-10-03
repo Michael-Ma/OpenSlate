@@ -1,32 +1,34 @@
 # Local setup
 
-OpenSlate runs as a source checkout on one computer. It uses Node 24, pnpm 10.33.0 and FFmpeg/ffprobe for media processing. The launcher installs locked project dependencies and builds the app; it does not install an operating-system runtime or change your provider keys.
+OpenSlate runs from a source checkout on one computer. The launcher installs locked project dependencies and builds the studio; installer packaging and bundled operating-system tools are still pending.
 
 ## First run
 
-1. Install Node 24. If using nvm: `nvm install 24` and `nvm use 24`.
-2. Install FFmpeg: `brew install ffmpeg` on macOS. Ubuntu CI uses `sudo apt-get install ffmpeg`.
-3. Run `./start.sh --init-config` to create a private, ignored `.env.live.local`. Existing files are preserved.
-4. Run `./start.sh --doctor`. The report lists every local blocker with its remedy. `--doctor --json` produces a redacted machine-readable report.
-5. Run `./start.sh`. The built studio opens at `http://127.0.0.1:3001/` using a short-lived pairing link. Keep the startup terminal open.
+1. Install **Node 24**; with nvm use `nvm install 24` and `nvm use 24`.
+2. The pinned package manager is **pnpm 10.33.0**. The launcher can use that version through npx; alternatively install it with `npm install --global pnpm@10.33.0`.
+3. For media import/export, install FFmpeg/ffprobe (`brew install ffmpeg` on macOS). A source build of SQLite may also require Python and compiler tools.
+4. Run `./start.sh --init-config` to create ignored private `.env.live.local`; an existing file is preserved.
+5. Run `./start.sh --doctor` or `--doctor --json` for redacted local checks, then `./start.sh`.
 
-With all real-generation switches set to `0`, demo profiles require no provider keys. Missing FFmpeg is a warning in demo mode because planning remains available, while media import/export needs the tools. `--doctor` performs no installation, server start, credential write or provider request.
+The studio opens at `http://127.0.0.1:3001` with a short-lived pairing link. Keep the startup terminal open. Demo profiles need no provider keys or native runtime and make no paid media calls. Missing media tools are a warning in demo mode; real enabled routes fail setup when their prerequisites are absent. Doctor starts no server and makes no provider request.
 
-## Real models
+## Models and accounts
 
-Select an explicit provider catalog using `OPENSLATE_PROVIDER_CONFIG`. Start from the checked-in examples, retain their exact model/profile contract and set conservative per-attempt estimates. New projects and the project's model settings choose from the installed catalog.
+Use an explicit `OPENSLATE_PROVIDER_CONFIG` based on the [example catalog](../../examples/live-provider-profiles.example.json). Keep profile estimates conservative and label them as estimates; keep keys outside catalog JSON.
 
-| Service | Local configuration |
+| Service | Server configuration |
 |---|---|
-| OpenAI image, stock speech, transcription | `OPENSLATE_OPENAI_API_KEY` and the corresponding `OPENSLATE_ENABLE_*` switch |
-| Viggle H3 | `OPENSLATE_VIGGLE_API_KEY`, `OPENSLATE_ENABLE_VIGGLE_H3_GENERATION=1`, `OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS` |
-| Direct MiniMax H3 | `OPENSLATE_MINIMAX_API_KEY`, `OPENSLATE_ENABLE_H3_GENERATION=1`, `OPENSLATE_H3_DOWNLOAD_HOSTS` |
-| Codex images | The existing Codex login and an absolute `OPENSLATE_CODEX_IMAGE_BINARY` path to supported Codex 0.153.4; enable its image route |
+| OpenAI image/speech/transcription | `OPENSLATE_OPENAI_API_KEY`; separate image/speech/transcription enable switches |
+| Viggle H3 | `OPENSLATE_VIGGLE_API_KEY`, video enable switch and exact download hosts |
+| Direct MiniMax H3 | `OPENSLATE_MINIMAX_API_KEY`, H3 enable switch and exact download hosts |
+| Codex images | Existing ChatGPT login, absolute supported `OPENSLATE_CODEX_IMAGE_BINARY`; optional existing Codex home |
 
-Video output host allowlists contain the provider's documented host names separated by commas, without a URL scheme, path or wildcard. API keys are server-only; the browser sees presence/readiness, never their values.
+See [activation variables](MEDIA-EXECUTION-LAUNCHER.md). Local credential presence does not verify provider access, quota or voice eligibility. A selected model or enabled route creates no paid work; review the intended operation and finite allowance in the app.
 
-Local readiness means configuration is present. It does not verify provider access, quotas, organization eligibility or voice ownership, and it does not authorize generation. The application still requires exact human generation review and separate finite usage/spending permission.
+The native director is configured separately. Use a pinned Codex 0.153.4 executable and complete its zero-turn local setup check. Its ChatGPT/API login is independent of media API keys; the image worker requires ChatGPT login. OpenSlate does not copy login credentials into project files.
 
-After editing keys, provider switches, catalog files or code, run `./start.sh --restart`. The launcher first authenticates and identifies the existing production server, then gracefully restarts it. `./start.sh --status` inspects the current server without rebuilding.
+## Storage and restart
 
-See [manual live validation](MANUAL-LIVE-PRODUCTION.md) for actual API validation and [local launcher behavior](LOCAL-LAUNCHER.md) for ownership/recovery details.
+Set one explicit `OPENSLATE_DATA_DIR` when changing launch modes. Root `pnpm start` defaults to repository `.openslate`; filtered/development server commands can otherwise point to a different directory. Keep data outside the public `apps/web/dist` bundle. The normal launcher reads `.env.live.local`, with exported variables taking precedence.
+
+After changing code, keys, catalog or enable switches, run `./start.sh --restart`; it authenticates and verifies the existing process before graceful shutdown/rebuild. `--status` only inspects. See [launcher details](LOCAL-LAUNCHER.md), [human live testing](MANUAL-LIVE-PRODUCTION.md) and [backup/recovery](INSTALLATION-RECOVERY.md).

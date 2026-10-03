@@ -4,4 +4,4 @@ This directory reserves an optional Python inference boundary after v0. No Pytho
 
 The planned worker owns model loading, GPU admission, preprocessing, inference, and output artifacts. TypeScript retains project state, scheduling, policy, and editing. A versioned loopback job/capability API on the same computer can connect them. The Python service will not own SQLite or application approval/budget decisions; local receipts and restart reconciliation still matter. Remote GPU hosting, distributed scheduling and shared-database deployment are outside v0 and need a separate future design.
 
-Local H3 capability parity with the cloud service is not assumed. See the [component design](../../docs/design/COMPONENT-DESIGN.md).
+Local H3 capability parity with the cloud service is not assumed. See the [component design](../../docs/design/README.md).

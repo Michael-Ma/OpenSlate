@@ -1,17 +1,25 @@
-# Explicit project guidance upgrades
+# Director guidance compatibility
 
-Updated October 1. Existing projects retain their exact immutable V1, V2 or V3 director tool/skill lock. New projects use V4 when their first lock is captured. V4 adds optional per-shot narration writing through `prepare_change`; canonical cue acceptance, protected pending/timing fields and generation authority remain outside that schema. Catalog and handler digests for all four versions are pinned by regression tests.
+Guidance is an application capability, not narration authorization. Ordinary storyboard/script writing needs no permission to generate or spend on media. The normal settings UI no longer asks the filmmaker to manage narration tool versions.
 
-For an older project, open **Project settings → Director → Project guidance → Enable audio planning** after active conversation/setup finishes. This explicit human configuration action installs V4; it does not start a model turn or accept narration. Existing epochs keep their original catalogs and the next request uses the new project lock.
+## Automatic compatible refresh
 
-The authenticated local routes are `GET /api/projects/:projectId/director/tools` and `POST /api/projects/:projectId/director/tools/upgrade`. Status reads do not create a lock, request or conversation. The upgrade binds the displayed predecessor lock ID and digest, the exact target version and a command key. The backend loads and verifies the shipped successor packages outside its write transaction, then rechecks predecessor, runtime configuration and idle state before saving one immutable successor and an audit event. Arbitrary package paths, actor tags and target versions are rejected.
+Before the first context/dispatch of an eligible fresh native turn, OpenSlate verifies the current lock against the exact shipped predecessor. Known V1–V3 packages move to a verified V4 successor; an already-current V4 remains current. Application records preserve the immutable old locks and install a replay-safe successor/audit event bound to that request/epoch/turn.
 
-Queued/running turns, live authority epochs and ongoing setup block the update. Previously saved questions can remain in history; their eventual answer receives a fresh request using the explicitly selected project guidance. No creative request, epoch, hold, canonical revision, approval or media grant is created by the upgrade itself. Prior epochs keep their original lock bindings. The next native request refreshes local readiness and uses its new lock's catalog; the update starts no model turn.
+Eligibility requires a current application-owned native epoch/turn that has not dispatched, started a native model, bound guidance, activated skills/context, invoked tools or prepared a change. Conflicting live epochs/setup, restored authority, stale state and customized/unavailable packages fail safely. An already-bound epoch keeps its original lock and cannot be silently reinterpreted.
 
-An exact replay returns the saved command receipt rather than installing another successor. Conflicting payloads under the same key fail. Stale displayed predecessors require refreshing settings. The browser retains a pending update's exact command across dialog/project remounts within the same API session; an uncertain result exposes an explicit same-command check. It does not automatically resubmit on mount. A page reload loses this tab-local command cache, while server receipts remain authoritative.
+This refresh changes no canonical film, hold, audio acceptance, generation grant or allowance and starts no extra model turn. It is application maintenance, never a model tool. Unsupported future/incompatible migrations still need explicit design; arbitrary package paths/versions are not model-selectable.
 
-The following V2 results are historical; current V4 default/upgrade/lock tests and native evidence are recorded in [workflow completion review](V1-COMPLETION-REVIEW.md).
+## Native verification boundary
 
-Seven focused synthetic tests passed, covering read-only status, exact predecessor checks, unchanged canonical state/holds/acceptances, preserved old epoch locks, new-request catalog selection, replay/conflicts, active-work/setup exclusion, project isolation and authenticated schema validation. A subsequent [actual native V2 narration request](CODEX-NARRATION-V2-VALIDATION.md) passed after the explicit upgrade, bringing the recorded historical native-start count to 18.
+The first bounded native supplement stopped safely before dispatch with `RUNTIME_SKILLS_UNEXPECTED`: historical V3 and successor V4 digest directories appeared together. Per-turn configuration now disables verified historical application snapshots and enables only the exact activated skills. Historical files/locks remain immutable, and an unexpected unowned skill still fails the exact catalog check.
 
-The built browser also upgraded a disposable version 1 project through **Enable narration drafting**, then reopened settings showing version 2. A database reopen confirmed the original lock and canonical state were unchanged, with no creative requests, epochs, holds, grants or model/media calls. Browser warning/error logs were empty. See the [recorded evidence](director-tools-browser-evidence.json).
+The repaired [native rerun](october-3-native-guidance-evidence.json) completed one fresh V3 → V4 turn and saved only the selected shot script. Other shot/project narration/visual revision remained unchanged, with zero media attempts or generation grants. This proves the bounded native migration/writing path, not media generation or full-film acceptance.
+
+## Preserved versions and diagnostic endpoint
+
+Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` bytes/catalog hashes remain untouched. V4 adds per-shot narration intent through a versioned catalog rather than modifying old schemas.
+
+The prior human settings upgrade endpoint remains available for diagnostics, with exact predecessor/target and idle-state/replay checks. It is not mounted in normal project settings. Existing native questions/history retain their old epoch evidence; a new eligible message gets current supported writing capability.
+
+Source: `apps/server/src/application/director-tools-upgrade.ts`, `director-capabilities.ts`, `director-input.ts`, local native input preparation, core tools/legacy schemas and director skills. Tests cover known V1/V2/V3 upgrades, already-current behavior, old epoch retention, no creative/media authority effects, recovery/busy/stale/customized rejection and native input wiring. [October 3 full gate](OCTOBER-3-REFINEMENT-REVIEW.md) passed 2,207 tests/builds/typechecks; the reviewed supplemental fixes are included in the final gate. Earlier [native V4 writing evidence](scoped-narration-native-evidence.json) is dated, not a new live run.

@@ -1,39 +1,26 @@
 # OpenSlate documentation
 
-Start with the current status or the local run guide. Architecture documents describe the target; dated component and validation notes record narrower implementation evidence.
+These pages describe the current local studio and its implemented boundaries. [Status](implementation/STATUS.md) separates available behavior from remaining acceptance work. Dated evidence establishes only the scenario it actually exercised.
 
-## Run and use OpenSlate
-
-| Document | Purpose |
+| Start here | Purpose |
 |---|---|
-| [Project quick start](../README.md#quick-start) | Start, inspect and restart the local app |
-| [Local launcher](implementation/LOCAL-LAUNCHER.md) | Lifecycle, troubleshooting and process ownership |
-| [Manual live run](implementation/MANUAL-LIVE-PRODUCTION.md) | Configure providers and validate a real production |
-| [Manual audio rehearsal](implementation/MANUAL-AUDIO-TESTING.md) | Test narration with media APIs disabled |
-| [Storyboard studio](design/STORYBOARD-STUDIO.md) | Current UI, direct-edit backend, audio limits and shared typography |
-| [Backup and recovery](implementation/INSTALLATION-RECOVERY.md) | Same-machine backup, restore and review |
+| [Quick start](../README.md#quick-start) | Run the studio |
+| [Local setup](implementation/LOCAL-SETUP.md) | Tools, server configuration and provider keys |
+| [Launcher](implementation/LOCAL-LAUNCHER.md) | Start, restart, pairing and process ownership |
+| [Studio guide](design/STORYBOARD-STUDIO.md) | Chat, storyboard, audio, reviews and Timeline |
+| [Human testing](implementation/MANUAL-LIVE-PRODUCTION.md) | Small real-provider walkthrough |
+| [Audio rehearsal](implementation/MANUAL-AUDIO-TESTING.md) | Writing/recording review without paid media |
+| [Backup and recovery](implementation/INSTALLATION-RECOVERY.md) | Private same-root installation recovery |
 
-## Current delivery and design
-
-| Document | Purpose |
+| Understand the system | Purpose |
 |---|---|
-| [Implementation status](implementation/STATUS.md) | What works, what was tested and remaining limits |
-| [Development plan](design/IMPLEMENTATION-PLAN.md) | Remaining release work and acceptance gates |
-| [Architecture](design/README.md) | Scope, stack and ownership |
-| [Components](design/COMPONENT-DESIGN.md) | High-level component diagrams and execution logic |
-| [Technical designs](technical/README.md) | Per-component contracts and algorithms |
-| [Commercial walkthrough](design/COMMERCIAL-WALKTHROUGH.md) | Example production and saved data |
-| [Local runtime trust decision](implementation/RUNTIME-TRUST-DECISION.md) | Accepted single-user, single-machine boundary |
+| [Architecture](design/README.md) | Capabilities, ownership and main execution loop |
+| [Technical references](technical/README.md) | Source-backed component contracts |
+| [Remaining work](design/IMPLEMENTATION-PLAN.md) | Current improvements and release acceptance |
+| [Runtime trust decision](implementation/RUNTIME-TRUST-DECISION.md) | Accepted local Codex trust boundary |
+| [Evidence index](implementation/VALIDATION-EVIDENCE.md) | Dated tests, native turns and real/synthetic distinction |
+| [Documentation cleanup](audit/DOCUMENTATION-RECONCILIATION.md) | Consolidated/deleted files and source/link checks |
 
-## Implementation references and evidence
+Current implementation references: [model catalog](implementation/PROVIDER-CATALOG.md), [provider activation](implementation/MEDIA-EXECUTION-LAUNCHER.md), [generation/spending review](implementation/SPENDING-REVIEW.md), [settings and updates](implementation/PROJECT-SETTINGS-AND-UPDATES.md), [director guidance](implementation/DIRECTOR-TOOLS-UPGRADE.md), [shot audio](implementation/SHOT-AUDIO.md), [personal voice](implementation/PERSONAL-VOICE.md), [output recovery](implementation/OUTPUT-SPOOL.md), [database migrations](implementation/DATABASE-MIGRATIONS.md), and [installation readiness checkpoint](implementation/HUMAN-TESTING-READINESS.md).
 
-- Director: [local setup](implementation/LOCAL-RUNTIME-SETUP.md), [versioned tools](implementation/DIRECTOR-TOOLS-UPGRADE.md), [skills/tools](implementation/T06-SKILLS-TOOLS.md).
-- Providers: [catalog](implementation/PROVIDER-CATALOG.md), [execution activation](implementation/MEDIA-EXECUTION-LAUNCHER.md), [Codex images](implementation/CODEX-IMAGE-PROVIDER.md), [Viggle H3](implementation/VIGGLE-H3.md), [OpenAI image execution](implementation/OPENAI-IMAGE-EXECUTION.md).
-- Audio: [compact shot audio and Timeline](implementation/SHOT-AUDIO.md), [owned recordings](implementation/AUDIO-LIBRARY.md), [recorded voice](implementation/PERSONAL-VOICE.md), [conversational preparation](implementation/CONVERSATIONAL-AUDIO.md), [speech execution](implementation/OPENAI-SPEECH-EXECUTION.md), [recording transcription](implementation/OWNED-TRANSCRIPTION-WORKSPACE.md), [transcript adoption](implementation/TRANSCRIPT-REVIEW-ADOPTION.md).
-- Execution: [spending review](implementation/SPENDING-REVIEW.md), [output recovery](implementation/OUTPUT-SPOOL.md), [assembly](implementation/AUTOMATIC-LOCAL-ASSEMBLY.md), [migrations](implementation/DATABASE-MIGRATIONS.md).
-- UI: [current storyboard and typography](design/STORYBOARD-STUDIO.md), [historical Precision layout](implementation/PRECISION-UI.md), [settings and SSE](implementation/PROJECT-SETTINGS-AND-UPDATES.md), [Stop behavior](implementation/CHAT-STOP.md).
-- Setup: [first run and doctor](implementation/LOCAL-SETUP.md).
-- Human testing: [current installation readiness](implementation/HUMAN-TESTING-READINESS.md).
-- Acceptance evidence: [October 1 workflow review](implementation/V1-COMPLETION-REVIEW.md), [real six-second pipeline](implementation/LIVE-VALIDATION.md), [synthetic six-minute workflow](implementation/SIX-MINUTE-WORKFLOW.md), [clean checkout](implementation/CLEAN-CHECKOUT-VALIDATION.md).
-
-Other files under `implementation/` preserve component contracts and dated experiments. Their old test totals and next steps describe that milestone, not current project status or permission to make new paid calls. Use the status page and development plan for current decisions. Versioned files under `skills/` are runtime inputs, not disposable documentation.
+Historical work logs were consolidated into these references; Git retains their earlier versions. Sanitized JSON evidence is preserved. Versioned `skills/` files are runtime inputs and remain intact.

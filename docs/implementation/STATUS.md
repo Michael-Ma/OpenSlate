@@ -1,57 +1,39 @@
-# Implementation status
+# Current implementation status
 
-Updated October 1, 2026. This page describes implemented behavior and verified limits. [Technical designs](../technical/README.md) describe the broader target; [the development plan](../design/IMPLEMENTATION-PLAN.md) tracks remaining work.
+Reconciled October 3, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
-## Current capability
+## Available behavior
 
-| Area | Implemented | Verification / limit |
+| Area | Implemented scope | Remaining boundary |
 |---|---|---|
-| Local studio | One process, private local state, browser pairing, authenticated SSE, model settings, conversational Stop | Desktop/mobile browser checks; v0 is one user on one computer |
-| Direction and planning | Codex or demo runtime, versioned skills/tools, typed stage outputs and restricted plan compiler | Native scoped conversations and contract delivery tested; complete native conversational production still needs acceptance |
-| Execution | Durable attempts, exact human grants, spending allowances, uncertain-submission recovery and scoped reuse | Offline regression and restart/recovery checks; no blind retry of unknown paid submissions |
-| Visual production | Uploaded images/video, Codex or API image adapters, Viggle and MiniMax adapters, keyframe/motion review | One actual Codex image → Viggle clip → export passed; OpenAI image API live validation remains pending |
-| Narration | Compact scoped script/recording/listen/accept, canonical exact source ranges, short voiceover within planned shots, relative shot placement, advanced transcripts | Synthetic media/injected-provider tests and actual FFmpeg proofs; real speech/transcription validation remains pending |
-| Assembly | Owned media, timeline composition, FFmpeg export, local recovery | Actual six-second provider output and synthetic six-minute workflow verified |
-| Review UI | Editable storyboard, plural saved-edit continuation, guided generation review, compact audio, owned recording library and synchronized Timeline | Persistent authority/revision tests, disposable browser/audio review; new voice enrollment and advanced timeline editing remain pending |
-| Local setup | Private configuration template, redacted doctor, provider/prerequisite errors and existing launcher | Node 24/pnpm 10.33.0 checks and zero-network local readiness report; broader OS packaging remains pending |
-| Personal voice | Project-owned consent/revocation registry and existing eligible OpenAI custom voice identity dispatch | Offline exact wire/ownership/race/recovery tests; new cloning enrollment and live synthesis remain pending provider/account choice |
-| Installation recovery | Verified media-inclusive backup, same-root restore, quarantine and human release | Offline and browser recovery evidence; portable relocation and installer packaging remain pending |
+| Director | Native/fake runtime, saved context, questions, scoped changes, locked skills/tools and Stop/recovery | Complete native conversation-to-film acceptance |
+| Storyboard | Editable treatment/scenes/shots, import proposal/confirmation, reorder/delete/undo and stable IDs | More advanced editing and subjective usability acceptance |
+| Planning/execution | Restricted declarative compiler, scoped reuse, exact reviews, durable intents/attempts and unknown-outcome recovery | Longer real production and provider-specific acceptance |
+| Silence/audio | Explicit no narration, compact script/recording review, short accepted within-shot voiceover and owned library | Real speech/transcription acceptance and richer mixing |
+| Timeline/export | Synchronized picture/accepted narration/music preview; local FFmpeg assembly | Advanced trimming, transitions, waveforms and streaming |
+| Personal voice | Consent/revocation registry and existing eligible OpenAI custom-ID dispatch | **Creating a new clone from a recording is not implemented** |
+| Local operation | Source launcher, pairing, doctor/private config, migrations and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
 
-## Latest verification
+Requested workflow items 1–5 are implemented. Item 6 is partial because provider voice-ID synthesis does not create a new voice clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 code review](V1-COMPLETION-REVIEW.md) records fixes and scope.
 
-- October 1 workflow completion: **2,173 passed, zero failed, one optional native probe skipped; all builds/typechecks passed.** explicit silent-shot timing, short accepted voiceover, scoped compact audio, plural edit continuation, guided review, Timeline audio and first-run setup. Four bounded native Codex turns completed with zero media jobs/grants, including a final V4 scoped-writing proof; actual synthetic FFmpeg proofs preserve one-second voice within six-second picture and support 65 audio placements. Final integrated regression/browser results are maintained in [workflow review](V1-COMPLETION-REVIEW.md).
+## October 3 refinement
 
-- September 28 app-wide typography: shared heading/body/caption scale; explicit scene and shot headings, wrapped descriptions, readable legacy labels and corrected setup contrast. Web build/typecheck and 126 web tests passed; desktop and 390px browser review. No provider calls. See [typography scope and checks](../design/STORYBOARD-STUDIO.md#app-wide-typography).
+The Director pane now resizes by drag/keyboard with persistent/clamped width; the composer resizes vertically and chat renders safe GFM Markdown. Background SSE refresh preserves connection/content and suppresses saved-edit Continue rows while the Director runs, retaining their holds. Project settings show Director, Keyframes, Video and Narration, with optional transcription/accounts/existing voice identities. Actual returned Director choices, separate durable saves, validated zero-impact apply, actual pending-work review and same-command recovery are connected. Automatic compatible V1–V3 → V4 fresh-turn guidance is implemented and offline-tested; ordinary storyboard/script writing needs no generation/spending permission. A bounded native check exposed historical/current skill inventory overlap before dispatch. Per-turn activation now disables verified historical snapshot entries while retaining their bytes and exact catalog checks. The repaired native rerun completed one V3 → V4 scoped script-writing turn, preserving other work and creating zero grants/media attempts.
 
-- September 28 storyboard rebuild: **2,026 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. revision-checked direct manipulation, scoped candidate invalidation, soundtrack selection and actual FFmpeg mix test. One native Codex read-only turn completed with zero grants/media attempts. See [delivered behavior and limits](../design/STORYBOARD-STUDIO.md).
+App-wide design-system adoption and the larger Change / Keep / Next plan-card proposal remain human choices. The final integrated gate passed after the response-order and native inventory fixes. See [refinement review](OCTOBER-3-REFINEMENT-REVIEW.md) and [remaining work](../design/IMPLEMENTATION-PLAN.md).
 
-- September 27 Film plan: **2,016 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. A separate native Codex interpreted one synthetic three-scene, three-shot outline; the proposed import survived reload, then human confirmation saved one revision with zero generation grants and zero media attempts. Optional music stayed outside the draft and narration stayed undecided. Phone layout measured 390px content/390px viewport; scoped chat, saved-edit continuation, narration, final navigation and the Markdown file picker passed. Tests cover stale/different drafts, interrupted work, model mutation rejection, idempotency, reopen, restored authority and scoped discard. See [delivered scope and limitations](../design/SIMPLIFIED-VIDEO-FLOW.md).
+## Verified evidence
 
-- September 27 launcher maintenance: builds/typechecks and 20 focused startup/session/ownership tests passed. A disposable real-process run exercised fresh install/build/start, verified restart, reconnect, credential mismatch and Ctrl+C. The launcher smoke test passed with zero model/media calls and graceful ownership release. Documentation file links passed; two obsolete review/approval histories were removed and status/roadmap histories consolidated.
+- **October 3:** `pnpm check` passed **2,207 tests, zero failures, one optional native skip**, with builds/typechecks under Node 24.15.0. Disposable React settings/browser and synthetic rapid-SSE checks passed. The native supplement completed one writing turn; zero media-provider calls. The final gate includes both the UI response-order and native inventory fixes. [Scope/limits](OCTOBER-3-REFINEMENT-REVIEW.md).
+- **October 1:** `pnpm check` passed 2,173 tests, zero failures, one optional native probe skipped; builds/typechecks passed. Bounded native V4 writing/context and disposable desktop/390px audio/Timeline review passed. Actual synthetic FFmpeg checks covered one-second voice inside six-second picture and 65 audio placements. No paid media calls.
+- **October 2 readiness checkpoint:** existing OpenAI key returned a successful model listing, and approved API-image/speech/transcription route activation preserved saved state. No media was generated. This proves local configuration/authentication evidence, not media entitlement, quota or generation acceptance.
+- **September 23 real media:** one Codex keyframe, one Viggle H3 job, exact-job download recovery and a six-second 1280×720 export survived reopen without duplicate dispatch. A scripted plan was used; audio was silent.
+- Synthetic six-minute workflow/media checks cover structure, timing, reuse and recovery. They do not prove six-minute real-provider quality.
 
-- September 26 full checks: **1,990 passed, zero failed, one optional native probe skipped**; builds and typechecks passed. Final UI-only rerun: 118 passed. See [UI refinement](../design/SIMPLIFIED-VIDEO-FLOW.md).
-- September 23 real pipeline: one Codex keyframe, one Viggle submission, exact-job download recovery, six-second 1280×720 export, and reopen without duplicate dispatch. Audio was deliberately silent. See [evidence and limits](LIVE-VALIDATION.md).
-- Earlier synthetic tests cover sixty shots, six-minute media processing, selected-shot reuse, uncertain submission and restart. Synthetic footage is not evidence of real-provider long-form quality.
-- Required director contract references are delivered through verified native developer instructions. A bounded native read-only rehearsal received all 18 references intact; see [sanitized evidence](director-context-delivery-evidence.json).
+The final October 3 full gate includes the reviewed response-order and native inventory fixes. Older totals do not verify later edits automatically. [Evidence index](VALIDATION-EVIDENCE.md) preserves exact dated results and limitations.
 
-These results do not establish commercial quality, a complete conversation-to-film run, or six-minute real-provider acceptance. API keys being configured is not proof of successful provider access. Setup values and old spending allowances are not permanent authorization for further tests.
+## Next acceptance
 
-## Operational boundaries
+Run [human live testing](MANUAL-LIVE-PRODUCTION.md) with short real API image, stock speech and transcription. Then exercise a full native conversation, a multi-shot scoped replacement and restart/reopen. Confirm user quality before longer production. Provider keys/configuration and old allowances are not blanket permission for new media calls.
 
-- Run `./start.sh`; use `--status` to inspect and `--restart` to rebuild with changed code/configuration. See [launcher behavior](LOCAL-LAUNCHER.md).
-- Default generation is fake. Real providers require configuration, enabled routes, exact generation permission and separate usage/spending approval. Video also requires exact frame/motion approval.
-- App-owned state and execution remain authoritative. Codex proposes validated actions; it does not own grants, budgets or paid-job recovery.
-- Stop fences old work. Unfinished edits retain individual ownership. A fresh human request may explicitly continue all fully covered owned holds with a revision-bound proof; partial/foreign/stale continuation is rejected atomically. Production IB data was not altered by this milestone.
-- The guided review connects planning, selected operation permission, exact usage/cost approval, returned-frame/motion review and export. These retain separate immutable authority and replay guarantees.
-- Local rendering is limited to 360 seconds, 64 cuts, 65 audio placements and 65 distinct audio sources, with eight simultaneous mixing lanes. Compact narration follows cut order and fits inside planned shots. Embedded clip audio is removed; automatic ducking/limiting is not implemented.
-- Supplied media is bounded and fully verified before playback; no range-streaming support yet. Backups contain private project/media records and must be protected.
-- Pairing uses a short-lived launch code and HttpOnly browser session. Manual bearer-token entry remains a fallback. Neither mechanism exposes provider API keys to the browser.
-
-## Remaining release gates
-
-1. Short real speech/transcription and OpenAI-image checks with enabled providers and an explicit test budget.
-2. Native conversation through brief, narration decision, storyboard, review, generation and export; cover the multi-edit continuation problem without manual state repair.
-3. Targeted conversational replacement, restart/reopen and a longer real multi-shot production; user quality acceptance.
-4. Packaging, broader clean-machine checks, operational documentation and final v1 acceptance.
-
-Use [manual live production validation](MANUAL-LIVE-PRODUCTION.md) for the next human rehearsal. No new paid provider test was performed during the UI or launcher/documentation maintenance.
+Application state, review and execution remain authoritative. Generation origin, finite usage allowance, exact returned-frame/motion approval, accepted audio, edit holds and Stop are separate predicates. Local export is limited to 360 seconds/64 cuts/65 audio placements/eight simultaneous lanes. V0 remains one computer.

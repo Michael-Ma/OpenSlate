@@ -1,6 +1,6 @@
 # October 1 workflow completion and code review
 
-This milestone implements the seven workflow items requested after the storyboard rebuild. It is a local development milestone; remaining provider and user acceptance gates still apply. Runtime evidence uses disposable projects, synthetic media and bounded native Codex turns. No paid media API call was made.
+This milestone records implementation of workflow items 1–5, existing custom voice-ID support for partial item 6, and local setup tooling for item 7 after the storyboard rebuild. It is a local development milestone; remaining provider and user acceptance gates still apply. Runtime evidence uses disposable projects, synthetic media and bounded native Codex turns. No paid media API call was made.
 
 ## Delivered scope
 
@@ -14,7 +14,7 @@ This milestone implements the seven workflow items requested after the storyboar
 | 6. Recorded voice | Provider-neutral project identity, explicit consent/revocation and existing eligible OpenAI custom-ID dispatch | New sample enrollment and ElevenLabs speech require provider/account choice; no biometric upload or live synthesis yet |
 | 7. First-run setup | Private no-overwrite config template, redacted doctor, prerequisite remedies and fail-fast provider setup | Source checkout launcher; broader OS packaging remains pending |
 
-Existing projects keep their saved director tools. For conversational per-shot writing, enable V4 from Project settings → Director → Project guidance → Enable audio planning after active work finishes.
+At this checkpoint, older projects needed an explicit V4 tools update for per-shot writing. The shipped compatible fresh-turn refresh is tracked in [director guidance](DIRECTOR-TOOLS-UPGRADE.md); a tools update is not narration spending authorization.
 
 The owned audio library imports and auditions music/recordings without changing narration, creating creative holds or fencing the director. Short voiceover stays within the planned 3–15 second picture. Compact placements follow shot/scene order; existing absolute narration keeps its saved placement.
 
@@ -49,7 +49,7 @@ Four bounded native Codex turns completed during this milestone: initial silent/
 - [V4 native discovery](scoped-narration-v4-native-discovery.json): known completed rehearsal retained as failure evidence before the changed-field fix.
 - [Native selected-shot writing evidence](scoped-narration-native-evidence.json): one completed writing turn; preserves the other shot, visual revision and narration collection; no fabricated cues or grants.
 - [Shot audio and Timeline](SHOT-AUDIO.md): acceptance, relative placements, cache, local rendering and source bounds.
-- [Owned audio library](AUDIO-LIBRARY.md): actual normalization, ownership, replay and interrupted publication recovery.
+- [Owned audio library](../technical/NARRATION.md): actual normalization, ownership, replay and interrupted publication recovery.
 - [Personal voice](PERSONAL-VOICE.md): exact provider-ID mapping, consent, revocation and durable speech authority tested offline.
 - [First-run setup](LOCAL-SETUP.md): doctor/private config and provider readiness contracts.
 
