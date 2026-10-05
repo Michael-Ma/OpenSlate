@@ -1,0 +1,24 @@
+#root .film-plan{padding:24px 26px;max-width:1600px;margin:0 auto}
+#root .board-treatment{padding-bottom:17px;margin-bottom:21px;border-color:var(--line)}
+#root .board-treatment .section-heading{margin-bottom:7px;align-items:center}
+#root .board-treatment .section-heading .board-treatment-heading{font-size:27px;line-height:1.25;letter-spacing:-.75px;color:var(--ink);font-weight:650;overflow-wrap:anywhere}
+#root .board-treatment .film-summary{display:block;color:var(--muted);font-size:12px}
+#root .film-direction{margin-top:12px;color:var(--muted);font-size:12px}
+#root .film-direction summary{cursor:pointer;width:fit-content;min-height:28px;display:list-item;padding:3px 0}
+#root .film-direction .board-edit{margin-top:5px;color:var(--ink)}
+#root .film-direction[open]{padding-bottom:3px}
+#root .board-focus-layout{grid-template-columns:minmax(0,2fr) minmax(160px,1fr);gap:15px;align-items:start}
+#root .board-focus-layout.single-shot{grid-template-columns:minmax(0,1fr);max-width:960px}
+#root .board-supporting-shots{display:grid;gap:15px;min-width:0}
+#root .board-shot-focus,#root .board-shot-support{min-width:0}
+#root .board-shot-focus>.board-shot{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+#root .board-shot-support .board-shot{background:var(--surface)}
+#root .board-scene{margin-bottom:24px}
+#root .board-scene-head{margin-bottom:12px}
+#root .board-scene-copy h3{font-size:14px;letter-spacing:-.2px;color:var(--ink)}
+#root .board-add-scene{border-color:var(--control);color:var(--muted);background:transparent;box-shadow:none;margin-top:4px}
+#root .generation-workspace{border:1px solid var(--line);border-radius:var(--radius-card,10px);background:var(--surface);padding:18px;margin-bottom:21px}
+#root .film-empty{border:1px dashed var(--control);border-radius:var(--radius-card,10px);padding:30px 22px;background:var(--surface);color:var(--muted)}
+#root .film-empty h3{color:var(--ink);font-size:20px;font-weight:650}.film-empty .rt-Button{margin:8px 9px 0 0}
+@container (max-width:660px){#root .board-focus-layout{grid-template-columns:minmax(0,1fr)}#root .board-supporting-shots{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}
+@media(max-width:720px){#root .film-plan{padding:21px 17px}#root .board-treatment .section-heading .board-treatment-heading{font-size:25px}#root .board-focus-layout{grid-template-columns:minmax(0,1fr)}#root .board-supporting-shots{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}#root .generation-workspace{padding:15px}}

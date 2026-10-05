@@ -13,9 +13,10 @@ export function generationStep(snapshot: ProjectSnapshot, review: ReviewSnapshot
   director: DirectorStatus, costs: SpendingState | null): GenerationStep {
   const step = (stage: GenerationStep['stage'], label: string, detail: string, action: GenerationStep['action']): GenerationStep => ({ stage, label, detail, action });
   if (snapshot.control?.paused) return step('plan', 'Work is stopped', 'Send a new direction to continue from saved work.', 'chat');
+  if (director.status === 'running') return step('plan', 'Updating your plan', 'The Director is working on your current request.', null);
   if (snapshot.questions?.some(q => q.state === 'pending' && q.canAnswer !== false)) return step('plan', 'Your direction is needed', 'Answer the director’s question to finish this plan.', 'chat');
+  if (director.status === 'waiting_user') return step('plan', 'Your direction is needed', 'Review the saved conversation before continuing.', 'chat');
   if (!snapshot.project.shots.length) return step('plan', 'Build the storyboard', 'Describe your film or bring an existing brief.', 'chat');
-  if (director.status === 'running') return step('plan', 'Preparing your plan', 'The director is updating the affected work.', null);
   const savedImages = snapshot.plan?.nodes?.filter(n => n.kind === 'image') ?? [];
   const pendingAudio = snapshot.project.shots.find(shot => shot.narrationPending && shot.narration?.mode !== 'none');
   if (pendingAudio && savedImages.length && savedImages.every(node => snapshot.outputs.some(output => output.nodeId === node.id)))
@@ -32,7 +33,8 @@ export function generationStep(snapshot: ProjectSnapshot, review: ReviewSnapshot
   const images = snapshot.plan.nodes?.filter(n => n.kind === 'image') ?? [];
   if (images.some(n => !output(n.id))) {
     if (candidates.some(c => c.operation === 'image' && canSelectSpending(c))) return step('frames', 'Review keyframe costs', 'Approve finite image starts for the exact work below.', 'costs');
-    return step('frames', 'Preparing keyframes', 'Current image jobs and their requirements are listed below.', 'costs');
+    const running = candidates.some(c => c.operation === 'image' && ['preparing','submitting','remote_pending','ingesting'].includes(c.latestAttempt?.phase ?? ''));
+    return step('frames', running ? 'Keyframes are in progress' : 'Keyframe generation requirements', 'Review the current image jobs and any setup or usage requirements below.', 'costs');
   }
   const videos = snapshot.plan.nodes?.filter(n => n.kind === 'video') ?? [];
   const missingVideos = videos.filter(n => !output(n.id));
@@ -40,7 +42,8 @@ export function generationStep(snapshot: ProjectSnapshot, review: ReviewSnapshot
     const exact = reviewMatchesProject(review, snapshot);
     if (!exact || missingVideos.some(n => !review!.members.find(m => m.videoNodeId === n.id)?.approved))
       return step('frames', 'Review your keyframes', 'Use each shot’s check after reviewing its image and motion. Then review video costs.', 'frames');
-    return step('clips', candidates.some(c => c.operation === 'video' && canSelectSpending(c)) ? 'Review video costs' : 'Generating your clips', 'Follow the exact video work below; new takes require your approval.', 'costs');
+    const running = candidates.some(c => c.operation === 'video' && ['preparing','submitting','remote_pending','ingesting'].includes(c.latestAttempt?.phase ?? ''));
+    return step('clips', candidates.some(c => c.operation === 'video' && canSelectSpending(c)) ? 'Review video costs' : running ? 'Clips are in progress' : 'Video generation requirements', 'Follow the exact video work below; new takes require your approval.', 'costs');
   }
   if (images.length && !videos.length && !snapshot.plan.nodes?.some(n => n.kind === 'timeline' || n.kind === 'render')) return step('clips', 'Prepare video work', 'Choose the shots to animate. Keep the existing keyframes and review their motion before video starts.', 'permission');
   if (!videos.length && !images.length && !snapshot.plan.nodes?.some(n => n.kind === 'timeline' || n.kind === 'render')) return step('plan', 'Prepare the visual plan', 'Continue in chat to plan your saved shots.', 'chat');

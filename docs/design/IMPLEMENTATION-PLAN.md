@@ -2,13 +2,15 @@
 
 V0 remains one user on one computer. [Status](../implementation/STATUS.md) separates available behavior from acceptance work; [technical references](../technical/README.md) explain current ownership and contracts.
 
-## October 3 refinement
+## Delivered studio refinement
 
-Delivered: persistent/clamped draggable and keyboard-resizable Director pane, vertically resizable composer, safe GFM Markdown, stable background updates, hidden saved-edit Continue rows during active Director work, compact job-based settings, actual Director model catalog, separately replay-safe Director/media saves, zero-impact exact-preview apply, pending-work impact review and compatible fresh-turn guidance refresh. Documentation is consolidated against current source.
+The selected **A · Light workspace** is implemented with [OpenSlate Light](OPENSLATE-LIGHT.md) tokens and Radix Themes components. The Director stays on the left with persistent/clamped drag and keyboard sizing; the storyboard promotes the selected shot beside supporting cards, with stable chronological labels and keyboard focus. Shared dialogs, fields, actions, selects, guidance and focus states apply the same visual rules to the workspace and settings. Film direction remains available without dominating a populated storyboard.
 
-The integrated check passed **2,207 tests, zero failures, one optional native skip**, with builds/typechecks. The final gate includes the reviewed read-response ordering and native inventory fixes; [the refinement review](../implementation/OCTOBER-3-REFINEMENT-REVIEW.md) records scope and limits.
+The current-plan card shows **Saved / Next** from actual state. It offers an explicit scoped **Resume this edit** only for eligible unfinished edits; active work, questions, Stop, exact frame review and existing provider jobs determine the other next actions. It summarizes recorded direction without inventing which creative changes will be made or kept. Generation review, spending allowance and frame/motion approval remain separate.
 
-Two design decisions remain with the user: select the app-wide minimal design system from prepared examples, and choose whether to adopt the larger **Change / Keep / Next** plan-card proposal. Neither is implied by the shipped settings hierarchy. Applying the chosen system consistently is subsequent work.
+**Models for this project** uses four main jobs and optional setup. The migration retains separate durable Director/media saves, exact zero-impact apply, human review for real pending-work impact and same-command recovery after lost responses. Earlier October 3 work supplied safe GFM Markdown, stable background updates, actual Director model choices and compatible fresh-turn guidance refresh.
+
+The October 5 integrated check passed **2,222 tests, zero failures, one optional native skip**, with builds/typechecks under Node 24.15.0. Disposable actual-React browser checks cover desktop interaction, settings recovery/focus and phone settings layout. [October 5 review](../implementation/OCTOBER-5-LIGHT-WORKSPACE.md) records current scope; the [October 3 review](../implementation/OCTOBER-3-REFINEMENT-REVIEW.md) retains its dated 2,207-test/runtime evidence. Visual-system selection is complete. Subjective usability and full real production remain acceptance work below.
 
 ## Human production acceptance
 

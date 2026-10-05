@@ -6,6 +6,7 @@ Dated verification is retained independently of current capability claims. A res
 
 | Checkpoint | Evidence and limits |
 |---|---|
+| October 5 Light workspace | [2,222-pass full gate and Radix/Light studio](OCTOBER-5-LIGHT-WORKSPACE.md): disposable actual-React/browser checks for storyboard/review/scoped editing, keyboard resizing, settings impact/same-command recovery/focus and 390×844 settings layout; no new real-provider media acceptance |
 | October 3 refinement | [2,207-test full gate and UI/backend refinement](OCTOBER-3-REFINEMENT-REVIEW.md): actual React with in-memory API/synthetic SSE; final integrated verification and repaired bounded native guidance rerun passed with one model turn and zero media attempts/grants |
 | October 1 workflow/review | [2,173-test implementation review](V1-COMPLETION-REVIEW.md): native writing/context, synthetic audio/FFmpeg and disposable UI; zero paid media |
 | October 2 local readiness | [Audit and approved activation](HUMAN-TESTING-READINESS.md): successful model listing/routes; no media generation |

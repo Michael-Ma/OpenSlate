@@ -30,7 +30,7 @@ test('video takes alone are not labeled as a finished export', () => {
 });
 test('stale allowance data cannot offer spending or reinterpret permission', () => {
   const s=snapshot(),c={headVersion:1,revisionId:'old',planId:'plan',candidates:[{nodeId:'image',selectionCurrent:true,unavailableCode:'ORIGIN_NOT_AUTHORIZED'}]};
-  assert.equal(generationStep(s,null,director,c).label,'Preparing keyframes');
+  assert.equal(generationStep(s,null,director,c).label,'Keyframe generation requirements');
   c.headVersion=2;c.revisionId='rev';assert.equal(generationStep(s,null,director,c).action,'permission');
 });
 
@@ -56,4 +56,14 @@ test('an old unknown submission on a reused node cannot replace current candidat
 test('pending voiced intent cannot be treated as accepted video timing just because an old cue exists',()=>{
  const s=snapshot();s.project.shots=[{id:'s',narrationPending:true,narration:{mode:'generated'},cueId:'old-accepted'}];s.outputs=[output('image')];
  const step=generationStep(s,review(),director,null);assert.equal(step.action,'audio');assert.equal(step.shotId,'s');
+});
+test('an active Director request supersedes stale questions and never offers generation permission',()=>{
+ const s=snapshot();s.questions=[{state:'pending'}];s.project.shots=[];
+ const step=generationStep(s,null,{...director,status:'running'},null);assert.equal(step.label,'Updating your plan');assert.equal(step.action,null);
+});
+test('generation requirements never claim a job is running without current attempt evidence',()=>{
+ const s=snapshot();assert.equal(generationStep(s,null,director,null).label,'Keyframe generation requirements');
+ const c={headVersion:2,revisionId:'rev',planId:'plan',candidates:[{nodeId:'image',operation:'image',selectionCurrent:true,workState:'running',latestAttempt:{phase:'remote_pending'}}]};
+ assert.equal(generationStep(s,null,director,c).label,'Keyframes are in progress');c.headVersion=1;
+ assert.equal(generationStep(s,null,director,c).label,'Keyframe generation requirements');
 });

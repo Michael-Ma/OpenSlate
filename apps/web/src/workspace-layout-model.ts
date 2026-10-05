@@ -1,4 +1,4 @@
-export const DEFAULT_DIRECTOR_WIDTH = 300;
+export const DEFAULT_DIRECTOR_WIDTH = 320;
 export const MIN_DIRECTOR_WIDTH = 260;
 export const MAX_DIRECTOR_WIDTH = 640;
 export const MIN_WORKSPACE_WIDTH = 360;

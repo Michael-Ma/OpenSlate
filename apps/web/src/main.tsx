@@ -1,13 +1,31 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
+import { Theme } from "@radix-ui/themes";
 import "./style.css";
+import "./precision.css";
+import "./storyboard.css";
+import "./workspace-layout.css";
+import "./chat-markdown.css";
+import "./project-activity.css";
+import "./providers.css";
+import "./project-settings.css";
+import "./media.css";
+import "./audio-library.css";
+import "./narration.css";
+import "./shot-audio.css";
+import "./owned-transcription.css";
+import "./transcript-review.css";
+import "./spending.css";
+import "./recovery.css";
+import "./generation-guide.css";
+import "./director-plan.css";
+import "./film-plan.css";
+import "./typography.css";
+import "@radix-ui/themes/styles.css";
+import "./light-theme.css";
+import "./workspace-light.css";
+import App from "./App";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root element");
-createRoot(root).render(<StrictMode><App /></StrictMode>);
-
-import "./precision.css";
-import './storyboard.css';
-
-import './typography.css';
+createRoot(root).render(<StrictMode><Theme appearance="light" accentColor="blue" grayColor="slate" radius="medium" scaling="100%" className="openslate-theme"><App /></Theme></StrictMode>);

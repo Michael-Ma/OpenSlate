@@ -1,6 +1,8 @@
 import { artifactIdentity, artifactView, type ArtifactViewState } from './artifact-view-model';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import type { ButtonHTMLAttributes, CSSProperties, FormEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ButtonHTMLAttributes, FormEvent, ReactNode } from "react";
+import { IconButton as RadixIconButton, Tooltip } from "@radix-ui/themes";
+import { AppDialog, UiButton } from "./ui";
 import { APP_NAME } from "@openslate/core/public";
 import type { StudioApi } from "./api";
 import { artifactFixture, durationLabel, previewOutput } from "./model";
@@ -21,23 +23,15 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
-export function IconButton({ label, icon = "close", className = "", ...props }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & { label: string; icon?: string }) {
-  return <button {...props} type={props.type ?? "button"} className={`icon-button ${className}`} aria-label={label} title={label}><Icon name={icon} /></button>;
+export function IconButton({ label, icon = "close", className = "", ...props }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "color"> & { label: string; icon?: string }) {
+  return <RadixIconButton {...props} type={props.type ?? "button"} variant="ghost" color="gray" size="2" className={`icon-button ${className}`} aria-label={label} title={label}><Icon name={icon} /></RadixIconButton>;
 }
 /** Hover, keyboard focus, or a tap reveals supplementary guidance. */
 export function HelpTip({ label, children }: { label: string; children: ReactNode }) {
-  const id = useId(), [open, setOpen] = useState(false), anchor = useRef<HTMLSpanElement>(null);
-  const [position, setPosition] = useState<CSSProperties>({});
-  useLayoutEffect(() => {
-    if (!open || !anchor.current) return;
-    const bounds = anchor.current.getBoundingClientRect(), width = Math.min(260, window.innerWidth - 24);
-    setPosition({ position: "fixed", width, left: Math.max(12, Math.min(bounds.left, window.innerWidth - width - 12)), right: "auto",
-      ...(window.innerHeight - bounds.bottom < 170 ? { bottom: window.innerHeight - bounds.top + 6, top: "auto" } : { top: bounds.bottom + 6, bottom: "auto" }) });
-    const close = () => setOpen(false);
-    window.addEventListener("resize", close); window.addEventListener("scroll", close, true);
-    return () => { window.removeEventListener("resize", close); window.removeEventListener("scroll", close, true); };
-  }, [open]);
-  return <span ref={anchor} className="help-tip" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onKeyDown={event => { if (event.key === "Escape" && open) { event.stopPropagation(); setOpen(false); } }}><button type="button" aria-label={label} aria-expanded={open} aria-describedby={open ? id : undefined} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)} onClick={() => setOpen(true)}><Icon name="info" size={16} /></button>{open && <span id={id} role="tooltip" className="help-tip-content" style={position}>{children}</span>}</span>;
+  const [open, setOpen] = useState(false);
+  return <span className="help-tip"><Tooltip open={open} onOpenChange={setOpen} delayDuration={200} content={children} className="ui-help-tooltip">
+    <RadixIconButton type="button" variant="ghost" color="gray" size="1" aria-label={label} onClick={() => setOpen(true)}><Icon name="info" size={16} /></RadixIconButton>
+  </Tooltip></span>;
 }
 export function Connect({ onConnect }: { onConnect: () => Promise<void> }) {
   const [busy, setBusy] = useState(true); const [error, setError] = useState("");
@@ -56,7 +50,7 @@ export function Connect({ onConnect }: { onConnect: () => Promise<void> }) {
   }
   return <div className="connect-page"><header className="connect-brand"><span className="brand-mark"><Icon name="slate" /></span><strong>{APP_NAME}</strong><span className="quiet-label">LOCAL STUDIO</span></header>
     <main className="connect-layout"><div className="connect-story"><span className="eyebrow">A FILM STARTS WITH A CONVERSATION</span><h1>Give your story<br />a place to take shape.</h1><p>Work through the idea, shape each shot, and review the frames before the video begins.</p><div className="process-strip"><span>01 <b>Imagine</b></span><span>02 <b>Shape</b></span><span>03 <b>Review</b></span></div><p className="connect-footnote">Open source. Your workspace, on your computer.</p></div>
-    <form className="connect-card" onSubmit={event => void submit(event)}><span className="small-mark"><Icon name="slate" size={27} /></span><h2>Open your studio</h2><p>Your projects stay on this computer. The OpenSlate launcher connects your browser automatically.</p>{error && <p role="alert" className="form-error">{error}</p>}<button className="button primary full-width" disabled={busy}>{busy ? "Opening studio…" : "Open studio"}<Icon name="arrow" size={17} /></button><div className="connection-help">Run <code>./start.sh</code> in your OpenSlate folder to start or reconnect to the studio.</div></form></main><footer className="connect-footer">BUILT FOR THE WORK BETWEEN IDEA AND FILM <span>OpenSlate · Early preview</span></footer></div>;
+    <form className="connect-card" onSubmit={event => void submit(event)}><span className="small-mark"><Icon name="slate" size={27} /></span><h2>Open your studio</h2><p>Your projects stay on this computer. The OpenSlate launcher connects your browser automatically.</p>{error && <p role="alert" className="form-error">{error}</p>}<UiButton type="submit" variant="primary" className="button primary full-width" disabled={busy}>{busy ? "Opening studio…" : "Open studio"}<Icon name="arrow" size={17} /></UiButton><div className="connection-help">Run <code>./start.sh</code> in your OpenSlate folder to start or reconnect to the studio.</div></form></main><footer className="connect-footer">BUILT FOR THE WORK BETWEEN IDEA AND FILM <span>OpenSlate · Early preview</span></footer></div>;
 }
 export function useArtifact(api: StudioApi, projectId: string, artifact: Artifact | null) {
   const identity = artifactIdentity(projectId, artifact);
@@ -87,9 +81,16 @@ export function ShotCard({ api, projectId, shot, index, member, chosen, scoped, 
     <button className="frame-surface" disabled={!url} onClick={() => url && onEnlarge(url, shot, artifactFixture(member?.keyframeFixture))} aria-label={`Enlarge keyframe for shot ${index + 1}`}>{url ? <img src={url} alt={`Keyframe for shot ${index + 1}: ${shot.purpose}`} onLoad={() => { setLoaded(true); if (member?.keyframe) onDisplayed(member.videoNodeId, member.keyframe.sha256); }} onError={() => { setLoaded(false); if (member) onDisplayed(member.videoNodeId, ""); }} /> : <div className="frame-placeholder"><Icon name="image" size={31} /><span>{error ? "Preview unavailable" : member?.keyframe ? "Loading exact frame…" : "Waiting for a keyframe"}</span></div>}{url && <span className="fixture-badge">{member?.keyframeFixture === true ? "FIXTURE PREVIEW" : "KEYFRAME PREVIEW"}</span>}</button>
     <div className="shot-content"><h3>{shot.purpose}</h3><p className="shot-framing">{shot.framing}</p><div className="motion-row"><Icon name="arrow" size={14} /><p>{member?.motionPrompt ?? shot.motion}</p></div>{member?.profileLabel && <p className="review-profile">Video profile: {member.profileLabel}</p>}<div className="shot-status"><span className={`status-dot ${member?.approved ? "green" : ""}`} />{take ? take.fixture === true ? "Video fixture available" : "Video available" : member?.approved ? "Video can continue when ready" : ready ? "Ready for your frame review" : "Keyframe preparation pending"}</div>{error && <p className="inline-error">{error}</p>}<button className={`button scope-button ${scoped ? "selected" : ""}`} onClick={onScope} aria-pressed={scoped}><Icon name="chat" size={15} />{scoped ? "Selected for conversation" : "Discuss this shot"}{scoped && <Icon name="check" size={14} />}</button></div></article>;
 }
-export function Lightbox({ value, onClose }: { value: { url: string; shot: Shot; fixture: ArtifactFixture }; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null); useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} className="lightbox" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}><div className="lightbox-content"><button className="icon-button lightbox-close" onClick={onClose} aria-label="Close enlarged keyframe" title="Close enlarged keyframe"><Icon name="close" /></button><img src={value.url} alt={value.shot.purpose} /><div><span className="eyebrow">{value.fixture === true ? "FIXTURE KEYFRAME" : "KEYFRAME"}</span><h2>{value.shot.purpose}</h2><p>{value.shot.motion} · {durationLabel(value.shot.desiredFrames)}</p><p className="field-help">{value.fixture === true ? "Fixture imagery represents pipeline state, not the requested creative quality." : "Review this keyframe and discuss any changes you want."}</p></div></div></dialog>;
+export function Lightbox({ value, onClose, onApprove, approveDisabled = false, approved = false }: { value: { url: string; shot: Shot; fixture: ArtifactFixture }; onClose: () => void; onApprove?: () => void; approveDisabled?: boolean; approved?: boolean }) {
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null), [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const imageReady = loadedUrl === value.url && failedUrl !== value.url;
+  return <AppDialog open onOpenChange={open => { if (!open) onClose(); }} title={value.shot.purpose} header={<span className="eyebrow">{value.fixture === true ? "Fixture keyframe" : "Keyframe review"}</span>} className="keyframe-dialog" maxWidth="980px" closeLabel="Close enlarged keyframe"
+    description={value.fixture === true ? "Fixture imagery represents pipeline state, not the requested creative quality." : "Review the exact frame and its planned motion."}
+    footer={<><span className="field-help">{durationLabel(value.shot.desiredFrames)} planned shot</span><div className="inline-actions"><UiButton variant="secondary" onClick={onClose}>Close</UiButton>{onApprove && <UiButton variant="primary" disabled={approved || approveDisabled || !imageReady} onClick={() => { if (imageReady) onApprove(); }}>{approved ? "Reviewed" : "Approve keyframe & motion"}</UiButton>}</div></>}>
+    <img key={value.url} className="keyframe-review-image" src={value.url} alt={value.shot.purpose} onLoad={() => { setLoadedUrl(value.url); setFailedUrl(null); }} onError={() => { setLoadedUrl(null); setFailedUrl(value.url); }} />
+    {failedUrl === value.url ? <p role="alert" className="inline-error">This exact frame could not be displayed. Close the review and reload it before approving.</p> : !imageReady && <p role="status" className="field-help">Loading the exact frame…</p>}
+    <dl className="keyframe-review-details"><div><dt>Direction</dt><dd>{value.shot.framing}</dd></div><div><dt>Motion</dt><dd>{value.shot.motion}</dd></div></dl>
+  </AppDialog>;
 }
 export function Preview({ api, snapshot }: { api: StudioApi; snapshot: ProjectSnapshot }) {
   const output = previewOutput(snapshot);

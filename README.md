@@ -24,9 +24,11 @@ Edit treatment, scenes and shots directly, or refine a selected shot in chat. Br
 
 Personal voice support currently registers an existing eligible OpenAI custom voice ID with consent and revocation. Creating a new clone inside OpenSlate remains pending. Waveforms, transitions and richer audio mixing are later work.
 
-The Director pane resizes by drag or keyboard and remembers its width; the composer resizes vertically. Chat renders safe GitHub-flavored Markdown. Compact project settings focus on Director, Keyframes, Video and Narration, with transcription, accounts and existing voice identities disclosed only when needed. Background updates preserve the connected workspace and hide saved-edit Continue rows during a running Director request.
+The studio uses **OpenSlate Light**, the selected A workspace direction built on Radix Themes: white panels, a pale gray canvas, clear blue actions and shared component states. A resizable Director stays on the left; the selected shot is prominent beside compact supporting shots. Selecting a shot keeps its stable identity and chronological label. Chat renders safe GitHub-flavored Markdown, and background updates preserve the connected workspace.
 
-The [studio guide](docs/design/STORYBOARD-STUDIO.md) describes these controls and limits. Minimal design-system examples and a larger Change / Keep / Next plan-card direction await human selection; no global theme or plan-card redesign has been imposed. See [October 3 verification](docs/implementation/OCTOBER-3-REFINEMENT-REVIEW.md).
+The current-plan card shows **Saved / Next** from actual project, Director, review and job state. Eligible unfinished edits expose their saved scope and direction with **Resume this edit**; an active request instead shows progress, and an unanswered question points to its answer. Resuming sends a new scoped Director request; generation and spending retain their separate review.
+
+**Models for this project** focuses on Director, Keyframes, Video and Narration, with transcription, accounts, local setup and existing voice identities available when needed. Director and media choices have separate saves and recovery. The [studio guide](docs/design/STORYBOARD-STUDIO.md), [design system](docs/design/OPENSLATE-LIGHT.md) and [October 5 verification](docs/implementation/OCTOBER-5-LIGHT-WORKSPACE.md) describe the delivered UI and its limits.
 
 ## Quick start
 

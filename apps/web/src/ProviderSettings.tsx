@@ -1,4 +1,5 @@
 import { IconButton } from "./components";
+import { UiButton, UiSelect } from "./ui";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ApiError } from "./api";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
@@ -33,12 +34,12 @@ export function NewProjectProviderFields({ api, selection, changed, disabled }: 
   return <details className="new-provider-fields"><summary>Media models</summary>
     {!catalog && !error && <p role="status">Loading model choices…</p>}
     {catalog && <>{PROVIDER_KIND_CHOICES.map(({ kind, label }) => <div key={kind}><label htmlFor={`new-${kind}-profile`}>{label}</label>
-      <select id={`new-${kind}-profile`} value={selected(kind)?.id ?? ""} disabled={disabled || stale} onChange={event => choose(kind, event.target.value)}>
-        {catalog.profiles.filter(provider => provider.profile?.kind === kind).map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
-      </select>{selected(kind) && <p>{providerEstimate(selected(kind)!)}</p>}</div>)}
+      <UiSelect id={`new-${kind}-profile`} value={selected(kind)?.id ?? ""} disabled={disabled || stale}
+        options={catalog.profiles.filter(provider => provider.profile?.kind === kind).map(provider => ({ value: provider.id, label: settingsModelLabel(provider) }))}
+        onValueChange={value => choose(kind, value)} />{selected(kind) && <p>{providerEstimate(selected(kind)!)}</p>}</div>)}
       <p>{selection ? PROVIDER_KIND_CHOICES.some(({ kind }) => selected(kind)?.profile?.adapter === "codex-image")
-        ? "These models will be saved for this project. Codex image starts require a separate, finite Codex usage approval. Quota use is not estimated; there is no automatic switch to the image API."
-        : "These models will be saved for this project. Generation also requires model readiness and your exact spending allowance." : "Demo models are selected. No paid media calls."}</p></>}
+        ? "Saved for this project. Codex images use your subscription allowance; generation is reviewed in the studio."
+        : "Saved for this project. Generation is reviewed in the studio with its spending allowance." : "Demo models are selected."}</p></>}
     {stale && <p role="alert">The model catalog changed. Refresh the choices before creating this project.</p>}
     {error && <p role="alert">{error} Reset the choices to create a default demo project.</p>}
     {(selection || error || stale) && <IconButton type="button" disabled={disabled} onClick={() => { changed(null); setRefresh(value => value + 1); }} label="Reset and refresh choices" icon="refresh" />}
@@ -79,8 +80,8 @@ function SelectedAccounts({ options, selected }: { options: ProviderView[]; sele
         ? provider.projectExecution.message ?? settingsSetupIssue(provider) : settingsSetupIssue(provider)}</li>)}</ul>}
     </li>;
   })}</ul>{!accounts.length && <p>Demo models need no accounts.</p>}
-    <p className="field-help">API keys stay on this computer. Configured accounts are checked when a model is used.</p>
-    <details className="settings-local-help"><summary>Where setup lives</summary><p>Media keys and enabled routes are set in the local server configuration. After changing setup, restart OpenSlate and reload these choices. Codex images use the configured ChatGPT login; the director has its own installation and account settings above.</p></details>
+    <p className="field-help">Accounts are checked when used. API keys stay on this computer.</p>
+    <details className="settings-local-help"><summary>Where setup lives</summary><p>Media keys and routes use the local server configuration. Restart OpenSlate after changing it. Codex images use the configured ChatGPT login; Director setup is below.</p></details>
   </div>;
 }
 export function ProviderSetupAccounts({ api, projectId, refreshKey = 0 }: { api: StudioApi; projectId: string; refreshKey?: number }) {
@@ -107,11 +108,11 @@ function ImpactList({ preview, options, snapshot }: { preview: ModelSettingsPrev
   const assembly = preview.changes.filter(row => !MODEL_KINDS.includes(row.kind as ProviderKind));
   return <div className="settings-impact-lists">
     {!!media.length && <ul>{media.slice(0, changeLimit).map(row => <li key={row.nodeId}><strong>{label(row)}</strong><span>{name(row.fromProfileId)} → {name(row.toProfileId)}</span></li>)}</ul>}
-    {changeLimit < media.length && <button type="button" className="text-button" onClick={() => setChangeLimit(value => value + 40)}>Show more changed work</button>}
+    {changeLimit < media.length && <UiButton type="button" variant="ghost" className="text-button" onClick={() => setChangeLimit(value => value + 40)}>Show more changed work</UiButton>}
     {!!assembly.length && <p className="field-help">{assembly.length} dependent timeline/export {assembly.length === 1 ? "step will" : "steps will"} be prepared from the changed media.</p>}
     <details><summary>Work being kept · {preview.counts.preserved}</summary>
       {preview.preserved.length ? <><ul>{preview.preserved.slice(0, preservedLimit).map(row => <li key={row.nodeId}><strong>{label(row)}</strong><span>{preservedWorkReason(row.reason)}</span></li>)}</ul>
-        {preservedLimit < preview.preserved.length && <button type="button" className="text-button" onClick={() => setPreservedLimit(value => value + 40)}>Show more kept work</button>}</> : <p>No existing work is excluded.</p>}
+        {preservedLimit < preview.preserved.length && <UiButton type="button" variant="ghost" className="text-button" onClick={() => setPreservedLimit(value => value + 40)}>Show more kept work</UiButton>}</> : <p>No existing work is excluded.</p>}
     </details>
   </div>;
 }
@@ -169,7 +170,7 @@ export function ProjectModelsSettings({ api, projectId, snapshot, changed, onCon
     automaticApplies.current.add(command.key);
     execute(command);
   }, [captured, status, selected, scope, slot.settledCommand, slot.running, slot.command, continuation.running, continuation.command, checking, loadError, snapshot?.project.headVersion, readOnly, externalBusy]);
-  const feedback = useRef<HTMLParagraphElement>(null), reviewHeading = useRef<HTMLHeadingElement>(null), imageChoice = useRef<HTMLSelectElement>(null), returnToChoices = useRef(false);
+  const feedback = useRef<HTMLParagraphElement>(null), reviewHeading = useRef<HTMLHeadingElement>(null), imageChoice = useRef<HTMLButtonElement>(null), returnToChoices = useRef(false);
   useEffect(() => { if (!captured && returnToChoices.current) { returnToChoices.current = false; imageChoice.current?.focus(); } }, [captured]);
   useEffect(() => { if (!slot.running && (slot.command || applied && !hasChanges && !checking)) feedback.current?.focus(); }, [slot.settledVersion, slot.running, slot.command, applied, hasChanges, checking]);
   const accountCount = selectedSettingsAccounts(status?.options ?? [], selected).length;
@@ -181,17 +182,16 @@ export function ProjectModelsSettings({ api, projectId, snapshot, changed, onCon
   const modelRow = (kind: ProviderKind, label: string, description: string) => {
     const choices = status?.options.filter(provider => provider.profile?.kind === kind) ?? [], provider = choices.find(provider => provider.id === selected[kind]);
     return <div className="settings-model-row" key={kind}><div className="settings-job-copy"><label htmlFor={`settings-model-${kind}`}>{label}</label><p>{description}</p></div><div className="settings-model-control">
-      <select ref={kind === "image" ? imageChoice : undefined} id={`settings-model-${kind}`} value={selected[kind] ?? ""} disabled={disabled || !!captured} onChange={event => { dirty.current = true; setSelected(value => ({ ...value, [kind]: event.target.value || null })); setFormError(""); }}>
-        {!selected[kind] && <option value="">No current model</option>}{selected[kind] && !provider && <option value={selected[kind]!}>Saved model unavailable</option>}
-        {choices.map(choice => <option key={choice.id} value={choice.id}>{settingsModelLabel(choice)}</option>)}
-      </select>
+      <UiSelect ref={kind === "image" ? imageChoice : undefined} id={`settings-model-${kind}`} value={selected[kind] ?? ""} disabled={disabled || !!captured}
+        options={[...(!selected[kind] ? [{ value: "", label: "No current model" }] : []), ...(selected[kind] && !provider ? [{ value: selected[kind]!, label: "Saved model unavailable" }] : []), ...choices.map(choice => ({ value: choice.id, label: settingsModelLabel(choice) }))]}
+        onValueChange={choice => { dirty.current = true; setSelected(value => ({ ...value, [kind]: choice || null })); setFormError(""); }} />
       <p className={`settings-account-line${provider && settingsSetupIssue(provider) ? " settings-inline-issue" : ""}`}>{provider ? settingsModelAccountLine(provider) : "Choose an available model"}</p>
     </div></div>;
   };
   return <section className="project-settings-section settings-media" aria-label="Media model choices">
-    {slot.command && !slot.running && <div className="notice warning"><p ref={feedback} tabIndex={-1}>The media save result was not confirmed. Check the same request before changing choices.</p><button type="button" className="button" disabled={readOnly || externalBusy || continuation.running} onClick={() => execute(slot.command!)}>Check saved media request</button></div>}
+    {slot.command && !slot.running && <div className="notice warning"><p ref={feedback} tabIndex={-1}>Media save unconfirmed. Check the saved request before changing choices.</p><UiButton type="button" disabled={readOnly || externalBusy || continuation.running} onClick={() => execute(slot.command!)}>Check saved media request</UiButton></div>}
     {!!(loadError || formError || !slot.command && slot.error || !continuation.command && continuation.error) && <p role="alert" className="form-error">{loadError || formError || errorText(slot.error ?? continuation.error)}</p>}
-    {applied && !slot.command && !hasChanges && <p ref={feedback} tabIndex={-1} role="status" className="settings-save-status">{modelAppliedCurrent(applied, status, checking, !!loadError) ? "Media models saved." : "Earlier media change recorded. Reload to see current choices."} Completed results and existing jobs were kept. Director choices are saved separately.</p>}
+    {applied && !slot.command && !hasChanges && <p ref={feedback} tabIndex={-1} role="status" className="settings-save-status">{modelAppliedCurrent(applied, status, checking, !!loadError) ? "Media models saved. Existing results and jobs kept." : "Earlier media change recorded. Reload to see current choices."}</p>}
     {modelRow("image", "Keyframes", "Create the look of each shot")}
     {modelRow("video", "Video", "Bring approved shots to life")}
     {modelRow("speech", "Narration", "Generate speech when needed")}
@@ -199,23 +199,23 @@ export function ProjectModelsSettings({ api, projectId, snapshot, changed, onCon
     <details className="settings-disclosure"><summary>Accounts & local setup<span>{accountCount ? `${accountCount} media ${accountCount === 1 ? "account" : "accounts"}` : "Demo models"}</span></summary>
       {status && <SelectedAccounts options={status.options} selected={selected} />}{children}
     </details>
-    {!captured && hasChanges && <div className="settings-media-actions">{hasChanges && <span>Applies to future plans and eligible unfinished work.</span>}<button type="button" className="button primary" disabled={disabled || !hasChanges} onClick={() => {
+    {!captured && hasChanges && <div className="settings-media-actions">{hasChanges && <span>Future plans and eligible unfinished work.</span>}<UiButton type="button" variant="primary" disabled={disabled || !hasChanges} onClick={() => {
       if (!status) return; try { const command = modelPreviewCommand(status, selected, scope, snapshot?.project.shots.map(shot => shot.id) ?? [], crypto.randomUUID());
         command.metadata = { ...(command.metadata as Record<string, unknown>), zeroImpactApplyKey: crypto.randomUUID() }; execute(command); setFormError("");
       } catch (error) { setFormError(errorText(error)); }
-    }}>{slot.running ? "Saving media choices…" : "Save media models"}</button></div>}
+    }}>{slot.running ? "Saving media choices…" : "Save media models"}</UiButton></div>}
     {captured && !applied && !zeroImpactSaving && !slot.command && <div className="settings-impact" aria-labelledby="settings-impact-title"><h3 id="settings-impact-title" ref={reviewHeading} tabIndex={-1}>{changedTitle}</h3>
       {scope.kind === "shots" && <p className="field-help">This saved change applies to {scope.shotIds.length} selected shots.</p>}
       <ImpactList key={captured.preview.id} preview={captured.preview} options={status?.options ?? []} snapshot={snapshot} />
-      <p>Completed results, in-flight work and reviewed audio are kept. Generation is reviewed in the studio.</p>
+      <p>Completed results, active jobs and reviewed audio are kept.</p>
       {!currentPreview && <p role="alert">The project or choices changed. Reload and review again.</p>}
-      <div className="settings-actions"><button type="button" className="button primary" disabled={disabled || !currentPreview} onClick={() => execute(modelApplyCommand(captured, crypto.randomUUID()))}>Apply media changes</button>
-        <button type="button" className="button" disabled={busy || !!slot.command} onClick={() => { returnToChoices.current = true; setCaptured(null); }}>Back to choices</button></div>
+      <div className="settings-actions"><UiButton type="button" variant="primary" disabled={disabled || !currentPreview} onClick={() => execute(modelApplyCommand(captured, crypto.randomUUID()))}>Apply media changes</UiButton>
+        <UiButton type="button" disabled={busy || !!slot.command} onClick={() => { returnToChoices.current = true; setCaptured(null); }}>Back to choices</UiButton></div>
     </div>}
     {busy && !zeroImpactSaving && <p role="status" className="settings-save-status">{continuation.running ? "Checking the saved planning request…" : "Saving media choices…"}</p>}
     {zeroImpactSaving && <p role="status" className="settings-save-status">Saving the reviewed media choices…</p>}
-    {continuation.command && !continuation.running && <div className="notice warning"><p>An earlier planning continuation was not confirmed.</p><button type="button" className="button" disabled={readOnly || externalBusy} onClick={() => continueWithDirector(continuation.command!)}>Check saved continuation</button></div>}
-    {(!slot.command && (loadError || slot.error || captured && !currentPreview)) && <button type="button" className="button small" disabled={busy || !!slot.command} onClick={() => { setCaptured(null); setRefresh(value => value + 1); }}>Reload model choices</button>}
+    {continuation.command && !continuation.running && <div className="notice warning"><p>An earlier planning continuation was not confirmed.</p><UiButton type="button" disabled={readOnly || externalBusy} onClick={() => continueWithDirector(continuation.command!)}>Check saved continuation</UiButton></div>}
+    {(!slot.command && (loadError || slot.error || captured && !currentPreview)) && <UiButton type="button" className="small" disabled={busy || !!slot.command} onClick={() => { setCaptured(null); setRefresh(value => value + 1); }}>Reload model choices</UiButton>}
     {checking && !status && <p role="status">Loading model choices…</p>}
   </section>;
 }

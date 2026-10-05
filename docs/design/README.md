@@ -71,4 +71,4 @@ A project revision, a compiled plan, a creative candidate, a provider attempt an
 - Existing eligible OpenAI custom voice IDs are supported; in-app enrollment from a recording is pending.
 - Local source-checkout launch, private same-root backups and recovery are implemented. Portable relocation, installer packaging, advanced timeline editing and same-machine H3 inference remain later work.
 
-See [studio behavior](STORYBOARD-STUDIO.md), [component references](../technical/README.md), [current evidence](../implementation/STATUS.md) and the [accepted runtime trust boundary](../implementation/RUNTIME-TRUST-DECISION.md).
+See [studio behavior](STORYBOARD-STUDIO.md), the [OpenSlate Light design system](OPENSLATE-LIGHT.md), [component references](../technical/README.md), [current evidence](../implementation/STATUS.md) and the [accepted runtime trust boundary](../implementation/RUNTIME-TRUST-DECISION.md).

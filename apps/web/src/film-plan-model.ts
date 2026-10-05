@@ -1,6 +1,12 @@
 import type { ProjectSnapshot, ReviewSnapshot } from './model';
 import type { NarrationView } from './narration-model';
 
+/** Selection follows stable IDs and falls back after deleting or moving the selected shot. */
+export function selectedSceneShot(shots: readonly { id: string; sceneId: string }[], sceneId: string, selectedId?: string): string | null {
+  const sceneShots = shots.filter(shot => shot.sceneId === sceneId);
+  return sceneShots.some(shot => shot.id === selectedId) ? selectedId! : sceneShots[0]?.id ?? null;
+}
+
 export function filmProgress(snapshot: ProjectSnapshot, review: ReviewSnapshot | null) {
   const shots = snapshot.project.shots;
   const current = review?.planId === snapshot.project.activePlanId && review.headVersion === snapshot.project.headVersion && review.revisionId === snapshot.project.revisionId;
