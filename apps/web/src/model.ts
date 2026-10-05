@@ -13,6 +13,8 @@ export interface ProjectSnapshot {
   questions?: PendingQuestion[];
   previousPreviews?: { artifact: Artifact; nodeId: string; fixture?: ArtifactFixture }[];
   outputs: { nodeId: string; candidateId: string | null; port: string; artifact: Artifact; fixture?: ArtifactFixture }[];
+  /** Server-selected current work; raw attempts also include earlier plans/takes. */
+  currentAttemptIds?: string[];
   attempts: { id: string; nodeId: string; phase: string; createdAt?: string }[];
   holds: { id: string; scopeId: string; ownerId: string; active: boolean }[];
   control?: { paused: boolean; authorityId?: string };

@@ -70,12 +70,13 @@ export type AppDialogProps = {
   closeDisabled?: boolean;
   preventClose?: boolean;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   size?: "1" | "2" | "3" | "4";
   maxWidth?: string;
 };
 
 /** Shared modal layout, dismissal rules and focus restoration for controlled app dialogs. */
-export function AppDialog({ open, onOpenChange, title, description, children, header, footer, className = "", headerClassName = "", bodyClassName = "", footerClassName = "", closeLabel = "Close dialog", closeDisabled = false, preventClose = false, initialFocusRef, size = "3", maxWidth = "760px" }: AppDialogProps) {
+export function AppDialog({ open, onOpenChange, title, description, children, header, footer, className = "", headerClassName = "", bodyClassName = "", footerClassName = "", closeLabel = "Close dialog", closeDisabled = false, preventClose = false, initialFocusRef, returnFocusRef, size = "3", maxWidth = "760px" }: AppDialogProps) {
   const returnFocus = useRef<HTMLElement | null>(null), content = useRef<HTMLDivElement>(null), descriptionId = useId();
   return <Dialog.Root open={open} onOpenChange={next => { if (next || !preventClose) onOpenChange(next); }}>
     <Dialog.Content ref={content} size={size} maxWidth={maxWidth} className={`app-dialog ${className}`} aria-describedby={description ? descriptionId : undefined}
@@ -86,7 +87,8 @@ export function AppDialog({ open, onOpenChange, title, description, children, he
         if (initialFocusRef?.current) { event.preventDefault(); initialFocusRef.current.focus({ preventScroll: true }); }
       }}
       onCloseAutoFocus={event => {
-        if (returnFocus.current?.isConnected) { event.preventDefault(); returnFocus.current.focus({ preventScroll: true }); }
+        const target = returnFocusRef?.current ?? returnFocus.current;
+        if (target?.isConnected && !target.matches(":disabled")) { event.preventDefault(); target.focus({ preventScroll: true }); }
       }}
       onEscapeKeyDown={event => { if (preventClose) event.preventDefault(); }}
       onInteractOutside={event => { if (preventClose) event.preventDefault(); }}>

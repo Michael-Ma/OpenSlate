@@ -189,3 +189,18 @@ test("malformed results and wrong artifact bytes cannot be published or accepted
   assert.throws(() => assertPreparedLocalExecution(null), { code: "LOCAL_EXECUTION_CONFLICT" });
   assert.throws(() => assertLocalExecutionResult(null, f.store.list("local_execution_intent", f.projectId)[0]), { code: "LOCAL_EXECUTION_CONFLICT" });
 });
+
+
+test("current-job metadata matches local captures and preserves historical attempts when inputs change", async t => {
+  const f = fixture(t); await f.engine.runReady();
+  const attempt = f.engine.attempts(f.projectId)[0];
+  const before = f.store.db.prepare("SELECT kind,id,body FROM entities ORDER BY kind,id").all();
+  assert.deepEqual(f.engine.currentAttemptIds(f.projectId), [attempt.id]);
+  assert.deepEqual(f.store.db.prepare("SELECT kind,id,body FROM entities ORDER BY kind,id").all(), before);
+  f.semantic(2);
+  assert.deepEqual(f.engine.currentAttemptIds(f.projectId), []);
+  assert.equal(f.engine.attempts(f.projectId)[0].phase, "succeeded");
+  f.semantic(1); assert.deepEqual(f.engine.currentAttemptIds(f.projectId), [attempt.id]);
+  f.port.matches = () => { throw new Error("local capture unavailable"); };
+  assert.deepEqual(f.engine.currentAttemptIds(f.projectId), []);
+});

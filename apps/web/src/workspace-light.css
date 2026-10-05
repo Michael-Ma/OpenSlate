@@ -1,97 +1,73 @@
-/* OpenSlate Light: the selected workspace layout. Shared tokens live in light-theme.css. */
-#root .studio-shell { height:100dvh; min-height:0; background:var(--slate-canvas,#eef1f4); }
+/* OpenSlate Light workspace layout. Component skins live in film-plan.css,
+   director-plan.css and light-theme.css; #root overrides retained legacy layout. */
+
+/* Shell, project selection and navigation. */
+#root .studio-shell { height:100dvh; min-height:0; background:var(--canvas); }
 #root .studio-main { height:100%; min-width:0; }
-#root .workspace-header { height:64px; min-height:64px; padding:12px 22px; gap:22px; background:var(--slate-surface,#fff); border-bottom:1px solid var(--slate-line,#d9e0e8); }
+#root .workspace-header { height:64px; min-height:64px; padding:12px 22px; gap:22px; background:var(--surface); border-bottom:1px solid var(--line); }
+#root .workspace-header :is(.brand,.header-actions) { flex-shrink:0; }
 #root .brand { font-size:19px; font-weight:700; letter-spacing:-.5px; }
-#root .brand-mark { width:31px; height:31px; border-radius:8px; background:var(--slate-selected,#eaf0fb); color:var(--slate-accent,#315cb2); }
+#root .brand-mark { width:31px; height:31px; border-radius:var(--radius-inset); background:var(--selected); color:var(--accent); }
 #root .project-switcher { flex:1; min-width:0; gap:10px; }
-#root .project-select { max-width:340px; font-weight:600; font-size:14px; overflow:hidden; }
-#root .project-select .rt-SelectTriggerInner { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#root .project-switcher .project-select { min-width:0; flex:1; max-width:min(340px,calc(100% - 44px)); font-weight:600; font-size:14px; overflow:hidden; }
+#root .project-switcher .rt-SelectTriggerInner { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #root .header-actions { gap:12px; flex-wrap:nowrap; }
 #root .header-actions .connection { font-size:12px; }
 #root .studio-body { display:flex; flex:1; min-height:0; overflow:hidden; }
-#root .workspace-navigation { display:flex; flex-direction:column; align-items:center; gap:9px; width:62px; flex:0 0 62px; padding:15px 5px; border-right:1px solid var(--slate-line,#d9e0e8); background:var(--slate-surface,#fff); }
-#root .rail-action { display:flex; align-items:center; flex-direction:column; justify-content:center; gap:6px; width:52px; height:54px; padding:7px 2px; border:0; border-radius:8px; box-shadow:none; background:transparent; color:var(--slate-muted,#5c6981); }
+#root .workspace-navigation { display:flex; flex-direction:column; align-items:center; gap:9px; width:62px; flex:0 0 62px; padding:15px 5px; border-right:1px solid var(--line); background:var(--surface); }
+#root .rail-action { display:flex; align-items:center; flex-direction:column; justify-content:center; gap:6px; width:52px; height:54px; padding:7px 2px; border:0; border-radius:var(--radius-inset); box-shadow:none; background:transparent; color:var(--muted); }
 #root .rail-action span { font-size:9px; line-height:1.2; font-weight:500; }
-#root .rail-action.active { background:var(--slate-selected,#eaf0fb); color:var(--slate-accent,#315cb2); }
-#root .rail-action:hover { background:var(--slate-soft,#f6f8fa); }
+#root .rail-action.active { background:var(--selected); color:var(--accent); }
+#root .rail-action:hover { background:var(--soft); }
 #root .rail-bottom { margin-top:auto; }
 #root .studio-body .workspace-grid { flex:1; min-width:0; min-height:0; }
-#root .conversation-panel { background:var(--slate-surface,#fff); border-right:0; }
-#root .panel-title { min-height:55px; padding:14px 18px; border-bottom:1px solid var(--slate-line,#d9e0e8); }
+
+/* Director, current decisions and the vertically resizable composer. */
+#root .conversation-panel { background:var(--surface); border-right:0; }
+#root .panel-title { min-height:55px; padding:14px 18px; border-bottom:1px solid var(--line); }
 #root .panel-title h2 { font-size:14px; font-weight:650; letter-spacing:0; }
 #root .panel-title .tag { font-size:10px; padding:3px 6px; white-space:nowrap; }
-#root .conversation-stream { min-height:0; padding:18px; scrollbar-color:var(--slate-control,#8191aa) transparent; }
+#root .conversation-stream { min-height:0; padding:18px; scrollbar-color:var(--control) transparent; }
 #root .message { font-size:13px; margin:18px 0; line-height:1.7; }
 #root .message-byline { font-size:11px; font-weight:650; }
-#root .message.user { margin-left:12px; padding:12px; border-radius:9px 9px 3px 9px; background:var(--slate-selected,#eaf0fb); }
+#root .message.user { margin-left:12px; padding:12px; border-radius:var(--radius-card) var(--radius-card) 3px var(--radius-card); background:var(--selected); }
 #root .message :is(p,li,blockquote) { font-size:13px; line-height:1.7; }
 #root .message :is(h1,h2,h3,h4,h5,h6) { font-size:14px; margin-top:16px; }
-#root .current-decision { max-height:38dvh; overflow:auto; flex-shrink:0; border-top:1px solid var(--slate-line,#d9e0e8); background:var(--slate-soft,#f6f8fa); }
-#root .current-decision .question-card { margin:12px; padding:12px; background:var(--slate-surface,#fff); }
+#root .current-decision { max-height:38dvh; overflow:auto; flex-shrink:0; border-top:1px solid var(--line); background:var(--soft); }
+#root .current-decision .question-card { margin:12px; padding:12px; background:var(--surface); }
 #root .current-decision .question-card :is(h3,p,li) { font-size:12px; }
-#root .composer-area { padding:12px 14px; border-color:var(--slate-line,#d9e0e8); }
-#root .composer { border-color:var(--slate-control,#8191aa); border-radius:9px; overflow:hidden; }
-#root .composer:focus-within { border-color:var(--slate-accent,#315cb2); box-shadow:0 0 0 2px var(--slate-selected,#eaf0fb); }
+#root .composer-area { padding:12px 14px; border-color:var(--line); }
+#root .composer { border-color:var(--control); border-radius:var(--radius-card); overflow:hidden; }
+#root .composer:focus-within { border-color:var(--accent); box-shadow:0 0 0 2px var(--selected); }
 #root .composer .rt-TextAreaRoot { border:0; background:transparent; box-shadow:none; border-radius:0; }
 #root .composer textarea { border:0; font-size:13px; padding:12px; min-height:80px; max-height:min(30dvh,260px); line-height:1.65; }
 #root .composer-bottom { gap:8px; padding:6px 10px 10px; }
 #root .composer-continuation { display:block; padding:9px 12px 0; font-size:11px; }
 #root .composer-actions { margin-left:auto; }
-#root .send-button { width:32px; min-width:32px; height:32px; padding:0; border-radius:7px; background:var(--slate-accent,#315cb2); color:#fff; }
-#root .stop-button { width:32px; min-width:32px; height:32px; padding:0; }
-#root .director-working { font-size:12px; color:var(--slate-muted,#5c6981); }
-#root .working-dots i { animation:none; background:var(--slate-muted,#5c6981); }
-#root .workspace-separator { background:var(--slate-canvas,#eef1f4); }
-#root .workspace-separator::after { background:var(--slate-line,#d9e0e8); }
-#root .workspace-separator:focus-visible::after, #root .workspace-separator:hover::after { background:var(--slate-accent,#315cb2); }
-#root .review-workspace { padding:0 26px 24px; background:var(--slate-canvas,#eef1f4); }
-#root .workspace-toolbar { position:sticky; top:0; display:flex; gap:12px; align-items:center; padding:13px 0; margin-bottom:0; background:var(--slate-canvas,#eef1f4); border-bottom:1px solid var(--slate-line,#d9e0e8); z-index:3; }
-#root .workspace-views { box-shadow:none; }
+#root :is(.send-button,.stop-button) { width:32px; min-width:32px; height:32px; padding:0; }
+#root .send-button { border-radius:var(--radius-control); background:var(--accent); color:var(--accent-contrast); }
+#root .director-working { font-size:12px; color:var(--muted); }
+#root .working-dots i { animation:none; background:var(--muted); }
+
+/* Split boundary and production navigation. */
+#root .workspace-separator { background:var(--canvas); }
+#root .workspace-separator::after { background:var(--line); }
+#root .workspace-separator:focus-visible::after, #root .workspace-separator:hover::after { background:var(--accent); }
+#root .review-workspace { padding:0 26px 24px; background:var(--canvas); }
+#root .workspace-toolbar { position:sticky; top:0; display:flex; gap:12px; align-items:center; padding:13px 0; margin-bottom:0; background:var(--canvas); border-bottom:1px solid var(--line); z-index:3; }
+#root .workspace-views { gap:5px; box-shadow:none; }
 #root .workspace-views button { font-size:12px; min-height:33px; }
-#root .workspace-views .rt-TabNavLinkInner { padding:7px 12px; border-radius:6px; }
-#root .workspace-views .rt-TabNavLink[data-active] .rt-TabNavLinkInner { background:var(--slate-surface,#fff); color:var(--slate-accent,#315cb2); }
+#root .workspace-views .rt-TabNavLink { display:flex; align-items:center; justify-content:center; min-height:34px; padding:0; background:transparent; }
+#root .workspace-views .rt-TabNavLinkInner { padding:8px 13px; border-radius:var(--radius-compact); }
+#root .workspace-views .rt-TabNavLink[data-active] { font-weight:600; }
+#root .workspace-views .rt-TabNavLink[data-active] .rt-TabNavLinkInner { background:var(--surface); color:var(--accent); }
 #root .workspace-views .rt-TabNavLink::before { display:none; }
-#root .film-plan { padding:22px 0; }
-#root .board-treatment { padding-bottom:18px; margin-bottom:22px; border-color:var(--slate-line,#d9e0e8); }
-#root .board-treatment .board-treatment-heading { font-size:25px; font-weight:700; margin:0; letter-spacing:-.7px; }
-#root .board-treatment .inline-actions { margin:0; gap:6px; }
-#root .board-treatment small { font-size:11px; }
-#root .board-scene-head { gap:10px; margin-bottom:12px; }
-#root .board-scene-head h3 { font-size:17px; margin-bottom:4px; }
-#root .board-scene-copy .board-edit { font-size:13px; line-height:1.5; }
-#root .board-shot { border-color:var(--slate-line,#d9e0e8); border-radius:9px; background:var(--slate-surface,#fff); box-shadow:0 1px 3px #1b263808; }
-#root .board-shot.selected-shot { border-color:var(--slate-control,#8191aa); box-shadow:0 0 0 1px var(--slate-control,#8191aa); }
-#root .board-media { background:#e5eaf0; aspect-ratio:16/9; }
-#root .board-media>img, #root .board-media>video, #root .board-inspect img { width:100%; height:100%; display:block; object-fit:contain; }
-#root .board-inspect { border:0; padding:0; background:transparent; display:block; width:100%; height:100%; cursor:zoom-in; }
-#root .board-inspect:focus-visible { outline:3px solid var(--slate-focus,#557bd5); outline-offset:-4px; }
-#root .board-shot-body { padding:14px; }
-#root .board-shot-label { display:flex; align-items:center; gap:8px; justify-content:space-between; margin-bottom:6px; }
-#root .board-shot-heading { font-size:15px; margin:0; }
-#root .board-select { font-size:10px; min-height:24px; }
-#root .board-shot-body .board-edit { font-size:13px; line-height:1.5; }
-#root .board-shot-body textarea { min-height:0; }
-#root .board-shot-description { font-weight:600; }
-#root .board-direction { margin-top:9px; border-color:var(--slate-line,#d9e0e8); }
-#root .board-direction>span { font-size:11px; font-weight:600; color:var(--slate-muted,#5c6981); }
-#root .board-shot-footer { gap:8px; flex-wrap:wrap; border-color:var(--slate-line,#d9e0e8); margin-top:10px; padding-top:10px; }
-#root .board-shot-footer .rt-SelectTrigger { flex:1; min-width:110px; font-size:11px; }
-#root .board-shot-footer .board-review { min-height:30px; font-size:11px; padding:6px 10px; border-radius:6px!important; border:0!important; color:#fff; }
-#root .board-shot-footer .board-review.approved { background:var(--slate-success-bg,#eaf4ed); color:var(--slate-success,#366c51); }
-#root .board-grip { min-height:28px; min-width:28px; }
-#root .board-media-state, #root .board-duration { font-size:10px; }
-#root .supporting-title { font-size:12px; font-weight:600; margin:5px 0; line-height:1.45; }
-#root .supporting-shot .board-shot-body { padding:11px; }
-#root .supporting-shot .board-shot-heading { font-size:12px; }
-#root .supporting-shot small { font-size:10px; }
-#root .board-placeholder { color:var(--slate-muted,#5c6981); font-size:12px; }
-#root .board-add-scene { border-color:var(--slate-control,#8191aa); color:var(--slate-muted,#5c6981); }
 #root .film-timeline { background:transparent; padding:22px 0; }
-#root .timeline-player { background:#dfe5ec; height:clamp(240px,38dvh,450px); }
-#root .create-project-panel { background:var(--slate-soft,#f6f8fa); }
+#root .timeline-player { background:var(--preview-bg); height:clamp(240px,38dvh,450px); }
+#root .create-project-panel { background:var(--soft); }
 #root .empty-studio { height:auto; flex:1; min-height:0; }
 #root .mobile-workspace-switch .rt-SegmentedControlRoot { width:100%; }
+
 @media (max-width:1050px) {
   #root .workspace-header { padding:12px 16px; gap:12px; }
   #root .review-workspace { padding:0 18px 24px; }
@@ -99,11 +75,15 @@
   #root .rail-action { width:46px; }
   #root .header-actions .connection { display:none; }
 }
+
 @media (max-width:760px) {
   #root .workspace-header { height:58px; min-height:58px; padding:10px 12px; gap:8px; }
   #root .brand { font-size:0; gap:0; }
+  #root .project-switcher { gap:2px; }
+  #root .project-switcher .project-select { max-width:calc(100% - 32px); font-size:11px; padding-inline:4px; }
+  #root .project-switcher>.ui-button { min-width:30px; width:30px; height:32px; padding:0; }
   #root .header-actions { gap:5px; }
-  #root .project-select { max-width:calc(100vw - 156px); font-size:12px; }
+  #root .header-actions>.icon-button { min-width:30px; width:30px; }
   #root .workspace-navigation { display:none; }
   #root .mobile-workspace-switch { display:flex; padding:7px 12px; }
   #root .review-workspace { padding:0 14px 20px; }
@@ -112,59 +92,5 @@
   #root .workspace-views button { flex:1; }
   #root .workspace-grid { height:100%; }
   #root .current-decision { max-height:35dvh; }
-  #root .board-shot-body { padding:13px; }
-  #root .board-shot-footer .board-review { font-size:12px; }
-  #root .board-treatment .board-treatment-heading { font-size:22px; }
-  #root .board-scene-head h3 { font-size:16px; }
   #root .film-timeline { padding:16px 0; }
 }
-
-/* Compact task guidance and stable media controls after Radix reset styles. */
-#root .current-decision .director-plan { margin:10px 12px; border-color:var(--line); border-radius:8px; }
-#root .director-plan :is(p,dd,dt) { font-size:12px; line-height:1.5; }
-#root .director-plan :is(.director-plan-note,.tiny-label) { font-size:10px; }
-#root .director-plan-head { padding:10px 12px; }
-#root .director-plan-body { padding:10px 12px; }
-#root .director-plan-detail { margin:0 0 8px; }
-#root .director-plan-facts { gap:7px; }
-#root .director-plan-facts>div { grid-template-columns:38px minmax(0,1fr); gap:8px; }
-#root .director-plan-facts dt { font-size:11px; }
-#root .director-plan .director-plan-action { margin-top:9px; min-height:32px; font-size:12px; }
-#root .board-media .board-delete { top:7px; right:7px; bottom:auto; left:auto; margin:0; }
-#root .board-shot-focus .board-media { aspect-ratio:auto; height:clamp(160px,26dvh,280px); }
-#root .film-direction summary { font-size:12px; font-weight:500; min-height:24px; line-height:1.5; }
-#root .board-treatment { margin-bottom:16px; padding-bottom:12px; }
-#root .board-treatment .film-summary { margin-top:8px; font-size:11px; }
-#root .board-scene-copy .board-edit { resize:vertical; padding:0!important; }
-#root .workspace-views .ui-button { background:transparent; box-shadow:none; padding:0; }
-#root .workspace-views .rt-TabNavLink[data-active] { font-weight:600; }
-@media(max-width:760px) {
-  #root .board-shot-focus .board-media { height:auto; aspect-ratio:16/9; }
-  #root .director-plan .director-plan-action { min-height:40px; }
-}
-
-#root .board-shot-label .board-review { min-height:30px; padding:6px 10px; font-size:11px; white-space:nowrap; border-radius:6px!important; border:0!important; color:#fff; }
-#root .board-shot-label .board-review.approved { background:var(--success-bg); color:var(--success); }
-#root .board-shot-label .board-select { margin-left:auto; }
-#root .workspace-views .rt-TabNavLink { display:flex; align-items:center; justify-content:center; min-height:34px; padding:0; background:transparent; }
-#root .workspace-views .rt-TabNavLinkInner { padding:8px 13px; }
-#root .workspace-views { gap:5px; }
-/* Keep long project names inside the available header space. */
-#root .project-switcher .project-select { min-width:0; flex:1; max-width:min(340px,calc(100% - 44px)); }
-#root .project-switcher .rt-SelectTriggerInner { min-width:0; }
-#root .workspace-header :is(.brand,.header-actions) { flex-shrink:0; }
-@media(max-width:760px) {
-  #root .project-switcher { gap:2px; }
-  #root .project-switcher .project-select { max-width:calc(100% - 32px); font-size:11px; padding-inline:4px; }
-  #root .project-switcher>.ui-button { min-width:30px; width:30px; height:32px; padding:0; }
-  #root .header-actions>.icon-button { min-width:30px; width:30px; }
-}
-
-#root .director-plan-edit-header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-#root .director-plan-edit-header strong { font-size:12px; font-weight:600; line-height:1.4; }
-#root .director-plan-edit-header .director-plan-action { width:auto; min-height:30px; margin:0; flex-shrink:0; padding:5px 9px; font-size:11px; }
-#root .director-plan-edit summary { font-size:11px; font-weight:500; margin-top:9px; line-height:1.5; }
-#root .director-plan-note { margin-bottom:0; }
-#root .asset-row.ui-button { display:flex; width:100%; height:auto; min-height:68px; gap:14px; padding:15px 12px; text-align:left; border:0; border-bottom:1px solid var(--line); }
-#root .asset-row.ui-button>span:nth-child(2) { flex:1; min-width:0; }
-#root .asset-row.ui-button { box-sizing:border-box; }

@@ -1,24 +1,74 @@
-#root .film-plan{padding:24px 26px;max-width:1600px;margin:0 auto}
-#root .board-treatment{padding-bottom:17px;margin-bottom:21px;border-color:var(--line)}
-#root .board-treatment .section-heading{margin-bottom:7px;align-items:center}
-#root .board-treatment .section-heading .board-treatment-heading{font-size:27px;line-height:1.25;letter-spacing:-.75px;color:var(--ink);font-weight:650;overflow-wrap:anywhere}
-#root .board-treatment .film-summary{display:block;color:var(--muted);font-size:12px}
-#root .film-direction{margin-top:12px;color:var(--muted);font-size:12px}
-#root .film-direction summary{cursor:pointer;width:fit-content;min-height:28px;display:list-item;padding:3px 0}
-#root .film-direction .board-edit{margin-top:5px;color:var(--ink)}
-#root .film-direction[open]{padding-bottom:3px}
-#root .board-focus-layout{grid-template-columns:minmax(0,2fr) minmax(160px,1fr);gap:15px;align-items:start}
-#root .board-focus-layout.single-shot{grid-template-columns:minmax(0,1fr);max-width:960px}
-#root .board-supporting-shots{display:grid;gap:15px;min-width:0}
-#root .board-shot-focus,#root .board-shot-support{min-width:0}
-#root .board-shot-focus>.board-shot{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-#root .board-shot-support .board-shot{background:var(--surface)}
-#root .board-scene{margin-bottom:24px}
-#root .board-scene-head{margin-bottom:12px}
-#root .board-scene-copy h3{font-size:14px;letter-spacing:-.2px;color:var(--ink)}
-#root .board-add-scene{border-color:var(--control);color:var(--muted);background:transparent;box-shadow:none;margin-top:4px}
-#root .generation-workspace{border:1px solid var(--line);border-radius:var(--radius-card,10px);background:var(--surface);padding:18px;margin-bottom:21px}
-#root .film-empty{border:1px dashed var(--control);border-radius:var(--radius-card,10px);padding:30px 22px;background:var(--surface);color:var(--muted)}
-#root .film-empty h3{color:var(--ink);font-size:20px;font-weight:650}.film-empty .rt-Button{margin:8px 9px 0 0}
-@container (max-width:660px){#root .board-focus-layout{grid-template-columns:minmax(0,1fr)}#root .board-supporting-shots{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}
-@media(max-width:720px){#root .film-plan{padding:21px 17px}#root .board-treatment .section-heading .board-treatment-heading{font-size:25px}#root .board-focus-layout{grid-template-columns:minmax(0,1fr)}#root .board-supporting-shots{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}#root .generation-workspace{padding:15px}}
+/* OpenSlate Light storyboard and film-plan components. These rules follow
+   shared typography/Radix controls and keep the established A composition. */
+#root .film-plan { padding:22px 0; max-width:1600px; margin:0 auto; }
+#root .board-treatment { padding-bottom:12px; margin-bottom:16px; border-color:var(--line); }
+#root .board-treatment .section-heading { margin-bottom:7px; align-items:center; }
+#root .board-treatment .section-heading .board-treatment-heading { margin:0; font-size:27px; line-height:1.25; letter-spacing:-.75px; color:var(--ink); font-weight:650; overflow-wrap:anywhere; }
+#root .board-treatment .inline-actions { margin:0; gap:6px; }
+#root .board-treatment small { font-size:11px; }
+#root .board-treatment .film-summary { display:block; margin-top:8px; color:var(--muted); font-size:11px; }
+#root .film-direction { margin-top:12px; color:var(--muted); font-size:12px; }
+#root .film-direction summary { cursor:pointer; width:fit-content; min-height:24px; display:list-item; padding:3px 0; font-size:12px; font-weight:500; line-height:1.5; }
+#root .film-direction .board-edit { margin-top:5px; color:var(--ink); }
+#root .film-direction[open] { padding-bottom:3px; }
+
+/* Stable-ID selection makes one editable shot prominent beside supporting cards. */
+#root .board-focus-layout { grid-template-columns:minmax(0,2fr) minmax(160px,1fr); gap:15px; align-items:start; }
+#root .board-focus-layout.single-shot { grid-template-columns:minmax(0,1fr); max-width:960px; }
+#root .board-supporting-shots { display:grid; gap:15px; min-width:0; }
+#root .board-shot-focus, #root .board-shot-support { min-width:0; }
+#root .board-scene { margin-bottom:24px; }
+#root .board-scene-head { gap:10px; margin-bottom:12px; }
+#root .board-scene-head h3 { font-size:17px; letter-spacing:-.2px; color:var(--ink); margin-bottom:4px; }
+#root .board-scene-copy .board-edit { font-size:13px; line-height:1.5; resize:vertical; padding:0!important; }
+#root .board-shot { border-color:var(--line); border-radius:var(--radius-card); background:var(--surface); box-shadow:var(--shadow-card); }
+#root .board-shot.selected-shot { border-color:var(--control); box-shadow:0 0 0 1px var(--control); }
+#root .board-media { background:var(--media-bg); aspect-ratio:16/9; }
+#root .board-shot-focus .board-media { aspect-ratio:auto; height:clamp(160px,26dvh,280px); }
+#root .board-media>img, #root .board-media>video, #root .board-inspect img { width:100%; height:100%; display:block; object-fit:contain; }
+#root .board-inspect { border:0; padding:0; background:transparent; display:block; width:100%; height:100%; cursor:zoom-in; }
+#root .board-inspect:focus-visible { outline:3px solid var(--focus); outline-offset:-4px; }
+#root .board-media .board-delete { top:7px; right:7px; bottom:auto; left:auto; margin:0; }
+#root .board-shot-body { padding:14px; }
+#root .board-shot-label { display:flex; align-items:center; gap:8px; justify-content:space-between; margin-bottom:6px; }
+#root .board-shot-heading { font-size:15px; margin:0; }
+#root .board-select { font-size:10px; min-height:24px; }
+#root .board-shot-label .board-select { margin-left:auto; }
+#root .board-shot-body .board-edit { font-size:13px; line-height:1.5; }
+#root .board-shot-body textarea { min-height:0; }
+#root .board-shot-description { font-weight:600; }
+#root .board-direction { margin-top:9px; border-color:var(--line); }
+#root .board-direction>span { font-size:11px; font-weight:600; color:var(--muted); }
+#root .board-shot-footer { gap:8px; flex-wrap:wrap; border-color:var(--line); margin-top:10px; padding-top:10px; }
+#root .board-shot-footer .rt-SelectTrigger { flex:1; min-width:110px; font-size:11px; }
+/* The retained native storyboard skin defines !important circular review styles. */
+#root .board-shot-label .board-review { min-height:30px; padding:6px 10px; font-size:11px; white-space:nowrap; border-radius:var(--radius-compact)!important; border:0!important; color:var(--accent-contrast); }
+#root .board-shot-label .board-review.approved { background:var(--success-bg); color:var(--success); }
+#root .board-grip { min-height:28px; min-width:28px; }
+#root .board-media-state, #root .board-duration { font-size:10px; }
+#root .supporting-title { font-size:12px; font-weight:600; margin:5px 0; line-height:1.45; }
+#root .supporting-shot .board-shot-body { padding:11px; }
+#root .supporting-shot .board-shot-heading { font-size:12px; }
+#root .supporting-shot small { font-size:10px; }
+#root .board-placeholder { color:var(--muted); font-size:12px; }
+#root .board-add-scene { border-color:var(--control); color:var(--muted); background:transparent; box-shadow:none; margin-top:4px; }
+#root .generation-workspace { border:1px solid var(--line); border-radius:var(--radius-panel); background:var(--surface); padding:18px; margin-bottom:21px; }
+#root .film-empty { border:1px dashed var(--control); border-radius:var(--radius-panel); padding:30px 22px; background:var(--surface); color:var(--muted); }
+#root .film-empty h3 { color:var(--ink); font-size:20px; font-weight:650; }
+.film-empty .rt-Button { margin:8px 9px 0 0; }
+
+@container (max-width:660px) {
+  #root .board-focus-layout { grid-template-columns:minmax(0,1fr); }
+  #root .board-supporting-shots { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+}
+@media (max-width:760px) {
+  #root .board-shot-body { padding:13px; }
+  #root .board-scene-head h3 { font-size:16px; }
+  #root .board-shot-focus .board-media { height:auto; aspect-ratio:16/9; }
+}
+@media (max-width:720px) {
+  #root .board-treatment .section-heading .board-treatment-heading { font-size:25px; }
+  #root .board-focus-layout { grid-template-columns:minmax(0,1fr); }
+  #root .board-supporting-shots { grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; }
+  #root .generation-workspace { padding:15px; }
+}

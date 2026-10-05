@@ -1,12 +1,12 @@
 import { artifactIdentity, artifactView, type ArtifactViewState } from './artifact-view-model';
 import { useEffect, useRef, useState } from "react";
-import type { ButtonHTMLAttributes, FormEvent, ReactNode } from "react";
+import type { ButtonHTMLAttributes, FormEvent, ReactNode, RefObject } from "react";
 import { IconButton as RadixIconButton, Tooltip } from "@radix-ui/themes";
 import { AppDialog, UiButton } from "./ui";
 import { APP_NAME } from "@openslate/core/public";
 import type { StudioApi } from "./api";
-import { artifactFixture, durationLabel, previewOutput } from "./model";
-import type { Artifact, ArtifactFixture, ProjectSnapshot, ReviewMember, Shot } from "./model";
+import { durationLabel, previewOutput } from "./model";
+import type { Artifact, ArtifactFixture, ProjectSnapshot, Shot } from "./model";
 
 export const errorText = (error: unknown) => error instanceof Error ? error.message : "The action could not be completed.";
 export function Icon({ name, size = 20 }: { name: string; size?: number }) {
@@ -69,22 +69,10 @@ export function useArtifact(api: StudioApi, projectId: string, artifact: Artifac
   return artifactView(result, api, identity);
 }
 
-export function ShotCard({ api, projectId, shot, index, member, chosen, scoped, stale, onChoose, onScope, onDisplayed, onEnlarge, take }: {
-  api: StudioApi; projectId: string; shot: Shot; index: number; member: ReviewMember | undefined; chosen: boolean; scoped: boolean; stale: boolean;
-  onChoose: () => void; onScope: () => void; onDisplayed: (id: string, sha: string) => void; onEnlarge: (url: string, shot: Shot, fixture: ArtifactFixture) => void;
-  take: Pick<ProjectSnapshot["outputs"][number], "fixture"> | undefined;
-}) {
-  const { url, error } = useArtifact(api, projectId, member?.keyframe ?? null); const [loaded, setLoaded] = useState(false);
-  useEffect(() => { setLoaded(false); if (member) onDisplayed(member.videoNodeId, ""); return () => { if (member) onDisplayed(member.videoNodeId, ""); }; }, [url, member?.videoNodeId, onDisplayed]);
-  const ready = !!member?.ready && !!member.motionPrompt && !!member.durationFrames && !!member.profileLabel && !!url && loaded;
-  return <article className={`shot-card ${scoped ? "in-scope" : ""}`}><div className="shot-card-top"><span className="shot-number">SHOT {String(index + 1).padStart(2, "0")}</span><span className="duration">{durationLabel(member?.durationFrames ?? shot.desiredFrames)}</span>{member?.approved ? <span className="approved-label"><Icon name="check" size={13} />Frame approved</span> : <label className="review-select"><input type="checkbox" checked={chosen} disabled={!ready || stale} onChange={onChoose} aria-label={`Select shot ${index + 1} keyframe for approval`} /><span className="sr-only">Select for approval</span></label>}</div>
-    <button className="frame-surface" disabled={!url} onClick={() => url && onEnlarge(url, shot, artifactFixture(member?.keyframeFixture))} aria-label={`Enlarge keyframe for shot ${index + 1}`}>{url ? <img src={url} alt={`Keyframe for shot ${index + 1}: ${shot.purpose}`} onLoad={() => { setLoaded(true); if (member?.keyframe) onDisplayed(member.videoNodeId, member.keyframe.sha256); }} onError={() => { setLoaded(false); if (member) onDisplayed(member.videoNodeId, ""); }} /> : <div className="frame-placeholder"><Icon name="image" size={31} /><span>{error ? "Preview unavailable" : member?.keyframe ? "Loading exact frame…" : "Waiting for a keyframe"}</span></div>}{url && <span className="fixture-badge">{member?.keyframeFixture === true ? "FIXTURE PREVIEW" : "KEYFRAME PREVIEW"}</span>}</button>
-    <div className="shot-content"><h3>{shot.purpose}</h3><p className="shot-framing">{shot.framing}</p><div className="motion-row"><Icon name="arrow" size={14} /><p>{member?.motionPrompt ?? shot.motion}</p></div>{member?.profileLabel && <p className="review-profile">Video profile: {member.profileLabel}</p>}<div className="shot-status"><span className={`status-dot ${member?.approved ? "green" : ""}`} />{take ? take.fixture === true ? "Video fixture available" : "Video available" : member?.approved ? "Video can continue when ready" : ready ? "Ready for your frame review" : "Keyframe preparation pending"}</div>{error && <p className="inline-error">{error}</p>}<button className={`button scope-button ${scoped ? "selected" : ""}`} onClick={onScope} aria-pressed={scoped}><Icon name="chat" size={15} />{scoped ? "Selected for conversation" : "Discuss this shot"}{scoped && <Icon name="check" size={14} />}</button></div></article>;
-}
-export function Lightbox({ value, onClose, onApprove, approveDisabled = false, approved = false }: { value: { url: string; shot: Shot; fixture: ArtifactFixture }; onClose: () => void; onApprove?: () => void; approveDisabled?: boolean; approved?: boolean }) {
+export function Lightbox({ value, onClose, onApprove, approveDisabled = false, approved = false, returnFocusRef }: { value: { url: string; shot: Shot; fixture: ArtifactFixture }; onClose: () => void; onApprove?: () => void; approveDisabled?: boolean; approved?: boolean; returnFocusRef?: RefObject<HTMLElement | null> }) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null), [failedUrl, setFailedUrl] = useState<string | null>(null);
   const imageReady = loadedUrl === value.url && failedUrl !== value.url;
-  return <AppDialog open onOpenChange={open => { if (!open) onClose(); }} title={value.shot.purpose} header={<span className="eyebrow">{value.fixture === true ? "Fixture keyframe" : "Keyframe review"}</span>} className="keyframe-dialog" maxWidth="980px" closeLabel="Close enlarged keyframe"
+  return <AppDialog open onOpenChange={open => { if (!open) onClose(); }} title={value.shot.purpose} header={<span className="eyebrow">{value.fixture === true ? "Fixture keyframe" : "Keyframe review"}</span>} className="keyframe-dialog" maxWidth="980px" closeLabel="Close enlarged keyframe" {...(returnFocusRef ? { returnFocusRef } : {})}
     description={value.fixture === true ? "Fixture imagery represents pipeline state, not the requested creative quality." : "Review the exact frame and its planned motion."}
     footer={<><span className="field-help">{durationLabel(value.shot.desiredFrames)} planned shot</span><div className="inline-actions"><UiButton variant="secondary" onClick={onClose}>Close</UiButton>{onApprove && <UiButton variant="primary" disabled={approved || approveDisabled || !imageReady} onClick={() => { if (imageReady) onApprove(); }}>{approved ? "Reviewed" : "Approve keyframe & motion"}</UiButton>}</div></>}>
     <img key={value.url} className="keyframe-review-image" src={value.url} alt={value.shot.purpose} onLoad={() => { setLoadedUrl(value.url); setFailedUrl(null); }} onError={() => { setLoadedUrl(null); setFailedUrl(value.url); }} />

@@ -1,12 +1,35 @@
-.director-plan{border:1px solid var(--control,var(--line));border-radius:var(--radius-card,10px);background:var(--soft,var(--surface));overflow:hidden;min-width:0}
-.director-plan-head{padding:12px 14px;border-bottom:1px solid var(--line);display:grid;gap:4px}
-.director-plan-head .tiny-label{font-size:10px;letter-spacing:.055em;color:var(--muted)}
-.director-plan-head strong{font-size:13px;line-height:1.45;font-weight:650;color:var(--ink)}
-.director-plan-body{padding:12px 14px}.director-plan-detail{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.55}
-.director-plan-facts{margin:0;display:grid;gap:10px}.director-plan-facts>div{display:grid;grid-template-columns:40px minmax(0,1fr);gap:9px}
-.director-plan-facts dt{font-size:11px;font-weight:650;color:var(--muted);line-height:1.55}.director-plan-facts dd{margin:0;overflow-wrap:anywhere;font-size:12px;line-height:1.55;color:var(--ink)}
-.director-plan-edit{border-top:1px solid var(--line);margin-top:12px;padding-top:12px;font-size:12px}.director-plan-edit>strong{display:block;font-weight:650;margin-bottom:8px}
-.director-plan-edit details{color:var(--muted);font-size:11px}.director-plan-edit summary{cursor:pointer}.director-plan-edit details p{color:var(--ink);font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0}
-.director-plan .director-plan-action{width:100%;margin-top:12px;min-height:36px;font-size:12px}.director-plan-note{font-size:10px;line-height:1.6;color:var(--muted);margin:9px 0 0}
-.director-plan.state-working .director-plan-head,.director-plan.state-generating .director-plan-head{border-left:3px solid var(--accent);padding-left:11px}
-@media(max-width:760px){.director-plan .director-plan-action{min-height:44px}}
+/* Snapshot-derived current-plan guidance. #root keeps these compact roles
+   explicit instead of inheriting the larger legacy global typography. */
+.director-plan { border:1px solid var(--line); border-radius:var(--radius-inset); background:var(--soft); overflow:hidden; min-width:0; }
+#root .current-decision .director-plan { margin:10px 12px; }
+#root .director-plan :is(p,dd,dt) { font-size:12px; line-height:1.5; }
+#root .director-plan :is(.director-plan-note,.tiny-label) { font-size:10px; }
+#root .director-plan-head { padding:10px 12px; border-bottom:1px solid var(--line); display:grid; gap:4px; }
+#root .director-plan-head .tiny-label { letter-spacing:.055em; color:var(--muted); }
+#root .director-plan-head strong { font-size:13px; line-height:1.45; font-weight:650; color:var(--ink); }
+#root .director-plan-body { padding:10px 12px; }
+#root .director-plan-detail { margin:0 0 8px; color:var(--muted); }
+#root .director-plan-facts { margin:0; display:grid; gap:7px; }
+#root .director-plan-facts>div { display:grid; grid-template-columns:38px minmax(0,1fr); gap:8px; }
+#root .director-plan-facts dt { font-size:11px; font-weight:600; color:var(--muted); }
+#root .director-plan-facts dd { margin:0; overflow-wrap:anywhere; color:var(--ink); }
+#root .director-plan-edit { border-top:1px solid var(--line); margin-top:12px; padding-top:12px; font-size:12px; }
+#root .director-plan-edit-header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+#root .director-plan-edit-header strong { font-size:12px; font-weight:600; line-height:1.4; }
+#root .director-plan-edit details { color:var(--muted); font-size:11px; }
+#root .director-plan-edit summary { cursor:pointer; font-size:11px; font-weight:500; margin-top:9px; line-height:1.5; }
+#root .director-plan-edit details p { color:var(--ink); white-space:pre-wrap; overflow-wrap:anywhere; margin:9px 0; }
+#root .director-plan .director-plan-action { width:100%; margin-top:9px; min-height:32px; font-size:12px; }
+#root .director-plan-note { color:var(--muted); margin:9px 0 0; }
+#root .director-plan:is(.state-working,.state-generating) .director-plan-head { border-left:3px solid var(--accent); }
+
+@media (max-width:760px) {
+  #root .director-plan .director-plan-action { min-height:40px; }
+}
+
+/* Scope-specific Resume stays compact alongside its saved-edit label. */
+#root .director-plan-edit-header .director-plan-action { width:auto; min-height:30px; margin:0; flex-shrink:0; padding:5px 9px; font-size:11px; }
+#root .director-earlier-jobs { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); color:var(--warning,var(--muted)); font-size:11px; }
+#root .director-earlier-jobs summary { cursor:pointer; line-height:1.5; }
+#root .director-earlier-jobs p { font-size:11px; line-height:1.55; color:var(--muted); margin:8px 0; }
+#root .director-earlier-jobs .rt-Button { margin-top:2px; font-size:11px; }

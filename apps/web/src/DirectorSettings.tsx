@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { AppDialog, UiButton, UiSelect, UiTextField } from "./ui";
+import { UiButton, UiSelect, UiTextField } from "./ui";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./api";
@@ -116,10 +116,4 @@ export function DirectorSettingsPanel({ api, projectId, changed, refreshKey = 0,
     {loadError && <UiButton type="button" className="small" onClick={() => setRefresh(value => value + 1)}>Reload Director choices</UiButton>}
     {checking && !status && <p role="status">Loading director choice…</p>}
   </section>;
-}
-
-/** Compatibility entry point until the app mounts the full Project settings shell. */
-export function DirectorSettings({ api, projectId, close, changed }: { api: StudioApi; projectId: string; close(): void; changed(): void }) {
-  return <AppDialog open onOpenChange={open => { if (!open) close(); }} title="Director settings" description="Choose the model that plans and refines your film." closeLabel="Close Director settings">
-    <DirectorSettingsPanel api={api} projectId={projectId} changed={changed} /></AppDialog>;
 }

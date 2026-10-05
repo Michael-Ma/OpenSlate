@@ -560,6 +560,7 @@ export class ProductionService {
     return this.store.transaction(() => {
       const project = this.store.getProject(projectId);
       const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : undefined;
+      const attempts = this.engine.attempts(projectId);
       const messages = this.store.list<RequestRecord>("message", projectId);
       const outputs = this.store.list<{ id: string; requestId: string; text: string; phase: string }>("director_output", projectId);
       const messageById = new Map(messages.map(message => [message.id, message])), outputById = new Map(outputs.map(output => [output.id, output]));
@@ -575,7 +576,8 @@ export class ProductionService {
         return [];
       });
       return { project, latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
-      stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts: this.engine.attempts(projectId),
+      stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts,
+      currentAttemptIds: this.engine.currentAttemptIds(projectId, attempts),
       assessments: this.store.list("stage_assessment", projectId),
       holds: this.store.list("hold", projectId), pendingEditContinuations: pendingEditContinuations(this.store, projectId, 'local-user'), messages, conversation,
       control: this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId) ?? { paused: false },

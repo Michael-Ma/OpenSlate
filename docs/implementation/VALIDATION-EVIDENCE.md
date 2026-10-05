@@ -75,3 +75,5 @@ These sanitized JSON records preserve exact narrower campaigns, including known 
 See [current status](STATUS.md), [human testing](MANUAL-LIVE-PRODUCTION.md) and [remaining work](../design/IMPLEMENTATION-PLAN.md) for present decisions. Historical native starts, fixture renders and read-only access checks are not full production acceptance.
 
 - [October 3 native guidance rerun](october-3-native-guidance-evidence.json): one disposable V3 → V4 conversation saved a scoped shot script, with preserved other work and zero media attempts/grants. Initial inventory failure stopped before native dispatch; verified historical snapshots are now disabled per turn while exact catalog checks remain.
+
+- [October 5 post-migration review and cleanup](OCTOBER-5-POST-MIGRATION-REVIEW.md): 2,232 passes, one optional native skip; exact current-job/scope/focus regressions, fake restart proof and rendered parity.

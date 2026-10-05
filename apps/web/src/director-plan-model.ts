@@ -1,5 +1,6 @@
 import type { DirectorStatus, ProjectSnapshot, ReviewSnapshot } from './model';
 import { reviewMatchesProject } from './model.ts';
+import { currentProjectAttempts, earlierProjectAttempts } from './production-evidence-model.ts';
 
 export interface SavedEdit {
   requestId: string;
@@ -13,11 +14,12 @@ export interface DirectorPlanView {
   detail: string;
   saved: string;
   next: string;
-  action: 'chat' | 'answer' | 'generation' | 'frames' | 'timeline' | null;
+  action: 'chat' | 'scope' | 'answer' | 'generation' | 'frames' | 'timeline' | null;
   actionLabel?: string;
   questionId?: string;
   edits: SavedEdit[];
   canResume: boolean;
+  earlierJobs?: { unknown: number; active: number };
 }
 
 /** Names reflect current storyboard order, while all commands retain stable scope IDs. */
@@ -49,11 +51,9 @@ function savedWork(snapshot: ProjectSnapshot): string {
   return `${parts.join(' · ')} saved.`;
 }
 
-function resumableEdits(snapshot: ProjectSnapshot, scopeIds: readonly string[]): SavedEdit[] {
-  const covers = (id: string) => scopeIds.includes(snapshot.project.id) || scopeIds.includes(id)
-    || snapshot.project.shots.some(shot => shot.id === id && scopeIds.includes(shot.sceneId));
+function savedEdits(snapshot: ProjectSnapshot): SavedEdit[] {
   return (snapshot.pendingEditContinuations ?? []).filter(group => group.requestId !== snapshot.latestStoryboardEdit?.requestId
-    && group.scopeIds.length > 0 && group.scopeIds.every(covers)
+    && group.scopeIds.length > 0
     && group.scopeIds.every(id => snapshot.holds.some(hold => hold.active && hold.ownerId === group.requestId && hold.scopeId === id)))
     .map(group => ({ requestId: group.requestId, scopeIds: [...group.scopeIds], scope: planScopeLabel(snapshot, group.scopeIds),
       direction: snapshot.messages.find(message => message.requestId === group.requestId || message.id === group.requestId)?.text ?? '' }));
@@ -62,10 +62,19 @@ function resumableEdits(snapshot: ProjectSnapshot, scopeIds: readonly string[]):
 /** Display-only projection. A Resume callback still uses the server's explicit continuation authority. */
 export function directorPlan(snapshot: ProjectSnapshot, director: DirectorStatus, review: ReviewSnapshot | null,
   connected = true, scopeIds: readonly string[] = [snapshot.project.id]): DirectorPlanView {
-  const saved = savedWork(snapshot), edits = resumableEdits(snapshot, scopeIds);
+  const saved = savedWork(snapshot), recordedEdits = savedEdits(snapshot);
+  const validScope = (id: string) => id === snapshot.project.id || snapshot.project.scenes.some(scene => scene.id === id)
+    || snapshot.project.shots.some(shot => shot.id === id);
+  const covers = (id: string) => scopeIds.includes(snapshot.project.id) || scopeIds.includes(id)
+    || snapshot.project.shots.some(shot => shot.id === id && scopeIds.includes(shot.sceneId));
+  const validEdits = recordedEdits.filter(edit => edit.scopeIds.every(validScope));
+  const edits = validEdits.filter(edit => edit.scopeIds.every(covers));
+  const earlier = earlierProjectAttempts(snapshot);
+  const unknown = earlier.filter(attempt => attempt.phase === 'submission_unknown').length;
+  const earlierJobs = earlier.length ? { unknown, active: earlier.length - unknown } : null;
   const view = (state: DirectorPlanView['state'], title: string, detail: string, next: string,
     action: DirectorPlanView['action'], actionLabel?: string): DirectorPlanView => ({ state, title, detail, saved, next, action,
-      ...(actionLabel ? { actionLabel } : {}), edits: [], canResume: false });
+      ...(actionLabel ? { actionLabel } : {}), ...(earlierJobs ? { earlierJobs } : {}), edits: [], canResume: false });
   if (!connected) return view('connecting', 'Checking saved work', 'Reconnecting to the local studio.', 'Current actions return after the project refreshes.', null);
   if (snapshot.control?.paused) return view('stopped', 'Work is stopped', 'Your saved project is available. Previously submitted jobs may still finish.',
     'Send a fresh direction to continue from this project.', 'chat', 'Write next direction');
@@ -74,17 +83,22 @@ export function directorPlan(snapshot: ProjectSnapshot, director: DirectorStatus
   const question = snapshot.questions?.find(row => row.state === 'pending' && row.canAnswer !== false);
   if (question) return { ...view('question', 'Your answer is needed', question.questions.map(row => row.header).join(' · ') || 'The Director has a question.',
     'Answer the question below to continue this request.', 'answer', 'Answer in chat'), questionId: question.id };
-  if (snapshot.attempts.some(attempt => attempt.phase === 'submission_unknown')) return view('uncertain', 'Check an earlier generation',
+  const attempts = currentProjectAttempts(snapshot);
+  if (attempts.some(attempt => attempt.phase === 'submission_unknown')) return view('uncertain', 'Check an earlier generation',
     'A submitted job has an unconfirmed outcome.', 'Inspect that existing job before deciding on another take.', 'generation', 'Review job status');
-  const active = snapshot.attempts.filter(attempt => ['preparing', 'submitting', 'remote_pending', 'ingesting'].includes(attempt.phase));
+  const active = attempts.filter(attempt => ['preparing', 'submitting', 'remote_pending', 'ingesting'].includes(attempt.phase));
   if (active.length) return view('generating', 'Media work is in progress', `${active.length} ${active.length === 1 ? 'job is' : 'jobs are'} being prepared, generated or saved.`,
     'Follow the existing jobs and review their returned media.', 'generation', 'View generation');
   if (director.status === 'waiting_user') return view('question', 'Review the conversation', 'The Director is waiting for input.',
     'Use the saved conversation to send your next direction.', 'chat', 'Open conversation');
   if (edits.length) return { ...view('unfinished', edits.length === 1 ? 'Finish the saved edit' : `${edits.length} saved edits need a next step`,
-    'The request is saved, but its affected production update is unfinished.', director.mode === 'native'
-      ? 'Resume an edit to check its saved scope against the current project.' : 'Set up Codex in Project settings to continue this saved edit.', null),
-    edits, canResume: director.mode === 'native' };
+    'The request is saved, but its affected production update is unfinished.', director.mode === 'native' && director.status !== 'not_connected'
+      ? 'Resume an edit to check its saved scope against the current project.' : 'Connect Codex in Project settings to continue this saved edit.', null),
+    edits, canResume: director.mode === 'native' && director.status !== 'not_connected' };
+  if (recordedEdits.length) return { ...view('unfinished', validEdits.length ? 'Review the full saved edit' : 'The saved scope has changed',
+    validEdits.length ? 'The current conversation scope does not cover every part of the saved edit.' : 'An earlier edit refers to a scope that is no longer in the storyboard.',
+    validEdits.length ? 'Clear the shot selection to review the saved edit in the whole-film conversation.' : 'Send a fresh whole-film direction to continue from the current storyboard.',
+    scopeIds.includes(snapshot.project.id) ? 'chat' : 'scope', scopeIds.includes(snapshot.project.id) ? 'Open conversation' : 'View whole-film edit'), edits: recordedEdits };
   if (snapshot.holds.some(hold => hold.active)) return view('saved', 'Your changes are saved',
     'The storyboard has saved changes that still need a matching production plan.',
     'Discuss the saved direction or review generation for the affected shots.', 'generation', 'Review generation');
@@ -96,7 +110,9 @@ export function directorPlan(snapshot: ProjectSnapshot, director: DirectorStatus
   const render = snapshot.plan?.id === snapshot.project.activePlanId && snapshot.plan.nodes?.find(node => node.kind === 'render');
   if (render && snapshot.outputs.some(output => output.nodeId === render.id && output.artifact.kind === 'video'))
     return view('ready', 'Your film is ready to watch', 'The current rendered film is saved.', 'Review the picture and sound in Timeline.', 'timeline', 'Watch the film');
-  if (!snapshot.project.shots.length) return view('empty', 'Build your film', 'Start with an idea or an existing brief.',
+  if (snapshot.project.scenes.some(scene => !snapshot.project.shots.some(shot => shot.sceneId === scene.id)))
+    return view('empty', 'Develop the missing shots', 'Your scene outline is saved.', 'Discuss the shot choices for the scenes that do not have shots yet.', 'chat', 'Plan the shots');
+  if (!snapshot.project.shots.length) return view('empty', 'Build your film', snapshot.project.brief.trim() ? 'Your film brief is saved.' : 'Start with an idea or an existing brief.',
     'Talk through the film with the Director.', 'chat', 'Start the conversation');
   if (!snapshot.project.activePlanId) return view('saved', 'Storyboard saved', 'Your scenes and shot direction are ready to develop.',
     'Discuss the next change or review which media to create.', 'generation', 'Review generation');

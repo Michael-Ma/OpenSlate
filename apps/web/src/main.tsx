@@ -1,12 +1,14 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Theme } from "@radix-ui/themes";
+// Register production CSS here, before App's module graph. Component-local
+// duplicates support isolated previews without changing the first load order.
+// Retained legacy layouts, followed by typography and the Radix foundation.
 import "./style.css";
 import "./precision.css";
 import "./storyboard.css";
 import "./workspace-layout.css";
 import "./chat-markdown.css";
-import "./project-activity.css";
 import "./providers.css";
 import "./project-settings.css";
 import "./media.css";
@@ -18,11 +20,12 @@ import "./transcript-review.css";
 import "./spending.css";
 import "./recovery.css";
 import "./generation-guide.css";
-import "./director-plan.css";
-import "./film-plan.css";
 import "./typography.css";
 import "@radix-ui/themes/styles.css";
+// Current OpenSlate components follow the shared theme; workspace layout is last.
 import "./light-theme.css";
+import "./director-plan.css";
+import "./film-plan.css";
 import "./workspace-light.css";
 import App from "./App";
 

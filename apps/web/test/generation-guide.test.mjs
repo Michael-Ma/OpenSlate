@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generationStep } from '../src/generation-guide-model.ts';
+import { generationStep, focusedGenerationStep, generationReviewBlocked } from '../src/generation-guide-model.ts';
 const director = { mode:'native', status:'idle' };
 const snapshot = () => ({ project:{ id:'p',activePlanId:'plan',headVersion:2,revisionId:'rev',shots:[{id:'s'}] },
   plan:{id:'plan',nodes:[{id:'image',kind:'image',shotId:'s'},{id:'video',kind:'video',shotId:'s'},{id:'render',kind:'render',shotId:null}]},
@@ -22,14 +22,14 @@ test('missing video requires exact current frame review before video costs', () 
 });
 test('old uncertain attempts cannot stop a new plan; current uncertainty never suggests a replacement', () => {
   const s=snapshot();s.attempts=[{nodeId:'old',phase:'submission_unknown'}];assert.notEqual(generationStep(s,null,director,null).label,'Checking an earlier submission');
-  s.attempts.push({nodeId:'video',phase:'submission_unknown'});const costs={headVersion:2,revisionId:'rev',planId:'plan',candidates:[{nodeId:'video',operation:'video',selectionCurrent:true,workState:'uncertain',latestAttempt:{phase:'submission_unknown'}}]};const step=generationStep(s,null,director,costs);assert.match(step.detail,/existing job/);assert.equal(step.action,'costs');
+  s.attempts.push({nodeId:'video',phase:'submission_unknown'});const costs={projectId:'p',headVersion:2,revisionId:'rev',planId:'plan',candidates:[{nodeId:'video',operation:'video',selectionCurrent:true,workState:'uncertain',latestAttempt:{phase:'submission_unknown'}}]};const step=generationStep(s,null,director,costs);assert.match(step.detail,/existing job/);assert.equal(step.action,'costs');
 });
 test('video takes alone are not labeled as a finished export', () => {
   const s=snapshot();s.outputs=[output('image'),output('video')];assert.equal(generationStep(s,review(),director,null).label,'Review the timeline');
   s.outputs.push(output('render'));assert.equal(generationStep(s,review(),director,null).label,'Your export is ready');
 });
 test('stale allowance data cannot offer spending or reinterpret permission', () => {
-  const s=snapshot(),c={headVersion:1,revisionId:'old',planId:'plan',candidates:[{nodeId:'image',selectionCurrent:true,unavailableCode:'ORIGIN_NOT_AUTHORIZED'}]};
+  const s=snapshot(),c={projectId:'p',headVersion:1,revisionId:'old',planId:'plan',candidates:[{nodeId:'image',selectionCurrent:true,unavailableCode:'ORIGIN_NOT_AUTHORIZED'}]};
   assert.equal(generationStep(s,null,director,c).label,'Keyframe generation requirements');
   c.headVersion=2;c.revisionId='rev';assert.equal(generationStep(s,null,director,c).action,'permission');
 });
@@ -49,7 +49,7 @@ test('finished keyframes alone advance to video preparation instead of claiming 
 });
 test('an old unknown submission on a reused node cannot replace current candidate guidance',()=>{
  const s=snapshot();s.attempts=[{nodeId:'video',phase:'submission_unknown',candidateId:'old'}];
- const costs={headVersion:2,revisionId:'rev',planId:'plan',candidates:[{nodeId:'image',operation:'image',selectionCurrent:true,workState:'planned',latestAttempt:null}]};
+ const costs={projectId:'p',headVersion:2,revisionId:'rev',planId:'plan',candidates:[{nodeId:'image',operation:'image',selectionCurrent:true,workState:'planned',latestAttempt:null}]};
  const step=generationStep(s,null,director,costs);assert.equal(step.stage,'frames');assert.notEqual(step.label,'Checking an earlier submission');
 });
 
@@ -63,7 +63,44 @@ test('an active Director request supersedes stale questions and never offers gen
 });
 test('generation requirements never claim a job is running without current attempt evidence',()=>{
  const s=snapshot();assert.equal(generationStep(s,null,director,null).label,'Keyframe generation requirements');
- const c={headVersion:2,revisionId:'rev',planId:'plan',candidates:[{nodeId:'image',operation:'image',selectionCurrent:true,workState:'running',latestAttempt:{phase:'remote_pending'}}]};
+ const c={projectId:'p',headVersion:2,revisionId:'rev',planId:'plan',candidates:[{nodeId:'image',operation:'image',selectionCurrent:true,workState:'running',latestAttempt:{phase:'remote_pending'}}]};
  assert.equal(generationStep(s,null,director,c).label,'Keyframes are in progress');c.headVersion=1;
  assert.equal(generationStep(s,null,director,c).label,'Keyframe generation requirements');
+});
+test('current unknown submission takes priority over held writing even before cost data loads',()=>{
+ const s=snapshot();s.holds=[{active:true,ownerId:'edit',scopeId:'s'}];s.currentAttemptIds=['current'];s.attempts=[{id:'current',nodeId:'image',phase:'submission_unknown'}];
+ const step=generationStep(s,null,director,null);assert.equal(step.action,'costs');assert.equal(step.jobState,'uncertain');assert.deepEqual(step.costOperations,['image']);
+ s.currentAttemptIds=[];assert.equal(generationStep(s,null,director,null).action,'permission');
+});
+test('current audio uncertainty remains reachable instead of being filtered to video costs',()=>{
+ const s=snapshot();s.plan.nodes.push({id:'speech',kind:'speech',shotId:'s'});s.currentAttemptIds=['speech-attempt'];s.attempts=[{id:'speech-attempt',nodeId:'speech',phase:'submission_unknown'}];
+ const step=generationStep(s,null,director,null);assert.equal(step.action,'costs');assert.deepEqual(step.costOperations,['speech']);
+});
+test('a current job is not disguised as new generation permission by an edit hold',()=>{
+ const s=snapshot();s.holds=[{active:true}];s.currentAttemptIds=['current'];s.attempts=[{id:'old',nodeId:'video',phase:'submission_unknown'},{id:'current',nodeId:'image',phase:'remote_pending'}];
+ const step=generationStep(s,null,director,null);assert.equal(step.jobState,'active');assert.equal(step.action,'costs');assert.deepEqual(step.costOperations,['image']);
+});
+test('focused recording costs require exact identity and never bypass Stop, running or answer states',()=>{
+ const s=snapshot();s.plan.nodes.push({id:'speech',kind:'speech',shotId:'s'});
+ const c={projectId:'p',headVersion:2,revisionId:'rev',planId:'plan',candidates:[{candidateId:'voice',nodeId:'speech',operation:'speech',selectionCurrent:true,workState:'unattempted'}]};
+ assert.equal(focusedGenerationStep(s,null,director,c,'voice').label,'Narration generation');
+ for(const [field,value] of [['projectId','foreign'],['headVersion',1],['revisionId','old'],['planId','old']]){
+  assert.notEqual(focusedGenerationStep(s,null,director,{...c,[field]:value},'voice').label,'Narration generation');
+ }
+ c.candidates[0].selectionCurrent=false;assert.notEqual(focusedGenerationStep(s,null,director,c,'voice').label,'Narration generation');c.candidates[0].selectionCurrent=true;
+ s.control={paused:true};assert.equal(focusedGenerationStep(s,null,director,c,'voice').label,'Work is stopped');s.control.paused=false;
+ assert.equal(focusedGenerationStep(s,null,{...director,status:'running'},c,'voice').action,null);
+ s.questions=[{state:'pending',canAnswer:true}];assert.equal(focusedGenerationStep(s,null,director,c,'voice').action,'chat');
+});
+test('a recording focus cannot replace another exact current unknown job with a fresh speech allowance',()=>{
+ const s=snapshot();s.plan.nodes.push({id:'speech',kind:'speech',shotId:'s'});s.currentAttemptIds=['unknown'];s.attempts=[{id:'unknown',nodeId:'video',phase:'submission_unknown'}];
+ const c={projectId:'p',headVersion:2,revisionId:'rev',planId:'plan',candidates:[{candidateId:'voice',nodeId:'speech',operation:'speech',selectionCurrent:true,workState:'unattempted'}]};
+ const step=focusedGenerationStep(s,null,director,c,'voice');assert.equal(step.jobState,'uncertain');assert.deepEqual(step.costOperations,['video']);
+});
+test('retained focus cannot keep spending selection visible while the conversation is stopped or awaiting input',()=>{
+ const s=snapshot();assert.equal(generationReviewBlocked(s,director),false);
+ for(const status of ['running','waiting_user']) assert.equal(generationReviewBlocked(s,{...director,status}),true);
+ s.control={paused:true};assert.equal(generationReviewBlocked(s,director),true);s.control.paused=false;
+ s.questions=[{state:'pending',canAnswer:true}];assert.equal(generationReviewBlocked(s,director),true);
+ s.questions[0].canAnswer=false;assert.equal(generationReviewBlocked(s,director),false);
 });

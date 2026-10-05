@@ -25,6 +25,10 @@ The current-plan card replaces the generic activity/Continue rows with **Saved /
 
 **Models for this project** presents Director, Keyframes, Video and Narration in a compact Radix dialog, with optional setup and existing voices. Separate Director/media commands, exact zero-impact saves, actual impact review and same-command recovery remain authoritative. Protected saves block dismissal; narrow layouts retain a reachable footer. Image inspection shows the complete frame with its actual motion and duration, and approval requires the exact current image to load successfully. See [October 5 review](OCTOBER-5-LIGHT-WORKSPACE.md).
 
+## Post-migration review
+
+The separate [post-migration review](OCTOBER-5-POST-MIGRATION-REVIEW.md) repaired current-versus-historical job guidance, wider/deleted scope recovery, stale recording focus and approval focus restoration. It consolidated inspection/navigation logic and component styling, and removed retired UI implementations. The latest full gate passed **2,232 tests, zero failures, one optional native skip**; the offline restart/edit demo and before/after desktop/phone checks passed. Application authority and saved live state remain unchanged.
+
 ## October 3 refinement
 
 October 3 delivered persistent/clamped drag/keyboard Director sizing, a vertically resizable composer and safe GFM Markdown. Background SSE refresh preserves connection/content and request-owned holds. Settings introduced the four main jobs with optional setup, actual returned Director choices, separate durable saves, validated zero-impact apply, pending-work impact review and same-command recovery. Automatic compatible V1–V3 → V4 fresh-turn guidance is implemented and offline-tested; ordinary storyboard/script writing needs no generation/spending permission. A bounded native check exposed historical/current skill inventory overlap before dispatch. Per-turn activation disables verified historical snapshot entries while retaining their bytes and exact catalog checks. The repaired native rerun completed one V3 → V4 scoped script-writing turn, preserving other work and creating zero grants/media attempts.

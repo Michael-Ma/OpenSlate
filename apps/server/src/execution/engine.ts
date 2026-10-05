@@ -322,6 +322,39 @@ export class Engine {
   }
 
   attempts(projectId: string): Attempt[] { return this.store.list<Attempt>("attempt", projectId); }
+
+  /** Read-only UI evidence. Historical attempts remain available for reconciliation. */
+  currentAttemptIds(projectId: string, attempts = this.attempts(projectId)): string[] {
+    const project = this.store.getProject(projectId);
+    const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : null;
+    if (!plan || plan.projectId !== projectId) return [];
+    const nodes = new Map(plan.compiled.nodes.map(node => [node.id, node]));
+    const bindings = new Map(this.store.list<NodeBinding>("node_binding", projectId)
+      .filter(binding => binding.state === "active" && binding.planId === project.activePlanId
+        && nodes.has(binding.id) && canonical(nodes.get(binding.id)) === canonical(binding.node))
+      .map(binding => [binding.id, binding]));
+    return attempts.filter(attempt => {
+      const binding = bindings.get(attempt.nodeId);
+      if (!binding || binding.node.specDigest !== attempt.specDigest || binding.node.kind !== attempt.request.kind) return false;
+      try {
+        this.checkIntent(project, binding.node);
+        if (binding.candidateId !== null) return attempt.candidateId === binding.candidateId;
+        if (attempt.candidateId !== null) return false;
+        const effective = this.resolveInputs(projectId, binding.node).fingerprint;
+        if (isLocalExecutionAttempt(attempt)) {
+          const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", attempt.id);
+          if (!intent) return false;
+          assertLocalExecutionIntent(intent, attempt);
+          return this.localMatches(intent.prepared)
+            && attempt.fingerprint === localFingerprint(effective, intent.prepared.contentDigest);
+        }
+        return attempt.workKey === digest({ projectId, nodeId: binding.id, fingerprint: effective });
+      } catch {
+        // Display evidence must not turn unavailable local inputs into a failed project read.
+        return false;
+      }
+    }).map(attempt => attempt.id);
+  }
   outputs(projectId: string): { nodeId: string; candidateId: string | null; port: string; artifact: ArtifactRef; fixture: boolean }[] {
     const project = this.store.getProject(projectId);
     return this.store.list<NodeBinding>("node_binding", projectId).filter(binding => binding.state === "active" && binding.planId === project.activePlanId)

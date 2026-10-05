@@ -11,8 +11,10 @@ The workspace keeps a resizable Director on the left, with the selected shot pro
 ## Foundation and source of truth
 
 - `apps/web/src/main.tsx` mounts the light Radix `Theme` with blue/slate colors, medium radius and 100% scaling.
-- `apps/web/src/light-theme.css` owns shared semantic tokens, component states and secondary surfaces. `main.tsx` first imports all legacy component CSS, then typography, Radix CSS, the shared light theme and workspace layout; it imports `App` afterward so nested duplicate CSS imports cannot reorder that first encounter. Radix portals inherit the same tokens.
-- `apps/web/src/workspace-light.css` owns workspace layout and loads last.
+- `apps/web/src/light-theme.css` owns shared semantic tokens, component states, dialogs and secondary surfaces. Radix portals inherit the same tokens.
+- `apps/web/src/director-plan.css` owns the compact current-plan card. `film-plan.css` owns film direction, storyboard selection, shot presentation and their responsive rules.
+- `apps/web/src/workspace-light.css` owns the shell, navigation, Director, split boundary and production viewport. Component presentation belongs in its component sheet rather than an appended workspace patch.
+- `main.tsx` is the production CSS entry point: retained legacy skins/layouts → typography → Radix → shared Light theme → current Director/film components → workspace layout → `App`. Register a new component sheet there at the appropriate layer. Component-local duplicate imports support isolated previews; production first encounters each sheet in the explicit entry-point order.
 - `apps/web/src/ui.tsx` owns standard actions, fields, selects and controlled modal layout. `components.tsx` owns reusable icons, guidance and media inspection.
 
 Use those sources for new screens. Existing component CSS remains where it supplies domain layout; shared colors and basic controls should use the central system. Radix Themes supplies components and interaction behavior; OpenSlate supplies its layout, product language and durable commands.
@@ -31,18 +33,33 @@ Use those sources for new screens. Existing component CSS remains where it suppl
 | `--accent` | `#315cb2` | Primary actions and selected text |
 | `--accent-hover` | `#274e9e` | Primary action hover |
 | `--selected` | `#eaf0fb` | Selected surfaces |
+| `--selected-border` | `#b5c8eb` | Selected secondary-surface boundary |
 | `--focus` | `#557bd5` | Keyboard focus |
 | `--success` / `--success-bg` | `#366c51` / `#eaf4ed` | Completed/accepted states |
 | `--warning` / `--warning-bg` | `#825b27` / `#fbf1e2` | Recovery and unresolved decisions |
 | `--danger` / `--danger-bg` | `#a43a37` / `#fff1f0` | Errors and destructive actions |
+| `--media-bg` / `--preview-bg` | `#e5eaf0` / `#dfe5ec` | Storyboard frame and timeline picture surfaces |
 
-`--slate-*` aliases map to the same roles for workspace components. Legacy `--paper`, `--pale`, `--green`, `--text` and `--border` aliases preserve older component integration. Radix accent/gray roles map to these colors; avoid a new literal palette per component. Decorative `--line` is not the required control boundary: use `--control` when a boundary identifies an input.
+Every current component uses the shared semantic names directly. Legacy `--paper`, `--pale`, `--green`, `--text` and `--border` aliases preserve older component integration. Radix accent/gray roles map to these colors; avoid a new literal palette per component. Decorative `--line` is not the required control boundary: use `--control` when a boundary identifies an input.
 
 ## Typography, shape and spacing
 
 The available UI font is `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; no font download is required. Body text is 14px, compact actions are 13px and captions are 12px. Headings use 26px/22px/18px/16px roles, with moderate 600–650 weight and short line lengths. Shot text stays readable body copy; status metadata stays compact.
 
-Use a 4px spacing rhythm, typically 8–12px between related controls and 20–24px within major panels. Standard controls use 7px corners; cards/dialogs use 10–12px. Shadows are restrained and primarily identify overlays. Media uses `object-fit: contain` so review shows the actual frame without cropping.
+Use a 4px spacing rhythm, typically 8–12px between related controls and 20–24px within major panels. Shape and control sizing use the shared tokens below; component overrides retain established compact storyboard actions. Shadows use `--shadow-card`, `--shadow-panel` and `--shadow-dialog`. Media uses `object-fit: contain` so review shows the actual frame without cropping.
+
+| Shape/size token | Value | Use |
+|---|---|---|
+| `--radius-compact` | 6px | Small actions and navigation items |
+| `--radius-control` | 7px | Standard buttons and fields |
+| `--radius-inset` | 8px | Embedded plan/navigation surfaces |
+| `--radius-card` | 9px | Shot cards and composer |
+| `--radius-panel` | 10px | Generation/empty panels and narrow dialogs |
+| `--radius-dialog` | 12px | Standard dialogs |
+| `--control-height` / `--field-height` | 34px / 36px | Standard actions and selectors |
+| `--touch-height` | 40px | Narrow-layout standard controls |
+
+Keep normal and responsive declarations together within the component's sheet. The remaining storyboard `!important` overrides are compatibility with specific retained native rules; do not use them to resolve ordinary new-component styling. Remove a legacy sheet only after proving its selectors have no live component use.
 
 ## Component contract
 
@@ -63,3 +80,5 @@ Use text and semantics alongside color for selected, reviewed, pending, error an
 The design migration preserves OpenSlate's separate durable commands for Director choices, media choices, generation grants, usage allowances, frame/motion approval and unknown-outcome recovery. A shared dialog or a new visual state cannot bypass those commands or turn an uncertain submission into a retry. Narration writing remains an ordinary creative edit.
 
 Review desktop and narrow layouts, keyboard focus/return, nested selects/dialogs, long model labels, disabled controls, unknown commands and actual frame approval against current saved state. Typechecking/building validates integration; rendered browser checks validate layout and interaction. Current results belong in the dated implementation evidence, not in assumptions attached to a visual token set.
+
+The [post-migration review](../implementation/OCTOBER-5-POST-MIGRATION-REVIEW.md) records current-job evidence, explicit scope recovery, the consolidated inspection path and rendered parity checks.
