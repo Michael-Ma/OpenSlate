@@ -255,7 +255,8 @@ export function compilePlan(sourceText: string, context: CompileContext): Compil
       verifyPrompt(shot, "video", prompt);
       invariant(typeof spec.seconds === "number" && Number.isInteger(spec.seconds), "PROFILE_INCOMPATIBLE", "Initial video profiles require integer seconds");
       invariant(duration >= (profile.minFrames ?? 1) && duration <= (profile.maxFrames ?? 10800), "PROFILE_INCOMPATIBLE", "Video duration is outside profile limits");
-      invariant(duration >= shot.desiredFrames && Number.isSafeInteger(shot.desiredFrames) && shot.desiredFrames > 0, "VALIDATION_ERROR", "Video must cover the planned shot duration");
+      // A symbolic/deferred recipe may await a compatible covering duration. Dispatch rechecks coverage before admission.
+      invariant(Number.isSafeInteger(shot.desiredFrames) && shot.desiredFrames > 0, "VALIDATION_ERROR", "The planned shot duration must be valid");
       invariant(approved !== undefined && isRef(approved) && approved.kind === "approved" && approved.review.kind === "review", "REVIEW_REQUIRED", "Every video requires p.approvedImage");
       const settings = jsonObject(spec.settings);
       const match = approved.review.specifications.find(item => item.shot.id === shot.id && sameSource(item.image, approved.image) && item.profile.id === profile.id && item.profile.revision === profile.revision && item.prompt === prompt && item.frames === duration && canonical(item.settings) === canonical(settings));

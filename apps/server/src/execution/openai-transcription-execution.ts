@@ -139,7 +139,7 @@ export class OpenAITranscriptionExecution implements ExecutionProvider, Submissi
         assertTranscriptionMappingAdmission(admission, mapping, resolveTranscriptionPreparation(this.#store, attempt, mapping));
         const marker: TranscriptionExecutionDispatch = { ...this.recordIdentity(attempt), mappingDigest: digest(mapping),
           transportDigest: mapping.transport.requestDigest, bodySha256: mapping.transport.bodySha256,
-          allowanceId: admission.allowance.id, createdAt: new Date().toISOString() };
+          allowanceId: admission.allowance?.id ?? null, createdAt: new Date().toISOString() };
         this.#store.insert("transcription_execution_dispatch", attempt.id, attempt.projectId, marker);
         if (context) {
           const current = this.#store.get<Attempt>("attempt", attempt.id)!;

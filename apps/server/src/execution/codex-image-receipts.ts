@@ -1,3 +1,4 @@
+import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
 import { canonical, digest, invariant, providerProfileArguments } from '@openslate/core';
 import type { ProviderProfile } from '@openslate/core';
 import { describeCodexImageInput } from '@openslate/providers';
@@ -9,7 +10,7 @@ import type { OutputReceipt } from './output-store.js';
 interface Identity { id:string;projectId:string;version:1;attemptId:string;requestDigest:string }
 export interface CodexImageExecutionMapping extends Identity {
   profileDigest:string;profileDefinitionDigest:string;profileDefinition:ProviderProfile;capabilityLockId:string;capabilityLockDigest:string;
-  allowanceId:string;allowanceDigest:string;consumptionDigest:string;estimatedMicros:'0';
+  allowanceId:string|null;allowanceDigest:string|null;consumptionDigest:string|null;estimatedMicros:'0';
   transport:CodexImageDescription;native:CodexImagePrepared;references:Array<{artifactId:string;artifactDigest:string}>;
 }
 export interface CodexImageExecutionDispatch extends Identity { mappingDigest:string;threadId:string;turnInputDigest:string;createdAt:string }
@@ -30,7 +31,7 @@ function base(attempt:Attempt,value:Identity,fields:string[]):void {
   codexFields(value,['id','projectId','version','attemptId','requestDigest',...fields]);
   invariant(value.version===1 && value.id===attempt.id && value.attemptId===attempt.id && value.projectId===attempt.projectId
     && value.requestDigest===digest(attempt.request) && attempt.request.execution?.adapter==='codex-image' && attempt.request.execution.version==='1'
-    && attempt.request.kind==='image' && attempt.taskId===null && Buffer.byteLength(canonical(value))<=131072,
+    && attempt.request.kind==='image' && providerAdmissionRequest(attempt.request) && attempt.taskId===null && Buffer.byteLength(canonical(value))<=131072,
   'CODEX_IMAGE_EXECUTION_CONFLICT','Codex image record differs from its admitted attempt');
 }
 export function assertCodexImageOperationOptions(profile:ProviderProfile,args:ExecutionRequest['args']):void {
@@ -61,8 +62,7 @@ export function assertCodexImageExecutionMapping(attempt:Attempt,mapping:CodexIm
   codexFields(mapping.native.session,['threadId','turnInputDigest']);
   const runtime=mapping.native.runtime, transport=mapping.transport;
   invariant(mapping.profileDigest===attempt.request.profile!.digest && mapping.profileDefinitionDigest===digest(mapping.profileDefinition)
-    && codexId(mapping.capabilityLockId) && codexHash(mapping.capabilityLockDigest) && mapping.allowanceId===attempt.request.externalAllowanceId
-    && codexHash(mapping.allowanceDigest) && codexHash(mapping.consumptionDigest) && mapping.estimatedMicros==='0'
+    && codexId(mapping.capabilityLockId) && codexHash(mapping.capabilityLockDigest) && allowanceMappingMatches(attempt.request,mapping) && mapping.estimatedMicros==='0'
     && runtime.version===1 && runtime.runtimeVersion==='0.153.4' && runtime.model==='gpt-6-astra' && runtime.authMode==='chatgpt'
     && codexHash(runtime.runtimeDigest) && codexHash(runtime.configurationDigest) && codexId(mapping.native.session.threadId)
     && Array.isArray(transport.images) && canonical(transport)===canonical(describeCodexImageInput({attemptId:attempt.id,requestDigest:digest(attempt.request),

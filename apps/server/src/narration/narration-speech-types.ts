@@ -21,6 +21,11 @@ export interface NarrationSpeechProposal {
 export interface ReviewNarrationSpeech { key: string; proposalId: string; proposalDigest: string }
 /** Review and grant share an ID; no forward reference to its later candidate. */
 export interface NarrationSpeechReview {
+  /** Present only for an operation requested by a versioned Director epoch. Historical human records omit it. */
+  epochId?: string;
+  /** Exact operation requested through the one-step application path; historical plan reviews omit it. */
+  requested?: true;
+  requestedAtCursor?: number;
   id: string; version: 1; projectId: string; requestId: string; principalId: string;
   proposal: { id: string; digest: string }; grantDigest: string; section: NarrationSpeechSection;
   nodeId: string; specDigest: string; compiledDigest: string;

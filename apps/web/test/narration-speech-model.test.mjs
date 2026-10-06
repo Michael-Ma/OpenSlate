@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canReviewSpeech, speechPrepareCommand, speechReviewCommand, speechStatus } from '../src/narration-speech-model.ts';
+import { canReviewSpeech, speechPrepareCommand, speechReviewCommand, speechRequestCommand, speechStatus } from '../src/narration-speech-model.ts';
 const fixture = () => {
   const view = { headVersion: 2, revisionId: 'rev', session: { id: 'session', state: 'active' }, snapshot: { segments: [
     { entry: { segmentId: 'section' }, script: { id: 'section-rev', text: 'Made to last.', textKind: 'draft', source: { kind: 'generated' } } },
@@ -38,5 +38,11 @@ test('unrelated section edits keep exact speech review eligible', () => {
   assert.equal(canReviewSpeech(f.detail, f.view), true);
 });
 test('speech status explains uncertain results and separate attachment', () => {
-  assert.match(speechStatus('submission_unknown'), /not be repeated/); assert.match(speechStatus('succeeded'), /attach/); assert.match(speechStatus('ready'), /spending/);
+  assert.match(speechStatus('submission_unknown'), /not be repeated/); assert.match(speechStatus('succeeded'), /attach/); assert.match(speechStatus('ready'), /configured provider/);
+});
+test('an explicit speech request needs saved input but opens its own app session without approval or spending fields',()=>{
+ const f=fixture();f.view.session=null;const c=speechRequestCommand('p','one-request',f.view,'section',f.options,'speech','cedar','Warm');
+ assert.equal(c.path,'/api/projects/p/narration/speech');assert.equal(c.body.sessionId,undefined);assert.equal(c.body.segmentRevisionId,'section-rev');assert.equal(c.metadata.narrationSpeech,'request');
+ for(const field of ['approved','allowanceId','maxAttempts','spending'])assert.equal(c.body[field],undefined);
+ f.view.snapshot.segments[0].script.textKind='notes';assert.throws(()=>speechRequestCommand('p','k',f.view,'section',f.options,'speech','cedar',''));
 });

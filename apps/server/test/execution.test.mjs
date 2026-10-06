@@ -97,7 +97,7 @@ test("late stale-lease evidence is retained and cannot overwrite the active fenc
     assert.equal(provider.acceptedCount(), 1); assert.equal(second.list("execution_evidence", f.projectId).length, 2); assert.equal(engine.outputs(f.projectId).length, 1);
   } finally { second.close(); provider.close(); }
 });
-test("two real worker connections racing near the cap admit exactly one covered submission", async t => {
+test("two real worker connections admit each covered submission once while an old project cap does not block them", async t => {
   const f = setup(t, { imagesOnly: true, budgetMicros: "100" }); const shared = new SharedArrayBuffer(4);
   const modulePaths = { store: new URL("../dist/persistence/index.js", import.meta.url).href, engine: new URL("../dist/execution/index.js", import.meta.url).href, provider: new URL("../../../packages/providers/dist/index.js", import.meta.url).href };
   const workers = [0, 1].map(() => new Worker(`const {parentPort,workerData}=require('node:worker_threads'); (async()=>{const {Store}=await import(workerData.modules.store);const {Engine}=await import(workerData.modules.engine);const {FakeProvider}=await import(workerData.modules.provider);const store=new Store(workerData.dbPath);const provider=new FakeProvider(workerData.providerPath);const engine=new Engine(store,provider,{artifactDir:workerData.artifactDir,budgetMicros:'100'});parentPort.postMessage('ready');Atomics.wait(new Int32Array(workerData.shared),0,0);try {parentPort.postMessage(await engine.runReady());}finally{store.close();provider.close();}})().catch(error=>{throw error;});`, { eval: true, workerData: { modules: modulePaths, shared, dbPath: f.dbPath, providerPath: f.providerPath, artifactDir: f.artifactDir } }));
@@ -105,7 +105,9 @@ test("two real worker connections racing near the cap admit exactly one covered 
   await Promise.all(ready); const results = workers.map(worker => new Promise((resolve, reject) => { worker.once("message", resolve); worker.once("error", reject); }));
   Atomics.store(new Int32Array(shared), 0, 1); Atomics.notify(new Int32Array(shared), 0, 2);
   const completed = await Promise.all(results); await Promise.all(workers.map(worker => worker.terminate()));
-  assert.equal(completed.reduce((sum, result) => sum + result.dispatched, 0), 1); assert.equal(f.provider.acceptedCount(), 1); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
+  assert.equal(completed.reduce((sum, result) => sum + result.dispatched, 0), 2); assert.equal(f.provider.acceptedCount(), 2); assert.equal(f.engine.budget(f.projectId).committedMicros, "200");
+  assert.equal(f.engine.attempts(f.projectId).length, 2);
+  for (const attempt of f.engine.attempts(f.projectId)) assert.equal(f.provider.acceptedCount(attempt.id), 1);
 });
 
 test("uncertain pre-send failure never guesses rejection or frees its liability", async t => {

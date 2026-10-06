@@ -76,7 +76,7 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
 
   app.register(async scoped => {
     const base = "/api/projects/:projectId/narration";
-    registerShotAudioRoutes(scoped, { production, narration, canonical, actorFor });
+    registerShotAudioRoutes(scoped, { production, narration, canonical, actorFor, ...(options.narrationSpeech ? { narrationSpeech: options.narrationSpeech } : {}) });
     registerNarrationSpeechRoutes(scoped, { production, narration, ...(options.narrationSpeech ? { narrationSpeech: options.narrationSpeech } : {}), actorFor });
     registerOwnedTranscriptionRoutes(scoped, { production, narration, ownedTranscription: options.ownedTranscription, actorFor });
     // Authentication inherited from createApp runs before a handler consumes this stream.

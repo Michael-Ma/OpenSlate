@@ -1,3 +1,4 @@
+import { registerSceneGeneration } from './scene-generation.js';
 import { continueEditsSchema, type ContinueEdits } from './application/pending-edit-continuation.js';
 import { registerStoryboard } from "./storyboard.js";
 import { registerPlanImports } from "./plan-imports.js";
@@ -54,6 +55,7 @@ export function createApp(options: AppOptions = {}) {
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
+  registerSceneGeneration(app, service);
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403

@@ -13,6 +13,7 @@ import { assertOwnedTranscriptionCurrent } from "../execution/owned-transcriptio
 import { assertTranscriptionPreparationAttemptState } from "../persistence/transcription-preparation-state.js";
 import { assertOwnedTranscriptionProposal, snapshotOwnedTranscriptionData } from "./owned-transcription-records.js";
 import { currentOwnedTranscriptionReview } from "./owned-transcription-review-state.js";
+import { requestedTranscriptionHoldIds } from './request-holds.js';
 import { isVerifiedGeneratedNarrationAudio, narrationAudioOrigin } from "./generated-audio.js";
 import type { NarrationAudio } from "./types.js";
 import type { OwnedTranscriptionApplyReceipt, OwnedTranscriptionProposal, OwnedTranscriptionSource, OwnedTranscriptionTarget } from "./owned-transcription-types.js";
@@ -134,7 +135,7 @@ const languageChoices = freeze(languages());
 export function projectOwnedTranscriptionOptions(production: ProductionService, projectId: string) {
   return read(production.store, () => {
     const view = new ProjectionReader(production.store, projectId), project = view.project();
-    const lock = view.get<{ profiles: ProviderProfile[] }>("capability_lock", project.capabilityLockId);
+    const lock = view.get<{ profiles: ProviderProfile[]; preferredProfileIds?: { transcription?: string | null } }>("capability_lock", project.capabilityLockId);
     invariant(lock && Array.isArray(lock.profiles) && lock.profiles.length <= 512, "PROPOSAL_UNAVAILABLE", "Pinned project profiles are unavailable");
     const profiles: Array<{ id: string; revision: string; provider: "OpenAI"; model: string; estimatedMicros: string; currency: "USD" }> = [];
     for (const profile of lock.profiles) {
@@ -142,7 +143,8 @@ export function projectOwnedTranscriptionOptions(production: ProductionService, 
         provider: "OpenAI", model: info.model, estimatedMicros: info.estimatedMicros, currency: "USD" }); }
       catch (error) { if (!(error instanceof DomainError)) throw error; }
     }
-    return response({ version: 1 as const, profiles, languages: [...languageChoices], timing: "word" as const });
+    const preferredProfileId = lock.preferredProfileIds && Object.hasOwn(lock.preferredProfileIds, 'transcription') ? lock.preferredProfileIds.transcription : profiles[0]?.id ?? null;
+    return response({ version: 1 as const, profiles, preferredProfileId, languages: [...languageChoices], timing: "word" as const });
   });
 }
 
@@ -191,8 +193,9 @@ function executionBlocker(view: ProjectionReader, resolved: ResolvedOwnedTranscr
   if (view.get<{ paused: boolean }>("execution_control", project.id)?.paused) return "EXECUTION_PAUSED";
   // The validated owned node has a literal source, no upstream operations and no shot/scene scope.
   // Therefore the Engine's transitive hold traversal reduces to active project holds here.
-  if (view.store.db.prepare("SELECT 1 FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=? LIMIT 1")
-    .get(project.id, project.id)) return "EXECUTION_HELD";
+  const ignored=requestedTranscriptionHoldIds(view.reader,project.id,resolved.application.id);
+  const holds=view.store.db.prepare("SELECT id FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=?").all(project.id,project.id) as {id:string}[];
+  if(holds.some(hold=>!ignored.includes(hold.id)))return 'EXECUTION_HELD';
   return null;
 }
 function detail(view: ProjectionReader, proposalId: string): OwnedTranscriptionProposalDetail {

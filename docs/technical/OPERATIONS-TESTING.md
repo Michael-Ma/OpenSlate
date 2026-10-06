@@ -21,7 +21,7 @@ FFmpeg/ffprobe enable media import/export. Native director/image setup requires 
 | `pnpm probe:runtime --codex /absolute/path/to/codex` | Installed compatibility with zero model turns |
 | `pnpm probe:launcher` | Disposable real process on port 3001; no model/media calls |
 
-Tests bind loopback and use temporary databases/media. Optional native probes are separate from paid model turns. Real media experiments must identify exact allowance/job/attempt outcomes; unknown dispatch is reconciled before any retry.
+Tests bind loopback and use temporary databases/media. Optional native probes are separate from paid model turns. Real media experiments must identify their explicitly authorized scope and exact job/attempt outcomes; unknown dispatch is reconciled before any retry. The studio has no separate usage-allowance or API-key approval step.
 
 ## Recovery and evidence
 

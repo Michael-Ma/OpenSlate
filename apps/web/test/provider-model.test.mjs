@@ -30,10 +30,10 @@ test('demo availability follows saved media profiles instead of director mode or
 
 test('incompatible saved project takes precedence over ready installation in the human status text', () => {
   const provider = { readiness: { enabledByHost: true, realExecutionEnabled: true } };
-  assert.match(providerExecutionStatus(provider), /^Provider ready/);
+  assert.match(providerExecutionStatus(provider), /^Provider configured/);
   const incompatible = { ...provider, projectExecution: { compatible: false, code: 'LOCAL_EXECUTION_UPGRADE_REQUIRED', message: 'Create a new project with video generation enabled on this computer.' } };
   assert.equal(providerExecutionStatus(incompatible), incompatible.projectExecution.message);
-  assert.doesNotMatch(providerExecutionStatus(incompatible), /Provider ready/);
+  assert.doesNotMatch(providerExecutionStatus(incompatible), /Provider configured/);
   assert.match(providerExecutionStatus({ ...provider, readiness: { enabledByHost: true, realExecutionEnabled: false } }), /setup is incomplete/);
   assert.match(providerExecutionStatus({ readiness: { realExecutionEnabled: false } }), /Generation is disabled/);
   assert.match(providerExecutionStatus({ ...incompatible, projectExecution: { compatible: false, code: null, message: null } }), /incompatible/);

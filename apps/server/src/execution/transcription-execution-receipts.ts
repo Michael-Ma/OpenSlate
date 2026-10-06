@@ -1,3 +1,4 @@
+import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
 import { createHash } from "node:crypto";
 import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
@@ -18,7 +19,7 @@ export interface TranscriptionExecutionMapping extends Identity {
   profileDigest: string; profileDefinitionDigest: string; profileDefinition: ProviderProfile;
   /** Retained matching evidence; consumption does not pin the original admission lock ID. */
   capabilityLockId: string; capabilityLockDigest: string;
-  allowanceId: string; allowanceDigest: string; consumptionDigest: string; estimatedMicros: string;
+  allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null; estimatedMicros: string;
   preparation: { intentId: string; intentDigest: string; receiptId: string; receiptDigest: string };
   source: { record: TranscriptionAudioIntent["sourceRecord"]; descriptor: TranscriptionAudioIntent["source"]; startSample: 0; endSample: number };
   derivative: TranscriptionAudioReceipt["audio"];
@@ -26,7 +27,7 @@ export interface TranscriptionExecutionMapping extends Identity {
   transport: OpenAITranscriptionDescription;
 }
 export interface TranscriptionExecutionDispatch extends Identity {
-  mappingDigest: string; transportDigest: string; bodySha256: string; allowanceId: string; createdAt: string;
+  mappingDigest: string; transportDigest: string; bodySha256: string; allowanceId: string | null; createdAt: string;
 }
 export interface CompactTranscriptionResult {
   rawResponseSha256: string; rawResponseByteLength: number; resultDigest: string;
@@ -55,14 +56,14 @@ function base(attempt: Attempt, value: Identity, extras: string[]): void {
   fail(value.version === 1 && value.id === attempt.id && value.projectId === attempt.projectId && value.attemptId === attempt.id
     && value.requestDigest === digest(attempt.request) && attempt.request.kind === "transcription"
     && attempt.request.execution?.adapter === "openai-transcription" && attempt.request.execution.version === "1"
-    && id(attempt.request.externalAllowanceId) && hash(attempt.request.profile?.digest) && Buffer.byteLength(canonical(value)) <= 32768,
+    && providerAdmissionRequest(attempt.request) && hash(attempt.request.profile?.digest) && Buffer.byteLength(canonical(value)) <= 32768,
   "Transcription record differs from its exact admitted request");
 }
 
 /** No source lookup or conversion. Invalid operation options remain a definite pre-dispatch error. */
 export function transcriptionExecutionOptions(input: ExecutionRequest): Pick<OpenAITranscriptionRequest, "model" | "language" | "timing"> {
   const request = structuredClone(input);
-  transcriptionFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "externalAllowanceId"]);
+  transcriptionFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
   fail(request.kind === "transcription" && request.execution?.adapter === "openai-transcription" && request.execution.version === "1"
     && request.inputs.length === 1 && request.inputs[0]?.kind === "audio" && typeof request.args.language === "string",
   "Transcription requires exactly one audio input, explicit language choice and no custom settings");
@@ -113,8 +114,7 @@ export function assertTranscriptionExecutionMapping(attempt: Attempt, mapping: T
   transcriptionFields(transport, ["adapter", "model", "language", "timing", "responseFormat", "input", "requestDigest", "bodySha256", "bodyByteLength", "contentType"]);
   const { requestDigest, bodySha256, bodyByteLength, contentType, ...savedSemantic } = transport;
   fail(mapping.profileDigest === attempt.request.profile!.digest && mapping.profileDefinitionDigest === digest(mapping.profileDefinition)
-    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && mapping.allowanceId === attempt.request.externalAllowanceId
-    && hash(mapping.allowanceDigest) && hash(mapping.consumptionDigest) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
+    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && allowanceMappingMatches(attempt.request, mapping) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
     && canonical(savedSemantic) === canonical(semantic) && requestDigest === semanticDigest && hash(bodySha256)
     && integer(bodyByteLength, receipt.audio.byteLength + 64, receipt.audio.byteLength + 16384)
     && typeof contentType === "string" && new RegExp(`^multipart/form-data; boundary=openslate-${semanticDigest.slice(0, 48)}-(?:[0-9]|1[0-5])$`).test(contentType),

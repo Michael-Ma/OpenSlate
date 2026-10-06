@@ -35,8 +35,9 @@ async function fixture(t,options={}) {
   const engine = new Engine(store, provider, { artifactDir: join(dir, 'artifacts'), profiles }), production = new ProductionService(store, engine, profiles), project = seedFixture(production, dir);
   const media = new LocalMediaService({ rootDir: join(dir, 'media'), allowedInputRoots: [uploadDirectory], ffmpegPath: ffmpeg, ffprobePath: ffprobe });
   const narration = new NarrationService(production, media), canonical = new NarrationCanonicalService(narration), app = createApp({ service: production, localToken: token });
-  registerNarrationRoutes(app, { production, narration, canonical, uploadDirectory, ...(options.speech?{narrationSpeech:new NarrationSpeechService(narration)}:{}) }); await app.ready();
-  const f = { dir, project, store, provider, engine, production, narration, canonical, app, session: null };
+  const speechService=options.speech?new NarrationSpeechService(narration):undefined;
+  registerNarrationRoutes(app, { production, narration, canonical, uploadDirectory, ...(speechService?{narrationSpeech:speechService}:{}) }); await app.ready();
+  const f = { dir, project, store, provider, engine, production, narration, canonical, app, session: null, speechService };
   f.request = (suffix = '', body, extras = {}) => app.inject({ method: body === undefined ? 'GET' : 'POST', url: `/api/projects/${project.id}/narration${suffix}`, ...(body === undefined ? {} : { payload: body }), ...extras,
     headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': randomUUID(), ...extras.headers } });
   f.view = () => narration.workspaceSnapshot(project.id);
@@ -179,12 +180,13 @@ test('uploaded-to-generated writing updates the card and preserves visual revisi
  assert.ok(!f.engine.attempts(current.id).some(attempt=>attempt.nodeId===oldVideo.id));
 });
 
-test('text and recorded-voice intent changes preserve frames, require the chosen personal voice and never accept old speech',async t=>{
+test('personal-voice writing needs no generation approval while synthesis still requires the chosen registered voice',async t=>{
  const f=await fixture(t,{speech:true});await f.start();const project=f.store.getProject(f.project.id),shotId=project.shots[0].id,visualRevision=project.shots[0].revisionId;
  let response=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:project.headVersion,expectedVersion:f.view().state.version,text:'First words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(response.statusCode,200,response.body);
  let changed=f.store.getProject(f.project.id);editStoryboard(f.production,f.project.id,{kind:'narration',id:shotId,field:'voice',value:'personal',expectedHeadVersion:changed.headVersion},randomUUID());
  response=await f.request(`/shots/${shotId}/sessions`,{continuationSessionId:f.session.id});assert.equal(response.statusCode,200,response.body);f.session=response.json().session;
- changed=f.store.getProject(f.project.id);const stale=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedVersion:f.view().state.version,text:'Second words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(stale.json().error.code,'PERSONAL_VOICE_REQUIRED');
+ changed=f.store.getProject(f.project.id);const writing=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedVersion:f.view().state.version,text:'Second words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(writing.statusCode,200,writing.body);
+ changed=f.store.getProject(f.project.id);const before=f.view(),stale=await f.request(`/shots/${shotId}/generate`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedNarrationVersion:before.state.version,text:'Second words.',voice:'coral',profileId:speechProfile.id});assert.equal(stale.json().error.code,'PERSONAL_VOICE_REQUIRED');assert.deepEqual(f.view(),before);
  const human=f.production.beginRequest(f.project.id,'local-user','Register my existing voice',{editing:false}),voices=new PersonalVoiceService(f.production);voices.register(f.project.id,human,{key:randomUUID(),expectedHeadVersion:changed.headVersion,label:'My recorded voice',provider:'openai',providerVoiceId:'voice_scope_demo',ownVoice:true,permitSynthesis:true});
  response=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedVersion:f.view().state.version,text:'Second words.',language:'en',mode:'generated',voice:'openai-custom:voice_scope_demo',profileRevisionId:speechProfile.revision});assert.equal(response.statusCode,200,response.body);
  changed=f.store.getProject(f.project.id);assert.equal(changed.shots[0].revisionId,visualRevision);assert.equal(changed.shots[0].narration.voice,'personal');assert.equal(changed.shots[0].narration.text,'Second words.');assert.equal(changed.shots[0].narrationPending,true);assert.deepEqual(changed.shots[1],project.shots[1]);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);assert.equal(f.store.list('grant',f.project.id).length,0);assert.equal(f.provider.acceptedCount(),0);
@@ -247,4 +249,32 @@ test('two successive compact voices preserve existing picture work and automatic
   for (const expected of picture) { const node = plan.nodes.find(node => node.id === expected.id); assert.equal(node.specDigest, expected.spec); assert.equal(f.store.get('node_binding', node.id).candidateId, expected.candidateId); }
   assert.deepEqual(f.store.list('grant', f.project.id), grants); assert.deepEqual(f.engine.attempts(f.project.id), attempts); assert.equal(f.provider.acceptedCount(), providerCalls);
   assert.equal(f.store.list('hold', f.project.id).filter(hold => hold.active).length, 0);
+});
+
+test('Generate narration creates its shot section and exact application in one request with no manual review or allowance', async t => {
+  const f=await fixture(t,{speech:true}),shotId=f.project.shots[0].id,unrelated=f.store.getProject(f.project.id).shots[1];
+  const body={expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:f.view().state.version,text:'Made with care.',profileId:speechProfile.id,voice:'cedar'};
+  const headers={'idempotency-key':'one-shot-narration-request'},path=`/shots/${shotId}/generate`,first=await f.request(path,body,{headers});
+  assert.equal(first.statusCode,200,first.body);const result=first.json();assert.ok(result.receipt.candidateId);assert.equal(result.proposal.segment.text,body.text);
+  assert.equal(f.view().segments.length,1);assert.equal(f.view().segments[0].accepted.audio,false);assert.equal(f.view().segments[0].accepted.timing,false);
+  assert.equal(f.store.list('external_allowance',f.project.id).length,0);assert.equal(f.store.list('narration_speech_application',f.project.id).length,1);
+  assert.deepEqual((await f.request(path,body,{headers})).json(),result);assert.equal(f.store.list('narration_speech_application',f.project.id).length,1);
+  assert.deepEqual(f.store.getProject(f.project.id).shots[1],unrelated);assert.equal(f.provider.acceptedCount(),0);
+});
+
+test('lost one-step speech response reuses its saved phase intent and application without creating a second candidate', async t => {
+  const f=await fixture(t,{speech:true}),shotId=f.project.shots[0].id,original=f.speechService.request.bind(f.speechService);let calls=0;
+  f.speechService.request=async(...args)=>{const result=await original(...args);if(++calls===1)throw Error('lost published speech response');return result;};
+  const body={expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:f.view().state.version,text:'One saved request.',profileId:speechProfile.id,voice:'cedar'},headers={'idempotency-key':'recover-one-shot-speech'},path=`/shots/${shotId}/generate`;
+  const first=await f.request(path,body,{headers});assert.equal(first.statusCode,500,first.body);const saved=f.store.list('narration_speech_application',f.project.id)[0];assert.ok(saved);
+  const recovered=await f.request(path,body,{headers});assert.equal(recovered.statusCode,200,recovered.body);assert.equal(recovered.json().receipt.candidateId,saved.id);
+  assert.equal(f.view().segments.length,1);assert.equal(f.store.list('narration_speech_application',f.project.id).length,1);assert.equal(f.provider.acceptedCount(),0);
+});
+
+test('uploaded recording setup creates a scoped draft automatically and stale writing fails before a session is minted', async t => {
+  const f=await fixture(t),shotId=f.project.shots[0].id,body={expectedHeadVersion:f.store.getProject(f.project.id).headVersion,expectedNarrationVersion:f.view().state.version,mode:'uploaded'};
+  const stale=await f.request(`/shots/${shotId}/initialize`,{...body,expectedNarrationVersion:body.expectedNarrationVersion+1});assert.equal(stale.statusCode,409,stale.body);
+  assert.equal(f.store.list('narration_session',f.project.id).length,0);
+  const saved=await f.request(`/shots/${shotId}/initialize`,body);assert.equal(saved.statusCode,200,saved.body);assert.equal(saved.json().segment.script.source.kind,'uploaded');
+  assert.ok(saved.json().session.id);assert.equal(f.view().segments.length,1);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);
 });

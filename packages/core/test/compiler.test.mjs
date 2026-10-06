@@ -144,6 +144,17 @@ test("preparation compiles without accepted/measured narration; readiness is not
   assert.equal(context.project.cues[0].accepted, false);
 });
 
+test('symbolic video may await covering duration while its exact recipe and planned cut remain distinct', () => {
+  const context = fixture(), shot = context.project.shots[0];
+  shot.desiredFrames = 240; shot.cueId = null; shot.narration = { mode: 'none', text: '', voice: 'stock' };
+  shot.promptIntent.video = shotIntentDigest(shot, 'video');
+  const result = compilePlan(plan(context), context);
+  assert.equal(result.nodes.find(node => node.kind === 'video').args.durationFrames, 180);
+  assert.equal(result.nodes.find(node => node.kind === 'timeline').args.durationFrames, 240);
+  assert.equal(result.gates[0].members[0].recipeDigest, result.nodes.find(node => node.kind === 'video').specDigest);
+  assert.equal(Object.hasOwn(result, 'generationAuthorized'), false);
+});
+
 test("speech/transcription preparation is independent of video timing and review", () => {
   const context = fixture();
   const result = compilePlan(`definePlan({baseRevision:"r1"},p=>{

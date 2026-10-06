@@ -17,13 +17,17 @@ Reconciled October 5, 2026. OpenSlate is an early single-user local studio. The 
 
 Requested workflow items 1–5 are implemented. Item 6 is partial because provider voice-ID synthesis does not create a new voice clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 code review](V1-COMPLETION-REVIEW.md) records fixes and scope.
 
+## October 5 simplified generation
+
+The [simplification review](OCTOBER-5-SIMPLIFIED-GENERATION-REVIEW.md) records the current flow: configured keys/Codex need no separate approval or usage allowance; green scene checks create keyframes and then approve exact video generation. Requested speech/transcription needs no generation review, and saved shot scripts materialize automatically within the original scope. Completed planning advances to scene actions rather than repeating Resume. New pauses, Stop, changed inputs and unknown-outcome recovery remain authoritative. The current full gate passed **2,304 tests, zero failures, one optional native skip**; offline restart/edit and actual desktop/mobile UI checks passed. Real-provider quality acceptance remains separate.
+
 ## October 5 Light workspace
 
 The user-selected **A · Light workspace** is implemented as [OpenSlate Light](../design/OPENSLATE-LIGHT.md), with Radix Themes as its React component foundation. Shared semantic tokens govern actions, fields, selections, dialogs, guidance and focus states. The Director remains on the left with its remembered drag/keyboard width; the storyboard emphasizes a selected shot alongside compact supporting cards. Film direction stays available in a disclosure, with empty-project writing visible. Stable IDs and scene/shot labels survive selection and reordering.
 
 The current-plan card replaces the generic activity/Continue rows with **Saved / Next** derived from the canonical snapshot, current Director state, exact frame review, job evidence and request-owned holds. Eligible unfinished edits show their actual scope and saved direction; **Resume this edit** creates an explicit new scoped Director request. Running work, pending answers, Stop and uncertain/in-progress media each have their own next action and suppress Resume. Direct storyboard edits are shown as saved changes needing a matching plan. The card does not infer a creative Change / Keep promise from conversation text.
 
-**Models for this project** presents Director, Keyframes, Video and Narration in a compact Radix dialog, with optional setup and existing voices. Separate Director/media commands, exact zero-impact saves, actual impact review and same-command recovery remain authoritative. Protected saves block dismissal; narrow layouts retain a reachable footer. Image inspection shows the complete frame with its actual motion and duration, and approval requires the exact current image to load successfully. See [October 5 review](OCTOBER-5-LIGHT-WORKSPACE.md).
+**Models for this project** presents Director, Keyframes, Video and Narration in a compact Radix dialog, with optional setup and existing voices. Separate Director/media commands, exact zero-impact saves, actual impact review and same-command recovery remain authoritative. Protected saves block dismissal; narrow layouts retain a reachable footer. Image inspection is read-only. Scene video approval requires every exact current conditioning image to load successfully alongside its actual motion and generated duration. See [October 5 review](OCTOBER-5-LIGHT-WORKSPACE.md).
 
 ## Post-migration review
 
@@ -50,4 +54,4 @@ The October 5 gate verifies the integrated Light workspace source; the October 3
 
 Run [human live testing](MANUAL-LIVE-PRODUCTION.md) with short real API image, stock speech and transcription. Then exercise a full native conversation, a multi-shot scoped replacement and restart/reopen. Confirm user quality before longer production. Provider keys/configuration and old allowances are not blanket permission for new media calls.
 
-Application state, review and execution remain authoritative. Generation origin, finite usage allowance, exact returned-frame/motion approval, accepted audio, edit holds and Stop are separate predicates. Local export is limited to 360 seconds/64 cuts/65 audio placements/eight simultaneous lanes. V0 remains one computer.
+Application state, review and execution remain authoritative. Configured keys enable providers without key approval or usage allowances. Human generation decisions cover keyframes and video per scene; requested audio starts without generation review. Exact returned-frame/motion identity, accepted audio timing, edit holds and Stop remain separate execution predicates. Local export is limited to 360 seconds/64 cuts/65 audio placements/eight simultaneous lanes. V0 remains one computer.

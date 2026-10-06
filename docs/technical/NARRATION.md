@@ -5,11 +5,11 @@ Writing intent, measured audio, transcript evidence and human acceptance are sep
 ## Human paths
 
 - **No narration:** save explicit `none`; use planned shot frames with no fabricated silent recording.
-- **Script first:** save words, choose stock or eligible personal voice, review the exact synthesis, generate under a finite allowance, then listen and accept the recording/range.
+- **Script first:** save words, choose stock or eligible personal voice, request speech with the configured model, then listen and accept the recording/range.
 - **Recording first:** upload/import owned audio, listen, save actual words or a truthful description, bind the exact range and accept it.
 - **Transcription:** review recognition of the exact owned recording; a returned transcript is candidate evidence until the human adopts words/timing.
 
-Ordinary script writing and guidance compatibility require no media spending permission. Generating speech/transcription does. Audio acceptance is a decision about the returned recording and range, not permission for another API call.
+Ordinary script writing, guidance compatibility and configured-provider usage require no separate approval. An explicit speech/transcription request executes its exact saved input without another generation-approval step. Audio acceptance is a decision about the returned recording and range rather than an API-key, spending or usage gate.
 
 ## Canonical state
 

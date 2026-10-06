@@ -115,16 +115,17 @@ test("exact budget command replay survives later cap/plan changes and database r
   } finally { await app.close(); store.close(); provider.close(); }
 });
 
-test("lowering below uncertain liability preserves it, blocks new starts and permits existing reconciliation", async t => {
+test("a historical cap below uncertain liability preserves evidence without blocking another authorized start or reconciliation", async t => {
   const f = fixture(t), hold = f.engine.setHold(f.projectId, { scopeId: "shot-1", ownerId: "offline-test" });
   f.provider.setMode(f.plan.nodes[0].id, "unknown_after_accept"); await f.engine.runReady();
   assert.equal(f.engine.attempts(f.projectId)[0].phase, "submission_unknown"); const before = creative(f);
   assert.equal((await f.request("POST", path(f), f.input("0"))).statusCode, 200);
   assert.deepEqual(creative(f), before); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
   f.engine.releaseHold(f.projectId, hold.id, "offline-test");
-  const blocked = await f.engine.runReady(); assert.equal(blocked.dispatched, 0); assert.ok(blocked.blocked.some(row => row.code === "BUDGET_EXCEEDED"));
-  await f.engine.reconcile(); assert.equal(f.engine.attempts(f.projectId)[0].phase, "succeeded"); assert.equal(f.provider.acceptedCount(), 1);
-  assert.equal(f.engine.budget(f.projectId).committedMicros, "100"); assert.equal(f.engine.budget(f.projectId).capMicros, "0");
+  const earlier = f.engine.attempts(f.projectId)[0], admitted = await f.engine.runReady(); assert.equal(admitted.dispatched, 1);
+  assert.equal(f.store.get("attempt", earlier.id).phase, "submission_unknown"); assert.equal(f.provider.acceptedCount(earlier.id), 1);
+  await f.engine.reconcile(); assert.equal(f.engine.attempts(f.projectId)[0].phase, "succeeded"); assert.equal(f.provider.acceptedCount(), 2);
+  assert.equal(f.engine.budget(f.projectId).committedMicros, "200"); assert.equal(f.engine.budget(f.projectId).capMicros, "0");
 });
 
 test("budget audit is immutable and validates exact same-project purpose authority", t => {

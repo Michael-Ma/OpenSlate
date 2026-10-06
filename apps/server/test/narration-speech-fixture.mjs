@@ -45,7 +45,7 @@ export async function narrationSpeechFixture(t, options = {}) {
   const fetch = async (...args) => { calls.http++; return options.fetch ? options.fetch(...args) : response(); };
   const bridge = new OpenAISpeechExecution({ store, outputStore: outputs, credentials, fetch });
   const engine = new Engine(store, options.realSpeech ? bridge : provider, { artifactDir, profiles, outputStore: outputs,
-    externalAdmission: new DurableExternalAdmission(store, () => {}) });
+    externalAdmission: options.configuredAdmission ? { authorize: () => ({}) } : new DurableExternalAdmission(store, () => {}) });
   const production = new ProductionService(store, engine, profiles); let project = production.createProject("Narration speech proposal");
   if (options.plan) project = store.saveProject({ ...projectFixture(project.id, 2), capabilityLockId: project.capabilityLockId }, project.headVersion);
   const human = production.beginRequest(project.id, "human", "Prepare my saved narration section."), actor = production.openEpoch(project.id, human).actor;

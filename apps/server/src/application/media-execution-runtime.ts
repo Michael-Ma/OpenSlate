@@ -19,7 +19,7 @@ import { SpoolTranscriptIngestor } from "../execution/spool-transcript-ingestor.
 import { TranscriptionAudioService } from "../execution/transcription-audio-service.js";
 import { TranscriptionAudioStore } from "../media/transcription-audio-store.js";
 import { LocalMediaExecutor } from "../execution/local-media-executor.js";
-import { DurableExternalAdmission } from "../execution/durable-external-admission.js";
+import { ConfiguredExternalAdmission } from "../execution/durable-external-admission.js";
 import { CodexImageExecution } from "../execution/codex-image-execution.js";
 import { assertCodexImageOperationOptions } from "../execution/codex-image-receipts.js";
 import { OpenAIImageExecution } from "../execution/openai-image-execution.js";
@@ -141,14 +141,14 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
     enabledExecutions.push({ adapter: "openai-transcription", version: "1" });
   }
   const registry = new ExecutionRegistry(providers);
-  const durable = new DurableExternalAdmission(store, profile => {
+  const configured = new ConfiguredExternalAdmission(store, profile => {
     const policy = profilePolicy(profile); registry.forProfile(profile);
     if (profile.adapter === "codex-image") {
       invariant(configuration.codexImage && codexImageConfigured, "EXTERNAL_EXECUTION_DISABLED", "Codex image generation is not configured");
       // Native ChatGPT authentication is checked by prepare before a turn marker; no API key or quota estimate is substituted.
       return;
     }
-    invariant(!policy.fixture && policy.credential, "EXTERNAL_EXECUTION_DISABLED", "Only an explicitly enabled external media route can use spending allowances");
+    invariant(!policy.fixture && policy.credential, "EXTERNAL_EXECUTION_DISABLED", "The selected external media route is unavailable");
     invariant(credentials.status().credentials.some(value => value.id === policy.credential && value.configured),
       "MEDIA_CREDENTIAL_MISSING", "Configure the selected media provider credential on the local server");
   });
@@ -157,23 +157,23 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
       if (input.profile.adapter === "codex-image") {
         const binding = store.get<NodeBinding>("node_binding", input.nodeId);
         invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "image",
-          "ALLOWANCE_SELECTION_STALE", "Codex preflight requires the exact current image candidate");
+          "EXTERNAL_SELECTION_STALE", "Codex preflight requires the exact current image candidate");
         invariant(typeof binding.node.shotId === "string", "CODEX_IMAGE_PREFLIGHT_INVALID", "Codex image version 1 supports shot keyframes only");
         assertCodexImageOperationOptions(input.profile, binding.node.args);
       }
       if (input.profile.adapter === "openai-speech" || input.profile.adapter === "openai-transcription") {
         const binding = store.get<NodeBinding>("node_binding", input.nodeId);
         invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId,
-          "ALLOWANCE_SELECTION_STALE", "Audio preflight requires the exact current candidate");
-        // Pure option validation precedes consumption. Durable admission below rechecks the full active selection.
+          "EXTERNAL_SELECTION_STALE", "Audio preflight requires the exact current candidate");
+        // Pure option validation precedes dispatch. Admission below rechecks the full active selection.
         assertAudioOperationOptions(input.profile, binding.node.args);
       }
       if (input.profile.adapter === "viggle-h3") {
         const binding = store.get<NodeBinding>("node_binding", input.nodeId);
         invariant(binding?.projectId === input.projectId && binding.candidateId === input.candidateId && binding.node.kind === "video",
-          "ALLOWANCE_SELECTION_STALE", "Viggle preflight requires the exact current video candidate");
-        // The shared bridge policy rejects unsupported options before any allowance or reservation is consumed.
-        // Durable admission below synchronously rechecks the full active node, profile definition and allowance.
+          "EXTERNAL_SELECTION_STALE", "Viggle preflight requires the exact current video candidate");
+        // The shared bridge policy rejects unsupported options before dispatch.
+        // Admission below synchronously rechecks the full active node and profile definition.
         assertViggleH3OperationOptions(input.profile, binding.node.args);
       }
       if (input.profile.adapter === "minimax-h3" || input.profile.adapter === "viggle-h3") {
@@ -182,9 +182,8 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
         try { if (lock?.projectId === project.id && Object.hasOwn(lock, "localExecution")) { snapshotLocalExecution(lock.localExecution); pinned = true; } } catch { /* Historical projects cannot silently inherit a new runtime. */ }
         invariant(pinned, "LOCAL_EXECUTION_UPGRADE_REQUIRED", "Create a new production project with local assembly enabled before generating video; this project's saved execution mode cannot be changed");
       }
-      return durable.authorize(input);
+      return configured.authorize(input);
     },
-    recordAdmission(attempt) { durable.recordAdmission(attempt); },
   };
   const engine = new Engine(store, registry, { artifactDir, outputStore,
     outputIngestor: new ExecutionIngestionRouter({ ...(imageStore ? { image: new SpoolImageIngestor(outputStore, imageStore) } : {}),

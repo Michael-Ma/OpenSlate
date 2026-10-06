@@ -172,7 +172,7 @@ test('review creates its exact grant without borrowing an earlier unused generic
   noSpending(f);
 });
 
-test('ordinary preparation excludes a reviewed unused grant even after its audio becomes canonical', async t => {
+test('ordinary requested preparation creates fresh ownership instead of borrowing a reviewed unused grant', async t => {
   const f = await fixture(t), proposal = f.proposal, node = proposal.compiled.nodes[0];
   // Trusted interrupted-publication fixture: a valid pre-install review is not
   // transferable to ordinary preparation, even without a consumed candidate.
@@ -183,11 +183,10 @@ test('ordinary preparation excludes a reviewed unused grant even after its audio
   const project = f.store.getProject(f.project.id), source = f.store.get('owned_transcription_source', proposal.sourceBinding.id);
   const canonicalProject = f.store.saveProject({ ...project, revisionId: key(), artifacts: [source.artifact] }, project.headVersion);
   f.store.insert('project_revision', canonicalProject.revisionId, f.project.id, { project: canonicalProject });
-  const before = data(f);
-  await assert.rejects(f.production.prepare(f.project.id, f.human, { variant: 'plan', expectedHeadVersion: canonicalProject.headVersion,
-    source: `definePlan({baseRevision:${JSON.stringify(canonicalProject.revisionId)}},p=>{return p.transcription("different-operation",{profile:${JSON.stringify(f.profile.id)},audio:p.asset(${JSON.stringify(f.audio.id)}),language:"auto",timing:"word",settings:{}});});` }),
-  { code: 'ORIGIN_NOT_AUTHORIZED' });
-  assert.deepEqual(data(f), before); assert.equal(rows(f, 'candidate').length, 0); noSpending(f);
+  const prepared = await f.production.prepare(f.project.id, f.human, { variant: 'plan', expectedHeadVersion: canonicalProject.headVersion,
+    source: `definePlan({baseRevision:${JSON.stringify(canonicalProject.revisionId)}},p=>{return p.transcription("different-operation",{profile:${JSON.stringify(f.profile.id)},audio:p.asset(${JSON.stringify(f.audio.id)}),language:"auto",timing:"word",settings:{}});});` });
+  const [newGrantId] = Object.values(prepared.grantBindings); assert.ok(newGrantId); assert.notEqual(newGrantId, grant.id);
+  assert.deepEqual(f.store.get('grant', grant.id), grant); assert.equal(rows(f, 'candidate').length, 0); noSpending(f);
 });
 
 test('review rejects unknown fields, accessors and a mismatched proposal digest before reading media', async t => {

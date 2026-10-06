@@ -1,3 +1,4 @@
+import { configuredProviderUse, configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionCallOptions, ExecutionRequest } from "@openslate/providers";
@@ -15,7 +16,7 @@ export interface SpeechCapabilityLock { id: string; projectId: string; profiles:
 export interface SpeechReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
 export interface SpeechAdmission {
   attempt: Attempt; candidate: Candidate; grant: Grant; reservation: SpeechReservation;
-  allowance: ExternalAllowance; consumption: ExternalAllowanceConsumption; allowanceRequest: AllowanceHumanRequest;
+  allowance: ExternalAllowance | null; consumption: ExternalAllowanceConsumption | null; allowanceRequest: AllowanceHumanRequest | null;
   profile: ProviderProfile; capabilityLock: SpeechCapabilityLock;
 }
 export type SpeechProfilePin = Pick<SpeechExecutionMapping, "capabilityLockId" | "capabilityLockDigest" | "profileDefinition">;
@@ -32,10 +33,12 @@ export function assertSpeechAdmission(value: SpeechAdmission): void {
     && grant?.id === candidate.grantId && grant.projectId === attempt.projectId && grant.kind === "speech" && grant.origin === candidate.origin
     && reservation?.id === attempt.reservationId && reservation.projectId === attempt.projectId && reservation.attemptId === attempt.id
     && ["reserved", "charged", "released"].includes(reservation.state), "Speech requires its exact admitted candidate, grant and reservation");
-  assertExternalAllowance(allowance, allowanceRequest); assertExternalAllowanceConsumption(consumption, allowance, attempt, reservation);
+  if (configuredProviderUse(attempt.request)) fail(allowance === null && consumption === null && allowanceRequest === null
+    && configuredProfileMatches(attempt.request, profile, capabilityLock.id, digest(capabilityLock)), "Configured provider proof differs from its exact original profile lock");
+  else { assertExternalAllowance(allowance!, allowanceRequest!); assertExternalAllowanceConsumption(consumption!, allowance!, attempt, reservation); }
   assertSpeechExecutionProfile(profile, attempt);
-  fail(digest(profile) === consumption.profileDefinitionDigest && digest(profile) === allowance.profileDefinitionDigest
-    && profile.unitCostMicros === consumption.estimatedMicros && profile.unitCostMicros === reservation.micros,
+  fail((configuredProviderUse(attempt.request) || digest(profile) === consumption!.profileDefinitionDigest && digest(profile) === allowance!.profileDefinitionDigest
+    && profile.unitCostMicros === consumption!.estimatedMicros) && profile.unitCostMicros === reservation.micros,
   "Speech profile estimate differs from its consumed allowance and reservation");
   fail(capabilityLock?.projectId === attempt.projectId && typeof capabilityLock.id === "string"
     && Array.isArray(capabilityLock.profiles) && capabilityLock.profiles.length > 0 && capabilityLock.profiles.length <= SPEECH_PROFILE_LOOKUP_LIMITS.profiles
@@ -45,8 +48,8 @@ export function assertSpeechAdmission(value: SpeechAdmission): void {
 export function assertSpeechMappingAdmission(admission: SpeechAdmission, mapping: SpeechExecutionMapping): void {
   assertSpeechAdmission(admission); assertSpeechExecutionMapping(admission.attempt, mapping);
   fail(mapping.capabilityLockId === admission.capabilityLock.id && mapping.capabilityLockDigest === digest(admission.capabilityLock)
-    && canonical(mapping.profileDefinition) === canonical(admission.profile) && mapping.allowanceId === admission.allowance.id
-    && mapping.allowanceDigest === digest(admission.allowance) && mapping.consumptionDigest === digest(admission.consumption)
+    && canonical(mapping.profileDefinition) === canonical(admission.profile) && mapping.allowanceId === (admission.allowance?.id ?? null)
+    && mapping.allowanceDigest === (admission.allowance ? (admission.allowance ? digest(admission.allowance) : null) : null) && mapping.consumptionDigest === (admission.consumption ? (admission.consumption ? digest(admission.consumption) : null) : null)
     && mapping.estimatedMicros === admission.reservation.micros, "Speech mapping lost its exact retained admission evidence");
 }
 
@@ -62,7 +65,8 @@ export function resolveSpeechAdmission(store: SpeechAuthorityStore, input: Reado
   const allowance = store.get<ExternalAllowance>("external_allowance", request.externalAllowanceId ?? "");
   const consumption = store.get<ExternalAllowanceConsumption>("external_allowance_consumption", current.id);
   const allowanceRequest = allowance ? store.get<AllowanceHumanRequest>("message", allowance.requestId) : undefined;
-  fail(candidate && grant && reservation && allowance && consumption && allowanceRequest, "Speech requires durable allowance consumption and its human issue evidence");
+  fail(providerAdmissionRequest(request) && candidate && grant && reservation
+    && (configuredProviderUse(request) ? !allowance && !consumption && !allowanceRequest : allowance && consumption && allowanceRequest), "Dispatch requires its exact candidate, grant and recorded provider-use evidence");
   const lockAt = (id: string): SpeechCapabilityLock | undefined => {
     const meta = store.db.prepare("SELECT project_id, length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='capability_lock' AND id=?").get(id) as { project_id: string; bytes: number } | undefined;
     if (!meta) return undefined;
@@ -72,14 +76,14 @@ export function resolveSpeechAdmission(store: SpeechAuthorityStore, input: Reado
       && lock.profiles.length <= SPEECH_PROFILE_LOOKUP_LIMITS.profiles, "Invalid retained profile lock"); return lock;
   };
   const matching = (lock: SpeechCapabilityLock | undefined): ProviderProfile | undefined => lock?.profiles.find(profile => profile
-    && profile.id === request.profile?.id && profile.revision === request.profile?.revision && digest(profile) === consumption!.profileDefinitionDigest);
+    && profile.id === request.profile?.id && profile.revision === request.profile?.revision && digest(profile) === (request.providerUse?.profileDefinitionDigest ?? consumption!.profileDefinitionDigest));
   let capabilityLock: SpeechCapabilityLock | undefined, profile: ProviderProfile | undefined;
   if (pinned) {
     capabilityLock = lockAt(pinned.capabilityLockId); profile = matching(capabilityLock);
     fail(capabilityLock && digest(capabilityLock) === pinned.capabilityLockDigest && profile && canonical(profile) === canonical(pinned.profileDefinition),
       "Pinned speech profile evidence is missing or changed");
   } else {
-    capabilityLock = lockAt(store.getProject(current.projectId).capabilityLockId); profile = matching(capabilityLock);
+    capabilityLock = lockAt(request.providerUse?.capabilityLockId ?? store.getProject(current.projectId).capabilityLockId); profile = matching(capabilityLock);
     if (!profile) {
       const rows = store.db.prepare("SELECT id FROM entities WHERE kind='capability_lock' AND project_id=? ORDER BY id LIMIT ?")
         .all(current.projectId, SPEECH_PROFILE_LOOKUP_LIMITS.locks + 1) as { id: string }[];
@@ -88,8 +92,8 @@ export function resolveSpeechAdmission(store: SpeechAuthorityStore, input: Reado
     }
     fail(profile, "The consumed speech profile definition has no retained matching lock");
   }
-  const result = { attempt: current, candidate: candidate!, grant: grant!, reservation: reservation!, allowance: allowance!, consumption: consumption!,
-    allowanceRequest: allowanceRequest!, profile: profile!, capabilityLock: capabilityLock! };
+  const result = { attempt: current, candidate: candidate!, grant: grant!, reservation: reservation!, allowance: allowance ?? null, consumption: consumption ?? null,
+    allowanceRequest: allowanceRequest ?? null, profile: profile!, capabilityLock: capabilityLock! };
   assertSpeechAdmission(result); return structuredClone(result);
 }
 

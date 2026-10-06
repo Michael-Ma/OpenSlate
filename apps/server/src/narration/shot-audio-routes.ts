@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { canonical, digest, invariant, newId } from '@openslate/core';
 import type { ActorContext } from '@openslate/core';
 import type { ProductionService } from '../application/service.js';
@@ -11,6 +11,10 @@ import { assertPersonalVoiceCurrent } from './personal-voices.js';
 import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from './generated-audio.js';
 import { assertNarrationAuthority, createShotNarrationSession, shotSessionHeadId } from './narration-scope.js';
 import type { NarrationSession } from './narration-scope.js';
+import type { NarrationSpeechService } from './narration-speech-service.js';
+import { summarizeNarrationSpeechProposal } from './narration-speech-projection.js';
+import { preflightAudioProfile } from '../execution/audio-preflight.js';
+import type { ProviderProfile } from '@openslate/core';
 
 const id = { type: 'string', minLength: 1, maxLength: 160 }, version = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
 const hash = { type: 'string', pattern: '^[a-f0-9]{64}$' }, sample = { type: 'integer', minimum: 0, maximum: 17280000 };
@@ -19,9 +23,16 @@ const key = (request: FastifyRequest) => { const key = request.headers['idempote
 const draftId = (projectId: string, shotId: string) => digest({ projectId, shotId });
 interface ShotDraft { segmentId: string; projectId: string; shotId: string; intentDigest?: string }
 interface PreparedAcceptance { preparedId: string; projectId: string; shotId: string }
+interface SaveShotScript { sessionId: string; expectedHeadVersion: number; expectedVersion: number; text: string; language: string; mode: 'generated' | 'uploaded'; voice: string | null; profileRevisionId: string | null }
+interface ShotSpeechIntent { sessionId: string; writing: SaveShotScript; profileId: string; voice: string; instructions: string }
+async function connected<T>(request: FastifyRequest, reply: FastifyReply, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
+  request.raw.on('aborted', disconnected); reply.raw.on('close', disconnected);
+  try { return await work(abort.signal); } finally { request.raw.off('aborted', disconnected); reply.raw.off('close', disconnected); }
+}
 
-/** Human shot workspace. Generation still uses the existing exact speech proposal, grants and spending routes. */
-export function registerShotAudioRoutes(app: FastifyInstance, options: { production: ProductionService; narration: NarrationService; canonical: NarrationCanonicalService; actorFor(projectId: string, sessionId: string): ActorContext }) {
+/** Human shot workspace. Requested speech retains exact operation identity; returned audio/timing acceptance is separate. */
+export function registerShotAudioRoutes(app: FastifyInstance, options: { production: ProductionService; narration: NarrationService; canonical: NarrationCanonicalService; narrationSpeech?: NarrationSpeechService; actorFor(projectId: string, sessionId: string): ActorContext }) {
   const { production, narration, canonical: commits, actorFor } = options, store = production.store;
   const base = '/api/projects/:projectId/narration/shots/:shotId';
   const actorForShot = (projectId: string, sessionId: string, shotId: string) => {
@@ -45,6 +56,26 @@ export function registerShotAudioRoutes(app: FastifyInstance, options: { product
     const latestSpeech = row ? store.db.prepare("SELECT id FROM entities WHERE kind='narration_speech_proposal' AND project_id=? AND json_extract(body,'$.section.segmentId')=? AND json_extract(body,'$.section.segmentRevisionId')=? ORDER BY rowid DESC LIMIT 1").get(projectId, row.entry.segmentId, row.script.id) as { id: string } | undefined : undefined;
     return { shotId, headVersion: project.headVersion, plannedFrames: shot.desiredFrames, segment, session: sessionFor(projectId, shotId), intentCurrent: !saved || saved.intentDigest === digest(shot.narration ?? null), latestSpeechProposalId: latestSpeech?.id ?? null, committed: Boolean(!shot.narrationPending && row && frozen?.shotMappings.some(mapping => mapping.shotId === shotId && mapping.segmentId === row.entry.segmentId) && shot.cueId === row.cue?.id) };
   });
+  const saveWriting = (projectId: string, shotId: string, b: SaveShotScript, commandKey: string) => {
+    const actor = actorForShot(projectId, b.sessionId, shotId);
+    return store.command(`local-user:${projectId}:shot-audio-script`, commandKey, digest({ shotId, ...b }), () => {
+      const project = store.getProject(projectId), shot = project.shots.find(shot => shot.id === shotId);
+      invariant(shot, 'NOT_FOUND', 'Shot not found'); invariant(project.headVersion === b.expectedHeadVersion, 'REVISION_CONFLICT', 'Shot changed before saving');
+      const current = detail(projectId, shotId).segment;
+      const draft: SegmentDraft = { text: b.text, textKind: 'draft', language: b.language, meaning: shot.purpose || 'Narration for this shot',
+        source: b.mode === 'generated' ? { kind: 'generated', voice: b.voice, profileRevisionId: b.profileRevisionId } : { kind: 'uploaded' } };
+      const next = narration.reviseSegments(projectId, actor, b.expectedVersion, commandKey, current ? { update: [{ segmentId: current.entry.segmentId, draft }] } : { add: [draft] });
+      const segmentId = current?.entry.segmentId ?? next.segments.at(-1)!.entry.segmentId;
+      const writing = { mode: b.mode, text: b.text, voice: b.voice?.startsWith('openai-custom:') ? 'personal' as const : shot.narration?.voice ?? 'stock' as const };
+      const changed = !current || current.script.id !== next.segments.find(row => row.entry.segmentId === segmentId)?.script.id || digest(shot.narration ?? null) !== digest(writing);
+      if (changed) {
+        shot.narration = writing; shot.narrationPending = true;
+        const saved = store.saveProject({ ...project, revisionId: newId() }, project.headVersion); store.insert('project_revision', saved.revisionId, projectId, { project: saved });
+      }
+      store.put('narration_shot_draft', draftId(projectId, shotId), projectId, { projectId, shotId, segmentId, intentDigest: digest(writing) });
+      return detail(projectId, shotId);
+    });
+  };
   app.get<{ Params: { projectId: string; shotId: string } }>(base, async request => detail(request.params.projectId, request.params.shotId));
   app.post<{ Params: { projectId: string; shotId: string }; Body: { continuationSessionId?: string } }>(`${base}/sessions`, {
     schema: { body: object({ continuationSessionId: id }, []) },
@@ -57,28 +88,71 @@ export function registerShotAudioRoutes(app: FastifyInstance, options: { product
   app.post<{ Params: { projectId: string; shotId: string }; Body: { sessionId: string; expectedHeadVersion: number; expectedVersion: number; text: string; language: string; mode: 'generated' | 'uploaded'; voice: string | null; profileRevisionId: string | null } }>(`${base}/script`, {
     schema: { body: object({ sessionId: id, expectedHeadVersion: version, expectedVersion: version, text: { type: 'string', minLength: 1, maxLength: 16000 }, language: { type: 'string', minLength: 1, maxLength: 64 }, mode: { enum: ['generated', 'uploaded'] }, voice: { anyOf: [id, { type: 'null' }] }, profileRevisionId: { anyOf: [id, { type: 'null' }] } }, ['sessionId', 'expectedHeadVersion', 'expectedVersion', 'text', 'language', 'mode', 'voice', 'profileRevisionId']) },
   }, async request => {
-    const { projectId, shotId } = request.params, b = request.body, actor = actorForShot(projectId, b.sessionId, shotId), commandKey = key(request);
-    return store.command(`local-user:${projectId}:shot-audio-script`, commandKey, digest({ shotId, ...b }), () => {
+    const { projectId, shotId } = request.params;
+    return saveWriting(projectId, shotId, request.body, key(request));
+  });
+  app.post<{ Params: { projectId: string; shotId: string }; Body: { expectedHeadVersion: number; expectedNarrationVersion?: number; sessionId?: string; continuationSessionId?: string; text?: string; profileId?: string; voice?: string; instructions?: string } }>(`${base}/generate`, {
+    schema: { body: object({ expectedHeadVersion: version, expectedNarrationVersion: version, sessionId: id, continuationSessionId: id, text: { type: 'string', minLength: 1, maxLength: 16000 }, profileId: id, voice: id, instructions: { type: 'string', maxLength: 256 } }, ['expectedHeadVersion']) },
+  }, async (request, reply) => {
+    const { projectId, shotId } = request.params, body = request.body, commandKey = key(request), scope = `local-user:${projectId}:shot-generate`, inputDigest = digest({ shotId, ...body });
+    production.recovery.assertWritable(projectId);
+    const completed = store.commandReplay<{ proposal: ReturnType<typeof summarizeNarrationSpeechProposal>; receipt: unknown; shot: ReturnType<typeof detail> }>(scope, commandKey, inputDigest);
+    if (completed) return completed.result;
+    invariant(options.narrationSpeech, 'NARRATION_SPEECH_UNAVAILABLE', 'Choose a configured narration model in Project settings.');
+    invariant(!store.get<{ paused: boolean }>('execution_control', projectId)?.paused, 'EXECUTION_PAUSED', 'Work is stopped. Send a fresh direction before generating narration.');
+    const intent = store.command<ShotSpeechIntent>(`${scope}:intent`, commandKey, inputDigest, () => {
       const project = store.getProject(projectId), shot = project.shots.find(shot => shot.id === shotId);
-      invariant(shot, 'NOT_FOUND', 'Shot not found'); invariant(project.headVersion === b.expectedHeadVersion, 'REVISION_CONFLICT', 'Shot changed before saving');
-      if (b.mode === 'generated' && shot.narration?.voice === 'personal') {
-        invariant(typeof b.voice === 'string' && b.voice.startsWith('openai-custom:'), 'PERSONAL_VOICE_REQUIRED', 'Choose your enrolled recorded voice');
-        assertPersonalVoiceCurrent(store, projectId, b.voice);
+      invariant(shot && project.headVersion === body.expectedHeadVersion, 'REVISION_CONFLICT', 'Shot changed before narration generation.');
+      invariant(body.expectedNarrationVersion === undefined || narration.workspaceSnapshot(projectId).state.version === body.expectedNarrationVersion,
+        'REVISION_CONFLICT', 'Narration writing changed before generation.');
+      const lock = store.get<{ profiles: ProviderProfile[]; preferredProfileIds?: { speech?: string | null } }>('capability_lock', project.capabilityLockId);
+      const preferred = lock?.preferredProfileIds && Object.hasOwn(lock.preferredProfileIds, 'speech') ? lock.preferredProfileIds.speech : undefined;
+      const profileId = body.profileId ?? (preferred === undefined ? lock?.profiles.find(profile => profile.kind === 'speech')?.id : preferred);
+      const profile = lock?.profiles.find(profile => profile.id === profileId && profile.kind === 'speech');
+      invariant(profile, 'NARRATION_SPEECH_UNAVAILABLE', 'Choose a narration model in Project settings.'); preflightAudioProfile(profile);
+      const text = body.text ?? shot.narration?.text ?? '';
+      invariant(text.trim(), 'NARRATION_SPEECH_INVALID', 'Write narration for this shot before generating speech.');
+      const voice = body.voice ?? 'cedar';
+      if (shot.narration?.voice === 'personal') {
+        invariant(voice.startsWith('openai-custom:'), 'PERSONAL_VOICE_REQUIRED', 'Choose your enrolled recorded voice.');
+        assertPersonalVoiceCurrent(store, projectId, voice, profile.adapter);
       }
-      const current = detail(projectId, shotId).segment;
-      const draft: SegmentDraft = { text: b.text, textKind: 'draft', language: b.language, meaning: shot.purpose,
-        source: b.mode === 'generated' ? { kind: 'generated', voice: b.voice, profileRevisionId: b.profileRevisionId } : { kind: 'uploaded' } };
-      const next = narration.reviseSegments(projectId, actor, b.expectedVersion, commandKey, current ? { update: [{ segmentId: current.entry.segmentId, draft }] } : { add: [draft] });
-      const segmentId = current?.entry.segmentId ?? next.segments.at(-1)!.entry.segmentId;
-      const writing = { mode: b.mode, text: b.text, voice: b.voice?.startsWith('openai-custom:') ? 'personal' as const : shot.narration?.voice ?? 'stock' as const };
-      const changed = !current || current.script.id !== next.segments.find(row => row.entry.segmentId === segmentId)?.script.id || digest(shot.narration ?? null) !== digest(writing);
-      if (changed) {
-        // Writing metadata is separate from the visual revision consumed by the immutable frame/video plan.
-        shot.narration = writing; shot.narrationPending = true;
-        const saved = store.saveProject({ ...project, revisionId: newId() }, project.headVersion); store.insert('project_revision', saved.revisionId, projectId, { project: saved });
-      }
-      store.put('narration_shot_draft', draftId(projectId, shotId), projectId, { projectId, shotId, segmentId, intentDigest: digest(writing) });
-      return detail(projectId, shotId);
+      const session = body.sessionId ? store.get<NarrationSession>('narration_session', body.sessionId)
+        : createShotNarrationSession(production, projectId, shotId, digest({ key: commandKey, action: 'shot-speech-session' }), body.continuationSessionId);
+      invariant(session?.projectId === projectId && session.shotId === shotId, 'NARRATION_SESSION_STALE', 'Shot narration session changed.');
+      return { sessionId: session.id, profileId: profile.id, voice, instructions: body.instructions ?? '', writing: { sessionId: session.id,
+        expectedHeadVersion: project.headVersion, expectedVersion: narration.workspaceSnapshot(projectId).state.version, text,
+        language: detail(projectId, shotId).segment?.script.language ?? 'en', mode: 'generated', voice, profileRevisionId: profile.revision } };
+    });
+    const writingKey = digest({ key: commandKey, action: 'shot-speech-writing' });
+    const saved = saveWriting(projectId, shotId, intent.writing, writingKey);
+    invariant(saved.segment, 'NARRATION_SPEECH_INVALID', 'The shot script could not be saved.');
+    const actor = actorForShot(projectId, intent.sessionId, shotId);
+    const result = await connected(request, reply, signal => options.narrationSpeech!.request(projectId, actor, { key: digest({ key: commandKey, action: 'shot-speech-request' }),
+      expectedHeadVersion: saved.headVersion, segmentId: saved.segment!.entry.segmentId, segmentRevisionId: saved.segment!.script.id, profileId: intent.profileId, voice: intent.voice, instructions: intent.instructions }, { signal }));
+    return store.command(scope, commandKey, inputDigest, () => ({ proposal: summarizeNarrationSpeechProposal(store, projectId, result.proposal.id), receipt: result.receipt, shot: detail(projectId, shotId) }));
+  });
+  app.post<{ Params: { projectId: string; shotId: string }; Body: { expectedHeadVersion: number; expectedNarrationVersion?: number; sessionId?: string; continuationSessionId?: string; text?: string; mode: 'generated' | 'uploaded'; voice?: string; profileId?: string } }>(`${base}/initialize`, {
+    schema: { body: object({ expectedHeadVersion: version, expectedNarrationVersion: version, sessionId: id, continuationSessionId: id, text: { type: 'string', maxLength: 16000 }, mode: { enum: ['generated','uploaded'] }, voice: id, profileId: id }, ['expectedHeadVersion','mode']) },
+  }, async request => {
+    const { projectId, shotId } = request.params, b = request.body, commandKey = key(request);
+    production.recovery.assertWritable(projectId);
+    invariant(!store.get<{ paused: boolean }>('execution_control', projectId)?.paused, 'EXECUTION_PAUSED', 'Work is stopped. Send a fresh direction before editing narration.');
+    return store.command(`local-user:${projectId}:shot-audio-initialize`, commandKey, digest({ shotId, ...b }), () => {
+      const project = store.getProject(projectId), shot = project.shots.find(shot => shot.id === shotId);
+      invariant(shot && project.headVersion === b.expectedHeadVersion, 'REVISION_CONFLICT', 'Shot changed before narration editing.');
+      invariant(b.expectedNarrationVersion === undefined || narration.workspaceSnapshot(projectId).state.version === b.expectedNarrationVersion,
+        'REVISION_CONFLICT', 'Narration writing changed before editing.');
+      const session = b.sessionId ? store.get<NarrationSession>('narration_session', b.sessionId)
+        : createShotNarrationSession(production, projectId, shotId, digest({ key: commandKey, action: 'initialize-shot-audio' }), b.continuationSessionId);
+      invariant(session?.projectId === projectId && session.shotId === shotId, 'NARRATION_SESSION_STALE', 'Shot narration session changed.');
+      const lock = store.get<{ profiles: ProviderProfile[] }>('capability_lock', project.capabilityLockId);
+      const profile = lock?.profiles.find(profile => profile.id === b.profileId && profile.kind === 'speech');
+      const text = b.text?.trim() || shot.narration?.text.trim() || (b.mode === 'uploaded' ? 'Uploaded narration recording' : '');
+      invariant(text, 'NARRATION_SPEECH_INVALID', 'Write narration for this shot before saving.');
+      return saveWriting(projectId, shotId, { sessionId: session.id, expectedHeadVersion: project.headVersion, expectedVersion: narration.workspaceSnapshot(projectId).state.version,
+        text, language: detail(projectId, shotId).segment?.script.language ?? 'en', mode: b.mode, voice: b.mode === 'generated' ? b.voice ?? null : null,
+        profileRevisionId: b.mode === 'generated' ? profile?.revision ?? null : null }, digest({ key: commandKey, action: 'initialize-shot-writing' }));
     });
   });
   app.post<{ Params: { projectId: string; shotId: string }; Body: { sessionId: string; expectedHeadVersion: number; expectedVersion: number; segmentId: string; segmentRevisionId: string; audioId: string; sha256: string; startSample: number; endSample: number; durationMode?: 'keep' | 'match_audio' } }>(`${base}/accept`, {

@@ -6,7 +6,7 @@ OpenSlate separates instruction content, validated tool contracts and provider e
 
 The two production packages are `production` and `plan-authoring`. Each declares an entry, reference files, compatibility and required tools. The loader verifies bounded regular files, UTF-8, links, manifest declarations and hashes, then preserves immutable snapshots. The project lock binds instruction bytes, tool catalog/handlers, workflow recipe, stage checks and runtime identity.
 
-Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` are runtime compatibility inputs. Do not edit/delete old versions during prose cleanup. New schema/behavior extensions use a successor catalog rather than changing old digests.
+Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` are runtime compatibility inputs. Do not edit/delete old versions during prose cleanup. Current `skills/v5` has package version `5.0.0` and retains the `4.0.0` JSON tool contract. It describes configured-provider scene generation and requested audio without usage-approval steps. Package-content successors preserve historical digests instead of rewriting frozen snapshots.
 
 ## Model-facing tools
 
@@ -18,13 +18,13 @@ Legacy `skills/`, `skills/v2`, `skills/v3` and `skills/v4` are runtime compatibi
 | `control_execution` | Apply allowed controls within the bound request |
 | `inspect_artifact` | Inspect permitted owned output/provenance |
 
-Versioned tool variants support narration drafting and reviewed audio proposals through the same bounded bridge. Model calls cannot supply a trusted actor, grant, acceptance or provider credential. Tool-call IDs are trace identities; service command/intention identities own replay and effect uniqueness.
+Versioned tool variants support narration drafting and requested audio through the same bounded bridge. V5-bound audio tools publish the exact requested input with `state: "requested"`; old V4-bound calls retain their proposal-only behavior. Model calls cannot supply a trusted actor, content acceptance, visual review or provider credential. Tool-call IDs are trace identities; service command/intention identities own replay and effect uniqueness.
 
 ## Context and upgrades
 
 Activated references carry exact package/digest provenance and request binding. Required contract references are delivered as verified native developer instructions. Context projection includes capabilities so an old catalog cannot silently pretend it can write individual shot narration.
 
-A successor guidance lock applies before the first context/dispatch of an eligible fresh native turn; already-bound epochs preserve their old lock. The application verifies exact shipped V1–V3 predecessor content and saves a replay-safe V4 successor/audit event. It rejects already-used/restored/stale/busy/customized epochs safely and changes no canonical film, hold, acceptance, grant or allowance. The manual diagnostic endpoint remains, but normal settings expose no version-management control. See [guidance compatibility](../implementation/DIRECTOR-TOOLS-UPGRADE.md).
+A successor guidance lock applies before the first context/dispatch of an eligible fresh native turn; already-bound epochs preserve their old lock. The application verifies exact historical predecessor content and saves a replay-safe current successor/audit event. V4 → V5 guidance is a package-content transition with the same tool contract. It rejects already-used/restored/stale/busy/customized epochs safely and changes no canonical film, hold or acceptance. Normal settings expose no manual guidance-update control. See [guidance compatibility](../implementation/DIRECTOR-TOOLS-UPGRADE.md) for the earlier V4 transition and [status](../implementation/STATUS.md) for current verification.
 
 ## Source and checks
 

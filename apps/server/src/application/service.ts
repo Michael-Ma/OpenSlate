@@ -38,6 +38,7 @@ interface Prepared {
   stages: StageRequirement[]; stageVersions: Record<string, number>; grantBindings: Record<string, string>;
   semanticChange: boolean;
   capabilityDigest: string;
+  deferredNodeIds?: string[];
 }
 
 export interface ApplyReceipt { preparedId: string; projectId: string; revisionId: string; headVersion: number; activePlanId: string | null; cursor: number }
@@ -279,7 +280,7 @@ export class ProductionService {
   }
 
   /** Shared post-compile validation. This assessment creates neither records nor generation authority. */
-  private assessCompiledChange(captured: PreparedChangeCapture, actor: ActorContext, reviewedSpeechNodeId?: string): CompiledChangeAssessment {
+  private assessCompiledChange(captured: PreparedChangeCapture, actor: ActorContext, reviewedSpeechNodeId?: string, reviewedGenerationNodeIds?: ReadonlySet<string>): CompiledChangeAssessment {
     const { before, next, proposal, compiled } = captured;
     const oldPlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
     const impact = compiled ? diffPlans(oldPlan, compiled) : [];
@@ -287,6 +288,8 @@ export class ProductionService {
     // ordinary plan review must select a fresh grant even when the new spec is unchanged.
     for (const change of impact) if (change.kind === "reuse") {
       const binding = this.store.get<NodeBinding>("node_binding", change.nodeId);
+      if (reviewedGenerationNodeIds && !reviewedGenerationNodeIds.has(change.nodeId)) continue;
+      if (binding?.state === "active" && !this.allows(before, actor, binding.node.shotId ?? before.id)) continue;
       if (binding?.state === "active" && binding.planId === before.activePlanId && binding.candidateId === null
         && ["image", "video", "speech", "transcription"].includes(binding.node.kind)) {
         change.kind = "replace"; change.reason = "Pending work requires fresh generation approval";
@@ -307,7 +310,7 @@ export class ProductionService {
   }
 
   /** Synchronous finalization inside prepare's transaction; existing unused grants remain mandatory. */
-  private finalizePreparedChange(projectId: string, actor: ActorContext, captured: PreparedChangeCapture, assessment: CompiledChangeAssessment): Prepared {
+  private finalizePreparedChange(projectId: string, actor: ActorContext, captured: PreparedChangeCapture, assessment: CompiledChangeAssessment, deferredNodeIds: string[] = []): Prepared {
     const { before, next, lock, proposal, proposalDigest, compiled, logicalIds } = captured;
     const { impact, stages, extraTakeIds: extra } = assessment;
     // Parsing and provider completion may interleave. Authority and project version are rechecked here.
@@ -326,17 +329,19 @@ export class ProductionService {
     for (const change of impact.filter(change => change.kind === "new" || change.kind === "replace")) {
       const node = compiled!.nodes.find(n => n.id === change.nodeId)!;
       if (["timeline", "render"].includes(node.kind)) continue;
+      if (deferredNodeIds.includes(node.id)) { invariant(node.kind === "video", "VALIDATION_ERROR", "Only video work may wait for scene review"); continue; }
       const sceneId = next.shots.find(s => s.id === node.shotId)?.sceneId;
-      const grant = grants.find(g => !used.has(g.id) && g.kind === node.kind && (!extra.has(node.id) || g.origin === "user_change") && (g.scopeId === node.shotId || g.scopeId === sceneId || g.scopeId === projectId));
+      const grant = grants.find(g => !used.has(g.id) && g.kind === node.kind && (!extra.has(node.id) || g.origin === "user_change") && (g.scopeId === node.shotId || g.scopeId === sceneId || g.scopeId === projectId))
+        ?? (["speech", "transcription"].includes(node.kind) ? this.engine.createGrant(projectId, node.shotId ?? projectId, node.kind, actor.requestId, "user_change") : undefined);
       invariant(grant, "ORIGIN_NOT_AUTHORIZED", `Human generation authorization is required for ${node.alias}`);
       used.add(grant.id); grantBindings[node.id] = grant.id;
     }
-    return this.recordPreparedChange(projectId, actor, captured, assessment, grantBindings);
+    return this.recordPreparedChange(projectId, actor, captured, assessment, grantBindings, deferredNodeIds);
   }
 
   /** Record one validated compiled change; callers own the exact grant selection and outer transaction. */
   private recordPreparedChange(projectId: string, actor: ActorContext, captured: PreparedChangeCapture,
-    assessment: CompiledChangeAssessment, grantBindings: Record<string, string>): Prepared {
+    assessment: CompiledChangeAssessment, grantBindings: Record<string, string>, deferredNodeIds: string[] = []): Prepared {
     const { before, next, lock, proposal, proposalDigest, compiled, logicalIds } = captured;
     const { impact, stages } = assessment;
     const stageVersions = Object.fromEntries(stages.map(stage => { const id = this.stageId(projectId, stage); return [id, this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0]; }));
@@ -345,10 +350,42 @@ export class ProductionService {
       proposal, proposalDigest, baseVersion: before.headVersion, next, compiled, logicalIds, impact, stages, stageVersions, grantBindings,
       semanticChange: digest(before) !== digest(next),
       capabilityDigest: digest(lock),
+      ...(deferredNodeIds.length ? { deferredNodeIds } : {}),
     };
     this.store.insert("prepared", prepared.id, projectId, prepared);
     this.store.appendEvent(projectId, "change.prepared", { preparedId: prepared.id, impact: impact.map(i => ({ ...i })) });
     return prepared;
+  }
+
+  /** Application-only publication of a scene plan compiled in the isolated worker before any mutation. */
+  applyCompiledSceneGeneration(projectId: string, actor: ActorContext, compiled: CompiledPlan, logicalIds: Record<string, string>, expectedHeadVersion: number, expectedLockDigest: string, kind: "image" | "video"): ApplyReceipt {
+    invariant(actor.kind === "human", "ACTOR_DENIED", "Scene generation requires the human scene check");
+    const before = this.store.getProject(projectId), lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
+    invariant(lock?.projectId === projectId && digest(lock) === expectedLockDigest && before.headVersion === expectedHeadVersion, "REVISION_CONFLICT", "The reviewed scene or model changed during preparation");
+    const proposal = parseChangeProposal({ variant: "plan", expectedHeadVersion, source: compiled.canonicalSource });
+    const captured: PreparedChangeCapture = { before, next: structuredClone(before), lock, proposal, proposalDigest: digest(proposal), compiled, logicalIds };
+    const targets = new Set(compiled.nodes.filter(node => node.kind === kind && node.shotId && this.allows(before, actor, node.shotId)).map(node => node.id));
+    const assessment = this.assessCompiledChange(captured, actor, undefined, targets);
+    // A new human scene check after a known terminal failure is a new candidate,
+    // rather than an unauthorized retry of the previous failed candidate.
+    for (const change of assessment.impact.filter(item => item.kind === "reuse")) {
+      const node = compiled.nodes.find(node => node.id === change.nodeId)!;
+      if (node.kind !== kind || !node.shotId || !this.allows(before, actor, node.shotId)) continue;
+      const binding = this.store.get<NodeBinding>("node_binding", node.id);
+      const last = this.engine.attempts(projectId).filter(attempt => attempt.candidateId === binding?.candidateId && attempt.nodeId === node.id).at(-1);
+      if (binding && !Object.keys(binding.outputs).length && last?.phase === "failed") {
+        change.kind = "replace"; change.reason = "New scene generation after a known failed attempt";
+      }
+    }
+    const affected = new Set(assessment.impact.filter(item => ["new", "replace"].includes(item.kind)).map(item => item.nodeId));
+    for (let pass = 0; pass < compiled.nodes.length; pass++) for (const node of compiled.nodes)
+      if (node.inputs.some(input => input.source.kind === "output" && affected.has(input.source.nodeId))) affected.add(node.id);
+    for (const change of assessment.impact.filter(item => item.kind === "reuse" && affected.has(item.nodeId))) {
+      change.kind = "replace"; change.reason = "Dependent work waits for the new media";
+    }
+    this.checkFootprint(before, captured.next, actor, compiled, assessment.impact);
+    const deferred = kind === "image" ? assessment.impact.filter(change => ["new", "replace"].includes(change.kind) && compiled.nodes.some(node => node.id === change.nodeId && node.kind === "video")).map(change => change.nodeId) : [];
+    return this.publishPreparedChange(projectId, actor, this.finalizePreparedChange(projectId, actor, captured, assessment, deferred));
   }
 
   /** Trusted synchronous host boundary after review re-verifies bytes and isolated composition.
@@ -356,13 +393,12 @@ export class ProductionService {
    * This method is never a model tool; admission independently verifies the exact owned bytes again.
    */
   commitOwnedTranscriptionReview(projectId: string, human: ActorContext, input: ReviewOwnedTranscription,
-    options: { signal?: AbortSignal } = {}): OwnedTranscriptionApplyReceipt {
-    const signal = options.signal;
+    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number } = {}): OwnedTranscriptionApplyReceipt {
+    const signal = options.signal, requested = options.requested === true, requestedAtCursor = options.requestedAtCursor;
     const stopped = (): void => invariant(!signal?.aborted, "OWNED_TRANSCRIPTION_CANCELLED", "Recording review was cancelled");
     stopped();
     human = snapshotOwnedTranscriptionData(human, 16384); input = captureOwnedTranscriptionReviewInput(input);
     const authority = (): void => {
-      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human can approve recording transcription");
       this.assertActor(projectId, human, true);
       invariant(this.request(projectId, human).scopeIds.includes(projectId), "SCOPE_DENIED", "Recording review requires editable project scope");
       this.recovery.assertFreshAuthority(projectId, "owned_transcription_proposal", input.proposalId);
@@ -375,13 +411,13 @@ export class ProductionService {
         const proposal = parseChangeProposal({ variant: "plan", expectedHeadVersion: before.headVersion, source: owned.compiled.source });
         const captured: PreparedChangeCapture = { before, next: structuredClone(before), lock: lock as ProjectCapabilityLock,
           proposal, proposalDigest: digest(proposal), compiled: owned.compiled, logicalIds: owned.logicalIds };
-        const assessment = this.assessCompiledChange(captured, human);
+        const node = owned.compiled.nodes.find(item => item.alias === owned.operation.alias)!;
+        const assessment = this.assessCompiledChange(captured, human, undefined, new Set([node.id]));
         invariant(digest(assessment.impact) === digest(owned.impact) && digest(assessment.stages) === digest(owned.stages),
           "OWNED_TRANSCRIPTION_STALE", "Recording proposal assessment changed since human review");
-        const node = owned.compiled.nodes.find(item => item.alias === owned.operation.alias)!;
         const grant = this.engine.createGrant(projectId, projectId, "transcription", human.requestId, "user_change");
         const review: OwnedTranscriptionReview = { id: grant.id, version: 1, projectId, requestId: human.requestId,
-          principalId: human.principalId, proposal: { id: owned.id, digest: input.proposalDigest }, grantDigest: digest(grant),
+          principalId: human.principalId, ...(requested ? { requested: true as const, requestedAtCursor: requestedAtCursor! } : {}), ...(human.kind === "director" ? { epochId: human.epochId } : {}), proposal: { id: owned.id, digest: input.proposalDigest }, grantDigest: digest(grant),
           sourceBinding: owned.sourceBinding, nodeId: node.id, specDigest: node.specDigest, compiledDigest: digest(owned.compiled) };
         this.store.insert("owned_transcription_review", review.id, projectId, review);
         const prepared = this.recordPreparedChange(projectId, human, captured, assessment, { [node.id]: grant.id });
@@ -403,15 +439,14 @@ export class ProductionService {
     });
   }
 
-  /** Exact human speech review; grants and application publication remain atomic. */
+  /** Exact speech publication for a requested operation or legacy review; grant and application are atomic. */
   commitNarrationSpeechReview(projectId: string, human: ActorContext, input: ReviewNarrationSpeech,
-    options: { signal?: AbortSignal } = {}): NarrationSpeechApplyReceipt {
-    const signal = options.signal;
+    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number } = {}): NarrationSpeechApplyReceipt {
+    const signal = options.signal, requested = options.requested === true, requestedAtCursor = options.requestedAtCursor;
     const stopped = (): void => invariant(!signal?.aborted, "NARRATION_SPEECH_CANCELLED", "Narration speech review was cancelled");
     stopped();
     human = snapshotOwnedTranscriptionData(human, 16384); input = captureNarrationSpeechReviewInput(input);
     const authority = (): void => {
-      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human can approve narration speech");
       this.assertActor(projectId, human, true);
       const selected = this.store.get<NarrationSpeechProposal>('narration_speech_proposal', input.proposalId);
       invariant(selected?.projectId === projectId, 'SCOPE_DENIED', 'Narration speech proposal belongs to this film');
@@ -428,12 +463,12 @@ export class ProductionService {
           proposal, proposalDigest: digest(proposal), compiled: owned.compiled, logicalIds: owned.logicalIds };
         const node = owned.compiled.nodes.find(item => item.alias === owned.operation.alias)!;
         assertNarrationAuthority(this, projectId, human, owned.section.segmentId);
-        const assessment = this.assessCompiledChange(captured, human, node.id);
+        const assessment = this.assessCompiledChange(captured, human, node.id, new Set([node.id]));
         invariant(digest(assessment.impact) === digest(owned.impact) && digest(assessment.stages) === digest(owned.stages),
           "NARRATION_SPEECH_STALE", "Narration speech proposal assessment changed since human review");
         const grant = this.engine.createGrant(projectId, projectId, "speech", human.requestId, "user_change");
         const review: NarrationSpeechReview = { id: grant.id, version: 1, projectId, requestId: human.requestId,
-          principalId: human.principalId, proposal: { id: owned.id, digest: input.proposalDigest }, grantDigest: digest(grant),
+          principalId: human.principalId, ...(requested ? { requested: true as const, requestedAtCursor: requestedAtCursor! } : {}), ...(human.kind === "director" ? { epochId: human.epochId } : {}), proposal: { id: owned.id, digest: input.proposalDigest }, grantDigest: digest(grant),
           section: owned.section, nodeId: node.id, specDigest: node.specDigest, compiledDigest: digest(owned.compiled) };
         this.store.insert("narration_speech_review", review.id, projectId, review);
         const prepared = this.recordPreparedChange(projectId, human, captured, assessment, { [node.id]: grant.id });
@@ -507,7 +542,7 @@ export class ProductionService {
     const changed = prepared.semanticChange || !!prepared.compiled;
     const next = changed ? this.store.saveProject({ ...prepared.next, revisionId: newId(), activePlanId: planId }, prepared.baseVersion) : before;
     if (prepared.compiled) {
-      this.engine.installPlan(projectId, planId!, prepared.compiled, prepared.grantBindings);
+      this.engine.installPlan(projectId, planId!, prepared.compiled, prepared.grantBindings, prepared.deferredNodeIds);
       this.store.put("logical_ids", projectId, projectId, { aliases: prepared.logicalIds });
     }
     if (changed) this.store.insert("project_revision", next.revisionId, projectId, { project: next });
@@ -579,7 +614,7 @@ export class ProductionService {
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts,
       currentAttemptIds: this.engine.currentAttemptIds(projectId, attempts),
       assessments: this.store.list("stage_assessment", projectId),
-      holds: this.store.list("hold", projectId), pendingEditContinuations: pendingEditContinuations(this.store, projectId, 'local-user'), messages, conversation,
+      holds: this.store.list("hold", projectId), pendingEditContinuations: pendingEditContinuations(this.store, projectId, 'local-user').map(group => ({ ...group, directorState: this.store.list<{ requestId: string; state: string }>('director_turn', projectId).filter(turn => turn.requestId === group.requestId).at(-1)?.state ?? null })), messages, conversation,
       control: this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId) ?? { paused: false },
       plan: plan ? { id: plan.id, graphDigest: plan.compiled.graphDigest, canonicalSource: plan.compiled.canonicalSource, nodes: plan.compiled.nodes } : null,
       questions: this.store.list<{ id: string; requestId: string; turnId: string }>("director_question", projectId).map(question =>
@@ -632,13 +667,15 @@ export class ProductionService {
     });
   }
 
-  holdRequest(projectId: string, actor: ActorContext) {
+  holdRequest(projectId: string, actor: ActorContext, renew = false) {
     this.assertActor(projectId, actor, true);
     return this.store.transaction(() => {
       this.assertActor(projectId, actor, true);
       const holds = this.store.list<Hold>("hold", projectId);
-      return this.request(projectId, actor).scopeIds.map(scopeId => holds.find(hold => hold.active && hold.ownerId === actor.requestId && hold.scopeId === scopeId)
-        ?? this.engine.setHold(projectId, { scopeId, ownerId: actor.requestId }));
+      return this.request(projectId, actor).scopeIds.map(scopeId => {
+        const existing = holds.find(hold => hold.active && hold.ownerId === actor.requestId && hold.scopeId === scopeId);
+        return existing && !renew ? existing : this.engine.setHold(projectId, { scopeId, ownerId: actor.requestId, ...(existing ? { id: existing.id } : {}) });
+      });
     });
   }
 

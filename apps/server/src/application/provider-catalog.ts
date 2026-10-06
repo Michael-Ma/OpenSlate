@@ -151,8 +151,8 @@ export class InstalledProviderCatalog {
     const profiles = this.#definitions.map(definition => this.describe(definition.profile, definition.label));
     return { catalogDigest: this.digest, defaults: BUILT_IN_PROFILES.map(profile => profile.id),
       profiles, realExecutionEnabled: profiles.some(profile => profile.readiness.realExecutionEnabled),
-      notice: this.#enabledExecutions.has(canonical({ adapter: "codex-image", version: "1" })) ? "Enabled models require their own authentication, exact generation permission and a finite allowance. Codex image usage is not a dollar estimate; login is checked before dispatch." : this.#enabledExecutions.size ? "Enabled models still require configured keys, exact generation permission and a spending allowance. Check each model's readiness."
-        : "Model selection does not grant generation or spending permission. Real execution is not enabled." };
+      notice: this.#enabledExecutions.size ? "Configured models are ready for use when their setup checks pass. Keyframes and video require your generation review."
+        : "Configure the selected provider or local runtime to use these models." };
   }
   projectView(profiles: unknown, provenance?: unknown, localExecution?: unknown) {
     invariant(Array.isArray(profiles) && profiles.length > 0 && profiles.length <= 64, "PROVIDER_CATALOG_INVALID", "The project provider lock is unavailable");
@@ -167,7 +167,7 @@ export class InstalledProviderCatalog {
     return { catalogDigest: this.digest, pinnedSelection: object(provenance) && typeof provenance.catalogDigest === "string"
       && /^[a-f0-9]{64}$/.test(provenance.catalogDigest) ? { catalogDigest: provenance.catalogDigest } : null,
       profiles: described, realExecutionEnabled: described.some(profile => profile.readiness.realExecutionEnabled && profile.projectExecution.compatible),
-      notice: "These are the project's saved models. Installation changes do not replace them; selection does not authorize generation." };
+      notice: "These are the project's saved models. Keyframes and video require your generation review." };
   }
   select(expectedCatalogDigest: string, profileIds: readonly string[]): InstalledProviderSelection {
     invariant(expectedCatalogDigest === this.digest, "PROVIDER_CATALOG_CHANGED", "Provider choices changed. Refresh before creating the project");
@@ -210,7 +210,7 @@ export class InstalledProviderCatalog {
         mediaTools: { required: !!policy?.media, available: policy?.media ? this.#mediaTools[policy.media] : valid },
         credential: { required: !!policy?.credential, present: credentialPresent, backendUnavailable: credentialUnavailable, apiValidated: false as const },
         ...(codexImage ? { nativeAccess: { configured: this.#codexImageConfigured, authentication: "checked_before_dispatch" as const, quota: "unverified" as const } } : {}),
-        spendingPermissionRequired: !policy?.fixture, enabledByHost, realExecutionEnabled } };
+        spendingPermissionRequired: false, enabledByHost, realExecutionEnabled } };
   }
 }
 

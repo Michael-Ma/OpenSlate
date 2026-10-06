@@ -12,7 +12,7 @@ export function settingsBillingRoute(provider: ProviderView): string {
     : adapter === "viggle-h3" ? "Viggle API" : adapter === "minimax-h3" ? "MiniMax API"
       : adapter?.startsWith("openai-") ? "OpenAI API" : "Provider account";
 }
-/** Setup state never claims access, quota or spending authorization from credential presence. */
+/** Real setup errors stay actionable; configured credentials need no separate approval. */
 export function settingsSetupIssue(provider: ProviderView): string | null {
   if (!provider.profile || !provider.readiness.registered || !provider.readiness.configurationValid) return "Model unavailable";
   if (provider.projectExecution?.compatible === false) return "Project setup needs attention";

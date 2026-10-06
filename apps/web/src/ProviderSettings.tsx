@@ -10,7 +10,7 @@ import { MODEL_KINDS, modelAppliedCurrent, modelAutomaticApplyCommand, modelDraf
 import type { CapturedModelPreview, ModelSelection, ModelScope, ModelSettingsStatus, ModelSettingsPreview, ModelSettingsApplied } from "./project-settings-model";
 import type { StudioApi } from "./api";
 import { errorText } from "./components";
-import { providerEstimate, providerExecutionStatus, PROVIDER_KIND_CHOICES, providerSelectionForKind, selectedProviderForKind } from "./provider-model";
+import { providerEstimate, PROVIDER_KIND_CHOICES, providerSelectionForKind, selectedProviderForKind } from "./provider-model";
 import type { ProviderCatalogView, ProviderKind, ProviderSelection, ProviderView } from "./provider-model";
 import { selectedSettingsAccounts, settingsModelAccountLine, settingsModelLabel, settingsSetupIssue } from "./settings-presentation-model";
 import "./providers.css";
@@ -37,39 +37,12 @@ export function NewProjectProviderFields({ api, selection, changed, disabled }: 
       <UiSelect id={`new-${kind}-profile`} value={selected(kind)?.id ?? ""} disabled={disabled || stale}
         options={catalog.profiles.filter(provider => provider.profile?.kind === kind).map(provider => ({ value: provider.id, label: settingsModelLabel(provider) }))}
         onValueChange={value => choose(kind, value)} />{selected(kind) && <p>{providerEstimate(selected(kind)!)}</p>}</div>)}
-      <p>{selection ? PROVIDER_KIND_CHOICES.some(({ kind }) => selected(kind)?.profile?.adapter === "codex-image")
-        ? "Saved for this project. Codex images use your subscription allowance; generation is reviewed in the studio."
-        : "Saved for this project. Generation is reviewed in the studio with its spending allowance." : "Demo models are selected."}</p></>}
+      <p>{selection ? "Saved for this project. Use each scene’s controls to generate and review its media." : "Demo models are selected."}</p></>}
     {stale && <p role="alert">The model catalog changed. Refresh the choices before creating this project.</p>}
     {error && <p role="alert">{error} Reset the choices to create a default demo project.</p>}
     {(selection || error || stale) && <IconButton type="button" disabled={disabled} onClick={() => { changed(null); setRefresh(value => value + 1); }} label="Reset and refresh choices" icon="refresh" />}
   </details>;
 }
-
-export function ProjectProviderSummary({ api, projectId }: { api: StudioApi; projectId: string }) {
-  const [providers, setProviders] = useState<ProviderView[] | null>(null), [error, setError] = useState(""), [refresh, setRefresh] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController(); setError(""); setProviders(null);
-    void api.request<{ profiles: ProviderView[] }>(`/api/projects/${encodeURIComponent(projectId)}/providers`, { signal: controller.signal })
-      .then(value => { if (!controller.signal.aborted) setProviders(value.profiles); }).catch(error => { if (!controller.signal.aborted) setError(errorText(error)); });
-    return () => controller.abort();
-  }, [api, projectId, refresh]);
-  return <section className="project-provider-summary" aria-labelledby="project-provider-title"><h3 id="project-provider-title">Media models</h3>
-    <p>Current project model choices. Completed assets and existing jobs keep the models used to create them.</p>
-    {!providers && !error && <p role="status">Loading saved models…</p>}
-    {providers && <ul>{providers.map(provider => <li key={provider.id}><strong>{provider.label}</strong>
-      <span>{provider.profile?.configuration?.model ?? (provider.profile?.adapter === "fake" ? "Demo model" : "Saved model unavailable")}</span>
-      <span>{providerEstimate(provider)}</span>
-      {provider.readiness.credential.required && <span>{provider.readiness.credential.backendUnavailable ? "Credential status unavailable" : provider.readiness.credential.present ? "API key configured · not checked with provider" : "API key not configured"}</span>}
-      {provider.readiness.nativeAccess && <span>{provider.readiness.nativeAccess.configured ? "Local Codex runtime configured" : "Local Codex runtime unavailable"} · authentication checked before each start · quota unverified</span>}
-      {provider.readiness.mediaTools.required && !provider.readiness.mediaTools.available && <span>Local media tools unavailable</span>}
-      {provider.readiness.spendingPermissionRequired && <span>{providerExecutionStatus(provider)}</span>}
-    </li>)}</ul>}
-    {error && <p role="alert" className="form-error">{error}</p>}
-    <IconButton type="button" onClick={() => setRefresh(value => value + 1)} label="Refresh model status" icon="refresh" />
-  </section>;
-}
-
 
 function SelectedAccounts({ options, selected }: { options: ProviderView[]; selected: ModelSelection }) {
   const accounts = selectedSettingsAccounts(options, selected);
@@ -83,17 +56,6 @@ function SelectedAccounts({ options, selected }: { options: ProviderView[]; sele
     <p className="field-help">Accounts are checked when used. API keys stay on this computer.</p>
     <details className="settings-local-help"><summary>Where setup lives</summary><p>Media keys and routes use the local server configuration. Restart OpenSlate after changing it. Codex images use the configured ChatGPT login; Director setup is below.</p></details>
   </div>;
-}
-export function ProviderSetupAccounts({ api, projectId, refreshKey = 0 }: { api: StudioApi; projectId: string; refreshKey?: number }) {
-  const [status, setStatus] = useState<ModelSettingsStatus | null>(null), [error, setError] = useState("");
-  useEffect(() => {
-    const abort = new AbortController();
-    void api.request<ModelSettingsStatus>(`/api/projects/${encodeURIComponent(projectId)}/settings/models`, { signal: abort.signal })
-      .then(value => { if (!abort.signal.aborted) { setStatus(value); setError(""); } }).catch(error => { if (!abort.signal.aborted) setError(errorText(error)); });
-    return () => abort.abort();
-  }, [api, projectId, refreshKey]);
-  return <section className="project-settings-section" aria-label="Selected media accounts">{status && <SelectedAccounts options={status.options} selected={status.selected} />}
-    {!status && !error && <p role="status">Loading selected accounts…</p>}{error && <p role="alert" className="form-error">{error}</p>}</section>;
 }
 function ImpactList({ preview, options, snapshot }: { preview: ModelSettingsPreview; options: ProviderView[]; snapshot: ProjectSnapshot | undefined }) {
   const [changeLimit, setChangeLimit] = useState(40), [preservedLimit, setPreservedLimit] = useState(40);
@@ -193,7 +155,7 @@ export function ProjectModelsSettings({ api, projectId, snapshot, changed, onCon
     {!!(loadError || formError || !slot.command && slot.error || !continuation.command && continuation.error) && <p role="alert" className="form-error">{loadError || formError || errorText(slot.error ?? continuation.error)}</p>}
     {applied && !slot.command && !hasChanges && <p ref={feedback} tabIndex={-1} role="status" className="settings-save-status">{modelAppliedCurrent(applied, status, checking, !!loadError) ? "Media models saved. Existing results and jobs kept." : "Earlier media change recorded. Reload to see current choices."}</p>}
     {modelRow("image", "Keyframes", "Create the look of each shot")}
-    {modelRow("video", "Video", "Bring approved shots to life")}
+    {modelRow("video", "Video", "Bring reviewed keyframes to life")}
     {modelRow("speech", "Narration", "Generate speech when needed")}
     <details className="settings-disclosure"><summary>Other models<span>Transcription</span></summary>{modelRow("transcription", "Transcription", "Find words and timing in audio")}</details>
     <details className="settings-disclosure"><summary>Accounts & local setup<span>{accountCount ? `${accountCount} media ${accountCount === 1 ? "account" : "accounts"}` : "Demo models"}</span></summary>

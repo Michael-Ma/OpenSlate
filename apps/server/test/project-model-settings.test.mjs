@@ -166,10 +166,13 @@ test('purpose-reviewed pending narration stays exact while defaults change',asyn
   const preview=await settings.preview(f.project.id,{expectedHeadVersion:status.headVersion,expectedSelectionDigest:status.selectionDigest,expectedCatalogDigest:status.catalogDigest,profileIds:[image.id],scope:{kind:'unfinished'}});
   assert.equal(preview.preserved.find(row=>row.kind==='speech').reason,'reviewed_audio');await settings.apply(f.project.id,{previewId:preview.id,previewDigest:preview.previewDigest,key:'keep-reviewed'});assert.deepEqual(f.store.list('node_binding',f.project.id),before);assert.equal(f.calls.http,0);
 });
-test('actual consumed finite allowance and unknown native image retain their original profile after defaults change',async t=>{
-  const f=codexImageFixture(t);f.build();t.after(()=>f.runtime.close());const selected=await f.seed();f.issue(selected);await f.runtime.engine.runReady();
+test('configured-provider proof and an unknown native image retain their original profile after defaults change',async t=>{
+  const f=codexImageFixture(t);f.build();t.after(()=>f.runtime.close());const selected=await f.seed();await f.runtime.engine.runReady();
   const attempt=f.store.list('attempt',selected.projectId)[0],families=['attempt','external_allowance','external_allowance_consumption','reservation','grant','candidate'],before=Object.fromEntries(families.map(kind=>[kind,f.store.list(kind,selected.projectId)]));assert.equal(attempt.phase,'submission_unknown');assert.equal(f.calls.start,1);
   const settings=new ProjectModelSettings(f.production,f.runtime.providerCatalog),status=settings.status(selected.projectId),preview=await settings.preview(selected.projectId,{expectedHeadVersion:status.headVersion,expectedSelectionDigest:status.selectionDigest,expectedCatalogDigest:status.catalogDigest,profileIds:[codexApiProfile.id],scope:{kind:'unfinished'}});
   assert.equal(preview.changes.length,0);await settings.apply(selected.projectId,{previewId:preview.id,previewDigest:preview.previewDigest,key:'native-history'});assert.deepEqual(Object.fromEntries(families.map(kind=>[kind,f.store.list(kind,selected.projectId)])),before);
-  await f.runtime.engine.reconcile();assert.equal(f.calls.start,1);assert.equal(f.calls.api,0);assert.equal(f.store.list('external_allowance_consumption',selected.projectId).length,1);assert.deepEqual(f.store.get('attempt',attempt.id).request,attempt.request);
+  await f.runtime.engine.reconcile();assert.equal(f.calls.start,1);assert.equal(f.calls.api,0);assert.equal(f.store.list('external_allowance_consumption',selected.projectId).length,0);assert.deepEqual(f.store.get('attempt',attempt.id).request,attempt.request);
+  const pinnedLock=f.store.get('capability_lock',attempt.request.providerUse.capabilityLockId),pinnedProfile=pinnedLock.profiles.find(profile=>profile.id===attempt.request.profile.id);
+  assert.deepEqual(attempt.request.providerUse,{kind:'configured',capabilityLockId:pinnedLock.id,capabilityLockDigest:digest(pinnedLock),profileDefinitionDigest:digest(pinnedProfile)});
+  assert.equal(attempt.request.externalAllowanceId,undefined);
 });

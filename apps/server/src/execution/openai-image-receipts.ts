@@ -1,3 +1,4 @@
+import { providerAdmissionRequest, externalAllowanceMatches } from "./provider-use.js";
 import { createHash } from "node:crypto";
 import { canonical, digest, invariant } from "@openslate/core";
 import { OPENAI_IMAGE_MODEL } from "@openslate/providers";
@@ -7,10 +8,10 @@ import type { OutputReceipt } from "./output-store.js";
 
 interface Identity { id: string; projectId: string; version: 1; attemptId: string; requestDigest: string }
 export interface ImageExecutionMapping extends Identity {
-  profileDigest: string; externalAllowanceId: string; transport: OpenAIImageDescription;
+  profileDigest: string; externalAllowanceId: string | null; transport: OpenAIImageDescription;
 }
 export interface ImageExecutionDispatch extends Identity {
-  mappingDigest: string; transportDigest: string; externalAllowanceId: string; createdAt: string;
+  mappingDigest: string; transportDigest: string; externalAllowanceId: string | null; createdAt: string;
 }
 type Completed = Extract<OpenAIImageOutcome, { kind: "completed" }>;
 export type ImageExecutionObservation = Exclude<OpenAIImageOutcome, Completed>
@@ -32,7 +33,7 @@ function base(attempt: Attempt, value: Identity, extra: string[]): void {
   invariant(value.version === 1 && value.id === attempt.id && value.attemptId === attempt.id && value.projectId === attempt.projectId
     && value.requestDigest === digest(attempt.request) && attempt.request.kind === "image"
     && attempt.request.execution?.adapter === "openai-image" && attempt.request.execution.version === "1"
-    && allowance(attempt.request.externalAllowanceId) && hash(attempt.request.profile?.digest)
+    && providerAdmissionRequest(attempt.request) && hash(attempt.request.profile?.digest)
     && Buffer.byteLength(canonical(value)) <= 16384,
   "IMAGE_EXECUTION_CONFLICT", "Image receipt must bind the exact admitted application request");
 }
@@ -42,7 +43,7 @@ export function assertImageExecutionMapping(attempt: Attempt, value: ImageExecut
   base(attempt, value, ["profileDigest", "externalAllowanceId", "transport"]);
   const description = value.transport, request = attempt.request, settings = request.profile!.configuration.settings;
   fields(description, ["adapter", "requestDigest", "model", "mode", "width", "height", "quality", "inputs"]);
-  invariant(value.profileDigest === request.profile!.digest && value.externalAllowanceId === request.externalAllowanceId
+  invariant(value.profileDigest === request.profile!.digest && externalAllowanceMatches(request, value.externalAllowanceId)
     && description.adapter === "openai-image-v1" && description.model === request.profile!.configuration.model
     && (description.model === OPENAI_IMAGE_MODEL || description.model === "gpt-image-2")
     && description.width === settings?.width && description.height === settings?.height && description.quality === settings?.quality

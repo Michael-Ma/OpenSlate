@@ -90,8 +90,8 @@ export class ProjectModelSettings {
     const status=this.status(projectId);fail(status.headVersion===data.expectedHeadVersion&&this.work(projectId).digest===work.digest,'Work changed while preview was being prepared');
     return {version:1,projectId,input:data,projectDigest:digest(project),lockDigest:digest(lock),workDigest:work.digest,logicalIds,profiles,selected,compiled,resetNodeIds:[...reset],
       view:{version:1,projectId,base:{headVersion:project.headVersion,revisionId:project.revisionId,capabilityLockId:project.capabilityLockId,selectionDigest:status.selectionDigest,catalogDigest:this.catalog.digest},selected,scope:data.scope,
-        changes,preserved:kept,counts:{changed:changes.length,preserved:kept.length},generationApprovalRequired:changes.some(row=>kinds.includes(row.kind as MediaKind)),allowanceRequired:changes.some(row=>kinds.includes(row.kind as MediaKind)),
-        notice:'Completed and in-flight work stays on its original model. Changed pending work needs fresh generation review and its own allowance. Model settings do not start generation.'}};
+        changes,preserved:kept,counts:{changed:changes.length,preserved:kept.length},generationApprovalRequired:changes.some(row=>["image","video"].includes(row.kind)),allowanceRequired:false,
+        notice:'Completed and in-flight work stays on its original model. Changed keyframes and videos need a fresh scene review. Model settings do not start generation.'}};
   }
   async preview(projectId:string,input:ProjectModelPreviewInput,options:{signal?:AbortSignal}={}):Promise<ProjectModelPreview>{
     const signal=options.signal;this.service.recovery.assertWritable(projectId);const value=await this.assess(projectId,input,signal);stop(signal);

@@ -1,3 +1,4 @@
+import { configuredProviderUse, configuredProfileMatches, providerAdmissionRequest } from "./provider-use.js";
 import { canonical, digest, invariant } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionCallOptions, ExecutionRequest } from "@openslate/providers";
@@ -19,7 +20,7 @@ export interface TranscriptionCapabilityLock { id: string; projectId: string; pr
 export interface TranscriptionReservation { id: string; projectId: string; attemptId: string; micros: string; state: string }
 export interface TranscriptionAdmission {
   attempt: Attempt; candidate: Candidate; grant: Grant; reservation: TranscriptionReservation;
-  allowance: ExternalAllowance; consumption: ExternalAllowanceConsumption; allowanceRequest: AllowanceHumanRequest;
+  allowance: ExternalAllowance | null; consumption: ExternalAllowanceConsumption | null; allowanceRequest: AllowanceHumanRequest | null;
   profile: ProviderProfile; capabilityLock: TranscriptionCapabilityLock;
 }
 export type TranscriptionProfilePin = Pick<TranscriptionExecutionMapping, "capabilityLockId" | "capabilityLockDigest" | "profileDefinition">;
@@ -36,10 +37,12 @@ export function assertTranscriptionAdmission(value: TranscriptionAdmission): voi
     && grant?.id === candidate.grantId && grant.projectId === attempt.projectId && grant.kind === "transcription" && grant.origin === candidate.origin
     && reservation?.id === attempt.reservationId && reservation.projectId === attempt.projectId && reservation.attemptId === attempt.id
     && ["reserved", "charged", "released"].includes(reservation.state), "Transcription requires its exact admitted candidate, grant and reservation");
-  assertExternalAllowance(allowance, allowanceRequest); assertExternalAllowanceConsumption(consumption, allowance, attempt, reservation);
+  if (configuredProviderUse(attempt.request)) fail(allowance === null && consumption === null && allowanceRequest === null
+    && configuredProfileMatches(attempt.request, profile, capabilityLock.id, digest(capabilityLock)), "Configured provider proof differs from its exact original profile lock");
+  else { assertExternalAllowance(allowance!, allowanceRequest!); assertExternalAllowanceConsumption(consumption!, allowance!, attempt, reservation); }
   assertTranscriptionExecutionProfile(profile, attempt);
-  fail(digest(profile) === consumption.profileDefinitionDigest && digest(profile) === allowance.profileDefinitionDigest
-    && profile.unitCostMicros === consumption.estimatedMicros && profile.unitCostMicros === reservation.micros,
+  fail((configuredProviderUse(attempt.request) || digest(profile) === consumption!.profileDefinitionDigest && digest(profile) === allowance!.profileDefinitionDigest
+    && profile.unitCostMicros === consumption!.estimatedMicros) && profile.unitCostMicros === reservation.micros,
   "Transcription profile estimate differs from its consumed allowance and reservation");
   fail(capabilityLock?.projectId === attempt.projectId && typeof capabilityLock.id === "string"
     && Array.isArray(capabilityLock.profiles) && capabilityLock.profiles.length > 0 && capabilityLock.profiles.length <= TRANSCRIPTION_PROFILE_LOOKUP_LIMITS.profiles
@@ -49,8 +52,8 @@ export function assertTranscriptionAdmission(value: TranscriptionAdmission): voi
 export function assertTranscriptionMappingAdmission(admission: TranscriptionAdmission, mapping: TranscriptionExecutionMapping, preparation: TranscriptionExecutionPreparation): void {
   assertTranscriptionAdmission(admission); assertTranscriptionExecutionMapping(admission.attempt, mapping, preparation);
   fail(mapping.capabilityLockId === admission.capabilityLock.id && mapping.capabilityLockDigest === digest(admission.capabilityLock)
-    && canonical(mapping.profileDefinition) === canonical(admission.profile) && mapping.allowanceId === admission.allowance.id
-    && mapping.allowanceDigest === digest(admission.allowance) && mapping.consumptionDigest === digest(admission.consumption)
+    && canonical(mapping.profileDefinition) === canonical(admission.profile) && mapping.allowanceId === (admission.allowance?.id ?? null)
+    && mapping.allowanceDigest === (admission.allowance ? (admission.allowance ? digest(admission.allowance) : null) : null) && mapping.consumptionDigest === (admission.consumption ? (admission.consumption ? digest(admission.consumption) : null) : null)
     && mapping.estimatedMicros === admission.reservation.micros, "Transcription mapping lost its exact retained admission evidence");
 }
 
@@ -79,8 +82,8 @@ export function createTranscriptionExecutionMapping(admission: TranscriptionAdmi
   const { attempt, profile, capabilityLock, allowance, consumption, reservation } = admission;
   const mapping: TranscriptionExecutionMapping = { id: attempt.id, projectId: attempt.projectId, version: 1, attemptId: attempt.id,
     requestDigest: digest(attempt.request), profileDigest: attempt.request.profile!.digest, profileDefinitionDigest: digest(profile), profileDefinition: profile,
-    capabilityLockId: capabilityLock.id, capabilityLockDigest: digest(capabilityLock), allowanceId: allowance.id, allowanceDigest: digest(allowance),
-    consumptionDigest: digest(consumption), estimatedMicros: reservation.micros,
+    capabilityLockId: capabilityLock.id, capabilityLockDigest: digest(capabilityLock), allowanceId: allowance?.id ?? null, allowanceDigest: allowance ? digest(allowance) : null,
+    consumptionDigest: consumption ? digest(consumption) : null, estimatedMicros: reservation.micros,
     preparation: { intentId: intent.id, intentDigest: digest(intent), receiptId: receipt.id, receiptDigest: digest(receipt) },
     source: { record: intent.sourceRecord, descriptor: intent.source, startSample: 0, endSample: intent.sourceEndSample }, derivative: receipt.audio,
     parser: TRANSCRIPTION_EXECUTION_PARSER, transport: description };
@@ -99,7 +102,8 @@ export function resolveTranscriptionAdmission(store: TranscriptionAuthorityStore
   const allowance = store.get<ExternalAllowance>("external_allowance", request.externalAllowanceId ?? "");
   const consumption = store.get<ExternalAllowanceConsumption>("external_allowance_consumption", current.id);
   const allowanceRequest = allowance ? store.get<AllowanceHumanRequest>("message", allowance.requestId) : undefined;
-  fail(candidate && grant && reservation && allowance && consumption && allowanceRequest, "Transcription requires durable allowance consumption and its human issue evidence");
+  fail(providerAdmissionRequest(request) && candidate && grant && reservation
+    && (configuredProviderUse(request) ? !allowance && !consumption && !allowanceRequest : allowance && consumption && allowanceRequest), "Dispatch requires its exact candidate, grant and recorded provider-use evidence");
   const lockAt = (id: string): TranscriptionCapabilityLock | undefined => {
     const meta = store.db.prepare("SELECT project_id, length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='capability_lock' AND id=?").get(id) as { project_id: string; bytes: number } | undefined;
     if (!meta) return undefined;
@@ -109,14 +113,14 @@ export function resolveTranscriptionAdmission(store: TranscriptionAuthorityStore
       && lock.profiles.length <= TRANSCRIPTION_PROFILE_LOOKUP_LIMITS.profiles, "Invalid retained profile lock"); return lock;
   };
   const matching = (lock: TranscriptionCapabilityLock | undefined): ProviderProfile | undefined => lock?.profiles.find(profile => profile
-    && profile.id === request.profile?.id && profile.revision === request.profile?.revision && digest(profile) === consumption!.profileDefinitionDigest);
+    && profile.id === request.profile?.id && profile.revision === request.profile?.revision && digest(profile) === (request.providerUse?.profileDefinitionDigest ?? consumption!.profileDefinitionDigest));
   let capabilityLock: TranscriptionCapabilityLock | undefined, profile: ProviderProfile | undefined;
   if (pinned) {
     capabilityLock = lockAt(pinned.capabilityLockId); profile = matching(capabilityLock);
     fail(capabilityLock && digest(capabilityLock) === pinned.capabilityLockDigest && profile && canonical(profile) === canonical(pinned.profileDefinition),
       "Pinned transcription profile evidence is missing or changed");
   } else {
-    capabilityLock = lockAt(store.getProject(current.projectId).capabilityLockId); profile = matching(capabilityLock);
+    capabilityLock = lockAt(request.providerUse?.capabilityLockId ?? store.getProject(current.projectId).capabilityLockId); profile = matching(capabilityLock);
     if (!profile) {
       const rows = store.db.prepare("SELECT id FROM entities WHERE kind='capability_lock' AND project_id=? ORDER BY id LIMIT ?")
         .all(current.projectId, TRANSCRIPTION_PROFILE_LOOKUP_LIMITS.locks + 1) as { id: string }[];
@@ -125,8 +129,8 @@ export function resolveTranscriptionAdmission(store: TranscriptionAuthorityStore
     }
     fail(profile, "The consumed transcription profile definition has no retained matching lock");
   }
-  const result = { attempt: current, candidate: candidate!, grant: grant!, reservation: reservation!, allowance: allowance!, consumption: consumption!,
-    allowanceRequest: allowanceRequest!, profile: profile!, capabilityLock: capabilityLock! };
+  const result = { attempt: current, candidate: candidate!, grant: grant!, reservation: reservation!, allowance: allowance ?? null, consumption: consumption ?? null,
+    allowanceRequest: allowanceRequest ?? null, profile: profile!, capabilityLock: capabilityLock! };
   assertTranscriptionAdmission(result); return structuredClone(result);
 }
 

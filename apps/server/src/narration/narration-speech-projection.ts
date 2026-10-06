@@ -13,6 +13,7 @@ import type { NarrationSpeechProposal, NarrationSpeechApplyReceipt } from './nar
 import { assertNarrationSpeechCurrent } from '../execution/narration-speech-execution.js';
 import type { SegmentRevision } from './types.js';
 import { projectPersonalVoices } from './personal-voices.js';
+import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from './narration-scope.js';
 
 export interface NarrationSpeechSummary {
   version: 1; id: string; proposalDigest: string;
@@ -33,7 +34,7 @@ const read = <T>(store: Store, work: () => T): T => store.db.inTransaction ? wor
 export function projectNarrationSpeechOptions(production: ProductionService, projectId: string) {
   return read(production.store, () => {
     const view = new ProjectionReader(production.store, projectId), project = view.project();
-    const lock = view.get<{ profiles: ProviderProfile[] }>('capability_lock', project.capabilityLockId);
+    const lock = view.get<{ profiles: ProviderProfile[]; preferredProfileIds?: { speech?: string | null } }>('capability_lock', project.capabilityLockId);
     invariant(lock && Array.isArray(lock.profiles) && lock.profiles.length <= 512, 'PROPOSAL_UNAVAILABLE', 'Speech profiles are unavailable');
     const profiles = lock.profiles.flatMap(profile => {
       if (profile.kind !== 'speech') return [];
@@ -41,7 +42,8 @@ export function projectNarrationSpeechOptions(production: ProductionService, pro
       catch { return []; }
     });
     const personalVoices = projectPersonalVoices(production.store, projectId);
-    return response({ version: 1 as const, profiles, voices: [...OPENAI_SPEECH_VOICES, ...personalVoices.filter(voice => voice.ready).map(voice => voice.id)], personalVoices, limits: { ...OPENAI_SPEECH_BUDGET } });
+    const preferredProfileId = lock.preferredProfileIds && Object.hasOwn(lock.preferredProfileIds, 'speech') ? lock.preferredProfileIds.speech : profiles[0]?.id ?? null;
+    return response({ version: 1 as const, profiles, preferredProfileId, voices: [...OPENAI_SPEECH_VOICES, ...personalVoices.filter(voice => voice.ready).map(voice => voice.id)], personalVoices, limits: { ...OPENAI_SPEECH_BUDGET } });
   });
 }
 function summary(view: ProjectionReader, proposalId: string): NarrationSpeechSummary {
@@ -103,7 +105,12 @@ function executionBlocker(view: ProjectionReader, resolved: ReturnType<typeof re
   try { assertNarrationSpeechCurrent(view.reader, project, node, resolved.application.id, resolved); }
   catch (error) { if (error instanceof DomainError && error.code === 'NARRATION_SPEECH_STALE') return error.code; throw error; }
   if (view.get<{ paused: boolean }>('execution_control', project.id)?.paused) return 'EXECUTION_PAUSED';
-  if (view.store.db.prepare("SELECT 1 FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=? LIMIT 1").get(project.id, project.id)) return 'EXECUTION_HELD';
+  const exemption=narrationSpeechHoldExemption(view.reader,project.id,resolved.application.id),shots=narrationSpeechShotScopes(view.reader,project.id,resolved.application.id);
+  const scopes=[...new Set([project.id,...shots,...project.shots.filter(shot=>shots.includes(shot.id)).map(shot=>shot.sceneId)])];
+  for(const scope of scopes){
+    const holds=view.store.db.prepare("SELECT id,json_extract(body,'$.ownerId') ownerId FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=?").all(project.id,scope) as {id:string;ownerId:string}[];
+    if(holds.some(hold=>!exemption?.holdIds?.includes(hold.id)&&!(exemption&&!exemption.requested&&scope===exemption.scopeId&&hold.ownerId===exemption.ownerId)))return 'EXECUTION_HELD';
+  }
   return null;
 }
 export function projectNarrationSpeechProposal(store: Store, projectId: string, proposalId: string): NarrationSpeechDetail {

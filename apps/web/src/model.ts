@@ -5,7 +5,7 @@ export interface ProjectSummary { id: string; name: string; headVersion: number;
 export interface ConversationMessage { id: string; role: "user" | "assistant"; text: string; state?: string; requestId?: string }
 export interface PendingQuestion { id: string; requestId: string; state: "pending" | "answered"; canAnswer?: boolean; questions: { id: string; header: string; question: string; options: { label: string; description: string }[] }[]; answerRequestId?: string }
 export interface ProjectSnapshot {
-  pendingEditContinuations?: { requestId: string; scopeIds: string[]; holdsDigest: string }[];
+  pendingEditContinuations?: { requestId: string; scopeIds: string[]; holdsDigest: string; directorState?: string | null }[];
   latestStoryboardEdit?: { id: string; headVersion: number; requestId: string } | null;
   project: ProjectSummary & { soundtrack?: { audioId: string; gainMilliDb: number } | null; revisionId: string; brief: string; story: string; shots: Shot[]; scenes: { id: string; revisionId: string; purpose: string }[]; narration: { script: string; source: string }; cues: { id: string; meaning: string; accepted: boolean; measured: boolean }[] };
   messages: { id: string; text: string; state?: string; requestId?: string; editing?: boolean; scopeIds?: string[] }[];
@@ -109,30 +109,22 @@ export function errorMessage(code: string): string {
     PERSONAL_VOICE_INVALID: "The recorded voice identity could not be verified. Review its setup.",
     PERSONAL_VOICE_LIMIT: "This project reached its registered-voice limit.",
     INSTALLATION_QUARANTINED: "Finish the restored installation review before making changes.",
-    RESTORED_AUTHORITY_REQUIRES_NEW: "This saved request cannot start work after recovery. Start a fresh conversation and review new permissions.",
+    RESTORED_AUTHORITY_REQUIRES_NEW: "This historical request cannot start work after recovery. Continue the project and use its scene controls for new media.",
     RECOVERY_CONFLICT: "The recovery state changed. Refresh and review it again.",
     RECOVERY_INVALID: "The saved recovery record could not be verified. Keep this installation paused.",
     RECOVERY_ALREADY_RELEASED: "Recovery was already released by another decision. Refresh to see its current status.",
     AUTH_REQUIRED: "Open a connected window from the OpenSlate launcher with pnpm studio.",
     STUDIO_LINK_EXPIRED: "This studio link has expired or was already used. Run pnpm studio to open a fresh window.",
     CSRF_DENIED: "Your studio session changed. Reload this page to reconnect.",
+    SCENE_REVIEW_STALE: "This scene changed. Review its refreshed frames and direction.",
+    SCENE_SELECTION_REQUIRED: "This shot has multiple active alternatives. Choose its current take before generating the scene.",
     REVISION_CONFLICT: "This project changed while you were working. Refresh to continue with its latest state.",
     HUMAN_REVIEW_REQUIRED: "The video is waiting for approval of its exact keyframe and motion plan.",
     REVIEW_STALE: "These frames have changed. Refresh the storyboard and review the new version.",
     REVIEW_MISMATCH: "The review no longer matches the current shot. Refresh before approving.",
     STALE_REVIEW: "The review no longer matches the current shot. Refresh before approving.",
     NOT_FOUND: "That item is no longer available. Refresh the project.",
-    ORIGIN_NOT_AUTHORIZED: "This action needs a current human generation allowance.",
-    ALLOWANCE_SELECTION_STALE: "The selected work changed. Refresh costs and review the current work.",
-    ALLOWANCE_PROFILE_MISMATCH: "The saved model or estimate changed. Refresh before approving spending.",
-    ALLOWANCE_EXPIRED: "That allowance has expired. Review a new allowance for the current work.",
-    ALLOWANCE_EXPIRY_INVALID: "Choose an allowance that expires within thirty days.",
-    ALLOWANCE_AUTHORITY_INVALID: "Use the spending review controls to authorize this exact work.",
-    ALLOWANCE_INVALID: "The allowance details are not valid. Refresh and review the selected work again.",
-    EXTERNAL_ALLOWANCE_UNAVAILABLE: "This work needs a current spending allowance with remaining capacity.",
-    PROJECT_BUDGET_CONFLICT: "The project limit changed. Refresh costs and review the current limit before saving.",
-    PROJECT_BUDGET_INVALID: "Enter a valid nonnegative project estimate limit.",
-    PROJECT_BUDGET_AUTHORITY_INVALID: "Use the project limit review controls to approve this exact change.",
+    ORIGIN_NOT_AUTHORIZED: "Use the scene controls to request this media from the current plan.",
     PROVIDER_CATALOG_CHANGED: "The installed models changed. Reset and refresh the model choices before creating this project.",
     PROVIDER_SELECTION_INVALID: "Refresh the model choices and choose one model for each operation.",
     EPOCH_REVOKED: "A newer request replaced this action. Refresh to continue.",

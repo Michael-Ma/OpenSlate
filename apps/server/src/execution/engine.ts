@@ -1,3 +1,4 @@
+import { requestedTranscriptionHoldIds } from '../narration/request-holds.js';
 import { assertCodexImageSpoolLineage, assertCodexImageArtifact } from "./codex-image-lineage.js";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, constants, realpathSync } from "node:fs";
@@ -73,8 +74,8 @@ export interface ExecutionOutputIngestor {
 interface IngestedOutput { output: IngestibleExecutionOutput; record: ArtifactRecord; normalized?: NormalizedIngestion; transcript?: TranscriptCandidateIngestion }
 interface ResolvedInputs { artifacts: ArtifactRef[]; fingerprint: string }
 export interface ExternalExecutionAdmission {
-  /** Trusted synchronous policy; check readiness and select allowance in this admission transaction. */
-  authorize(input: { attemptId: string; projectId: string; nodeId: string; candidateId: string; profile: Readonly<ProviderProfile>; estimatedMicros: string }): { allowanceId: string };
+  /** Trusted synchronous readiness check. Legacy receipts may retain an allowance identity. */
+  authorize(input: { attemptId: string; projectId: string; nodeId: string; candidateId: string; profile: Readonly<ProviderProfile>; estimatedMicros: string }): { allowanceId?: string };
   /** Record exact consumption after attempt and reservation insertion, before the same transaction commits. */
   recordAdmission?(attempt: Readonly<Attempt>): void;
 }
@@ -149,10 +150,14 @@ export class Engine {
     return this.store.insert("grant", newId(), projectId, { scopeId, kind, authorityId, origin }) as Grant;
   }
 
-  installPlan(projectId: string, planId: string, compiled: CompiledPlan, grantBindings: Record<string, string> = {}): { planId: string; nodes: NodeBinding[] } {
+  installPlan(projectId: string, planId: string, compiled: CompiledPlan, grantBindings: Record<string, string> = {}, deferredNodeIds: readonly string[] = []): { planId: string; nodes: NodeBinding[] } {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId);
       const project = this.store.getProject(projectId);
+      const deferred = new Set(deferredNodeIds);
+      invariant(Array.isArray(deferredNodeIds) && deferred.size === deferredNodeIds.length
+        && [...deferred].every(id => compiled.nodes.some(node => node.id === id && node.kind === "video") && !grantBindings[id]),
+      "DEFERRED_VIDEO_INVALID", "Only video nodes without generation grants can be deferred by trusted scene publication");
       assertOwnedTranscriptionInstallation(this.store, project, planId, compiled, grantBindings);
       assertNarrationSpeechInstallation(this.store, project, planId, compiled, grantBindings);
       if (!this.store.get("budget", projectId)) this.store.insert("budget", projectId, projectId, { capMicros: this.defaultBudgetMicros, currency: "USD" });
@@ -171,7 +176,8 @@ export class Engine {
         const same = old?.state === "active" && old.node.specDigest === node.specDigest && !dependencyChanged;
         const grantId = grantBindings[node.id];
         let candidateId: string | null = same ? old.candidateId : null;
-        if (GENERATED.has(node.kind) && (!same || grantId)) {
+        if (deferred.has(node.id)) candidateId = null;
+        else if (GENERATED.has(node.kind) && (!same || grantId)) {
           invariant(grantId, "ORIGIN_NOT_AUTHORIZED", `Node ${node.alias} requires an unused grant`);
           this.recovery.assertFreshAuthority(projectId, "grant", grantId);
           const grant = this.store.get<Grant>("grant", grantId);
@@ -180,7 +186,7 @@ export class Engine {
           const candidate = this.store.insert("candidate", newId(), projectId, { nodeId: node.id, grantId, origin: grant.origin }) as Candidate;
           candidateId = candidate.id;
         }
-        const reuse = same && !grantId && !Object.hasOwn(node.args, "localExecution");
+        const reuse = same && !grantId && !deferred.has(node.id) && !Object.hasOwn(node.args, "localExecution");
         if (!reuse) replaced.add(node.id);
         const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {} };
         this.store.put("node_binding", node.id, projectId, binding); nodes.push(binding);
@@ -754,9 +760,10 @@ export class Engine {
       const sceneId = project.shots.find(shot => shot.id === binding.node.shotId)?.sceneId;
       const speechShotIds = binding.node.kind === 'speech' ? narrationSpeechShotScopes(this.store, project.id, binding.candidateId) : [];
       const speechSceneIds = project.shots.filter(shot => speechShotIds.includes(shot.id)).map(shot => shot.sceneId);
+      const transcriptionHolds = binding.node.kind === 'transcription' && binding.id === nodeId ? requestedTranscriptionHoldIds(this.store, project.id, binding.candidateId) : [];
       const exemption = binding.node.kind === 'speech' && binding.id === nodeId ? narrationSpeechHoldExemption(this.store, project.id, binding.candidateId) : null;
       if (holds.some(hold => [project.id, binding.node.shotId, sceneId, ...speechShotIds, ...speechSceneIds].includes(hold.scopeId)
-        && !(exemption && hold.scopeId === exemption.scopeId && hold.ownerId === exemption.ownerId))) return true;
+        && !(transcriptionHolds.includes(hold.id) || (exemption?.requested ? exemption.holdIds?.includes(hold.id) : exemption && hold.scopeId === exemption.scopeId && hold.ownerId === exemption.ownerId)))) return true;
       return binding.node.inputs.some(input => input.source.kind === "output" && visit(input.source.nodeId));
     };
     return visit(nodeId);
@@ -822,16 +829,16 @@ export class Engine {
           && canonical(requestExecutionIdentity(attempt.request)) === canonical(execution)).length;
         invariant(active < profile.maxConcurrency, "CAPACITY_EXCEEDED", "Configured provider capacity is occupied");
       }
-      const cost = profile ? moneyMicros(profile.unitCostMicros) : 0n; const budget = this.budget(projectId);
-      invariant(moneyMicros(budget.committedMicros) + cost <= moneyMicros(budget.capMicros), "BUDGET_EXCEEDED", "Dispatch exceeds the configured spending cap");
+      // Estimates remain audit information, not an additional generation gate.
+      const cost = profile ? moneyMicros(profile.unitCostMicros) : 0n;
       const id = newId(); const reservationId = profile ? newId() : null;
       let externalAllowanceId: string | undefined;
       if (!isLegacyExecution(execution)) {
-        invariant(this.externalAdmission && profile && binding.candidateId, "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "External generation requires explicit application spending permission");
+        invariant(this.externalAdmission && profile && binding.candidateId, "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "External generation requires configured provider admission");
         const approval = this.externalAdmission.authorize({ attemptId: id, projectId, nodeId, candidateId: binding.candidateId,
           profile: structuredClone(profile), estimatedMicros: cost.toString() });
-        invariant(approval && Object.keys(approval).length === 1 && typeof approval.allowanceId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(approval.allowanceId),
-          "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "External admission must return an explicit durable allowance identity");
+        invariant(approval && Object.keys(approval).every(key => key === "allowanceId") && (approval.allowanceId === undefined || typeof approval.allowanceId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(approval.allowanceId)),
+          "EXTERNAL_EXECUTION_NOT_AUTHORIZED", "Provider admission returned an invalid receipt");
         externalAllowanceId = approval.allowanceId;
       }
       const pinnedProfile = profile ? executionProfileSnapshot(profile) : undefined;
@@ -839,7 +846,9 @@ export class Engine {
         id, projectId, nodeId, candidateId: binding.candidateId, ordinal: (previous?.ordinal ?? 0) + 1,
         specDigest: node.specDigest, fingerprint: inputs.fingerprint, workKey,
         request: { attemptId: id, nodeId, kind: node.kind, fingerprint: inputs.fingerprint, args: node.args, inputs: inputs.artifacts,
-          execution: { ...execution }, ...(pinnedProfile ? { profile: pinnedProfile } : {}), ...(externalAllowanceId ? { externalAllowanceId } : {}) },
+          execution: { ...execution }, ...(pinnedProfile ? { profile: pinnedProfile } : {}), ...(externalAllowanceId ? { externalAllowanceId }
+            : !isLegacyExecution(execution) && profile ? { providerUse: { kind: "configured" as const, capabilityLockId: project.capabilityLockId,
+              capabilityLockDigest: digest(this.store.get("capability_lock", project.capabilityLockId)), profileDefinitionDigest: digest(profile) } } : {}) },
         phase: "submitting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId, failure: null, outputs: {}, createdAt: new Date().toISOString(),
         ...(ownedInput ? { applicationInput: structuredClone(ownedInput.input) } : {}),

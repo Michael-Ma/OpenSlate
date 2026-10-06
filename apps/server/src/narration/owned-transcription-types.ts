@@ -35,6 +35,10 @@ export interface PrepareOwnedTranscription {
 
 /** Keyed by the exact new grant; saved before installation in the human command transaction. */
 export interface OwnedTranscriptionReview {
+  /** Present only for an operation requested by a versioned Director epoch. Historical human records omit it. */
+  epochId?: string;
+  requested?: true;
+  requestedAtCursor?: number;
   id: string; version: 1; projectId: string; requestId: string; principalId: string;
   proposal: { id: string; digest: string }; grantDigest: string;
   sourceBinding: { id: string; digest: string };

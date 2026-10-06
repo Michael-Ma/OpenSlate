@@ -8,7 +8,7 @@ import type { ResolvedGeneratedNarrationAudio } from "./generated-audio.js";
 import { createTranscriptSelection, resolvePublishedTranscriptCandidate } from "./transcript-selection.js";
 import type { ResolvedPublishedTranscriptCandidate } from "./transcript-selection.js";
 import { verifyTranscriptSelectionEvidence } from "./transcript-selection-media.js";
-import { assertNarrationAuthority, assertNarrationMutation } from './narration-scope.js';
+import { assertNarrationAuthority, assertNarrationMutation, shotDraftId } from './narration-scope.js';
 
 export interface AttachGeneratedNarrationAudio {
   expectedVersion: number; segmentId: string; segmentRevisionId: string;
@@ -90,6 +90,44 @@ export class NarrationService {
         invariant(!additions.length && input.order.length === state.entries.length && new Set(input.order).size === state.entries.length, "NARRATION_INVALID_INPUT", "Order must name each saved segment exactly once");
         state.entries = input.order.map(id => this.entry(state, id));
       }
+    });
+  }
+
+  /** Host materialization of one saved shot. This never widens the Director's generic narration-edit capability. */
+  materializeRequestedShot(projectId: string, actor: ActorContext, input: { key: string; expectedHeadVersion: number; shotId: string; intentDigest: string; voice: string; profileRevisionId: string }) {
+    this.production.assertActor(projectId, actor, true);
+    return this.store.command(`${actor.principalId}:${projectId}:${actor.requestId}:requested-shot-narration`, input.key, digest(input), () => {
+      this.production.assertActor(projectId, actor, true);
+      const project = this.store.getProject(projectId), shot = project.shots.find(shot => shot.id === input.shotId);
+      const request = this.store.get<{ scopeIds: string[] }>('message', actor.requestId);
+      invariant(shot && project.headVersion === input.expectedHeadVersion && digest({ shotId: shot.id, narration: shot.narration ?? null }) === input.intentDigest,
+        'NARRATION_SPEECH_STALE', 'The saved shot narration changed before the request.');
+      invariant(request && [projectId, shot.id, shot.sceneId].some(scope => request.scopeIds.includes(scope)), 'SCOPE_DENIED', 'This request does not cover that shot narration.');
+      invariant(shot.narration?.mode === 'generated' && shot.narration.text.trim(), 'NARRATION_SPEECH_INVALID', 'This shot has no generated narration script.');
+      const state = this.read(projectId).state, saved = this.store.get<{ segmentId: string }>('narration_shot_draft', shotDraftId(projectId, shot.id));
+      const canonicalHead = this.store.get<{ canonicalId: string }>('narration_canonical_head', projectId);
+      const canonical = canonicalHead ? this.store.get<{ shotMappings: { shotId: string; segmentId: string | null }[] }>('narration_canonical', canonicalHead.canonicalId) : undefined;
+      const target = saved?.segmentId ?? canonical?.shotMappings.find(mapping => mapping.shotId === shot.id)?.segmentId;
+      const shared = target && (this.store.db.prepare("SELECT 1 FROM entities WHERE kind='narration_shot_draft' AND project_id=? AND json_extract(body,'$.segmentId')=? AND json_extract(body,'$.shotId')<>? LIMIT 1").get(projectId,target,shot.id)
+        || canonical?.shotMappings.some(mapping => mapping.segmentId === target && mapping.shotId !== shot.id));
+      let entry = !shared && target ? state.entries.find(entry => entry.segmentId === target) : undefined;
+      const draft = this.validateDraft({ text: shot.narration.text, textKind: 'draft', language: 'en', meaning: shot.purpose || 'Narration for this shot',
+        source: { kind: 'generated', voice: input.voice, profileRevisionId: input.profileRevisionId } });
+      const old = entry ? this.record<SegmentRevision>('narration_segment', entry.segmentRevisionId, projectId) : null;
+      const changed = !old || digest(this.draft(old)) !== digest(draft);
+      if (changed) {
+        const segmentId = entry?.segmentId ?? newId(), script = this.store.insert('narration_segment', newId(), projectId, { ...draft, segmentId }) as SegmentRevision;
+        if (entry) { entry.segmentRevisionId = script.id; entry.audioId = entry.cueId = null; entry.scriptAcceptanceId = entry.audioAcceptanceId = entry.timingAcceptanceId = null; }
+        else { entry = { segmentId, segmentRevisionId: script.id, audioId: null, cueId: null, atSample: 0, scriptAcceptanceId: null, audioAcceptanceId: null, timingAcceptanceId: null }; state.entries.push(entry); }
+        invariant(state.entries.length <= 400, 'NARRATION_INVALID_INPUT', 'Narration exceeds 400 sections.');
+        this.persistState(projectId, actor, state, 'requested_shot_script');
+      }
+      invariant(entry, 'NARRATION_SPEECH_INVALID', 'Shot narration could not be materialized.');
+      this.store.put('narration_shot_draft', shotDraftId(projectId, shot.id), projectId, { projectId, shotId: shot.id, segmentId: entry.segmentId, intentDigest: digest(shot.narration) });
+      const scopeId = digest({ projectId, requestId: actor.requestId, segmentId: entry.segmentId });
+      if (!this.store.get('narration_requested_shot_scope', scopeId)) this.store.insert('narration_requested_shot_scope', scopeId, projectId,
+        { id: scopeId, version: 1, projectId, requestId: actor.requestId, principalId: actor.principalId, segmentId: entry.segmentId, shotId: shot.id, projectRevisionId: project.revisionId, projectDigest: digest(project) });
+      return { segmentId: entry.segmentId, segmentRevisionId: entry.segmentRevisionId, headVersion: project.headVersion };
     });
   }
 
@@ -369,14 +407,16 @@ export class NarrationService {
         const changed = fn(state);
         assertNarrationMutation(this.store, scope, before, state, action, argumentsValue);
         if (changed === false) return this.read(projectId);
-        const revisionId = newId();
-        const next = { ...state, version: state.version + 1, revisionId };
-        this.store.insert("narration_revision", revisionId, projectId, { state: next, requestId: actor.requestId });
-        this.store.put("narration_state", projectId, projectId, next);
-        this.store.appendEvent(projectId, "narration.changed", { revisionId, version: next.version, action });
+        this.persistState(projectId, actor, state, action);
         return this.read(projectId);
       });
     });
+  }
+  private persistState(projectId: string, actor: ActorContext, state: NarrationState, action: string): void {
+    const revisionId = newId(), next = { ...state, version: state.version + 1, revisionId };
+    this.store.insert('narration_revision', revisionId, projectId, { state: next, requestId: actor.requestId });
+    this.store.put('narration_state', projectId, projectId, next);
+    this.store.appendEvent(projectId, 'narration.changed', { revisionId, version: next.version, action });
   }
   private authority(projectId: string, actor: ActorContext, humanOnly = false, segmentId?: string): void {
     this.production.assertActor(projectId, actor, true);

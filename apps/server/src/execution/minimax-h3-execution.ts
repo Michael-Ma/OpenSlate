@@ -1,3 +1,4 @@
+import { assertConfiguredProviderAdmission, configuredProviderUse, providerAdmissionRequest } from "./provider-use.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
@@ -53,7 +54,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     try {
       stopped(signal); prepared = await this.prepare(attempt, signal); stopped(signal);
       const proposed: H3ExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
-        externalAllowanceId: request.externalAllowanceId!, firstFrameArtifactId: request.inputs[0]!.artifactId,
+        externalAllowanceId: (request.externalAllowanceId ?? null), firstFrameArtifactId: request.inputs[0]!.artifactId,
         transport: describeMiniMaxH3Request(request.profile!.configuration.model as MiniMaxH3Model, prepared) };
       assertH3ExecutionMapping(attempt, proposed);
       mapping = this.#store.transaction(() => {
@@ -74,7 +75,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
         if (this.started(attempt.id)) return false;
         stopped(signal); this.dispatchable(attempt, expected);
         const dispatch: H3ExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping), bodySha256: mapping.transport.bodySha256,
-          externalAllowanceId: request.externalAllowanceId!, createdAt: this.now() };
+          externalAllowanceId: (request.externalAllowanceId ?? null), createdAt: this.now() };
         this.#store.insert("h3_execution_dispatch", attempt.id, attempt.projectId, dispatch); return true;
       });
     } catch { return this.notDispatched(attempt, expected, 'LOCAL_CANCELLED', signal); }
@@ -175,10 +176,11 @@ export class MiniMaxH3Execution implements ExecutionProvider {
     assertExecutionRequest(this, request);
     const attempt = this.#store.get<Attempt>("attempt", request.attemptId);
     invariant(attempt && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint && attempt.candidateId && attempt.reservationId
-      && request.kind === "video" && canonical(attempt.request) === canonical(request) && typeof request.externalAllowanceId === "string",
-    "H3_EXECUTION_CONFLICT", "H3 execution requires its exact admitted attempt and allowance");
+      && request.kind === "video" && canonical(attempt.request) === canonical(request) && providerAdmissionRequest(request),
+    "H3_EXECUTION_CONFLICT", "H3 execution requires its exact admitted attempt and provider-use evidence");
     const reservation = this.#store.get<{ projectId: string; attemptId: string }>("reservation", attempt.reservationId);
     invariant(reservation?.projectId === attempt.projectId && reservation.attemptId === attempt.id, "H3_EXECUTION_CONFLICT", "H3 attempt lost its reservation");
+    assertConfiguredProviderAdmission(this.#store, attempt);
     return attempt;
   }
   private dispatchable(previous: Attempt, expected: ExecutionCallOptions["expectedLease"]): void {
@@ -281,7 +283,7 @@ export class MiniMaxH3Execution implements ExecutionProvider {
 
   private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<MiniMaxH3Request> {
     const request = attempt.request, configuration = request.profile!.configuration;
-    h3Fields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "externalAllowanceId"]);
+    h3Fields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
     h3Fields(configuration, ["model", "settings"]); h3Fields(configuration.settings, ["resolution"]);
     h3Fields(request.args.settings, []);
     invariant(request.inputs.length === 1 && request.inputs[0]!.kind === "image" && Number.isSafeInteger(request.args.durationFrames)

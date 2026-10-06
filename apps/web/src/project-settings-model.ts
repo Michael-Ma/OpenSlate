@@ -75,7 +75,7 @@ export function modelSettingsContinuation(projectId: string, key: string, reques
   if (!id(projectId) || !key || receipt.projectId !== projectId || !id(receipt.previewId) || !hash(receipt.previewDigest) || requestId !== null && !id(requestId))
     throw new Error("Open the current project and saved model change before continuing.");
   return { path: `/api/projects/${encodeURIComponent(projectId)}/messages`, key,
-    body: { text: "I changed this project's media model choices. Review the current settings and unfinished work, then prepare an updated plan for my review. Preserve completed results, existing jobs and protected inputs. Do not generate media or approve spending for me.",
+    body: { text: "I changed this project's media model choices. Review the current settings and unfinished work, then prepare an updated plan. Preserve completed results, existing jobs and protected inputs. I will use the scene controls to generate and review the media.",
       editing: true, scopeIds: [projectId], ...(requestId ? { continuationRequestId: requestId } : {}) },
     metadata: { previewId: receipt.previewId, previewDigest: receipt.previewDigest } };
 }

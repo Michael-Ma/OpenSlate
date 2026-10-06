@@ -175,15 +175,17 @@ test("readiness separates enabled host routes, credential availability and unreg
   assert.equal(runtime.providerCatalog.view().realExecutionEnabled, false); assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 });
 });
 
-test("actual human allowance and admitted image bridge publish the exact injected PNG without fake fallback", async t => {
+test("configured image use publishes the exact injected PNG without a separate allowance or fake fallback", async t => {
   const f = fixture(t, { configuration: config(true), keys: true }), runtime = f.build(), selected = await f.seed();
-  const denied = await runtime.engine.runReady(); assert.ok(denied.blocked.some(item => item.code === "EXTERNAL_ALLOWANCE_UNAVAILABLE")); f.noAdmission(selected.projectId);
-  const allowance = f.issue(selected); await runtime.engine.runReady();
+  // A cap saved by the earlier app is historical bookkeeping, never a new approval gate.
+  runtime.engine.setBudget(selected.projectId, "0");
+  await runtime.engine.runReady();
   const output = runtime.engine.outputs(selected.projectId)[0], artifact = f.store.get("artifact", output.artifact.artifactId);
   assert.equal(artifact.fixture, false); assert.equal(artifact.artifact.sha256, hash(png)); assert.deepEqual(readFileSync(artifact.path), png);
   assert.equal(artifact.path.startsWith(runtime.imageStore.rootDir), true);
-  const attempt = runtime.engine.attempts(selected.projectId)[0]; assert.equal(attempt.phase, "succeeded"); assert.equal(attempt.request.externalAllowanceId, allowance.id);
-  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 1);
+  const attempt = runtime.engine.attempts(selected.projectId)[0]; assert.equal(attempt.phase, "succeeded"); assert.equal(attempt.request.externalAllowanceId, undefined);
+  assert.equal(f.store.list("external_allowance", selected.projectId).length, 0);
+  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 0);
   assert.equal(f.store.list("image_execution_dispatch", selected.projectId).length, 1); assert.equal(f.provider.acceptedCount(), 0);
   await runtime.engine.reconcile(); await runtime.engine.runReady(); assert.deepEqual(f.calls, { image: 1, h3: 0, lookup: 0, download: 0 });
 });
@@ -202,12 +204,12 @@ test("legacy external-video projects require a new local-assembly pin before pai
   f.noAdmission(selected.projectId); assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 });
 });
 
-test("new pinned H3 project can admit exactly one reviewed attempt using its durable allowance", async t => {
-  const f = fixture(t, { configuration: config(false, true), keys: true }), runtime = f.build(), selected = await f.seed("video"), allowance = f.issue(selected);
+test("new pinned H3 project admits one reviewed attempt without a separate allowance", async t => {
+  const f = fixture(t, { configuration: config(false, true), keys: true }), runtime = f.build(), selected = await f.seed("video");
   const result = await runtime.engine.runReady(); const attempt = runtime.engine.attempts(selected.projectId)[0]; assert.ok(attempt, JSON.stringify(result));
   assert.equal(attempt.phase, "remote_pending"); assert.equal(attempt.taskId, "offline-runtime-h3-task");
-  assert.deepEqual(attempt.request.execution, { adapter: "minimax-h3", version: "1" }); assert.equal(attempt.request.externalAllowanceId, allowance.id);
-  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 1);
+  assert.deepEqual(attempt.request.execution, { adapter: "minimax-h3", version: "1" }); assert.equal(attempt.request.externalAllowanceId, undefined);
+  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 0);
   assert.equal(f.store.list("h3_execution_dispatch", selected.projectId).length, 1); assert.equal(f.provider.acceptedCount(), 0);
   assert.deepEqual(f.calls, { image: 0, h3: 1, lookup: 0, download: 0 });
 });
@@ -259,14 +261,14 @@ for (const blocker of ["missing_key", "legacy_pin"]) test(`Viggle ${blocker} blo
   f.noAdmission(selected.projectId); assert.deepEqual(f.viggleCalls, { fetch: 0, lookup: 0, download: 0 }); assert.equal(f.provider.acceptedCount(), 0);
 });
 
-test("Viggle runtime consumes one flat per-attempt allowance for an actually reviewed take through only its injected bridge", async t => {
+test("Viggle runtime starts an actually reviewed take through its injected bridge without an allowance", async t => {
   const f = fixture(t, { configuration: viggleConfig(), videoProfile: viggleProfile, keys: true }), runtime = f.build(), selected = await f.seed("video");
-  const denied = await runtime.engine.runReady(); assert.ok(denied.blocked.some(row => row.code === "EXTERNAL_ALLOWANCE_UNAVAILABLE")); f.noAdmission(selected.projectId);
-  const allowance = f.issue(selected), result = await runtime.engine.runReady(), attempt = runtime.engine.attempts(selected.projectId)[0];
+  const result = await runtime.engine.runReady(), attempt = runtime.engine.attempts(selected.projectId)[0];
   assert.ok(attempt, JSON.stringify(result)); assert.equal(attempt.phase, "remote_pending"); assert.equal(attempt.taskId, "vid_offline_runtime");
   assert.deepEqual(attempt.request.execution, { adapter: "viggle-h3", version: "1" });
-  assert.deepEqual(attempt.request.profile.configuration.settings, viggleProfile.configuration.settings); assert.equal(attempt.request.externalAllowanceId, allowance.id);
-  const consumption = f.store.list("external_allowance_consumption", selected.projectId); assert.equal(consumption.length, 1); assert.equal(consumption[0].estimatedMicros, "900000");
+  assert.deepEqual(attempt.request.profile.configuration.settings, viggleProfile.configuration.settings); assert.equal(attempt.request.externalAllowanceId, undefined);
+  assert.equal(f.store.list("external_allowance", selected.projectId).length, 0);
+  assert.equal(f.store.list("external_allowance_consumption", selected.projectId).length, 0);
   assert.equal(f.store.list("viggle_h3_execution_dispatch", selected.projectId).length, 1); assert.equal(f.store.list("h3_execution_dispatch", selected.projectId).length, 0);
   await runtime.engine.runReady(); assert.equal(f.provider.acceptedCount(), 0);
   assert.deepEqual(f.calls, { image: 0, h3: 0, lookup: 0, download: 0 }); assert.deepEqual(f.viggleCalls, { fetch: 1, lookup: 0, download: 0 });

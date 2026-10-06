@@ -32,10 +32,11 @@ function release(store){const snapshot=new InstallationRecoveryGuard(store).snap
 function restarted(t,f){const store=new Store(join(f.directory,'openslate.sqlite'));t.after(()=>{if(store.db.open)store.close();});const outputs=new ExecutionOutputStore(store,{rootDir:join(f.directory,'execution-output')});
   const forbidden=async()=>{throw Error('native unavailable');};return {store,outputs,bridge:new CodexImageExecution({store,outputStore:outputs,artifactRoot:join(f.directory,'artifacts'),transport:{prepare:forbidden,start:forbidden,lookup:forbidden}})};}
 
-test('exact native marker, result and finite zero-dollar consumption precede real PNG publication',async t=>{
+test('exact native configured-provider proof, marker and result precede real PNG publication',async t=>{
   const f=await fixture(t,{start:async(prepared,input,context)=>{assert.equal(prepared.session.turnInputDigest,describeCodexImageInput(input).turnInputDigest);await context.observeTurn('turn-exact');return complete(prepared);}});
   const result=await f.bridge.submit(f.request,f.context);assert.equal(result.type,'completed');assert.equal(result.vendorTaskId,null);
-  assert.equal(rows(f,'external_allowance_consumption').length,1);assert.equal(rows(f,'external_allowance_consumption')[0].estimatedMicros,'0');
+  assert.equal(rows(f,'external_allowance_consumption').length,0);assert.equal(f.request.externalAllowanceId,undefined);
+  assert.equal(f.request.providerUse.kind,'configured');assert.equal(rows(f,'codex_image_execution_mapping')[0].allowanceId,null);
   const saved=rows(f,'codex_image_execution_result')[0];assert.equal(saved.observation.outputReceiptId,result.outputs[0].storage.spoolId);
   assert.equal(saved.observation.output.width,inspectCodexImagePng(bytes).width);assert.notEqual(saved.observation.output.width,1024,'native size is a bounded observed value, not a claimed knob');
   f.expire();await f.engine.reconcile();const a=f.store.get('attempt',f.attempt.id);assert.equal(a.phase,'succeeded');assert.equal(f.store.get('reservation',a.reservationId).state,'charged');

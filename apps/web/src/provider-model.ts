@@ -14,7 +14,7 @@ export interface ProviderSelection { expectedCatalogDigest: string; profileIds: 
 export interface NewProjectCommand { key: string; body: { name: string; expectedCatalogDigest?: string; profileIds?: string[] } }
 export const PROVIDER_KIND_CHOICES = Object.freeze([
   Object.freeze({ kind: "image" as const, label: "Keyframes" }), Object.freeze({ kind: "video" as const, label: "Video" }),
-  Object.freeze({ kind: "speech" as const, label: "Narration model" }), Object.freeze({ kind: "transcription" as const, label: "Speech recognition" }),
+  Object.freeze({ kind: "speech" as const, label: "Narration" }), Object.freeze({ kind: "transcription" as const, label: "Transcription" }),
 ]);
 export function selectedProviderForKind(catalog: ProviderCatalogView, selection: ProviderSelection | null, kind: ProviderKind): ProviderView | undefined {
   return catalog.profiles.find(provider => provider.profile?.kind === kind && selection?.profileIds.includes(provider.id))
@@ -39,7 +39,7 @@ export function projectCreationCommand(name: string, key: string, selection: Pro
 }
 
 export function providerEstimate(provider: ProviderView): string {
-  if (provider.profile?.adapter === "codex-image") return "Uses Codex subscription quota · quota use is not estimated";
+  if (provider.profile?.adapter === "codex-image") return "Uses your Codex subscription";
   if (provider.estimatedCost?.basis === "fixture") return "Demo · no media API calls";
   const value = provider.estimatedCost?.unitMicros;
   if (!value || !/^(0|[1-9][0-9]{0,17})$/.test(value)) return "Estimate unavailable";
@@ -57,11 +57,12 @@ export function providerExecutionStatus(provider: ProviderView): string {
   if (provider.projectExecution?.compatible === false)
     return provider.projectExecution.message ?? "This project's saved execution mode is incompatible. Create a new project to use this provider.";
   if (provider.profile?.adapter === "codex-image") {
-    if (provider.readiness.realExecutionEnabled) return "Codex runtime configured · authentication is checked before each start. Quota is unverified; a Codex usage approval is still required.";
-    return provider.readiness.enabledByHost ? "Codex generation enabled · local setup is incomplete. Authentication and quota are not verified."
-      : "Codex generation is disabled on this computer. A usage approval does not enable it.";
+    if (provider.readiness.realExecutionEnabled) return "Codex configured · sign-in is checked when used.";
+    return provider.readiness.enabledByHost ? "Codex setup is incomplete."
+      : "Codex generation is disabled in local setup.";
   }
-  if (provider.readiness.realExecutionEnabled) return "Provider ready · generation permission and a spending allowance are still required.";
+  if (provider.profile?.adapter === "fake") return "Demo · no model calls";
+  if (provider.readiness.realExecutionEnabled) return "Provider configured · ready for scene generation.";
   return provider.readiness.enabledByHost ? "Enabled on this computer · setup is incomplete."
-    : "Generation is disabled on this computer. Key setup does not authorize spending.";
+    : "Generation is disabled in local setup.";
 }

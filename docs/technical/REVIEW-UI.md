@@ -6,7 +6,7 @@ The React studio presents saved production state and sends authenticated human c
 
 The Director conversation sits beside the treatment/scenes/shots storyboard. Shot controls support inline text, narration intent, add/delete/reorder, exact frame/motion review and selected clip preview. The lightweight Timeline auditions picture, accepted narration and music, while Assets retains uploaded/generated media. Chat **+** imports owned media.
 
-Narration uses a compact shot-scoped script/recording/listen/accept flow, with advanced section/transcript interfaces retained for detailed review. Generation connects planning, intended operations, usage/spending, actual frame/motion review and export.
+Narration uses a compact shot-scoped script/recording/listen/accept flow, with advanced section/transcript interfaces retained for detailed review. Visual generation has two decisions per scene: create keyframes from the direction, then review exact returned frames/motion/video recipe and start video. Returned clips are available to inspect. Green completion means the current media is saved.
 
 The compact header settings dialog shows Director, Keyframes, Video and Narration, with transcription/accounts/local setup/existing voice identities disclosed on demand. Director choices come from the actual compatible account/runtime catalog. Director/media commands save separately; zero-impact media Save applies the exact current server preview, while actual unfinished changes receive a human impact review. Unknown responses retain their command identity for recovery.
 
@@ -18,11 +18,11 @@ The compact header settings dialog shows Director, Keyframes, Video and Narratio
 - Viewport media release, indexed timeline data and bounded audio caching avoid retaining every media file.
 - Long content, empty states, dialogs, keyboard controls and 390px layouts need rendered validation.
 
-The Director divider supports drag/keyboard, persistent preferred width and container clamping; the composer resizes vertically. Chat uses safe GFM with horizontal table scrolling and no automatic external image loading. Background projection refresh retains connected content/controls and hides Continue rows during Director execution without deleting holds. The [October 3 full/fixture checks](../implementation/OCTOBER-3-REFINEMENT-REVIEW.md) passed, with the reviewed response-order/native inventory fixes included in the final gate. A larger Change / Keep / Next plan card and app-wide minimal theme remain human choices.
+The Director divider supports drag/keyboard, persistent preferred width and container clamping; the composer resizes vertically. Chat uses safe GFM with horizontal table scrolling and no automatic external image loading. Background projection refresh retains connected content/controls and request-owned holds. The state-derived Saved / Next card names the next useful action, and [OpenSlate Light](../design/OPENSLATE-LIGHT.md) supplies the accepted Radix foundation. Dated verification belongs in [current evidence](../implementation/STATUS.md).
 
 ## Explanation of reviews
 
-Ordinary narration writing needs no spending authorization. A guidance upgrade is tool compatibility. Media generation needs explicit operation permission plus finite usage/spending; video also needs actual frame/motion approval. Audio acceptance confirms words/recording/range. The UI should name the concrete action and why it is waiting instead of grouping these as generic authorization.
+Configured credentials need no separate approval or usage allowance. Scene generation actions request work directly; the second decision reviews the exact returned keyframes and actual motion/video recipe. Videos can be inspected after return without another acceptance gate. Requested speech/transcription has no additional generation-review dialog. Audio acceptance confirms words/recording/range. A guidance upgrade is automatic compatibility maintenance before an eligible fresh turn. Name a concrete missing input or setup issue instead of asking for generic authorization.
 
 ## Source and checks
 

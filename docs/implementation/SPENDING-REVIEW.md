@@ -1,5 +1,7 @@
 # Generation, review and spending
 
+Historical implementation reference. The current studio uses configured-provider scene actions and keyframe/video review without a separate spending approval or usage allowance. Earlier accounting records remain stored; the retired GenerationPermission/SpendingPanel frontend and its step model have been removed. Use [current status](STATUS.md) and [the studio guide](../design/STORYBOARD-STUDIO.md) for current controls.
+
 Writing or revising the film does not require permission to spend on media. OpenSlate asks for concrete decisions when it is about to create a creative result, use an account or condition video on a returned frame. These decisions should be explained in the flow where they matter, not presented as repetitive configuration warnings.
 
 | Decision | Meaning |

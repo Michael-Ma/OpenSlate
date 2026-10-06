@@ -1,4 +1,6 @@
 import type { ArtifactRecord } from "../execution/engine.js";
+import { assertConfiguredProviderAdmission } from "../execution/provider-use.js";
+import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
 import { codexImageBackupClosure } from "./codex-image-backup.js";
 import { CODEX_IMAGE_RECORD_KINDS } from "../execution/codex-image-lineage.js";
 import { composeSpeechPlanIsolated } from "@openslate/core";
@@ -487,7 +489,20 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
         const { attempt, output } = await audioIntent(intent);
         assertNormalizedAudioIngestion(intent, attempt, output, { type: "normalized_audio", artifact: get("artifact", intent.artifactId) as any,
           derivation: value as AudioDerivationReceipt, mediaSource: get("media_source", intent.artifactId) as any });
+      } else if (row.kind === "narration_requested_shot_scope") {
+        fail(value.id === row.id && value.projectId === row.project_id, "Requested narration scope row identity differs");
+        assertRequestedNarrationShotScope(speechReader, row.project_id, value);
       } else if (row.kind === "attempt") {
+        if (value.request && Object.hasOwn(value.request, "providerUse")) {
+          fail(value.id === row.id && value.projectId === row.project_id, "Configured provider attempt row identity differs");
+        }
+        assertConfiguredProviderAdmission({ get<T>(kind: string, id: string): T | undefined {
+          const saved = speechReader.get<RecordValue>(kind, id); if (!saved) return undefined;
+          const target = db.prepare("SELECT project_id FROM entities WHERE kind=? AND id=?").get(kind, id) as { project_id: string } | undefined;
+          fail(target?.project_id === row.project_id && saved.id === id && saved.projectId === row.project_id,
+            "Configured provider proof reference belongs to another row or project");
+          return saved as T;
+        } }, value as Attempt);
         const speech = assertNarrationSpeechAttemptInput(speechReader, value as Attempt);
         if (speech) {
           fail(value.id === row.id && value.projectId === row.project_id, "Speech attempt row identity differs");

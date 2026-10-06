@@ -3,6 +3,8 @@ import type { ActorContext, ProjectRecord } from '@openslate/core';
 import type { Store } from '../persistence/store.js';
 import type { ProductionService } from '../application/service.js';
 import type { NarrationState } from './types.js';
+import { isProxy } from 'node:util/types';
+import { earlierRequestHoldIds, assertRequestHoldCutoff } from './request-holds.js';
 
 type Reader = Pick<Store, 'get' | 'getProject' | 'db'>;
 export interface NarrationSession { id: string; projectId: string; requestId: string; principalId: 'local-user'; shotId?: string }
@@ -10,6 +12,32 @@ export interface NarrationShotScope { id: string; version: 1; projectId: string;
 interface ScopeTarget { id: string; version: 1; projectId: string; requestId: string; shotId: string; segmentId: string; scopeDigest: string }
 interface Message { id: string; projectId: string; principalId: string; editing: boolean; scopeIds: string[] }
 const fail = (value: unknown, message: string): void => invariant(value, 'SCOPE_DENIED', message);
+interface RequestedShotScope { id: string; version: 1; projectId: string; requestId: string; principalId: string; segmentId: string; shotId: string; projectRevisionId: string; projectDigest: string }
+export function assertRequestedNarrationShotScope(reader: Reader, projectId: string, input: unknown): asserts input is RequestedShotScope {
+  fail(input && typeof input === 'object' && !Array.isArray(input) && !isProxy(input), 'Requested narration mapping is invalid');
+  const descriptors = Object.getOwnPropertyDescriptors(input!);
+  fail((Object.getPrototypeOf(input) === Object.prototype || Object.getPrototypeOf(input) === null) && Object.getOwnPropertySymbols(input!).length === 0
+    && Object.values(descriptors).every(field => field.enumerable && Object.hasOwn(field, 'value')), 'Requested narration mapping must contain only plain saved data');
+  const mapping = input as RequestedShotScope;
+  fail(Object.keys(mapping).sort().join('\0') === ['id','version','projectId','requestId','principalId','segmentId','shotId','projectRevisionId','projectDigest'].sort().join('\0')
+    && mapping.version === 1 && mapping.projectId === projectId && [mapping.id,mapping.requestId,mapping.principalId,mapping.segmentId,mapping.shotId,mapping.projectRevisionId].every(id => typeof id === 'string' && id.length > 0 && id.length <= 160)
+    && /^[a-f0-9]{64}$/.test(mapping.projectDigest) && mapping.id === digest({ projectId, requestId: mapping.requestId, segmentId: mapping.segmentId }), 'Requested narration mapping changed');
+  const request = record<Message>(reader, 'message', mapping.requestId, projectId);
+  const meta = reader.db.prepare("SELECT project_id,length(CAST(body AS BLOB)) bytes FROM entities WHERE kind='project_revision' AND id=?").get(mapping.projectRevisionId) as { project_id: string; bytes: number } | undefined;
+  fail(meta?.project_id === projectId && meta.bytes > 0 && meta.bytes <= 8 * 1024 * 1024, 'Requested narration lost its saved shot revision');
+  const saved = reader.get<{ project: ProjectRecord }>('project_revision', mapping.projectRevisionId)?.project;
+  const shot = saved?.shots.find(shot => shot.id === mapping.shotId);
+  fail(request?.id === mapping.requestId && request.projectId === projectId && request.principalId === mapping.principalId && request.editing && Array.isArray(request.scopeIds) && request.scopeIds.length <= 400 && saved?.id === projectId
+    && saved.revisionId === mapping.projectRevisionId && digest(saved) === mapping.projectDigest && shot && (request.scopeIds.includes(projectId) || request.scopeIds.includes(shot.id) || request.scopeIds.includes(shot.sceneId)),
+    'Requested narration is outside its original human scope');
+}
+export function requestedNarrationShot(reader: Reader, projectId: string, requestId: string, principalId: string, segmentId: string): string | null {
+  const key = digest({ projectId, requestId, segmentId }), mapping = record<RequestedShotScope>(reader, 'narration_requested_shot_scope', key, projectId);
+  if (!mapping) return null;
+  assertRequestedNarrationShotScope(reader, projectId, mapping);
+  fail(mapping.requestId === requestId && mapping.principalId === principalId && mapping.segmentId === segmentId, 'Requested narration mapping differs from its original request');
+  return mapping.shotId;
+}
 export const shotDraftId = (projectId: string, shotId: string): string => digest({ projectId, shotId });
 export const shotSessionHeadId = shotDraftId;
 function record<T>(reader: Reader, kind: string, id: string, projectId: string): T | undefined {
@@ -22,6 +50,7 @@ function record<T>(reader: Reader, kind: string, id: string, projectId: string):
 export function narrationAuthorScope(reader: Reader, projectId: string, requestId: string, principalId: string, segmentId?: string): NarrationShotScope | null {
   const request = record<Message>(reader, 'message', requestId, projectId);
   invariant(request?.id === requestId && request.projectId === projectId && request.principalId === principalId && request.editing && Array.isArray(request.scopeIds), 'SCOPE_DENIED', 'Narration requires its editable human request');
+  if (segmentId !== undefined && requestedNarrationShot(reader, projectId, requestId, principalId, segmentId)) return null;
   if (request.scopeIds.includes(projectId)) return null;
   const scope = record<NarrationShotScope>(reader, 'narration_shot_scope', requestId, projectId);
   invariant(scope?.id === requestId && scope.requestId === requestId && scope.version === 1 && scope.projectId === projectId && scope.principalId === principalId
@@ -132,6 +161,8 @@ export function narrationSpeechShotScope(reader: Reader, projectId: string, cand
   const review = reader.get<{ projectId: string; requestId: string; principalId: string; section: { segmentId: string }; proposal: { id: string } }>('narration_speech_review', candidate.grantId);
   if (!review) return null;
   fail(review.projectId === projectId, 'Speech scope belongs to another project');
+  const requested = requestedNarrationShot(reader, projectId, review.requestId, review.principalId, review.section.segmentId);
+  if (requested) return requested;
   const scope = narrationAuthorScope(reader, projectId, review.requestId, review.principalId, review.section.segmentId);
   if (scope) return scope.shotId;
   const proposal = reader.db.prepare("SELECT project_id,json_extract(body,'$.requestId') requestId,json_extract(body,'$.principalId') principalId,json_extract(body,'$.section.segmentId') segmentId FROM entities WHERE kind='narration_speech_proposal' AND id=?")
@@ -160,13 +191,24 @@ export function narrationSpeechShotScopes(reader: Reader, projectId: string, can
   }))];
 }
 /** Only this exact reviewed speech job may run through its own compact writing hold. Other holders and project/scene holds still win. */
-export function narrationSpeechHoldExemption(reader: Reader, projectId: string, candidateId: string | null): { scopeId: string; ownerId: string } | null {
+export function narrationSpeechHoldExemption(reader: Reader, projectId: string, candidateId: string | null): { scopeId: string; ownerId: string; requested?: true; holdIds?: string[] } | null {
   if (!candidateId) return null;
   const candidate = reader.get<{ projectId: string; grantId: string; nodeId: string }>('candidate', candidateId);
   if (candidate?.projectId !== projectId) return null;
-  const review = reader.get<{ projectId: string; requestId: string; principalId: string; nodeId: string; section: { segmentId: string } }>('narration_speech_review', candidate.grantId);
+  const review = reader.get<{ projectId: string; requestId: string; principalId: string; nodeId: string; requested?: true; requestedAtCursor?: number; epochId?: string; section: { segmentId: string } }>('narration_speech_review', candidate.grantId);
   if (!review) return null;
   fail(review.projectId === projectId && review.nodeId === candidate.nodeId, 'The speech hold exemption lost its exact reviewed candidate');
   const scope = narrationAuthorScope(reader, projectId, review.requestId, review.principalId, review.section.segmentId);
+  if (review.requested === true) {
+    assertRequestHoldCutoff(reader,projectId,review.requestId,review.requestedAtCursor,review.epochId);
+    const requested = requestedNarrationShot(reader, projectId, review.requestId, review.principalId, review.section.segmentId);
+    if(requested) {
+      const mapping=record<RequestedShotScope>(reader,'narration_requested_shot_scope',digest({projectId,requestId:review.requestId,segmentId:review.section.segmentId}),projectId)!;
+      const before=reader.get<{project:ProjectRecord}>('project_revision',mapping.projectRevisionId)?.project.shots.find(shot=>shot.id===requested);
+      const current=reader.getProject(projectId).shots.find(shot=>shot.id===requested);
+      invariant(before && current && canonical(before.narration??null)===canonical(current.narration??null),'NARRATION_SPEECH_STALE','The requested shot writing or voice intent changed before generation.');
+    }
+    return {scopeId:requested??scope?.shotId??projectId,ownerId:review.requestId,requested:true,holdIds:earlierRequestHoldIds(reader,projectId,review.requestedAtCursor!)};
+  }
   return scope ? { scopeId: scope.shotId, ownerId: scope.requestId } : null;
 }

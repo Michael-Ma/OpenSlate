@@ -88,7 +88,7 @@ test('continuation is one explicit normal message per applied change and preserv
   assert.equal(modelAppliedCurrent(savedApply, current, false, true), false);
   const command = modelSettingsContinuation('project', 'continue-once' , activeProjectEdit(messages, 'project'), savedApply.receipt);
   assert.equal(command.path, '/api/projects/project/messages'); assert.equal(command.body.continuationRequestId, 'current');
-  assert.equal(command.body.editing, true); assert.deepEqual(command.body.scopeIds, ['project']); assert.match(command.body.text, /for my review/);
+  assert.equal(command.body.editing, true); assert.deepEqual(command.body.scopeIds, ['project']); assert.match(command.body.text, /scene controls to generate and review/);
   assert.equal(modelContinuationSent(savedApply, registry.snapshot('project')), false); assert.equal(calls, 0);
   await registry.run('project', command, async () => { calls++; throw Error('lost response'); }, uncertain);
   messages[1].state = 'superseded'; messages.push({ id: 'later', state: 'active', editing: true, scopeIds: ['project'] });

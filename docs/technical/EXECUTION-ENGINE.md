@@ -6,7 +6,7 @@ The execution engine advances the saved graph through trusted providers and loca
 
 A **node** is a planned operation. A **candidate** is a human-origin creative result slot. An **attempt** is one submission/recovery/retry under that candidate. A **receipt** records observed provider/local effects. An **artifact** is owned verified output. A current **binding** selects which candidate/output can satisfy the graph.
 
-Admission rechecks current plan/selection, epoch/hold/pause controls, profile identity, accepted audio, exact video review, one-use generation origin, finite external allowance, project cap and concurrency. Reservations and attempt/submission identity are committed before external effects. Technical retry requires trusted eligible failure evidence and bounded policy; it does not become a new aesthetic alternative.
+Configured admission rechecks the exact active candidate/node, pinned profile definition/options, credential/native/media readiness, epoch/hold/pause controls, accepted audio and exact keyframe review before video dispatch. It creates no usage allowance or hidden consumption step. Attempt/submission identity is committed before external effects. Technical retry requires trusted eligible failure evidence and bounded policy; it does not become a new aesthetic alternative.
 
 ## State and recovery
 
@@ -29,9 +29,9 @@ Files are outside short database transactions. [Output storage](../implementatio
 ## Source and checks
 
 - [Engine](../../apps/server/src/execution/engine.ts)
-- [Durable external admission](../../apps/server/src/execution/durable-external-admission.ts), [current selection guard](../../apps/server/src/execution/current-generated-selection.ts)
+- Configured external admission in `apps/server/src/execution/`, [current selection guard](../../apps/server/src/execution/current-generated-selection.ts); earlier durable accounting remains available for historical records
 - [Submission preparation](../../apps/server/src/execution/submission-preparation.ts), [output store](../../apps/server/src/execution/output-store.ts), [ingestion router](../../apps/server/src/execution/ingestion-router.ts)
 - Provider-specific execution/authority/receipt modules in `apps/server/src/execution/`.
 - Tests: execution/recovery/routing/spool suites, competing admission, lease loss, Stop/selection races, rejected-versus-unknown outcome and provider bridges.
 
-The engine bounds OpenSlate's own configured activity. Estimated accounting is not an account-wide vendor billing cap, and offline tests do not establish undocumented provider idempotency.
+The engine executes the user's requested scoped work using configured providers. Historical accounting is retained; the active flow has no project spending-cap or usage-allowance prompt. Offline tests do not establish undocumented provider idempotency.

@@ -51,17 +51,17 @@ test('Codex history describes consumed permissions without inventing measured qu
   assert.equal(spendingAllowanceUsage(old),'1 / 2 starts used · $0.000123 USD / $0.000999 USD configured estimate used');
   assert.equal(spendingEstimate(old.providerDisplay,'0'),'$0.00 USD configured estimate / attempt');
 });
-test('native setup never presents Codex authentication or quota as currently verified',()=>{
-  const current=provider();assert.match(providerEstimate(current),/Codex subscription quota.*not estimated/);
-  assert.match(providerExecutionStatus(current),/authentication is checked before each start.*Quota is unverified/);
-  assert.doesNotMatch(providerExecutionStatus(current),/Provider ready/);
+test('configured providers require no separate key or usage approval while setup failures remain actionable',()=>{
+  const current=provider();assert.equal(providerEstimate(current),'Uses your Codex subscription');
+  assert.match(providerExecutionStatus(current),/Codex configured.*sign-in is checked when used/);
+  assert.doesNotMatch(providerExecutionStatus(current),/approval|allowance|quota.*verified/i);
   assert.match(providerExecutionStatus({...current,readiness:{...current.readiness,realExecutionEnabled:false}}),/setup is incomplete/);
   assert.match(providerExecutionStatus({...current,readiness:{...current.readiness,realExecutionEnabled:false,enabledByHost:false}}),/disabled/);
   assert.equal(providerExecutionStatus({...current,projectExecution:{compatible:false,message:'Saved execution is incompatible'}}),'Saved execution is incompatible');
-  const missing={...current,usage:undefined,estimatedCost:null};assert.match(providerEstimate(missing),/not estimated/);
+  const missing={...current,usage:undefined,estimatedCost:null};assert.equal(providerEstimate(missing),'Uses your Codex subscription');
   const api={...current,profile:{kind:'image',adapter:'openai-image'},usage:undefined};
   assert.equal(providerEstimate(api),'Configured estimate: $0.00 USD / attempt');
-  assert.equal(providerExecutionStatus(api),'Provider ready · generation permission and a spending allowance are still required.');
+  assert.equal(providerExecutionStatus(api),'Provider configured · ready for scene generation.');
 });
 test('choosing Codex image preserves other provider selections and exact project catalog binding',()=>{
   const catalog={catalogDigest:hash('a'),defaults:['fake-image','video'],profiles:[{id:'fake-image',profile:{kind:'image'}},provider(),{id:'video',profile:{kind:'video'}}]};

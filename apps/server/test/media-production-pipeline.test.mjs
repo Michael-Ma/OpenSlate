@@ -15,7 +15,6 @@ import { Store } from "../dist/persistence/store.js";
 import { ProductionService } from "../dist/application/service.js";
 import { EnvironmentMediaCredentials } from "../dist/application/provider-credentials.js";
 import { createMediaExecutionRuntime } from "../dist/application/media-execution-runtime.js";
-import { allowanceIssueContextDigest } from "../dist/application/external-allowances.js";
 import { NarrationService, NarrationCanonicalService } from "../dist/narration/index.js";
 
 const execute = promisify(execFile), hash = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -26,7 +25,7 @@ const imageProfile = { id: "pipeline-image", revision: "1", kind: "image", adapt
 const videoProfile = { id: "pipeline-video", revision: "1", kind: "video", adapter: "minimax-h3", executionVersion: "1",
   configuration: { model: "MiniMax-H3", settings: { resolution: "768P" } }, maxConcurrency: 1, unitCostMicros: "200000", maxRetries: 0, minFrames: 120, maxFrames: 450 };
 
-test("production composition gates exact frames and spending, then automatically renders injected H3 media with accepted narration across restart", { timeout: 60000 }, async t => {
+test("production composition gates exact frames, then renders configured H3 media with accepted narration across restart", { timeout: 60000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), "openslate-production-pipeline-"));
   const calls = { image: 0, submit: 0, poll: 0, download: 0, lookup: 0, render: 0 };
   let store, provider, runtime, production;
@@ -107,24 +106,15 @@ test("production composition gates exact frames and spending, then automatically
     creative: { updateShots: [{ id: shot.id, reauthorPrompts: true }] } });
   production.apply(projectId, human, prepared.id);
   const binding = kind => store.list("node_binding", projectId).find(value => value.node.kind === kind);
-  const issue = profile => {
-    const selected = binding(profile.kind), input = { profileDigest: String(providerProfileArguments(profile).profileDigest), profileDefinitionDigest: digest(profile),
-      selections: [{ candidateId: selected.candidateId, nodeId: selected.id, specDigest: selected.node.specDigest }], maxAttempts: 1,
-      maxEstimatedMicros: profile.unitCostMicros, expiresAt: new Date(Date.now() + 3600000).toISOString() };
-    const reviewer = production.beginRequest(projectId, "human", "Allow one exact synthetic test operation", { editing: false, contextDigest: allowanceIssueContextDigest(projectId, input) });
-    return runtime.allowances.issue(projectId, reviewer, input);
-  };
   let result = await runtime.engine.runReady();
-  assert.ok(result.blocked.some(item => item.code === "EXTERNAL_ALLOWANCE_UNAVAILABLE")); assert.equal(runtime.engine.attempts(projectId).length, 0);
-  issue(imageProfile); issue(videoProfile);
-  result = await runtime.engine.runReady();
+  assert.equal(runtime.engine.attempts(projectId).length, 1);
   const frameOutput = runtime.engine.outputs(projectId).find(output => output.nodeId === binding("image").id);
   assert.ok(frameOutput, JSON.stringify({ result, attempts: runtime.engine.attempts(projectId) }));
   const frameRef = frameOutput.artifact;
   assert.equal(frameRef.sha256, hash(png)); assert.deepEqual(await readFile(store.get("artifact", frameRef.artifactId).path), png);
   for (let pass = 0; pass < 2; pass++) await runtime.engine.runReady();
-  assert.equal(calls.submit, 0, "A spending allowance cannot stand in for exact keyframe review");
-  assert.equal(store.list("external_allowance_consumption", projectId).length, 1);
+  assert.equal(calls.submit, 0, "A configured provider cannot stand in for exact keyframe review");
+  assert.equal(store.list("external_allowance_consumption", projectId).length, 0);
   const reviewer = production.beginRequest(projectId, "human", "Approve this exact blue keyframe", { editing: false });
   const review = runtime.engine.reviewSnapshot(projectId);
   production.approve(projectId, reviewer, review.id, [binding("video").id]);
@@ -149,7 +139,7 @@ test("production composition gates exact frames and spending, then automatically
   assert.equal(attempts.length, 4); assert.ok(attempts.every(attempt => attempt.phase === "succeeded"));
   const local = attempts.filter(attempt => attempt.request.execution.adapter === "local-media");
   assert.equal(local.length, 2); assert.ok(local.every(attempt => attempt.taskId === null && attempt.candidateId === null && attempt.reservationId === null));
-  assert.equal(store.list("external_allowance_consumption", projectId).length, 2); assert.equal(store.list("local_execution_completion", projectId).length, 2);
+  assert.equal(store.list("external_allowance_consumption", projectId).length, 0); assert.equal(store.list("local_execution_completion", projectId).length, 2);
   assert.equal(provider.acceptedCount(), 0); assert.deepEqual(calls, { image: 1, submit: 1, poll: 1, download: 1, lookup: 1, render: 1 });
   const before = structuredClone(calls), savedIds = attempts.map(attempt => attempt.id);
   store.close(); provider.close(); open();

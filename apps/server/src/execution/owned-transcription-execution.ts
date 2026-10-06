@@ -6,6 +6,7 @@ import type { OwnedTranscriptionAttemptInput, OwnedTranscriptionProposal, OwnedT
 import { assertOwnedTranscriptionAttemptInput, assertOwnedTranscriptionReview, resolveOwnedTranscriptionApplication } from "../narration/owned-transcription-authorization.js";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 import type { NarrationState } from "../narration/types.js";
+import { requestedTranscriptionHoldIds } from '../narration/request-holds.js';
 
 type Reader = Pick<Store, "get" | "getProject" | "db">;
 type Resolved = ReturnType<typeof resolveOwnedTranscriptionApplication>;
@@ -114,4 +115,8 @@ export function assertOwnedTranscriptionCurrent(reader: Reader, project: Project
 export function assertOwnedTranscriptionAttemptCurrent(reader: Reader, attempt: Readonly<Attempt>): void {
   const resolved = resolveOwnedTranscriptionAttempt(reader, attempt); if (!resolved) return;
   assertOwnedTranscriptionCurrent(reader, reader.getProject(attempt.projectId), reviewedNode(resolved), attempt.candidateId, resolved);
+  invariant(!reader.get<{paused:boolean}>('execution_control',attempt.projectId)?.paused,'EXECUTION_PAUSED','Execution is paused.');
+  const ignored=requestedTranscriptionHoldIds(reader,attempt.projectId,attempt.candidateId);
+  const holds=reader.db.prepare("SELECT id FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=?").all(attempt.projectId,attempt.projectId) as {id:string}[];
+  invariant(!holds.some(hold=>!ignored.includes(hold.id)),'EXECUTION_HELD','Transcription is held by a current editing request.');
 }

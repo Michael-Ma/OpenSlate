@@ -1,4 +1,4 @@
-import { digest, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolHandlerId } from "@openslate/core";
+import { digest, invariant, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, STAGES, toolCatalog, toolHandlerId } from "@openslate/core";
 import type { ToolContractVersion } from "@openslate/core";
 import { createSkillLock, loadSkillCatalog } from "@openslate/director";
 import type { SkillCapabilityLock, SkillEnvironment } from "@openslate/director";
@@ -17,9 +17,10 @@ export function directorSkillEnvironment(options: DirectorSkillConfiguration, ve
 }
 
 /** Trusted configuration helper. Creates/verifies snapshots but does not install or upgrade a project lock. */
-export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "4.0.0"): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
+export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "4.0.0", guidanceVersion = version === "4.0.0" ? "5" : version.split(".")[0]): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
   const environment = directorSkillEnvironment(options, version);
-  const root = version === "1.0.0" ? join(options.repositoryRoot, "skills") : join(options.repositoryRoot, `skills/v${version.split(".")[0]}`);
+  invariant([version.split(".")[0], ...(version === "4.0.0" ? ["5"] : [])].includes(guidanceVersion), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance package");
+  const root = version === "1.0.0" ? join(options.repositoryRoot, "skills") : join(options.repositoryRoot, `skills/v${guidanceVersion}`);
   const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(root, "production"), join(root, "plan-authoring")] });
   return { environment, lock: createSkillLock(catalog, { selectedSkillIds: ["production", "plan-authoring"], bindings: environment.bindings!,
     prompts: STAGES.map(stage => ({ id: `production/${stage}@1`, skillId: "production", path: `references/stages/${stage}.md` })) }) };

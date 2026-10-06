@@ -102,13 +102,16 @@ test("audio enablement requires executable tools and rejects malformed additive 
   }
 });
 
-test("missing audio key and missing allowance each block without consuming a start", async t => {
+test("a missing audio key blocks technically; configured audio starts without an extra allowance", async t => {
   const f = fixture(t, { keys: false }); await f.seed({ speechOnly: true }); f.issue("speech");
   let result = await f.runtime.engine.runReady(); assert.ok(result.blocked.some(row => row.code === "MEDIA_CREDENTIAL_MISSING")); f.noAdmission();
   f.keys = true;
   const other = fixture(t); await other.seed({ speechOnly: true });
-  result = await other.runtime.engine.runReady(); assert.ok(result.blocked.some(row => row.code === "EXTERNAL_ALLOWANCE_UNAVAILABLE")); other.noAdmission();
-  assert.equal(f.calls.speech + other.calls.speech, 0);
+  result = await other.runtime.engine.runReady(); assert.equal(result.dispatched, 1);
+  assert.equal(other.store.list("external_allowance", other.projectId).length, 0);
+  assert.equal(other.store.list("external_allowance_consumption", other.projectId).length, 0);
+  assert.equal(other.runtime.engine.attempts(other.projectId)[0].request.externalAllowanceId, undefined);
+  assert.equal(f.calls.speech, 0); assert.equal(other.calls.speech, 1);
 });
 
 for (const changes of [{ voice: "unsupported-voice" }, { text: "x".repeat(2000) }]) test(`audio operation preflight preserves allowance for ${changes.voice ? "unsupported voice" : "oversized text"}`, async t => {
@@ -126,11 +129,11 @@ test("unsupported transcription granularity consumes no transcription allowance 
   assert.equal(f.rows("transcription_audio_intent").length, 0); assert.equal(f.calls.transcription, 0); assert.equal(f.calls.derivative, 0);
 });
 
-test("actual runtime composes approved speech, owned normalization and word candidate publication, then reopens without repeating work", async t => {
-  const f = fixture(t); await f.seed(); f.issue("speech"); f.issue("transcription");
+test("actual runtime composes requested speech without a separate allowance, owned normalization and word candidate publication, then reopens without repeating work", async t => {
+  const f = fixture(t); await f.seed();
   await f.runtime.engine.runReady(); await f.runtime.engine.runReady();
   const attempts = f.rows("attempt"); assert.equal(attempts.length, 2); assert.ok(attempts.every(row => row.phase === "succeeded"));
-  assert.equal(f.rows("external_allowance_consumption").length, 2); assert.ok(f.rows("reservation").every(row => row.state === "charged"));
+  assert.equal(f.rows("external_allowance_consumption").length, 0); assert.ok(f.rows("reservation").every(row => row.state === "charged"));
   const candidates = f.rows("transcript_candidate"); assert.equal(candidates.length, 1); assert.equal(candidates[0].status, "unreviewed");
   assert.deepEqual(candidates[0].projection.words.map(row => row.word), ["Leather", "boots."]);
   for (const kind of ["narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_transcript_selection", "narration_canonical"]) assert.equal(f.rows(kind).length, 0);
@@ -143,19 +146,19 @@ test("actual runtime composes approved speech, owned normalization and word cand
 });
 
 test("runtime recovers a retained speech spool after local ingestion contention without another POST or allowance", async t => {
-  const f = fixture(t); await f.seed({ speechOnly: true }); f.issue("speech");
+  const f = fixture(t); await f.seed({ speechOnly: true });
   f.runtime.localMedia.importMedia = async () => { throw new DomainError("MEDIA_BUSY", "Synthetic shared worker contention"); };
   await f.runtime.engine.runReady(); const attempt = f.rows("attempt")[0]; assert.notEqual(attempt.phase, "succeeded");
-  assert.equal(f.calls.speech, 1); assert.equal(f.rows("external_allowance_consumption").length, 1);
+  assert.equal(f.calls.speech, 1); assert.equal(f.rows("external_allowance_consumption").length, 0);
   f.store.put("attempt", attempt.id, f.projectId, { ...attempt, leaseExpiresAt: 0 });
   f.keys = false; f.open(); await f.runtime.engine.reconcile();
   const recovered = f.store.get("attempt", attempt.id); assert.equal(recovered.phase, "succeeded");
   assert.equal(f.calls.speech, 1); assert.equal(f.calls.normalization, 1); assert.equal(f.rows("attempt").length, 1);
-  assert.equal(f.rows("external_allowance_consumption").length, 1); assert.equal(f.store.get("reservation", recovered.reservationId).state, "charged");
+  assert.equal(f.rows("external_allowance_consumption").length, 0); assert.equal(f.store.get("reservation", recovered.reservationId).state, "charged");
 });
 
 test("two admitted transcriptions contend on the actual shared worker and the waiting attempt resumes after reopen with one POST each", async t => {
-  const f = fixture(t); await f.seed({ secondTranscription: true }); f.issue("speech"); f.issue("transcription");
+  const f = fixture(t); await f.seed({ secondTranscription: true });
   await f.runtime.engine.runReady(); assert.equal(f.calls.speech, 1);
   const media = f.runtime.localMedia, describe = media.describeTranscriptionAudio.bind(media);
   let arrived = 0, release;
@@ -172,7 +175,7 @@ test("two admitted transcriptions contend on the actual shared worker and the wa
   const waiting = audioAttempts.find(row => row.phase === "preparing"), completed = audioAttempts.find(row => row.phase === "succeeded");
   assert.ok(waiting); assert.ok(completed); assert.equal(waiting.preparation.waitCount, 1); assert.equal(waiting.leaseExpiresAt, 0);
   assert.equal(f.calls.transcription, 1); assert.equal(f.calls.derivative, 1);
-  assert.equal(f.rows("external_allowance_consumption").length, 3);
+  assert.equal(f.rows("external_allowance_consumption").length, 0);
   assert.equal(f.rows("transcription_preparation_intent").length, 2);
   assert.equal(f.rows("transcription_execution_dispatch").length, 1);
   assert.equal(f.store.get("reservation", waiting.reservationId).state, "reserved");

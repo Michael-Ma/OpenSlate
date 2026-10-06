@@ -1,4 +1,6 @@
 import { CODEX_IMAGE_RECORD_KINDS, assertCodexImageArtifact } from "../execution/codex-image-lineage.js";
+import { assertConfiguredProviderAdmission, assertConfiguredProviderPin } from "../execution/provider-use.js";
+import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
 import { resolveCodexImageAdmission, assertCodexImageMappingAdmission } from "../execution/codex-image-authority.js";
 import { assertCodexImageExecutionDispatch, assertCodexImageExecutionRun, assertCodexImageExecutionResult } from "../execution/codex-image-receipts.js";
 import type { CodexImageExecutionMapping, CodexImageExecutionDispatch, CodexImageExecutionRun, CodexImageExecutionResult } from "../execution/codex-image-receipts.js";
@@ -173,12 +175,28 @@ export class Store {
       if (body.candidateId !== null) reference("candidate", body.candidateId);
       else invariant(typeof body.workKey === "string", "REFERENCE_REQUIRED", "Local work requires a work key");
       invariant(Number.isSafeInteger(body.ordinal) && Number(body.ordinal) >= 1, "VALIDATION_ERROR", "Invalid attempt ordinal");
+      const configured = assertConfiguredProviderPin(this, { ...body, id, projectId } as unknown as Attempt);
+      if (configured) {
+        reference("capability_lock", (body.request as Attempt["request"]).providerUse!.capabilityLockId);
+        reference("grant", this.get<{ grantId: string }>("candidate", String(body.candidateId))!.grantId);
+      }
+      // Initial admission writes its reservation next. Every later attempt write must retain the full proof.
+      if (this.get("attempt", id)) assertConfiguredProviderAdmission(this, { ...body, id, projectId } as unknown as Attempt);
       assertNarrationSpeechAttemptInput(this, { ...body, id, projectId } as unknown as Attempt);
       assertOwnedTranscriptionAttemptInput(this, { ...body, id, projectId } as unknown as Attempt);
       assertTranscriptionPreparationAttemptState(this, { ...body, id, projectId } as unknown as Attempt);
     }
-    if (kind === "reservation") reference("attempt", body.attemptId);
+    if (kind === "reservation") {
+      reference("attempt", body.attemptId);
+      const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      assertConfiguredProviderAdmission({ get: <T>(targetKind: string, targetId: string): T | undefined =>
+        targetKind === "reservation" && targetId === id ? { ...body, id, projectId } as T : this.get<T>(targetKind, targetId) }, attempt);
+    }
     if (kind === "narration_speech_proposal") assertNarrationSpeechProposal(this, projectId, { ...body, id, projectId });
+    if (kind === "narration_requested_shot_scope") {
+      assertRequestedNarrationShotScope(this, projectId, { ...body, id, projectId });
+      reference("message", body.requestId); reference("project_revision", body.projectRevisionId);
+    }
     if (kind === "narration_speech_review") {
       assertNarrationSpeechReview(this, projectId, { ...body, id, projectId });
       if (!this.get(kind, id)) invariant(!this.db.prepare("SELECT 1 FROM entities WHERE kind='candidate' AND json_extract(body,'$.grantId')=? LIMIT 1").get(id),
@@ -382,6 +400,7 @@ export class Store {
     if (["image_execution_mapping", "image_execution_dispatch", "image_execution_result"].includes(kind)) {
       reference("attempt", id);
       const attempt = this.get<Attempt>("attempt", id)!;
+      assertConfiguredProviderAdmission(this, attempt);
       const value = { ...body, id, projectId };
       const mapping = this.get<ImageExecutionMapping>("image_execution_mapping", id);
       const dispatch = this.get<ImageExecutionDispatch>("image_execution_dispatch", id);
@@ -485,6 +504,7 @@ export class Store {
     if (["h3_execution_mapping", "h3_execution_dispatch", "h3_execution_submit", "h3_execution_observation", "h3_poll_schedule"].includes(kind)) {
       reference("attempt", body.attemptId);
       const attempt = this.get<Attempt>("attempt", String(body.attemptId))!;
+      assertConfiguredProviderAdmission(this, attempt);
       const mapping = this.get<H3ExecutionMapping>("h3_execution_mapping", attempt.id), dispatch = this.get<H3ExecutionDispatch>("h3_execution_dispatch", attempt.id);
       const submit = this.get<H3ExecutionSubmit>("h3_execution_submit", attempt.id), value = { ...body, id, projectId };
       if (kind === "h3_execution_mapping") {
@@ -672,6 +692,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Viggle execution receipts are immutable");
       if ((CODEX_IMAGE_RECORD_KINDS as readonly string[]).includes(kind)) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Native image receipts are immutable");
       if (kind === "project_model_preview") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Model previews are immutable");
+      if (kind === "narration_requested_shot_scope") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Requested shot narration scope is immutable");
       if (kind === "viggle_h3_poll_schedule") {
         const previous = JSON.parse(old.body) as Record<string, unknown>, next = JSON.parse(encoded) as Record<string, unknown>;
         for (const field of ["version", "attemptId", "requestDigest", "taskId", "policy"])

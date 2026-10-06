@@ -9,7 +9,7 @@ OpenSlate is a single-user local video studio. The conversational director devel
 | Conversational filmmaking | A native/fake director reads saved brief, treatment, scenes, shots, media and pending decisions; compatible shipped guidance updates before eligible fresh native turns |
 | Editable production | Stable identities and revision-checked commands preserve unaffected outputs across scoped edits; a resizable Director pane and safe Markdown support iteration |
 | Declarative planning | Restricted TypeScript compiles into a durable graph; no generated JavaScript is evaluated |
-| Human review | Exact generation permission, finite usage/spending allowance and returned-frame/motion approval govern media execution |
+| Human review | Two per-scene generation decisions: create keyframes, then review exact returned frames/motion/video recipe before starting video; configured providers need no separate usage approval |
 | Recovery | Service-issued intents/candidates/attempts, durable receipts and uncertain-submission handling survive interruption |
 | Narration | Explicit silence, script-first or recording-first review and accepted short within-shot voiceover |
 | Playback/export | Synchronized picture/narration/music preview and an exact local FFmpeg render manifest |
@@ -56,7 +56,7 @@ flowchart TB
 2. Read current saved evidence and gaps. The director proposes creative changes and a plan through locked typed tools.
 3. Prepare without media effects: validate the mutation footprint, workflow prerequisites, source graph and reuse impact.
 4. Apply against current revisions and request authority. Publish compatible creative/plan changes atomically.
-5. Workers admit only eligible operations. The application checks one-use generation origin, exact reviews, allowances, holds, timing and current selection.
+5. Workers admit only current requested operations. The application checks configured provider readiness, scoped generation origin, exact keyframe reviews, holds, timing and current selection.
 6. Retain provider receipts and outputs durably. Poll/recover the existing job; an uncertain effect is not a retry instruction.
 7. Show the next useful decision, inspect actual frames/motion and audition the timeline. Scoped revisions preserve valid branches and historical attempts.
 

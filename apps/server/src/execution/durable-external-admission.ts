@@ -1,4 +1,4 @@
-import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
+import { canonical, digest, DomainError, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProjectRecord, ProviderProfile } from "@openslate/core";
 import { isLegacyExecution, profileExecutionIdentity } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
@@ -6,8 +6,8 @@ import { InstallationRecoveryGuard } from "../application/installation-recovery.
 import type { Attempt, Candidate, ExternalExecutionAdmission, NodeBinding, PlanRecord } from "./engine.js";
 import type { AllowanceSelection, ExternalAllowance, ExternalAllowanceConsumption } from "./external-allowance-records.js";
 
-/** Re-read canonical selection; mutable bindings or today's defaults cannot widen a saved allowance. */
-export function currentAllowanceSelection(store: Store, projectId: string, selection: AllowanceSelection, profileDigest: string, profileDefinitionDigest: string): {
+/** Re-read the exact canonical selection and pinned profile before any external dispatch. */
+export function currentExternalSelection(store: Store, projectId: string, selection: AllowanceSelection, profileDigest: string, profileDefinitionDigest: string): {
   project: ProjectRecord; binding: NodeBinding; profile: ProviderProfile;
 } {
   const project = store.getProject(projectId), binding = store.get<NodeBinding>("node_binding", selection.nodeId);
@@ -20,12 +20,22 @@ export function currentAllowanceSelection(store: Store, projectId: string, selec
     && binding.candidateId === selection.candidateId && binding.node.specDigest === selection.specDigest && node
     && Object.keys(binding.outputs).length === 0 && canonical(node) === canonical(binding.node)
     && candidate?.projectId === projectId && candidate.nodeId === selection.nodeId && profile?.kind === node.kind,
-  "ALLOWANCE_SELECTION_STALE", "Allowance selection must match the current unfinished plan node and candidate");
+  "EXTERNAL_SELECTION_STALE", "Provider selection must match the current unfinished plan node and candidate");
   const args = providerProfileArguments(profile);
   invariant(!isLegacyExecution(profileExecutionIdentity(profile)) && args.profileDigest === profileDigest && digest(profile) === profileDefinitionDigest
     && Object.entries(args).every(([key, value]) => Object.hasOwn(node.args, key) && canonical(node.args[key]) === canonical(value)),
-  "ALLOWANCE_PROFILE_MISMATCH", "Allowance requires the exact current external profile and compiled settings");
+  "EXTERNAL_PROFILE_MISMATCH", "Dispatch requires the exact current external profile and compiled settings");
   return { project, binding, profile };
+}
+
+/** Compatibility for historical allowance tooling; new dispatch uses currentExternalSelection. */
+export function currentAllowanceSelection(...input: Parameters<typeof currentExternalSelection>): ReturnType<typeof currentExternalSelection> {
+  try { return currentExternalSelection(...input); }
+  catch (error) {
+    if (error instanceof DomainError && ["EXTERNAL_SELECTION_STALE", "EXTERNAL_PROFILE_MISMATCH"].includes(error.code))
+      throw new DomainError(error.code === "EXTERNAL_SELECTION_STALE" ? "ALLOWANCE_SELECTION_STALE" : "ALLOWANCE_PROFILE_MISMATCH", error.message);
+    throw error;
+  }
 }
 
 export function allowanceUsage(store: Store, allowance: ExternalAllowance): { attempts: number; estimatedMicros: string } {
@@ -33,7 +43,31 @@ export function allowanceUsage(store: Store, allowance: ExternalAllowance): { at
   return { attempts: consumed.length, estimatedMicros: consumed.reduce((total, row) => total + moneyMicros(row.estimatedMicros), 0n).toString() };
 }
 
-/** Opt-in host policy. Registration and credentials alone never issue spending authority. */
+/** Current app policy: configured provider use requires readiness, never a spending allowance. */
+export class ConfiguredExternalAdmission implements ExternalExecutionAdmission {
+  readonly recovery: InstallationRecoveryGuard;
+  constructor(readonly store: Store, private readonly assertReady: (profile: Readonly<ProviderProfile>) => void) {
+    this.recovery = new InstallationRecoveryGuard(store);
+    invariant(typeof assertReady === "function" && assertReady.constructor.name !== "AsyncFunction", "ASYNC_TRANSACTION", "Credential readiness must be a synchronous host check");
+  }
+  authorize(input: Parameters<ExternalExecutionAdmission["authorize"]>[0]): Record<string, never> {
+    this.recovery.assertWritable(input.projectId);
+    this.recovery.assertFreshAuthority(input.projectId, "candidate", input.candidateId);
+    invariant(this.store.db.inTransaction, "EXTERNAL_ADMISSION_TRANSACTION_REQUIRED", "Provider readiness must share the Engine transaction");
+    const binding = this.store.get<NodeBinding>("node_binding", input.nodeId);
+    invariant(binding, "EXTERNAL_SELECTION_STALE", "Selected node no longer exists");
+    const current = currentExternalSelection(this.store, input.projectId,
+      { candidateId: input.candidateId, nodeId: input.nodeId, specDigest: binding.node.specDigest },
+      String(providerProfileArguments(input.profile).profileDigest), digest(input.profile));
+    invariant(canonical(current.profile) === canonical(input.profile) && input.estimatedMicros === current.profile.unitCostMicros,
+      "EXTERNAL_PROFILE_MISMATCH", "Admission must use the exact pinned provider profile");
+    const ready = this.assertReady(structuredClone(current.profile)) as unknown;
+    invariant(!(ready && typeof (ready as { then?: unknown }).then === "function"), "ASYNC_TRANSACTION", "Credential readiness cannot return a promise");
+    return {};
+  }
+}
+
+/** Historical opt-in policy retained for saved allowance records and compatibility tools. The app uses ConfiguredExternalAdmission. */
 export class DurableExternalAdmission implements ExternalExecutionAdmission {
   readonly recovery: InstallationRecoveryGuard;
   constructor(readonly store: Store, private readonly assertReady: (profile: Readonly<ProviderProfile>) => void) {

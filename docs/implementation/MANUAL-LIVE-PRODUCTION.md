@@ -1,6 +1,6 @@
 # Human live production testing
 
-Start with one six-second shot and a small finite allowance per operation. This walkthrough uses real account usage/API credits; the human reviews and starts the generation in OpenSlate. Existing keys, route enablement and old allowances do not authorize an unattended test campaign.
+Start with one six-second shot. There is no API-key approval or usage allowance step. This walkthrough uses real account usage/API credits; the human reviews and starts the generation in OpenSlate. Configured keys enable their providers; they are not an instruction to run an unattended test campaign.
 
 ## 1. Prepare the local studio
 
@@ -34,29 +34,27 @@ Example request:
 
 Inspect saved intent, models and one-shot duration. Iterate in chat or edit the card. Existing material can be brought through Bring a brief; confirm the proposed plan after inspecting it. Saving writing/import interpretation starts no media. A selected-shot discussion should preserve other shots.
 
-Compatible narration guidance is an application capability, not spending authorization. Before the first context/dispatch of an eligible fresh native turn, shipped older guidance upgrades automatically so the next conversation can write individual shot narration. Already-started epochs retain their saved capability. If customized/unavailable guidance reports an application error, retain the state/error for diagnosis rather than repairing its database.
+Compatible narration guidance is an application capability; writing needs no authorization. Before the first context/dispatch of an eligible fresh native turn, shipped older guidance upgrades automatically so the next conversation can write individual shot narration. Already-started epochs retain their saved capability. If customized/unavailable guidance reports an application error, retain the state/error for diagnosis rather than repairing its database.
 
 ## 3. Choose silence or accept short voiceover
 
 For picture only, choose **No narration**. Undecided is a visible choice, not implicit silence.
 
-For voiceover, open Audio setup on the shot. Save a short script and generate stock speech under exact review/one-start allowance, or import your owned recording. Listen, bind actual words/description and range, then accept the displayed words/bytes/timing together. A one-second accepted voice may sit inside the planned six-second shot; **do not pad it to six seconds**. Trim overlong audio or deliberately change picture duration. Existing personal voices need eligible registered IDs; creating a new clone is pending.
+For voiceover, open Audio setup on the shot. Save a short script and click Generate for stock speech, without an approval or allowance dialog, or import your owned recording. Listen, bind actual words/description and range, then accept the displayed words/bytes/timing together. A one-second accepted voice may sit inside the planned six-second shot; **do not pad it to six seconds**. Trim overlong audio or deliberately change picture duration. Existing personal voices need eligible registered IDs; creating a new clone is pending.
 
-Continue the edit to update its plan when needed. Check stale speech proposals are unavailable after script/mode/voice changes. Audio acceptance does not authorize another synthesis call.
+Continue the edit to update its plan when needed. Check stale speech proposals are unavailable after script/mode/voice changes. A separate Generate request creates another recording; accepting audio only accepts its words, bytes and timing.
 
 ## 4. Generate and review a keyframe
 
-Open generation review from the treatment controls. Review selected shot/operation intent and confirm the creative permission. Then inspect the exact candidate/profile and approve a finite one-start usage/spending allowance you accept.
+Review the saved scene and click its green **Generate keyframes** check. It queues missing keyframes using the selected image model. Other scenes and completed results are kept. There is no intermediate permission or spending screen.
 
-Once matching plan, holds/readiness and current authority permit, the selected worker runs automatically. Inspect the returned actual image (not a fixture), its dimensions/provenance and account usage. Record attempt/result identity. If it is wrong, request a new take explicitly; aesthetic disappointment is not an automatic retry.
-
-Inspect that actual frame and its motion plan, then use the shot card's approval control. Returned-frame/motion approval is distinct from the image-generation start.
+Inspect the returned actual images, their provenance and account usage. The scene shows every conditioning frame, motion, model and generated duration together. If an image needs revision, edit its direction or prompt, then generate the changed keyframe. Dependent video waits for its next explicit scene check.
 
 ## 5. Generate one video and export
 
-Review a separate six-second video candidate bound to the selected profile, exact approved conditioning frame and effective motion. Check account credit/current price and approve one video start.
+Click the green **Approve & generate video** check after all displayed scene frames have loaded and narration timing is ready. That one action reviews the exact frames and actual video recipe, then queues the missing videos. No separate keyframe approval or spending button follows it. A video model must support the generated duration shown in the scene.
 
-Expected result: one saved vendor job, polling of that same job, downloaded/normalized owned video and a playable shot card. Audition picture/accepted voice/music in Timeline, export locally, and inspect duration/picture/sound in the actual MP4. Generated clip sound is removed; the soundtrack uses accepted narration and optional owned music.
+Inspect the recorded vendor job, polling of that same job, downloaded/normalized owned video and a playable shot card. Audition picture/accepted voice/music in Timeline, export locally, and inspect duration/picture/sound in the actual MP4. Generated clip sound is removed; the soundtrack uses accepted narration and optional owned music.
 
 Refresh and restart/reopen. Confirm the same attempt/take/export identities remain and no duplicate create occurred. Unknown submission must stay attached to its original attempt/liability until reconciled; missing output is not permission to start over.
 
@@ -74,4 +72,4 @@ Record pass/fail, confusing controls, selected models/account route, actual atte
 
 For an error, record its code and phase: before submission, unknown create, vendor processing, download, normalization or export. Keep saved state for diagnosis. Exclude keys, local tokens, signed result URLs, credential files and private project text.
 
-See [current status](STATUS.md), [readiness checkpoint](HUMAN-TESTING-READINESS.md), [review semantics](SPENDING-REVIEW.md) and [audio rehearsal](MANUAL-AUDIO-TESTING.md).
+See [current status](STATUS.md), [readiness checkpoint](HUMAN-TESTING-READINESS.md), [current scene review](../technical/REVIEW-UI.md) and [audio rehearsal](MANUAL-AUDIO-TESTING.md).

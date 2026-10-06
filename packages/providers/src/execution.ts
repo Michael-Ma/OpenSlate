@@ -13,6 +13,8 @@ export interface ExecutionRequest {
   profile?: ExecutionProfileSnapshot;
   /** Application-issued spending correlation, never a credential. */
   externalAllowanceId?: string;
+  /** Host-created readiness proof; retains the exact original profile lock without a spending allowance. */
+  providerUse?: { kind: "configured"; capabilityLockId: string; capabilityLockDigest: string; profileDefinitionDigest: string };
 }
 export interface ExecutionOutput {
   port: string; kind: ArtifactRef["kind"]; mimeType: string; extension: string;

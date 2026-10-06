@@ -52,7 +52,7 @@ function savedWork(snapshot: ProjectSnapshot): string {
 }
 
 function savedEdits(snapshot: ProjectSnapshot): SavedEdit[] {
-  return (snapshot.pendingEditContinuations ?? []).filter(group => group.requestId !== snapshot.latestStoryboardEdit?.requestId
+  return (snapshot.pendingEditContinuations ?? []).filter(group => group.directorState !== 'completed' && group.requestId !== snapshot.latestStoryboardEdit?.requestId
     && group.scopeIds.length > 0
     && group.scopeIds.every(id => snapshot.holds.some(hold => hold.active && hold.ownerId === group.requestId && hold.scopeId === id)))
     .map(group => ({ requestId: group.requestId, scopeIds: [...group.scopeIds], scope: planScopeLabel(snapshot, group.scopeIds),
@@ -101,12 +101,15 @@ export function directorPlan(snapshot: ProjectSnapshot, director: DirectorStatus
     scopeIds.includes(snapshot.project.id) ? 'chat' : 'scope', scopeIds.includes(snapshot.project.id) ? 'Open conversation' : 'View whole-film edit'), edits: recordedEdits };
   if (snapshot.holds.some(hold => hold.active)) return view('saved', 'Your changes are saved',
     'The storyboard has saved changes that still need a matching production plan.',
-    'Discuss the saved direction or review generation for the affected shots.', 'generation', 'Review generation');
+    'Use the green scene check to create keyframes, then review the returned frames for video.', 'frames', 'Go to scenes');
   if (director.status === 'error') return view('error', 'Review the last response', 'The last Director request needs attention.',
     'Read its message before sending a fresh direction.', 'chat', 'Open conversation');
   if (reviewMatchesProject(review, snapshot) && review!.members.some(member => member.ready && member.keyframe && !member.approved))
     return view('review', 'Frames are ready to review', 'Current keyframes and motion plans are available.',
       'Inspect each frame and its motion before reviewing video generation.', 'frames', 'Review frames');
+  const images = snapshot.plan?.id === snapshot.project.activePlanId ? snapshot.plan.nodes?.filter(node => node.kind === 'image') ?? [] : [];
+  if (images.length && images.every(node => snapshot.outputs.some(output => output.nodeId === node.id)) && !snapshot.plan?.nodes?.some(node => node.kind === 'video'))
+    return view('review', 'Keyframes are ready', 'The scene’s keyframes are saved.', 'Review all frames and motion, then use the green scene check to generate video.', 'frames', 'Go to scenes');
   const render = snapshot.plan?.id === snapshot.project.activePlanId && snapshot.plan.nodes?.find(node => node.kind === 'render');
   if (render && snapshot.outputs.some(output => output.nodeId === render.id && output.artifact.kind === 'video'))
     return view('ready', 'Your film is ready to watch', 'The current rendered film is saved.', 'Review the picture and sound in Timeline.', 'timeline', 'Watch the film');
@@ -115,7 +118,7 @@ export function directorPlan(snapshot: ProjectSnapshot, director: DirectorStatus
   if (!snapshot.project.shots.length) return view('empty', 'Build your film', snapshot.project.brief.trim() ? 'Your film brief is saved.' : 'Start with an idea or an existing brief.',
     'Talk through the film with the Director.', 'chat', 'Start the conversation');
   if (!snapshot.project.activePlanId) return view('saved', 'Storyboard saved', 'Your scenes and shot direction are ready to develop.',
-    'Discuss the next change or review which media to create.', 'generation', 'Review generation');
+    'Discuss the next change or review which media to create.', 'frames', 'Go to scenes');
   return view('idle', 'Choose the next step', 'The current project is saved and the Director is idle.',
-    'Review the remaining generation requirements or discuss a change.', 'generation', 'Review generation');
+    'Review the remaining generation requirements or discuss a change.', 'frames', 'Go to scenes');
 }

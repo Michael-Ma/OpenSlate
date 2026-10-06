@@ -16,7 +16,7 @@ export interface TranscriptionPreparationIntent {
   id: string; version: 1; projectId: string; attemptId: string; requestDigest: string;
   candidateId: string; candidateDigest: string; grantId: string; grantDigest: string;
   reservation: { id: string; micros: string };
-  allowanceId: string; allowanceDigest: string; consumptionDigest: string;
+  allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null;
   capabilityLockId: string; capabilityLockDigest: string;
   profileDefinition: ProviderProfile; profileDefinitionDigest: string;
   sourceRecord: TranscriptionAudioIntent["sourceRecord"]; source: TranscriptionAudioIntent["source"];
@@ -73,8 +73,8 @@ function expectedIntent(store: TranscriptionAuthorityStore, attempt: Readonly<At
   const source = (selected.kind === "media_source" ? selected.record.source : selected.record.media)!;
   return { id: attempt.id, version: 1, projectId: attempt.projectId, attemptId: attempt.id, requestDigest: digest(attempt.request),
     candidateId: admission.candidate.id, candidateDigest: digest(admission.candidate), grantId: admission.grant.id, grantDigest: digest(admission.grant),
-    reservation: { id: admission.reservation.id, micros: admission.reservation.micros }, allowanceId: admission.allowance.id,
-    allowanceDigest: digest(admission.allowance), consumptionDigest: digest(admission.consumption),
+    reservation: { id: admission.reservation.id, micros: admission.reservation.micros }, allowanceId: admission.allowance?.id ?? null,
+    allowanceDigest: admission.allowance ? digest(admission.allowance) : null, consumptionDigest: admission.consumption ? digest(admission.consumption) : null,
     capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
     profileDefinition: admission.profile, profileDefinitionDigest: digest(admission.profile),
     sourceRecord: { kind: selected.kind, id: selected.record.id, digest: digest(selected.record) }, source,

@@ -5,6 +5,7 @@ export interface SpeechOptions {
   version: 1; profiles: Array<{ id: string; revision: string; model: string; estimatedMicros: string }>;
   voices: string[]; personalVoices?: Array<{ id: string; label: string; ready: boolean }>; limits: { maxTotalBytes: number; maxInstructionBytes: number };
   capabilities: { configured: boolean; providerReadiness: string };
+  preferredProfileId?: string | null;
 }
 export interface SpeechProposal {
   version: 1; id: string; proposalDigest: string;
@@ -36,17 +37,26 @@ export function speechReviewCommand(projectId: string, key: string, view: Narrat
     metadata: { label: 'Narration generation plan approved. Review spending separately.', narrationSpeech: 'review' } };
 }
 export function speechPrepareCommand(projectId: string, key: string, view: NarrationView, segmentId: string,
-  options: SpeechOptions, profileId: string, voice: string, instructions: string): PendingCommand {
+  options: SpeechOptions, profileId: string, voice: string, instructions: string, allowNewSession = false): PendingCommand {
   const row = view.snapshot.segments.find(row => row.entry.segmentId === segmentId);
-  if (view.session?.state !== 'active' || !row || row.script.source.kind !== 'generated' || row.script.textKind !== 'draft'
+  if (!allowNewSession && view.session?.state !== 'active' || !row || row.script.source.kind !== 'generated' || row.script.textKind !== 'draft'
     || !row.script.text.trim() || !options.capabilities.configured || !options.profiles.some(profile => profile.id === profileId)
     || !options.voices.includes(voice)) throw Error('Choose a saved finished section, speech model and voice.');
   return { path: `/api/projects/${encodeURIComponent(projectId)}/narration/speech-proposals`, key,
-    body: { sessionId: view.session.id, expectedHeadVersion: view.headVersion, segmentId, segmentRevisionId: row.script.id, profileId, voice, instructions },
+    body: { ...(view.session?.state === 'active' ? { sessionId: view.session.id } : {}), expectedHeadVersion: view.headVersion, segmentId, segmentRevisionId: row.script.id, profileId, voice, instructions },
     metadata: { label: 'Speech plan prepared for your review. No audio has been generated.', narrationSpeech: 'prepare' } };
 }
+export function speechRequestCommand(projectId: string, key: string, view: NarrationView, segmentId: string,
+  options: SpeechOptions, profileId: string, voice: string, instructions: string): PendingCommand {
+  const command = speechPrepareCommand(projectId, key, view, segmentId, options, profileId, voice, instructions, true);
+  const body = command.body as Record<string, unknown>;
+  const { sessionId: _sessionId, ...input } = body;
+  return { ...command, path: `/api/projects/${encodeURIComponent(projectId)}/narration/speech`,
+    body: { ...input, ...(view.session?.state === 'active' ? { sessionId: view.session.id } : {}) },
+    metadata: { label: 'Narration requested. Listen to its returned recording before accepting timing.', narrationSpeech: 'request' } };
+}
 export function speechStatus(state: string): string {
-  return ({ not_applied: 'Awaiting plan approval', ready: 'Plan approved · spending and provider setup are separate', submitting: 'Requesting narration',
+  return ({ not_applied: 'Saved speech has not been requested', ready: 'Narration requested · waiting for the configured provider', submitting: 'Requesting narration',
     submission_unknown: 'Response uncertain · the request will not be repeated automatically', remote_pending: 'Narration in progress',
     ingesting: 'Saving the recording', succeeded: 'Recording ready · listen and attach it to a section', failed: 'Narration did not complete',
     unavailable: 'Saved execution details are unavailable' } as Record<string, string>)[state] ?? 'Checking progress';

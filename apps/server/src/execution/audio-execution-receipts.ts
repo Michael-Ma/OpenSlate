@@ -1,3 +1,4 @@
+import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
 import { canonical, digest, invariant, moneyMicros, providerProfileArguments } from "@openslate/core";
 import type { ProviderProfile } from "@openslate/core";
 import type { ExecutionRequest, OpenAISpeechDescription, OpenAISpeechOutcome, OpenAISpeechRequest } from "@openslate/providers";
@@ -11,11 +12,11 @@ export interface SpeechExecutionMapping extends Identity {
   profileDigest: string; profileDefinitionDigest: string; profileDefinition: ProviderProfile;
   /** A retained matching definition, not proof of the originating admission lock. */
   capabilityLockId: string; capabilityLockDigest: string;
-  allowanceId: string; allowanceDigest: string; consumptionDigest: string; estimatedMicros: string;
+  allowanceId: string | null; allowanceDigest: string | null; consumptionDigest: string | null; estimatedMicros: string;
   transport: OpenAISpeechDescription; bodyByteLength: number;
 }
 export interface SpeechExecutionDispatch extends Identity {
-  mappingDigest: string; transportDigest: string; bodySha256: string; allowanceId: string; createdAt: string;
+  mappingDigest: string; transportDigest: string; bodySha256: string; allowanceId: string | null; createdAt: string;
 }
 type Completed = Extract<OpenAISpeechOutcome, { kind: "completed" }>;
 export type SpeechExecutionObservation = Exclude<OpenAISpeechOutcome, Completed>
@@ -36,14 +37,14 @@ function base(attempt: Attempt, value: Identity, extras: string[]): void {
   speechFields(value, ["id", "projectId", "version", "attemptId", "requestDigest", ...extras]);
   invariant(value.version === 1 && value.id === attempt.id && value.projectId === attempt.projectId && value.attemptId === attempt.id
     && value.requestDigest === digest(attempt.request) && attempt.request.kind === "speech" && attempt.request.execution?.adapter === "openai-speech"
-    && attempt.request.execution.version === "1" && id(attempt.request.externalAllowanceId) && hash(attempt.request.profile?.digest)
+    && attempt.request.execution.version === "1" && providerAdmissionRequest(attempt.request) && hash(attempt.request.profile?.digest)
     && Buffer.byteLength(canonical(value)) <= 32768, "SPEECH_EXECUTION_CONFLICT", "Speech record differs from its exact admitted request");
 }
 
 /** Speech-only operation validation is separate from admission so owned local input failures can be recorded. */
 export function prepareSpeechExecutionRequest(input: ExecutionRequest): { request: OpenAISpeechRequest; description: OpenAISpeechDescription; bodyByteLength: number } {
   const request = structuredClone(input);
-  speechFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "externalAllowanceId"]);
+  speechFields(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
   invariant(request.kind === "speech" && request.execution?.adapter === "openai-speech" && request.execution.version === "1"
     && request.inputs.length === 0, "SPEECH_EXECUTION_CONFLICT", "Speech has no media inputs or custom transport overrides");
   return prepareSpeechOperationOptions(request.profile!.configuration, request.args);
@@ -67,8 +68,7 @@ export function assertSpeechExecutionMapping(attempt: Attempt, mapping: SpeechEx
   assertSpeechExecutionProfile(mapping.profileDefinition, attempt);
   const prepared = prepareSpeechExecutionRequest(attempt.request);
   invariant(mapping.profileDigest === attempt.request.profile!.digest && mapping.profileDefinitionDigest === digest(mapping.profileDefinition)
-    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && mapping.allowanceId === attempt.request.externalAllowanceId
-    && hash(mapping.allowanceDigest) && hash(mapping.consumptionDigest) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
+    && id(mapping.capabilityLockId) && hash(mapping.capabilityLockDigest) && allowanceMappingMatches(attempt.request, mapping) && mapping.estimatedMicros === mapping.profileDefinition.unitCostMicros
     && canonical(mapping.transport) === canonical(prepared.description) && mapping.bodyByteLength === prepared.bodyByteLength,
   "SPEECH_EXECUTION_CONFLICT", "Speech mapping differs from its approved profile or exact wire payload");
 }

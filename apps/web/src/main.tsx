@@ -17,7 +17,6 @@ import "./narration.css";
 import "./shot-audio.css";
 import "./owned-transcription.css";
 import "./transcript-review.css";
-import "./spending.css";
 import "./recovery.css";
 import "./generation-guide.css";
 import "./typography.css";

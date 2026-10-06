@@ -213,3 +213,18 @@ test('native projection disables late historical packages while retaining their 
   assert.equal(records().filter(row => row.method === 'turn/start').length, 1);
   assert.equal(f.store.list('grant', f.project.id).length, 0); assert.equal(f.store.list('attempt', f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
 });
+
+ test('a fresh V4 project loads V5 guidance with the same tool catalog while prior V4 snapshots remain exact', t => {
+  const f=fixture(t), saved=createDirectorSkillLock(f.configuration,'4.0.0','4');
+  new DirectorContextService(f.service,saved.environment).bootstrapLock(f.project.id,saved.lock);
+  const current=f.fresh('Use the current scene workflow'),before=f.store.getProject(f.project.id);
+  const input=f.prepareInput(current.turn,current.human,current.bridge);
+  assert.equal(input.bridge.toolContractVersion,'4.0.0');
+  const installed=f.store.list('director_skill_lock',f.project.id).at(-1).lock;
+  assert.ok(installed.skills.every(skill=>skill.version==='5.0.0'));
+  const context=JSON.parse(input.context);assert.doesNotMatch(context.instructions,/finite spending approval/);assert.doesNotMatch(context.filmPlanning.procedure.join(' '),/account usage or spending allowance is separate/);
+  const overview=f.service.readContext(f.project.id,current.bridge.actor,{});assert.equal(overview.applicationCapabilities.version,6);assert.doesNotMatch(JSON.stringify(overview.applicationCapabilities),/separate spending allowance|obtain human plan review/);
+  assert.deepEqual(f.store.get('director_skill_lock',saved.lock.id).lock,saved.lock);
+  assert.deepEqual(f.store.getProject(f.project.id),before);
+  for(const kind of ['grant','candidate','attempt','external_allowance'])assert.equal(f.store.list(kind,f.project.id).length,0);
+ });

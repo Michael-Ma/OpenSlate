@@ -41,8 +41,8 @@ export class OpenAISpeechExecution implements ExecutionProvider {
       const proposed: SpeechExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
         profileDefinitionDigest: digest(admission.profile), profileDefinition: admission.profile,
         capabilityLockId: admission.capabilityLock.id, capabilityLockDigest: digest(admission.capabilityLock),
-        allowanceId: admission.allowance.id, allowanceDigest: digest(admission.allowance), consumptionDigest: digest(admission.consumption),
-        estimatedMicros: admission.consumption.estimatedMicros, transport: prepared.description, bodyByteLength: prepared.bodyByteLength };
+        allowanceId: (admission.allowance?.id ?? null), allowanceDigest: (admission.allowance ? digest(admission.allowance) : null), consumptionDigest: (admission.consumption ? digest(admission.consumption) : null),
+        estimatedMicros: admission.reservation.micros, transport: prepared.description, bodyByteLength: prepared.bodyByteLength };
       mapping = this.#store.transaction(() => {
         stopped(signal); assertSpeechFirstDispatch(this.#store, admission, expectedLease);
         const existing = this.#store.get<SpeechExecutionMapping>("speech_execution_mapping", attempt.id);
@@ -73,7 +73,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
         assertPersonalVoiceCurrent(this.#store, attempt.projectId, String(request.args.voice));
         const marker: SpeechExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
           transportDigest: mapping.transport.requestDigest, bodySha256: mapping.transport.bodySha256,
-          allowanceId: admission.allowance.id, createdAt: new Date().toISOString() };
+          allowanceId: (admission.allowance?.id ?? null), createdAt: new Date().toISOString() };
         this.#store.insert("speech_execution_dispatch", attempt.id, attempt.projectId, marker); return true;
       });
     } catch (error) {

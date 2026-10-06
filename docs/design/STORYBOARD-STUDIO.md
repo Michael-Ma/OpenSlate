@@ -8,7 +8,7 @@ The studio is an editable treatment/scenes/shots workspace with a Director conve
 2. Select a shot to make it prominent beside compact supporting cards. Edit scene purpose and the selected shot inline; open **Film direction** for the treatment. Add scenes/shots, reorder through handles or keyboard controls, delete a shot, or undo the latest eligible edit. Selection keeps the shot's stable ID and chronological scene/shot label.
 3. Decide narration per shot: **No narration**, script-generated voice or owned recording. Audio setup opens the compact script/recording/listen/accept flow for that shot.
 4. Discuss a selected shot or whole-film request to update relevant prompts/plan. Direct edits save intent without launching media. A covering message can continue multiple saved edits together.
-5. Review intended generation and usage. Open **Review keyframe** to inspect the entire returned image, motion and planned duration before approving the exact video work. The generated clip replaces its frame and can be previewed.
+5. Use each scene's green action to generate keyframes from its direction. Inspect the entire returned images, motion and actual video recipe, then use its second action to approve and generate video. Returned clips are available to inspect; green completion means current media is saved. No separate API-key, usage, spending or post-generation acceptance step appears.
 6. Audition picture, accepted narration and optional owned music in Timeline. Render/export locally and inspect the final result. Assets retains uploaded/generated media; chat **+** imports it.
 
 ## Editing and authority
@@ -35,7 +35,7 @@ The Director's current-plan card answers two questions: **Saved** shows the curr
 
 **Resume this edit** appears only for an eligible request whose active held scopes are fully covered by the current conversation scope. It sends a new Director message carrying that request's explicit continuation identity and saved scope. The server still checks and transfers authority; the button does not replay old model authority or start media generation. Running work, pending answers, Stop and uncertain/in-progress jobs suppress Resume. A manual storyboard edit is a saved change needing a matching production plan, rather than evidence that a Director request was interrupted.
 
-An unfinished edit alone does not tell the UI which new shot writing or media the Director will propose. Review the saved direction, resume when appropriate, and iterate on the Director's actual response. Generation scope, finite usage and exact returned-frame/motion review are separate decisions.
+An unfinished edit alone does not tell the UI which new shot writing or media the Director will propose. Review the saved direction, resume when appropriate, and iterate on the Director's actual response. Scene generation actions and review of exact keyframes/motion and actual video are distinct decisions; configured provider usage needs no additional approval.
 
 ## Audio and timing
 
@@ -51,7 +51,7 @@ Drag the divider beside the Director to resize its width. Focus it and use Left/
 
 Chat renders headings, emphasis, lists, links, fenced code and GFM tables/task lists. Tables scroll inside the pane; raw HTML is not enabled and model-supplied image URLs become links rather than automatic external image loads. Owned image attachments remain in their verified viewer.
 
-Background project refresh keeps current connected content visible. The current-plan card updates its status and next action while retaining saved work; request-owned holds stay authoritative. Ordinary planning and script writing need no generation/spending permission. Compatible shipped guidance upgrades before the first context/dispatch of an eligible fresh native request; old epochs retain their original locks.
+Background project refresh keeps current connected content visible. The current-plan card updates its status and next action while retaining saved work; request-owned holds stay authoritative. Ordinary planning and script writing need no approval. Compatible shipped guidance upgrades before the first context/dispatch of an eligible fresh native request; old epochs retain their original locks. Requested speech/transcription uses the configured provider without a separate generation-review step.
 
 **Models for this project** leads with Director, Keyframes, Video and Narration, with optional transcription/accounts/local setup/existing voice identities. Director/media choices have separate saves and results. A no-pending-impact Save applies its exact server preview without an empty confirmation; changed unfinished work receives an actual impact review. Unknown responses retain the same request for recovery. A protected save blocks closing the dialog, and its scrolling body keeps header/footer controls reachable on phones.
 

@@ -71,19 +71,20 @@ export class DirectorToolSettings {
     let successor: SkillCapabilityLock;
     try {
       invariant(["1.0.0", "2.0.0", "3.0.0", "4.0.0"].includes(saved.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported Director guidance");
-      const shipped = createDirectorSkillLock(configuration, saved.lock.compatibility.toolContract as ToolContractVersion);
+      const guidanceVersion = saved.lock.skills.find(skill => skill.id === "production")?.version.split(".")[0];
+      const shipped = createDirectorSkillLock(configuration, saved.lock.compatibility.toolContract as ToolContractVersion, guidanceVersion);
       verifySkillLock(saved.lock, shipped.environment);
       // UUIDs differ per project. Every package, prompt and implementation binding must match the shipped predecessor.
       const content = ({ id: _id, lockDigest: _digest, ...body }: SkillCapabilityLock) => body;
       invariant(saved.id === saved.lock.id && canonical(content(saved.lock)) === canonical(content(shipped.lock)), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Customized Director guidance");
-      successor = saved.lock.compatibility.toolContract === "4.0.0" ? saved.lock : createDirectorSkillLock(configuration, "4.0.0").lock;
+      successor = saved.lock.compatibility.toolContract === "4.0.0" && guidanceVersion === "5" ? saved.lock : createDirectorSkillLock(configuration, "4.0.0").lock;
     } catch (error) {
       throw new DomainError("DIRECTOR_GUIDANCE_UNSUPPORTED", "OpenSlate cannot safely load this project's customized or unavailable Director guidance. Saved work is retained. Restore the matching application files, then send a new message.",
         { cause: error instanceof DomainError ? error.code : "GUIDANCE_VERIFICATION_FAILED" });
     }
     fresh();
     invariant(digest(this.configuration(projectId)) === configurationDigest, "DIRECTOR_TOOLS_STALE", "Director setup changed while the new conversation was being prepared. Send a new message.");
-    if (saved.lock.compatibility.toolContract === "4.0.0") return successor;
+    if (successor === saved.lock) return successor;
     const input = { requestId: actor.requestId, epochId: actor.epochId, turnId, previousLockId: saved.id,
       previousLockDigest: saved.lock.lockDigest, configurationDigest, targetVersion: "4.0.0" };
     const receipt = store.command(`application:${projectId}:director-guidance`, actor.epochId, digest(input), () => {

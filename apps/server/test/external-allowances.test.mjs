@@ -269,17 +269,17 @@ test("recordAdmission rechecks the full profile definition before committing con
   assert.equal(rows(f, "external_allowance_consumption").length, 0);
 });
 
-test("holds, pause, grants and budget remain independent requirements", async t => {
+test("holds, pause and grants remain required while historical project caps do not block covered work", async t => {
   const f = fixture(t); f.issue();
   const hold = f.engine.setHold(f.projectId, { scopeId: f.projectId, ownerId: "human-edit" });
   assert.equal((await f.engine.runReady()).dispatched, 0); f.engine.releaseHold(f.projectId, hold.id, "human-edit");
   f.engine.setPaused(f.projectId, true, "human-pause"); assert.equal((await f.engine.runReady()).dispatched, 0); f.engine.setPaused(f.projectId, false, "human-resume");
   const budget = f.store.get("budget", f.projectId); f.store.put("budget", budget.id, f.projectId, { ...budget, capMicros: "0" });
-  assert.ok((await f.engine.runReady()).blocked.every(row => row.code === "BUDGET_EXCEEDED"));
   assert.equal(rows(f, "external_allowance_consumption").length, 0);
-  f.store.put("budget", budget.id, f.projectId, budget);
   const candidate = rows(f, "candidate")[0]; f.store.db.prepare("DELETE FROM entities WHERE kind='grant' AND id=?").run(candidate.grantId);
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 1); assert.equal(result.blocked[0].code, "ORIGIN_NOT_AUTHORIZED");
+  assert.equal(rows(f, "external_allowance_consumption").length, 1);
+  assert.equal(f.engine.budget(f.projectId).capMicros, "0"); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
 });
 
 test("each trusted retry permanently consumes another start; rejected requests never restore estimate capacity", async t => {

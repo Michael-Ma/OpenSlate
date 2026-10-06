@@ -7,6 +7,7 @@ import type { OwnedTranscriptionService } from "./owned-transcription-service.js
 import type { PrepareOwnedTranscription, ReviewOwnedTranscription } from "./owned-transcription-types.js";
 import { projectOwnedTranscriptionOptions, projectOwnedTranscriptionProposal, projectOwnedTranscriptionProposals,
   summarizeOwnedTranscriptionProposal } from "./owned-transcription-projection.js";
+import { audioRequestActor } from './audio-request-session.js';
 
 const id = { type: "string", minLength: 1, maxLength: 160 };
 const hash = { type: "string", pattern: "^[a-f0-9]{64}$" };
@@ -68,5 +69,16 @@ export function registerOwnedTranscriptionRoutes(app: FastifyInstance, options: 
     const { sessionId, ...input } = request.body, actor = actorFor(request.params.projectId, sessionId), commandKey = key(request), owned = service();
     const receipt = await connected(request, reply, signal => owned.review(request.params.projectId, actor, { ...input, key: commandKey }, { signal }));
     return reply.header("Cache-Control", "private, no-store").send({ receipt });
+  });
+  app.post<{ Params: { projectId: string }; Body: Omit<PrepareOwnedTranscription, 'key'> & { sessionId?: string } }>(`${base}/transcriptions`, {
+    schema: { params, querystring: object({}), body: object({ sessionId: id,
+      expectedHeadVersion: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, audioId: id,
+      sourceRecordDigest: hash, profileId: id, language: { type: 'string', minLength: 1, maxLength: 64 }, target },
+    ['expectedHeadVersion', 'audioId', 'sourceRecordDigest', 'profileId', 'language', 'target']) },
+  }, async (request, reply) => {
+    const { sessionId, ...input } = request.body, projectId = request.params.projectId, commandKey = key(request);
+    const actor = audioRequestActor(production, projectId, commandKey, sessionId, actorFor, 'Transcribe the selected owned recording.');
+    const result = await connected(request, reply, signal => service().request(projectId, actor, { ...input, key: commandKey }, { signal }));
+    return reply.header('Cache-Control', 'private, no-store').send({ proposal: summarizeOwnedTranscriptionProposal(production.store, projectId, result.proposal.id), receipt: result.receipt });
   });
 }

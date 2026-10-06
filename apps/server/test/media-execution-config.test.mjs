@@ -2,15 +2,25 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readMediaExecutionConfiguration } from "../dist/application/media-execution-config.js";
 
-test("media execution defaults off and credential presence cannot enable a route", () => {
-  const seen = [];
-  const environment = new Proxy({ OPENSLATE_OPENAI_API_KEY: "synthetic-key", OPENSLATE_MINIMAX_API_KEY: "synthetic-key", OPENSLATE_VIGGLE_API_KEY: "synthetic-viggle-key" }, {
-    get(target, property) { seen.push(property); return target[property]; },
-  });
-  assert.deepEqual(readMediaExecutionConfiguration(environment), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
-  assert.deepEqual(seen, ["OPENSLATE_ENABLE_IMAGE_GENERATION", "OPENSLATE_ENABLE_H3_GENERATION", "OPENSLATE_ENABLE_SPEECH_GENERATION", "OPENSLATE_ENABLE_TRANSCRIPTION", "OPENSLATE_ENABLE_VIGGLE_H3_GENERATION", "OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION", "OPENSLATE_CODEX_IMAGE_BINARY", "OPENSLATE_CODEX_IMAGE_HOME", "OPENSLATE_H3_DOWNLOAD_HOSTS", "OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS"]);
+test("a configured key enables its API routes without an extra enable approval", () => {
+  assert.deepEqual(readMediaExecutionConfiguration({}), { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+  assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_OPENAI_API_KEY: "synthetic-key" }),
+    { image: true, codexImage: false, h3: false, speech: true, transcription: true, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+  const configuration = readMediaExecutionConfiguration({ OPENSLATE_MINIMAX_API_KEY: "synthetic-minimax-key", OPENSLATE_VIGGLE_API_KEY: "synthetic-viggle-key",
+    OPENSLATE_H3_DOWNLOAD_HOSTS: "media.example.test", OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS: "viggle.example.test" });
+  assert.equal(configuration.h3, true); assert.equal(configuration.viggleH3, true); assert.equal(configuration.image, false);
+  assert.equal(JSON.stringify(configuration).includes("synthetic-"), false);
   assert.deepEqual(readMediaExecutionConfiguration({ OPENSLATE_ENABLE_IMAGE_GENERATION: "0", OPENSLATE_ENABLE_H3_GENERATION: "" }),
     { image: false, codexImage: false, h3: false, speech: false, transcription: false, h3DownloadHosts: [], viggleH3: false, viggleH3DownloadHosts: [] });
+});
+
+test("explicit host disable and invalid credential values never silently activate a route", () => {
+  const configuration = readMediaExecutionConfiguration({ OPENSLATE_OPENAI_API_KEY: "synthetic-key", OPENSLATE_ENABLE_IMAGE_GENERATION: "0", OPENSLATE_ENABLE_SPEECH_GENERATION: "0" });
+  assert.equal(configuration.image, false); assert.equal(configuration.speech, false); assert.equal(configuration.transcription, true);
+  for (const value of ["", "bad key", "key\nvalue", "x".repeat(8193)]) {
+    const result = readMediaExecutionConfiguration({ OPENSLATE_OPENAI_API_KEY: value });
+    assert.equal(result.image, false); assert.equal(result.speech, false); assert.equal(result.transcription, false);
+  }
 });
 
 test("explicit independent switches capture an immutable exact host list without network access", () => {
@@ -80,11 +90,13 @@ test("Viggle rejects ambiguous enablement and unsafe output hosts even when anot
 });
 
 
-test("Codex image opt-in needs an explicit local binary and never enables API images", () => {
+test("a configured Codex binary enables native images without implicitly enabling the API route", () => {
   const value = readMediaExecutionConfiguration({ OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: "1", OPENSLATE_CODEX_IMAGE_BINARY: "/opt/codex", OPENSLATE_CODEX_IMAGE_HOME: "/private/codex" });
   assert.equal(value.codexImage, true); assert.equal(value.image, false);
   assert.equal(value.codexImageBinary, "/opt/codex"); assert.equal(value.codexImageHome, "/private/codex");
   assert.ok(Object.isFrozen(value));
+  assert.equal(readMediaExecutionConfiguration({ OPENSLATE_CODEX_IMAGE_BINARY: "/opt/codex" }).codexImage, true);
+  assert.equal(readMediaExecutionConfiguration({ OPENSLATE_CODEX_IMAGE_BINARY: "/opt/codex", OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: "0" }).codexImage, false);
   for (const configuration of [
     { OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: "1" },
     { OPENSLATE_ENABLE_CODEX_IMAGE_GENERATION: "true" },

@@ -77,7 +77,6 @@ export function StoryboardShot({
   stale,
   command,
   onDiscuss,
-  onDisplayed,
   onNarration,
   selected,
   compact,
@@ -91,7 +90,6 @@ export function StoryboardShot({
   stale: boolean;
   command: BoardCommand;
   onDiscuss(): void;
-  onDisplayed(id: string, sha: string): void;
   onNarration(): void;
   selected?: boolean | undefined;
   compact?: boolean | undefined;
@@ -142,11 +140,7 @@ export function StoryboardShot({
     label = `${sceneIndex + 1}.${index + 1}`;
   useEffect(() => {
     setLoaded(false);
-    if (member) onDisplayed(member.videoNodeId, "");
-    return () => {
-      if (member) onDisplayed(member.videoNodeId, "");
-    };
-  }, [still.url, member?.videoNodeId, onDisplayed]);
+  }, [still.url, member?.videoNodeId]);
   const edit = (field: string, value: string, expectedHeadVersion: number) =>
     command({ kind: "shot", id: shot.id, field, value, expectedHeadVersion });
   const narration = shot.narration;
@@ -213,12 +207,9 @@ export function StoryboardShot({
               alt={`Keyframe for shot ${label}`}
               onLoad={() => {
                 setLoaded(true);
-                if (member?.keyframe)
-                  onDisplayed(member.videoNodeId, member.keyframe.sha256);
               }}
               onError={() => {
                 setLoaded(false);
-                if (member) onDisplayed(member.videoNodeId, "");
               }}
             />
           </button>
@@ -311,20 +302,20 @@ export function StoryboardShot({
           )}
           {!compact && (
             <UiButton
-              className={`board-review ${member?.approved ? "approved" : ""}`}
-              variant={member?.approved ? "soft" : "solid"}
+              className="board-inspect-action"
+              variant="ghost"
               aria-label={
                 member?.approved
-                  ? `Shot ${label} reviewed`
-                  : `Review shot ${label} keyframe and motion`
+                  ? `Inspect shot ${label} keyframe`
+                  : `Inspect shot ${label} keyframe`
               }
               disabled={stale || !loaded || !still.url}
               onClick={() => {
                 if (still.url) onInspect(still.url, frameFixture ?? null);
               }}
             >
-              <Icon name="check" size={15} />
-              {member?.approved ? "Reviewed" : "Review keyframe"}
+              <Icon name="image" size={15} />
+              Inspect frame
             </UiButton>
           )}
         </div>

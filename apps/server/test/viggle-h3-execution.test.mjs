@@ -51,7 +51,7 @@ test('missing actual consumption or forged full profile cannot substitute a nomi
     const f = await fixture(t);
     if (mode === 'missing-consumption') f.store.db.prepare("DELETE FROM entities WHERE kind='external_allowance_consumption' AND id=?").run(f.attempt.id);
     else { const lock = f.store.get('capability_lock', f.project.capabilityLockId); tamper(f, 'capability_lock', { ...lock, profiles: [{ ...f.profile, unitCostMicros: '1' }] }); }
-    await assert.rejects(f.bridge.submit(f.request, context(f)), /[Vv]iggle/); assert.equal(f.calls.post, 0);
+    await assert.rejects(f.bridge.submit(f.request, context(f)), { code: 'VIGGLE_H3_EXECUTION_CONFLICT' }); assert.equal(f.calls.post, 0);
     assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0);
   }
 });

@@ -1,6 +1,6 @@
 import { ChatMarkdown } from "./ChatMarkdown";
 import { useWorkspaceSplit } from "./WorkspaceSplit";
-import { useKeyframeReview } from "./useKeyframeReview";
+import { useKeyframeInspection } from "./useKeyframeInspection";
 import { WorkspaceRail, WorkspaceViewTabs } from "./WorkspaceNavigation";
 import type { WorkspaceView } from "./WorkspaceNavigation";
 import { visibleProjectConnection } from "./project-view-model";
@@ -177,11 +177,6 @@ function Studio({
   } = useProject(api, projectId, refreshKey, updates.revision);
   const [pendingCreation, setPendingCreation] =
     useState<NewProjectCommand | null>(null);
-  const [spendingFocus, setSpendingFocus] = useState<{
-    projectId: string;
-    candidateId: string;
-    requestId: string;
-  } | null>(null);
   const [providerSelection, setProviderSelection] =
     useState<ProviderSelection | null>(null);
   const [demoProfiles, setDemoProfiles] = useState<{
@@ -251,7 +246,6 @@ function Studio({
   useEffect(() => {
     setGenerationOpen(false);
     setGenerationHistoryRequest(null);
-    setSpendingFocus(null);
     setAudioShotId(null);
     setMusicImportOpen(false);
     setImportOpen(false);
@@ -589,21 +583,10 @@ function Studio({
     !!pendingAction ||
     !!pendingMessage ||
     !!stops[projectId];
-  const frames = useKeyframeReview({
+  const frames = useKeyframeInspection({
     projectId,
     snapshot,
     review,
-    connected,
-    disabled,
-    onApprove: (body) =>
-      void runAction({
-        projectId,
-        path: `${projectPath(projectId)}/approvals`,
-        body,
-        key: crypto.randomUUID(),
-        label: "Keyframe and motion approved.",
-      }),
-    onError: setActionError,
   });
   const selectedNames =
     snapshot?.project.shots
@@ -657,7 +640,7 @@ function Studio({
       ? coveredPendingEdits(
           snapshot,
           selectedShots.length ? selectedShots : [projectId],
-        ).length
+        ).filter((group) => group.directorState !== "completed").length
       : 0;
 
   return (
@@ -726,13 +709,8 @@ function Studio({
                   setMobileView("director");
                   composer.current?.focus();
                 }}
-                onReviewSpending={(candidateId) => {
+                onRequested={() => {
                   setGenerationHistoryRequest(null);
-                  setSpendingFocus({
-                    projectId,
-                    candidateId,
-                    requestId: crypto.randomUUID(),
-                  });
                   setAudioShotId(null);
                   setGenerationOpen(true);
                 }}
@@ -784,13 +762,8 @@ function Studio({
                         shots={snapshot.project.shots}
                         directorMode={director.mode}
                         onChanged={refresh}
-                        onReviewSpending={(candidateId) => {
+                        onRequested={() => {
                           setGenerationHistoryRequest(null);
-                          setSpendingFocus({
-                            projectId,
-                            candidateId,
-                            requestId: crypto.randomUUID(),
-                          });
                           setImportOpen(false);
                           setGenerationOpen(true);
                           setTab("storyboard");
@@ -1046,9 +1019,9 @@ function Studio({
                             {demoAvailable
                               ? "This director uses canned guidance and fixture media. Ordinary chat does not change the video; use the demo edit buttons below."
                               : "This director uses canned guidance. Set up Codex to plan with this project’s saved models."}{" "}
-                            Paid generation requires a ready provider and your
-                            exact spending allowance. Video also requires
-                            approval of its keyframe and motion plan.
+                            Use the scene controls to generate with configured
+                            models, review keyframes and motion, then review the
+                            actual video.
                           </p>
                         </div>
                       )}
@@ -1162,7 +1135,6 @@ function Studio({
                               projectId,
                               id: crypto.randomUUID(),
                             });
-                            setSpendingFocus(null);
                             setGenerationOpen(true);
                             setTab("storyboard");
                             setMobileView("workspace");
@@ -1483,7 +1455,6 @@ function Studio({
                           closeGeneration={() => {
                             setGenerationOpen(false);
                             setGenerationHistoryRequest(null);
-                            setSpendingFocus(null);
                           }}
                           onDiscuss={(text, ids) => {
                             setDraftContinuation(
@@ -1517,23 +1488,8 @@ function Studio({
                           }
                           generation={
                             <GenerationGuide
-                              active={tab === "storyboard" && generationOpen}
                               key={projectId}
-                              api={api}
                               snapshot={snapshot}
-                              review={review}
-                              director={director}
-                              disabled={disabled || !connected}
-                              authorize={(body) =>
-                                void runAction({
-                                  projectId,
-                                  path: `${projectPath(projectId)}/generation-permission`,
-                                  body,
-                                  key: crypto.randomUUID(),
-                                  label:
-                                    "Permission saved. Follow the generation review as the plan becomes ready.",
-                                })
-                              }
                               {...(generationHistoryRequest?.projectId ===
                               projectId
                                 ? {
@@ -1541,22 +1497,15 @@ function Studio({
                                       generationHistoryRequest.id,
                                   }
                                 : {})}
-                              onChanged={refresh}
                               onChat={() => {
                                 setMobileView("director");
                                 composer.current?.focus();
                               }}
-                              onFrames={() => {
-                                setGenerationOpen(false);
-                                setTab("storyboard");
-                              }}
                               onTimeline={() => setTab("preview")}
-                              onAudio={(shotId) => setAudioShotId(shotId)}
-                              {...(spendingFocus?.projectId === projectId
-                                ? { focus: spendingFocus }
-                                : {})}
                             />
                           }
+                          onChanged={refresh}
+                          onAudio={(shotId) => setAudioShotId(shotId)}
                           renderShot={(shot, focus) => {
                             const member = review?.members.find(
                               (member) => member.shotId === shot.id,
@@ -1574,7 +1523,6 @@ function Studio({
                                   frames.inspect(shot, url, fixture)
                                 }
                                 stale={disabled || !connected}
-                                onDisplayed={frames.onDisplayed}
                                 command={(body) =>
                                   void runAction({
                                     projectId,
@@ -1657,11 +1605,6 @@ function Studio({
               value={frames.inspection}
               returnFocusRef={frames.returnFocus}
               onClose={frames.close}
-              approved={frames.approved}
-              approveDisabled={frames.approveDisabled}
-              {...(frames.inspection.reviewNodeId
-                ? { onApprove: frames.approve }
-                : {})}
             />
           )}
         </div>

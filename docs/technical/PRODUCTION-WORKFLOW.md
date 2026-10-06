@@ -14,8 +14,9 @@ The [core workflow](../../packages/core/src/workflow/index.ts) parses typed crea
 | Shot prompt change | Actual changed fields and explicit prompt reauthoring/reconfirmation |
 | Silent video timing | Explicit `none`, no attached cue and a valid planned duration |
 | Spoken video timing | Current accepted measured audio; within-shot overlays may be shorter than picture |
-| Image/video generation | Current matching plan, human generation origin, allowance and no blocking controls/holds |
+| Image/video generation | Current matching plan, scoped scene request, configured provider readiness and no blocking controls/holds |
 | Video dispatch | Actual exact frame/motion review and current timing/provider bindings |
+| Scene completion | Current requested media is saved; returned videos remain available to inspect, without another acceptance gate |
 | Local export | Resolved owned clips/audio and validated timeline within local bounds |
 
 Preparation may represent pending outputs. Dispatch enforces the prerequisites that require actual returned media; requiring final audio before creating its own speech plan would deadlock the workflow.
@@ -26,7 +27,7 @@ A human edit fences the older director epoch and holds affected work. Direct sto
 
 A covering request can continue multiple saved edits atomically. Scope, owner and revision-bound hold proof must match; partial or foreign coverage fails without transferring any hold. Other pauses/reviews remain active. Undo restores creative data, not spent grants or old approval authority.
 
-Completion of a director turn is not creative acceptance. A valid stage proposal does not approve audio or video; actual human decisions and executor evidence remain distinct. Ordinary writing needs no spending permission. Narration guidance compatibility must not be presented as a user authorization requirement.
+Completion of a director turn is not creative acceptance. A valid stage proposal does not review keyframes or actual video; saved human decisions and executor evidence remain distinct. Ordinary writing and configured-provider usage require no separate approval. Narration guidance compatibility must not be presented as a user authorization requirement. Requested audio proceeds without another generation-approval step; returned words/recordings are still content evidence rather than automatic acceptance.
 
 ## Source and checks
 
@@ -35,4 +36,4 @@ Completion of a director turn is not creative acceptance. A valid stage proposal
 - [Generation review](../../apps/server/src/generation-permission.ts), [storyboard commands](../../apps/server/src/storyboard.ts)
 - Tests: core workflow/video-timing suites; server service, continuation, generation-permission and shot-narration scope suites.
 
-See [current studio](../design/STORYBOARD-STUDIO.md) and [generation/spending review](../implementation/SPENDING-REVIEW.md) for the human flow.
+See [current studio](../design/STORYBOARD-STUDIO.md) for the human flow. [Spending review](../implementation/SPENDING-REVIEW.md) describes the retained historical accounting implementation rather than current scene controls.

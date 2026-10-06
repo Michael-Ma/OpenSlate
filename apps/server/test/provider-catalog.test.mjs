@@ -119,7 +119,7 @@ test("selection replaces one profile per kind, freezes provenance, and rejects f
     assert.throws(() => catalog.select(catalog.digest, ids), { code: "PROVIDER_SELECTION_INVALID" });
 });
 
-test("authenticated catalog separates settings, registration, local credentials and media tools from spending", async t => {
+test("authenticated catalog reports technical setup without a spending approval gate", async t => {
   const f = fixture(t, configuration(image()), { readCredential: () => credential });
   assert.equal((await f.app.inject({ method: "GET", url: "/api/providers", headers: { host: "127.0.0.1" } })).statusCode, 403);
   const response = await f.req("GET", "/api/providers"); assert.equal(response.statusCode, 200, response.body);
@@ -127,7 +127,7 @@ test("authenticated catalog separates settings, registration, local credentials 
   assert.equal(row.readiness.configurationValid, true); assert.equal(row.readiness.registered, false);
   assert.deepEqual(row.readiness.mediaTools, { required: true, available: false });
   assert.deepEqual(row.readiness.credential, { required: true, present: true, backendUnavailable: false, apiValidated: false });
-  assert.equal(row.readiness.spendingPermissionRequired, true); assert.equal(row.readiness.realExecutionEnabled, false);
+  assert.equal(row.readiness.spendingPermissionRequired, false); assert.equal(row.readiness.realExecutionEnabled, false);
   assert.deepEqual(row.estimatedCost, { currency: "USD", unitMicros: "123456", basis: "host_configured", actualVendorPriceVerified: false });
   assert.equal(response.body.includes(credential), false); assert.equal(f.store.listProjects().length, 0); assert.equal(f.provider.acceptedCount(), 0);
 });
@@ -137,7 +137,7 @@ test("registered execution and present dependencies still do not activate real g
   const catalog = new InstalledProviderCatalog({ configuration: configuration(image()), registry: new ExecutionRegistry([provider]),
     mediaTools: { image: true, video: false }, credentials: new EnvironmentMediaCredentials(() => credential) });
   const row = catalog.view().profiles.at(-1); assert.equal(row.readiness.registered, true); assert.equal(row.readiness.mediaTools.available, true);
-  assert.equal(row.readiness.credential.present, true); assert.equal(row.readiness.spendingPermissionRequired, true); assert.equal(row.readiness.realExecutionEnabled, false);
+  assert.equal(row.readiness.credential.present, true); assert.equal(row.readiness.spendingPermissionRequired, false); assert.equal(row.readiness.realExecutionEnabled, false);
 });
 
 test("audio catalog profiles use exact transport preflight and preserve legacy default catalog bytes", () => {
@@ -147,7 +147,7 @@ test("audio catalog profiles use exact transport preflight and preserve legacy d
     const catalog = new InstalledProviderCatalog({ configuration: configuration(definition) }), row = catalog.view().profiles.at(-1);
     assert.deepEqual(row.profile, definition.profile); assert.deepEqual(profilePolicy(row.profile), { credential: "openai-media", media: "audio", fixture: false });
     assert.equal(row.definitionDigest, digest(definition.profile)); assert.equal(row.estimatedCost.actualVendorPriceVerified, false);
-    assert.equal(row.readiness.enabledByHost, false); assert.equal(row.readiness.spendingPermissionRequired, true);
+    assert.equal(row.readiness.enabledByHost, false); assert.equal(row.readiness.spendingPermissionRequired, false);
     assert.equal(canonical(defaultCatalog.view().profiles.map(value => value.profile)), originalProfiles);
   }
 });

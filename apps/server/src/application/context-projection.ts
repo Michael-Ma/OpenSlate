@@ -5,7 +5,7 @@ import type { ProductionService } from "./service.js";
 import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
 import { NarrationService } from "../narration/service.js";
 import { isVerifiedGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from "../narration/generated-audio.js";
-import { contextToolVersion, projectAudioOperations } from "./audio-operation-context.js";
+import { contextToolVersion, contextAudioRequests, projectAudioOperations } from "./audio-operation-context.js";
 import { projectApplicationCapabilities } from "./application-capabilities.js";
 import type { DirectorApplicationCapabilities } from "./application-capabilities.js";
 
@@ -159,7 +159,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     const cursor = service.store.cursor(projectId);
     const domainCursor = (service.store.db.prepare("SELECT coalesce(max(sequence),0) AS cursor FROM events WHERE project_id=? AND json_extract(body,'$.kind') NOT IN ('tool.started','tool.finished','director.context_captured')").get(projectId) as { cursor: number }).cursor;
     const toolVersion = contextToolVersion(service.store, projectId, actor);
-    const applicationCapabilities = projectApplicationCapabilities(toolVersion);
+    const applicationCapabilities = projectApplicationCapabilities(toolVersion, contextAudioRequests(service.store, projectId, actor));
     const base: DirectorContextProjection = {
       section, project: { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames, shots: [], scenes: [] },
       headVersion, revisionId, activePlanId, cursor,
@@ -180,7 +180,8 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       invariant(["3.0.0", "4.0.0"].includes(toolVersion), "CAPABILITY_MISMATCH", "Audio preparation context requires compatible audio guidance");
       base.guard.dataDigest = digest({ domainCursor, narrationVersion: service.store.get<NarrationState>("narration_state", projectId)?.version ?? 0 });
       const audio = projectAudioOperations(service, projectId, offset, value => bytes({ ...base, items: [value],
-        page: page(offset, value.coverage.returned, value.coverage.total), coverage: { ...base.coverage, audioOperations: value.coverage } }) <= DIRECTOR_PROJECTION_LIMITS.bytes);
+        page: page(offset, value.coverage.returned, value.coverage.total), coverage: { ...base.coverage, audioOperations: value.coverage } }) <= DIRECTOR_PROJECTION_LIMITS.bytes,
+        contextAudioRequests(service.store, projectId, actor), actor);
       return withinBudget({ ...base, items: [audio], page: page(offset, audio.coverage.returned, audio.coverage.total), coverage: { ...base.coverage, audioOperations: audio.coverage } });
     }
     if (section === "narration") {

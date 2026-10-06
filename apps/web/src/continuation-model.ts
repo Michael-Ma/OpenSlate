@@ -1,5 +1,5 @@
 /** Browser-safe projection of the human continuation review; no mutation occurs until a fresh message is sent. */
-export interface PendingEditContinuation { requestId: string; scopeIds: string[]; holdsDigest: string }
+export interface PendingEditContinuation { requestId: string; scopeIds: string[]; holdsDigest: string; directorState?: string | null }
 export interface ContinueEdits { headVersion: number; requestIds: string[]; holdsDigest: string }
 export interface ContinuationSnapshot {
   project: { id: string; headVersion: number; shots: { id: string; sceneId: string }[] };

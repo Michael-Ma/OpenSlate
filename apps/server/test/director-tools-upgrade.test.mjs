@@ -170,7 +170,7 @@ for (const version of ["1.0.0", "2.0.0", "3.0.0"]) test(`explicit ${version} to 
   assert.equal(result.receipt.toolContract, "4.0.0"); assert.equal(digest(f.store.getProject(project.id)), before);
   assert.deepEqual(f.store.get("director_skill_lock", saved.lock.id).lock, saved.lock);
   const installed = f.store.get("director_skill_lock", result.lockId).lock;
-  assert.ok(installed.bindings.some(row => row.id === "director-tools@4")); assert.ok(installed.skills.every(row => row.version === "4.0.0"));
+  assert.ok(installed.bindings.some(row => row.id === "director-tools@4")); assert.ok(installed.skills.every(row => row.version === "5.0.0"));
   const cursor = f.store.cursor(project.id), settings = new DirectorToolSettings(f.service, () => { throw Error("No package reload during replay"); });
   assert.deepEqual(settings.upgrade(project.id, input, "v4-upgrade"), result); assert.equal(f.store.cursor(project.id), cursor);
   assert.equal(f.store.list("director_skill_lock", project.id).length, 2);

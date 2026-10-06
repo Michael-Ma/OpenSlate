@@ -5,6 +5,7 @@ export interface TranscriptionOptions {
   version: 1; profiles: Array<{ id: string; revision: string; provider: "OpenAI"; model: string; estimatedMicros: string; currency: "USD" }>;
   languages: string[]; timing: "word";
   capabilities: { implemented: boolean; configured: boolean; audioTools: boolean; providerReadiness: string; directorToolAvailable: boolean };
+  preferredProfileId?: string | null;
 }
 export type TranscriptionTarget = { kind: "recording" } | { kind: "section"; narrationRevisionId?: string; segmentId: string; segmentRevisionId: string; audioId: string };
 export interface TranscriptionProposal {
@@ -30,15 +31,23 @@ export function transcriptionTarget(recording: Recording, row?: NarrationSegment
   return { kind: "section", segmentId: row.entry.segmentId, segmentRevisionId: row.script.id, audioId: recording.id };
 }
 export function transcriptionPrepareCommand(projectId: string, key: string, view: NarrationView, recording: Recording,
-  options: TranscriptionOptions, profileId: string, language: string, row?: NarrationSegment): PendingCommand {
-  if (view.session?.state !== "active") throw new Error("Open a current narration session first.");
+  options: TranscriptionOptions, profileId: string, language: string, row?: NarrationSegment, allowNewSession = false): PendingCommand {
+  if (!allowNewSession && view.session?.state !== "active") throw new Error("Open a current narration session first.");
   if (!hash(recording.sourceRecordDigest)) throw new Error("Attach this generated recording to a section before requesting its transcript.");
   if (!options.capabilities.implemented || !options.capabilities.configured || !options.capabilities.audioTools) throw new Error("Recording transcription needs local audio tools to be configured.");
   if (!options.profiles.some(profile => profile.id === profileId) || !options.languages.includes(language)) throw new Error("Choose a saved transcription model and a supported language.");
   return { path: `/api/projects/${encodeURIComponent(projectId)}/narration/transcription-proposals`, key,
-    body: { sessionId: view.session.id, expectedHeadVersion: view.headVersion, audioId: recording.id, sourceRecordDigest: recording.sourceRecordDigest,
+    body: { ...(view.session?.state === 'active' ? { sessionId: view.session.id } : {}), expectedHeadVersion: view.headVersion, audioId: recording.id, sourceRecordDigest: recording.sourceRecordDigest,
       profileId, language, target: transcriptionTarget(recording, row) },
     metadata: { label: "Transcription plan prepared. Review it before approval.", ownedTranscription: "prepare" } };
+}
+export function transcriptionRequestCommand(projectId: string, key: string, view: NarrationView, recording: Recording,
+  options: TranscriptionOptions, profileId: string, language: string, row?: NarrationSegment): PendingCommand {
+  const command = transcriptionPrepareCommand(projectId, key, view, recording, options, profileId, language, row, true);
+  const { sessionId: _sessionId, ...input } = command.body as Record<string, unknown>;
+  return { ...command, path: `/api/projects/${encodeURIComponent(projectId)}/narration/transcriptions`,
+    body: { ...input, ...(view.session?.state === 'active' ? { sessionId: view.session.id } : {}) },
+    metadata: { label: 'Transcription requested. Review returned words and timing before adopting them.', ownedTranscription: 'request' } };
 }
 interface DetailVerification { checking: boolean; failed: boolean }
 export function canReviewTranscription(detail: TranscriptionProposalDetail | null, view: NarrationView, verification?: DetailVerification): boolean {
@@ -70,7 +79,7 @@ export function transcriptionBlockReason(code: string | null): string {
     PROPOSAL_TOO_LARGE: "This saved plan is too large to show here." } as Record<string, string>)[code ?? ""] ?? "Refresh this plan to check whether it can be approved.";
 }
 export function transcriptionExecutionText(state: string): string {
-  return ({ not_applied: "Awaiting plan approval", ready: "Plan approved · review spending before transcription can start", preparing: "Waiting for local audio preparation",
+  return ({ not_applied: "Saved transcription has not been requested", ready: "Transcription requested · waiting for the configured provider", preparing: "Waiting for local audio preparation",
     submitting: "Requesting transcription", submission_unknown: "The response is uncertain · checking the existing request", remote_pending: "Transcription in progress",
     ingesting: "Saving the transcript", succeeded: "Transcript ready to review", failed: "Transcription did not complete", unavailable: "Saved execution details are unavailable" } as Record<string, string>)[state] ?? "Checking transcription progress";
 }

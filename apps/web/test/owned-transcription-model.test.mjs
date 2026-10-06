@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendTranscriptionProposals, canReviewTranscription, transcriptionBlockReason, transcriptionExecutionNotice, transcriptionExecutionText, transcriptionPrepareCommand, transcriptionReviewCommand, transcriptionTarget } from '../src/owned-transcription-model.ts';
+import { appendTranscriptionProposals, canReviewTranscription, transcriptionBlockReason, transcriptionExecutionNotice, transcriptionExecutionText, transcriptionPrepareCommand, transcriptionRequestCommand, transcriptionReviewCommand, transcriptionTarget } from '../src/owned-transcription-model.ts';
 import { narrationContinuation } from '../src/narration-model.ts';
 import { pendingCommandsFor } from '../src/pending-command.ts';
 
@@ -114,10 +114,17 @@ test('continuation names only the displayed request and separately acknowledges 
 test('progress distinguishes local waiting from uncertain paid response and transcript adoption', () => {
   assert.match(transcriptionExecutionText('preparing'), /local audio preparation/);
   assert.match(transcriptionExecutionText('submission_unknown'), /existing request/);
-  assert.match(transcriptionExecutionText('ready'), /spending/);
+  assert.match(transcriptionExecutionText('ready'), /configured provider/);
   assert.match(transcriptionExecutionText('succeeded'), /review/);
   assert.doesNotMatch(transcriptionExecutionText('succeeded'), /accepted|adopted/);
   assert.match(transcriptionBlockReason('RESTORED_AUTHORITY_REQUIRES_NEW'), /new transcription plan/);
+});
+test('a direct transcription request opens its own app session and sends only exact owned input',()=>{
+ const state=view();state.session=null;const c=transcriptionRequestCommand('project','request-key',state,audio(),options(),'whisper-profile','auto');
+ assert.equal(c.path,'/api/projects/project/narration/transcriptions');assert.equal(c.body.sessionId,undefined);assert.equal(c.body.sourceRecordDigest,'a'.repeat(64));
+ assert.deepEqual(c.body.target,{kind:'recording'});assert.equal(c.metadata.ownedTranscription,'request');
+ for(const name of ['approved','allowanceId','maxAttempts','spending'])assert.equal(c.body[name],undefined);
+ assert.throws(()=>transcriptionRequestCommand('project','k',state,{...audio(),sourceRecordDigest:'changed'},options(),'whisper-profile','auto'));
 });
 
 test('first-dispatch blockers stay visible alongside ready or preparing, while observed historical outcomes remain intact', () => {

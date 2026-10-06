@@ -1,3 +1,4 @@
+import { assertConfiguredProviderAdmission, configuredProviderUse, providerAdmissionRequest } from "./provider-use.js";
 import { createHash } from "node:crypto";
 import { constants, mkdirSync, realpathSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
@@ -53,7 +54,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
     try {
       stopped(signal); prepared = await this.prepare(attempt, signal); stopped(signal);
       const value: ImageExecutionMapping = { ...this.identity(attempt), profileDigest: request.profile!.digest,
-        externalAllowanceId: request.externalAllowanceId!, transport: describeOpenAIImageRequest(prepared) };
+        externalAllowanceId: (request.externalAllowanceId ?? null), transport: describeOpenAIImageRequest(prepared) };
       mapping = this.#store.transaction(() => {
         this.admitted(request); const existing = this.#store.get<ImageExecutionMapping>("image_execution_mapping", attempt.id);
         if (existing) { invariant(canonical(existing) === canonical(value), "IMAGE_EXECUTION_CONFLICT", "Prepared payload changed for this attempt"); return existing; }
@@ -78,7 +79,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
         if (this.hasDispatchOrResult(attempt.id)) return false;
         stopped(signal); this.dispatchable(attempt, expectedLease);
         const intent: ImageExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
-          transportDigest: mapping.transport.requestDigest, externalAllowanceId: request.externalAllowanceId!, createdAt: new Date().toISOString() };
+          transportDigest: mapping.transport.requestDigest, externalAllowanceId: (request.externalAllowanceId ?? null), createdAt: new Date().toISOString() };
         this.#store.insert("image_execution_dispatch", attempt.id, attempt.projectId, intent); return true;
       });
     } catch {
@@ -143,12 +144,12 @@ export class OpenAIImageExecution implements ExecutionProvider {
     const attempt = this.#store.get<Attempt>("attempt", request.attemptId);
     invariant(attempt && attempt.id === request.attemptId && attempt.nodeId === request.nodeId && attempt.fingerprint === request.fingerprint
       && attempt.candidateId && attempt.reservationId && attempt.taskId === null && request.kind === "image"
-      && canonical(attempt.request) === canonical(request) && typeof request.externalAllowanceId === "string"
-      && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(request.externalAllowanceId),
-    "IMAGE_EXECUTION_CONFLICT", "Image execution requires an exact admitted attempt and application allowance");
+      && canonical(attempt.request) === canonical(request) && providerAdmissionRequest(request),
+    "IMAGE_EXECUTION_CONFLICT", "Image execution requires an exact admitted attempt and provider-use evidence");
     const reservation = this.#store.get<{ projectId: string; attemptId: string }>("reservation", attempt.reservationId);
     invariant(reservation?.projectId === attempt.projectId && reservation.attemptId === attempt.id,
       "IMAGE_EXECUTION_CONFLICT", "Image attempt has no matching application reservation");
+    assertConfiguredProviderAdmission(this.#store, attempt);
     return attempt;
   }
   private dispatchable(previous: Attempt, expectedLease: ExecutionCallOptions["expectedLease"]): void {
@@ -209,7 +210,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
 
   private async prepare(attempt: Attempt, signal?: AbortSignal): Promise<OpenAIImageRequest> {
     const request = attempt.request;
-    exact(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", "externalAllowanceId"]);
+    exact(request, ["attemptId", "nodeId", "kind", "fingerprint", "args", "inputs", "execution", "profile", ...(configuredProviderUse(request) ? ["providerUse"] : ["externalAllowanceId"])]);
     exact(request.args, ["profileIdentity", "profileRevision", "adapter", "executionVersion", "profileConfiguration", "profileDigest", "prompt", "width", "height", "settings"]);
     const configuration = request.profile!.configuration;
     exact(configuration, ["model", "settings"]); exact(configuration.settings, ["width", "height", "quality"]);

@@ -12,6 +12,7 @@ import type { NarrationService } from "./service.js";
 import { assertPersonalVoiceCurrent } from './personal-voices.js';
 import { assertMappedSpeechPreparation } from './mapped-speech-intent.js';
 import { assertNarrationAuthority } from './narration-scope.js';
+import { requestHoldCutoff } from './request-holds.js';
 export { narrationSpeechPrepareScope } from "./narration-speech-review-state.js";
 
 interface Lock { projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string; localExecution?: unknown }
@@ -19,15 +20,15 @@ const stageId = (projectId: string, stage: StageRequirement) => digest({ project
 const id = (value: unknown): value is string => typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= 160;
 const epoch = (actor: ActorContext): string | null => actor.kind === "director" ? actor.epochId : null;
 
-/** Prepare exact saved writing; review is human-only and spending is always a separate service. */
+/** Saved writing produces an exact application-owned speech operation under its current request. */
 export class NarrationSpeechService {
   constructor(readonly narration: NarrationService) {}
   private get production() { return this.narration.production; }
   private get store() { return this.production.store; }
-  private authority(projectId: string, actor: ActorContext): void {
+  private authority(projectId: string, actor: ActorContext, segmentId?: string): void {
     invariant(actor.kind === "human" || actor.kind === "director", "ACTOR_DENIED", "An application request is required");
     this.production.assertActor(projectId, actor, true);
-    assertNarrationAuthority(this.production, projectId, actor);
+    assertNarrationAuthority(this.production, projectId, actor, segmentId);
   }
   private compose(base: CompiledPlan | null, operation: NarrationSpeechOperation, context: CompileContext, options: { signal?: AbortSignal }) {
     return composeSpeechPlanIsolated(base, operation, context, options);
@@ -41,7 +42,7 @@ export class NarrationSpeechService {
     const signal = options.signal, cancellation = signal ? { signal } : {};
     const stopped = (): void => invariant(!signal?.aborted, "NARRATION_SPEECH_CANCELLED", "Narration preparation was cancelled");
     try {
-      stopped(); actor = snapshotOwnedTranscriptionData(actor, 16384); input = snapshotOwnedTranscriptionData(input, 16384); this.authority(projectId, actor);
+      stopped(); actor = snapshotOwnedTranscriptionData(actor, 16384); input = snapshotOwnedTranscriptionData(input, 16384); this.authority(projectId, actor, input.segmentId);
       invariant(input && Object.keys(input).sort().join("\0") === ["key", "expectedHeadVersion", "segmentId", "segmentRevisionId", "profileId", "voice", "instructions"].sort().join("\0")
         && [input.key, input.segmentId, input.segmentRevisionId, input.profileId, input.voice].every(id)
         && typeof input.instructions === "string" && input.instructions.length <= 16000
@@ -52,7 +53,7 @@ export class NarrationSpeechService {
       const replay = this.store.commandReplay<NarrationSpeechProposal>(scope, input.key, inputDigest);
       if (replay) { this.production.recovery.assertFreshAuthority(projectId, "narration_speech_proposal", replay.result.id); return replay.result; }
       const captured = this.store.transaction(() => {
-        this.authority(projectId, actor); const before = this.store.getProject(projectId);
+        this.authority(projectId, actor, input.segmentId); const before = this.store.getProject(projectId);
         invariant(before.headVersion === input.expectedHeadVersion, "REVISION_CONFLICT", "Project changed before narration preparation");
         const lock = this.store.get<Lock>("capability_lock", before.capabilityLockId);
         invariant(lock?.projectId === projectId && lock.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST,
@@ -84,7 +85,7 @@ export class NarrationSpeechService {
         return { before, lock, profile, section, script, base, logicalIds, stages, catalog: ownedTranscriptionCatalog(this.store, projectId, base?.compiled ?? null) };
       });
       const current = (): void => {
-        stopped(); this.authority(projectId, actor);
+        stopped(); this.authority(projectId, actor, input.segmentId);
         assertNarrationAuthority(this.production, projectId, actor, input.segmentId);
         invariant(canonical(this.store.getProject(projectId)) === canonical(captured.before), "REVISION_CONFLICT", "Project changed during narration preparation");
         invariant(canonical(this.store.get("capability_lock", captured.before.capabilityLockId)) === canonical(captured.lock), "CAPABILITY_MISMATCH", "Project capability lock changed");
@@ -105,7 +106,7 @@ export class NarrationSpeechService {
         capabilityLock: { id: captured.before.capabilityLockId, digest: digest(captured.lock) }, section: captured.section, profile: captured.profile,
         operation, compiled, logicalIds: captured.logicalIds, impact: diffPlans(captured.base?.compiled ?? null, compiled), stages, stageVersions };
       return this.store.transaction(() => {
-        stopped(); this.authority(projectId, actor);
+        stopped(); this.authority(projectId, actor, input.segmentId);
         return this.store.command(scope, input.key, inputDigest, () => {
           current(); for (const [id, version] of Object.entries(stageVersions)) invariant((this.store.get<{ bindingVersion: number }>("stage", id)?.bindingVersion ?? 0) === version,
             "STAGE_BINDING_CONFLICT", "Stage binding changed during narration preparation");
@@ -117,13 +118,43 @@ export class NarrationSpeechService {
     } finally { stopped(); }
   }
   async review(projectId: string, human: ActorContext, input: ReviewNarrationSpeech, options: { signal?: AbortSignal } = {}): Promise<NarrationSpeechApplyReceipt> {
+    return this.publish(projectId, human, input, options, false);
+  }
+  async request(projectId: string, actor: ActorContext, input: PrepareNarrationSpeech, options: { signal?: AbortSignal } = {}): Promise<{ proposal: NarrationSpeechProposal; receipt: NarrationSpeechApplyReceipt }> {
+    actor = snapshotOwnedTranscriptionData(actor, 16384); input = snapshotOwnedTranscriptionData(input, 16384);
+    const signal = options.signal; options = signal ? { signal } : {};
+    invariant(!signal?.aborted, 'NARRATION_SPEECH_CANCELLED', 'Narration request was cancelled.');
+    this.production.assertActor(projectId, actor, true);
+    const originalKey = input.key, originalDigest = digest(input), requestScope = `${actor.principalId}:${projectId}:${actor.requestId}:narration-speech-request:${epoch(actor) ?? 'human'}`;
+    const requestedAtCursor = this.store.command(`${requestScope}-cursor`,originalKey,originalDigest,()=>requestHoldCutoff(this.store,projectId,actor));
+    const replay = this.store.commandReplay<{ proposal: NarrationSpeechProposal; receipt: NarrationSpeechApplyReceipt }>(requestScope, originalKey, originalDigest);
+    if (replay) return replay.result;
+    input = this.store.command(`${requestScope}-input`, originalKey, originalDigest, () => {
+      const project = this.store.getProject(projectId), shot = project.shots.find(shot => shot.id === input.segmentId);
+      if (!shot) { this.authority(projectId, actor, input.segmentId); return input; }
+      const lock = this.store.get<Lock>('capability_lock', project.capabilityLockId), profile = lock?.profiles.find(profile => profile.id === input.profileId && profile.kind === 'speech');
+      invariant(profile, 'NARRATION_SPEECH_INVALID', 'Choose the saved narration model.'); preflightAudioProfile(profile);
+      assertPersonalVoiceCurrent(this.store, projectId, input.voice, profile.adapter);
+      invariant(shot.narration?.voice !== 'personal' || input.voice.startsWith('openai-custom:'), 'PERSONAL_VOICE_REQUIRED', 'This shot requests its registered personal voice.');
+      assertAudioOperationOptions(profile, { ...providerProfileArguments(profile), text: shot.narration?.text ?? '', voice: input.voice, instructions: input.instructions, settings: {} });
+      const section = this.narration.materializeRequestedShot(projectId, actor, { key: originalKey, expectedHeadVersion: input.expectedHeadVersion,
+        shotId: shot.id, intentDigest: input.segmentRevisionId, voice: input.voice, profileRevisionId: profile.revision });
+      this.authority(projectId, actor, section.segmentId);
+      return { ...input, expectedHeadVersion: section.headVersion, segmentId: section.segmentId, segmentRevisionId: section.segmentRevisionId };
+    });
+    const proposal = await this.prepare(projectId, actor, input, options);
+    const receipt = await this.publish(projectId, actor, { key: digest({ key: input.key, action: 'request-speech' }), proposalId: proposal.id, proposalDigest: digest(proposal) }, options, true, requestedAtCursor);
+    return this.store.command(requestScope, originalKey, originalDigest, () => ({ proposal, receipt }));
+  }
+  private async publish(projectId: string, human: ActorContext, input: ReviewNarrationSpeech, options: { signal?: AbortSignal }, automatic: boolean, requestedAtCursor?: number): Promise<NarrationSpeechApplyReceipt> {
     const signal = options.signal, cancellation = signal ? { signal } : {};
     const stopped = (): void => invariant(!signal?.aborted, "NARRATION_SPEECH_CANCELLED", "Narration review was cancelled");
     try {
       stopped(); human = snapshotOwnedTranscriptionData(human, 16384); input = captureNarrationSpeechReviewInput(input);
       const scope = narrationSpeechReviewScope(projectId, human), inputDigest = digest(input);
       const checkpoint = (): NarrationSpeechApplyReceipt | undefined => {
-        stopped(); invariant(human.kind === "human", "ACTOR_DENIED", "Only a human can approve narration speech"); this.authority(projectId, human);
+        stopped(); invariant(human.kind === 'human' || automatic && human.kind === 'director', "ACTOR_DENIED", "A current application request is required for narration speech");
+        this.authority(projectId, human, this.store.get<NarrationSpeechProposal>('narration_speech_proposal', input.proposalId)?.section.segmentId);
         this.production.recovery.assertFreshAuthority(projectId, "narration_speech_proposal", input.proposalId);
         const replay = this.store.commandReplay<NarrationSpeechApplyReceipt>(scope, input.key, inputDigest); if (replay) return replay.result;
         const reviewed = currentNarrationSpeechReview(this.store, projectId, input);
@@ -139,7 +170,7 @@ export class NarrationSpeechService {
       replay = checkpoint(); if (replay) return replay;
       invariant(canonical(compiled) === canonical(proposal.compiled) && canonical(logicalIds) === canonical(proposal.logicalIds),
         "NARRATION_SPEECH_STALE", "Saved speech code no longer reproduces the exact reviewed plan");
-      return this.production.commitNarrationSpeechReview(projectId, human, input, cancellation);
+      return this.production.commitNarrationSpeechReview(projectId, human, input, { ...cancellation, ...(automatic ? { requested: true as const, ...(requestedAtCursor !== undefined ? { requestedAtCursor } : {}) } : {}) });
     } finally { stopped(); }
   }
 }

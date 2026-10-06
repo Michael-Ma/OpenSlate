@@ -7,6 +7,7 @@ import type { NarrationSpeechService } from './narration-speech-service.js';
 import type { PrepareNarrationSpeech, ReviewNarrationSpeech } from './narration-speech-types.js';
 import { projectNarrationSpeechOptions, projectNarrationSpeechProposals, projectNarrationSpeechProposal, summarizeNarrationSpeechProposal } from './narration-speech-projection.js';
 import { registerPersonalVoiceRoutes } from './personal-voice-routes.js';
+import { audioRequestActor } from './audio-request-session.js';
 const id = { type: 'string', minLength: 1, maxLength: 160 }, hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
 const object = (properties: object, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const key = (request: FastifyRequest): string => { const value = request.headers['idempotency-key']; invariant(typeof value === 'string' && value.length > 0 && value.length <= 160, 'VALIDATION_ERROR', 'One bounded Idempotency-Key is required'); return value; };
@@ -47,5 +48,15 @@ export function registerNarrationSpeechRoutes(app: FastifyInstance, options: { p
     const { sessionId, ...input } = request.body, actor = actorFor(request.params.projectId, sessionId), selected = service(), commandKey = key(request);
     const receipt = await connected(request, reply, signal => selected.review(request.params.projectId, actor, { ...input, key: commandKey }, { signal }));
     return reply.header('Cache-Control', 'private, no-store').send({ receipt });
+  });
+  app.post<{ Params: { projectId: string }; Body: Omit<PrepareNarrationSpeech, 'key'> & { sessionId?: string } }>(`${base}/speech`, {
+    schema: { params, querystring: object({}), body: object({ sessionId: id, expectedHeadVersion: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+      segmentId: id, segmentRevisionId: id, profileId: id, voice: id, instructions: { type: 'string', maxLength: 256 } },
+    ['expectedHeadVersion', 'segmentId', 'segmentRevisionId', 'profileId', 'voice', 'instructions']) },
+  }, async (request, reply) => {
+    const { sessionId, ...input } = request.body, projectId = request.params.projectId, commandKey = key(request);
+    const actor = audioRequestActor(production, projectId, commandKey, sessionId, actorFor, 'Generate narration from the selected saved script.');
+    const result = await connected(request, reply, signal => service().request(projectId, actor, { ...input, key: commandKey }, { signal }));
+    return reply.header('Cache-Control', 'private, no-store').send({ proposal: summarizeNarrationSpeechProposal(production.store, projectId, result.proposal.id), receipt: result.receipt });
   });
 }

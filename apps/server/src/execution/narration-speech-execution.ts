@@ -6,7 +6,7 @@ import type { NarrationSpeechAttemptInput, NarrationSpeechProposal, NarrationSpe
 import { assertNarrationSpeechAttemptInput, assertNarrationSpeechReview, resolveNarrationSpeechApplication } from "../narration/narration-speech-authorization.js";
 import type { NarrationState } from "../narration/types.js";
 import { assertMappedSpeechCurrent } from '../narration/mapped-speech-intent.js';
-import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from '../narration/narration-scope.js';
+import { narrationSpeechHoldExemption, narrationSpeechShotScopes, requestedNarrationShot } from '../narration/narration-scope.js';
 
 type Reader = NarrationSpeechReader;
 type Resolved = ReturnType<typeof resolveNarrationSpeechApplication>;
@@ -55,6 +55,12 @@ export function assertNarrationSpeechCurrent(reader: Reader, project: ProjectRec
     && same(binding.node, node) && entry?.segmentRevisionId === section.segmentRevisionId,
   "NARRATION_SPEECH_STALE", "The human-reviewed narration section or operation changed before generation");
   assertMappedSpeechCurrent(reader, project, resolved.proposal);
+  const requested = requestedNarrationShot(reader, project.id, resolved.review.requestId, resolved.review.principalId, section.segmentId);
+  if (requested) {
+    const before = reader.get<{ project: ProjectRecord }>('project_revision', resolved.proposal.baseProject.revisionId)?.project;
+    const old = before?.shots.find(shot => shot.id === requested), current = project.shots.find(shot => shot.id === requested);
+    invariant(old && current && same(old.narration ?? null, current.narration ?? null), 'NARRATION_SPEECH_STALE', 'The requested shot writing or voice intent changed before generation.');
+  }
 }
 export function assertNarrationSpeechAttemptCurrent(reader: Reader, attempt: Readonly<Attempt>): void {
   const resolved = assertNarrationSpeechAttemptInput(reader, attempt); if (!resolved) return;
@@ -63,8 +69,8 @@ export function assertNarrationSpeechAttemptCurrent(reader: Reader, attempt: Rea
   const shotIds = narrationSpeechShotScopes(reader, project.id, attempt.candidateId), sceneIds = project.shots.filter(shot => shotIds.includes(shot.id)).map(shot => shot.sceneId);
   const exemption = narrationSpeechHoldExemption(reader, project.id, attempt.candidateId);
   for (const scopeId of [...new Set([project.id, ...shotIds, ...sceneIds])]) {
-    const hold = reader.db.prepare("SELECT id FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=? AND NOT (json_extract(body,'$.scopeId')=? AND json_extract(body,'$.ownerId')=?) LIMIT 1")
-      .get(project.id, scopeId, exemption?.scopeId ?? '', exemption?.ownerId ?? '');
-    invariant(!hold, 'EXECUTION_HELD', 'Narration generation is held by an editing request for this scope');
+    const holds = reader.db.prepare("SELECT id FROM entities WHERE kind='hold' AND project_id=? AND json_extract(body,'$.active')=1 AND json_extract(body,'$.scopeId')=? AND NOT (json_extract(body,'$.scopeId')=? AND json_extract(body,'$.ownerId')=?)")
+      .all(project.id, scopeId, exemption?.requested?'':exemption?.scopeId??'', exemption?.requested?'':exemption?.ownerId??'') as {id:string}[];
+    invariant(!holds.some(hold=>!exemption?.holdIds?.includes(hold.id)), 'EXECUTION_HELD', 'Narration generation is held by an editing request for this scope');
   }
 }

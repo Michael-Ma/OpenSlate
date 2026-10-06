@@ -18,10 +18,21 @@ export function contextToolVersion(store: Store, projectId: string, actor: Actor
   const { lockDigest, ...body } = record.lock;
   invariant(digest(body) === lockDigest, 'CAPABILITY_MISMATCH', 'Context skill lock changed'); return record.lock.compatibility.toolContract;
 }
+export function contextAudioRequests(store: Store, projectId: string, actor: ActorContext): boolean {
+  const epoch = actor.kind === 'director' ? store.get<{ projectId: string; requestId: string; lockId: string }>('director_epoch_lock', actor.epochId) : undefined;
+  if (actor.kind === 'director' && !epoch) return false;
+  invariant(!epoch || epoch.projectId === projectId && epoch.requestId === actor.requestId, 'CAPABILITY_MISMATCH', 'Audio context epoch lock differs');
+  const id = epoch?.lockId ?? (store.db.prepare("SELECT id FROM entities WHERE kind='director_skill_lock' AND project_id=? ORDER BY rowid DESC LIMIT 1").get(projectId) as { id: string } | undefined)?.id;
+  if (!id) return false;
+  const record = store.get<{ projectId: string; lock: { id: string; lockDigest: string; skills: { version: string }[] } }>('director_skill_lock', id);
+  invariant(record?.projectId === projectId && record.lock.id === id, 'CAPABILITY_MISMATCH', 'Audio context skill lock is missing');
+  const { lockDigest, ...body } = record.lock; invariant(digest(body) === lockDigest, 'CAPABILITY_MISMATCH', 'Audio context skill lock changed');
+  return record.lock.skills.length > 0 && record.lock.skills.every(skill => Number(skill.version.split('.')[0]) >= 5);
+}
 export interface AudioOperationsProjection {
   version: 1;
   sections: Array<{ segmentId: string; segmentRevisionId: string; text: string; textKind: SegmentRevision['textKind']; language: string;
-    source: SegmentRevision['source']; audioId: string | null; generationNeedsReview: true }>;
+    source: SegmentRevision['source']; audioId: string | null; generationNeedsReview: boolean }>;
   recordings: ReturnType<typeof ownedTranscriptionAudioSummary>[];
   speechProposals: ReturnType<typeof projectNarrationSpeechProposals>['proposals'];
   transcriptionProposals: ReturnType<typeof projectOwnedTranscriptionProposals>['proposals'];
@@ -29,23 +40,28 @@ export interface AudioOperationsProjection {
   coverage: { offset: number; returned: number; total: number; nextOffset: number | null; sections: number; recordings: number;
     speechProposals: number; transcriptionProposals: number; pagination: string; hostReadiness: 'not_evaluated' };
   authority: string;
+  savedShotScripts?: Array<{ shotId: string; sceneId: string; segmentId: string; segmentRevisionId: string; text: string; language: 'en'; voice: 'stock' | 'personal' }>;
 }
 /** Each collection uses the same consumed window, including unavailable proposal rows.
  * The caller can include its outer envelope in the byte check. Bounded pages are
  * loaded once; shrinking a response never repeats hydration or skips a row.
  */
 export function projectAudioOperations(service: ProductionService, projectId: string, offset: number,
-  fits: (value: AudioOperationsProjection) => boolean = value => Buffer.byteLength(JSON.stringify(value)) <= 128 * 1024): AudioOperationsProjection {
+  fits: (value: AudioOperationsProjection) => boolean = value => Buffer.byteLength(JSON.stringify(value)) <= 128 * 1024, requestsEnabled = false, actor?: ActorContext): AudioOperationsProjection {
   const store = service.store;
   const read = (): AudioOperationsProjection => {
     invariant(Number.isSafeInteger(offset) && offset >= 0 && offset <= 1_000_000, 'VALIDATION_ERROR', 'Invalid audio operations page');
-    const view = new ProjectionReader(store, projectId); view.project();
+    const view = new ProjectionReader(store, projectId), project = view.project();
+    const request = actor ? store.get<{ scopeIds: string[] }>('message', actor.requestId) : null;
+    const savedShotScripts = requestsEnabled ? project.shots.filter(shot => shot.narration?.mode === 'generated' && shot.narration.text.trim()
+      && (!request || [projectId, shot.id, shot.sceneId].some(scope => request.scopeIds.includes(scope)))).map(shot => ({ shotId: shot.id, sceneId: shot.sceneId,
+        segmentId: shot.id, segmentRevisionId: digest({ shotId: shot.id, narration: shot.narration ?? null }), text: shot.narration!.text, language: 'en' as const, voice: shot.narration!.voice })) : [];
     const state = view.get<NarrationState>('narration_state', projectId), entries = state?.entries ?? [];
     invariant(Array.isArray(entries) && entries.length <= 400, 'PROPOSAL_UNAVAILABLE', 'Narration section inventory is unavailable');
     const totalAudio = (store.db.prepare("SELECT count(*) total FROM entities WHERE kind='narration_audio' AND project_id=?").get(projectId) as { total: number }).total;
     const speechCount = (store.db.prepare("SELECT count(*) total FROM entities WHERE kind='narration_speech_proposal' AND project_id=?").get(projectId) as { total: number }).total;
     const transcriptCount = (store.db.prepare("SELECT count(*) total FROM entities WHERE kind='owned_transcription_proposal' AND project_id=?").get(projectId) as { total: number }).total;
-    const total = Math.max(entries.length, totalAudio, speechCount, transcriptCount);
+    const total = Math.max(entries.length, totalAudio, speechCount, transcriptCount, savedShotScripts.length);
     invariant(offset <= total, 'VALIDATION_ERROR', 'Audio operations page is beyond saved history');
     const speech = projectNarrationSpeechProposals(store, projectId, Math.min(offset, speechCount));
     const transcription = projectOwnedTranscriptionProposals(store, projectId, Math.min(offset, transcriptCount));
@@ -60,7 +76,9 @@ export function projectAudioOperations(service: ProductionService, projectId: st
       coverage: { offset, returned: count, total, nextOffset: offset + count < total ? offset + count : null,
         sections: entries.length, recordings: totalAudio, speechProposals: speechCount, transcriptionProposals: transcriptCount,
         pagination: 'One adaptive shared window per collection; follow nextOffset. Compare the context guard across pages.', hostReadiness: 'not_evaluated' },
-      authority: 'These are proposal choices and saved records, never generation permission. Prepare with exact saved IDs. The human reviews the proposal and spending separately. Results require independent listening/word/timing acceptance.' });
+      ...(requestsEnabled ? { savedShotScripts: savedShotScripts.slice(offset, offset + count) } : {}),
+      authority: requestsEnabled ? 'Use exact saved writing or owned recordings to request audio with the configured provider. savedShotScripts expose shot IDs as virtual segment IDs with the saved narration digest as segmentRevisionId; a speech request materializes the mapped section automatically. Refresh current context between requests. No generation or spending approval is needed. Listening, transcript adoption and timing acceptance remain content decisions.'
+        : 'These are proposal choices and saved records, never generation permission. Prepare with exact saved IDs. The human reviews the proposal and spending separately. Results require independent listening/word/timing acceptance.' });
     let count = 0;
     for (; count < maximum; count++) {
       try {
@@ -70,7 +88,7 @@ export function projectAudioOperations(service: ProductionService, projectId: st
           invariant(segment?.id === entry.segmentRevisionId && segment.projectId === projectId && segment.segmentId === entry.segmentId,
             'PROPOSAL_UNAVAILABLE', 'Narration section is unavailable');
           sections.push({ segmentId: entry.segmentId, segmentRevisionId: segment.id, text: segment.text, textKind: segment.textKind,
-            language: segment.language, source: segment.source, audioId: entry.audioId, generationNeedsReview: true });
+            language: segment.language, source: segment.source, audioId: entry.audioId, generationNeedsReview: !requestsEnabled });
         }
         const row = audioIds[count];
         if (row) {

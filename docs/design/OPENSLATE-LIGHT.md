@@ -4,7 +4,7 @@ Selected October 4, 2026. The user chose **A · Light workspace** from the OpenS
 
 ## Purpose and structure
 
-The studio helps one person develop a film through conversation, edit its storyboard and inspect media before authorizing execution. White surfaces keep the Director and controls readable; the pale gray canvas separates those surfaces from the creative work. Blue identifies primary actions and selection. Color does not imply that a generation grant, spending allowance or exact frame review exists.
+The studio helps one person develop a film through conversation, edit its storyboard and generate/review media per scene. White surfaces keep the Director and controls readable; the pale gray canvas separates those surfaces from the creative work. Blue identifies primary actions and selection. Green scene actions request keyframes or video; a completion check means the current media is saved rather than that its artistic quality was accepted.
 
 The workspace keeps a resizable Director on the left, with the selected shot prominent and supporting shots available alongside it. Model settings organize choices by the job they perform. Small screens provide explicit workspace/Director navigation and stack controls rather than compressing the desktop arrangement.
 
@@ -77,7 +77,7 @@ Use text and semantics alongside color for selected, reviewed, pending, error an
 
 ## Behavior boundaries and verification
 
-The design migration preserves OpenSlate's separate durable commands for Director choices, media choices, generation grants, usage allowances, frame/motion approval and unknown-outcome recovery. A shared dialog or a new visual state cannot bypass those commands or turn an uncertain submission into a retry. Narration writing remains an ordinary creative edit.
+Director choices, media choices, scoped scene generation, exact frame/motion/video-recipe review and unknown-outcome recovery use durable application commands. Each scene has two generation decisions: create keyframes from its direction, then review the returned frames and actual video recipe before starting video. Returned clips are available to inspect without an additional acceptance gate. Configured provider keys/runtime enable requested generation without a separate approval or usage-allowance screen. Requested speech/transcription proceeds through the configured provider; listening, attachment and transcript adoption remain content decisions. A new visual state cannot turn an uncertain submission into a retry. Narration writing remains an ordinary creative edit.
 
 Review desktop and narrow layouts, keyboard focus/return, nested selects/dialogs, long model labels, disabled controls, unknown commands and actual frame approval against current saved state. Typechecking/building validates integration; rendered browser checks validate layout and interaction. Current results belong in the dated implementation evidence, not in assumptions attached to a visual token set.
 

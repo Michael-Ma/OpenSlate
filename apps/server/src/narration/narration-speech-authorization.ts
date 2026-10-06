@@ -7,6 +7,7 @@ import { assertNarrationSpeechProposal, NARRATION_SPEECH_LIMITS } from "./narrat
 import { snapshotOwnedTranscriptionData } from "./owned-transcription-records.js";
 import { narrationAuthorScope } from './narration-scope.js';
 import type { NarrationSpeechApplication, NarrationSpeechAttemptInput, NarrationSpeechProposal, NarrationSpeechReview } from "./narration-speech-types.js";
+import { assertRequestHoldCutoff } from './request-holds.js';
 
 type Reader = NarrationSpeechReader;
 export interface ResolvedNarrationSpeechApplication {
@@ -30,7 +31,9 @@ function pin(value: unknown): void {
 }
 function reviewEvidence(reader: Reader, projectId: string, input: unknown): Omit<ResolvedNarrationSpeechApplication, "application"> {
   const review = snapshotOwnedTranscriptionData(input, 16384) as NarrationSpeechReview;
-  exact(review, ["id", "version", "projectId", "requestId", "principalId", "proposal", "grantDigest", "section", "nodeId", "specDigest", "compiledDigest"]);
+  exact(review, ["id", "version", "projectId", "requestId", "principalId", "proposal", "grantDigest", "section", "nodeId", "specDigest", "compiledDigest", ...(Object.hasOwn(review, 'epochId') ? ['epochId'] : []), ...(Object.hasOwn(review, 'requested') ? ['requested'] : []), ...(Object.hasOwn(review, 'requestedAtCursor') ? ['requestedAtCursor'] : [])]);
+  fail(!Object.hasOwn(review, 'requested') || review.requested === true);
+  fail(!Object.hasOwn(review,'requestedAtCursor') || review.requested === true);
   fail(review.version === 1 && review.projectId === projectId && id(review.id) && id(review.requestId) && id(review.principalId)
     && id(review.nodeId) && hash(review.specDigest) && hash(review.compiledDigest) && hash(review.grantDigest));
   pin(review.proposal);
@@ -46,8 +49,13 @@ function reviewEvidence(reader: Reader, projectId: string, input: unknown): Omit
   fail(request.id === review.requestId && request.projectId === projectId && request.principalId === review.principalId
     && request.editing === true && Array.isArray(request.scopeIds) && request.scopeIds.length <= 400);
   narrationAuthorScope(reader, projectId, review.requestId, review.principalId, review.section.segmentId);
-  // Every message is created by the human request channel. The review has no epoch: its live caller must be human.
-  // A superseded historical human request remains evidence, never current execution authority.
+  if(review.requested)assertRequestHoldCutoff(reader,projectId,review.requestId,review.requestedAtCursor,review.epochId);
+  if (Object.hasOwn(review, 'epochId')) {
+    fail(id(review.epochId));
+    const epoch = get<{ id: string; projectId: string; requestId: string; principalId: string }>(reader, projectId, 'epoch', review.epochId!);
+    fail(epoch.id === review.epochId && epoch.projectId === projectId && epoch.requestId === review.requestId && epoch.principalId === review.principalId);
+  }
+  // Historical request/epoch evidence remains readable after fencing; it cannot create a new current operation.
   return { review, proposal };
 }
 
@@ -69,7 +77,7 @@ function applicationEvidence(reader: Reader, projectId: string, input: unknown):
   const prepared = get<Record<string, unknown>>(reader, projectId, "prepared", application.prepared.id);
   const change = parseChangeProposal({ variant: "plan", expectedHeadVersion: proposal.baseProject.headVersion, source: proposal.compiled.source });
   fail(digest(prepared) === application.prepared.digest && same(prepared, { id: application.prepared.id, projectId,
-    requestId: review.requestId, principalId: review.principalId, epochId: null, proposal: change, proposalDigest: digest(change),
+    requestId: review.requestId, principalId: review.principalId, epochId: review.epochId ?? null, proposal: change, proposalDigest: digest(change),
     baseVersion: proposal.baseProject.headVersion, next: base, compiled: proposal.compiled, logicalIds: proposal.logicalIds,
     impact: proposal.impact, stages: proposal.stages, stageVersions: proposal.stageVersions, grantBindings: { [review.nodeId]: review.id },
     semanticChange: false, capabilityDigest: proposal.capabilityLock.digest }));
