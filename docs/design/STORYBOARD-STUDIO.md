@@ -5,11 +5,11 @@ The studio is an editable treatment/scenes/shots workspace with a Director conve
 ## Film flow
 
 1. Start in conversation or bring a UTF-8 text/Markdown brief. Inspect the director's interpretation and confirm the proposed film plan before it becomes canonical.
-2. Select a shot to make it prominent beside compact supporting cards. Edit scene purpose and the selected shot inline; open **Film direction** for the treatment. Add scenes/shots, reorder through handles or keyboard controls, delete a shot, or undo the latest eligible edit. Selection keeps the shot's stable ID and chronological scene/shot label.
+2. The right Project view always shows the saved Scene → Shot hierarchy. Each shot keeps its direction, image/video prompts, separate keyframe and video, narration and current state together. Use **Edit** in the left conversation to change treatment, scene purpose or a shot, add/reorder/delete shots, or undo the latest eligible edit. Choose a shot in the discussion-scope selector to focus chat.
 3. Decide narration per shot: **No narration**, script-generated voice or owned recording. Audio setup opens the compact script/recording/listen/accept flow for that shot.
 4. Discuss a selected shot or whole-film request to update relevant prompts/plan. Direct edits save intent without launching media. A covering message can continue multiple saved edits together.
-5. Use each scene's green action to generate keyframes from its direction. Inspect the entire returned images, motion and actual video recipe, then use its second action to approve and generate video. Returned clips are available to inspect; green completion means current media is saved. No separate API-key, usage, spending or post-generation acceptance step appears.
-6. Audition picture, accepted narration and optional owned music in Timeline. Render/export locally and inspect the final result. Assets retains uploaded/generated media; chat **+** imports it.
+5. Use each scene's green action in the conversation to generate keyframes from its direction. Inspect the entire returned images on the right and the motion and actual video recipe, then use its second action to approve and generate video. Returned clips are available to inspect; green completion means current media is saved. No separate API-key, usage, spending or post-generation acceptance step appears.
+6. Audition picture, accepted narration and optional owned music in Timeline. Render/export locally and inspect the final result. Assets retains uploaded/generated media; conversation **Import** and **+** import it. **Export** in the conversation contains rendering and music controls. The right Timeline contains playback only.
 
 ## Editing and authority
 
@@ -35,6 +35,8 @@ The Director's current-plan card answers two questions: **Saved** shows the curr
 
 **Resume this edit** appears only for an eligible request whose active held scopes are fully covered by the current conversation scope. It sends a new Director message carrying that request's explicit continuation identity and saved scope. The server still checks and transfers authority; the button does not replay old model authority or start media generation. Running work, pending answers, Stop and uncertain/in-progress jobs suppress Resume. A manual storyboard edit is a saved change needing a matching production plan, rather than evidence that a Director request was interrupted.
 
+The right result view does not add another gallery during scene review. Scene action cards on the left reference the saved shots and actual recipes. Video approval requires the exact current conditioning images to load successfully in the active right view; already viewed exact images remain eligible when returning to the Director on a phone.
+
 An unfinished edit alone does not tell the UI which new shot writing or media the Director will propose. Review the saved direction, resume when appropriate, and iterate on the Director's actual response. Scene generation actions and review of exact keyframes/motion and actual video are distinct decisions; configured provider usage needs no additional approval.
 
 ## Audio and timing
@@ -53,12 +55,12 @@ Chat renders headings, emphasis, lists, links, fenced code and GFM tables/task l
 
 Background project refresh keeps current connected content visible. The current-plan card updates its status and next action while retaining saved work; request-owned holds stay authoritative. Ordinary planning and script writing need no approval. Compatible shipped guidance upgrades before the first context/dispatch of an eligible fresh native request; old epochs retain their original locks. Requested speech/transcription uses the configured provider without a separate generation-review step.
 
-**Models for this project** leads with Director, Keyframes, Video and Narration, with optional transcription/accounts/local setup/existing voice identities. Director/media choices have separate saves and results. A no-pending-impact Save applies its exact server preview without an empty confirmation; changed unfinished work receives an actual impact review. Unknown responses retain the same request for recovery. A protected save blocks closing the dialog, and its scrolling body keeps header/footer controls reachable on phones.
+**Models for this project** leads with Director, Keyframes, Video and Narration, with optional transcription/accounts/local setup/existing voice identities. Director/media choices have separate saves and results. A no-pending-impact Save applies its exact server preview without an empty confirmation; changed unfinished work receives an actual impact review. Unknown responses retain the same request for recovery. Model settings are an inline conversation tool. A protected save blocks closing it or switching projects; the conversation scroll keeps every control reachable on phones.
 
 The selected system's reusable controls and states are defined in [OpenSlate Light](OPENSLATE-LIGHT.md). Its implementation and disposable browser verification are recorded in the [October 5 review](../implementation/OCTOBER-5-LIGHT-WORKSPACE.md); the earlier [October 3 review](../implementation/OCTOBER-3-REFINEMENT-REVIEW.md) retains its dated UI/runtime findings.
 
 ## Implementation and verification
 
 - [Storyboard handler](../../apps/server/src/storyboard.ts), [continuation](../../apps/server/src/application/pending-edit-continuation.ts), [generation permission](../../apps/server/src/generation-permission.ts)
-- Web `App.tsx`, `FilmPlan.tsx`, `DirectorPlan.tsx`, `director-plan-model.ts`, `StoryboardControls.tsx`, `ShotAudioPanel.tsx`, `Timeline.tsx`, `ui.tsx` and shared Light/typography styles.
+- Web `App.tsx`, `ProjectResults.tsx`, `ConversationActions.tsx`, `ProjectEditor.tsx`, `PlanImport.tsx`, `DirectorPlan.tsx`, `director-plan-model.ts`, `InlineField.tsx`, `ShotAudioPanel.tsx`, `Timeline.tsx`, `ui.tsx` and shared Light/typography styles.
 - Core/API tests cover stale revisions, unknown fields, scope, candidate reuse/invalidation, narration and undo. The [October 5 Light workspace](../implementation/OCTOBER-5-LIGHT-WORKSPACE.md) has the 2,222-pass full gate plus disposable actual-React/browser checks. New state-transition tests cover exact continuation scope, runtime/question/Stop priority, historical evidence, saved output counts and shot selection after reordering/removal. Earlier [October 3 UI/runtime](../implementation/OCTOBER-3-REFINEMENT-REVIEW.md) and [October 1 audio/Timeline evidence](../implementation/V1-COMPLETION-REVIEW.md) keep their dated scope.

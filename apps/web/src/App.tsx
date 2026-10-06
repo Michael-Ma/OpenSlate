@@ -1,13 +1,30 @@
 import { ChatMarkdown } from "./ChatMarkdown";
 import { useWorkspaceSplit } from "./WorkspaceSplit";
 import { useKeyframeInspection } from "./useKeyframeInspection";
-import { WorkspaceRail, WorkspaceViewTabs } from "./WorkspaceNavigation";
+import { WorkspaceViewTabs } from "./WorkspaceNavigation";
 import type { WorkspaceView } from "./WorkspaceNavigation";
 import { visibleProjectConnection } from "./project-view-model";
 import "./chat-markdown.css";
 import "./workspace-layout.css";
 import { SegmentedControl, Select, TextArea } from "@radix-ui/themes";
-import { UiButton, UiTextField } from "./ui";
+import {
+  ConversationSurface,
+  ConversationToolBusy,
+  UiButton,
+  UiSelect,
+  UiTextField,
+} from "./ui";
+import {
+  AssetActions,
+  TimelineSettings,
+  ExportDownload,
+} from "./ConversationMediaTools";
+import { ProjectEditor } from "./ProjectEditor";
+import { PlanImport } from "./PlanImport";
+import { ProjectResults } from "./ProjectResults";
+import { ConversationActions } from "./ConversationActions";
+import { exposedSceneFrameKey } from "./conversation-actions-model";
+import "./conversation-workspace.css";
 import { AudioLibraryPanel } from "./AudioLibraryPanel";
 import {
   coveredPendingEdits,
@@ -16,8 +33,6 @@ import {
 import { ImagePanel } from "./ImagePanel";
 import { ImportMedia, ImportTabs } from "./ImportMedia";
 import { Timeline } from "./Timeline";
-import { StoryboardShot } from "./StoryboardControls";
-import { FilmPlan } from "./FilmPlan";
 import { GenerationGuide } from "./GenerationGuide";
 import { useProjectUpdates, ProjectUpdatesProvider } from "./project-updates";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -190,7 +205,34 @@ function Studio({
   const [showNew, setShowNew] = useState(!initialProjects.length);
   const [showDirectorSettings, setShowDirectorSettings] = useState(false);
   const [selectedShots, setSelectedShots] = useState<string[]>([]);
-  const [reviewChanged, setReviewChanged] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false),
+    [briefImportOpen, setBriefImportOpen] = useState(false),
+    [exportOpen, setExportOpen] = useState(false);
+  const [toolBusy, setToolBusy] = useState<Record<string, boolean>>({});
+  const registerToolBusy = useCallback(
+    (id: string, value: boolean) =>
+      setToolBusy((previous) => {
+        if (!!previous[id] === value) return previous;
+        const next = { ...previous };
+        if (value) next[id] = true;
+        else delete next[id];
+        return next;
+      }),
+    [],
+  );
+  const protectedTool = Object.values(toolBusy).some(Boolean);
+  const [exposedFrames, setExposedFrames] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [compactScreen, setCompactScreen] = useState(
+    () => window.matchMedia("(max-width:760px)").matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia("(max-width:760px)");
+    const change = () => setCompactScreen(media.matches);
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, []);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Record<string, PendingMessage>>({});
   const [pendingActions, setPendingActions] = useState<Record<string, Action>>(
@@ -233,7 +275,8 @@ function Studio({
   } | null>(null);
   const [mobileView, setMobileView] = useState("workspace");
   const [replyQuestionId, setReplyQuestionId] = useState<string | null>(null);
-  const chatEnd = useRef<HTMLDivElement>(null);
+  const chatEnd = useRef<HTMLDivElement>(null),
+    sceneDecisions = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
   const draft = drafts[projectId] ?? "";
@@ -244,6 +287,10 @@ function Studio({
     (updates.connection === "connected" || updates.connection === "fallback");
   const messages = conversation(snapshot);
   useEffect(() => {
+    setEditorOpen(false);
+    setBriefImportOpen(false);
+    setExportOpen(false);
+    setExposedFrames({});
     setGenerationOpen(false);
     setGenerationHistoryRequest(null);
     setAudioShotId(null);
@@ -254,7 +301,6 @@ function Studio({
     setSelectedShots([]);
     setFeedback("");
     setActionError("");
-    setReviewChanged(false);
     setReplyQuestionId(null);
   }, [projectId]);
 
@@ -297,7 +343,10 @@ function Studio({
   async function createProject(event: FormEvent) {
     event.preventDefault();
     if (
-      recoveryReadOnly ||
+      disabled ||
+      (!!projectId && !connected) ||
+      sending.current ||
+      actionInFlight.current ||
       !newName.trim() ||
       creating ||
       creationInFlight.current
@@ -352,7 +401,11 @@ function Studio({
   async function send() {
     if (
       recoveryReadOnly ||
+      protectedTool ||
+      !connected ||
       !snapshot ||
+      creating ||
+      creationInFlight.current ||
       busy ||
       sending.current ||
       actionInFlight.current ||
@@ -509,7 +562,18 @@ function Studio({
     }
   }
   async function runAction(action: Action) {
-    if (recoveryReadOnly || busy || actionInFlight.current || sending.current)
+    if (
+      recoveryReadOnly ||
+      protectedTool ||
+      !connected ||
+      creating ||
+      creationInFlight.current ||
+      !!pendingMessage ||
+      (!!pendingAction && pendingAction.key !== action.key) ||
+      busy ||
+      actionInFlight.current ||
+      sending.current
+    )
       return;
     actionInFlight.current = true;
     setBusy(true);
@@ -543,9 +607,6 @@ function Studio({
           delete next[action.projectId];
           return next;
         });
-        if (action.path.endsWith("/approvals")) {
-          setReviewChanged(true);
-        }
       }
       setActionError(errorText(error));
       refresh();
@@ -568,21 +629,14 @@ function Studio({
       });
   }
 
-  const toggleScope = (id: string) => {
-    setDraftContinuation(null);
-    setMobileView("director");
-    setSelectedShots((ids) =>
-      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id],
-    );
-    composer.current?.focus();
-  };
-  const disabled =
+  const mutationsDisabled =
     recoveryReadOnly ||
     busy ||
     creating ||
     !!pendingAction ||
     !!pendingMessage ||
     !!stops[projectId];
+  const disabled = mutationsDisabled || protectedTool;
   const frames = useKeyframeInspection({
     projectId,
     snapshot,
@@ -620,17 +674,6 @@ function Studio({
         return next;
       });
   }, [snapshot, stops, projectId]);
-  const heldRequests = [
-    ...new Set(
-      snapshot?.holds
-        .filter(
-          (hold) =>
-            hold.active &&
-            hold.ownerId !== snapshot.latestStoryboardEdit?.requestId,
-        )
-        .map((hold) => hold.ownerId) ?? [],
-    ),
-  ];
   const continuingEdits =
     snapshot &&
     !replyQuestion &&
@@ -647,134 +690,6 @@ function Studio({
     <ProjectUpdatesProvider value={updates.revision + refreshKey}>
       <RecoveryReadOnly.Provider value={recoveryReadOnly}>
         <div className="studio-shell">
-          {showDirectorSettings && projectId && (
-            <ProjectSettings
-              key={projectId}
-              api={api}
-              projectId={projectId}
-              refreshKey={updates.revision + refreshKey}
-              {...(snapshot ? { snapshot } : {})}
-              close={() => setShowDirectorSettings(false)}
-              changed={refresh}
-              onContinue={() => {
-                setShowDirectorSettings(false);
-                requestAnimationFrame(() => composer.current?.focus());
-              }}
-            />
-          )}
-          {musicImportOpen && snapshot && (
-            <ImportMedia
-              title="Background music"
-              close={() => setMusicImportOpen(false)}
-            >
-              <AudioLibraryPanel
-                api={api}
-                projectId={projectId}
-                onChanged={refresh}
-              />
-              <p className="field-help">
-                After uploading, choose the recording in Timeline’s Music
-                selector.
-              </p>
-            </ImportMedia>
-          )}
-          {audioShotId && snapshot && (
-            <ImportMedia
-              title="Shot narration"
-              close={() => setAudioShotId(null)}
-            >
-              <NarrationPanel
-                api={api}
-                projectId={projectId}
-                headVersion={snapshot.project.headVersion}
-                shots={snapshot.project.shots.filter(
-                  (s) => s.id === audioShotId,
-                )}
-                directorMode={director.mode}
-                onChanged={refresh}
-                onContinue={(requestId) => {
-                  const ids = snapshot.pendingEditContinuations
-                    ?.find((group) => group.requestId === requestId)
-                    ?.scopeIds.filter((id) =>
-                      snapshot.project.shots.some((shot) => shot.id === id),
-                    ) ?? [audioShotId];
-                  setSelectedShots(ids.length ? ids : [audioShotId]);
-                  setDraftContinuation({ projectId, requestId });
-                  setDrafts((all) => ({
-                    ...all,
-                    [projectId]:
-                      "Continue this shot using its accepted narration and update only the affected production plan.",
-                  }));
-                  setAudioShotId(null);
-                  setMobileView("director");
-                  composer.current?.focus();
-                }}
-                onRequested={() => {
-                  setGenerationHistoryRequest(null);
-                  setAudioShotId(null);
-                  setGenerationOpen(true);
-                }}
-              />
-            </ImportMedia>
-          )}
-          {importOpen && snapshot && (
-            <ImportMedia close={() => setImportOpen(false)}>
-              <ImportTabs
-                initialTab={importTab}
-                onTabChange={setImportTab}
-                image={
-                  <ImagePanel
-                    active={importTab === "image"}
-                    api={api}
-                    snapshot={snapshot}
-                    uploadOnly
-                    onChanged={refresh}
-                  />
-                }
-                video={
-                  <MediaPanel
-                    active={importTab === "video"}
-                    api={api}
-                    snapshot={snapshot}
-                    mode="upload"
-                    onChanged={refresh}
-                  />
-                }
-                audio={
-                  <>
-                    <AudioLibraryPanel
-                      active={importTab === "audio"}
-                      api={api}
-                      projectId={projectId}
-                      onChanged={refresh}
-                    />
-                    <details
-                      onToggle={(event) =>
-                        setAdvancedAudioOpen(event.currentTarget.open)
-                      }
-                    >
-                      <summary>Advanced narration & transcripts</summary>
-                      <NarrationPanel
-                        active={importTab === "audio" && advancedAudioOpen}
-                        api={api}
-                        projectId={projectId}
-                        headVersion={snapshot.project.headVersion}
-                        shots={snapshot.project.shots}
-                        directorMode={director.mode}
-                        onChanged={refresh}
-                        onRequested={() => {
-                          setGenerationHistoryRequest(null);
-                          setImportOpen(false);
-                          setGenerationOpen(true);
-                          setTab("storyboard");
-                        }}
-                      />
-                    </details>
-                  </>
-                }
-              />
-            </ImportMedia>
-          )}
           <div className="studio-main" id="workspace">
             <header className="workspace-header">
               <a href="#workspace" className="brand">
@@ -789,7 +704,7 @@ function Studio({
                 </label>
                 <Select.Root
                   value={projectId || "__new__"}
-                  disabled={busy || creating}
+                  disabled={busy || creating || protectedTool}
                   onValueChange={(value) => {
                     if (value !== "__new__") setProjectId(value);
                   }}
@@ -811,15 +726,6 @@ function Studio({
                     ))}
                   </Select.Content>
                 </Select.Root>
-                <UiButton
-                  className="icon-button"
-                  aria-label="Create a project"
-                  title="Create a project"
-                  disabled={recoveryReadOnly || busy || creating}
-                  onClick={() => setShowNew((value) => !value)}
-                >
-                  <Icon name="plus" size={18} />
-                </UiButton>
               </div>
               <div className="header-actions">
                 <span
@@ -833,70 +739,8 @@ function Studio({
                       : "Live updates"
                     : "Connecting…"}
                 </span>
-                <IconButton
-                  icon="settings"
-                  label="Project settings"
-                  disabled={!projectId}
-                  onClick={() => setShowDirectorSettings(true)}
-                />
-                <IconButton
-                  icon="logout"
-                  label="Disconnect studio"
-                  onClick={() =>
-                    void Promise.resolve(disconnect()).catch((error) =>
-                      setActionError(errorText(error)),
-                    )
-                  }
-                />
               </div>
             </header>
-            {showNew && (
-              <section className="create-project-panel">
-                <div className="section-heading">
-                  <h2>Start a new film</h2>
-                  <UiButton
-                    className="icon-button"
-                    aria-label="Close new project"
-                    title="Close new project"
-                    onClick={() => setShowNew(false)}
-                  >
-                    <Icon name="close" />
-                  </UiButton>
-                </div>
-                <form
-                  className="new-project-form"
-                  onSubmit={(event) => void createProject(event)}
-                >
-                  <label htmlFor="project-name">Project name</label>
-                  <UiTextField
-                    id="project-name"
-                    value={newName}
-                    onChange={(event) => setNewName(event.target.value)}
-                    maxLength={160}
-                    placeholder="Name your film"
-                    disabled={!!pendingCreation}
-                    autoFocus
-                  />
-                  <NewProjectProviderFields
-                    api={api}
-                    selection={providerSelection}
-                    changed={setProviderSelection}
-                    disabled={recoveryReadOnly || creating || !!pendingCreation}
-                  />
-                  <UiButton
-                    type="submit"
-                    disabled={recoveryReadOnly || creating || !newName.trim()}
-                    className="button primary"
-                  >
-                    {creating
-                      ? "Creating…"
-                      : pendingCreation
-                        ? "Retry same project"
-                        : "Create project"}
-                  </UiButton>
-                </form>
-              </section>
-            )}
             <div className="mobile-workspace-switch">
               <SegmentedControl.Root
                 value={mobileView}
@@ -911,185 +755,233 @@ function Studio({
                 </SegmentedControl.Item>
               </SegmentedControl.Root>
             </div>
-            <RecoveryPanel
-              api={api}
-              refreshKey={refreshKey}
-              onState={setRecoveryReadOnly}
-              onChanged={refresh}
-            />
-            {(connectionError || actionError) && (
-              <div className="notice error" role="alert">
-                <span>{actionError || connectionError}</span>
-                <IconButton
-                  icon="refresh"
-                  label="Refresh workspace"
-                  onClick={refresh}
-                />
-              </div>
-            )}
-            {pendingAction && (
-              <div className="notice warning">
-                <span>
-                  This action wasn’t confirmed. Retry the same request to check
-                  its outcome.
-                </span>
-                <UiButton
-                  disabled={recoveryReadOnly || busy}
-                  onClick={() => void runAction(pendingAction)}
+            <div className="studio-body">
+              <main
+                ref={split.grid}
+                style={split.style}
+                data-resizing={split.dragging}
+                className={`workspace-grid panel-${mobileView}`}
+              >
+                <section
+                  id="director-pane"
+                  className="conversation-panel"
+                  aria-labelledby="conversation-title"
                 >
-                  Retry action
-                </UiButton>
-              </div>
-            )}
-            {feedback && (
-              <div className="sr-only" role="status">
-                {feedback}
-              </div>
-            )}
-            {!projectId ? (
-              <main className="empty-studio">
-                <span className="empty-symbol">
-                  <Icon name="slate" size={40} />
-                </span>
-                <span className="eyebrow">YOUR FIRST SLATE</span>
-                <h2>Make room for an idea.</h2>
-                <p>
-                  Create a project to start a conversation and shape your first
-                  storyboard.
-                </p>
-                <UiButton
-                  className="button primary"
-                  disabled={recoveryReadOnly}
-                  onClick={() => setShowNew(true)}
-                >
-                  <Icon name="plus" size={16} />
-                  New project
-                </UiButton>
-              </main>
-            ) : (
-              <div className="studio-body">
-                <WorkspaceRail
-                  value={tab}
-                  onChange={setTab}
-                  onSettings={() => setShowDirectorSettings(true)}
-                />
-                <main
-                  ref={split.grid}
-                  style={split.style}
-                  data-resizing={split.dragging}
-                  className={`workspace-grid panel-${mobileView}`}
-                >
-                  <section
-                    id="director-pane"
-                    className="conversation-panel"
-                    aria-labelledby="conversation-title"
-                  >
-                    <div className="panel-title">
-                      <div>
-                        <Icon name="chat" size={18} />
-                        <h2 id="conversation-title">Director</h2>
-                      </div>
-                      <span className="tag subtle">
-                        {director.mode === "fake"
-                          ? "Demo director"
-                          : director.mode === "native"
-                            ? "Codex director"
-                            : "Director offline"}
-                      </span>
+                  <div className="panel-title">
+                    <div>
+                      <Icon name="chat" size={18} />
+                      <h2 id="conversation-title">Director</h2>
                     </div>
-                    <div
-                      className="conversation-stream"
-                      aria-live="polite"
-                      aria-relevant="additions text"
+                    <span className="tag subtle">
+                      {director.mode === "fake"
+                        ? "Demo director"
+                        : director.mode === "native"
+                          ? "Codex director"
+                          : "Director offline"}
+                    </span>
+                  </div>
+                  <div
+                    className="conversation-tools"
+                    aria-label="Conversation tools"
+                  >
+                    <UiButton
+                      size="1"
+                      variant="ghost"
+                      disabled={!projectId || protectedTool}
+                      onClick={() => setEditorOpen((v) => !v)}
                     >
-                      <div className="conversation-intro">
-                        <span className="small-mark">
-                          <Icon name="slate" size={20} />
-                        </span>
-                        <h3>Let’s shape the story.</h3>
+                      Edit
+                    </UiButton>
+                    <UiButton
+                      size="1"
+                      variant="ghost"
+                      disabled={!projectId || protectedTool}
+                      onClick={() => setBriefImportOpen((v) => !v)}
+                    >
+                      Brief
+                    </UiButton>
+                    <UiButton
+                      size="1"
+                      variant="ghost"
+                      disabled={!projectId || protectedTool}
+                      onClick={() => setImportOpen((v) => !v)}
+                    >
+                      Import
+                    </UiButton>
+                    <UiButton
+                      size="1"
+                      variant="ghost"
+                      disabled={!projectId || protectedTool}
+                      onClick={() => setShowDirectorSettings((v) => !v)}
+                    >
+                      Models
+                    </UiButton>
+                    <UiButton
+                      size="1"
+                      variant="ghost"
+                      disabled={!projectId || protectedTool}
+                      onClick={() => setExportOpen((v) => !v)}
+                    >
+                      Export
+                    </UiButton>
+                    <UiButton
+                      size="1"
+                      variant="ghost"
+                      disabled={recoveryReadOnly || protectedTool}
+                      aria-label="Create a project"
+                      onClick={() => setShowNew((v) => !v)}
+                    >
+                      New project
+                    </UiButton>
+                    <IconButton
+                      icon="logout"
+                      label="Disconnect studio"
+                      disabled={protectedTool}
+                      onClick={() =>
+                        void Promise.resolve(disconnect()).catch((e) =>
+                          setActionError(errorText(e)),
+                        )
+                      }
+                    />
+                  </div>
+                  {snapshot && (
+                    <div className="conversation-scope">
+                      <UiSelect
+                        aria-label="Discussion scope"
+                        value={
+                          selectedShots.length === 1
+                            ? selectedShots[0]!
+                            : selectedShots.length
+                              ? "__selected__"
+                              : projectId
+                        }
+                        disabled={disabled}
+                        onValueChange={(value) => {
+                          setSelectedShots(value === projectId ? [] : [value]);
+                          setDraftContinuation(null);
+                        }}
+                        options={[
+                          { value: projectId, label: "Whole project" },
+                          ...(selectedShots.length > 1
+                            ? [
+                                {
+                                  value: "__selected__",
+                                  label:
+                                    String(selectedShots.length) +
+                                    " selected shots",
+                                },
+                              ]
+                            : []),
+                          ...snapshot.project.scenes.flatMap((scene, i) =>
+                            snapshot.project.shots
+                              .filter((s) => s.sceneId === scene.id)
+                              .map((shot, j) => ({
+                                value: shot.id,
+                                label:
+                                  "Shot " +
+                                  (i + 1) +
+                                  "." +
+                                  (j + 1) +
+                                  " · " +
+                                  shot.purpose,
+                              })),
+                          ),
+                        ]}
+                      />
+                    </div>
+                  )}
+                  <div
+                    className="conversation-stream"
+                    aria-live="polite"
+                    aria-relevant="additions text"
+                  >
+                    <div className="conversation-intro">
+                      <span className="small-mark">
+                        <Icon name="slate" size={20} />
+                      </span>
+                      <h3>Let’s shape the story.</h3>
+                      <p>
+                        Talk through your idea here. Choose a shot above to
+                        focus the conversation. Your project results stay on the
+                        right.
+                      </p>
+                    </div>
+                    {director.mode === "fake" && (
+                      <div className="demo-disclosure">
+                        <span className="tiny-label">DEMO MODE</span>
                         <p>
-                          Talk through your idea here. Select a shot to focus
-                          the conversation on that part of the film.
+                          {demoAvailable
+                            ? "This director uses canned guidance and fixture media. Ordinary chat does not change the video; use the demo edit buttons below."
+                            : "This director uses canned guidance. Set up Codex to plan with this project’s saved models."}{" "}
+                          Use the scene controls to generate with configured
+                          models, review keyframes and motion, then review the
+                          actual video.
                         </p>
                       </div>
-                      {director.mode === "fake" && (
-                        <div className="demo-disclosure">
-                          <span className="tiny-label">DEMO MODE</span>
-                          <p>
-                            {demoAvailable
-                              ? "This director uses canned guidance and fixture media. Ordinary chat does not change the video; use the demo edit buttons below."
-                              : "This director uses canned guidance. Set up Codex to plan with this project’s saved models."}{" "}
-                            Use the scene controls to generate with configured
-                            models, review keyframes and motion, then review the
-                            actual video.
-                          </p>
+                    )}
+                    {director.mode === "offline" && (
+                      <div className="demo-disclosure">
+                        <p>
+                          Your messages are saved. A live director isn’t
+                          connected.
+                        </p>
+                      </div>
+                    )}
+                    {messages.map((message) => (
+                      <article
+                        key={message.id}
+                        className={`message ${message.role}`}
+                      >
+                        <div className="message-byline">
+                          {message.role === "assistant" ? "OpenSlate" : "You"}
                         </div>
-                      )}
-                      {director.mode === "offline" && (
-                        <div className="demo-disclosure">
-                          <p>
-                            Your messages are saved. A live director isn’t
-                            connected.
-                          </p>
-                        </div>
-                      )}
-                      {messages.map((message) => (
-                        <article
-                          key={message.id}
-                          className={`message ${message.role}`}
-                        >
-                          <div className="message-byline">
-                            {message.role === "assistant" ? "OpenSlate" : "You"}
-                          </div>
-                          <ChatMarkdown
-                            text={message.text}
-                            messageId={message.id}
-                          />
-                          {message.state === "failed" && (
-                            <small>Response needs attention</small>
-                          )}
-                        </article>
-                      ))}
-                      {pendingMessage && (
-                        <article className="message user pending">
-                          <div className="message-byline">
-                            You{" "}
-                            <span>
-                              {pendingMessage.failed
-                                ? "Not confirmed"
-                                : "Sending…"}
-                            </span>
-                          </div>
-                          <ChatMarkdown
-                            text={pendingMessage.command.body.text}
-                            messageId={pendingMessage.command.key}
-                          />
-                          {pendingMessage.failed && (
-                            <UiButton
-                              className="text-button"
-                              disabled={recoveryReadOnly || busy}
-                              onClick={() => void send()}
-                            >
-                              Retry this message
-                            </UiButton>
-                          )}
-                        </article>
-                      )}
-                      {director.status === "running" && (
-                        <div className="director-working" role="status">
-                          <span className="working-dots">
-                            <i />
-                            <i />
-                            <i />
+                        <ChatMarkdown
+                          text={message.text}
+                          messageId={message.id}
+                        />
+                        {message.state === "failed" && (
+                          <small>Response needs attention</small>
+                        )}
+                      </article>
+                    ))}
+                    {pendingMessage && (
+                      <article className="message user pending">
+                        <div className="message-byline">
+                          You{" "}
+                          <span>
+                            {pendingMessage.failed
+                              ? "Not confirmed"
+                              : "Sending…"}
                           </span>
-                          Working on your request
                         </div>
-                      )}
-                      {director.message && director.status === "error" && (
-                        <div className="inline-error">{director.message}</div>
-                      )}
-                      <div ref={chatEnd} />
-                    </div>
+                        <ChatMarkdown
+                          text={pendingMessage.command.body.text}
+                          messageId={pendingMessage.command.key}
+                        />
+                        {pendingMessage.failed && (
+                          <UiButton
+                            className="text-button"
+                            disabled={recoveryReadOnly || busy}
+                            onClick={() => void send()}
+                          >
+                            Retry this message
+                          </UiButton>
+                        )}
+                      </article>
+                    )}
+                    {director.status === "running" && (
+                      <div className="director-working" role="status">
+                        <span className="working-dots">
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                        Working on your request
+                      </div>
+                    )}
+                    {director.message && director.status === "error" && (
+                      <div className="inline-error">{director.message}</div>
+                    )}
                     <div ref={currentDecision} className="current-decision">
                       {snapshot && (
                         <DirectorPlan
@@ -1124,11 +1016,23 @@ function Studio({
                               label: "The saved edit was resumed.",
                             })
                           }
+                          onScenes={() => {
+                            setGenerationHistoryRequest(null);
+                            setGenerationOpen(false);
+                            setMobileView("director");
+                            requestAnimationFrame(() => {
+                              sceneDecisions.current?.scrollIntoView({
+                                block: "start",
+                              });
+                              sceneDecisions.current?.focus({
+                                preventScroll: true,
+                              });
+                            });
+                          }}
                           onGeneration={() => {
                             setGenerationHistoryRequest(null);
                             setGenerationOpen(true);
-                            setTab("storyboard");
-                            setMobileView("workspace");
+                            setMobileView("director");
                           }}
                           onHistory={() => {
                             setGenerationHistoryRequest({
@@ -1137,7 +1041,7 @@ function Studio({
                             });
                             setGenerationOpen(true);
                             setTab("storyboard");
-                            setMobileView("workspace");
+                            setMobileView("director");
                           }}
                           onFrames={() => {
                             setGenerationOpen(false);
@@ -1211,284 +1115,387 @@ function Studio({
                         </section>
                       ))}
                     </div>
-                    <div className="composer-area">
-                      {replyQuestion && (
-                        <div className="scope-chip">
-                          <span>
-                            Replying to:{" "}
-                            {replyQuestion.questions
-                              .map((item) => item.header)
-                              .join(", ")}
-                          </span>
-                          <UiButton
-                            onClick={() => setReplyQuestionId(null)}
-                            aria-label="Cancel question reply"
-                            title="Cancel question reply"
-                          >
-                            <Icon name="close" size={13} />
-                          </UiButton>
-                        </div>
-                      )}
-                      {!replyQuestion && selectedShots.length > 0 && (
-                        <div className="scope-chip">
-                          <Icon name="image" size={14} />
-                          <span>{selectedNames.join(", ")}</span>
-                          <UiButton
-                            onClick={() => setSelectedShots([])}
-                            aria-label="Clear shot selection"
-                            title="Clear shot selection"
-                          >
-                            <Icon name="close" size={13} />
-                          </UiButton>
-                        </div>
-                      )}
-                      {director.mode === "fake" &&
-                        demoAvailable &&
-                        !replyQuestion &&
-                        selectedShots.length === 1 && (
-                          <div className="quick-actions">
-                            <span>Try an edit</span>
-                            <UiButton
+                    <ConversationSurface.Provider value={true}>
+                      <ConversationToolBusy.Provider value={registerToolBusy}>
+                        <div ref={sceneDecisions} tabIndex={-1}>
+                          {snapshot && (
+                            <ConversationActions
+                              api={api}
+                              snapshot={snapshot}
+                              director={director}
                               disabled={disabled || !connected}
-                              onClick={() => demo("close_up")}
-                            >
-                              Close-up
-                            </UiButton>
-                            <UiButton
-                              disabled={disabled || !connected}
-                              onClick={() => demo("wide")}
-                            >
-                              Wide shot
-                            </UiButton>
-                          </div>
-                        )}
-                      {draftContinuation?.projectId === projectId && (
-                        <div className="scope-chip">
-                          <span>Continuing the saved edit</span>
-                          <IconButton
-                            label="Clear saved edit continuation"
-                            onClick={() => setDraftContinuation(null)}
-                          />
+                              onChanged={refresh}
+                              exposedFrames={exposedFrames}
+                              onFocusScene={(sceneId) => {
+                                setTab("storyboard");
+                                setMobileView("workspace");
+                                requestAnimationFrame(() =>
+                                  document
+                                    .getElementById(
+                                      "project-results-scene-" + sceneId,
+                                    )
+                                    ?.scrollIntoView({ block: "start" }),
+                                );
+                              }}
+                              onNarrationShot={(shotId) => {
+                                setAudioShotId(shotId);
+                                setMobileView("director");
+                              }}
+                            />
+                          )}
                         </div>
-                      )}
-                      <form
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void send();
-                        }}
-                        className="composer"
-                      >
-                        {continuingEdits > 0 && (
-                          <small className="composer-continuation">
-                            This message continues {continuingEdits} saved edit
-                            {continuingEdits === 1 ? "" : "s"} in this scope.
-                          </small>
-                        )}
-                        <label className="sr-only" htmlFor="message-draft">
-                          Message OpenSlate
-                        </label>
-                        <TextArea
-                          ref={composer}
-                          id="message-draft"
-                          value={draft}
-                          onChange={(event) =>
-                            setDrafts((all) => ({
-                              ...all,
-                              [projectId]: event.target.value,
-                            }))
-                          }
-                          placeholder={
-                            replyQuestion
-                              ? "Your answer to the selected question…"
-                              : selectedShots.length
-                                ? `What should change in ${selectedNames.join(", ").toLowerCase()}?`
-                                : "Tell me about the film you have in mind…"
-                          }
-                          maxLength={16000}
-                          disabled={!!pendingMessage}
-                          rows={3}
-                          onKeyDown={(event) => {
-                            if (
-                              (event.metaKey || event.ctrlKey) &&
-                              event.key === "Enter"
-                            ) {
-                              event.preventDefault();
-                              void send();
-                            }
-                          }}
-                        />
-                        <div className="composer-bottom">
-                          <IconButton
-                            icon="plus"
-                            label="Import image, audio or video"
-                            disabled={disabled}
-                            onClick={() => setImportOpen(true)}
-                          />
-                          <HelpTip label="Conversation scope">
-                            {selectedShots.length
-                              ? `Editing ${selectedNames.join(", ")}. Clear the selection to discuss the whole film.`
-                              : "Discuss the whole film, or choose Discuss on a shot to focus an edit. Press Command or Control + Enter to send."}
-                          </HelpTip>
-                          <div className="composer-actions">
-                            {(canStopWork(snapshot, director) ||
-                              !!stops[projectId] ||
-                              (!!pendingMessage &&
-                                !snapshot?.control?.paused)) && (
-                              <UiButton
-                                type="button"
-                                className="stop-button"
-                                disabled={
-                                  recoveryReadOnly ||
-                                  (!!stops[projectId] &&
-                                    !stops[projectId]?.failed)
-                                }
-                                onClick={() => void stopWork()}
-                                aria-label={
-                                  stops[projectId]?.failed
-                                    ? "Retry stop"
-                                    : "Stop conversation and generation"
-                                }
-                                title="Stop the conversation and new generation. Submitted provider jobs may still finish."
-                              >
-                                <span aria-hidden="true">■</span>
-                                <span className="sr-only">
-                                  {stops[projectId]?.failed
-                                    ? "Retry stop"
-                                    : stops[projectId]
-                                      ? "Stopping…"
-                                      : "Stop"}
-                                </span>
-                              </UiButton>
-                            )}
-                            <UiButton
-                              type="submit"
-                              className="send-button"
-                              disabled={disabled || !draft.trim() || !snapshot}
-                              aria-label="Send message"
-                              title="Send message"
-                            >
-                              <Icon name="arrow" size={18} />
-                            </UiButton>
-                          </div>
-                        </div>
-                      </form>
-                    </div>
-                  </section>
-                  {split.separator}
-                  <section
-                    id="production-pane"
-                    ref={workspaceScroll}
-                    className="review-workspace"
-                    aria-label="Production workspace"
-                  >
-                    <div className="workspace-toolbar">
-                      <WorkspaceViewTabs value={tab} onChange={setTab} />
-                      {tab !== "storyboard" && (
-                        <span className="film-meta">
-                          {snapshot?.project.shots.length ?? 0} shots ·{" "}
-                          {durationLabel(totalFrames)}
-                        </span>
-                      )}
-                    </div>
-                    {tab === "preview" && snapshot && (
-                      <Timeline
-                        active={tab === "preview"}
-                        api={api}
-                        snapshot={snapshot}
-                        disabled={disabled || !connected}
-                        onImportAudio={() => setMusicImportOpen(true)}
-                        command={(body) =>
-                          void runAction({
-                            projectId,
-                            path: `${projectPath(projectId)}/storyboard`,
-                            body: {
-                              expectedHeadVersion: snapshot.project.headVersion,
-                              ...body,
-                            },
-                            key: crypto.randomUUID(),
-                            label: "Soundtrack saved.",
-                          })
-                        }
-                      />
-                    )}
-                    {snapshot?.control?.paused && (
-                      <div className="notice warning">
-                        <span>
-                          {recoveryReadOnly
-                            ? "Execution is paused for recovery review."
-                            : "Stopped. Send a new direction in the conversation to continue from saved work. Previously submitted jobs may still finish at their provider."}
-                        </span>
-                      </div>
-                    )}
-                    {reviewChanged && (
-                      <div className="notice warning">
-                        <span>
-                          The storyboard changed. Inspect the current frame and
-                          motion before approving.
-                        </span>
-                        <IconButton
-                          onClick={() => setReviewChanged(false)}
-                          label="Dismiss notice"
-                          icon="close"
-                        />
-                      </div>
-                    )}
-                    {!snapshot ? (
-                      <div className="loading-state">
-                        <span className="loading-ring" />
-                        Loading your workspace…
-                      </div>
-                    ) : (
-                      <div hidden={tab !== "storyboard"}>
-                        <FilmPlan
-                          active={tab === "storyboard"}
-                          key={projectId}
+                        <RecoveryPanel
                           api={api}
-                          snapshot={snapshot}
-                          director={director}
-                          disabled={disabled || !connected}
-                          generationOpen={generationOpen}
-                          openGeneration={() => {
-                            setGenerationHistoryRequest(null);
-                            setGenerationOpen(true);
-                          }}
-                          closeGeneration={() => {
-                            setGenerationOpen(false);
-                            setGenerationHistoryRequest(null);
-                          }}
-                          onDiscuss={(text, ids) => {
-                            setDraftContinuation(
-                              text && heldRequests.length === 1
-                                ? { projectId, requestId: heldRequests[0]! }
-                                : null,
-                            );
-                            setMobileView("director");
-                            if (ids) setSelectedShots(ids);
-                            else if (text) setSelectedShots([]);
-                            if (text)
-                              setDrafts((all) => ({
-                                ...all,
-                                [projectId]: text,
-                              }));
-                            composer.current?.focus();
-                          }}
-                          action={(path, body, label, key) =>
-                            void runAction({
-                              projectId,
-                              path,
-                              body,
-                              label,
-                              key: key ?? crypto.randomUUID(),
-                            })
-                          }
-                          onDemo={
-                            director.mode === "fake" && demoAvailable
-                              ? () => demo("create")
-                              : undefined
-                          }
-                          generation={
-                            <GenerationGuide
+                          refreshKey={refreshKey}
+                          onState={setRecoveryReadOnly}
+                          onChanged={refresh}
+                        />
+                        {(connectionError || actionError) && (
+                          <div className="notice error" role="alert">
+                            <span>{actionError || connectionError}</span>
+                            <IconButton
+                              icon="refresh"
+                              label="Refresh workspace"
+                              onClick={refresh}
+                            />
+                          </div>
+                        )}
+                        {pendingAction && (
+                          <div className="notice warning">
+                            <span>
+                              This action wasn’t confirmed. Retry the same
+                              request to check its outcome.
+                            </span>
+                            <UiButton
+                              disabled={recoveryReadOnly || busy}
+                              onClick={() => void runAction(pendingAction)}
+                            >
+                              Retry action
+                            </UiButton>
+                          </div>
+                        )}
+                        {feedback && (
+                          <div className="sr-only" role="status">
+                            {feedback}
+                          </div>
+                        )}
+                        {showNew && (
+                          <section className="create-project-panel">
+                            <div className="section-heading">
+                              <h2>Start a new film</h2>
+                              <UiButton
+                                className="icon-button"
+                                aria-label="Close new project"
+                                title="Close new project"
+                                onClick={() => setShowNew(false)}
+                              >
+                                <Icon name="close" />
+                              </UiButton>
+                            </div>
+                            <form
+                              className="new-project-form"
+                              onSubmit={(event) => void createProject(event)}
+                            >
+                              <label htmlFor="project-name">Project name</label>
+                              <UiTextField
+                                id="project-name"
+                                value={newName}
+                                onChange={(event) =>
+                                  setNewName(event.target.value)
+                                }
+                                maxLength={160}
+                                placeholder="Name your film"
+                                disabled={disabled || !!pendingCreation}
+                                autoFocus
+                              />
+                              <NewProjectProviderFields
+                                api={api}
+                                selection={providerSelection}
+                                changed={setProviderSelection}
+                                disabled={disabled || !!pendingCreation}
+                              />
+                              <UiButton
+                                type="submit"
+                                disabled={
+                                  disabled ||
+                                  (!!projectId && !connected) ||
+                                  !newName.trim()
+                                }
+                                className="button primary"
+                              >
+                                {creating
+                                  ? "Creating…"
+                                  : pendingCreation
+                                    ? "Retry same project"
+                                    : "Create project"}
+                              </UiButton>
+                            </form>
+                          </section>
+                        )}
+                        <RecoveryReadOnly.Provider
+                          value={mutationsDisabled || !connected}
+                        >
+                          {showDirectorSettings && projectId && (
+                            <ProjectSettings
                               key={projectId}
+                              api={api}
+                              projectId={projectId}
+                              refreshKey={updates.revision + refreshKey}
+                              {...(snapshot ? { snapshot } : {})}
+                              close={() => setShowDirectorSettings(false)}
+                              changed={refresh}
+                              onContinue={() => {
+                                setShowDirectorSettings(false);
+                                requestAnimationFrame(() =>
+                                  composer.current?.focus(),
+                                );
+                              }}
+                            />
+                          )}
+                        </RecoveryReadOnly.Provider>
+                        <RecoveryReadOnly.Provider
+                          value={disabled || !connected}
+                        >
+                          {musicImportOpen && snapshot && (
+                            <ImportMedia
+                              title="Background music"
+                              close={() => setMusicImportOpen(false)}
+                            >
+                              <AudioLibraryPanel
+                                api={api}
+                                projectId={projectId}
+                                onChanged={refresh}
+                              />
+                              <p className="field-help">
+                                After uploading, choose it in Export’s
+                                background music selector.
+                              </p>
+                            </ImportMedia>
+                          )}
+                          {audioShotId && snapshot && (
+                            <ImportMedia
+                              title="Shot narration"
+                              close={() => setAudioShotId(null)}
+                            >
+                              <NarrationPanel
+                                api={api}
+                                projectId={projectId}
+                                headVersion={snapshot.project.headVersion}
+                                shots={snapshot.project.shots.filter(
+                                  (s) => s.id === audioShotId,
+                                )}
+                                directorMode={director.mode}
+                                onChanged={refresh}
+                                onContinue={(requestId) => {
+                                  const ids = snapshot.pendingEditContinuations
+                                    ?.find(
+                                      (group) => group.requestId === requestId,
+                                    )
+                                    ?.scopeIds.filter((id) =>
+                                      snapshot.project.shots.some(
+                                        (shot) => shot.id === id,
+                                      ),
+                                    ) ?? [audioShotId];
+                                  setSelectedShots(
+                                    ids.length ? ids : [audioShotId],
+                                  );
+                                  setDraftContinuation({
+                                    projectId,
+                                    requestId,
+                                  });
+                                  setDrafts((all) => ({
+                                    ...all,
+                                    [projectId]:
+                                      "Continue this shot using its accepted narration and update only the affected production plan.",
+                                  }));
+                                  setAudioShotId(null);
+                                  setMobileView("director");
+                                  composer.current?.focus();
+                                }}
+                                onRequested={() => {
+                                  setGenerationHistoryRequest(null);
+                                  setAudioShotId(null);
+                                  setGenerationOpen(true);
+                                }}
+                              />
+                            </ImportMedia>
+                          )}
+                          {importOpen && snapshot && (
+                            <ImportMedia close={() => setImportOpen(false)}>
+                              <ImportTabs
+                                initialTab={importTab}
+                                onTabChange={setImportTab}
+                                image={
+                                  <ImagePanel
+                                    active={importTab === "image"}
+                                    api={api}
+                                    snapshot={snapshot}
+                                    uploadOnly
+                                    onChanged={refresh}
+                                  />
+                                }
+                                video={
+                                  <MediaPanel
+                                    active={importTab === "video"}
+                                    api={api}
+                                    snapshot={snapshot}
+                                    mode="upload"
+                                    onChanged={refresh}
+                                  />
+                                }
+                                audio={
+                                  <>
+                                    <AudioLibraryPanel
+                                      active={importTab === "audio"}
+                                      api={api}
+                                      projectId={projectId}
+                                      onChanged={refresh}
+                                    />
+                                    <details
+                                      onToggle={(event) =>
+                                        setAdvancedAudioOpen(
+                                          event.currentTarget.open,
+                                        )
+                                      }
+                                    >
+                                      <summary>
+                                        Advanced narration & transcripts
+                                      </summary>
+                                      <NarrationPanel
+                                        active={
+                                          importTab === "audio" &&
+                                          advancedAudioOpen
+                                        }
+                                        api={api}
+                                        projectId={projectId}
+                                        headVersion={
+                                          snapshot.project.headVersion
+                                        }
+                                        shots={snapshot.project.shots}
+                                        directorMode={director.mode}
+                                        onChanged={refresh}
+                                        onRequested={() => {
+                                          setGenerationHistoryRequest(null);
+                                          setImportOpen(false);
+                                          setGenerationOpen(true);
+                                          setTab("storyboard");
+                                        }}
+                                      />
+                                    </details>
+                                  </>
+                                }
+                              />
+                              <AssetActions
+                                api={api}
+                                snapshot={snapshot}
+                                disabled={disabled || !connected}
+                                onDiscuss={(artifact) => {
+                                  const command = makeImageDiscussion(
+                                    projectId,
+                                    artifact,
+                                    crypto.randomUUID(),
+                                  );
+                                  setImportOpen(false);
+                                  void runAction({
+                                    projectId,
+                                    path: projectPath(projectId) + "/messages",
+                                    body: command.body,
+                                    key: command.key,
+                                    label:
+                                      "Image attached to the conversation.",
+                                  });
+                                  setMobileView("director");
+                                  composer.current?.focus();
+                                }}
+                              />
+                            </ImportMedia>
+                          )}
+
+                          {editorOpen && snapshot && (
+                            <ImportMedia
+                              title="Edit project"
+                              close={() => setEditorOpen(false)}
+                            >
+                              <ProjectEditor
+                                snapshot={snapshot}
+                                disabled={disabled || !connected}
+                                action={(body) =>
+                                  void runAction({
+                                    projectId,
+                                    path:
+                                      projectPath(projectId) + "/storyboard",
+                                    body,
+                                    key: crypto.randomUUID(),
+                                    label: "Project updated.",
+                                  })
+                                }
+                                onNarration={setAudioShotId}
+                                onDiscuss={(shotId) => {
+                                  setSelectedShots(shotId ? [shotId] : []);
+                                  setMobileView("director");
+                                  composer.current?.focus();
+                                }}
+                              />
+                            </ImportMedia>
+                          )}
+                          {briefImportOpen && snapshot && (
+                            <ImportMedia
+                              title="Bring a brief"
+                              close={() => setBriefImportOpen(false)}
+                            >
+                              <PlanImport
+                                api={api}
+                                snapshot={snapshot}
+                                disabled={disabled || !connected}
+                                native={director.mode === "native"}
+                                action={(path, body, label, key) =>
+                                  void runAction({
+                                    projectId,
+                                    path,
+                                    body,
+                                    label,
+                                    key: key ?? crypto.randomUUID(),
+                                  })
+                                }
+                              />
+                            </ImportMedia>
+                          )}
+                          {exportOpen && snapshot && (
+                            <ImportMedia
+                              title="Export & soundtrack"
+                              close={() => setExportOpen(false)}
+                            >
+                              <MediaPanel
+                                api={api}
+                                snapshot={snapshot}
+                                mode="render"
+                                onChanged={refresh}
+                              />
+                              <ExportDownload api={api} snapshot={snapshot} />
+                              <TimelineSettings
+                                api={api}
+                                snapshot={snapshot}
+                                disabled={disabled || !connected}
+                                onImportAudio={() => setMusicImportOpen(true)}
+                                command={(body) =>
+                                  void runAction({
+                                    projectId,
+                                    path:
+                                      projectPath(projectId) + "/storyboard",
+                                    body: {
+                                      expectedHeadVersion:
+                                        snapshot.project.headVersion,
+                                      ...body,
+                                    },
+                                    key: crypto.randomUUID(),
+                                    label: "Soundtrack saved.",
+                                  })
+                                }
+                              />
+                            </ImportMedia>
+                          )}
+                          {generationOpen && snapshot && (
+                            <GenerationGuide
                               snapshot={snapshot}
                               {...(generationHistoryRequest?.projectId ===
                               projectId
@@ -1497,108 +1504,258 @@ function Studio({
                                       generationHistoryRequest.id,
                                   }
                                 : {})}
-                              onChat={() => {
-                                setMobileView("director");
-                                composer.current?.focus();
+                              onChat={() => composer.current?.focus()}
+                              onTimeline={() => {
+                                setTab("preview");
+                                setMobileView("workspace");
                               }}
-                              onTimeline={() => setTab("preview")}
                             />
-                          }
-                          onChanged={refresh}
-                          onAudio={(shotId) => setAudioShotId(shotId)}
-                          renderShot={(shot, focus) => {
-                            const member = review?.members.find(
-                              (member) => member.shotId === shot.id,
-                            );
-                            return (
-                              <StoryboardShot
-                                api={api}
-                                snapshot={snapshot}
-                                shot={shot}
-                                member={member}
-                                selected={focus?.selected}
-                                compact={focus?.compact}
-                                onSelect={focus?.onSelect}
-                                onInspect={(url, fixture) =>
-                                  frames.inspect(shot, url, fixture)
-                                }
-                                stale={disabled || !connected}
-                                command={(body) =>
-                                  void runAction({
-                                    projectId,
-                                    path: `${projectPath(projectId)}/storyboard`,
-                                    body: {
-                                      expectedHeadVersion:
-                                        snapshot.project.headVersion,
-                                      ...body,
-                                    },
-                                    key: crypto.randomUUID(),
-                                    label: "Storyboard saved.",
-                                  })
-                                }
-                                onDiscuss={() => {
-                                  toggleScope(shot.id);
-                                  setMobileView("director");
-                                  composer.current?.focus();
-                                }}
-                                onNarration={() => setAudioShotId(shot.id)}
-                              />
-                            );
-                          }}
+                          )}
+                        </RecoveryReadOnly.Provider>
+                      </ConversationToolBusy.Provider>
+                    </ConversationSurface.Provider>
+                    <div ref={chatEnd} />
+                  </div>
+                  <div className="composer-area">
+                    {replyQuestion && (
+                      <div className="scope-chip">
+                        <span>
+                          Replying to:{" "}
+                          {replyQuestion.questions
+                            .map((item) => item.header)
+                            .join(", ")}
+                        </span>
+                        <UiButton
+                          onClick={() => setReplyQuestionId(null)}
+                          aria-label="Cancel question reply"
+                          title="Cancel question reply"
+                        >
+                          <Icon name="close" size={13} />
+                        </UiButton>
+                      </div>
+                    )}
+                    {!replyQuestion && selectedShots.length > 0 && (
+                      <div className="scope-chip">
+                        <Icon name="image" size={14} />
+                        <span>{selectedNames.join(", ")}</span>
+                        <UiButton
+                          onClick={() => setSelectedShots([])}
+                          aria-label="Clear shot selection"
+                          title="Clear shot selection"
+                        >
+                          <Icon name="close" size={13} />
+                        </UiButton>
+                      </div>
+                    )}
+                    {director.mode === "fake" &&
+                      demoAvailable &&
+                      !replyQuestion &&
+                      selectedShots.length === 1 && (
+                        <div className="quick-actions">
+                          <span>Try an edit</span>
+                          <UiButton
+                            disabled={disabled || !connected}
+                            onClick={() => demo("close_up")}
+                          >
+                            Close-up
+                          </UiButton>
+                          <UiButton
+                            disabled={disabled || !connected}
+                            onClick={() => demo("wide")}
+                          >
+                            Wide shot
+                          </UiButton>
+                        </div>
+                      )}
+                    {draftContinuation?.projectId === projectId && (
+                      <div className="scope-chip">
+                        <span>Continuing the saved edit</span>
+                        <IconButton
+                          label="Clear saved edit continuation"
+                          onClick={() => setDraftContinuation(null)}
                         />
                       </div>
                     )}
-                    {snapshot && (
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void send();
+                      }}
+                      className="composer"
+                    >
+                      {continuingEdits > 0 && (
+                        <small className="composer-continuation">
+                          This message continues {continuingEdits} saved edit
+                          {continuingEdits === 1 ? "" : "s"} in this scope.
+                        </small>
+                      )}
+                      <label className="sr-only" htmlFor="message-draft">
+                        Message OpenSlate
+                      </label>
+                      <TextArea
+                        ref={composer}
+                        id="message-draft"
+                        value={draft}
+                        onChange={(event) =>
+                          setDrafts((all) => ({
+                            ...all,
+                            [projectId]: event.target.value,
+                          }))
+                        }
+                        placeholder={
+                          replyQuestion
+                            ? "Your answer to the selected question…"
+                            : selectedShots.length
+                              ? `What should change in ${selectedNames.join(", ").toLowerCase()}?`
+                              : "Tell me about the film you have in mind…"
+                        }
+                        maxLength={16000}
+                        disabled={!!pendingMessage}
+                        rows={3}
+                        onKeyDown={(event) => {
+                          if (
+                            (event.metaKey || event.ctrlKey) &&
+                            event.key === "Enter"
+                          ) {
+                            event.preventDefault();
+                            void send();
+                          }
+                        }}
+                      />
+                      <div className="composer-bottom">
+                        <IconButton
+                          icon="plus"
+                          label="Import image, audio or video"
+                          disabled={disabled}
+                          onClick={() => setImportOpen(true)}
+                        />
+                        <HelpTip label="Conversation scope">
+                          {selectedShots.length
+                            ? `Editing ${selectedNames.join(", ")}. Clear the selection to discuss the whole film.`
+                            : "Discuss the whole film, or choose Discuss on a shot to focus an edit. Press Command or Control + Enter to send."}
+                        </HelpTip>
+                        <div className="composer-actions">
+                          {(canStopWork(snapshot, director) ||
+                            !!stops[projectId] ||
+                            (!!pendingMessage &&
+                              !snapshot?.control?.paused)) && (
+                            <UiButton
+                              type="button"
+                              className="stop-button"
+                              disabled={
+                                recoveryReadOnly ||
+                                (!!stops[projectId] &&
+                                  !stops[projectId]?.failed)
+                              }
+                              onClick={() => void stopWork()}
+                              aria-label={
+                                stops[projectId]?.failed
+                                  ? "Retry stop"
+                                  : "Stop conversation and generation"
+                              }
+                              title="Stop the conversation and new generation. Submitted provider jobs may still finish."
+                            >
+                              <span aria-hidden="true">■</span>
+                              <span className="sr-only">
+                                {stops[projectId]?.failed
+                                  ? "Retry stop"
+                                  : stops[projectId]
+                                    ? "Stopping…"
+                                    : "Stop"}
+                              </span>
+                            </UiButton>
+                          )}
+                          <UiButton
+                            type="submit"
+                            className="send-button"
+                            disabled={disabled || !draft.trim() || !snapshot}
+                            aria-label="Send message"
+                            title="Send message"
+                          >
+                            <Icon name="arrow" size={18} />
+                          </UiButton>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+                </section>
+                {split.separator}
+                <section
+                  id="production-pane"
+                  ref={workspaceScroll}
+                  className="review-workspace"
+                  aria-label="Production workspace"
+                >
+                  <div className="workspace-toolbar">
+                    <WorkspaceViewTabs value={tab} onChange={setTab} />
+                    {tab !== "storyboard" && (
+                      <span className="film-meta">
+                        {snapshot?.project.shots.length ?? 0} shots ·{" "}
+                        {durationLabel(totalFrames)}
+                      </span>
+                    )}
+                  </div>
+                  {!projectId ? (
+                    <div className="result-empty">
+                      <h2>Your project results</h2>
+                      <p>Create a project in the conversation to begin.</p>
+                    </div>
+                  ) : !snapshot ? (
+                    <div className="loading-state">
+                      Loading project results…
+                    </div>
+                  ) : (
+                    <>
+                      <div hidden={tab !== "storyboard"}>
+                        <ProjectResults
+                          api={api}
+                          snapshot={snapshot}
+                          active={
+                            tab === "storyboard" &&
+                            (!compactScreen || mobileView === "workspace")
+                          }
+                          onInspect={({ url, shot, fixture }) =>
+                            frames.inspect(shot, url, fixture)
+                          }
+                          onFrameExposure={(event) => {
+                            const key = exposedSceneFrameKey(
+                              event.projectId,
+                              event.projectRevisionId,
+                              event.shotId,
+                              event.artifactId,
+                              event.sha256,
+                            );
+                            setExposedFrames((previous) => {
+                              if (!!previous[key] === event.displayed)
+                                return previous;
+                              const next = { ...previous };
+                              if (event.displayed) next[key] = true;
+                              else delete next[key];
+                              return next;
+                            });
+                          }}
+                        />
+                      </div>
                       <div hidden={tab !== "assets"}>
                         <AssetLibrary
                           active={tab === "assets"}
                           key={projectId}
                           api={api}
                           snapshot={snapshot}
-                          onChanged={refresh}
-                          disabled={
-                            disabled ||
-                            !connected ||
-                            !director.imageAttachmentsAvailable
-                          }
-                          onDiscuss={
-                            director.mode === "native"
-                              ? (artifact) => {
-                                  const command = makeImageDiscussion(
-                                    projectId,
-                                    artifact,
-                                    crypto.randomUUID(),
-                                  );
-                                  setMobileView("director");
-                                  void runAction({
-                                    projectId,
-                                    path: `${projectPath(projectId)}/messages`,
-                                    body: command.body,
-                                    key: command.key,
-                                    label: "Image attached to this discussion.",
-                                  });
-                                }
-                              : undefined
-                          }
                         />
                       </div>
-                    )}
-                    {snapshot && (
                       <div hidden={tab !== "preview"}>
-                        <MediaPanel
+                        <Timeline
                           active={tab === "preview"}
-                          key={projectId}
                           api={api}
                           snapshot={snapshot}
-                          mode="render"
-                          onChanged={refresh}
                         />
                       </div>
-                    )}
-                  </section>
-                </main>
-              </div>
-            )}
+                    </>
+                  )}
+                </section>
+              </main>
+            </div>
           </div>
           {frames.inspection && (
             <Lightbox

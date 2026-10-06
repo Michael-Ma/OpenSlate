@@ -29,12 +29,7 @@ export function useKeyframeInspection({
   const inspect = (shot: Shot, url: string, fixture: ArtifactFixture) => {
     if (!snapshot) return;
     const launcher = document.activeElement;
-    returnFocus.current =
-      launcher instanceof HTMLElement
-        ? (launcher
-            .closest(".board-shot")
-            ?.querySelector<HTMLElement>(".board-inspect") ?? launcher)
-        : null;
+    returnFocus.current = launcher instanceof HTMLElement ? launcher : null;
     setStored(inspectKeyframe(snapshot, review, shot, url, fixture));
   };
   return { inspection, returnFocus, inspect, close: () => setStored(null) };

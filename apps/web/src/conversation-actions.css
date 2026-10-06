@@ -1,0 +1,31 @@
+.conversation-actions { display: grid; gap: 10px; margin: 16px 0; }
+.conversation-scene-action { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.conversation-scene-summary.ui-button { width: 100%; height: auto; min-height: 52px; margin: 0; padding: 12px 14px; display: flex; justify-content: space-between; gap: 10px; text-align: left; color: var(--ink); border-radius: 0; }
+.conversation-scene-summary > span { display: grid; gap: 3px; min-width: 0; }
+.conversation-scene-summary strong { font-size: 13px; font-weight: 650; }
+.conversation-scene-summary > span > span { font-size: 12px; font-weight: 400; color: var(--muted); }
+.conversation-scene-chevron.open { transform: rotate(90deg); }
+.conversation-scene-body { display: grid; gap: 12px; padding: 0 14px 14px; }
+.conversation-scene-direction { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.conversation-scene-direction p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.conversation-scene-direction .ui-button { flex-shrink: 0; }
+.conversation-scene-recipes { padding: 0; margin: 0; list-style: none; display: grid; gap: 12px; }
+.conversation-scene-recipes > li { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 5px; min-width: 0; }
+.conversation-scene-shot-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 5px 12px; font-size: 12px; }
+.conversation-scene-shot-heading span { font-size: 11px; color: var(--muted); }
+.conversation-scene-shot-purpose,.conversation-scene-motion,.conversation-scene-recipe-meta,.conversation-scene-note { margin: 0; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.conversation-scene-motion { color: var(--ink); }
+.conversation-scene-motion > span { display: block; color: var(--muted); font-size: 11px; }
+.conversation-scene-recipe-meta,.conversation-scene-note { color: var(--muted); }
+.conversation-scene-prompt { font-size: 12px; color: var(--muted); }
+.conversation-scene-prompt summary { cursor: pointer; }
+.conversation-scene-prompt p { margin: 6px 0 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.conversation-scene-prompt dl { margin: 6px 0 0; display: grid; gap: 4px; }
+.conversation-scene-prompt dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; }
+.conversation-scene-prompt dt { color: var(--muted); }
+.conversation-scene-prompt dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.conversation-scene-generate.ui-button { height: auto; min-height: 36px; padding: 8px 10px; white-space: normal; }
+.conversation-scene-retry { display: grid; gap: 8px; }
+.conversation-scene-retry p { font-size: 12px; line-height: 1.55; margin: 0; color: var(--muted); }
+.conversation-scene-saved { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--green-11); font-size: 12px; }
+@media (max-width:760px) { .conversation-scene-summary.ui-button { min-height: 56px; } .conversation-scene-generate.ui-button { min-height: 44px; } }

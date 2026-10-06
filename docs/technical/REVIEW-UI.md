@@ -4,11 +4,11 @@ The React studio presents saved production state and sends authenticated human c
 
 ## Workspace
 
-The Director conversation sits beside the treatment/scenes/shots storyboard. Shot controls support inline text, narration intent, add/delete/reorder, exact frame/motion review and selected clip preview. The lightweight Timeline auditions picture, accepted narration and music, while Assets retains uploaded/generated media. Chat **+** imports owned media.
+The left Director conversation owns production actions and inline tools for editing, model selection, imports, narration, generation, rendering and recovery. The right preserves Project → Scene → Shot results, with prompts, independent keyframe/video slots and narration state. It has viewing interactions only; no second scene review gallery follows workflow progress. The lightweight Timeline auditions picture, accepted narration and music, while Assets retains uploaded/generated media. Chat **+** imports owned media.
 
 Narration uses a compact shot-scoped script/recording/listen/accept flow, with advanced section/transcript interfaces retained for detailed review. Visual generation has two decisions per scene: create keyframes from the direction, then review exact returned frames/motion/video recipe and start video. Returned clips are available to inspect. Green completion means the current media is saved.
 
-The compact header settings dialog shows Director, Keyframes, Video and Narration, with transcription/accounts/local setup/existing voice identities disclosed on demand. Director choices come from the actual compatible account/runtime catalog. Director/media commands save separately; zero-impact media Save applies the exact current server preview, while actual unfinished changes receive a human impact review. Unknown responses retain their command identity for recovery.
+The compact inline Models tool in the conversation shows Director, Keyframes, Video and Narration, with transcription/accounts/local setup/existing voice identities disclosed on demand. Director choices come from the actual compatible account/runtime catalog. Director/media commands save separately; zero-impact media Save applies the exact current server preview, while actual unfinished changes receive a human impact review. Unknown responses retain their command identity for recovery.
 
 ## Browser state and safety
 
@@ -27,7 +27,7 @@ Configured credentials need no separate approval or usage allowance. Scene gener
 ## Source and checks
 
 - [App](../../apps/web/src/App.tsx), [typed API](../../apps/web/src/api.ts), [project subscription](../../apps/web/src/project-subscription.ts), [resizable layout](../../apps/web/src/WorkspaceSplit.tsx), [safe Markdown](../../apps/web/src/ChatMarkdown.ts)
-- [Storyboard controls](../../apps/web/src/StoryboardControls.tsx), [shot audio](../../apps/web/src/ShotAudioPanel.tsx), [generation guide](../../apps/web/src/GenerationGuide.tsx), [settings](../../apps/web/src/ProjectSettings.tsx)
+- [Editing](../../apps/web/src/ProjectEditor.tsx), [result hierarchy](../../apps/web/src/ProjectResults.tsx), [conversation decisions](../../apps/web/src/ConversationActions.tsx), [inline fields](../../apps/web/src/InlineField.tsx), [shot audio](../../apps/web/src/ShotAudioPanel.tsx), [generation guide](../../apps/web/src/GenerationGuide.tsx), [settings](../../apps/web/src/ProjectSettings.tsx)
 - Shared typography in `apps/web/src/typography.css`; scoped surface/layout styles in web CSS.
 - Web model/command/playback tests plus disposable desktop/narrow-screen review. See [evidence index](../implementation/VALIDATION-EVIDENCE.md).
 

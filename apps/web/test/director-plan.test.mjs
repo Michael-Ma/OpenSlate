@@ -27,7 +27,7 @@ test('a selected shot cannot silently borrow whole-film or partially covered con
 });
 test('manual storyboard edits are saved changes rather than an interrupted Director request',()=>{
   const s=state();s.latestStoryboardEdit={requestId:'edit'};const p=directorPlan(s,director,null);
-  assert.equal(p.state,'saved');assert.equal(p.action,'frames');assert.equal(p.canResume,false);assert.equal(p.edits.length,0);
+  assert.equal(p.state,'saved');assert.equal(p.action,'scenes');assert.equal(p.canResume,false);assert.equal(p.edits.length,0);
 });
 test('historical questions and stale keyframe reviews cannot masquerade as the next human decision',()=>{
   const s=state();s.holds=[];s.pendingEditContinuations=[];s.questions=[{id:'old',state:'pending',canAnswer:false,questions:[]}];
@@ -100,5 +100,17 @@ test('unfinished earlier jobs remain separate evidence alongside a valid Resume 
 
 test('a completed planning turn with a retained hold leads to scene generation instead of a Resume loop',()=>{
  const s=state();s.pendingEditContinuations[0].directorState='completed';
- const p=directorPlan(s,director,null);assert.equal(p.state,'saved');assert.equal(p.action,'frames');assert.equal(p.canResume,false);assert.equal(p.edits.length,0);assert.match(p.next,/green scene check/);
+ const p=directorPlan(s,director,null);assert.equal(p.state,'saved');assert.equal(p.action,'scenes');assert.equal(p.canResume,false);assert.equal(p.edits.length,0);assert.match(p.next,/green scene check/);
+});
+
+test('current reviewed scene videos lead to timeline playback, missing or stale clips still need scene actions', () => {
+ const s=state();s.holds=[];s.pendingEditContinuations=[];
+ const review={planId:'plan',headVersion:2,revisionId:'r',members:[{shotId:'a',videoNodeId:'va',approved:true},{shotId:'b',videoNodeId:'vb',approved:true}]};
+ s.outputs=[{nodeId:'va',artifact:{kind:'video'}},{nodeId:'vb',artifact:{kind:'video'}}];
+ assert.equal(directorPlan(s,director,review).action,'timeline');
+ s.outputs.pop();assert.equal(directorPlan(s,director,review).action,'scenes');
+ s.outputs.push({nodeId:'vb',artifact:{kind:'video'}});review.headVersion=1;
+ assert.equal(directorPlan(s,director,review).action,'scenes');
+ review.headVersion=2;s.project.shots[0].narrationPending=true;
+ assert.equal(directorPlan(s,director,review).action,'scenes');
 });

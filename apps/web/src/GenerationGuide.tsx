@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ProjectSnapshot } from "./model";
 import {
   currentProjectAttempts,
@@ -27,6 +27,11 @@ export function GenerationGuide({
   onChat(): void;
   onTimeline(): void;
 }) {
+  const guide = useRef<HTMLElement>(null);
+  useEffect(() => {
+    guide.current?.scrollIntoView({ block: "start" });
+    guide.current?.focus({ preventScroll: true });
+  }, [historyRequestId]);
   const [showHistory, setShowHistory] = useState(false),
     historyId = useId();
   useEffect(() => {
@@ -35,7 +40,12 @@ export function GenerationGuide({
   const current = currentProjectAttempts(snapshot),
     earlier = earlierProjectAttempts(snapshot);
   return (
-    <section className="generation-guide" aria-label="Generation status">
+    <section
+      ref={guide}
+      tabIndex={-1}
+      className="generation-guide"
+      aria-label="Generation status"
+    >
       <div className="generation-next">
         <div>
           <h4>Generate from each scene</h4>

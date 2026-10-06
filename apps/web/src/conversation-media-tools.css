@@ -1,0 +1,8 @@
+.conversation-media-tools{display:grid;gap:10px;min-width:0;margin:14px 0}
+.conversation-media-field{display:grid;gap:6px;min-width:0}
+.conversation-media-field>label{font-size:12px;font-weight:550;color:var(--ink)}
+.conversation-media-tools :is(.ui-select,.ui-text-field){width:100%;min-width:0;max-width:100%}
+.conversation-media-note{font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.conversation-media-actions,.conversation-media-pages{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.conversation-media-pages>small{margin-right:auto;font-size:11px;color:var(--muted)}
+.conversation-media-tools .field-help,.conversation-media-tools .form-error{margin:0;font-size:12px;line-height:1.5}

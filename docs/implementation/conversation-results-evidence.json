@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-05",
+  "node": "24.15.0",
+  "pnpm": "10.33.0",
+  "full_gate": {
+    "command": "pnpm check",
+    "exit_code": 0,
+    "tests": 2325,
+    "pass": 2324,
+    "fail": 0,
+    "skipped": 1
+  },
+  "web_tests": {
+    "passed": 196,
+    "failed": 0
+  },
+  "independent_review": {
+    "targeted_checks_passed": 26,
+    "remaining_material_findings": 0
+  },
+  "offline_restart_demo": {
+    "initial_fake_accepts": 4,
+    "edited_fake_accepts": 2,
+    "duplicates": 0
+  },
+  "actual_browser": {
+    "bundle": "index-tONq-rVZ.js",
+    "fixture_transport": "FakeProvider only; optional unavailable API profile used for settings metadata only",
+    "scene_count": 2,
+    "shot_count": 4,
+    "left_image_previews": 0,
+    "right_production_mutation_controls": 0,
+    "same_shot_cards_preserved_across_generation_and_edit": true,
+    "asset_download_and_discussion_left_only": true,
+    "viewport_phone": {
+      "width": 390,
+      "height": 844,
+      "unseen_frame_blocks_video": true,
+      "viewed_frame_survives_director_return": true,
+      "protected_save_blocks_project_creation_switch_close_and_shortcuts": true,
+      "unsent_shortcut_messages": 0
+    },
+    "import": {
+      "full_story_and_shot_details_reviewable_left": true,
+      "unconfirmed_draft_kept_out_of_canonical_results": true
+    }
+  },
+  "existing_project_inspection": {
+    "project": "IB Project",
+    "scenes": 1,
+    "shots": 3,
+    "current_keyframes": 3,
+    "current_videos": 0,
+    "new_generation_requests": 0
+  },
+  "limitations": [
+    "optional native probe skipped",
+    "fixture import/audio/render route setup limited; conversion and assembly covered by existing offline tests/demo",
+    "no new real-provider generation or quality acceptance"
+  ]
+}

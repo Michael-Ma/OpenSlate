@@ -1,4 +1,11 @@
-import { forwardRef, useId, useRef } from "react";
+import {
+  createContext,
+  forwardRef,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 import type {
   ButtonHTMLAttributes,
   ComponentPropsWithoutRef,
@@ -180,7 +187,13 @@ export const UiSelect = forwardRef<HTMLButtonElement, UiSelectProps>(
   },
 );
 
+export const ConversationSurface = createContext(false);
+export const ConversationToolBusy = createContext<
+  ((id: string, busy: boolean) => void) | null
+>(null);
+
 export type AppDialogProps = {
+  inline?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: ReactNode;
@@ -204,6 +217,7 @@ export type AppDialogProps = {
 
 /** Shared modal layout, dismissal rules and focus restoration for controlled app dialogs. */
 export function AppDialog({
+  inline: inlineOverride,
   open,
   onOpenChange,
   title,
@@ -226,6 +240,71 @@ export function AppDialog({
   const returnFocus = useRef<HTMLElement | null>(null),
     content = useRef<HTMLDivElement>(null),
     descriptionId = useId();
+  const registerBusy = useContext(ConversationToolBusy);
+  const conversationSurface = useContext(ConversationSurface);
+  const inline = inlineOverride ?? conversationSurface;
+  useEffect(() => {
+    if (!inline || !open || !registerBusy) return;
+    registerBusy(descriptionId, preventClose || closeDisabled);
+    return () => registerBusy(descriptionId, false);
+  }, [inline, open, registerBusy, descriptionId, preventClose, closeDisabled]);
+  useEffect(() => {
+    if (!inline || !open) return;
+    const launcher = document.activeElement;
+    if (launcher instanceof HTMLElement && !content.current?.contains(launcher))
+      returnFocus.current = launcher;
+    content.current?.scrollIntoView({ block: "start" });
+    (initialFocusRef?.current ?? content.current)?.focus({
+      preventScroll: true,
+    });
+    return () => {
+      const target = returnFocusRef?.current ?? returnFocus.current;
+      if (target?.isConnected && !target.matches(":disabled"))
+        target.focus({ preventScroll: true });
+    };
+  }, [inline, open]);
+  if (inline)
+    return !open ? null : (
+      <div
+        ref={content}
+        tabIndex={-1}
+        role="region"
+        aria-labelledby={`${descriptionId}-title`}
+        className={`app-dialog conversation-tool ${className}`}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !preventClose && !closeDisabled) {
+            event.stopPropagation();
+            onOpenChange(false);
+          }
+        }}
+      >
+        <header className={`app-dialog-header ${headerClassName}`}>
+          <div className="app-dialog-heading">
+            {header}
+            <h3 id={`${descriptionId}-title`} className="app-dialog-title">
+              {title}
+            </h3>
+            {description && (
+              <p className="app-dialog-description">{description}</p>
+            )}
+          </div>
+          <UiButton
+            variant="ghost"
+            disabled={preventClose || closeDisabled}
+            aria-label={closeLabel}
+            onClick={() => onOpenChange(false)}
+          >
+            ×
+          </UiButton>
+        </header>
+        <div className={`app-dialog-body ${bodyClassName}`}>{children}</div>
+        {footer && (
+          <footer className={`app-dialog-footer ${footerClassName}`}>
+            {footer}
+          </footer>
+        )}
+      </div>
+    );
   return (
     <Dialog.Root
       open={open}

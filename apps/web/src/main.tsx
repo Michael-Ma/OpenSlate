@@ -24,10 +24,26 @@ import "@radix-ui/themes/styles.css";
 // Current OpenSlate components follow the shared theme; workspace layout is last.
 import "./light-theme.css";
 import "./director-plan.css";
-import "./film-plan.css";
 import "./workspace-light.css";
+import "./project-results.css";
+import "./conversation-media-tools.css";
+import "./conversation-actions.css";
+import "./conversation-workspace.css";
 import App from "./App";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root element");
-createRoot(root).render(<StrictMode><Theme appearance="light" accentColor="blue" grayColor="slate" radius="medium" scaling="100%" className="openslate-theme"><App /></Theme></StrictMode>);
+createRoot(root).render(
+  <StrictMode>
+    <Theme
+      appearance="light"
+      accentColor="blue"
+      grayColor="slate"
+      radius="medium"
+      scaling="100%"
+      className="openslate-theme"
+    >
+      <App />
+    </Theme>
+  </StrictMode>,
+);

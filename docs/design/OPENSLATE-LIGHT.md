@@ -6,16 +6,16 @@ Selected October 4, 2026. The user chose **A · Light workspace** from the OpenS
 
 The studio helps one person develop a film through conversation, edit its storyboard and generate/review media per scene. White surfaces keep the Director and controls readable; the pale gray canvas separates those surfaces from the creative work. Blue identifies primary actions and selection. Green scene actions request keyframes or video; a completion check means the current media is saved rather than that its artistic quality was accepted.
 
-The workspace keeps a resizable Director on the left, with the selected shot prominent and supporting shots available alongside it. Model settings organize choices by the job they perform. Small screens provide explicit workspace/Director navigation and stack controls rather than compressing the desktop arrangement.
+The workspace keeps a resizable Director on the left. Conversation, generation decisions, editing, model choices, imports, narration and export controls belong there. The right side is a persistent project result view: Project → Scene → Shot, with each shot’s direction, prompts, keyframe, video and narration state together. A workflow transition updates those same shot cards; it never adds a second scene review gallery. Viewing controls, media playback and navigation remain in the result pane. Model settings organize choices by the job they perform. Small screens provide explicit workspace/Director navigation and stack controls rather than compressing the desktop arrangement.
 
 ## Foundation and source of truth
 
 - `apps/web/src/main.tsx` mounts the light Radix `Theme` with blue/slate colors, medium radius and 100% scaling.
 - `apps/web/src/light-theme.css` owns shared semantic tokens, component states, dialogs and secondary surfaces. Radix portals inherit the same tokens.
-- `apps/web/src/director-plan.css` owns the compact current-plan card. `film-plan.css` owns film direction, storyboard selection, shot presentation and their responsive rules.
+- `apps/web/src/director-plan.css` owns the compact current-plan card. `project-results.css` owns the canonical project/scene/shot result hierarchy; `conversation-actions.css` and `conversation-workspace.css` own the left operation cards and inline tools.
 - `apps/web/src/workspace-light.css` owns the shell, navigation, Director, split boundary and production viewport. Component presentation belongs in its component sheet rather than an appended workspace patch.
 - `main.tsx` is the production CSS entry point: retained legacy skins/layouts → typography → Radix → shared Light theme → current Director/film components → workspace layout → `App`. Register a new component sheet there at the appropriate layer. Component-local duplicate imports support isolated previews; production first encounters each sheet in the explicit entry-point order.
-- `apps/web/src/ui.tsx` owns standard actions, fields, selects and controlled modal layout. `components.tsx` owns reusable icons, guidance and media inspection.
+- `apps/web/src/ui.tsx` owns standard actions, fields, selects and controlled modal and inline conversation-tool layout. `components.tsx` owns reusable icons, guidance and media inspection.
 
 Use those sources for new screens. Existing component CSS remains where it supplies domain layout; shared colors and basic controls should use the central system. Radix Themes supplies components and interaction behavior; OpenSlate supplies its layout, product language and durable commands.
 
@@ -70,7 +70,7 @@ Keep normal and responsive declarations together within the component's sheet. T
 | `UiSelect` | Controlled `value`, `onValueChange(value)` and `options: { value, label, disabled? }[]`. Its forwarded ref points to the trigger button. An empty option is internally encoded and returned as `""`; named forms preserve the real field value. Do not fabricate `ChangeEvent`s. |
 | `IconButton` | Radix icon action with a required accessible label and native disabled/click behavior. |
 | `HelpTip` | Radix tooltip for supplementary guidance, available through hover, focus or tap. Essential instructions remain visible in the product. |
-| `AppDialog` | Controlled `open`/`onOpenChange`, semantic title, optional description, header supplement, scrolling body and optional footer. `preventClose` blocks Escape/outside dismissal while an operation needs protection; `closeDisabled` disables the close action. Focus returns to the launcher, including nested modal flows. |
+| `AppDialog` | Controlled `open`/`onOpenChange`, semantic title, optional description, header supplement, scrolling body and optional footer. `preventClose` blocks Escape/outside dismissal while an operation needs protection; `closeDisabled` disables the close action. Inside `ConversationSurface`, the same component renders an inline labelled region in the left conversation. Protected saves also block project switching; focus returns to the launcher on close. Image inspection remains a modal viewing surface. |
 | `Lightbox` | Exact image, direction, motion and planned duration. An optional approval action is provided by the parent only when the current application review permits it; the modal also requires its own exact image to load successfully. Read-only callers cannot approve media. |
 
 Use text and semantics alongside color for selected, reviewed, pending, error and disabled states. A disabled control remains visible with an explanation when necessary. Keyboard focus uses a consistent blue outline. Loading feedback keeps saved content stable. Reduced-motion preferences suppress decorative animation and transitions.
@@ -79,6 +79,10 @@ Use text and semantics alongside color for selected, reviewed, pending, error an
 
 Director choices, media choices, scoped scene generation, exact frame/motion/video-recipe review and unknown-outcome recovery use durable application commands. Each scene has two generation decisions: create keyframes from its direction, then review the returned frames and actual video recipe before starting video. Returned clips are available to inspect without an additional acceptance gate. Configured provider keys/runtime enable requested generation without a separate approval or usage-allowance screen. Requested speech/transcription proceeds through the configured provider; listening, attachment and transcript adoption remain content decisions. A new visual state cannot turn an uncertain submission into a retry. Narration writing remains an ordinary creative edit.
 
+Scene generation cards contain text recipes and links to the right scene, without duplicate images. Video generation is enabled only after the exact current keyframes have loaded in the active result pane. On a phone, already displayed exact frames remain eligible when returning to the Director; hidden initial loads, changed identities and failed loads never qualify.
+
 Review desktop and narrow layouts, keyboard focus/return, nested selects/dialogs, long model labels, disabled controls, unknown commands and actual frame approval against current saved state. Typechecking/building validates integration; rendered browser checks validate layout and interaction. Current results belong in the dated implementation evidence, not in assumptions attached to a visual token set.
 
 The [post-migration review](../implementation/OCTOBER-5-POST-MIGRATION-REVIEW.md) records current-job evidence, explicit scope recovery, the consolidated inspection path and rendered parity checks.
+
+The [conversation/results review](../implementation/OCTOBER-5-CONVERSATION-RESULTS-REVIEW.md) records the current two-pane architecture and final verification.

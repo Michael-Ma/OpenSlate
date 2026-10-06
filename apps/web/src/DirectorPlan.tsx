@@ -15,6 +15,7 @@ interface Props {
   onClearScope(): void;
   onAnswer(questionId: string): void;
   onResume(edit: SavedEdit): void;
+  onScenes(): void;
   onGeneration(): void;
   onHistory(): void;
   onFrames(): void;
@@ -31,6 +32,7 @@ export function DirectorPlan({
   onClearScope,
   onAnswer,
   onResume,
+  onScenes,
   onGeneration,
   onHistory,
   onFrames,
@@ -41,6 +43,7 @@ export function DirectorPlan({
     if (plan.action === "answer" && plan.questionId) onAnswer(plan.questionId);
     else if (plan.action === "chat") onDiscuss();
     else if (plan.action === "scope") onClearScope();
+    else if (plan.action === "scenes") onScenes();
     else if (plan.action === "generation") onGeneration();
     else if (plan.action === "frames") onFrames();
     else if (plan.action === "timeline") onTimeline();
