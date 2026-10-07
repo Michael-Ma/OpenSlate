@@ -8,7 +8,6 @@ import {
   currentPlayback,
   scheduleAudioStart,
   syncAudio,
-  timelineMediaIndex,
 } from "./timeline-playback-model";
 import type {
   AudioPlacement,
@@ -19,16 +18,95 @@ import type { StudioApi } from "./api";
 import type { ProjectSnapshot, Shot } from "./model";
 import { Icon, IconButton, Preview, useArtifact } from "./components";
 import { durationLabel } from "./model";
+import type { AudioLibraryEntry } from "./AudioLibraryPanel";
+import {
+  timelineEditor,
+  timelineMoveCommand,
+  timelineNudgeCommand,
+  timelineDurationFrames,
+  timelineDurationCommand,
+  timelineMusicStart,
+  timelineMusicSpan,
+  timelineMusicCommand,
+} from "./timeline-editor-model";
+import type { TimelineCommand } from "./timeline-editor-model";
+import type { DragEvent } from "react";
+import "./timeline-editor.css";
 import { UiButton } from "./ui";
 interface TimelineProps {
   api: StudioApi;
   snapshot: ProjectSnapshot;
   active?: boolean;
+  selectedShotId?: string | null;
+  onSelectShot?(id: string): void;
+  command?(body: Record<string, unknown>): void | Promise<void>;
+  disabled?: boolean;
+  onEditShot?(id: string): void;
+  onImportAudio?(): void;
 }
 export function Timeline(props: TimelineProps) {
   return props.active === false ? null : <TimelineWorkspace {...props} />;
 }
-function TimelineWorkspace({ api, snapshot }: TimelineProps) {
+function TimelineWorkspace({
+  api,
+  snapshot,
+  selectedShotId,
+  onSelectShot,
+  command,
+  disabled = true,
+  onEditShot,
+  onImportAudio,
+}: TimelineProps) {
+  const [localSelection, setLocalSelection] = useState<string | null>(null),
+    [collapsed, setCollapsed] = useState(false),
+    [zoom, setZoom] = useState(1),
+    [editError, setEditError] = useState("");
+  const [sending, setSending] = useState(false),
+    [trackViewportWidth, setTrackViewportWidth] = useState(660);
+  const trackViewport = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = trackViewport.current;
+    if (!element) return;
+    const measure = () =>
+      setTrackViewportWidth(Math.max(0, element.clientWidth - 24));
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [collapsed, snapshot.project.id, snapshot.project.shots.length]);
+  const sendingNow = useRef(false),
+    drag = useRef<{
+      id: string;
+      projectId: string;
+      headVersion: number;
+    } | null>(null);
+  const locked = disabled || !command || sending;
+  const send = useCallback(
+    (body: TimelineCommand | null) => {
+      if (!body || disabled || !command || sendingNow.current) return;
+      sendingNow.current = true;
+      setSending(true);
+      setEditError("");
+      void Promise.resolve()
+        .then(() => command(body))
+        .catch((error) =>
+          setEditError(
+            error instanceof Error
+              ? error.message
+              : "修改未完成，请检查对话中的状态。",
+          ),
+        )
+        .finally(() => {
+          sendingNow.current = false;
+          setSending(false);
+        });
+    },
+    [command, disabled],
+  );
   const [playback, setPlayback] = useState<TimelinePlayback | null>(null),
     [audioUrls, setAudioUrls] = useState<Record<string, string>>({}),
     [audioError, setAudioError] = useState(""),
@@ -108,13 +186,8 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
         ...(playback!.soundtrack ? [playback!.soundtrack] : []),
       ]
     : [];
-  const mediaIndex = useMemo(
-    () => timelineMediaIndex(snapshot),
-    [snapshot.plan?.nodes, snapshot.outputs],
-  );
-  const shots = snapshot.project.scenes.flatMap((scene) =>
-    snapshot.project.shots.filter((s) => s.sceneId === scene.id),
-  );
+  const editor = useMemo(() => timelineEditor(snapshot), [snapshot]);
+  const shots = editor.clips.map((clip) => clip.result.shot);
   const [position, setPosition] = useState(0),
     [playing, setPlaying] = useState(false),
     [showRender, setShowRender] = useState(false);
@@ -127,15 +200,38 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
     if (!element) video.current?.pause();
     video.current = element;
   }, []);
-  let start = 0;
-  const clips = shots.map((shot) => {
-    const at = start;
-    start += shot.desiredFrames / 30;
-    return { shot, at, end: start };
-  });
+  const clips = editor.clips.map((clip) => ({
+    ...clip,
+    shot: clip.result.shot,
+    at: clip.startFrame / 30,
+    end: clip.endFrame / 30,
+  }));
   const current =
-      clips.find((c) => position >= c.at && position < c.end) ?? clips.at(-1),
-    media = current ? mediaIndex.get(current.shot.id) : null;
+    clips.find((c) => position >= c.at && position < c.end) ?? clips.at(-1);
+  const media = current
+    ? {
+        video:
+          current.result.video.current && current.result.video.artifact
+            ? current.result.video
+            : null,
+        image: current.result.keyframe.artifact
+          ? current.result.keyframe
+          : null,
+      }
+    : null;
+  const selected =
+    clips.find((clip) => clip.shot.id === (selectedShotId ?? localSelection)) ??
+    current;
+  useEffect(() => {
+    const clip = editor.clips.find(
+      (clip) => clip.result.shot.id === selectedShotId,
+    );
+    if (clip) {
+      ++controlVersion.current;
+      setPlaying(false);
+      setPosition(clip.startFrame / 30);
+    }
+  }, [selectedShotId, snapshot.project.id]);
   const clip = useArtifact(
       api,
       snapshot.project.id,
@@ -146,6 +242,8 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
       snapshot.project.id,
       media?.image?.artifact ?? null,
     );
+  const [failedVideo, setFailedVideo] = useState<string | null>(null);
+  const playableVideo = clip.url && clip.url !== failedVideo;
   const neededAudio = audioWindow(placements, position),
     neededKeys = [...new Set(neededAudio.map(audioKey))].join(",");
   useEffect(() => {
@@ -168,7 +266,10 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
   playingNow.current = playing && !buffering;
   useEffect(() => {
     setPlaying(false);
-    setPosition(0);
+    const selected = editor.clips.find(
+      (clip) => clip.result.shot.id === (selectedShotId ?? localSelection),
+    );
+    setPosition((selected?.startFrame ?? 0) / 30);
   }, [snapshot.project.id, snapshot.project.headVersion]);
   useEffect(() => {
     if (!playing) {
@@ -300,17 +401,45 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
   if (!shots.length)
     return (
       <div className="empty-storyboard">
-        <h3>Your timeline starts with a shot.</h3>
-        <p>Develop your storyboard in the conversation.</p>
+        <h3>时间线从第一个镜头开始。</h3>
+        <p>在对话里完善场景和镜头。</p>
       </div>
     );
+  const choose = (id: string, at: number) => {
+    setLocalSelection(id);
+    onSelectShot?.(id);
+    setPlaying(false);
+    seek(at);
+  };
+  const drop = (targetId: string, edge: "before" | "after") => {
+    const captured = drag.current;
+    drag.current = null;
+    if (locked || !captured) return;
+    if (
+      captured.projectId !== snapshot.project.id ||
+      captured.headVersion !== snapshot.project.headVersion
+    ) {
+      setEditError("项目已更新，请按当前顺序重新拖动。");
+      return;
+    }
+    send(
+      timelineMoveCommand(
+        snapshot,
+        captured.id,
+        targetId,
+        edge,
+        captured.headVersion,
+      ),
+    );
+  };
+  const marks = Math.min(20, Math.max(2, Math.ceil(total / 5)));
   return (
-    <section className="film-timeline" aria-label="Timeline">
+    <section className="film-timeline timeline-editor" aria-label="时间线">
       <div className="timeline-player">
-        {clip.url ? (
+        {playableVideo ? (
           <video
             ref={assignVideo}
-            src={clip.url}
+            src={clip.url ?? undefined}
             poster={still.url ?? undefined}
             muted
             playsInline
@@ -321,7 +450,13 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
               el.currentTime = Math.max(0, position - (current?.at ?? 0));
               if (playing) playVideo(el);
             }}
-            aria-label="Timeline picture preview"
+            onError={(event) => {
+              if (event.currentTarget !== video.current) return;
+              setFailedVideo(clip.url);
+              setPlaying(false);
+              setEditError("视频无法播放；可查看已保存的关键帧。");
+            }}
+            aria-label="时间线画面预览"
           />
         ) : still.url ? (
           <img src={still.url} alt={current?.shot.purpose} />
@@ -330,29 +465,33 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
             <Icon name="image" size={34} />
             <p>
               {clip.error || still.error
-                ? "Media unavailable"
-                : "This shot has no current media"}
+                ? "媒体暂时无法读取"
+                : "这个镜头还没有画面"}
             </p>
           </div>
         )}
         <span className="timeline-player-label">
-          {current?.shot.purpose} ·{" "}
-          {media?.video
-            ? media.video.fixture
-              ? "Fixture video"
-              : "Video"
-            : "Still · clip missing"}
+          镜头 {current?.result.label} ·{" "}
+          {playableVideo
+            ? media?.video?.fixture === true
+              ? "演示视频"
+              : "当前视频"
+            : still.url
+              ? media?.image?.current
+                ? media.image.fixture === true
+                  ? `演示关键帧 · ${media?.video ? (clip.error || failedVideo === clip.url ? "视频暂不可用" : "视频读取中") : "视频待生成"}`
+                  : `当前关键帧 · ${media?.video ? (clip.error || failedVideo === clip.url ? "视频暂不可用" : "视频读取中") : "视频待生成"}`
+                : "早期关键帧 · 当前画面待更新"
+              : buffering
+                ? "正在读取媒体"
+                : "画面待生成"}
         </span>
       </div>
       <div className="timeline-transport">
-        <IconButton
-          icon="refresh"
-          label="Return to beginning"
-          onClick={() => seek(0)}
-        />
+        <IconButton icon="refresh" label="返回起点" onClick={() => seek(0)} />
         <IconButton
           icon={playing ? "pause" : "play"}
-          label={playing ? "Pause timeline preview" : "Play timeline preview"}
+          label={playing ? "暂停时间线预览" : "播放时间线预览"}
           disabled={audioLoading}
           onClick={() => {
             ++controlVersion.current;
@@ -362,40 +501,44 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
               setAudioRetry((value) => value + 1);
               setAudioError("");
             }
-            setPlaying((v) => !v);
+            setPlaying((value) => !value);
           }}
         />
-        <span>
+        <span className="timeline-time">
           {durationLabel(position * 30)} / {durationLabel(total * 30)}
         </span>
         <small>
           {audioLoading
-            ? "Loading sound…"
+            ? "正在读取声音"
             : buffering
-              ? "Loading picture…"
+              ? "正在读取画面"
               : placements.length
                 ? playback?.soundtrack
                   ? playback.placements.length
-                    ? "Video + narration + music"
-                    : "Video + music"
-                  : "Video + narration"
-                : "No accepted audio"}
+                    ? "画面 + 旁白 + 配乐"
+                    : "画面 + 配乐"
+                  : "画面 + 旁白"
+                : "没有已确认的音频"}
         </small>
         <UiButton
           variant="ghost"
-          className="text-button"
           onClick={() => {
             ++controlVersion.current;
             setPlaying(false);
-            setShowRender((v) => !v);
+            setShowRender((value) => !value);
           }}
         >
-          {showRender ? "Hide export" : "Rendered export"}
+          {showRender ? "收起导出预览" : "导出预览"}
         </UiButton>
       </div>
       {audioError && (
         <p className="narration-feedback error" role="alert">
           {audioError}
+        </p>
+      )}
+      {editError && (
+        <p className="inline-error" role="alert">
+          {editError}
         </p>
       )}
       {neededAudio.map((placement) => (
@@ -406,118 +549,710 @@ function TimelineWorkspace({ api, snapshot }: TimelineProps) {
           elements={audioElements.current}
         />
       ))}
-      <div className="timeline-scroll">
-        <div className="timeline-tracks">
-          <div className="timeline-scenes">
-            {snapshot.project.scenes.map((scene, i) => (
-              <span
-                key={scene.id}
-                title={scene.purpose}
-                style={{
-                  flex:
-                    shots
-                      .filter((s) => s.sceneId === scene.id)
-                      .reduce((n, s) => n + s.desiredFrames, 0) || 1,
-                }}
-              >
-                {String(i + 1).padStart(2, "0")} · {scene.purpose}
-              </span>
-            ))}
-          </div>
-          <input
-            type="range"
-            aria-label="Timeline playhead"
-            min={0}
-            max={total}
-            step={0.1}
-            value={position}
-            onChange={(e) => seek(Number(e.target.value))}
-          />
-          <div className="timeline-lane">
-            <span>Video</span>
-            <div>
-              {clips.map(({ shot, at }) => (
-                <TimelineClip
-                  key={shot.id}
-                  api={api}
-                  snapshot={snapshot}
-                  shot={shot}
-                  media={mediaIndex.get(shot.id)}
-                  active={shot.id === current?.shot.id}
-                  select={() => seek(at)}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="timeline-lane">
-            <span>Voice</span>
-            <div>
-              {shots.map((shot) => (
-                <div
-                  key={shot.id}
-                  className={`timeline-voice ${shot.narration?.text ? "script" : ""}`}
-                  style={{ flex: shot.desiredFrames }}
-                  title={shot.narration?.text || "No shot script"}
-                >
-                  {shot.narration?.mode === "generated"
-                    ? `${shot.narrationPending ? "Draft" : "Script"} · ${shot.narration.text || "To write"}`
-                    : shot.cueId
-                      ? "Saved narration cue"
-                      : ""}
+      <div className="timeline-editor-toolbar">
+        <div>
+          <Icon name="timeline" size={17} />
+          <strong>时间线</strong>
+          <span>{shots.length} 个镜头</span>
+        </div>
+        <div className="timeline-view-controls">
+          <label>
+            缩放{" "}
+            <input
+              type="range"
+              aria-label="时间线缩放"
+              min="1"
+              max="3"
+              step="0.25"
+              value={zoom}
+              onChange={(event) => setZoom(Number(event.target.value))}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-expanded={!collapsed}
+          >
+            {collapsed ? "展开" : "收起"}
+            <Icon name="chevron-down" size={14} />
+          </button>
+        </div>
+      </div>
+      {!collapsed && (
+        <div className="timeline-editor-board">
+          <div className="timeline-scroll" ref={trackViewport}>
+            <div
+              className="timeline-tracks"
+              style={{ minWidth: `${Math.max(660, total * 32 * zoom)}px` }}
+            >
+              <div className="timeline-scenes">
+                {editor.groups
+                  .filter((group) => group.endFrame > group.startFrame)
+                  .map((group) => (
+                    <span
+                      key={group.id}
+                      title={group.purpose}
+                      style={{
+                        width: `${((group.endFrame - group.startFrame) / editor.totalFrames) * 100}%`,
+                      }}
+                    >
+                      {group.label} · {group.purpose}
+                    </span>
+                  ))}
+              </div>
+              <div className="timeline-ruler">
+                {Array.from({ length: marks + 1 }, (_, index) => (
+                  <span
+                    key={index}
+                    style={{ left: `${(index / marks) * 100}%` }}
+                  >
+                    {((total * index) / marks).toFixed(1)}s
+                  </span>
+                ))}
+              </div>
+              <input
+                type="range"
+                aria-label="时间线播放位置"
+                min={0}
+                max={total}
+                step={1 / 30}
+                value={position}
+                onChange={(event) => seek(Number(event.target.value))}
+              />
+              <div className="timeline-lane">
+                <span>画面</span>
+                <div>
+                  {clips.map(({ shot, at, result }) => (
+                    <TimelineClip
+                      key={shot.id}
+                      api={api}
+                      snapshot={snapshot}
+                      shot={shot}
+                      result={result}
+                      active={shot.id === current?.shot.id}
+                      selected={shot.id === selected?.shot.id}
+                      disabled={locked}
+                      select={() => choose(shot.id, at)}
+                      dragStart={() => {
+                        drag.current = {
+                          id: shot.id,
+                          projectId: snapshot.project.id,
+                          headVersion: snapshot.project.headVersion,
+                        };
+                      }}
+                      dragEnd={() => {
+                        drag.current = null;
+                      }}
+                      drop={(edge) => drop(shot.id, edge)}
+                      nudge={(direction) =>
+                        send(timelineNudgeCommand(snapshot, shot.id, direction))
+                      }
+                    />
+                  ))}
                 </div>
-              ))}
+              </div>
+              <div className="timeline-lane">
+                <span>旁白</span>
+                <div>
+                  {shots.map((shot) => (
+                    <div
+                      key={shot.id}
+                      className={`timeline-voice ${shot.narration?.text ? "script" : ""}`}
+                      style={{ flex: shot.desiredFrames }}
+                      title={shot.narration?.text || "没有镜头文稿"}
+                    >
+                      {shot.narration?.mode === "generated"
+                        ? `${shot.narrationPending ? "文稿" : "旁白"} · ${shot.narration.text || "待写"}`
+                        : shot.cueId
+                          ? "已保存旁白"
+                          : ""}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <TimelineMusic
+                api={api}
+                snapshot={snapshot}
+                totalFrames={editor.totalFrames}
+                placement={
+                  currentPlayback(playback, snapshot.project)
+                    ? (playback?.soundtrack ?? null)
+                    : null
+                }
+                disabled={locked}
+                send={send}
+              />
+              <div
+                className="timeline-playhead"
+                aria-hidden="true"
+                style={{
+                  left: `calc(58px + ${total ? (position / total) * 100 : 0}% - ${total ? (position / total) * 58 : 0}px)`,
+                }}
+              />
             </div>
           </div>
         </div>
-      </div>
+      )}
+      {selected && (
+        <div className="timeline-selection-tools">
+          <div className="timeline-selected-copy">
+            <strong>镜头 {selected.result.label}</strong>
+            <span>{selected.shot.purpose}</span>
+          </div>
+          <TimelineDuration
+            key={`${snapshot.project.id}:${selected.shot.id}`}
+            snapshot={snapshot}
+            shot={selected.shot}
+            disabled={locked}
+            send={send}
+          />
+          {onEditShot && (
+            <UiButton
+              disabled={disabled}
+              onClick={() => onEditShot(selected.shot.id)}
+            >
+              <Icon name="edit" size={15} />
+              编辑镜头
+            </UiButton>
+          )}
+          {onImportAudio && (
+            <UiButton disabled={disabled} onClick={onImportAudio}>
+              <Icon name="volume" size={15} />
+              导入配乐
+            </UiButton>
+          )}
+        </div>
+      )}
       {showRender && <Preview api={api} snapshot={snapshot} />}
     </section>
   );
 }
+
 function TimelineClip({
   api,
   snapshot,
   shot,
-  media,
+  result,
   active,
+  selected,
+  disabled,
   select,
+  dragStart,
+  dragEnd,
+  drop,
+  nudge,
 }: {
   api: StudioApi;
   snapshot: ProjectSnapshot;
   shot: Shot;
-  media: ReturnType<typeof timelineMediaIndex> extends Map<string, infer V>
-    ? V | undefined
-    : never;
+  result: import("./project-results-model").ResultShot;
   active: boolean;
+  selected: boolean;
+  disabled: boolean;
   select(): void;
+  dragStart(): void;
+  dragEnd(): void;
+  drop(edge: "before" | "after"): void;
+  nudge(direction: -1 | 1): void;
 }) {
-  const image = useArtifact(
-    api,
-    snapshot.project.id,
-    media?.image?.artifact ?? null,
-  );
-  const scene = snapshot.project.scenes.findIndex((s) => s.id === shot.sceneId),
-    index = snapshot.project.shots
-      .filter((s) => s.sceneId === shot.sceneId)
-      .findIndex((s) => s.id === shot.id);
+  const image = useArtifact(api, snapshot.project.id, result.keyframe.artifact);
+  const [edge, setEdge] = useState<"before" | "after" | null>(null);
+  const peers = snapshot.project.shots.filter(
+      (peer) => peer.sceneId === shot.sceneId,
+    ),
+    index = peers.findIndex((peer) => peer.id === shot.id);
+  const position = (event: DragEvent) =>
+    event.clientX <
+    event.currentTarget.getBoundingClientRect().left +
+      event.currentTarget.getBoundingClientRect().width / 2
+      ? "before"
+      : "after";
   return (
-    <button
-      className={`timeline-clip ${active ? "active" : ""}`}
-      style={{
-        flex: shot.desiredFrames,
-        ...(image.url ? { backgroundImage: `url("${image.url}")` } : {}),
+    <div
+      className={`timeline-clip-wrap ${selected ? "selected" : ""} ${active ? "playing" : ""} ${edge ? `drop-${edge}` : ""}`}
+      style={{ flex: shot.desiredFrames }}
+      onDragOver={(event) => {
+        if (
+          !disabled &&
+          event.dataTransfer.types.includes("application/x-openslate-shot")
+        ) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setEdge(position(event));
+        }
       }}
-      onClick={select}
-      title={shot.purpose}
-      aria-label={`Seek to shot ${scene + 1}.${index + 1}`}
+      onDragLeave={() => setEdge(null)}
+      onDrop={(event) => {
+        event.preventDefault();
+        const side = position(event);
+        setEdge(null);
+        if (!disabled) drop(side);
+      }}
     >
-      <strong>
-        {scene + 1}.{index + 1} · {shot.purpose}
-      </strong>
-      <small>
-        {media?.video ? "Video" : media?.image ? "Keyframe" : "Missing"}
-      </small>
-    </button>
+      <button
+        type="button"
+        className={`timeline-clip ${active ? "active" : ""}`}
+        style={
+          image.url ? { backgroundImage: `url("${image.url}")` } : undefined
+        }
+        onClick={select}
+        draggable={!disabled}
+        onDragStart={(event) => {
+          if (disabled) {
+            event.preventDefault();
+            return;
+          }
+          event.dataTransfer.setData("application/x-openslate-shot", shot.id);
+          event.dataTransfer.effectAllowed = "move";
+          dragStart();
+        }}
+        onDragEnd={dragEnd}
+        aria-label={`选择镜头 ${result.label}`}
+        aria-pressed={selected}
+        title={shot.purpose}
+        onKeyDown={(event) => {
+          if (
+            !disabled &&
+            event.altKey &&
+            ["ArrowLeft", "ArrowRight"].includes(event.key)
+          ) {
+            event.preventDefault();
+            nudge(event.key === "ArrowLeft" ? -1 : 1);
+          }
+        }}
+      >
+        <strong>
+          {result.label} · {shot.purpose}
+        </strong>
+        <small>
+          {result.video.current
+            ? result.video.fixture === true
+              ? "演示视频"
+              : "当前视频"
+            : result.keyframe.current
+              ? result.keyframe.fixture === true
+                ? "演示关键帧"
+                : "当前关键帧"
+              : result.keyframe.artifact
+                ? "早期关键帧"
+                : "待生成"}{" "}
+          · {durationLabel(shot.desiredFrames)}
+        </small>
+      </button>
+      {selected && (
+        <div className="timeline-order-actions">
+          <button
+            type="button"
+            disabled={disabled || index <= 0}
+            onClick={() => nudge(-1)}
+            aria-label={`向前移动镜头 ${result.label}`}
+          >
+            <Icon name="chevron" size={13} />
+          </button>
+          <button
+            type="button"
+            disabled={disabled || index >= peers.length - 1}
+            onClick={() => nudge(1)}
+            aria-label={`向后移动镜头 ${result.label}`}
+          >
+            <Icon name="chevron" size={13} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+function TimelineDuration({
+  snapshot,
+  shot,
+  disabled,
+  send,
+}: {
+  snapshot: ProjectSnapshot;
+  shot: Shot;
+  disabled: boolean;
+  send(body: TimelineCommand | null): void;
+}) {
+  const [draft, setDraft] = useState(String(shot.desiredFrames / 30)),
+    [error, setError] = useState("");
+  const base = useRef(snapshot.project.headVersion),
+    editing = useRef(false);
+  useEffect(() => {
+    if (!editing.current) {
+      setDraft(String(shot.desiredFrames / 30));
+      base.current = snapshot.project.headVersion;
+    }
+  }, [shot.desiredFrames, snapshot.project.headVersion]);
+  return (
+    <form
+      className="timeline-duration"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (disabled) return;
+        if (base.current !== snapshot.project.headVersion) {
+          setError("项目已更新，请重新输入当前时长。");
+          return;
+        }
+        if (timelineDurationFrames(draft) === null) {
+          setError("每个镜头需要 3–15 秒。");
+          return;
+        }
+        const body = timelineDurationCommand(
+          snapshot,
+          shot.id,
+          draft,
+          base.current,
+        );
+        editing.current = false;
+        setError("");
+        send(body);
+      }}
+    >
+      <label>
+        计划时长{" "}
+        <input
+          aria-label={`镜头 ${shot.id} 的计划时长（秒）`}
+          type="number"
+          min="3"
+          max="15"
+          step="0.1"
+          value={draft}
+          disabled={disabled}
+          onFocus={() => {
+            if (!editing.current) base.current = snapshot.project.headVersion;
+            editing.current = true;
+          }}
+          onChange={(event) => {
+            editing.current = true;
+            setDraft(event.target.value);
+            setError("");
+          }}
+        />
+        <span>秒</span>
+      </label>
+      <UiButton
+        type="submit"
+        disabled={
+          disabled || timelineDurationFrames(draft) === shot.desiredFrames
+        }
+      >
+        保存时长
+      </UiButton>
+      <small>这是镜头计划时长；已有视频可能需要更新。</small>
+      {error && (
+        <p role="alert" className="inline-error">
+          {error}
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(String(shot.desiredFrames / 30));
+              base.current = snapshot.project.headVersion;
+              editing.current = false;
+              setError("");
+            }}
+          >
+            恢复当前时长
+          </button>
+        </p>
+      )}
+    </form>
+  );
+}
+function TimelineMusic({
+  api,
+  snapshot,
+  totalFrames,
+  placement,
+  disabled,
+  send,
+}: {
+  api: StudioApi;
+  snapshot: ProjectSnapshot;
+  totalFrames: number;
+  placement: AudioPlacement | null;
+  disabled: boolean;
+  send(body: TimelineCommand | null): void;
+}) {
+  const soundtrack = snapshot.project.soundtrack as
+    | (NonNullable<ProjectSnapshot["project"]["soundtrack"]> & {
+        startFrame?: number;
+        muted?: boolean;
+      })
+    | null
+    | undefined;
+  const [recording, setRecording] = useState<AudioLibraryEntry | null>(null),
+    [error, setError] = useState(""),
+    [dragFrame, setDragFrame] = useState<number | null>(null),
+    [gain, setGain] = useState(soundtrack?.gainMilliDb ?? -18000);
+  const track = useRef<HTMLDivElement>(null),
+    drag = useRef<{
+      x: number;
+      frame: number;
+      width: number;
+      head: number;
+      projectId: string;
+      pointerId: number;
+    } | null>(null),
+    gainHead = useRef(snapshot.project.headVersion);
+  useEffect(() => {
+    const abort = new AbortController();
+    setRecording(null);
+    setError("");
+    if (soundtrack)
+      void api
+        .request<{ recordings: AudioLibraryEntry[] }>(
+          `/api/projects/${encodeURIComponent(snapshot.project.id)}/audio-library`,
+          { signal: abort.signal },
+        )
+        .then((value) => {
+          if (!abort.signal.aborted)
+            setRecording(
+              value.recordings.find(
+                (recording) => recording.id === soundtrack.audioId,
+              ) ?? null,
+            );
+        })
+        .catch(() => {
+          if (!abort.signal.aborted) setError("配乐信息暂时无法读取。");
+        });
+    return () => abort.abort();
+  }, [api, snapshot.project.id, soundtrack?.audioId]);
+  useEffect(() => {
+    drag.current = null;
+    setDragFrame(null);
+    setGain(soundtrack?.gainMilliDb ?? -18000);
+    gainHead.current = snapshot.project.headVersion;
+  }, [
+    snapshot.project.id,
+    snapshot.project.headVersion,
+    soundtrack?.gainMilliDb,
+    soundtrack?.startFrame,
+  ]);
+  const startFrame = soundtrack?.startFrame ?? 0,
+    sourceFrames =
+      recording && Number.isFinite(recording.durationSeconds)
+        ? Math.round(recording.durationSeconds * 30)
+        : placement
+          ? Math.round(placement.durationSamples / 1600)
+          : null;
+  const span = timelineMusicSpan(
+    dragFrame ?? startFrame,
+    sourceFrames,
+    totalFrames,
+  );
+  const saveGain = () => {
+    if (!disabled)
+      send(
+        timelineMusicCommand(snapshot, "gainMilliDb", gain, gainHead.current),
+      );
+  };
+  const cancel = () => {
+    drag.current = null;
+    setDragFrame(null);
+  };
+  return (
+    <div className="timeline-music-editor">
+      <div className="timeline-lane">
+        <span>配乐</span>
+        <div ref={track} className="timeline-music-track">
+          {soundtrack ? (
+            <div
+              role="slider"
+              tabIndex={disabled ? -1 : 0}
+              aria-label="配乐起点"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(0, (totalFrames - 1) / 30)}
+              aria-valuenow={(dragFrame ?? startFrame) / 30}
+              aria-valuetext={`${((dragFrame ?? startFrame) / 30).toFixed(1)} 秒`}
+              aria-disabled={disabled}
+              className={`timeline-music-clip ${soundtrack.muted ? "muted" : ""} ${span.width === null ? "duration-unknown" : ""}`}
+              style={{
+                left: `${span.left}%`,
+                ...(span.width !== null ? { width: `${span.width}%` } : {}),
+              }}
+              title={recording?.label || "已保存配乐"}
+              onPointerDown={(event) => {
+                if (disabled || event.button !== 0 || !track.current) return;
+                event.currentTarget.focus();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                drag.current = {
+                  x: event.clientX,
+                  frame: startFrame,
+                  width: track.current.getBoundingClientRect().width,
+                  head: snapshot.project.headVersion,
+                  projectId: snapshot.project.id,
+                  pointerId: event.pointerId,
+                };
+                setDragFrame(startFrame);
+              }}
+              onPointerMove={(event) => {
+                const captured = drag.current;
+                if (captured && captured.pointerId === event.pointerId)
+                  setDragFrame(
+                    timelineMusicStart(
+                      captured.frame,
+                      event.clientX - captured.x,
+                      captured.width,
+                      totalFrames,
+                    ),
+                  );
+              }}
+              onPointerUp={(event) => {
+                const captured = drag.current;
+                cancel();
+                if (
+                  !captured ||
+                  disabled ||
+                  captured.projectId !== snapshot.project.id
+                )
+                  return;
+                send(
+                  timelineMusicCommand(
+                    snapshot,
+                    "startFrame",
+                    timelineMusicStart(
+                      captured.frame,
+                      event.clientX - captured.x,
+                      captured.width,
+                      totalFrames,
+                    ),
+                    captured.head,
+                  ),
+                );
+              }}
+              onPointerCancel={cancel}
+              onKeyDown={(event) => {
+                if (
+                  disabled ||
+                  !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                    event.key,
+                  )
+                )
+                  return;
+                event.preventDefault();
+                const frame =
+                  event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? totalFrames - 1
+                      : Math.max(
+                          0,
+                          Math.min(
+                            totalFrames - 1,
+                            startFrame +
+                              (event.key === "ArrowLeft" ? -1 : 1) *
+                                (event.shiftKey ? 1 : 30),
+                          ),
+                        );
+                send(
+                  timelineMusicCommand(
+                    snapshot,
+                    "startFrame",
+                    frame,
+                    snapshot.project.headVersion,
+                  ),
+                );
+              }}
+            >
+              <strong>
+                <Icon name="volume" size={13} />
+                {recording?.label || "已保存配乐"}
+              </strong>
+              <small>
+                {soundtrack.muted
+                  ? "已静音"
+                  : `${((dragFrame ?? startFrame) / 30).toFixed(1)}s 开始`}
+                {span.width === null ? " · 长度待读取" : ""}
+              </small>
+            </div>
+          ) : (
+            <span className="timeline-empty-music">未添加配乐</span>
+          )}
+        </div>
+      </div>
+      {soundtrack && (
+        <div className="timeline-music-controls">
+          <label>
+            音量{" "}
+            <input
+              type="range"
+              aria-label="配乐音量"
+              min="-60000"
+              max="0"
+              step="1000"
+              value={gain}
+              disabled={disabled}
+              onPointerDown={() => {
+                gainHead.current = snapshot.project.headVersion;
+              }}
+              onFocus={() => {
+                gainHead.current = snapshot.project.headVersion;
+              }}
+              onChange={(event) => setGain(Number(event.target.value))}
+              onPointerUp={saveGain}
+              onKeyUp={(event) => {
+                if (
+                  [
+                    "ArrowLeft",
+                    "ArrowRight",
+                    "ArrowUp",
+                    "ArrowDown",
+                    "Home",
+                    "End",
+                  ].includes(event.key)
+                )
+                  saveGain();
+              }}
+            />
+            <span>{gain / 1000} dB</span>
+          </label>
+          <label className="timeline-mute">
+            <input
+              type="checkbox"
+              checked={soundtrack.muted ?? false}
+              disabled={disabled}
+              onChange={(event) =>
+                send(
+                  timelineMusicCommand(
+                    snapshot,
+                    "muted",
+                    event.target.checked,
+                    snapshot.project.headVersion,
+                  ),
+                )
+              }
+            />
+            静音
+          </label>
+          {startFrame >= totalFrames && (
+            <>
+              <small>配乐起点在当前影片之外。</small>
+              <UiButton
+                disabled={disabled}
+                onClick={() =>
+                  send(
+                    timelineMusicCommand(
+                      snapshot,
+                      "startFrame",
+                      0,
+                      snapshot.project.headVersion,
+                    ),
+                  )
+                }
+              >
+                移至影片起点
+              </UiButton>
+            </>
+          )}
+          <small>拖动配乐调整起点，或使用左右方向键。</small>
+        </div>
+      )}
+      {error && (
+        <p role="status" className="field-help">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

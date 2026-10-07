@@ -4,7 +4,7 @@ The React studio presents saved production state and sends authenticated human c
 
 ## Workspace
 
-The left Director conversation owns production actions and inline tools for editing, model selection, imports, narration, generation, rendering and recovery. The right preserves Project → Scene → Shot results, with prompts, independent keyframe/video slots and narration state. It has viewing interactions only; no second scene review gallery follows workflow progress. The lightweight Timeline auditions picture, accepted narration and music, while Assets retains uploaded/generated media. Chat **+** imports owned media.
+The left resizable conversation contains scoped chat, @ project resources, concise plan/recovery widgets and inline production tools. The right **Plan / Keyframes / Assets / Film** views present the same saved Scene → Shot hierarchy. Keyframes uses a large selected-shot preview, compact inspector and scene shelves; prompt/edit/reference/regeneration shortcuts share the authenticated operations used in conversation. There is no workflow-dependent duplicate scene gallery. Assets retains owned media. Film auditions picture, accepted narration and music and exposes persisted ordering, plan timing and music placement/gain/mute.
 
 Narration uses a compact shot-scoped script/recording/listen/accept flow, with advanced section/transcript interfaces retained for detailed review. Visual generation has two decisions per scene: create keyframes from the direction, then review exact returned frames/motion/video recipe and start video. Returned clips are available to inspect. Green completion means the current media is saved.
 
@@ -18,7 +18,7 @@ The compact inline Models tool in the conversation shows Director, Keyframes, Vi
 - Viewport media release, indexed timeline data and bounded audio caching avoid retaining every media file.
 - Long content, empty states, dialogs, keyboard controls and 390px layouts need rendered validation.
 
-The Director divider supports drag/keyboard, persistent preferred width and container clamping; the composer resizes vertically. Chat uses safe GFM with horizontal table scrolling and no automatic external image loading. Background projection refresh retains connected content/controls and request-owned holds. The state-derived Saved / Next card names the next useful action, and [OpenSlate Light](../design/OPENSLATE-LIGHT.md) supplies the accepted Radix foundation. Dated verification belongs in [current evidence](../implementation/STATUS.md).
+The Director divider supports drag/keyboard, persistent preferred width and container clamping; the composer resizes vertically. Chat uses safe GFM with horizontal table scrolling and no automatic external image loading. Background projection refresh retains connected content/controls and request-owned holds. The concise plan widget retains state-derived Saved / Next details and priority recovery states. [Studio Day/Night](../design/OPENSLATE-LIGHT.md) supplies the accepted Radix foundation, grayscale zones and purple-blue action tokens. Appearance/view changes preserve selection, draft and references. Dated verification belongs in [current evidence](../implementation/STATUS.md).
 
 ## Explanation of reviews
 
@@ -27,7 +27,7 @@ Configured credentials need no separate approval or usage allowance. Scene gener
 ## Source and checks
 
 - [App](../../apps/web/src/App.tsx), [typed API](../../apps/web/src/api.ts), [project subscription](../../apps/web/src/project-subscription.ts), [resizable layout](../../apps/web/src/WorkspaceSplit.tsx), [safe Markdown](../../apps/web/src/ChatMarkdown.ts)
-- [Editing](../../apps/web/src/ProjectEditor.tsx), [result hierarchy](../../apps/web/src/ProjectResults.tsx), [conversation decisions](../../apps/web/src/ConversationActions.tsx), [inline fields](../../apps/web/src/InlineField.tsx), [shot audio](../../apps/web/src/ShotAudioPanel.tsx), [generation guide](../../apps/web/src/GenerationGuide.tsx), [settings](../../apps/web/src/ProjectSettings.tsx)
+- [Editing](../../apps/web/src/ProjectEditor.tsx), [frame workbench](../../apps/web/src/FrameWorkspace.tsx), [reference composer](../../apps/web/src/ReferenceComposer.tsx), [scoped frame decisions](../../apps/web/src/FrameDecision.tsx), [conversation decisions](../../apps/web/src/ConversationActions.tsx), [inline fields](../../apps/web/src/InlineField.tsx), [shot audio](../../apps/web/src/ShotAudioPanel.tsx), [generation guide](../../apps/web/src/GenerationGuide.tsx), [settings](../../apps/web/src/ProjectSettings.tsx)
 - Shared typography in `apps/web/src/typography.css`; scoped surface/layout styles in web CSS.
 - Web model/command/playback tests plus disposable desktop/narrow-screen review. See [evidence index](../implementation/VALIDATION-EVIDENCE.md).
 

@@ -31,11 +31,13 @@ function AssetDetail({
   projectId,
   asset,
   close,
+  onReference,
 }: {
   api: StudioApi;
   projectId: string;
   asset: Asset;
   close(): void;
+  onReference?(artifact: Artifact): void;
 }) {
   const { url, error } = useArtifact(api, projectId, asset.artifact);
   return (
@@ -52,6 +54,15 @@ function AssetDetail({
         ) : (
           <video src={url} controls preload="metadata" />
         ))}
+      {onReference && (
+        <UiButton
+          variant="secondary"
+          onClick={() => onReference(asset.artifact)}
+        >
+          <Icon name="at" size={16} />
+          引用到对话
+        </UiButton>
+      )}
       <p>
         {asset.width && asset.height
           ? `${asset.width} × ${asset.height} · `
@@ -67,10 +78,14 @@ export function AssetLibrary({
   api,
   snapshot,
   active = true,
+  focusArtifactId,
+  onReference,
 }: {
   api: StudioApi;
   snapshot: ProjectSnapshot;
   active?: boolean;
+  focusArtifactId?: string | null;
+  onReference?(artifact: Artifact): void;
 }) {
   const projectId = snapshot.project.id,
     revision = useProjectRefreshVersion();
@@ -83,6 +98,22 @@ export function AssetLibrary({
     [loading, setLoading] = useState(true),
     [retry, setRetry] = useState(0);
   const [selected, setSelected] = useState<Asset | null>(null);
+  useEffect(() => {
+    if (focusArtifactId) {
+      setSearch(focusArtifactId);
+      setKind("all");
+      setSource("all");
+      setOffset(0);
+    }
+  }, [focusArtifactId]);
+  useEffect(() => {
+    if (focusArtifactId && page) {
+      const asset = page.assets.find(
+        (a) => a.artifact.artifactId === focusArtifactId,
+      );
+      if (asset) setSelected(asset);
+    }
+  }, [page, focusArtifactId]);
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
@@ -188,6 +219,7 @@ export function AssetLibrary({
           projectId={projectId}
           asset={selected}
           close={() => setSelected(null)}
+          {...(onReference ? { onReference } : {})}
         />
       )}
       {error && (

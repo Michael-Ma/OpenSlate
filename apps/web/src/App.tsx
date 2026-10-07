@@ -1,13 +1,14 @@
 import { ChatMarkdown } from "./ChatMarkdown";
 import { useWorkspaceSplit } from "./WorkspaceSplit";
 import { useKeyframeInspection } from "./useKeyframeInspection";
-import { WorkspaceViewTabs } from "./WorkspaceNavigation";
+import { initialWorkspaceView, WorkspaceViewTabs } from "./WorkspaceNavigation";
 import type { WorkspaceView } from "./WorkspaceNavigation";
 import { visibleProjectConnection } from "./project-view-model";
 import "./chat-markdown.css";
 import "./workspace-layout.css";
 import { SegmentedControl, Select, TextArea } from "@radix-ui/themes";
 import {
+  AppDialog,
   ConversationSurface,
   ConversationToolBusy,
   UiButton,
@@ -21,7 +22,23 @@ import {
 } from "./ConversationMediaTools";
 import { ProjectEditor } from "./ProjectEditor";
 import { PlanImport } from "./PlanImport";
-import { ProjectResults } from "./ProjectResults";
+import { FrameWorkspace } from "./FrameWorkspace";
+import { AppearanceSwitch } from "./Appearance";
+import { ReferenceComposer } from "./ReferenceComposer";
+import {
+  continueReferencedWork,
+  makeReferencedMessage,
+  parseReferenceLink,
+  projectReferences,
+  referenceKey,
+} from "./reference-model";
+import type { StudioReference } from "./reference-model";
+import { projectResults } from "./project-results-model";
+import { currentFrameExposures, frameSelection } from "./frame-workspace-model";
+import { FrameDecision, SceneDecisionFooter } from "./FrameDecision";
+import type { FrameRequest } from "./frame-decision-model";
+import { pendingCommandsFor } from "./pending-command";
+import "./frame-shell.css";
 import { ConversationActions } from "./ConversationActions";
 import { exposedSceneFrameKey } from "./conversation-actions-model";
 import "./conversation-workspace.css";
@@ -35,7 +52,13 @@ import { ImportMedia, ImportTabs } from "./ImportMedia";
 import { Timeline } from "./Timeline";
 import { GenerationGuide } from "./GenerationGuide";
 import { useProjectUpdates, ProjectUpdatesProvider } from "./project-updates";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { FormEvent } from "react";
 import { APP_NAME } from "@openslate/core/public";
 import { ApiError, StudioApi } from "./api";
@@ -205,6 +228,49 @@ function Studio({
   const [showNew, setShowNew] = useState(!initialProjects.length);
   const [showDirectorSettings, setShowDirectorSettings] = useState(false);
   const [selectedShots, setSelectedShots] = useState<string[]>([]);
+  const [selectedFrameIds, setSelectedFrameIds] = useState<
+    Record<string, string>
+  >({});
+  const [referenceDrafts, setReferenceDrafts] = useState<
+    Record<string, StudioReference[]>
+  >({});
+  const referenceDraft = referenceDrafts[projectId] ?? [];
+  const [reviewedFrames, setReviewedFrames] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [frameRequest, setFrameRequest] = useState<FrameRequest | null>(null);
+  const [sceneReview, setSceneReview] = useState<string | null>(null);
+  const [editorTarget, setEditorTarget] = useState<string | null>(null);
+  const [assetFocus, setAssetFocus] = useState<string | null>(null);
+  const sceneRegistry = pendingCommandsFor(api, "conversation-scenes");
+  const sceneSlot = useSyncExternalStore(
+    useCallback(
+      (listener) => sceneRegistry.subscribe(projectId, listener),
+      [sceneRegistry, projectId],
+    ),
+    useCallback(
+      () => sceneRegistry.snapshot(projectId),
+      [sceneRegistry, projectId],
+    ),
+  );
+  const sceneBusy = sceneSlot.running;
+  const seenSceneSettlement = useRef(sceneSlot.settledVersion);
+  useEffect(() => {
+    if (sceneSlot.settledVersion <= seenSceneSettlement.current) return;
+    seenSceneSettlement.current = sceneSlot.settledVersion;
+    const meta = sceneSlot.settledCommand?.metadata as
+      | { sceneId?: string; kind?: string }
+      | undefined;
+    if (sceneSlot.lastSuccess && meta?.kind === "video")
+      setSceneReview((current) => (current === meta.sceneId ? null : current));
+  }, [
+    sceneSlot.settledVersion,
+    sceneSlot.lastSuccess,
+    sceneSlot.settledCommand,
+  ]);
+  const conversationScroll = useRef<HTMLDivElement>(null),
+    followChat = useRef(true);
+  const [newChat, setNewChat] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false),
     [briefImportOpen, setBriefImportOpen] = useState(false),
     [exportOpen, setExportOpen] = useState(false);
@@ -258,7 +324,19 @@ function Studio({
     [audioShotId, setAudioShotId] = useState<string | null>(null),
     [musicImportOpen, setMusicImportOpen] = useState(false),
     [advancedAudioOpen, setAdvancedAudioOpen] = useState(false);
-  const [tab, setTab] = useState<WorkspaceView>("storyboard");
+  const [tab, updateTab] = useState<WorkspaceView>(() =>
+    initialWorkspaceView(window.location.search),
+  );
+  const setTab = (next: WorkspaceView) => {
+    updateTab(next);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", next);
+      window.history.replaceState(null, "", url);
+    } catch {
+      /*The current work area still switches when browser history is unavailable.*/
+    }
+  };
   const workspaceScroll = useRef<HTMLElement>(null);
   const currentDecision = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -291,6 +369,13 @@ function Studio({
     setBriefImportOpen(false);
     setExportOpen(false);
     setExposedFrames({});
+    setReviewedFrames({});
+    setFrameRequest(null);
+    setSceneReview(null);
+    setEditorTarget(null);
+    setAssetFocus(null);
+    followChat.current = true;
+    setNewChat(false);
     setGenerationOpen(false);
     setGenerationHistoryRequest(null);
     setAudioShotId(null);
@@ -313,8 +398,10 @@ function Studio({
       );
   }, [snapshot]);
   useEffect(() => {
-    const stream = chatEnd.current?.parentElement;
-    if (stream) stream.scrollTo({ top: stream.scrollHeight, behavior: "auto" });
+    const stream = conversationScroll.current;
+    if (stream && followChat.current)
+      stream.scrollTo({ top: stream.scrollHeight, behavior: "auto" });
+    else if (stream) setNewChat(true);
   }, [messages.length, pendingMessage?.failed]);
   useEffect(() => {
     if (!projectId) return;
@@ -399,9 +486,11 @@ function Studio({
     }
   }
   async function send() {
+    if (!pendingMessage && !draft.trim()) return;
     if (
       recoveryReadOnly ||
       protectedTool ||
+      sceneRegistry.snapshot(projectId).running ||
       !connected ||
       !snapshot ||
       creating ||
@@ -428,13 +517,16 @@ function Studio({
         pendingMessage?.command ??
         (question
           ? makeQuestionReply(projectId, question, draft, crypto.randomUUID())
-          : continueStoppedWork(
-              makeMessageCommand(
+          : continueReferencedWork(
+              makeReferencedMessage(
                 snapshot.project,
                 draft,
                 selectedShots,
+                referenceDraft,
                 crypto.randomUUID(),
                 director.mode === "native",
+                director.mode === "native" &&
+                  director.imageAttachmentsAvailable === true,
               ),
               snapshot.control,
             ));
@@ -487,6 +579,7 @@ function Studio({
       setDrafts((all) => ({ ...all, [command.projectId]: "" }));
       setReplyQuestionId(null);
       setDraftContinuation(null);
+      setReferenceDrafts((all) => ({ ...all, [command.projectId]: [] }));
       setFeedback("Message saved.");
       refresh();
     } catch (error) {
@@ -565,6 +658,7 @@ function Studio({
     if (
       recoveryReadOnly ||
       protectedTool ||
+      sceneRegistry.snapshot(projectId).running ||
       !connected ||
       creating ||
       creationInFlight.current ||
@@ -636,7 +730,7 @@ function Studio({
     !!pendingAction ||
     !!pendingMessage ||
     !!stops[projectId];
-  const disabled = mutationsDisabled || protectedTool;
+  const disabled = mutationsDisabled || protectedTool || sceneBusy;
   const frames = useKeyframeInspection({
     projectId,
     snapshot,
@@ -686,6 +780,194 @@ function Studio({
         ).filter((group) => group.directorState !== "completed").length
       : 0;
 
+  const results = snapshot ? projectResults(snapshot) : null;
+  const selectedFrame =
+    snapshot && results
+      ? frameSelection(results.scenes, selectedFrameIds[projectId] ?? null)
+      : null;
+  const checkedFrames = { ...reviewedFrames };
+  if (
+    snapshot &&
+    review &&
+    review.planId === snapshot.project.activePlanId &&
+    review.headVersion === snapshot.project.headVersion &&
+    review.revisionId === snapshot.project.revisionId
+  ) {
+    for (const member of review.members) {
+      const actual = results?.scenes
+        .flatMap((s) => s.shots)
+        .find((r) => r.shot.id === member.shotId);
+      if (
+        member.approved &&
+        member.keyframe &&
+        actual?.keyframe.current &&
+        actual.keyframe.artifact?.artifactId === member.keyframe.artifactId &&
+        actual.keyframe.artifact.sha256 === member.keyframe.sha256
+      )
+        checkedFrames[
+          exposedSceneFrameKey(
+            projectId,
+            snapshot.project.revisionId,
+            member.shotId,
+            member.keyframe.artifactId,
+            member.keyframe.sha256,
+          )
+        ] = true;
+    }
+  }
+  const selectedFrameId = selectedFrame?.result.shot.id ?? null;
+  const selectedSceneId = selectedFrame?.scene.id ?? null;
+  const updateReferences = (refs: StudioReference[]) =>
+    setReferenceDrafts((all) => ({ ...all, [projectId]: refs }));
+  const chooseShot = (id: string) => {
+    setSelectedFrameIds((all) => ({ ...all, [projectId]: id }));
+    setSelectedShots([id]);
+    setDraftContinuation(null);
+  };
+  const editTarget = (id: string) => {
+    setEditorTarget(id);
+    setEditorOpen(true);
+    setMobileView("director");
+  };
+  const addReference = (kind: "shot" | "scene", id: string) => {
+    if (!snapshot) return;
+    const ref = projectReferences(snapshot).find(
+      (r) => r.kind === kind && r.id === id,
+    );
+    if (!ref) return;
+    updateReferences(
+      referenceDraft.some((r) => r.key === ref.key)
+        ? referenceDraft
+        : [...referenceDraft, ref],
+    );
+    setMobileView("director");
+    requestAnimationFrame(() => composer.current?.focus());
+  };
+  const navigateReference = (ref: StudioReference) => {
+    if (ref.projectId !== projectId) {
+      setActionError("引用来自另一个项目。");
+      return;
+    }
+    if (ref.kind === "shot") {
+      if (!snapshot?.project.shots.some((s) => s.id === ref.id)) {
+        setActionError("引用的镜头已不在项目中。");
+        return;
+      }
+      chooseShot(ref.id);
+      setTab("frames");
+      setMobileView("workspace");
+    } else if (ref.kind === "scene") {
+      const shot = snapshot?.project.shots.find((s) => s.sceneId === ref.id);
+      if (shot) chooseShot(shot.id);
+      setTab("plan");
+      setMobileView("workspace");
+      requestAnimationFrame(() =>
+        document
+          .getElementById("plan-scene-" + ref.id)
+          ?.scrollIntoView({ block: "start" }),
+      );
+    } else if (ref.kind === "project") {
+      setTab("plan");
+      setMobileView("workspace");
+    } else if (ref.kind === "audio") {
+      setMusicImportOpen(true);
+      setMobileView("director");
+    } else {
+      setAssetFocus(ref.id);
+      setTab("assets");
+      setMobileView("workspace");
+    }
+  };
+  const requestFrames = (sceneId: string, shotId?: string) => {
+    if (!snapshot) return;
+    const targets = snapshot.project.shots.filter(
+      (s) => s.sceneId === sceneId && (!shotId || s.id === shotId),
+    );
+    const missing = targets.filter(
+      (s) =>
+        !results?.scenes
+          .flatMap((scene) => scene.shots)
+          .find((r) => r.shot.id === s.id)?.keyframe.current,
+    );
+    setFrameRequest({
+      sceneId,
+      targetShotIds: (missing.length ? missing : targets).map((s) => s.id),
+      regenerate: !missing.length,
+    });
+    setMobileView("director");
+  };
+  const confirmFrame = (shotId: string) => {
+    const current = results?.scenes
+      .flatMap((scene) => scene.shots)
+      .find((r) => r.shot.id === shotId);
+    if (!snapshot || !current?.keyframe.current || !current.keyframe.artifact)
+      return;
+    const artifact = current.keyframe.artifact,
+      key = exposedSceneFrameKey(
+        projectId,
+        snapshot.project.revisionId,
+        shotId,
+        artifact.artifactId,
+        artifact.sha256,
+      );
+    if (!exposedFrames[key] || disabled || !connected) return;
+    setReviewedFrames((previous) => ({ ...previous, [key]: true }));
+  };
+  const exposeFrame = (event: {
+    projectId: string;
+    projectRevisionId: string;
+    shotId: string;
+    artifactId: string;
+    sha256: string;
+    displayed: boolean;
+  }) => {
+    const key = exposedSceneFrameKey(
+      event.projectId,
+      event.projectRevisionId,
+      event.shotId,
+      event.artifactId,
+      event.sha256,
+    );
+    setExposedFrames((previous) => {
+      if (!!previous[key] === event.displayed) return previous;
+      const next = { ...previous };
+      if (event.displayed) next[key] = true;
+      else delete next[key];
+      return next;
+    });
+    if (!event.displayed)
+      setReviewedFrames((previous) => {
+        if (!previous[key]) return previous;
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
+  };
+  useEffect(() => {
+    if (!snapshot || !results) return;
+    const valid = new Set(
+      currentFrameExposures(snapshot, results.scenes).map((e) =>
+        exposedSceneFrameKey(
+          e.projectId,
+          e.projectRevisionId,
+          e.shotId,
+          e.artifactId,
+          e.sha256,
+        ),
+      ),
+    );
+    const prune = (previous: Record<string, boolean>) => {
+      const keys = Object.keys(previous);
+      return keys.every((k) => valid.has(k))
+        ? previous
+        : Object.fromEntries(
+            keys.filter((k) => valid.has(k)).map((k) => [k, true]),
+          );
+    };
+    setExposedFrames(prune);
+    setReviewedFrames(prune);
+  }, [snapshot]);
+
   return (
     <ProjectUpdatesProvider value={updates.revision + refreshKey}>
       <RecoveryReadOnly.Provider value={recoveryReadOnly}>
@@ -704,7 +986,7 @@ function Studio({
                 </label>
                 <Select.Root
                   value={projectId || "__new__"}
-                  disabled={busy || creating || protectedTool}
+                  disabled={busy || creating || protectedTool || sceneBusy}
                   onValueChange={(value) => {
                     if (value !== "__new__") setProjectId(value);
                   }}
@@ -728,6 +1010,19 @@ function Studio({
                 </Select.Root>
               </div>
               <div className="header-actions">
+                <AppearanceSwitch />
+                <UiButton
+                  className="header-export"
+                  variant="secondary"
+                  disabled={!snapshot || disabled}
+                  onClick={() => {
+                    setExportOpen(true);
+                    setMobileView("director");
+                  }}
+                >
+                  <Icon name="download" size={16} />
+                  导出项目
+                </UiButton>
                 <span
                   className={`connection ${connected ? "online" : ""}`}
                   role="status"
@@ -735,9 +1030,9 @@ function Studio({
                   <span className="status-dot" />
                   {connected
                     ? updates.connection === "fallback"
-                      ? "Periodic updates"
-                      : "Live updates"
-                    : "Connecting…"}
+                      ? "定时同步"
+                      : "已同步"
+                    : "连接中…"}
                 </span>
               </div>
             </header>
@@ -748,10 +1043,10 @@ function Studio({
                 aria-label="Workspace panel"
               >
                 <SegmentedControl.Item value="workspace">
-                  Workspace
+                  工作区
                 </SegmentedControl.Item>
                 <SegmentedControl.Item value="director">
-                  Director
+                  对话
                 </SegmentedControl.Item>
               </SegmentedControl.Root>
             </div>
@@ -770,69 +1065,50 @@ function Studio({
                   <div className="panel-title">
                     <div>
                       <Icon name="chat" size={18} />
-                      <h2 id="conversation-title">Director</h2>
+                      <h2 id="conversation-title">创作对话</h2>
                     </div>
                     <span className="tag subtle">
                       {director.mode === "fake"
-                        ? "Demo director"
+                        ? "演示助手"
                         : director.mode === "native"
-                          ? "Codex director"
-                          : "Director offline"}
+                          ? "Codex"
+                          : "未连接助手"}
                     </span>
                   </div>
                   <div
                     className="conversation-tools"
                     aria-label="Conversation tools"
                   >
-                    <UiButton
-                      size="1"
-                      variant="ghost"
+                    <IconButton
+                      icon="edit"
+                      label="编辑镜头与场景"
                       disabled={!projectId || protectedTool}
                       onClick={() => setEditorOpen((v) => !v)}
-                    >
-                      Edit
-                    </UiButton>
-                    <UiButton
-                      size="1"
-                      variant="ghost"
+                    />
+                    <IconButton
+                      icon="list"
+                      label="导入文本方案"
                       disabled={!projectId || protectedTool}
                       onClick={() => setBriefImportOpen((v) => !v)}
-                    >
-                      Brief
-                    </UiButton>
-                    <UiButton
-                      size="1"
-                      variant="ghost"
+                    />
+                    <IconButton
+                      icon="plus"
+                      label="导入图像、视频或音频"
                       disabled={!projectId || protectedTool}
                       onClick={() => setImportOpen((v) => !v)}
-                    >
-                      Import
-                    </UiButton>
-                    <UiButton
-                      size="1"
-                      variant="ghost"
+                    />
+                    <IconButton
+                      icon="settings"
+                      label="模型设置"
                       disabled={!projectId || protectedTool}
                       onClick={() => setShowDirectorSettings((v) => !v)}
-                    >
-                      Models
-                    </UiButton>
-                    <UiButton
-                      size="1"
-                      variant="ghost"
-                      disabled={!projectId || protectedTool}
-                      onClick={() => setExportOpen((v) => !v)}
-                    >
-                      Export
-                    </UiButton>
-                    <UiButton
-                      size="1"
-                      variant="ghost"
+                    />
+                    <IconButton
+                      icon="folder"
+                      label="新建项目"
                       disabled={recoveryReadOnly || protectedTool}
-                      aria-label="Create a project"
                       onClick={() => setShowNew((v) => !v)}
-                    >
-                      New project
-                    </UiButton>
+                    />
                     <IconButton
                       icon="logout"
                       label="Disconnect studio"
@@ -891,31 +1167,58 @@ function Studio({
                     </div>
                   )}
                   <div
+                    ref={conversationScroll}
+                    onScroll={(event) => {
+                      const e = event.currentTarget;
+                      followChat.current =
+                        e.scrollHeight - e.scrollTop - e.clientHeight < 120;
+                      if (followChat.current) setNewChat(false);
+                    }}
+                    onClick={(event) => {
+                      const anchor = (event.target as HTMLElement).closest("a");
+                      const ref = anchor
+                        ? parseReferenceLink(anchor.getAttribute("href") ?? "")
+                        : null;
+                      if (ref) {
+                        event.preventDefault();
+                        navigateReference({
+                          key: referenceKey(
+                            ref.projectId,
+                            ref.kind,
+                            ref.id,
+                            ref.sha256,
+                          ),
+                          projectId: ref.projectId,
+                          kind: ref.kind,
+                          id: ref.id,
+                          label: anchor!.textContent ?? "项目资源",
+                        });
+                      }
+                    }}
                     className="conversation-stream"
                     aria-live="polite"
                     aria-relevant="additions text"
                   >
-                    <div className="conversation-intro">
-                      <span className="small-mark">
-                        <Icon name="slate" size={20} />
-                      </span>
-                      <h3>Let’s shape the story.</h3>
-                      <p>
-                        Talk through your idea here. Choose a shot above to
-                        focus the conversation. Your project results stay on the
-                        right.
-                      </p>
-                    </div>
+                    {messages.length === 0 && (
+                      <div className="conversation-intro">
+                        <span className="small-mark">
+                          <Icon name="slate" size={20} />
+                        </span>
+                        <h3>从一个想法开始。</h3>
+                        <p>
+                          Talk through your idea here. Choose a shot above to
+                          focus the conversation. Your project results stay on
+                          the right.
+                        </p>
+                      </div>
+                    )}
                     {director.mode === "fake" && (
                       <div className="demo-disclosure">
-                        <span className="tiny-label">DEMO MODE</span>
+                        <span className="tiny-label">演示模式</span>
                         <p>
                           {demoAvailable
-                            ? "This director uses canned guidance and fixture media. Ordinary chat does not change the video; use the demo edit buttons below."
-                            : "This director uses canned guidance. Set up Codex to plan with this project’s saved models."}{" "}
-                          Use the scene controls to generate with configured
-                          models, review keyframes and motion, then review the
-                          actual video.
+                            ? "使用示例素材。用镜头操作体验制作流程；自由对话不会生成真实媒体。"
+                            : "当前对话使用演示助手，可在模型设置中选择 Codex。"}
                         </p>
                       </div>
                     )}
@@ -985,6 +1288,10 @@ function Studio({
                     <div ref={currentDecision} className="current-decision">
                       {snapshot && (
                         <DirectorPlan
+                          onPlan={() => {
+                            setTab("plan");
+                            setMobileView("workspace");
+                          }}
                           snapshot={snapshot}
                           director={director}
                           review={review}
@@ -1040,16 +1347,16 @@ function Studio({
                               id: crypto.randomUUID(),
                             });
                             setGenerationOpen(true);
-                            setTab("storyboard");
+                            setTab("frames");
                             setMobileView("director");
                           }}
                           onFrames={() => {
                             setGenerationOpen(false);
-                            setTab("storyboard");
+                            setTab("frames");
                             setMobileView("workspace");
                           }}
                           onTimeline={() => {
-                            setTab("preview");
+                            setTab("cut");
                             setMobileView("workspace");
                           }}
                           onClearScope={() => {
@@ -1126,8 +1433,9 @@ function Studio({
                               disabled={disabled || !connected}
                               onChanged={refresh}
                               exposedFrames={exposedFrames}
+                              reviewedFrames={checkedFrames}
                               onFocusScene={(sceneId) => {
-                                setTab("storyboard");
+                                setTab("frames");
                                 setMobileView("workspace");
                                 requestAnimationFrame(() =>
                                   document
@@ -1253,6 +1561,23 @@ function Studio({
                             />
                           )}
                         </RecoveryReadOnly.Provider>
+                        {frameRequest && snapshot && (
+                          <RecoveryReadOnly.Provider
+                            value={mutationsDisabled || !connected}
+                          >
+                            <FrameDecision
+                              api={api}
+                              snapshot={snapshot}
+                              director={director}
+                              request={frameRequest}
+                              disabled={
+                                mutationsDisabled || protectedTool || !connected
+                              }
+                              onChanged={refresh}
+                              close={() => setFrameRequest(null)}
+                            />
+                          </RecoveryReadOnly.Provider>
+                        )}
                         <RecoveryReadOnly.Provider
                           value={disabled || !connected}
                         >
@@ -1378,7 +1703,7 @@ function Studio({
                                           setGenerationHistoryRequest(null);
                                           setImportOpen(false);
                                           setGenerationOpen(true);
-                                          setTab("storyboard");
+                                          setTab("frames");
                                         }}
                                       />
                                     </details>
@@ -1418,6 +1743,9 @@ function Studio({
                             >
                               <ProjectEditor
                                 snapshot={snapshot}
+                                {...(editorTarget
+                                  ? { targetId: editorTarget }
+                                  : {})}
                                 disabled={disabled || !connected}
                                 action={(body) =>
                                   void runAction({
@@ -1506,7 +1834,7 @@ function Studio({
                                 : {})}
                               onChat={() => composer.current?.focus()}
                               onTimeline={() => {
-                                setTab("preview");
+                                setTab("cut");
                                 setMobileView("workspace");
                               }}
                             />
@@ -1517,6 +1845,22 @@ function Studio({
                     <div ref={chatEnd} />
                   </div>
                   <div className="composer-area">
+                    {newChat && (
+                      <UiButton
+                        size="1"
+                        variant="ghost"
+                        onClick={() => {
+                          followChat.current = true;
+                          setNewChat(false);
+                          conversationScroll.current?.scrollTo({
+                            top: conversationScroll.current.scrollHeight,
+                            behavior: "auto",
+                          });
+                        }}
+                      >
+                        查看新消息
+                      </UiButton>
+                    )}
                     {replyQuestion && (
                       <div className="scope-chip">
                         <span>
@@ -1577,105 +1921,95 @@ function Studio({
                       </div>
                     )}
                     <form
+                      className="studio-message-form"
                       onSubmit={(event) => {
                         event.preventDefault();
                         void send();
                       }}
-                      className="composer"
                     >
-                      {continuingEdits > 0 && (
-                        <small className="composer-continuation">
-                          This message continues {continuingEdits} saved edit
-                          {continuingEdits === 1 ? "" : "s"} in this scope.
-                        </small>
-                      )}
-                      <label className="sr-only" htmlFor="message-draft">
-                        Message OpenSlate
-                      </label>
-                      <TextArea
-                        ref={composer}
-                        id="message-draft"
+                      <ReferenceComposer
+                        api={api}
+                        snapshot={snapshot}
                         value={draft}
-                        onChange={(event) =>
-                          setDrafts((all) => ({
-                            ...all,
-                            [projectId]: event.target.value,
-                          }))
+                        changed={(value) =>
+                          setDrafts((all) => ({ ...all, [projectId]: value }))
                         }
+                        textareaRef={composer}
+                        references={replyQuestion ? [] : referenceDraft}
+                        referencesChanged={updateReferences}
+                        onNavigate={navigateReference}
+                        send={() => void send()}
+                        pending={!!pendingMessage}
+                        disabled={disabled || !!replyQuestion}
                         placeholder={
                           replyQuestion
-                            ? "Your answer to the selected question…"
+                            ? "回答当前问题…"
                             : selectedShots.length
-                              ? `What should change in ${selectedNames.join(", ").toLowerCase()}?`
-                              : "Tell me about the film you have in mind…"
+                              ? "描述这个镜头的调整，输入 @ 引用资源…"
+                              : "描述你的想法，输入 @ 引用素材…"
                         }
-                        maxLength={16000}
-                        disabled={!!pendingMessage}
-                        rows={3}
-                        onKeyDown={(event) => {
-                          if (
-                            (event.metaKey || event.ctrlKey) &&
-                            event.key === "Enter"
-                          ) {
-                            event.preventDefault();
-                            void send();
-                          }
-                        }}
+                        continuation={
+                          continuingEdits > 0 ? (
+                            <small className="composer-continuation">
+                              继续 {continuingEdits} 个已保存的编辑
+                            </small>
+                          ) : undefined
+                        }
+                        actions={
+                          <>
+                            {" "}
+                            <IconButton
+                              icon="plus"
+                              label="Import image, audio or video"
+                              disabled={disabled}
+                              onClick={() => setImportOpen(true)}
+                            />
+                            <div className="composer-actions">
+                              {(canStopWork(snapshot, director) ||
+                                !!stops[projectId] ||
+                                (!!pendingMessage &&
+                                  !snapshot?.control?.paused)) && (
+                                <UiButton
+                                  type="button"
+                                  className="stop-button"
+                                  disabled={
+                                    recoveryReadOnly ||
+                                    (!!stops[projectId] &&
+                                      !stops[projectId]?.failed)
+                                  }
+                                  onClick={() => void stopWork()}
+                                  aria-label={
+                                    stops[projectId]?.failed
+                                      ? "Retry stop"
+                                      : "Stop conversation and generation"
+                                  }
+                                  title="Stop the conversation and new generation. Submitted provider jobs may still finish."
+                                >
+                                  <span aria-hidden="true">■</span>
+                                  <span className="sr-only">
+                                    {stops[projectId]?.failed
+                                      ? "Retry stop"
+                                      : stops[projectId]
+                                        ? "Stopping…"
+                                        : "Stop"}
+                                  </span>
+                                </UiButton>
+                              )}
+                              <UiButton
+                                type="submit"
+                                className="send-button"
+                                disabled={
+                                  disabled || !draft.trim() || !snapshot
+                                }
+                                aria-label="Send message"
+                                title="Send message"
+                              >
+                                <Icon name="arrow" size={18} />
+                              </UiButton>
+                            </div>
+                          </>
+                        }
                       />
-                      <div className="composer-bottom">
-                        <IconButton
-                          icon="plus"
-                          label="Import image, audio or video"
-                          disabled={disabled}
-                          onClick={() => setImportOpen(true)}
-                        />
-                        <HelpTip label="Conversation scope">
-                          {selectedShots.length
-                            ? `Editing ${selectedNames.join(", ")}. Clear the selection to discuss the whole film.`
-                            : "Discuss the whole film, or choose Discuss on a shot to focus an edit. Press Command or Control + Enter to send."}
-                        </HelpTip>
-                        <div className="composer-actions">
-                          {(canStopWork(snapshot, director) ||
-                            !!stops[projectId] ||
-                            (!!pendingMessage &&
-                              !snapshot?.control?.paused)) && (
-                            <UiButton
-                              type="button"
-                              className="stop-button"
-                              disabled={
-                                recoveryReadOnly ||
-                                (!!stops[projectId] &&
-                                  !stops[projectId]?.failed)
-                              }
-                              onClick={() => void stopWork()}
-                              aria-label={
-                                stops[projectId]?.failed
-                                  ? "Retry stop"
-                                  : "Stop conversation and generation"
-                              }
-                              title="Stop the conversation and new generation. Submitted provider jobs may still finish."
-                            >
-                              <span aria-hidden="true">■</span>
-                              <span className="sr-only">
-                                {stops[projectId]?.failed
-                                  ? "Retry stop"
-                                  : stops[projectId]
-                                    ? "Stopping…"
-                                    : "Stop"}
-                              </span>
-                            </UiButton>
-                          )}
-                          <UiButton
-                            type="submit"
-                            className="send-button"
-                            disabled={disabled || !draft.trim() || !snapshot}
-                            aria-label="Send message"
-                            title="Send message"
-                          >
-                            <Icon name="arrow" size={18} />
-                          </UiButton>
-                        </div>
-                      </div>
                     </form>
                   </div>
                 </section>
@@ -1687,68 +2021,156 @@ function Studio({
                   aria-label="Production workspace"
                 >
                   <div className="workspace-toolbar">
+                    <span className="workspace-label">制作工作区</span>
                     <WorkspaceViewTabs value={tab} onChange={setTab} />
-                    {tab !== "storyboard" && (
-                      <span className="film-meta">
-                        {snapshot?.project.shots.length ?? 0} shots ·{" "}
-                        {durationLabel(totalFrames)}
-                      </span>
-                    )}
+                    <span className="film-meta">
+                      {durationLabel(totalFrames)}
+                    </span>
                   </div>
                   {!projectId ? (
                     <div className="result-empty">
-                      <h2>Your project results</h2>
-                      <p>Create a project in the conversation to begin.</p>
+                      <h2>开始一个新项目</h2>
+                      <p>在左侧描述想法或导入参考素材。</p>
                     </div>
                   ) : !snapshot ? (
-                    <div className="loading-state">
-                      Loading project results…
-                    </div>
+                    <div className="loading-state">读取项目…</div>
                   ) : (
                     <>
-                      <div hidden={tab !== "storyboard"}>
-                        <ProjectResults
+                      <div hidden={tab !== "plan" && tab !== "frames"}>
+                        <FrameWorkspace
                           api={api}
                           snapshot={snapshot}
+                          view={tab === "plan" ? "plan" : "frames"}
                           active={
-                            tab === "storyboard" &&
+                            (tab === "plan" || tab === "frames") &&
                             (!compactScreen || mobileView === "workspace")
                           }
+                          disabled={disabled || !connected}
+                          selectedShotId={selectedFrameId}
+                          onSelectShot={chooseShot}
+                          reviewedFrames={checkedFrames}
+                          onConfirmFrame={confirmFrame}
+                          onEditShot={editTarget}
+                          onEditScene={editTarget}
+                          onReferenceShot={(id) => addReference("shot", id)}
+                          onReferenceScene={(id) => addReference("scene", id)}
                           onInspect={({ url, shot, fixture }) =>
                             frames.inspect(shot, url, fixture)
                           }
-                          onFrameExposure={(event) => {
-                            const key = exposedSceneFrameKey(
-                              event.projectId,
-                              event.projectRevisionId,
-                              event.shotId,
-                              event.artifactId,
-                              event.sha256,
-                            );
-                            setExposedFrames((previous) => {
-                              if (!!previous[key] === event.displayed)
-                                return previous;
-                              const next = { ...previous };
-                              if (event.displayed) next[key] = true;
-                              else delete next[key];
-                              return next;
-                            });
-                          }}
+                          onFrameExposure={exposeFrame}
+                          onGenerateKeyframes={requestFrames}
+                          onReviewScene={(id) => setSceneReview(id)}
+                          sceneActions={
+                            <SceneDecisionFooter
+                              api={api}
+                              snapshot={snapshot}
+                              director={director}
+                              sceneId={selectedSceneId}
+                              disabled={disabled || !connected}
+                              exposedFrames={exposedFrames}
+                              reviewedFrames={checkedFrames}
+                              onReviewScene={setSceneReview}
+                              onGenerateKeyframes={requestFrames}
+                            />
+                          }
                         />
                       </div>
                       <div hidden={tab !== "assets"}>
                         <AssetLibrary
-                          active={tab === "assets"}
                           key={projectId}
                           api={api}
                           snapshot={snapshot}
+                          active={tab === "assets"}
+                          focusArtifactId={assetFocus}
+                          onReference={(artifact) => {
+                            const ref: StudioReference = {
+                              key: referenceKey(
+                                projectId,
+                                artifact.kind as "image" | "video",
+                                artifact.artifactId,
+                                artifact.sha256,
+                              ),
+                              projectId,
+                              kind: artifact.kind as "image" | "video",
+                              id: artifact.artifactId,
+                              label:
+                                artifact.kind === "image"
+                                  ? "参考图片"
+                                  : "视频片段",
+                              artifact,
+                            };
+                            updateReferences(
+                              referenceDraft.some((r) => r.key === ref.key)
+                                ? referenceDraft
+                                : [...referenceDraft, ref],
+                            );
+                            setMobileView("director");
+                            requestAnimationFrame(() =>
+                              composer.current?.focus(),
+                            );
+                          }}
                         />
+                        <details className="workspace-audio-assets">
+                          <summary>音频素材</summary>
+                          <AudioLibraryPanel
+                            api={api}
+                            projectId={projectId}
+                            active={tab === "assets"}
+                            readOnly
+                            onChanged={refresh}
+                            onReference={(recording) => {
+                              const ref: StudioReference = {
+                                key: referenceKey(
+                                  projectId,
+                                  "audio",
+                                  recording.id,
+                                ),
+                                projectId,
+                                kind: "audio",
+                                id: recording.id,
+                                label: recording.label,
+                                detail:
+                                  recording.durationSeconds.toFixed(1) + "s",
+                              };
+                              updateReferences(
+                                referenceDraft.some((r) => r.key === ref.key)
+                                  ? referenceDraft
+                                  : [...referenceDraft, ref],
+                              );
+                              setMobileView("director");
+                              requestAnimationFrame(() =>
+                                composer.current?.focus(),
+                              );
+                            }}
+                          />
+                        </details>
                       </div>
-                      <div hidden={tab !== "preview"}>
+                      <div hidden={tab !== "cut"}>
                         <Timeline
-                          active={tab === "preview"}
                           api={api}
                           snapshot={snapshot}
+                          active={tab === "cut"}
+                          selectedShotId={selectedFrameId}
+                          onSelectShot={chooseShot}
+                          disabled={disabled || !connected}
+                          command={(body) =>
+                            void runAction({
+                              projectId,
+                              path: projectPath(projectId) + "/storyboard",
+                              body: {
+                                expectedHeadVersion:
+                                  snapshot.project.headVersion,
+                                ...body,
+                              },
+                              key: crypto.randomUUID(),
+                              label: "时间线已更新。",
+                            })
+                          }
+                          onEditShot={editTarget}
+                          onImportAudio={() => {
+                            setMusicImportOpen(true);
+                            setMobileView("director");
+                          }}
                         />
                       </div>
                     </>
@@ -1757,6 +2179,46 @@ function Studio({
               </main>
             </div>
           </div>
+          {sceneReview && snapshot && (
+            <AppDialog
+              inline={false}
+              open
+              title="检查场景视频方案"
+              description="使用已检查的当前关键帧与下列动作制作视频。"
+              preventClose={sceneBusy}
+              closeDisabled={sceneBusy}
+              onOpenChange={(open) => {
+                if (!open) setSceneReview(null);
+              }}
+              closeLabel="关闭视频方案"
+            >
+              <ConversationActions
+                api={api}
+                snapshot={snapshot}
+                director={director}
+                disabled={mutationsDisabled || protectedTool || !connected}
+                sceneIds={[sceneReview]}
+                initialOpenSceneId={sceneReview}
+                exposedFrames={exposedFrames}
+                reviewedFrames={checkedFrames}
+                onChanged={refresh}
+                onFocusScene={(id) => {
+                  setSceneReview(null);
+                  setTab("frames");
+                  setMobileView("workspace");
+                  const shot = snapshot.project.shots.find(
+                    (s) => s.sceneId === id,
+                  );
+                  if (shot) chooseShot(shot.id);
+                }}
+                onNarrationShot={(id) => {
+                  setSceneReview(null);
+                  setAudioShotId(id);
+                  setMobileView("director");
+                }}
+              />
+            </AppDialog>
+          )}
           {frames.inspection && (
             <Lightbox
               value={frames.inspection}

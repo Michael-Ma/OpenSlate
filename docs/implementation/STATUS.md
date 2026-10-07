@@ -1,33 +1,37 @@
 # Current implementation status
 
-Reconciled October 5, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 7, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
 ## Available behavior
 
 | Area | Implemented scope | Remaining boundary |
 |---|---|---|
 | Director | Native/fake runtime, saved context, questions, scoped changes, locked skills/tools and Stop/recovery | Complete native conversation-to-film acceptance |
-| Studio UI | Selected A / OpenSlate Light on Radix Themes, shared tokens/controls/dialogs, persistent Project/Scene/Shot results, conversation action cards, resizable Director and state-derived Saved / Next card | Subjective usability acceptance and further refinements against actual production work |
+| Studio UI | Day/Night Frame workbench on Radix, Inter/PingFang, project references, selected preview/inspector, Scene/Shot shelves, resizable conversation and concise plan/recovery widgets | Subjective usability acceptance and further refinements against actual production work |
 | Storyboard | Editable treatment/scenes/shots, import proposal/confirmation, reorder/delete/undo and stable IDs | More advanced editing and subjective usability acceptance |
 | Planning/execution | Restricted declarative compiler, scoped reuse, exact reviews, durable intents/attempts and unknown-outcome recovery | Longer real production and provider-specific acceptance |
 | Silence/audio | Explicit no narration, compact script/recording review, short accepted within-shot voiceover and owned library | Real speech/transcription acceptance and richer mixing |
-| Timeline/export | Synchronized picture/accepted narration/music preview; local FFmpeg assembly | Advanced trimming, transitions, waveforms and streaming |
+| Timeline/export | Synchronized preview, shot ordering/plan timing, music placement/gain/mute and local FFmpeg assembly | Advanced trimming, transitions, waveforms and streaming |
 | Personal voice | Consent/revocation registry and existing eligible OpenAI custom-ID dispatch | **Creating a new clone from a recording is not implemented** |
 | Local operation | Source launcher, pairing, doctor/private config, migrations and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
 
 Requested workflow items 1–5 are implemented. Item 6 is partial because provider voice-ID synthesis does not create a new voice clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 code review](V1-COMPLETION-REVIEW.md) records fixes and scope.
 
+## October 7 Day / Night workbench
+
+The supplied [Frame Day/Night direction](../design/OPENSLATE-LIGHT.md) replaces the Light-only presentation with Plan/Keyframes/Assets/Film views, selected-media preview, inspector, scene shelves and scoped @ collaboration. Per-shot keyframe generation/regeneration and direct Plan/Prompt edits use real revision-checked commands; exact current image review still precedes scene video generation. Timeline ordering, plan timing and music placement/gain/mute persist to the actual project. Theme changes keep selection and drafts intact. Final builds/typechecks and **2,376 tests passed**, with zero failures and one optional native skip. The offline restart/edit demo, independent review and final desktop/390px browser checks passed. Current verification and limits are recorded in the [October 7 review](OCTOBER-7-DAY-NIGHT-REVIEW.md).
+
 ## October 5 conversation and canonical results
 
-The [conversation/results review](OCTOBER-5-CONVERSATION-RESULTS-REVIEW.md) records the current workspace architecture: all production actions and tools are in the left Director conversation. The right preserves Project → Scene → Shot results, with prompts, keyframes, video and narration state together. Scene review no longer repeats thumbnails beneath the saved project. Exact visible-frame proof supports phone navigation without admitting hidden or historical images. Final builds/typechecks and **2,324 tests passed**, with zero failures and one optional native skip; the offline restart/edit demo and actual desktop/390px browser checks passed. Independent review has no remaining material findings. This makes no new real-provider acceptance claim.
+The [conversation/results review](OCTOBER-5-CONVERSATION-RESULTS-REVIEW.md) records the preceding workspace architecture, with production tools in the left Director conversation. The October 7 supplied design adds right-side shortcuts to the same operations. The right preserves Project → Scene → Shot results, with prompts, keyframes, video and narration state together. Scene review no longer repeats thumbnails beneath the saved project. Exact visible-frame proof supports phone navigation without admitting hidden or historical images. Final builds/typechecks and **2,324 tests passed**, with zero failures and one optional native skip; the offline restart/edit demo and actual desktop/390px browser checks passed. Independent review has no remaining material findings. This makes no new real-provider acceptance claim.
 
 ## October 5 simplified generation
 
-The [simplification review](OCTOBER-5-SIMPLIFIED-GENERATION-REVIEW.md) records the current flow: configured keys/Codex need no separate approval or usage allowance; green scene checks create keyframes and then approve exact video generation. Requested speech/transcription needs no generation review, and saved shot scripts materialize automatically within the original scope. Completed planning advances to scene actions rather than repeating Resume. New pauses, Stop, changed inputs and unknown-outcome recovery remain authoritative. The simplification gate passed **2,304 tests, zero failures, one optional native skip**; offline restart/edit and actual desktop/mobile UI checks passed. Real-provider quality acceptance remains separate.
+The [simplification review](OCTOBER-5-SIMPLIFIED-GENERATION-REVIEW.md) records the retained generation flow: configured keys/Codex need no separate approval or usage allowance; green scene checks create keyframes and then approve exact video generation. Requested speech/transcription needs no generation review, and saved shot scripts materialize automatically within the original scope. Completed planning advances to scene actions rather than repeating Resume. New pauses, Stop, changed inputs and unknown-outcome recovery remain authoritative. The simplification gate passed **2,304 tests, zero failures, one optional native skip**; offline restart/edit and actual desktop/mobile UI checks passed. Real-provider quality acceptance remains separate.
 
 ## October 5 Light workspace
 
-The user-selected **A · Light workspace** is implemented as [OpenSlate Light](../design/OPENSLATE-LIGHT.md), with Radix Themes as its React component foundation. Shared semantic tokens govern actions, fields, selections, dialogs, guidance and focus states. The Director remains on the left with its remembered drag/keyboard width; the result pane preserves all scenes and shots with their latest prompts, keyframes and videos. All production actions and editing tools are in the left conversation; scene review no longer duplicates a gallery on the right. Film direction stays available in a disclosure, with empty-project writing visible. Stable IDs and scene/shot labels survive selection and reordering.
+The earlier user-selected **A · Light workspace** used the Radix foundation now retained by [Studio Day/Night](../design/OPENSLATE-LIGHT.md), with Radix Themes as its React component foundation. Shared semantic tokens govern actions, fields, selections, dialogs, guidance and focus states. The Director remains on the left with its remembered drag/keyboard width; the result pane preserves all scenes and shots with their latest prompts, keyframes and videos. All production actions and editing tools are in the left conversation; scene review no longer duplicates a gallery on the right. Film direction stays available in a disclosure, with empty-project writing visible. Stable IDs and scene/shot labels survive selection and reordering.
 
 The current-plan card replaces the generic activity/Continue rows with **Saved / Next** derived from the canonical snapshot, current Director state, exact frame review, job evidence and request-owned holds. Eligible unfinished edits show their actual scope and saved direction; **Resume this edit** creates an explicit new scoped Director request. Running work, pending answers, Stop and uncertain/in-progress media each have their own next action and suppress Resume. Direct storyboard edits are shown as saved changes needing a matching plan. The card does not infer a creative Change / Keep promise from conversation text.
 
@@ -35,7 +39,7 @@ The current-plan card replaces the generic activity/Continue rows with **Saved /
 
 ## Post-migration review
 
-The separate [post-migration review](OCTOBER-5-POST-MIGRATION-REVIEW.md) repaired current-versus-historical job guidance, wider/deleted scope recovery, stale recording focus and approval focus restoration. It consolidated inspection/navigation logic and component styling, and removed retired UI implementations. The latest full gate passed **2,232 tests, zero failures, one optional native skip**; the offline restart/edit demo and before/after desktop/phone checks passed. Application authority and saved live state remain unchanged.
+The separate [post-migration review](OCTOBER-5-POST-MIGRATION-REVIEW.md) repaired current-versus-historical job guidance, wider/deleted scope recovery, stale recording focus and approval focus restoration. It consolidated inspection/navigation logic and component styling, and removed retired UI implementations. Its dated full gate passed **2,232 tests, zero failures, one optional native skip**; the offline restart/edit demo and before/after desktop/phone checks passed. Application authority and saved live state remain unchanged.
 
 ## October 3 refinement
 
@@ -52,7 +56,7 @@ The October 3 integrated gate passed after the response-order and native invento
 - **September 23 real media:** one Codex keyframe, one Viggle H3 job, exact-job download recovery and a six-second 1280×720 export survived reopen without duplicate dispatch. A scripted plan was used; audio was silent.
 - Synthetic six-minute workflow/media checks cover structure, timing, reuse and recovery. They do not prove six-minute real-provider quality.
 
-The October 5 gate verifies the integrated Light workspace source; the October 3 gate retains its original UI/runtime scope. Older totals do not verify later edits automatically. [Evidence index](VALIDATION-EVIDENCE.md) preserves exact dated results and limitations.
+The October 7 gate verifies the current Day/Night source; the October 5 gate records the preceding Light workspace; the October 3 gate retains its original UI/runtime scope. Older totals do not verify later edits automatically. [Evidence index](VALIDATION-EVIDENCE.md) preserves exact dated results and limitations.
 
 ## Next acceptance
 

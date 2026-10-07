@@ -152,9 +152,15 @@ export function editStoryboard(
         const row = shot(),
           prior = structuredClone(row);
         invariant(
-          ["purpose", "framing", "motion", "desiredFrames"].includes(
-            input.field ?? "",
-          ),
+          [
+            "purpose",
+            "action",
+            "framing",
+            "motion",
+            "desiredFrames",
+            "imagePrompt",
+            "videoPrompt",
+          ].includes(input.field ?? ""),
           "VALIDATION_ERROR",
           "Unknown shot field.",
         );
@@ -166,18 +172,33 @@ export function editStoryboard(
             "Use 3–15 seconds per shot.",
           );
           row.desiredFrames = frames;
-        } else row[input.field as "purpose" | "framing" | "motion"] = value();
+        } else
+          row[
+            input.field as
+              | "purpose"
+              | "action"
+              | "framing"
+              | "motion"
+              | "imagePrompt"
+              | "videoPrompt"
+          ] = value();
         row.revisionId = newId();
         changed.add(row.id);
-        if (input.field === "purpose" || input.field === "framing") {
+        if (["purpose", "action", "framing"].includes(input.field ?? "")) {
           row.imagePrompt = editedPrompt(prior.imagePrompt, row, "image");
           row.videoPrompt = editedPrompt(prior.videoPrompt, row, "video");
         } else if (input.field === "motion")
           row.videoPrompt = editedPrompt(prior.videoPrompt, row, "video");
         const cue = next.cues.find((cue) => cue.id === row.cueId);
         row.promptIntent = {
-          image: shotIntentDigest(row, "image", cue),
-          video: shotIntentDigest(row, "video", cue),
+          image:
+            input.field === "videoPrompt"
+              ? prior.promptIntent.image
+              : shotIntentDigest(row, "image", cue),
+          video:
+            input.field === "imagePrompt"
+              ? prior.promptIntent.video
+              : shotIntentDigest(row, "video", cue),
         };
       } else if (input.kind === "deleteShot") {
         const row = shot();
@@ -277,8 +298,31 @@ export function editStoryboard(
             next.soundtrack = {
               audioId: audio.id,
               gainMilliDb: next.soundtrack?.gainMilliDb ?? -18000,
+              ...(next.soundtrack?.startFrame !== undefined
+                ? { startFrame: next.soundtrack.startFrame }
+                : {}),
+              ...(next.soundtrack?.muted !== undefined
+                ? { muted: next.soundtrack.muted }
+                : {}),
             };
           }
+        } else if (input.field === "startFrame") {
+          invariant(next.soundtrack, "VALIDATION_ERROR", "Select music first.");
+          const start = Number(input.value);
+          invariant(
+            Number.isSafeInteger(start) && start >= 0 && start <= 10800,
+            "VALIDATION_ERROR",
+            "Music start must be a whole frame within six minutes.",
+          );
+          next.soundtrack.startFrame = start;
+        } else if (input.field === "muted") {
+          invariant(
+            next.soundtrack &&
+              (input.value === "true" || input.value === "false"),
+            "VALIDATION_ERROR",
+            "Select music and choose a valid mute state.",
+          );
+          next.soundtrack.muted = input.value === "true";
         } else {
           invariant(
             input.field === "gainMilliDb" && next.soundtrack,
@@ -341,8 +385,10 @@ export function editStoryboard(
       const scopes =
         global || inherited.includes(projectId)
           ? [projectId]
-          : [...new Set([...changed, ...inherited])].filter((id) =>
-              before.shots.some((x) => x.id === id),
+          : [...new Set([...changed, ...inherited])].filter(
+              (id) =>
+                before.shots.some((x) => x.id === id) ||
+                before.scenes.some((x) => x.id === id),
             );
       const actor = s.beginRequest(
         projectId,
@@ -407,8 +453,17 @@ export function editStoryboard(
                 ) &&
                 !(
                   input.kind === "shot" &&
-                  ["motion", "desiredFrames"].includes(input.field ?? "") &&
+                  ["motion", "desiredFrames", "videoPrompt"].includes(
+                    input.field ?? "",
+                  ) &&
                   x.node.kind === "image"
+                ) &&
+                !(
+                  input.kind === "shot" &&
+                  ["imagePrompt", "videoPrompt", "action"].includes(
+                    input.field ?? "",
+                  ) &&
+                  !["image", "video"].includes(x.node.kind)
                 )),
           )
           .map((x) => x.id),

@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-07",
+  "scope": "Frame Studio Day/Night production UI rewrite",
+  "reference": {
+    "archive": "frame-studio-day-night.zip",
+    "sha256": "88a3e0733a5362c3bd677e38fb2366ed324cbe285ef885c47247c6090ac2ed48",
+    "conversation": "https://chatgpt.com/s/cx_6ac60628b4488191846d212aaa2f527e",
+    "design": "docs/design/OPENSLATE-LIGHT.md"
+  },
+  "runtime": {
+    "node": "24.15.0",
+    "pnpm": "10.33.0"
+  },
+  "final_gate": {
+    "command": "pnpm check",
+    "tests": 2377,
+    "passed": 2376,
+    "failed": 0,
+    "skipped": 1,
+    "builds": "passed",
+    "typechecks": "passed"
+  },
+  "focused_review": {
+    "backend_scene_composition_storyboard": 50,
+    "frame_decision_reference": 18
+  },
+  "offline_demo": {
+    "initial_fake_accepts": 4,
+    "edited_fake_accepts": 2,
+    "duplicates_after_restart": 0,
+    "unaffected_shot_preserved": true
+  },
+  "browser": {
+    "application": "built production React and actual HTTP/application/engine routes",
+    "fixture": "disposable SQLite, fake providers, synthetic owned audio, credential source always empty",
+    "scenes": 2,
+    "shots": 4,
+    "fake_attempts": 8,
+    "new_real_media_calls": 0,
+    "new_native_model_turns": 0,
+    "verified": [
+      "Day/Night selection draft and reference preservation",
+      "exact submitted shot reference scope",
+      "scene images then exact reviewed video",
+      "selected-shot regeneration preserving siblings/history",
+      "direct Prompt edit saved with no new generation attempt",
+      "actual shot drag and Alt+Arrow ordering",
+      "music keyboard and pointer position, gain and mute persistence",
+      "390x844 exactly one pane and zero horizontal overflow",
+      "seen-frame confirmation after scrolling on mobile",
+      "720x421 zero overflow independent review",
+      "protected delayed model save blocks conflicting operations and shortcut messages",
+      "existing IB Project final UI inspected without mutations"
+    ],
+    "settings_save_result": "definite failure for intentionally unavailable metadata-only profile; protection verified, no successful real save claimed"
+  },
+  "limitations": [
+    "no real provider quality acceptance",
+    "optional native runtime probe skipped",
+    "no source trim/split, redo/version adoption, waveform or independent effect lanes",
+    "no new voice cloning",
+    "full real conversation-to-film acceptance remains pending"
+  ],
+  "logs": {
+    "gate": "/private/tmp/openslate-day-night-final-check.log",
+    "demo": "/private/tmp/openslate-day-night-demo.log"
+  },
+  "authentication_material_included": false
+}

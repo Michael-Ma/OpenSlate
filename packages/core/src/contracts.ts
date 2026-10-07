@@ -1,8 +1,20 @@
 /** Shared domain values. All persisted IDs are issued by application services. */
 export type Id = string;
-export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
-export type OperationKind = "image" | "video" | "speech" | "transcription" | "timeline" | "render";
+export type OperationKind =
+  | "image"
+  | "video"
+  | "speech"
+  | "transcription"
+  | "timeline"
+  | "render";
 
 export interface ArtifactRef {
   artifactId: Id;
@@ -14,9 +26,13 @@ export interface ShotRecord {
   /** App-derived writing gap. Models cannot clear it; canonical human audio acceptance does. */
   narrationPending?: boolean;
   /** Protected canonical policy: actual narration may be shorter than this shot's visual slot. */
-  narrationTimingMode?: 'within_shot';
+  narrationTimingMode?: "within_shot";
   /** Shot-level writing intent; acceptance and measured audio remain in narration records. */
-  narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: "stock" | "personal" };
+  narration?: {
+    mode: "undecided" | "none" | "generated" | "uploaded";
+    text: string;
+    voice: "stock" | "personal";
+  };
   id: Id;
   revisionId: Id;
   sceneId: Id;
@@ -57,10 +73,18 @@ export interface ProviderProfile {
   minFrames?: number;
   maxFrames?: number;
 }
-export interface ProviderConfiguration { model: string; settings?: JsonObject }
+export interface ProviderConfiguration {
+  model: string;
+  settings?: JsonObject;
+}
 
 export interface ProjectRecord {
-  soundtrack?: { audioId: string; gainMilliDb: number } | null;
+  soundtrack?: {
+    audioId: string;
+    gainMilliDb: number;
+    startFrame?: number;
+    muted?: boolean;
+  } | null;
   id: Id;
   revisionId: Id;
   headVersion: number;
@@ -68,7 +92,10 @@ export interface ProjectRecord {
   brief: string;
   story: string;
   scenes: Array<{ id: Id; revisionId: Id; purpose: string }>;
-  narration: { script: string; source: "undecided" | "uploaded" | "generated" | "mixed" };
+  narration: {
+    script: string;
+    source: "undecided" | "uploaded" | "generated" | "mixed";
+  };
   maxFrames: number;
   capabilityLockId: Id;
   shots: ShotRecord[];
@@ -156,7 +183,11 @@ export interface CompileContext {
 }
 
 export type NodeImpactKind = "reuse" | "replace" | "new" | "retire";
-export interface NodeImpact { nodeId: Id; kind: NodeImpactKind; reason: string }
+export interface NodeImpact {
+  nodeId: Id;
+  kind: NodeImpactKind;
+  reason: string;
+}
 
 export type ActorContext =
   | { kind: "human"; principalId: Id; requestId: Id }
@@ -172,8 +203,42 @@ export interface ProjectEvent {
 }
 
 export const DEFAULT_PROFILES: ProviderProfile[] = [
-  { id: "fake-image-v1", revision: "1", kind: "image", adapter: "fake", maxConcurrency: 2, unitCostMicros: "100", maxRetries: 1 },
-  { id: "fake-video-v1", revision: "1", kind: "video", adapter: "fake", maxConcurrency: 2, unitCostMicros: "1000", maxRetries: 1, minFrames: 120, maxFrames: 450 },
-  { id: "fake-speech-v1", revision: "1", kind: "speech", adapter: "fake", maxConcurrency: 2, unitCostMicros: "100", maxRetries: 1 },
-  { id: "fake-transcription-v1", revision: "1", kind: "transcription", adapter: "fake", maxConcurrency: 2, unitCostMicros: "100", maxRetries: 1 },
+  {
+    id: "fake-image-v1",
+    revision: "1",
+    kind: "image",
+    adapter: "fake",
+    maxConcurrency: 2,
+    unitCostMicros: "100",
+    maxRetries: 1,
+  },
+  {
+    id: "fake-video-v1",
+    revision: "1",
+    kind: "video",
+    adapter: "fake",
+    maxConcurrency: 2,
+    unitCostMicros: "1000",
+    maxRetries: 1,
+    minFrames: 120,
+    maxFrames: 450,
+  },
+  {
+    id: "fake-speech-v1",
+    revision: "1",
+    kind: "speech",
+    adapter: "fake",
+    maxConcurrency: 2,
+    unitCostMicros: "100",
+    maxRetries: 1,
+  },
+  {
+    id: "fake-transcription-v1",
+    revision: "1",
+    kind: "transcription",
+    adapter: "fake",
+    maxConcurrency: 2,
+    unitCostMicros: "100",
+    maxRetries: 1,
+  },
 ];

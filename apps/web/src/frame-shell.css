@@ -1,0 +1,636 @@
+/* Current workbench layout; the shared Day/Night palette is owned by frame-theme.css. */
+#root .workspace-header {
+  height: 60px;
+  min-height: 60px;
+  padding: 12px 24px;
+  gap: 20px;
+  background: var(--header-bg);
+  border-color: var(--zone-edge);
+}
+#root .brand {
+  font-family: var(--font-ui);
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.8px;
+  color: var(--ink);
+}
+#root .brand-mark {
+  background: var(--ink);
+  color: var(--header-bg);
+  border-radius: 8px;
+}
+#root .project-switcher .project-select {
+  font-size: 13px;
+  font-weight: 550;
+  max-width: 320px;
+}
+#root .header-actions {
+  gap: 12px;
+}
+#root .header-actions .connection {
+  font-size: 11px;
+  color: var(--muted);
+  order: -1;
+}
+#root .header-export {
+  min-height: 34px;
+  font-size: 12px;
+  border: 1px solid var(--control-edge);
+  border-radius: 7px;
+  background: var(--zone-nav);
+}
+#root .workspace-grid {
+  background: var(--zone-canvas);
+}
+#root .conversation-panel {
+  background: var(--zone-chat);
+}
+#root .panel-title {
+  min-height: 62px;
+  padding: 16px 23px;
+  background: var(--zone-chat);
+  border-color: var(--zone-edge);
+}
+#root .panel-title h2 {
+  font-size: 14px;
+  font-weight: 630;
+}
+#root .panel-title .tag {
+  font-size: 11px;
+  border: 0;
+  background: transparent;
+  color: var(--success);
+}
+#root .conversation-tools {
+  padding: 7px 17px;
+  gap: 2px;
+  border-color: var(--zone-edge);
+  background: var(--zone-chat);
+}
+#root .conversation-tools .rt-Button {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 8px;
+  min-height: 28px;
+}
+#root .conversation-scope {
+  padding: 8px 17px;
+  border-color: var(--zone-edge);
+  background: var(--zone-chat);
+}
+#root .conversation-scope .ui-select {
+  font-size: 12px;
+  background: var(--zone-chat);
+}
+#root .conversation-stream {
+  padding: 19px 23px;
+}
+#root .message {
+  margin: 20px 0;
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--ink);
+}
+#root .message-byline {
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+#root .message.user {
+  background: var(--user-bg);
+  border-radius: 12px 12px 3px 12px;
+  padding: 14px 15px;
+  margin-left: 18px;
+  border: 0;
+}
+#root .message :is(p, li, blockquote) {
+  font-size: 14px;
+  line-height: 1.85;
+}
+#root .conversation-stream .current-decision {
+  margin: 18px 0;
+  background: transparent;
+}
+#root .director-plan {
+  background: var(--widget-surface);
+  border: 1px solid var(--widget-edge);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+}
+#root .director-plan-head {
+  padding: 12px 14px;
+  background: transparent;
+}
+#root .director-plan-head strong {
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 620;
+}
+#root .director-plan-body {
+  padding: 12px 14px;
+}
+#root .director-plan-detail {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+#root .director-plan-facts {
+  font-size: 12px;
+}
+#root .composer-area {
+  padding: 13px 17px 12px;
+  background: var(--zone-composer);
+  border-color: var(--zone-edge);
+}
+#root .composer {
+  background: var(--input-surface);
+  border: 1px solid var(--control-edge);
+  border-radius: 11px;
+  box-shadow: var(--shadow-card);
+}
+#root .composer textarea {
+  min-height: 75px;
+  padding: 14px;
+  font-size: 14px;
+  line-height: 1.7;
+  font-family: var(--font-ui);
+}
+#root .composer .rt-TextAreaRoot {
+  background: transparent;
+  border-radius: 10px 10px 0 0;
+  box-shadow: none;
+}
+#root .composer .composer-bottom {
+  padding: 6px 12px 12px;
+}
+#root .composer .send-button {
+  background: var(--action-fill);
+  color: var(--action-ink);
+  border: 0;
+  border-radius: 8px;
+  min-width: 32px;
+  width: 32px;
+  height: 32px;
+}
+#root .scope-chip {
+  font-size: 11px;
+  background: var(--selection-bg);
+  border-color: var(--zone-edge);
+  margin-bottom: 7px;
+}
+#root .studio-message-form {
+  min-width: 0;
+}
+#root .workspace-separator {
+  background: var(--zone-edge);
+  width: 5px;
+}
+#root .workspace-separator::after {
+  background: var(--muted);
+  left: 2px;
+  width: 1px;
+  top: calc(50% - 15px);
+  bottom: auto;
+  height: 30px;
+}
+#root .review-workspace {
+  padding: 0;
+  background: var(--zone-canvas);
+  overflow: auto;
+}
+#root .workspace-toolbar {
+  height: 62px;
+  min-height: 62px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0;
+  padding: 0 24px;
+  background: var(--zone-nav);
+  border-bottom: 1px solid var(--zone-edge);
+  gap: 18px;
+}
+#root .workspace-label {
+  font-size: 12px;
+  font-weight: 630;
+  white-space: nowrap;
+}
+#root .workspace-views .rt-TabNavLink {
+  font-size: 13px;
+  border-radius: 7px;
+  min-height: 34px;
+  height: 34px;
+  padding: 0 11px;
+  color: var(--muted);
+  gap: 6px;
+  margin: 0;
+  border: 1px solid transparent;
+}
+#root .workspace-views .rt-TabNavLink[data-active] {
+  background: var(--selection-bg);
+  color: var(--selection-text);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+#root .workspace-views .rt-TabNavLink::before {
+  display: none;
+}
+#root .workspace-views small {
+  font-size: 11px;
+  color: var(--muted);
+}
+#root .film-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+#root .asset-library {
+  padding: 20px 24px;
+}
+#root .film-timeline {
+  padding: 20px 24px;
+}
+#root .frame-generation-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  margin: 20px -24px -20px;
+  border-top: 1px solid var(--zone-edge);
+  background: var(--zone-nav);
+  min-height: 70px;
+}
+#root .frame-generation-footer strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+#root .frame-generation-footer small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 5px;
+}
+#root .frame-generation-footer .rt-Button {
+  font-size: 12px;
+  min-height: 36px;
+}
+#root .conversation-tool.app-dialog {
+  background: var(--widget-surface);
+  border-color: var(--widget-edge);
+  color: var(--ink);
+}
+#root .conversation-tool .app-dialog-header {
+  background: var(--zone-nav);
+  border-radius: 9px 9px 0 0;
+}
+#root .conversation-tool .app-dialog-body {
+  padding: 14px;
+}
+#root .project-editor .board-edit {
+  background: var(--input-surface) !important;
+  border-color: var(--control-edge) !important;
+  font-family: var(--font-ui);
+}
+#root .project-editor-prompts > summary {
+  font-size: 12px;
+  cursor: pointer;
+}
+#root .project-editor-prompts textarea {
+  min-height: 100px;
+  margin-top: 8px;
+}
+#root .frame-decision-targets {
+  font-size: 12px;
+  padding-left: 18px;
+}
+#root .frame-decision-targets > li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+#root .frame-decision-targets details {
+  margin-top: 8px;
+}
+#root .frame-decision-targets p {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+#root .mobile-workspace-switch {
+  background: var(--zone-nav);
+  border-color: var(--zone-edge);
+}
+#root .reference-composer-tools {
+  width: 100%;
+}
+@media (min-width: 761px) {
+  #root .workspace-grid {
+    grid-template-columns: var(--director-width, 380px) 5px minmax(0, 1fr);
+  }
+}
+@media (max-width: 1000px) {
+  #root .workspace-label {
+    display: none;
+  }
+  #root .workspace-toolbar {
+    gap: 8px;
+    padding: 0 16px;
+  }
+  #root .header-actions .connection {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  #root .workspace-header {
+    height: 58px;
+    min-height: 58px;
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  #root .brand {
+    font-size: 17px;
+  }
+  #root .brand-mark {
+    width: 27px;
+    height: 27px;
+  }
+  #root .brand > span + span {
+    display: none;
+  }
+  #root .header-export {
+    font-size: 0;
+    padding: 8px;
+    min-width: 36px;
+  }
+  #root .header-export svg {
+    width: 17px;
+    height: 17px;
+  }
+  #root .project-switcher .project-select {
+    font-size: 12px;
+  }
+  #root .header-actions {
+    gap: 6px;
+  }
+  #root .panel-title {
+    min-height: 54px;
+    padding: 12px 17px;
+  }
+  #root .conversation-tools {
+    padding: 5px 12px;
+  }
+  #root .conversation-tools .rt-Button {
+    min-height: 36px;
+  }
+  #root .conversation-scope {
+    padding: 7px 13px;
+  }
+  #root .conversation-stream {
+    padding: 16px;
+  }
+  #root .workspace-toolbar {
+    padding: 0 12px;
+    height: 54px;
+    min-height: 54px;
+    gap: 5px;
+  }
+  #root .workspace-views .rt-TabNavLink {
+    padding: 0 8px;
+    font-size: 12px;
+    min-height: 40px;
+  }
+  #root .workspace-views .rt-TabNavLink svg {
+    width: 14px;
+  }
+  #root .film-meta {
+    display: none;
+  }
+  #root .asset-library,
+  #root .film-timeline {
+    padding: 16px;
+  }
+  #root .frame-generation-footer {
+    margin: 16px -16px -16px;
+    padding: 13px 16px;
+    flex-wrap: wrap;
+  }
+  #root .frame-generation-footer .rt-Button {
+    min-height: 44px;
+  }
+  #root .composer textarea {
+    font-size: 14px;
+    min-height: 68px;
+  }
+  #root .composer-area {
+    padding: 10px 13px;
+  }
+  #root .composer .composer-bottom {
+    padding: 4px 9px 9px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #root .frame-workbench *,
+  #root .reference-composer * {
+    scroll-behavior: auto;
+    transition: none;
+  }
+}
+
+#root .review-workspace {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+#root .workspace-toolbar {
+  flex: 0 0 auto;
+}
+#root .review-workspace > div:not(.workspace-toolbar) {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+#root .review-workspace > div[hidden] {
+  display: none;
+}
+#root .frame-generation-footer {
+  margin: 0;
+  border-top: 0;
+  padding: 0;
+  background: transparent;
+  min-height: 42px;
+}
+#root .workspace-grid.panel-director .conversation-panel {
+  min-height: 0;
+}
+.fw-work-footer {
+  background: var(--zone-nav);
+  border-color: var(--zone-edge);
+}
+
+#root .fw-stage-layout {
+  --fw-preview-height: clamp(220px, 32dvh, 330px);
+}
+#root .fw-main-media {
+  height: var(--fw-preview-height);
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
+}
+#root .fw-inspector {
+  max-height: calc(var(--fw-preview-height) + 90px);
+}
+#root .brand-mark svg {
+  color: var(--header-bg);
+}
+#root .workspace-views [aria-current="page"] {
+  background: var(--selected);
+  color: var(--selection-text);
+  border-color: var(--selected-border);
+}
+#root .workspace-audio-assets {
+  padding: 16px 24px;
+  background: var(--zone-shelf);
+  border-top: 1px solid var(--zone-edge);
+}
+#root .workspace-audio-assets > summary {
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+@container (max-width:780px) {
+  #root .fw-inspector {
+    max-height: none;
+  }
+  #root .fw-main-media {
+    height: clamp(210px, 30dvh, 300px);
+  }
+}
+@media (max-width: 760px) {
+  #root .fw-inspector {
+    max-height: none;
+  }
+  #root .fw-main-media {
+    height: 220px;
+  }
+  #root .workspace-audio-assets {
+    padding: 16px;
+  }
+}
+
+#root .conversation-tools {
+  justify-content: flex-end;
+  padding: 5px 17px;
+}
+#root .conversation-tools .rt-IconButton {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  width: 29px;
+  height: 29px;
+}
+#root .creative-brief-text {
+  font-size: 13px;
+  line-height: 1.75;
+  margin: 0 0 10px;
+  color: var(--ink);
+}
+#root .creative-brief-tags {
+  display: flex;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+#root .creative-brief-tags span {
+  padding-right: 7px;
+  border-right: 1px solid var(--line);
+}
+#root .creative-brief-shots {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#root .creative-brief-shots li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 9px 0;
+  font-size: 12px;
+}
+#root .creative-brief-shots li strong {
+  font-weight: 550;
+  flex: 1;
+  min-width: 0;
+}
+#root .creative-brief-shots li span {
+  font-size: 11px;
+  color: var(--muted);
+}
+#root .creative-brief-status {
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+#root .creative-brief-status summary {
+  cursor: pointer;
+}
+#root .creative-brief-status p {
+  font-size: 12px;
+  margin: 7px 0;
+  line-height: 1.6;
+}
+#root .creative-brief-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  font-size: 10px;
+  color: var(--muted);
+}
+#root .demo-disclosure {
+  font-size: 11px;
+  padding: 9px 11px;
+  background: var(--zone-shelf);
+  border-radius: 8px;
+  border: 1px solid var(--zone-edge);
+}
+#root .demo-disclosure p {
+  font-size: 11px;
+  line-height: 1.65;
+  margin: 5px 0 0;
+}
+@media (max-width: 760px) {
+  #root .conversation-tools .rt-IconButton {
+    width: 38px;
+    height: 38px;
+  }
+}
+@media (max-width: 760px) {
+  #root .workspace-grid.panel-director #production-pane {
+    display: none;
+  }
+  #root .workspace-grid.panel-workspace #director-pane {
+    display: none;
+  }
+  #root .workspace-grid > section {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+  }
+  #root .brand {
+    font-size: 0;
+    gap: 0;
+  }
+  #root .brand-mark {
+    flex-shrink: 0;
+  }
+  #root .project-switcher {
+    flex: 1;
+    min-width: 0;
+  }
+}

@@ -66,7 +66,12 @@ export interface ProjectSnapshot {
     requestId: string;
   } | null;
   project: ProjectSummary & {
-    soundtrack?: { audioId: string; gainMilliDb: number } | null;
+    soundtrack?: {
+      audioId: string;
+      gainMilliDb: number;
+      startFrame?: number;
+      muted?: boolean;
+    } | null;
     revisionId: string;
     brief: string;
     story: string;

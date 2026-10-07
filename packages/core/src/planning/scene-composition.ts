@@ -714,6 +714,8 @@ export function composeScenePlan(
           ),
         ),
       };
+      const video = chooseNode(base, operation, "video");
+      let generatedFrame: Ast | undefined;
       if (existing) {
         const expression = operationCall(existing),
           previous = resolve(arr(expression.arguments)[1]!);
@@ -722,31 +724,28 @@ export function composeScenePlan(
         if (existing.profileId !== profile!.id)
           put(previous, "settings", object({}));
         changed.add(existing.id);
-        const video = chooseNode(base, operation, "video");
-        if (video) {
-          const videoProfile = working.profiles.find(
-            (profile) =>
-              profile.id === video.profileId && profile.kind === "video",
-          );
-          fail(videoProfile, "Saved video model is missing");
-          updateVideo(
-            video,
-            shot!,
-            videoProfile!,
-            intent,
-            imageReference(existing),
-            true,
-          );
-        }
-      } else
-        outputs.push(
-          add(
-            call(receiver, "image", [
-              lit(newAlias("shot-" + shot!.id + "/keyframe")),
-              object(options),
-            ]),
-          ),
+        if (video) generatedFrame = imageReference(existing);
+      } else {
+        // A shot may have only a video conditioned by an owned/shared image. Its
+        // replacement frame must precede both its review and video. Its sole
+        // declaration dependency is the current intent just inserted at index zero.
+        generatedFrame = add(
+          call(receiver, "image", [
+            lit(newAlias("shot-" + shot!.id + "/keyframe")),
+            object(options),
+          ]),
+          video ? 1 : statements.length - 1,
         );
+        outputs.push(generatedFrame);
+      }
+      if (video) {
+        const videoProfile = working.profiles.find(
+          (profile) =>
+            profile.id === video.profileId && profile.kind === "video",
+        );
+        fail(videoProfile, "Saved video model is missing");
+        updateVideo(video, shot!, videoProfile!, intent, generatedFrame!, true);
+      }
     } else {
       invariant(
         operation.frame?.kind === "image" &&

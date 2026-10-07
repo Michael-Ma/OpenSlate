@@ -10,7 +10,8 @@ import { ProductionService } from "../dist/application/service.js";
 import { FakeProvider } from "../../../packages/providers/dist/index.js";
 import { createApp } from "../dist/app.js";
 import { projectFixture } from "./execution-fixture.mjs";
-function fixture(t) {
+import { compilePlan } from "@openslate/core";
+function fixture(t, { sharedScene = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openslate-scene-")),
     store = new Store(join(directory, "store.sqlite")),
     provider = new FakeProvider(join(directory, "provider.sqlite")),
@@ -20,7 +21,11 @@ function fixture(t) {
     }),
     service = new ProductionService(store, engine);
   let project = service.createProject("Scene approval fixture");
-  const shape = projectFixture(project.id);
+  const shape = projectFixture(project.id, sharedScene ? 3 : 2);
+  if (sharedScene) {
+    shape.shots[1].sceneId = "scene-0";
+    shape.scenes = shape.scenes.filter((scene) => scene.id !== "scene-1");
+  }
   project = {
     ...project,
     ...shape,
@@ -616,5 +621,539 @@ test("duration-only edits retain the exact completed keyframe and require only a
   assert.equal(
     f.engine.attempts(p.id).filter((a) => a.request.kind === "image").length,
     1,
+  );
+});
+
+test("explicit shot regeneration retains siblings and old receipts, then needs the new exact scene video review", async (t) => {
+  const f = fixture(t, { sharedScene: true });
+  for (const scene of ["scene-0", "scene-2"]) {
+    for (const kind of ["image", "video"]) {
+      const result = await f.post(await f.get(scene), kind);
+      assert.equal(result.statusCode, 200, result.body);
+      await f.finish();
+    }
+  }
+  const view = await f.get(),
+    oldFrame = view.rows[0].image,
+    oldAttempts = f.engine.attempts(f.project.id),
+    oldCandidates = f.store.list("candidate", f.project.id).length,
+    oldBindings = f.store.list("node_binding", f.project.id),
+    key = randomUUID(),
+    extra = { targetShotIds: ["shot-0"], regenerate: true };
+  const generated = await f.post(view, "image", key, extra);
+  assert.equal(generated.statusCode, 200, generated.body);
+  assert.deepEqual(generated.json().shotIds, ["shot-0"]);
+  assert.equal(
+    f.store.list("candidate", f.project.id).length,
+    oldCandidates + 1,
+  );
+  for (const binding of oldBindings) {
+    const current = f.store.get("node_binding", binding.id);
+    if (binding.node.shotId !== "shot-0") {
+      assert.equal(current.candidateId, binding.candidateId);
+      assert.deepEqual(current.outputs, binding.outputs);
+    } else if (binding.node.kind === "video") {
+      assert.equal(current.candidateId, null);
+      assert.deepEqual(current.outputs, {});
+    }
+  }
+  assert.deepEqual(f.engine.attempts(f.project.id), oldAttempts);
+  assert.deepEqual(
+    (await f.post(view, "image", key, extra)).json(),
+    generated.json(),
+  );
+  assert.equal(
+    f.store.list("candidate", f.project.id).length,
+    oldCandidates + 1,
+  );
+  const conflict = await f.post(view, "image", key, {
+    ...extra,
+    targetShotIds: ["shot-1"],
+  });
+  assert.equal(conflict.json().error.code, "IDEMPOTENCY_CONFLICT");
+  await f.finish();
+  const ready = await f.get();
+  assert.notEqual(ready.rows[0].image.artifactId, oldFrame.artifactId);
+  assert.ok(ready.rows[1].videoComplete);
+  assert.equal(ready.rows[0].videoComplete, false);
+  assert.equal(f.engine.attempts(f.project.id).length, oldAttempts.length + 1);
+  const stale = await f.post(ready, "video", randomUUID(), {
+    reviewedFrames: [
+      {
+        shotId: "shot-0",
+        artifactId: oldFrame.artifactId,
+        sha256: oldFrame.sha256,
+      },
+    ],
+  });
+  assert.equal(stale.json().error.code, "SCENE_REVIEW_STALE");
+  const video = await f.post(ready, "video");
+  assert.equal(video.statusCode, 200, video.body);
+  assert.deepEqual(video.json().shotIds, ["shot-0"]);
+  await f.finish();
+  assert.equal(f.engine.attempts(f.project.id).length, oldAttempts.length + 2);
+  assert.ok((await f.get()).rows.every((row) => row.videoComplete));
+  assert.ok(f.store.get("artifact", oldFrame.artifactId));
+});
+
+test("a shot keyframe action narrows a human film pause to untouched siblings without widening its generation scope", async (t) => {
+  const f = fixture(t, { sharedScene: true }),
+    human = f.service.beginRequest(
+      f.project.id,
+      "local-user",
+      "Plan this film",
+      { scopeIds: [f.project.id] },
+    );
+  const result = await f.post(await f.get(), "image", randomUUID(), {
+    targetShotIds: ["shot-0"],
+  });
+  assert.equal(result.statusCode, 200, result.body);
+  assert.deepEqual(result.json().shotIds, ["shot-0"]);
+  const request = f.store.list("message", f.project.id).at(-1);
+  assert.deepEqual(request.scopeIds, ["shot-0"]);
+  const retained = f.store
+    .list("hold", f.project.id)
+    .filter((hold) => hold.active && hold.ownerId === human.requestId);
+  assert.deepEqual(retained.map((hold) => hold.scopeId).sort(), [
+    "scene-2",
+    "shot-1",
+  ]);
+  await f.finish();
+  const current = await f.get();
+  assert.ok(current.rows[0].image);
+  assert.equal(current.rows[1].image, null);
+  assert.equal((await f.get("scene-2")).rows[0].image, null);
+  assert.equal(f.store.list("grant", f.project.id).length, 1);
+});
+
+test("shot regeneration rejects ambiguous scope, video shortcuts, missing identity and unsupported hold ownership without writes", async (t) => {
+  const f = fixture(t, { sharedScene: true }),
+    view = await f.get(),
+    cursor = f.store.cursor(f.project.id);
+  for (const extra of [
+    { regenerate: true },
+    { targetShotIds: [] },
+    { targetShotIds: ["shot-0", "shot-0"] },
+    { targetShotIds: ["shot-2"] },
+  ]) {
+    const result = await f.post(view, "image", randomUUID(), extra);
+    assert.notEqual(result.statusCode, 200, result.body);
+  }
+  for (const extra of [{ targetShotIds: ["shot-0"] }, { regenerate: false }]) {
+    const result = await f.post(view, "video", randomUUID(), extra);
+    assert.equal(result.json().error.code, "VALIDATION_ERROR");
+  }
+  const noKey = await f.app.inject({
+    method: "POST",
+    url: `/api/projects/${f.project.id}/scenes/scene-0/generate`,
+    headers: { host: "127.0.0.1", authorization: `Bearer ${f.token}` },
+    payload: {
+      headVersion: view.headVersion,
+      revisionId: view.revisionId,
+      kind: "image",
+      reviewedFrames: [],
+      reviewedHoldDigest: view.reviewedHoldDigest,
+      reviewedControlAuthorityId: view.reviewedControlAuthorityId,
+      targetShotIds: ["shot-0"],
+    },
+  });
+  assert.equal(noKey.json().error.code, "AUTH_REQUIRED");
+  assert.equal(f.store.cursor(f.project.id), cursor);
+  f.engine.setHold(f.project.id, {
+    scopeId: "scene-0",
+    ownerId: "unowned-fixture-pause",
+  });
+  const held = f.store.list("hold", f.project.id),
+    before = f.store.cursor(f.project.id);
+  const result = await f.post(await f.get(), "image", randomUUID(), {
+    targetShotIds: ["shot-0"],
+  });
+  assert.equal(result.json().error.code, "SCOPE_DENIED");
+  assert.equal(f.store.cursor(f.project.id), before);
+  assert.deepEqual(f.store.list("hold", f.project.id), held);
+});
+
+test("shot regeneration cannot replace an uncertain provider job after a prompt edit detached its candidate", async (t) => {
+  const f = fixture(t);
+  const generated = await f.post(await f.get());
+  assert.equal(generated.statusCode, 200, generated.body);
+  const node = f.store.get("plan", generated.json().activePlanId).compiled
+    .nodes[0];
+  f.provider.setMode(node.id, "unknown_after_accept");
+  await f.engine.runReady();
+  const attempt = f.engine.attempts(f.project.id)[0];
+  assert.equal(attempt.phase, "submission_unknown");
+  const { editStoryboard } = await import("../dist/storyboard.js"),
+    p = f.store.getProject(f.project.id);
+  editStoryboard(
+    f.service,
+    p.id,
+    {
+      kind: "shot",
+      id: "shot-0",
+      field: "imagePrompt",
+      value: "New human frame",
+      expectedHeadVersion: p.headVersion,
+    },
+    randomUUID(),
+  );
+  const view = await f.get();
+  assert.equal(view.rows[0].imagePending, false);
+  const candidateCount = f.store.list("candidate", f.project.id).length;
+  const result = await f.post(view, "image", randomUUID(), {
+    targetShotIds: ["shot-0"],
+    regenerate: true,
+  });
+  assert.equal(result.json().error.code, "ATTEMPT_EXISTS");
+  assert.equal(f.store.list("candidate", f.project.id).length, candidateCount);
+  assert.equal(f.provider.acceptedCount(), 1);
+  assert.equal(f.engine.attempts(f.project.id)[0].id, attempt.id);
+});
+
+test("shot generation respects current unanswered direction and Stop, while superseded questions do not block", async (t) => {
+  const f = fixture(t),
+    human = f.service.beginRequest(f.project.id, "local-user", "Plan film");
+  f.store.insert("director_question", "pending-direction", f.project.id, {
+    id: "pending-direction",
+    requestId: human.requestId,
+    turnId: "fixture-turn",
+    state: "pending",
+    questions: ["Which direction?"],
+  });
+  const view = await f.get();
+  assert.equal(view.busy, true);
+  assert.equal(
+    (
+      await f.post(view, "image", randomUUID(), { targetShotIds: ["shot-0"] })
+    ).json().error.code,
+    "WAITING_USER",
+  );
+  f.service.beginRequest(f.project.id, "local-user", "New explicit direction", {
+    scopeIds: ["shot-0"],
+  });
+  assert.equal((await f.get()).busy, false);
+  f.engine.setPaused(f.project.id, true, "fixture-stop");
+  assert.equal(
+    (
+      await f.post(await f.get(), "image", randomUUID(), {
+        targetShotIds: ["shot-0"],
+      })
+    ).json().error.code,
+    "WAITING_USER",
+  );
+  assert.equal(f.store.list("grant", f.project.id).length, 0);
+});
+
+test("a selected frame can regenerate beside a pending sibling without replacing or dispatching that sibling twice", async (t) => {
+  const f = fixture(t, { sharedScene: true }),
+    first = await f.post(await f.get());
+  assert.equal(first.statusCode, 200, first.body);
+  const nodes = f.store.get("plan", first.json().activePlanId).compiled.nodes,
+    sibling = nodes.find(
+      (node) => node.shotId === "shot-1" && node.kind === "image",
+    );
+  f.provider.setMode(sibling.id, "pending");
+  await f.finish();
+  const view = await f.get();
+  assert.ok(view.rows[0].imageComplete);
+  assert.ok(view.rows[1].imagePending);
+  const siblingBinding = f.store.get("node_binding", sibling.id),
+    siblingAttempt = f.engine
+      .attempts(f.project.id)
+      .find((attempt) => attempt.nodeId === sibling.id);
+  const response = await f.post(view, "image", randomUUID(), {
+    targetShotIds: ["shot-0"],
+    regenerate: true,
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(
+    f.store.get("node_binding", sibling.id).candidateId,
+    siblingBinding.candidateId,
+  );
+  await f.finish();
+  assert.equal(f.provider.acceptedCount(siblingAttempt.id), 1);
+  assert.equal(
+    f.engine
+      .attempts(f.project.id)
+      .filter((attempt) => attempt.nodeId === sibling.id).length,
+    1,
+  );
+});
+
+test("failed same-spec regeneration publication rolls back the frame, candidate and narrowed holds", async (t) => {
+  const f = fixture(t, { sharedScene: true });
+  assert.equal((await f.post(await f.get())).statusCode, 200);
+  await f.finish();
+  f.service.beginRequest(f.project.id, "local-user", "Revise film", {
+    scopeIds: [f.project.id],
+  });
+  const view = await f.get(),
+    bindings = f.store.list("node_binding", f.project.id),
+    holds = f.store.list("hold", f.project.id),
+    messages = f.store.list("message", f.project.id),
+    candidates = f.store.list("candidate", f.project.id),
+    key = randomUUID(),
+    original = f.service.applyCompiledSceneGeneration.bind(f.service),
+    extra = { targetShotIds: ["shot-0"], regenerate: true };
+  f.service.applyCompiledSceneGeneration = () => {
+    throw new Error("Injected publication failure");
+  };
+  assert.equal((await f.post(view, "image", key, extra)).statusCode, 500);
+  assert.deepEqual(f.store.list("node_binding", f.project.id), bindings);
+  assert.deepEqual(f.store.list("hold", f.project.id), holds);
+  assert.deepEqual(f.store.list("message", f.project.id), messages);
+  assert.deepEqual(f.store.list("candidate", f.project.id), candidates);
+  f.service.applyCompiledSceneGeneration = original;
+  assert.equal((await f.post(view, "image", key, extra)).statusCode, 200);
+});
+
+test("renewing or reactivating the same pause identity invalidates a previously captured shot decision", async (t) => {
+  const f = fixture(t),
+    human = f.service.beginRequest(
+      f.project.id,
+      "local-user",
+      "Prepare this shot",
+      { scopeIds: ["shot-0"] },
+    ),
+    hold = f.store
+      .list("hold", f.project.id)
+      .find((row) => row.active && row.ownerId === human.requestId);
+  const first = await f.get();
+  f.engine.setHold(f.project.id, {
+    id: hold.id,
+    scopeId: hold.scopeId,
+    ownerId: hold.ownerId,
+  });
+  const renewed = await f.get();
+  assert.equal(renewed.headVersion, first.headVersion);
+  assert.notEqual(renewed.reviewedHoldDigest, first.reviewedHoldDigest);
+  const stale = await f.post(first, "image", randomUUID(), {
+    targetShotIds: ["shot-0"],
+  });
+  assert.equal(stale.json().error.code, "SCENE_REVIEW_STALE");
+  f.engine.releaseHold(f.project.id, hold.id, hold.ownerId);
+  f.engine.setHold(f.project.id, {
+    id: hold.id,
+    scopeId: hold.scopeId,
+    ownerId: hold.ownerId,
+  });
+  const reactivated = await f.get();
+  assert.notEqual(reactivated.reviewedHoldDigest, renewed.reviewedHoldDigest);
+  const outdated = await f.post(renewed, "image", randomUUID(), {
+    targetShotIds: ["shot-0"],
+  });
+  assert.equal(outdated.json().error.code, "SCENE_REVIEW_STALE");
+  assert.equal(f.store.list("grant", f.project.id).length, 0);
+  assert.equal(f.store.list("candidate", f.project.id).length, 0);
+  assert.equal(f.store.get("hold", hold.id).active, true);
+});
+
+for (const conditioning of ["owned", "shared"]) {
+  test(`targeted regeneration replaces the exact ${conditioning} conditioning and defers only its video until new frame review`, async (t) => {
+    const f = fixture(t, { sharedScene: true });
+    let ownedFrame;
+    if (conditioning === "owned") {
+      assert.equal((await f.post(await f.get("scene-2"))).statusCode, 200);
+      await f.finish();
+      ownedFrame = (await f.get("scene-2")).rows[0].image;
+    }
+    const project = f.store.getProject(f.project.id),
+      aliases = {};
+    if (ownedFrame) {
+      project.artifacts.push(ownedFrame);
+      Object.assign(project, f.store.saveProject(project, project.headVersion));
+    }
+    const frameSource = ownedFrame
+      ? `const frame=p.asset(${JSON.stringify(ownedFrame.artifactId)});`
+      : 'const frame=p.image("shared-frame",{profile:"fake-image-v1",prompt:"One shared frame",width:256,height:256});';
+    const source =
+      `definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{` +
+      frameSource +
+      'const s0=p.shot("shot-0");const s1=p.shot("shot-1");' +
+      'const gate=p.humanReview("shared-review",{shots:[' +
+      '{intent:s0,keyframe:frame,videoProfile:"fake-video-v1",motionPrompt:"Slow push angle 0",seconds:6},' +
+      '{intent:s1,keyframe:frame,videoProfile:"fake-video-v1",motionPrompt:"Slow push angle 1",seconds:6}]});' +
+      'const v0=p.video("video-0",{intent:s0,profile:"fake-video-v1",firstFrame:p.approvedImage(frame,gate),prompt:"Slow push angle 0",seconds:6});' +
+      'const v1=p.video("video-1",{intent:s1,profile:"fake-video-v1",firstFrame:p.approvedImage(frame,gate),prompt:"Slow push angle 1",seconds:6});return [v0,v1];});';
+    const lock = f.store.get("capability_lock", project.capabilityLockId),
+      base = compilePlan(source, {
+        project,
+        profiles: lock.profiles,
+        logicalIds: aliases,
+        allocateId: randomUUID,
+      }),
+      planId = randomUUID(),
+      grants = {};
+    for (const node of base.nodes)
+      grants[node.id] = f.engine.createGrant(
+        project.id,
+        node.shotId ?? project.id,
+        node.kind,
+        "conditioning-fixture",
+        "initial_slot",
+      ).id;
+    f.engine.installPlan(project.id, planId, base, grants);
+    f.store.saveProject(
+      { ...project, activePlanId: planId },
+      project.headVersion,
+    );
+    f.store.put("logical_ids", project.id, project.id, { aliases });
+    await f.finish();
+    const review = f.engine.reviewSnapshot(project.id);
+    f.engine.approve(
+      project.id,
+      review.id,
+      review.members.map((member) => member.videoNodeId),
+      "conditioning-fixture-review",
+    );
+    await f.finish();
+    const prior = await f.get(),
+      oldFrame = prior.rows[0].image,
+      video0 = base.nodes.find((node) => node.alias === "video-0"),
+      video1 = base.nodes.find((node) => node.alias === "video-1"),
+      sibling = f.store.get("node_binding", video1.id),
+      attempts = f.engine.attempts(project.id).length;
+    assert.equal(prior.rows[0].imageNodeId, null);
+    assert.ok(prior.rows.every((row) => row.videoComplete));
+    const generated = await f.post(prior, "image", randomUUID(), {
+      targetShotIds: ["shot-0"],
+      regenerate: true,
+    });
+    assert.equal(generated.statusCode, 200, generated.body);
+    const published = f.store.get(
+        "plan",
+        generated.json().activePlanId,
+      ).compiled,
+      newImage = published.nodes.find(
+        (node) => node.kind === "image" && node.shotId === "shot-0",
+      ),
+      currentVideo = published.nodes.find((node) => node.id === video0.id),
+      pending = f.store.get("node_binding", video0.id);
+    assert.ok(newImage);
+    assert.equal(
+      currentVideo.inputs.find((input) => input.role === "first_frame").source
+        .nodeId,
+      newImage.id,
+    );
+    assert.equal(published.gates[0].members[0].frameSource.nodeId, newImage.id);
+    assert.equal(pending.candidateId, null);
+    assert.deepEqual(pending.outputs, {});
+    assert.equal(
+      f.store.get("node_binding", video1.id).candidateId,
+      sibling.candidateId,
+    );
+    assert.deepEqual(
+      f.store.get("node_binding", video1.id).outputs,
+      sibling.outputs,
+    );
+    const waiting = await f.get();
+    assert.equal(waiting.rows[0].image, null);
+    assert.equal(waiting.rows[0].videoComplete, false);
+    assert.ok(waiting.rows[1].videoComplete);
+    await f.finish();
+    const ready = await f.get();
+    assert.notEqual(ready.rows[0].image.artifactId, oldFrame.artifactId);
+    assert.deepEqual(ready.rows[1].image, oldFrame);
+    assert.equal(f.engine.attempts(project.id).length, attempts + 1);
+    const stale = await f.post(ready, "video", randomUUID(), {
+      reviewedFrames: [
+        {
+          shotId: "shot-0",
+          artifactId: oldFrame.artifactId,
+          sha256: oldFrame.sha256,
+        },
+      ],
+    });
+    assert.equal(stale.json().error.code, "SCENE_REVIEW_STALE");
+    assert.equal((await f.post(ready, "video")).statusCode, 200);
+    await f.finish();
+    const last = f.engine
+      .attempts(project.id)
+      .filter((attempt) => attempt.nodeId === video0.id)
+      .at(-1);
+    assert.equal(
+      last.request.inputs[0].artifactId,
+      ready.rows[0].image.artifactId,
+    );
+    assert.equal(f.engine.attempts(project.id).length, attempts + 2);
+  });
+}
+
+test("prompt writing after partial film generation retains inherited scene pauses and saves without widening generation", async (t) => {
+  const f = fixture(t),
+    { editStoryboard } = await import("../dist/storyboard.js");
+  const first = f.store.getProject(f.project.id);
+  const treatment = editStoryboard(
+    f.service,
+    first.id,
+    {
+      kind: "treatment",
+      field: "brief",
+      value: "A revised whole-film direction",
+      expectedHeadVersion: first.headVersion,
+    },
+    randomUUID(),
+  );
+  assert.equal((await f.post(await f.get())).statusCode, 200);
+  await f.finish();
+  const pending = f.store
+    .list("hold", first.id)
+    .filter((hold) => hold.active && hold.ownerId === treatment.requestId);
+  assert.deepEqual(
+    pending.map((hold) => hold.scopeId),
+    ["scene-1"],
+  );
+  const before = f.store.getProject(first.id),
+    other = structuredClone(before.shots[1]),
+    grants = f.store.list("grant", first.id).length,
+    attempts = f.engine.attempts(first.id).length;
+  const writing = editStoryboard(
+    f.service,
+    first.id,
+    {
+      kind: "shot",
+      id: "shot-0",
+      field: "imagePrompt",
+      value: "A new explicit leather close-up",
+      expectedHeadVersion: before.headVersion,
+    },
+    randomUUID(),
+  );
+  const saved = f.store.getProject(first.id);
+  assert.equal(saved.shots[0].imagePrompt, "A new explicit leather close-up");
+  assert.deepEqual(saved.shots[1], other);
+  const request = f.store.get("message", writing.requestId);
+  assert.deepEqual(request.scopeIds.sort(), ["scene-1", "shot-0"]);
+  const retained = f.store.list("hold", first.id).filter((hold) => hold.active);
+  assert.ok(
+    retained.some(
+      (hold) =>
+        hold.scopeId === "scene-1" && hold.ownerId === writing.requestId,
+    ),
+  );
+  assert.ok(
+    retained.some(
+      (hold) => hold.scopeId === "shot-0" && hold.ownerId === writing.requestId,
+    ),
+  );
+  assert.equal(f.store.list("grant", first.id).length, grants);
+  assert.equal(f.engine.attempts(first.id).length, attempts);
+  assert.equal((await f.get("scene-1")).rows[0].image, null);
+  const generated = await f.post(await f.get(), "image", randomUUID(), {
+    targetShotIds: ["shot-0"],
+  });
+  assert.equal(generated.statusCode, 200, generated.body);
+  await f.finish();
+  assert.equal(f.engine.attempts(first.id).length, attempts + 1);
+  assert.equal((await f.get("scene-1")).rows[0].image, null);
+  assert.ok(
+    f.store
+      .list("hold", first.id)
+      .some(
+        (hold) =>
+          hold.active &&
+          hold.scopeId === "scene-1" &&
+          hold.ownerId === writing.requestId,
+      ),
   );
 });

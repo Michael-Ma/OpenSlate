@@ -1,88 +1,56 @@
-# OpenSlate Light design system
+# OpenSlate Studio design system — Day & Night
 
-Selected October 4, 2026. The user chose **A · Light workspace** from the OpenSlate direction comparison and approved Radix Themes as its component foundation. This is the current visual direction for the React studio.
+Current direction: October 7, 2026. The supplied Frame Studio Day/Night artifact is the implementation target. This document remains the existing design source of truth; the earlier Light-only presentation is historical.
 
-## Purpose and structure
+## References and product structure
 
-The studio helps one person develop a film through conversation, edit its storyboard and generate/review media per scene. White surfaces keep the Director and controls readable; the pale gray canvas separates those surfaces from the creative work. Blue identifies primary actions and selection. Green scene actions request keyframes or video; a completion check means the current media is saved rather than that its artistic quality was accepted.
+- Exact layout/interaction reference: the supplied `frame-studio-day-night.zip`, `studio.html`, `DAY-NIGHT.md` and its Day/Night captures. The later Codex/Claude style variants are not part of this selected direction.
+- Design brief: [the supplied conversation](https://chatgpt.com/s/cx_6ac60628b4488191846d212aaa2f527e), which describes chat collaboration, project resources, Scene/Shot hierarchy, keyframe iteration and timeline editing.
+- Color/hierarchy inspiration: [Linear’s official UI redesign](https://linear.app/now/how-we-redesigned-the-linear-ui). OpenSlate’s hex values come from the supplied artifact; they are not claimed to be Linear’s official tokens.
+- Production remains React/Radix with application-owned state, authenticated commands and durable generation/recovery. The prototype’s sample perfume project, simulated generation, credits and silent animatic are not production behavior.
 
-The workspace keeps a resizable Director on the left. Conversation, generation decisions, editing, model choices, imports, narration and export controls belong there. The right side is a persistent project result view: Project → Scene → Shot, with each shot’s direction, prompts, keyframe, video and narration state together. A workflow transition updates those same shot cards; it never adds a second scene review gallery. Viewing controls, media playback and navigation remain in the result pane. Model settings organize choices by the job they perform. Small screens provide explicit workspace/Director navigation and stack controls rather than compressing the desktop arrangement.
+The left resizable conversation contains chat, scoped resource references, concise plan/status widgets and inline editing/model/import/audio tools. The right has **Plan / Keyframes / Assets / Film** views. A large selected-shot preview, inspector and Scene → Shot shelves share the same saved project. Selecting a shot retains its stable ID and scopes further conversation; @ scene/shot references explicitly override preview selection. View or appearance changes do not submit work, clear drafts or change selected-shot identity.
 
-## Foundation and source of truth
+The new brief permits direct right-side editing/reference/regeneration shortcuts, as well as chat widgets. Those shortcuts invoke the same authenticated application operations. Current work remains inspectable across views; workflow progress does not append duplicate result galleries or switch the user’s selected view automatically.
 
-- `apps/web/src/main.tsx` mounts the light Radix `Theme` with blue/slate colors, medium radius and 100% scaling.
-- `apps/web/src/light-theme.css` owns shared semantic tokens, component states, dialogs and secondary surfaces. Radix portals inherit the same tokens.
-- `apps/web/src/director-plan.css` owns the compact current-plan card. `project-results.css` owns the canonical project/scene/shot result hierarchy; `conversation-actions.css` and `conversation-workspace.css` own the left operation cards and inline tools.
-- `apps/web/src/workspace-light.css` owns the shell, navigation, Director, split boundary and production viewport. Component presentation belongs in its component sheet rather than an appended workspace patch.
-- `main.tsx` is the production CSS entry point: retained legacy skins/layouts → typography → Radix → shared Light theme → current Director/film components → workspace layout → `App`. Register a new component sheet there at the appropriate layer. Component-local duplicate imports support isolated previews; production first encounters each sheet in the explicit entry-point order.
-- `apps/web/src/ui.tsx` owns standard actions, fields, selects and controlled modal and inline conversation-tool layout. `components.tsx` owns reusable icons, guidance and media inspection.
+## Semantic system
 
-Use those sources for new screens. Existing component CSS remains where it supplies domain layout; shared colors and basic controls should use the central system. Radix Themes supplies components and interaction behavior; OpenSlate supplies its layout, product language and durable commands.
-
-## Semantic color roles
-
-| Token | Value | Use |
+| Role | Day | Night |
 |---|---|---|
-| `--canvas` | `#eef1f4` | Workspace background |
-| `--surface` | `#ffffff` | Panels, cards, fields and dialogs |
-| `--soft` | `#f6f8fa` | Subtle sections and hover surfaces |
-| `--ink` | `#1b2638` | Primary text |
-| `--muted` | `#5c6981` | Secondary text and metadata |
-| `--line` | `#d9e0e8` | Decorative separation |
-| `--control` | `#8191aa` | Field and selectable-control boundaries |
-| `--accent` | `#315cb2` | Primary actions and selected text |
-| `--accent-hover` | `#274e9e` | Primary action hover |
-| `--selected` | `#eaf0fb` | Selected surfaces |
-| `--selected-border` | `#b5c8eb` | Selected secondary-surface boundary |
-| `--focus` | `#557bd5` | Keyboard focus |
-| `--success` / `--success-bg` | `#366c51` / `#eaf4ed` | Completed/accepted states |
-| `--warning` / `--warning-bg` | `#825b27` / `#fbf1e2` | Recovery and unresolved decisions |
-| `--danger` / `--danger-bg` | `#a43a37` / `#fff1f0` | Errors and destructive actions |
-| `--media-bg` / `--preview-bg` | `#e5eaf0` / `#dfe5ec` | Storyboard frame and timeline picture surfaces |
+| Conversation | `#e8e8ee` | `#131316` |
+| Workbench | `#ffffff` | `#27272f` |
+| Inspector | `#f0f0f5` | `#393941` |
+| Shelf | `#f5f5f8` | `#19191f` |
+| Composer zone | `#dcdce5` | `#0c0c10` |
+| Main text | `#191a20` | `#f2f2f5` |
+| Action fill | `#5e56d8` | `#6960d5` |
 
-Every current component uses the shared semantic names directly. Legacy `--paper`, `--pale`, `--green`, `--text` and `--border` aliases preserve older component integration. Radix accent/gray roles map to these colors; avoid a new literal palette per component. Decorative `--line` is not the required control boundary: use `--control` when a boundary identifies an input.
+Purple-blue identifies actions and selection; green identifies checked/saved results; amber identifies stale/pending/unknown work. Labels and geometry accompany color. Media viewing stays dark in both appearances and uses `object-fit: contain` so current frame review never crops the underlying artifact.
 
-## Typography, shape and spacing
+`frame-theme.css` owns the palette, semantic/Radix aliases, inputs, dialogs, Markdown and states. Day auxiliary text and Night hover fills are adjusted slightly from the reference to preserve readable contrast. Root layout/components use `--zone-*`, `--ink`, `--muted`, `--line`, `--control`, `--selected`, `--action-*` and semantic status roles. Do not introduce another component palette.
 
-The available UI font is `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`; no font download is required. Body text is 14px, compact actions are 13px and captions are 12px. Headings use 26px/22px/18px/16px roles, with moderate 600–650 weight and short line lengths. Shot text stays readable body copy; status metadata stays compact.
+Bundled **Inter Variable** renders supported glyphs; system **PingFang SC**, Microsoft YaHei and system sans provide language fallbacks. No font/network request is required. Title 22px/630, body 14px, controls 12–13px, auxiliary metadata 10–11px. Icons use one rounded outline style, 1.85 strokes, round caps/joins. Shared shapes are 7–8px controls, 10px cards, 11px composer; spacing follows a 4px rhythm.
 
-Use a 4px spacing rhythm, typically 8–12px between related controls and 20–24px within major panels. Shape and control sizing use the shared tokens below; component overrides retain established compact storyboard actions. Shadows use `--shadow-card`, `--shadow-panel` and `--shadow-dialog`. Media uses `object-fit: contain` so review shows the actual frame without cropping.
+## Interaction and authority
 
-| Shape/size token | Value | Use |
-|---|---|---|
-| `--radius-compact` | 6px | Small actions and navigation items |
-| `--radius-control` | 7px | Standard buttons and fields |
-| `--radius-inset` | 8px | Embedded plan/navigation surfaces |
-| `--radius-card` | 9px | Shot cards and composer |
-| `--radius-panel` | 10px | Generation/empty panels and narrow dialogs |
-| `--radius-dialog` | 12px | Standard dialogs |
-| `--control-height` / `--field-height` | 34px / 36px | Standard actions and selectors |
-| `--touch-height` | 40px | Narrow-layout standard controls |
+- Appearance changes CSS/Radix theme context in place. Valid URL `mode=day|night` overrides stored appearance; default is Day. Mode and current `view` are reflected in the URL. Storage/history failures do not disable the workbench. React components remain mounted during mode changes.
+- @ offers searchable project, scene, shot, owned image/video and recording references. Keyboard arrows/Enter/Escape select/cancel; chips locate their objects. Messages contain readable local reference links with explicit scope IDs and bounded native image attachments when supported. Reference chips alone cannot submit a fresh editable request. A narrow referenced edit cannot silently resume a stopped whole project.
+- Right-side keyframe checks require an actually decoded, visible current selected frame; thumbnail prefetch, old takes and hidden panes never qualify. The green check records an explicit local review for that current decision. Genuine current server review receipts can display the same checked state. Changed/removed/stale frame identities clear local proof. Scene video approval still binds exact returned frames, motion, duration, model and settings at the server.
+- A scoped image request can create missing frames or explicitly regenerate selected shots. New candidates retain sibling outputs and historical artifacts; unknown/in-progress jobs are inspected rather than blindly repeated. Regenerating an owned/shared conditioner rewires the affected video and review member to the new frame and defers its video candidate.
+- Plan/Prompt edits are normal human writing. Image prompt, video prompt, action, framing, purpose, motion and duration are revision checked; only the relevant visual work becomes stale. They do not dispatch media automatically.
+- Timeline video drag/order buttons and Alt+Arrow persist shot order. Saved 3–15s controls edit **shot plan timing**, which may require an affected video update. Music drag/keyboard, gain and mute persist actual placement; browser audition and local render share the same source-local sample calculation. Zoom, playhead and panel sizing are viewing state. Arbitrary source trim/split, redo/version adoption and multiple independently arranged music/effect lanes remain unsupported; omit inert controls.
+- Protected saves block conflicting project/creation/chat/generation mutations. Unknown responses retain their exact request body/key. Background refresh preserves same-identity connected content and reading position; new messages do not force an older conversation to the bottom.
 
-Keep normal and responsive declarations together within the component's sheet. The remaining storyboard `!important` overrides are compatibility with specific retained native rules; do not use them to resolve ordinary new-component styling. Remove a legacy sheet only after proving its selectors have no live component use.
+## Responsive contract and source ownership
 
-## Component contract
+Desktop retains a remembered/clamped Director divider, large preview, compact inspector and scrollable scene shelves. At narrow widths, explicit Conversation/Workspace navigation presents one pane at a time; inspector/actions stack without clipping, and major mobile controls target 44px. Appearance remains accessible in the header. Long metadata and prompts wrap or scroll within their owning area; reduced motion is respected.
 
-| Component | Contract |
-|---|---|
-| `UiButton` | Native button event/form props; defaults to `type="button"`. Use `variant="primary"` for the next principal action, `secondary` for normal actions, `ghost` for low-emphasis actions and `danger` for destructive actions. Set `type="submit"` explicitly. Existing `button primary` and `text-button` classes remain supported. |
-| `UiTextField` / `UiTextArea` | Radix textual fields with native input/textarea refs and change events. TextField supports textual/numeric input types; use specialized controls for checkboxes, ranges, files and media playback. |
-| `UiSelect` | Controlled `value`, `onValueChange(value)` and `options: { value, label, disabled? }[]`. Its forwarded ref points to the trigger button. An empty option is internally encoded and returned as `""`; named forms preserve the real field value. Do not fabricate `ChangeEvent`s. |
-| `IconButton` | Radix icon action with a required accessible label and native disabled/click behavior. |
-| `HelpTip` | Radix tooltip for supplementary guidance, available through hover, focus or tap. Essential instructions remain visible in the product. |
-| `AppDialog` | Controlled `open`/`onOpenChange`, semantic title, optional description, header supplement, scrolling body and optional footer. `preventClose` blocks Escape/outside dismissal while an operation needs protection; `closeDisabled` disables the close action. Inside `ConversationSurface`, the same component renders an inline labelled region in the left conversation. Protected saves also block project switching; focus returns to the launcher on close. Image inspection remains a modal viewing surface. |
-| `Lightbox` | Exact image, direction, motion and planned duration. An optional approval action is provided by the parent only when the current application review permits it; the modal also requires its own exact image to load successfully. Read-only callers cannot approve media. |
+- `Appearance.tsx`, `appearance-model.ts`, `frame-theme.css`: modes, tokens, font and shared states.
+- `FrameWorkspace.tsx`, `frame-workspace-model.ts`, `frame-workspace.css`: Plan and selected-media/Scene/Shot workbench.
+- `ReferenceComposer.tsx`, `reference-model.ts`, `reference-composer.css`: composer and exact project references.
+- `FrameDecision.tsx`, `frame-decision-model.ts`, `ConversationActions.tsx`: actual scoped image and scene video decisions.
+- `Timeline.tsx`, `timeline-editor-model.ts`, `timeline-editor.css`: synchronized preview and supported direct edits.
+- `frame-shell.css`: shell, concise plan widget and final responsive integration.
+- `ui.tsx`: shared Radix controls and protected inline/modal tools. `main.tsx` registers production CSS in explicit order, with the shared theme followed by current workbench/layout sheets.
 
-Use text and semantics alongside color for selected, reviewed, pending, error and disabled states. A disabled control remains visible with an explanation when necessary. Keyboard focus uses a consistent blue outline. Loading feedback keeps saved content stable. Reduced-motion preferences suppress decorative animation and transitions.
-
-## Behavior boundaries and verification
-
-Director choices, media choices, scoped scene generation, exact frame/motion/video-recipe review and unknown-outcome recovery use durable application commands. Each scene has two generation decisions: create keyframes from its direction, then review the returned frames and actual video recipe before starting video. Returned clips are available to inspect without an additional acceptance gate. Configured provider keys/runtime enable requested generation without a separate approval or usage-allowance screen. Requested speech/transcription proceeds through the configured provider; listening, attachment and transcript adoption remain content decisions. A new visual state cannot turn an uncertain submission into a retry. Narration writing remains an ordinary creative edit.
-
-Scene generation cards contain text recipes and links to the right scene, without duplicate images. Video generation is enabled only after the exact current keyframes have loaded in the active result pane. On a phone, already displayed exact frames remain eligible when returning to the Director; hidden initial loads, changed identities and failed loads never qualify.
-
-Review desktop and narrow layouts, keyboard focus/return, nested selects/dialogs, long model labels, disabled controls, unknown commands and actual frame approval against current saved state. Typechecking/building validates integration; rendered browser checks validate layout and interaction. Current results belong in the dated implementation evidence, not in assumptions attached to a visual token set.
-
-The [post-migration review](../implementation/OCTOBER-5-POST-MIGRATION-REVIEW.md) records current-job evidence, explicit scope recovery, the consolidated inspection path and rendered parity checks.
-
-The [conversation/results review](../implementation/OCTOBER-5-CONVERSATION-RESULTS-REVIEW.md) records the current two-pane architecture and final verification.
+Current verification belongs in the dated implementation review and status; passing model tests alone is not visual or real-provider acceptance.

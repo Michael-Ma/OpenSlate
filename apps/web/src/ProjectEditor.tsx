@@ -1,24 +1,29 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ProjectSnapshot } from "./model";
 import { InlineField } from "./InlineField";
 import { UiButton, UiSelect } from "./ui";
 import { Icon } from "./components";
 export function ProjectEditor({
   snapshot,
+  targetId,
   disabled,
   action,
   onNarration,
   onDiscuss,
 }: {
   snapshot: ProjectSnapshot;
+  targetId?: string;
   disabled: boolean;
   action(body: Record<string, unknown>): void;
   onNarration(shotId: string): void;
   onDiscuss(shotId?: string): void;
 }) {
-  const [target, setTarget] = useState(snapshot.project.id),
+  const [target, setTarget] = useState(targetId ?? snapshot.project.id),
     project = snapshot.project,
     version = project.headVersion;
+  useEffect(() => {
+    if (targetId) setTarget(targetId);
+  }, [targetId]);
   const scene = project.scenes.find((s) => s.id === target),
     shot = project.shots.find((s) => s.id === target),
     valid = target === project.id || !!scene || !!shot;
@@ -164,6 +169,57 @@ export function ProjectEditor({
               })
             }
           />
+          <InlineField
+            multiline
+            value={shot.action}
+            label="镜头内容"
+            version={version}
+            disabled={disabled}
+            save={(value, expectedHeadVersion) =>
+              send({
+                kind: "shot",
+                id: shot.id,
+                field: "action",
+                value,
+                expectedHeadVersion,
+              })
+            }
+          />
+          <details className="project-editor-prompts">
+            <summary>Plan & Prompt</summary>
+            <InlineField
+              multiline
+              value={shot.imagePrompt}
+              label="Keyframe Prompt"
+              version={version}
+              disabled={disabled}
+              save={(value, expectedHeadVersion) =>
+                send({
+                  kind: "shot",
+                  id: shot.id,
+                  field: "imagePrompt",
+                  value,
+                  expectedHeadVersion,
+                })
+              }
+            />
+            <InlineField
+              multiline
+              value={shot.videoPrompt}
+              label="Video Prompt"
+              version={version}
+              disabled={disabled}
+              save={(value, expectedHeadVersion) =>
+                send({
+                  kind: "shot",
+                  id: shot.id,
+                  field: "videoPrompt",
+                  value,
+                  expectedHeadVersion,
+                })
+              }
+            />
+          </details>
           <InlineField
             value={String(shot.desiredFrames / 30)}
             label="Shot seconds"

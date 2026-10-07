@@ -11,6 +11,7 @@ interface Props {
   connected: boolean;
   disabled: boolean;
   scopeIds?: readonly string[];
+  onPlan?(): void;
   onDiscuss(): void;
   onClearScope(): void;
   onAnswer(questionId: string): void;
@@ -28,6 +29,7 @@ export function DirectorPlan({
   connected,
   disabled,
   scopeIds,
+  onPlan,
   onDiscuss,
   onClearScope,
   onAnswer,
@@ -48,6 +50,70 @@ export function DirectorPlan({
     else if (plan.action === "frames") onFrames();
     else if (plan.action === "timeline") onTimeline();
   };
+  const compact =
+    ["saved", "review", "ready", "idle"].includes(plan.state) &&
+    snapshot.project.shots.length > 0;
+  if (compact && onPlan)
+    return (
+      <section
+        className={`director-plan state-${plan.state} creative-brief-widget`}
+        aria-label="Current plan"
+      >
+        <header className="director-plan-head">
+          <span className="tiny-label">创作计划</span>
+          <strong>{snapshot.project.name}</strong>
+        </header>
+        <div className="director-plan-body">
+          <p className="creative-brief-text">
+            {snapshot.project.brief || snapshot.project.story}
+          </p>
+          <div className="creative-brief-tags">
+            <span>{snapshot.project.scenes.length} 场景</span>
+            <span>{snapshot.project.shots.length} 镜头</span>
+            <span>
+              {(
+                snapshot.project.shots.reduce(
+                  (sum, s) => sum + s.desiredFrames,
+                  0,
+                ) / 30
+              ).toFixed(0)}
+              s
+            </span>
+          </div>
+          <ol className="creative-brief-shots">
+            {snapshot.project.scenes
+              .flatMap((scene, i) =>
+                snapshot.project.shots
+                  .filter((s) => s.sceneId === scene.id)
+                  .map((shot, j) => (
+                    <li key={shot.id}>
+                      <span>
+                        {i + 1}.{j + 1}
+                      </span>
+                      <strong>{shot.purpose}</strong>
+                      <span>{shot.desiredFrames / 30}s</span>
+                    </li>
+                  )),
+              )
+              .slice(0, 6)}
+          </ol>
+          <details className="creative-brief-status">
+            <summary>{plan.title}</summary>
+            <p>{plan.detail}</p>
+            <p>{plan.saved}</p>
+            <p>{plan.next}</p>
+          </details>
+          <div className="creative-brief-footer">
+            <span>
+              {connected ? "计划已同步到工作区" : "正在核对已保存状态"}
+            </span>
+            <UiButton size="1" variant="secondary" onClick={onPlan}>
+              查看计划 →
+            </UiButton>
+          </div>
+        </div>
+      </section>
+    );
   return (
     <section
       className={`director-plan state-${plan.state}`}

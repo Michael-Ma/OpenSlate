@@ -6,6 +6,7 @@ Dated verification is retained independently of current capability claims. A res
 
 | Checkpoint | Evidence and limits |
 |---|---|
+| October 7 Day/Night | [Current Frame workbench verification](OCTOBER-7-DAY-NIGHT-REVIEW.md): supplied design implementation, exact scoped image/video review, project references, persisted Timeline edits and desktop/mobile checks; no real-provider media calls |
 | October 5 conversation/results | [2,324-pass final gate and persistent result hierarchy](OCTOBER-5-CONVERSATION-RESULTS-REVIEW.md): two-scene/four-shot actual React flow, 390px exact frame viewing, protected inline tools, editing/history and full uncommitted import review; zero new real media calls |
 | October 5 Light workspace | [2,222-pass full gate and Radix/Light studio](OCTOBER-5-LIGHT-WORKSPACE.md): disposable actual-React/browser checks for storyboard/review/scoped editing, keyboard resizing, settings impact/same-command recovery/focus and 390×844 settings layout; no new real-provider media acceptance |
 | October 3 refinement | [2,207-test full gate and UI/backend refinement](OCTOBER-3-REFINEMENT-REVIEW.md): actual React with in-memory API/synthetic SSE; final integrated verification and repaired bounded native guidance rerun passed with one model turn and zero media attempts/grants |
@@ -16,7 +17,7 @@ Dated verification is retained independently of current capability claims. A res
 | Fresh checkout | [Configured macOS source/dependency campaign](CLEAN-CHECKOUT-VALIDATION.md): not a bare-OS installer |
 | Recovery | [Same-root browser/process campaign](INSTALLATION-RECOVERY-VALIDATION.md): fixture media and quarantine/fences; no relocation |
 
-Current [conversation/results evidence](conversation-results-evidence.json) records the final gate and actual browser boundaries.
+Current [Day/Night evidence](day-night-evidence.json) records the final gate and browser boundaries. [Conversation/results evidence](conversation-results-evidence.json) preserves the earlier campaign.
 
 ## Preserved machine-readable records
 

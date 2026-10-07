@@ -332,6 +332,51 @@ test("an inline saved image is lifted once with collision-free names when adding
   assert.match(result.canonicalSource, /const __scene_frame_3 =/);
 });
 
+for (const conditioning of ["owned", "shared"]) {
+  test(`a new shot keyframe replaces ${conditioning} conditioning in its exact video and review member while preserving siblings`, async () => {
+    const ctx = context();
+    ctx.project.artifacts.push(frame);
+    const shared =
+      conditioning === "owned"
+        ? 'const f=p.asset("actual-frame");'
+        : 'const f=p.image("shared-frame",{profile:"fake-image-v1",prompt:"One shared reference frame",width:256,height:256});';
+    const source =
+      'definePlan({baseRevision:"revision-1"},p=>{' +
+      shared +
+      'const s0=p.shot("shot-0");const s1=p.shot("shot-1");' +
+      'const gate=p.humanReview("shared-review",{shots:[' +
+      '{intent:s0,keyframe:f,videoProfile:"fake-video-v1",motionPrompt:"Move 0",seconds:6},' +
+      '{intent:s1,keyframe:f,videoProfile:"fake-video-v1",motionPrompt:"Move 1",seconds:6}]});' +
+      'const v0=p.video("video-0",{intent:s0,profile:"fake-video-v1",firstFrame:p.approvedImage(f,gate),prompt:"Move 0",seconds:6});' +
+      'const v1=p.video("video-1",{intent:s1,profile:"fake-video-v1",firstFrame:p.approvedImage(f,gate),prompt:"Move 1",seconds:6});return [v0,v1];});';
+    const base = compilePlan(source, ctx),
+      saved = canonical(base);
+    const result = await composeScenePlanIsolated(
+      base,
+      [{ shotId: "shot-0", kind: "image", profileId: "fake-image-v1" }],
+      ctx,
+    );
+    const generated = result.nodes.find(
+        (item) => item.kind === "image" && item.shotId === "shot-0",
+      ),
+      video = node(result, "video-0"),
+      firstFrame = video.inputs.find((input) => input.role === "first_frame");
+    assert.ok(generated);
+    assert.equal(firstFrame.source.kind, "output");
+    assert.equal(firstFrame.source.nodeId, generated.id);
+    assert.notEqual(video.specDigest, node(base, "video-0").specDigest);
+    assert.equal(result.gates[0].members[0].frameSource.nodeId, generated.id);
+    assert.deepEqual(node(result, "video-1"), node(base, "video-1"));
+    assert.deepEqual(result.gates[0].members[1], base.gates[0].members[1]);
+    if (conditioning === "shared")
+      assert.deepEqual(
+        node(result, "shared-frame"),
+        node(base, "shared-frame"),
+      );
+    assert.equal(canonical(base), saved);
+  });
+}
+
 test("a new owned reference changes the selected image branch without making the old source unverifiable", () => {
   const { ctx, base } = fixture();
   ctx.project.artifacts.push({

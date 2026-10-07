@@ -89,3 +89,62 @@ test('removing ordinary voiceover preserves its already generated picture and vi
  f.edit({kind:'narration',id:shot.id,field:'mode',value:'none'});const after=f.store.getProject(f.projectId);
  assert.equal(after.shots[0].cueId,null);assert.equal(after.shots[0].revisionId,revision);assert.equal(f.engine.outputs(f.projectId).find(output=>output.nodeId===video.id).artifact.artifactId,take.artifact.artifactId);assert.deepEqual(after.cues,p.cues);
 });
+
+test('explicit video prompt writing preserves the exact frame, sibling results, narration and original execution receipts', async t => {
+ const f=fixture(t);await f.engine.runReady();await f.engine.reconcile();
+ const review=f.engine.reviewSnapshot(f.projectId);f.engine.approve(f.projectId,review.id,review.members.map(row=>row.videoNodeId),'fixture-video-review');
+ await f.engine.runReady();await f.engine.reconcile();
+ const before=f.store.getProject(f.projectId),prior=f.store.list('node_binding',f.projectId),attempts=f.engine.attempts(f.projectId),
+   oldShot=before.shots[0],grants=f.store.list('grant',f.projectId).length;
+ const receipt=f.edit({kind:'shot',id:oldShot.id,field:'videoPrompt',value:'Human-authored slow orbit with a locked product position'});
+ const next=f.store.getProject(f.projectId).shots[0];
+ assert.equal(next.videoPrompt,'Human-authored slow orbit with a locked product position');
+ assert.equal(next.imagePrompt,oldShot.imagePrompt);assert.deepEqual(next.promptIntent,oldShot.promptIntent);
+ assert.deepEqual(next.narration,oldShot.narration);assert.equal(next.cueId,oldShot.cueId);assert.notEqual(next.revisionId,oldShot.revisionId);
+ for(const binding of prior){const current=f.store.get('node_binding',binding.id);
+   if(binding.node.shotId===oldShot.id&&binding.node.kind==='video'){assert.equal(current.candidateId,null);assert.deepEqual(current.outputs,{});}
+   else {assert.equal(current.candidateId,binding.candidateId);assert.deepEqual(current.outputs,binding.outputs);}}
+ assert.deepEqual(f.engine.attempts(f.projectId),attempts);assert.equal(f.store.list('grant',f.projectId).length,grants);
+ assert.ok(receipt.commandId);
+});
+
+test('explicit image prompt writing invalidates its frame and dependent video without changing video prose or audio writing', async t => {
+ const f=fixture(t);await f.engine.runReady();await f.engine.reconcile();
+ const before=f.store.getProject(f.projectId),prior=f.store.list('node_binding',f.projectId),shot=before.shots[0];
+ // The other prompt's provenance can be stale; editing an image cannot silently authenticate it.
+ shot.promptIntent.video='a'.repeat(64);shot.narration={mode:'generated',text:'Saved words',voice:'stock'};
+ f.store.saveProject(before,before.headVersion);
+ const body={kind:'shot',id:shot.id,field:'imagePrompt',value:'  Human-authored leather macro with side light  ',expectedHeadVersion:before.headVersion+1},key=randomUUID();
+ const receipt=f.edit(body,key);assert.deepEqual(f.edit(body,key),receipt);
+ const next=f.store.getProject(f.projectId).shots[0];
+ assert.equal(next.imagePrompt,'Human-authored leather macro with side light');assert.equal(next.videoPrompt,shot.videoPrompt);
+ assert.equal(next.promptIntent.image,shotIntentDigest(next,'image'));assert.equal(next.promptIntent.video,'a'.repeat(64));
+ assert.deepEqual(next.narration,shot.narration);assert.equal(next.cueId,shot.cueId);
+ for(const binding of prior){const current=f.store.get('node_binding',binding.id);
+   if(binding.node.shotId===shot.id){assert.equal(current.candidateId,null);assert.deepEqual(current.outputs,{});}
+   else {assert.equal(current.candidateId,binding.candidateId);assert.deepEqual(current.outputs,binding.outputs);}}
+ assert.equal(f.engine.attempts(f.projectId).length,2);
+});
+
+test('direct shot action editing reauthors current visual prompts and keeps saved independent reference details', t => {
+ const f=fixture(t),before=f.store.getProject(f.projectId),shot=before.shots[0];
+ f.edit({kind:'shot',id:shot.id,field:'action',value:'Rotate the boot on the display stand'});
+ const next=f.store.getProject(f.projectId).shots[0];
+ assert.equal(next.action,'Rotate the boot on the display stand');
+ assert.match(next.imagePrompt,/Rotate the boot on the display stand/);assert.ok(next.imagePrompt.endsWith(shot.imagePrompt));
+ assert.match(next.videoPrompt,/Rotate the boot on the display stand/);assert.ok(next.videoPrompt.endsWith(shot.videoPrompt));
+ assert.equal(next.promptIntent.image,shotIntentDigest(next,'image'));assert.equal(next.promptIntent.video,shotIntentDigest(next,'video'));
+ assert.deepEqual(next.referenceArtifactIds,shot.referenceArtifactIds);
+});
+
+test('prompt writing through HTTP uses exact command identity, rejects stale or blank input and creates no generation authority', async t => {
+ const f=fixture(t),p=f.store.getProject(f.projectId),key=randomUUID(),body={kind:'shot',id:'shot-0',field:'imagePrompt',value:'Direct human frame text',expectedHeadVersion:p.headVersion},
+   headers={host:'127.0.0.1',authorization:`Bearer ${f.token}`,'idempotency-key':key},url=`/api/projects/${f.projectId}/storyboard`,grants=f.store.list('grant',f.projectId).length;
+ const response=await f.app.inject({method:'POST',url,headers,payload:body});assert.equal(response.statusCode,200,response.body);
+ assert.deepEqual((await f.app.inject({method:'POST',url,headers,payload:body})).json(),response.json());
+ assert.equal((await f.app.inject({method:'POST',url,headers:{...headers,'idempotency-key':randomUUID()},payload:body})).json().error.code,'REVISION_CONFLICT');
+ const current=f.store.getProject(f.projectId),cursor=f.store.cursor(f.projectId);
+ const blank=await f.app.inject({method:'POST',url,headers:{...headers,'idempotency-key':randomUUID()},payload:{...body,expectedHeadVersion:current.headVersion,value:'   '}});
+ assert.equal(blank.json().error.code,'VALIDATION_ERROR');assert.equal(f.store.cursor(f.projectId),cursor);
+ assert.equal(f.store.list('grant',f.projectId).length,grants);assert.equal(f.engine.attempts(f.projectId).length,0);
+});

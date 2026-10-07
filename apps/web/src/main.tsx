@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { Theme } from "@radix-ui/themes";
+import { initializeAppearance, StudioTheme } from "./Appearance";
 // Register production CSS here, before App's module graph. Component-local
 // duplicates support isolated previews without changing the first load order.
-// Retained legacy layouts, followed by typography and the Radix foundation.
+// Retained component layouts, followed by typography and the Radix foundation.
 import "./style.css";
 import "./precision.css";
 import "./storyboard.css";
@@ -21,29 +21,26 @@ import "./recovery.css";
 import "./generation-guide.css";
 import "./typography.css";
 import "@radix-ui/themes/styles.css";
-// Current OpenSlate components follow the shared theme; workspace layout is last.
-import "./light-theme.css";
+// Production components retain their behavior; the final palette covers portals too.
 import "./director-plan.css";
 import "./workspace-light.css";
-import "./project-results.css";
 import "./conversation-media-tools.css";
 import "./conversation-actions.css";
 import "./conversation-workspace.css";
+import "./frame-theme.css";
+import "./frame-workspace.css";
+import "./timeline-editor.css";
+import "./reference-composer.css";
+import "./frame-shell.css";
 import App from "./App";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root element");
+const initialAppearance = initializeAppearance();
 createRoot(root).render(
   <StrictMode>
-    <Theme
-      appearance="light"
-      accentColor="blue"
-      grayColor="slate"
-      radius="medium"
-      scaling="100%"
-      className="openslate-theme"
-    >
+    <StudioTheme initialAppearance={initialAppearance}>
       <App />
-    </Theme>
+    </StudioTheme>
   </StrictMode>,
 );
