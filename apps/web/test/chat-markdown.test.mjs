@@ -23,3 +23,10 @@ test('footnote identities belong to their message and cannot jump into another m
   const text = 'A note[^1].\n\n[^1]: Details';
   assert.match(render(text, 'first'), /chat-first-fn-/); assert.match(render(text, 'second'), /chat-second-fn-/);
 });
+
+test('Chinese UI localizes only an absent image label while original message and explicit alternative text stay intact', async () => {
+ const {LocaleContext}=await import('../src/locale-context.ts');
+ const content='Original English story.\n\n![](https://example.com/reference.png)\n\n![Image reference](https://example.com/original.png)';
+ const html=renderToStaticMarkup(createElement(LocaleContext.Provider,{value:{locale:'zh-CN',setLocale:()=>{}}},createElement(ChatMarkdown,{text:content,messageId:'zh'})));
+ assert.match(html,/Original English story/);assert.match(html,/>参考图像<\/a>/);assert.match(html,/>Image reference<\/a>/);assert.doesNotMatch(html,/<img/);
+});

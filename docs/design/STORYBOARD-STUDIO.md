@@ -2,6 +2,8 @@
 
 The studio follows the supplied [Frame Studio Day/Night design](OPENSLATE-LIGHT.md). React/Radix controls use neutral grayscale zones, purple-blue actions, local Inter Variable/PingFang and rounded outline icons. A resizable Director conversation sits beside **Plan / Keyframes / Assets / Film** views. The large selected-shot preview, inspector and Scene → Shot shelves share canonical project state.
 
+Use the header language menu for English or Simplified Chinese. The initial choice follows the browser language, and your selection is remembered. Switching keeps drafts, references, selected shots and pending tools; existing creative text and conversation history stay in their original language.
+
 ## Film flow
 
 1. Start in conversation or import a UTF-8 text/Markdown brief. Inspect and confirm the proposed film plan before it becomes canonical.

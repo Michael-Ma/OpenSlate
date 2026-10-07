@@ -7,7 +7,7 @@ Reconciled October 7, 2026. OpenSlate is an early single-user local studio. The 
 | Area | Implemented scope | Remaining boundary |
 |---|---|---|
 | Director | Native/fake runtime, saved context, questions, scoped changes, locked skills/tools and Stop/recovery | Complete native conversation-to-film acceptance |
-| Studio UI | Day/Night Frame workbench on Radix, Inter/PingFang, project references, selected preview/inspector, Scene/Shot shelves, resizable conversation and concise plan/recovery widgets | Subjective usability acceptance and further refinements against actual production work |
+| Studio UI | English/Simplified Chinese, Day/Night Frame workbench on Radix, Inter/PingFang, project references, selected preview/inspector, Scene/Shot shelves, resizable conversation and concise plan/recovery widgets | Subjective usability acceptance and further refinements against actual production work |
 | Storyboard | Editable treatment/scenes/shots, import proposal/confirmation, reorder/delete/undo and stable IDs | More advanced editing and subjective usability acceptance |
 | Planning/execution | Restricted declarative compiler, scoped reuse, exact reviews, durable intents/attempts and unknown-outcome recovery | Longer real production and provider-specific acceptance |
 | Silence/audio | Explicit no narration, compact script/recording review, short accepted within-shot voiceover and owned library | Real speech/transcription acceptance and richer mixing |
@@ -20,6 +20,10 @@ Requested workflow items 1–5 are implemented. Item 6 is partial because provid
 ## October 7 Day / Night workbench
 
 The supplied [Frame Day/Night direction](../design/OPENSLATE-LIGHT.md) replaces the Light-only presentation with Plan/Keyframes/Assets/Film views, selected-media preview, inspector, scene shelves and scoped @ collaboration. Per-shot keyframe generation/regeneration and direct Plan/Prompt edits use real revision-checked commands; exact current image review still precedes scene video generation. Timeline ordering, plan timing and music placement/gain/mute persist to the actual project. Theme changes keep selection and drafts intact. Final builds/typechecks and **2,376 tests passed**, with zero failures and one optional native skip. The offline restart/edit demo, independent review and final desktop/390px browser checks passed. Current verification and limits are recorded in the [October 7 review](OCTOBER-7-DAY-NIGHT-REVIEW.md).
+
+## October 7 English / Chinese interface
+
+The header/startup selector switches English and Simplified Chinese in place and remembers the browser preference. UI copy, accessibility, model/audio/recovery feedback and controlled count labels are localized. Project text, prompts, transcripts, provider names and conversation content stay as written. Locale never enters backend authority, media inputs or a pending command payload. Final builds/typechecks and **2,401 tests passed**, zero failures and one optional native skip. Offline restart/edit and desktop/mobile language-switch checks passed; independent review has no remaining material findings. [Language review](OCTOBER-7-LANGUAGE-REVIEW.md) records scope and limits.
 
 ## October 5 conversation and canonical results
 

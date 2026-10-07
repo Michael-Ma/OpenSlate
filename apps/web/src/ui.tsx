@@ -1,3 +1,4 @@
+import { useTranslation } from "./Locale";
 import {
   createContext,
   forwardRef,
@@ -237,6 +238,7 @@ export function AppDialog({
   size = "3",
   maxWidth = "760px",
 }: AppDialogProps) {
+  const { ui } = useTranslation();
   const returnFocus = useRef<HTMLElement | null>(null),
     content = useRef<HTMLDivElement>(null),
     descriptionId = useId();
@@ -291,7 +293,7 @@ export function AppDialog({
           <UiButton
             variant="ghost"
             disabled={preventClose || closeDisabled}
-            aria-label={closeLabel}
+            aria-label={ui(closeLabel)}
             onClick={() => onOpenChange(false)}
           >
             ×
@@ -365,7 +367,7 @@ export function AppDialog({
             size="2"
             disabled={closeDisabled || preventClose}
             onClick={() => onOpenChange(false)}
-            aria-label={closeLabel}
+            aria-label={ui(closeLabel)}
             title={closeLabel}
             className="app-dialog-close icon-button"
           >

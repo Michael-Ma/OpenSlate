@@ -20,6 +20,10 @@ The compact inline Models tool in the conversation shows Director, Keyframes, Vi
 
 The Director divider supports drag/keyboard, persistent preferred width and container clamping; the composer resizes vertically. Chat uses safe GFM with horizontal table scrolling and no automatic external image loading. Background projection refresh retains connected content/controls and request-owned holds. The concise plan widget retains state-derived Saved / Next details and priority recovery states. [Studio Day/Night](../design/OPENSLATE-LIGHT.md) supplies the accepted Radix foundation, grayscale zones and purple-blue action tokens. Appearance/view changes preserve selection, draft and references. Dated verification belongs in [current evidence](../implementation/STATUS.md).
 
+## Language
+
+The studio supports English and Simplified Chinese with an in-place header/startup selector. It persists only a browser preference, keeps URL theme/view/reference context and updates `html.lang`; project state and execution payloads do not gain a locale field. Static pairs and controlled-copy whitelists cover UI labels, help, accessibility, states and sanitized errors. Original project writing, prompts, scripts, transcripts, provider names and Director messages/questions are retained. See the [language verification](../implementation/OCTOBER-7-LANGUAGE-REVIEW.md).
+
 ## Explanation of reviews
 
 Configured credentials need no separate approval or usage allowance. Scene generation actions request work directly; the second decision reviews the exact returned keyframes and actual motion/video recipe. Videos can be inspected after return without another acceptance gate. Requested speech/transcription has no additional generation-review dialog. Audio acceptance confirms words/recording/range. A guidance upgrade is automatic compatibility maintenance before an eligible fresh turn. Name a concrete missing input or setup issue instead of asking for generic authorization.

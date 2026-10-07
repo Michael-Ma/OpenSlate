@@ -1,3 +1,5 @@
+import { useTranslation } from "./Locale";
+import { hierarchyUiLabel, workbenchCopy } from "./workbench-copy";
 import { useEffect, useId, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent, ReactNode, RefObject } from "react";
 import type { StudioApi } from "./api";
@@ -64,6 +66,8 @@ export function ReferenceComposer({
   continuation,
   actions,
 }: Props) {
+  const { t, ui } = useTranslation();
+
   const [cursor, setCursor] = useState(value.length),
     [dismissed, setDismissed] = useState(false),
     [active, setActive] = useState(0),
@@ -161,7 +165,13 @@ export function ReferenceComposer({
       }
       setAssets(next);
       setLoading(false);
-      if (missing) setError("部分素材暂时无法读取；项目与镜头仍可引用。");
+      if (missing)
+        setError(
+          t(
+            "Some media could not be loaded. Project and shot references remain available.",
+            "部分素材暂时无法读取；项目与镜头仍可引用。",
+          ),
+        );
     });
     return () => abort.abort();
   }, [api, projectId, open, query, version]);
@@ -171,7 +181,17 @@ export function ReferenceComposer({
   ].filter(
     (r) =>
       (filter === "all" || r.kind === filter) &&
-      (r.label + " " + (r.detail ?? "")).toLowerCase().includes(query),
+      (
+        r.label +
+        " " +
+        r.kind +
+        " " +
+        kindLabel[r.kind] +
+        " " +
+        (r.detail ?? "")
+      )
+        .toLowerCase()
+        .includes(query),
   );
   const index = Math.min(active, Math.max(0, options.length - 1));
   useEffect(() => {
@@ -245,11 +265,13 @@ export function ReferenceComposer({
         {references.map((ref) => (
           <span key={ref.key} className="reference-chip">
             <UiButton size="1" variant="ghost" onClick={() => onNavigate(ref)}>
-              @ {ref.label}
+              @ {hierarchyUiLabel(ref.label, ref.kind, t)}
             </UiButton>
             <IconButton
               icon="close"
-              label={"移除引用 " + ref.label}
+              label={t("Remove reference {label}", "移除引用 {label}", {
+                label: ref.label,
+              })}
               disabled={pending}
               onClick={() =>
                 referencesChanged(references.filter((r) => r.key !== ref.key))
@@ -264,13 +286,15 @@ export function ReferenceComposer({
           <div
             className="reference-picker"
             role="region"
-            aria-label="引用项目资源"
+            aria-label={t("Reference project resources", "引用项目资源")}
           >
             <div className="reference-picker-heading">
-              <strong>引用项目资源</strong>
+              <strong>
+                {t("Reference project resources", "引用项目资源")}
+              </strong>
               <IconButton
                 icon="close"
-                label="关闭引用列表"
+                label={t("Close reference list", "关闭引用列表")}
                 onClick={() => setDismissed(true)}
               />
             </div>
@@ -287,12 +311,18 @@ export function ReferenceComposer({
                       setActive(0);
                     }}
                   >
-                    {kind === "all" ? "全部" : kindLabel[kind as ReferenceKind]}
+                    {kind === "all"
+                      ? t("All", "全部")
+                      : ui(kindLabel[kind as ReferenceKind], workbenchCopy)}
                   </UiButton>
                 ),
               )}
             </div>
-            <div role="listbox" id={id} aria-label="项目资源">
+            <div
+              role="listbox"
+              id={id}
+              aria-label={t("Project resources", "项目资源")}
+            >
               {options.map((r, i) => (
                 <button
                   type="button"
@@ -307,23 +337,34 @@ export function ReferenceComposer({
                 >
                   <Icon name={refIcon(r.kind)} size={18} />
                   <span>
-                    <strong>{r.label}</strong>
+                    <strong>{hierarchyUiLabel(r.label, r.kind, t)}</strong>
                     <small>
-                      {kindLabel[r.kind]}
-                      {r.detail ? " · " + r.detail : ""}
+                      {ui(kindLabel[r.kind], workbenchCopy)}
+                      {r.detail
+                        ? " · " +
+                          (r.kind === "project"
+                            ? t("Entire project", "整个项目")
+                            : r.detail)
+                        : ""}
                     </small>
                   </span>
                 </button>
               ))}
-              {!options.length && !loading && <p>没有匹配的资源</p>}
+              {!options.length && !loading && (
+                <p>{t("No matching resources", "没有匹配的资源")}</p>
+              )}
             </div>
-            {loading && <small role="status">读取素材…</small>}
-            {error && <small role="status">{error}</small>}
+            {loading && (
+              <small role="status">
+                {t("Loading resources…", "读取素材…")}
+              </small>
+            )}
+            {error && <small role="status">{ui(error, workbenchCopy)}</small>}
           </div>
         )}
         <UiTextArea
           ref={textareaRef}
-          aria-label="Message OpenSlate"
+          aria-label={t("Message OpenSlate", "给 OpenSlate 发消息")}
           value={value}
           rows={3}
           maxLength={16000}
@@ -352,13 +393,17 @@ export function ReferenceComposer({
             {actions}
             <IconButton
               icon="at"
-              label="引用项目资源"
+              label={t("Reference project resources", "引用项目资源")}
               disabled={disabled || pending || !snapshot}
               onClick={addMention}
             />
           </div>
           <span className="reference-keyhint">
-            Enter 发送 · Shift Enter 换行
+            {" "}
+            {t(
+              "Enter to send · Shift Enter for a new line",
+              "Enter 发送 · Shift Enter 换行",
+            )}{" "}
           </span>
         </div>
       </div>

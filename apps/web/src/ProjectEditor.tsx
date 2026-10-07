@@ -1,3 +1,4 @@
+import { useTranslation } from "./Locale";
 import { useEffect, useState } from "react";
 import type { ProjectSnapshot } from "./model";
 import { InlineField } from "./InlineField";
@@ -18,6 +19,8 @@ export function ProjectEditor({
   onNarration(shotId: string): void;
   onDiscuss(shotId?: string): void;
 }) {
+  const { t } = useTranslation();
+
   const [target, setTarget] = useState(targetId ?? snapshot.project.id),
     project = snapshot.project,
     version = project.headVersion;
@@ -31,14 +34,20 @@ export function ProjectEditor({
   const send = (body: Record<string, unknown>) =>
     action({ expectedHeadVersion: version, ...body });
   const options = [
-    { value: project.id, label: "Film direction" },
+    { value: project.id, label: t("Film direction", "影片方向") },
     ...project.scenes.flatMap((scene, i) => [
-      { value: scene.id, label: `Scene ${i + 1}` },
+      {
+        value: scene.id,
+        label: t("Scene {number}", "场景 {number}", { number: i + 1 }),
+      },
       ...project.shots
         .filter((s) => s.sceneId === scene.id)
         .map((shot, j) => ({
           value: shot.id,
-          label: `Shot ${i + 1}.${j + 1} · ${shot.purpose}`,
+          label: t("Shot {number} · {purpose}", "镜头 {number} · {purpose}", {
+            number: `${i + 1}.${j + 1}`,
+            purpose: shot.purpose,
+          }),
         })),
     ]),
   ];
@@ -47,11 +56,14 @@ export function ProjectEditor({
       : [],
     index = peers.findIndex((s) => s.id === shot?.id);
   return (
-    <section className="project-editor" aria-label="Edit project">
+    <section
+      className="project-editor"
+      aria-label={t("Edit project", "编辑项目")}
+    >
       <label>
-        What would you like to change?
+        {t("What would you like to change?", "想修改哪部分？")}
         <UiSelect
-          aria-label="Editing scope"
+          aria-label={t("Editing scope", "编辑范围")}
           value={selected}
           onValueChange={setTarget}
           options={options}
@@ -63,7 +75,7 @@ export function ProjectEditor({
           <InlineField
             multiline
             value={project.brief}
-            label="Film brief"
+            label={t("Film brief", "创作简报")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -78,7 +90,7 @@ export function ProjectEditor({
           <InlineField
             multiline
             value={project.story}
-            label="Film direction"
+            label={t("Film direction", "影片方向")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -95,7 +107,7 @@ export function ProjectEditor({
             onClick={() => send({ kind: "addScene" })}
           >
             <Icon name="plus" size={15} />
-            Add scene
+            {t("Add scene", "添加场景")}
           </UiButton>
         </>
       )}
@@ -104,7 +116,7 @@ export function ProjectEditor({
           <InlineField
             multiline
             value={scene.purpose}
-            label="Scene direction"
+            label={t("Scene direction", "场景方向")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -115,7 +127,7 @@ export function ProjectEditor({
             disabled={disabled}
             onClick={() => send({ kind: "addShot", sceneId: scene.id })}
           >
-            Add shot
+            {t("Add shot", "添加镜头")}
           </UiButton>
         </>
       )}
@@ -124,7 +136,7 @@ export function ProjectEditor({
           <InlineField
             multiline
             value={shot.purpose}
-            label="Shot purpose"
+            label={t("Shot purpose", "镜头意图")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -140,7 +152,7 @@ export function ProjectEditor({
           <InlineField
             multiline
             value={shot.framing}
-            label="Shot framing"
+            label={t("Shot framing", "镜头构图")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -156,7 +168,7 @@ export function ProjectEditor({
           <InlineField
             multiline
             value={shot.motion}
-            label="Camera movement"
+            label={t("Camera movement", "镜头运动")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -172,7 +184,7 @@ export function ProjectEditor({
           <InlineField
             multiline
             value={shot.action}
-            label="镜头内容"
+            label={t("Shot content", "镜头内容")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -186,11 +198,11 @@ export function ProjectEditor({
             }
           />
           <details className="project-editor-prompts">
-            <summary>Plan & Prompt</summary>
+            <summary>{t("Plan & Prompt", "计划与提示词")}</summary>
             <InlineField
               multiline
               value={shot.imagePrompt}
-              label="Keyframe Prompt"
+              label={t("Keyframe Prompt", "关键帧提示词")}
               version={version}
               disabled={disabled}
               save={(value, expectedHeadVersion) =>
@@ -206,7 +218,7 @@ export function ProjectEditor({
             <InlineField
               multiline
               value={shot.videoPrompt}
-              label="Video Prompt"
+              label={t("Video Prompt", "视频提示词")}
               version={version}
               disabled={disabled}
               save={(value, expectedHeadVersion) =>
@@ -222,7 +234,7 @@ export function ProjectEditor({
           </details>
           <InlineField
             value={String(shot.desiredFrames / 30)}
-            label="Shot seconds"
+            label={t("Shot seconds", "镜头时长（秒）")}
             version={version}
             disabled={disabled}
             save={(value, expectedHeadVersion) =>
@@ -236,9 +248,9 @@ export function ProjectEditor({
             }
           />
           <label>
-            Narration
+            {t("Narration", "旁白")}
             <UiSelect
-              aria-label="Narration mode"
+              aria-label={t("Narration mode", "旁白方式")}
               value={
                 shot.narration?.mode === "undecided" || !shot.narration
                   ? "undecided"
@@ -249,10 +261,14 @@ export function ProjectEditor({
               }
               disabled={disabled}
               options={[
-                { value: "undecided", label: "To decide", disabled: true },
-                { value: "none", label: "No narration" },
-                { value: "generated", label: "Generate voice" },
-                { value: "uploaded", label: "Use a recording" },
+                {
+                  value: "undecided",
+                  label: t("To decide", "待决定"),
+                  disabled: true,
+                },
+                { value: "none", label: t("No narration", "无旁白") },
+                { value: "generated", label: t("Generate voice", "生成语音") },
+                { value: "uploaded", label: t("Use a recording", "使用录音") },
               ]}
             />
           </label>
@@ -260,7 +276,7 @@ export function ProjectEditor({
             <InlineField
               multiline
               value={shot.narration.text}
-              label="Narration script"
+              label={t("Narration script", "旁白文稿")}
               version={version}
               disabled={disabled}
               save={(value, expectedHeadVersion) =>
@@ -276,20 +292,20 @@ export function ProjectEditor({
           )}
           <div className="conversation-action-row">
             <UiButton disabled={disabled} onClick={() => onNarration(shot.id)}>
-              Narration & timing
+              {t("Narration & timing", "旁白与时间")}
             </UiButton>
             <UiButton variant="ghost" onClick={() => onDiscuss(shot.id)}>
-              Discuss shot
+              {t("Discuss shot", "讨论镜头")}
             </UiButton>
           </div>
           <label>
-            Move to scene
+            {t("Move to scene", "移动到场景")}
             <UiSelect
-              aria-label="Shot scene"
+              aria-label={t("Shot scene", "镜头所在场景")}
               value={shot.sceneId}
               options={project.scenes.map((s, i) => ({
                 value: s.id,
-                label: `Scene ${i + 1}`,
+                label: t("Scene {number}", "场景 {number}", { number: i + 1 }),
               }))}
               disabled={disabled}
               onValueChange={(sceneId) =>
@@ -309,7 +325,7 @@ export function ProjectEditor({
                 })
               }
             >
-              Move up
+              {t("Move up", "向前移动")}
             </UiButton>
             <UiButton
               disabled={disabled || index === peers.length - 1}
@@ -324,14 +340,14 @@ export function ProjectEditor({
                 })
               }
             >
-              Move down
+              {t("Move down", "向后移动")}
             </UiButton>
             <UiButton
               variant="danger"
               disabled={disabled}
               onClick={() => send({ kind: "deleteShot", id: shot.id })}
             >
-              Delete shot
+              {t("Delete shot", "删除镜头")}
             </UiButton>
           </div>
         </>
@@ -344,7 +360,7 @@ export function ProjectEditor({
             send({ kind: "undo", commandId: snapshot.latestStoryboardEdit!.id })
           }
         >
-          Undo last edit
+          {t("Undo last edit", "撤销上次编辑")}
         </UiButton>
       )}
     </section>

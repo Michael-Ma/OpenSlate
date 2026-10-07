@@ -1,3 +1,4 @@
+import { useTranslation, LanguageSwitch } from "./Locale";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { useWorkspaceSplit } from "./WorkspaceSplit";
 import { useKeyframeInspection } from "./useKeyframeInspection";
@@ -200,6 +201,7 @@ function Studio({
   initialProjects: ProjectSummary[];
   disconnect: () => void | Promise<void>;
 }) {
+  const { t, ui } = useTranslation();
   const [recoveryReadOnly, setRecoveryReadOnly] = useState(true);
   const [projects, setProjects] = useState(initialProjects);
   const [projectId, setProjectId] = useState(initialProjects[0]?.id ?? "");
@@ -739,7 +741,11 @@ function Studio({
   const selectedNames =
     snapshot?.project.shots
       .filter((shot) => selectedShots.includes(shot.id))
-      .map((shot) => `Shot ${snapshot.project.shots.indexOf(shot) + 1}`) ?? [];
+      .map((shot) =>
+        t("Shot {number}", "镜头 {number}", {
+          number: snapshot.project.shots.indexOf(shot) + 1,
+        }),
+      ) ?? [];
   const totalFrames =
     snapshot?.project.shots.reduce(
       (total, shot) => total + shot.desiredFrames,
@@ -845,12 +851,12 @@ function Studio({
   };
   const navigateReference = (ref: StudioReference) => {
     if (ref.projectId !== projectId) {
-      setActionError("引用来自另一个项目。");
+      setActionError("The reference belongs to another project.");
       return;
     }
     if (ref.kind === "shot") {
       if (!snapshot?.project.shots.some((s) => s.id === ref.id)) {
-        setActionError("引用的镜头已不在项目中。");
+        setActionError("The referenced shot is no longer in this project.");
         return;
       }
       chooseShot(ref.id);
@@ -982,7 +988,7 @@ function Studio({
               </a>
               <div className="project-switcher">
                 <label className="sr-only" htmlFor="project-switch">
-                  Current project
+                  {t("Current project", "当前项目")}
                 </label>
                 <Select.Root
                   value={projectId || "__new__"}
@@ -993,13 +999,15 @@ function Studio({
                 >
                   <Select.Trigger
                     id="project-switch"
-                    aria-label="Current project"
+                    aria-label={t("Current project", "当前项目")}
                     className="project-select"
                     variant="ghost"
                   />
                   <Select.Content position="popper">
                     {!projectId && (
-                      <Select.Item value="__new__">Your next film</Select.Item>
+                      <Select.Item value="__new__">
+                        {t("Your next film", "你的下一部影片")}
+                      </Select.Item>
                     )}
                     {projects.map((project) => (
                       <Select.Item key={project.id} value={project.id}>
@@ -1011,6 +1019,7 @@ function Studio({
               </div>
               <div className="header-actions">
                 <AppearanceSwitch />
+                <LanguageSwitch />
                 <UiButton
                   className="header-export"
                   variant="secondary"
@@ -1021,7 +1030,7 @@ function Studio({
                   }}
                 >
                   <Icon name="download" size={16} />
-                  导出项目
+                  {t("Export project", "导出项目")}
                 </UiButton>
                 <span
                   className={`connection ${connected ? "online" : ""}`}
@@ -1030,9 +1039,9 @@ function Studio({
                   <span className="status-dot" />
                   {connected
                     ? updates.connection === "fallback"
-                      ? "定时同步"
-                      : "已同步"
-                    : "连接中…"}
+                      ? t("Periodic sync", "定时同步")
+                      : t("Synced", "已同步")
+                    : t("Connecting…", "连接中…")}
                 </span>
               </div>
             </header>
@@ -1040,13 +1049,13 @@ function Studio({
               <SegmentedControl.Root
                 value={mobileView}
                 onValueChange={setMobileView}
-                aria-label="Workspace panel"
+                aria-label={t("Workspace panel", "工作区面板")}
               >
                 <SegmentedControl.Item value="workspace">
-                  工作区
+                  {t("Workspace", "工作区")}
                 </SegmentedControl.Item>
                 <SegmentedControl.Item value="director">
-                  对话
+                  {t("Conversation", "对话")}
                 </SegmentedControl.Item>
               </SegmentedControl.Root>
             </div>
@@ -1065,53 +1074,58 @@ function Studio({
                   <div className="panel-title">
                     <div>
                       <Icon name="chat" size={18} />
-                      <h2 id="conversation-title">创作对话</h2>
+                      <h2 id="conversation-title">
+                        {t("Creative conversation", "创作对话")}
+                      </h2>
                     </div>
                     <span className="tag subtle">
                       {director.mode === "fake"
-                        ? "演示助手"
+                        ? t("Demo director", "演示助手")
                         : director.mode === "native"
                           ? "Codex"
-                          : "未连接助手"}
+                          : t("Director disconnected", "未连接助手")}
                     </span>
                   </div>
                   <div
                     className="conversation-tools"
-                    aria-label="Conversation tools"
+                    aria-label={t("Conversation tools", "对话工具")}
                   >
                     <IconButton
                       icon="edit"
-                      label="编辑镜头与场景"
+                      label={t("Edit shots and scenes", "编辑镜头与场景")}
                       disabled={!projectId || protectedTool}
                       onClick={() => setEditorOpen((v) => !v)}
                     />
                     <IconButton
                       icon="list"
-                      label="导入文本方案"
+                      label={t("Import a written plan", "导入文本方案")}
                       disabled={!projectId || protectedTool}
                       onClick={() => setBriefImportOpen((v) => !v)}
                     />
                     <IconButton
                       icon="plus"
-                      label="导入图像、视频或音频"
+                      label={t(
+                        "Import image, video or audio",
+                        "导入图像、视频或音频",
+                      )}
                       disabled={!projectId || protectedTool}
                       onClick={() => setImportOpen((v) => !v)}
                     />
                     <IconButton
                       icon="settings"
-                      label="模型设置"
+                      label={t("Model settings", "模型设置")}
                       disabled={!projectId || protectedTool}
                       onClick={() => setShowDirectorSettings((v) => !v)}
                     />
                     <IconButton
                       icon="folder"
-                      label="新建项目"
+                      label={t("New project", "新建项目")}
                       disabled={recoveryReadOnly || protectedTool}
                       onClick={() => setShowNew((v) => !v)}
                     />
                     <IconButton
                       icon="logout"
-                      label="Disconnect studio"
+                      label={t("Disconnect studio", "断开工作区连接")}
                       disabled={protectedTool}
                       onClick={() =>
                         void Promise.resolve(disconnect()).catch((e) =>
@@ -1123,7 +1137,7 @@ function Studio({
                   {snapshot && (
                     <div className="conversation-scope">
                       <UiSelect
-                        aria-label="Discussion scope"
+                        aria-label={t("Discussion scope", "讨论范围")}
                         value={
                           selectedShots.length === 1
                             ? selectedShots[0]!
@@ -1137,14 +1151,19 @@ function Studio({
                           setDraftContinuation(null);
                         }}
                         options={[
-                          { value: projectId, label: "Whole project" },
+                          {
+                            value: projectId,
+                            label: t("Whole project", "整个项目"),
+                          },
                           ...(selectedShots.length > 1
                             ? [
                                 {
                                   value: "__selected__",
-                                  label:
-                                    String(selectedShots.length) +
-                                    " selected shots",
+                                  label: t(
+                                    "{count} selected shots",
+                                    "已选择 {count} 个镜头",
+                                    { count: selectedShots.length },
+                                  ),
                                 },
                               ]
                             : []),
@@ -1153,13 +1172,15 @@ function Studio({
                               .filter((s) => s.sceneId === scene.id)
                               .map((shot, j) => ({
                                 value: shot.id,
-                                label:
-                                  "Shot " +
-                                  (i + 1) +
-                                  "." +
-                                  (j + 1) +
-                                  " · " +
-                                  shot.purpose,
+                                label: t(
+                                  "Shot {scene}.{shot} · {purpose}",
+                                  "镜头 {scene}.{shot} · {purpose}",
+                                  {
+                                    scene: i + 1,
+                                    shot: j + 1,
+                                    purpose: shot.purpose,
+                                  },
+                                ),
                               })),
                           ),
                         ]}
@@ -1191,7 +1212,7 @@ function Studio({
                           projectId: ref.projectId,
                           kind: ref.kind,
                           id: ref.id,
-                          label: anchor!.textContent ?? "项目资源",
+                          label: anchor!.textContent ?? "Project resource",
                         });
                       }
                     }}
@@ -1204,29 +1225,40 @@ function Studio({
                         <span className="small-mark">
                           <Icon name="slate" size={20} />
                         </span>
-                        <h3>从一个想法开始。</h3>
+                        <h3>{t("Start with an idea.", "从一个想法开始。")}</h3>
                         <p>
-                          Talk through your idea here. Choose a shot above to
-                          focus the conversation. Your project results stay on
-                          the right.
+                          {t(
+                            "Talk through your idea here. Choose a shot above to focus the conversation. Your project results stay on the right.",
+                            "在这里讨论想法，选择上方的镜头聚焦对话。项目结果始终显示在右侧。",
+                          )}
                         </p>
                       </div>
                     )}
                     {director.mode === "fake" && (
                       <div className="demo-disclosure">
-                        <span className="tiny-label">演示模式</span>
+                        <span className="tiny-label">
+                          {t("Demo mode", "演示模式")}
+                        </span>
                         <p>
                           {demoAvailable
-                            ? "使用示例素材。用镜头操作体验制作流程；自由对话不会生成真实媒体。"
-                            : "当前对话使用演示助手，可在模型设置中选择 Codex。"}
+                            ? t(
+                                "Sample media. Try shot actions to explore production; free conversation does not generate real media.",
+                                "使用示例素材。用镜头操作体验制作流程；自由对话不会生成真实媒体。",
+                              )
+                            : t(
+                                "This conversation uses the demo director. Choose Codex in model settings.",
+                                "当前对话使用演示助手，可在模型设置中选择 Codex。",
+                              )}
                         </p>
                       </div>
                     )}
                     {director.mode === "offline" && (
                       <div className="demo-disclosure">
                         <p>
-                          Your messages are saved. A live director isn’t
-                          connected.
+                          {t(
+                            "Your messages are saved. A live director isn’t connected.",
+                            "消息已保存，真实导演尚未连接。",
+                          )}
                         </p>
                       </div>
                     )}
@@ -1236,25 +1268,29 @@ function Studio({
                         className={`message ${message.role}`}
                       >
                         <div className="message-byline">
-                          {message.role === "assistant" ? "OpenSlate" : "You"}
+                          {message.role === "assistant"
+                            ? "OpenSlate"
+                            : t("You", "你")}
                         </div>
                         <ChatMarkdown
                           text={message.text}
                           messageId={message.id}
                         />
                         {message.state === "failed" && (
-                          <small>Response needs attention</small>
+                          <small>
+                            {t("Response needs attention", "回复需要处理")}
+                          </small>
                         )}
                       </article>
                     ))}
                     {pendingMessage && (
                       <article className="message user pending">
                         <div className="message-byline">
-                          You{" "}
+                          {t("You", "你")}{" "}
                           <span>
                             {pendingMessage.failed
-                              ? "Not confirmed"
-                              : "Sending…"}
+                              ? t("Not confirmed", "尚未确认")
+                              : t("Sending…", "发送中…")}
                           </span>
                         </div>
                         <ChatMarkdown
@@ -1267,7 +1303,7 @@ function Studio({
                             disabled={recoveryReadOnly || busy}
                             onClick={() => void send()}
                           >
-                            Retry this message
+                            {t("Retry this message", "重试此消息")}
                           </UiButton>
                         )}
                       </article>
@@ -1279,7 +1315,7 @@ function Studio({
                           <i />
                           <i />
                         </span>
-                        Working on your request
+                        {t("Working on your request", "正在处理请求")}
                       </div>
                     )}
                     {director.message && director.status === "error" && (
@@ -1376,12 +1412,12 @@ function Studio({
                         <section
                           key={question.id}
                           className={`question-card ${replyQuestionId === question.id ? "selected" : ""}`}
-                          aria-label="OpenSlate question"
+                          aria-label={t("OpenSlate question", "OpenSlate 提问")}
                         >
                           <span className="tiny-label">
                             {question.canAnswer === false
-                              ? "SAVED QUESTION"
-                              : "YOUR INPUT NEEDED"}
+                              ? t("SAVED QUESTION", "已保存的问题")
+                              : t("YOUR INPUT NEEDED", "需要你的回答")}
                           </span>
                           {question.questions.map((item) => (
                             <div key={item.id}>
@@ -1401,9 +1437,10 @@ function Studio({
                           ))}
                           {question.canAnswer === false ? (
                             <p>
-                              This question is saved for reference. Use a fresh
-                              conversation to continue when the project is
-                              ready.
+                              {t(
+                                "This question is saved for reference. Use a fresh conversation to continue when the project is ready.",
+                                "此问题已保存供参考。项目就绪后，请通过新对话继续。",
+                              )}
                             </p>
                           ) : (
                             <UiButton
@@ -1415,8 +1452,8 @@ function Studio({
                               }}
                             >
                               {replyQuestionId === question.id
-                                ? "Replying below"
-                                : "Answer this question"}
+                                ? t("Replying below", "在下方回答")
+                                : t("Answer this question", "回答此问题")}
                             </UiButton>
                           )}
                         </section>
@@ -1460,10 +1497,10 @@ function Studio({
                         />
                         {(connectionError || actionError) && (
                           <div className="notice error" role="alert">
-                            <span>{actionError || connectionError}</span>
+                            <span>{ui(actionError || connectionError)}</span>
                             <IconButton
                               icon="refresh"
-                              label="Refresh workspace"
+                              label={t("Refresh workspace", "刷新工作区")}
                               onClick={refresh}
                             />
                           </div>
@@ -1471,30 +1508,35 @@ function Studio({
                         {pendingAction && (
                           <div className="notice warning">
                             <span>
-                              This action wasn’t confirmed. Retry the same
-                              request to check its outcome.
+                              {t(
+                                "This action wasn’t confirmed. Retry the same request to check its outcome.",
+                                "此操作尚未确认，请重试同一请求以检查结果。",
+                              )}
                             </span>
                             <UiButton
                               disabled={recoveryReadOnly || busy}
                               onClick={() => void runAction(pendingAction)}
                             >
-                              Retry action
+                              {t("Retry action", "重试操作")}
                             </UiButton>
                           </div>
                         )}
                         {feedback && (
                           <div className="sr-only" role="status">
-                            {feedback}
+                            {ui(feedback)}
                           </div>
                         )}
                         {showNew && (
                           <section className="create-project-panel">
                             <div className="section-heading">
-                              <h2>Start a new film</h2>
+                              <h2>{t("Start a new film", "开始一部新影片")}</h2>
                               <UiButton
                                 className="icon-button"
-                                aria-label="Close new project"
-                                title="Close new project"
+                                aria-label={t(
+                                  "Close new project",
+                                  "关闭新建项目",
+                                )}
+                                title={t("Close new project", "关闭新建项目")}
                                 onClick={() => setShowNew(false)}
                               >
                                 <Icon name="close" />
@@ -1504,7 +1546,9 @@ function Studio({
                               className="new-project-form"
                               onSubmit={(event) => void createProject(event)}
                             >
-                              <label htmlFor="project-name">Project name</label>
+                              <label htmlFor="project-name">
+                                {t("Project name", "项目名称")}
+                              </label>
                               <UiTextField
                                 id="project-name"
                                 value={newName}
@@ -1512,7 +1556,7 @@ function Studio({
                                   setNewName(event.target.value)
                                 }
                                 maxLength={160}
-                                placeholder="Name your film"
+                                placeholder={t("Name your film", "为影片命名")}
                                 disabled={disabled || !!pendingCreation}
                                 autoFocus
                               />
@@ -1532,10 +1576,13 @@ function Studio({
                                 className="button primary"
                               >
                                 {creating
-                                  ? "Creating…"
+                                  ? t("Creating…", "创建中…")
                                   : pendingCreation
-                                    ? "Retry same project"
-                                    : "Create project"}
+                                    ? t(
+                                        "Retry same project",
+                                        "重试创建同一项目",
+                                      )
+                                    : t("Create project", "创建项目")}
                               </UiButton>
                             </form>
                           </section>
@@ -1583,7 +1630,7 @@ function Studio({
                         >
                           {musicImportOpen && snapshot && (
                             <ImportMedia
-                              title="Background music"
+                              title={t("Background music", "背景音乐")}
                               close={() => setMusicImportOpen(false)}
                             >
                               <AudioLibraryPanel
@@ -1592,14 +1639,16 @@ function Studio({
                                 onChanged={refresh}
                               />
                               <p className="field-help">
-                                After uploading, choose it in Export’s
-                                background music selector.
+                                {t(
+                                  "After uploading, choose it in Export’s background music selector.",
+                                  "上传后，在导出工具的背景音乐选项中选择。",
+                                )}
                               </p>
                             </ImportMedia>
                           )}
                           {audioShotId && snapshot && (
                             <ImportMedia
-                              title="Shot narration"
+                              title={t("Shot narration", "镜头旁白")}
                               close={() => setAudioShotId(null)}
                             >
                               <NarrationPanel
@@ -1684,7 +1733,10 @@ function Studio({
                                       }
                                     >
                                       <summary>
-                                        Advanced narration & transcripts
+                                        {t(
+                                          "Advanced narration & transcripts",
+                                          "高级旁白与转录",
+                                        )}
                                       </summary>
                                       <NarrationPanel
                                         active={
@@ -1738,7 +1790,7 @@ function Studio({
 
                           {editorOpen && snapshot && (
                             <ImportMedia
-                              title="Edit project"
+                              title={t("Edit project", "编辑项目")}
                               close={() => setEditorOpen(false)}
                             >
                               <ProjectEditor
@@ -1768,7 +1820,7 @@ function Studio({
                           )}
                           {briefImportOpen && snapshot && (
                             <ImportMedia
-                              title="Bring a brief"
+                              title={t("Bring a brief", "导入创作简报")}
                               close={() => setBriefImportOpen(false)}
                             >
                               <PlanImport
@@ -1790,7 +1842,7 @@ function Studio({
                           )}
                           {exportOpen && snapshot && (
                             <ImportMedia
-                              title="Export & soundtrack"
+                              title={t("Export & soundtrack", "导出与配乐")}
                               close={() => setExportOpen(false)}
                             >
                               <MediaPanel
@@ -1858,21 +1910,24 @@ function Studio({
                           });
                         }}
                       >
-                        查看新消息
+                        {t("View new messages", "查看新消息")}
                       </UiButton>
                     )}
                     {replyQuestion && (
                       <div className="scope-chip">
                         <span>
-                          Replying to:{" "}
+                          {t("Replying to:", "正在回答：")}{" "}
                           {replyQuestion.questions
                             .map((item) => item.header)
                             .join(", ")}
                         </span>
                         <UiButton
                           onClick={() => setReplyQuestionId(null)}
-                          aria-label="Cancel question reply"
-                          title="Cancel question reply"
+                          aria-label={t(
+                            "Cancel question reply",
+                            "取消回答问题",
+                          )}
+                          title={t("Cancel question reply", "取消回答问题")}
                         >
                           <Icon name="close" size={13} />
                         </UiButton>
@@ -1884,8 +1939,8 @@ function Studio({
                         <span>{selectedNames.join(", ")}</span>
                         <UiButton
                           onClick={() => setSelectedShots([])}
-                          aria-label="Clear shot selection"
-                          title="Clear shot selection"
+                          aria-label={t("Clear shot selection", "清除镜头选择")}
+                          title={t("Clear shot selection", "清除镜头选择")}
                         >
                           <Icon name="close" size={13} />
                         </UiButton>
@@ -1896,26 +1951,31 @@ function Studio({
                       !replyQuestion &&
                       selectedShots.length === 1 && (
                         <div className="quick-actions">
-                          <span>Try an edit</span>
+                          <span>{t("Try an edit", "尝试调整")}</span>
                           <UiButton
                             disabled={disabled || !connected}
                             onClick={() => demo("close_up")}
                           >
-                            Close-up
+                            {t("Close-up", "特写")}
                           </UiButton>
                           <UiButton
                             disabled={disabled || !connected}
                             onClick={() => demo("wide")}
                           >
-                            Wide shot
+                            {t("Wide shot", "广角")}
                           </UiButton>
                         </div>
                       )}
                     {draftContinuation?.projectId === projectId && (
                       <div className="scope-chip">
-                        <span>Continuing the saved edit</span>
+                        <span>
+                          {t("Continuing the saved edit", "继续已保存的编辑")}
+                        </span>
                         <IconButton
-                          label="Clear saved edit continuation"
+                          label={t(
+                            "Clear saved edit continuation",
+                            "取消继续已保存的编辑",
+                          )}
                           onClick={() => setDraftContinuation(null)}
                         />
                       </div>
@@ -1943,15 +2003,27 @@ function Studio({
                         disabled={disabled || !!replyQuestion}
                         placeholder={
                           replyQuestion
-                            ? "回答当前问题…"
+                            ? t("Answer the current question…", "回答当前问题…")
                             : selectedShots.length
-                              ? "描述这个镜头的调整，输入 @ 引用资源…"
-                              : "描述你的想法，输入 @ 引用素材…"
+                              ? t(
+                                  "Describe a shot change. Type @ to reference resources…",
+                                  "描述这个镜头的调整，输入 @ 引用资源…",
+                                )
+                              : t(
+                                  "Describe your idea. Type @ to reference assets…",
+                                  "描述你的想法，输入 @ 引用素材…",
+                                )
                         }
                         continuation={
                           continuingEdits > 0 ? (
                             <small className="composer-continuation">
-                              继续 {continuingEdits} 个已保存的编辑
+                              {t(
+                                continuingEdits === 1
+                                  ? "Continue {count} saved edit"
+                                  : "Continue {count} saved edits",
+                                "继续 {count} 个已保存的编辑",
+                                { count: continuingEdits },
+                              )}
                             </small>
                           ) : undefined
                         }
@@ -1960,7 +2032,10 @@ function Studio({
                             {" "}
                             <IconButton
                               icon="plus"
-                              label="Import image, audio or video"
+                              label={t(
+                                "Import image, audio or video",
+                                "导入图像、音频或视频",
+                              )}
                               disabled={disabled}
                               onClick={() => setImportOpen(true)}
                             />
@@ -1980,18 +2055,24 @@ function Studio({
                                   onClick={() => void stopWork()}
                                   aria-label={
                                     stops[projectId]?.failed
-                                      ? "Retry stop"
-                                      : "Stop conversation and generation"
+                                      ? t("Retry stop", "重试停止")
+                                      : t(
+                                          "Stop conversation and generation",
+                                          "停止对话与生成",
+                                        )
                                   }
-                                  title="Stop the conversation and new generation. Submitted provider jobs may still finish."
+                                  title={t(
+                                    "Stop the conversation and new generation. Submitted provider jobs may still finish.",
+                                    "停止对话与新的生成，已提交给服务商的任务仍可能完成。",
+                                  )}
                                 >
                                   <span aria-hidden="true">■</span>
                                   <span className="sr-only">
                                     {stops[projectId]?.failed
-                                      ? "Retry stop"
+                                      ? t("Retry stop", "重试停止")
                                       : stops[projectId]
-                                        ? "Stopping…"
-                                        : "Stop"}
+                                        ? t("Stopping…", "停止中…")
+                                        : t("Stop", "停止")}
                                   </span>
                                 </UiButton>
                               )}
@@ -2001,8 +2082,8 @@ function Studio({
                                 disabled={
                                   disabled || !draft.trim() || !snapshot
                                 }
-                                aria-label="Send message"
-                                title="Send message"
+                                aria-label={t("Send message", "发送消息")}
+                                title={t("Send message", "发送消息")}
                               >
                                 <Icon name="arrow" size={18} />
                               </UiButton>
@@ -2018,10 +2099,12 @@ function Studio({
                   id="production-pane"
                   ref={workspaceScroll}
                   className="review-workspace"
-                  aria-label="Production workspace"
+                  aria-label={t("Production workspace", "制作工作区")}
                 >
                   <div className="workspace-toolbar">
-                    <span className="workspace-label">制作工作区</span>
+                    <span className="workspace-label">
+                      {t("Production workspace", "制作工作区")}
+                    </span>
                     <WorkspaceViewTabs value={tab} onChange={setTab} />
                     <span className="film-meta">
                       {durationLabel(totalFrames)}
@@ -2029,11 +2112,18 @@ function Studio({
                   </div>
                   {!projectId ? (
                     <div className="result-empty">
-                      <h2>开始一个新项目</h2>
-                      <p>在左侧描述想法或导入参考素材。</p>
+                      <h2>{t("Start a new project", "开始一个新项目")}</h2>
+                      <p>
+                        {t(
+                          "Describe your idea or import reference assets on the left.",
+                          "在左侧描述想法或导入参考素材。",
+                        )}
+                      </p>
                     </div>
                   ) : !snapshot ? (
-                    <div className="loading-state">读取项目…</div>
+                    <div className="loading-state">
+                      {t("Loading project…", "读取项目…")}
+                    </div>
                   ) : (
                     <>
                       <div hidden={tab !== "plan" && tab !== "frames"}>
@@ -2095,8 +2185,8 @@ function Studio({
                               id: artifact.artifactId,
                               label:
                                 artifact.kind === "image"
-                                  ? "参考图片"
-                                  : "视频片段",
+                                  ? "Reference image"
+                                  : "Video clip",
                               artifact,
                             };
                             updateReferences(
@@ -2111,7 +2201,7 @@ function Studio({
                           }}
                         />
                         <details className="workspace-audio-assets">
-                          <summary>音频素材</summary>
+                          <summary>{t("Audio assets", "音频素材")}</summary>
                           <AudioLibraryPanel
                             api={api}
                             projectId={projectId}
@@ -2163,7 +2253,7 @@ function Studio({
                                 ...body,
                               },
                               key: crypto.randomUUID(),
-                              label: "时间线已更新。",
+                              label: "Timeline updated.",
                             })
                           }
                           onEditShot={editTarget}
@@ -2183,14 +2273,17 @@ function Studio({
             <AppDialog
               inline={false}
               open
-              title="检查场景视频方案"
-              description="使用已检查的当前关键帧与下列动作制作视频。"
+              title={t("Review scene video plan", "检查场景视频方案")}
+              description={t(
+                "Use the checked current keyframes and the motion below to create video.",
+                "使用已检查的当前关键帧与下列动作制作视频。",
+              )}
               preventClose={sceneBusy}
               closeDisabled={sceneBusy}
               onOpenChange={(open) => {
                 if (!open) setSceneReview(null);
               }}
-              closeLabel="关闭视频方案"
+              closeLabel={t("Close video plan", "关闭视频方案")}
             >
               <ConversationActions
                 api={api}

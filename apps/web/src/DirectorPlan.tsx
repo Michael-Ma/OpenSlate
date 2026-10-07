@@ -1,3 +1,5 @@
+import { settingsPlanCopy, settingsScopeLabel } from "./settings-labels";
+import { useTranslation } from "./Locale";
 import type { DirectorStatus, ProjectSnapshot, ReviewSnapshot } from "./model";
 import { directorPlan } from "./director-plan-model";
 import type { SavedEdit } from "./director-plan-model";
@@ -40,12 +42,15 @@ export function DirectorPlan({
   onFrames,
   onTimeline,
 }: Props) {
+  const { t, locale } = useTranslation();
+
   const plan = directorPlan(snapshot, director, review, connected, scopeIds);
+  const copy = settingsPlanCopy(snapshot, plan, locale);
   const act = () => {
     if (plan.action === "answer" && plan.questionId) onAnswer(plan.questionId);
     else if (plan.action === "chat") onDiscuss();
     else if (plan.action === "scope") onClearScope();
-    else if (plan.action === "scenes") onScenes();
+    else if (plan.action === t("scenes", "场景")) onScenes();
     else if (plan.action === "generation") onGeneration();
     else if (plan.action === "frames") onFrames();
     else if (plan.action === "timeline") onTimeline();
@@ -57,10 +62,10 @@ export function DirectorPlan({
     return (
       <section
         className={`director-plan state-${plan.state} creative-brief-widget`}
-        aria-label="Current plan"
+        aria-label={t("Current plan", "当前计划")}
       >
         <header className="director-plan-head">
-          <span className="tiny-label">创作计划</span>
+          <span className="tiny-label">{t("Creative plan", "创作计划")}</span>
           <strong>{snapshot.project.name}</strong>
         </header>
         <div className="director-plan-body">
@@ -68,8 +73,18 @@ export function DirectorPlan({
             {snapshot.project.brief || snapshot.project.story}
           </p>
           <div className="creative-brief-tags">
-            <span>{snapshot.project.scenes.length} 场景</span>
-            <span>{snapshot.project.shots.length} 镜头</span>
+            <span>
+              {t("{count} scene{suffix}", "{count} 个场景", {
+                count: snapshot.project.scenes.length,
+                suffix: snapshot.project.scenes.length === 1 ? "" : "s",
+              })}
+            </span>
+            <span>
+              {t("{count} shot{suffix}", "{count} 个镜头", {
+                count: snapshot.project.shots.length,
+                suffix: snapshot.project.shots.length === 1 ? "" : "s",
+              })}
+            </span>
             <span>
               {(
                 snapshot.project.shots.reduce(
@@ -98,17 +113,19 @@ export function DirectorPlan({
               .slice(0, 6)}
           </ol>
           <details className="creative-brief-status">
-            <summary>{plan.title}</summary>
-            <p>{plan.detail}</p>
-            <p>{plan.saved}</p>
-            <p>{plan.next}</p>
+            <summary>{copy.title}</summary>
+            <p>{copy.detail}</p>
+            <p>{copy.saved}</p>
+            <p>{copy.next}</p>
           </details>
           <div className="creative-brief-footer">
             <span>
-              {connected ? "计划已同步到工作区" : "正在核对已保存状态"}
+              {connected
+                ? t("Plan synced to workspace", "计划已同步到工作区")
+                : t("Checking saved state", "正在核对已保存状态")}
             </span>
             <UiButton size="1" variant="secondary" onClick={onPlan}>
-              查看计划 →
+              {t("View plan →", "查看计划 →")}
             </UiButton>
           </div>
         </div>
@@ -117,38 +134,42 @@ export function DirectorPlan({
   return (
     <section
       className={`director-plan state-${plan.state}`}
-      aria-label="Current plan"
+      aria-label={t("Current plan", "当前计划")}
     >
       <header className="director-plan-head">
         <span className="tiny-label">
           {plan.state === "working" || plan.state === "generating"
-            ? "IN PROGRESS"
+            ? t("IN PROGRESS", "进行中")
             : plan.state === "unfinished"
-              ? "UNFINISHED EDIT"
-              : "YOUR NEXT STEP"}
+              ? t("UNFINISHED EDIT", "未完成的编辑")
+              : t("YOUR NEXT STEP", "下一步")}
         </span>
         <strong role="status" tabIndex={-1}>
-          {plan.title}
+          {copy.title}
         </strong>
       </header>
       <div className="director-plan-body">
-        <p className="director-plan-detail">{plan.detail}</p>
+        <p className="director-plan-detail">{copy.detail}</p>
         <dl className="director-plan-facts">
           <div>
-            <dt>Saved</dt>
-            <dd>{plan.saved}</dd>
+            <dt>{t("Saved", "已保存")}</dt>
+            <dd>{copy.saved}</dd>
           </div>
           <div>
-            <dt>Next</dt>
-            <dd>{plan.next}</dd>
+            <dt>{t("Next", "下一步")}</dt>
+            <dd>{copy.next}</dd>
           </div>
         </dl>
         {plan.edits.map((edit, index) => (
           <div className="director-plan-edit" key={edit.requestId}>
             <div className="director-plan-edit-header">
               <strong>
-                {plan.edits.length > 1 ? `Edit ${index + 1} · ` : ""}
-                {edit.scope}
+                {plan.edits.length > 1
+                  ? t("Edit {number} · ", "编辑 {number} · ", {
+                      number: index + 1,
+                    })
+                  : ""}
+                {settingsScopeLabel(snapshot, edit.scopeIds, locale)}
               </strong>
               {plan.canResume && (
                 <UiButton
@@ -157,13 +178,13 @@ export function DirectorPlan({
                   disabled={disabled || !connected}
                   onClick={() => onResume(edit)}
                 >
-                  Resume this edit
+                  {t("Resume this edit", "继续此编辑")}
                 </UiButton>
               )}
             </div>
             {edit.direction && (
               <details>
-                <summary>Your saved direction</summary>
+                <summary>{t("Your saved direction", "已保存的方向")}</summary>
                 <p>{edit.direction}</p>
               </details>
             )}
@@ -176,12 +197,15 @@ export function DirectorPlan({
             disabled={disabled || !connected}
             onClick={act}
           >
-            {plan.actionLabel}
+            {copy.actionLabel}
           </UiButton>
         )}
         {plan.canResume && (
           <p className="director-plan-note">
-            Saved work is kept. Generation has a separate review.
+            {t(
+              "Saved work is kept. Generation has a separate review.",
+              "已保存的工作会保留，关键帧和视频生成需单独确认。",
+            )}
           </p>
         )}
         {plan.earlierJobs && (
@@ -189,21 +213,36 @@ export function DirectorPlan({
             <summary>
               {plan.earlierJobs.unknown
                 ? plan.earlierJobs.unknown === 1
-                  ? "Earlier job needs confirmation"
-                  : `${plan.earlierJobs.unknown} earlier jobs need confirmation`
+                  ? t("Earlier job needs confirmation", "先前任务需要确认")
+                  : t(
+                      "{count} earlier jobs need confirmation",
+                      "{count} 个先前任务需要确认",
+                      { count: plan.earlierJobs.unknown },
+                    )
                 : plan.earlierJobs.active === 1
-                  ? "Earlier job has saved progress"
-                  : `${plan.earlierJobs.active} earlier jobs have saved progress`}
+                  ? t("Earlier job has saved progress", "先前任务已有进度")
+                  : t(
+                      "{count} earlier jobs have saved progress",
+                      "{count} 个先前任务已有进度",
+                      { count: plan.earlierJobs.active },
+                    )}
             </summary>
             <p>
               {plan.earlierJobs.unknown > 0 &&
-                `${plan.earlierJobs.unknown} unconfirmed`}
+                t("{count} unconfirmed", "{count} 个结果未确认", {
+                  count: plan.earlierJobs.unknown,
+                })}
               {plan.earlierJobs.unknown > 0 &&
                 plan.earlierJobs.active > 0 &&
                 " · "}
               {plan.earlierJobs.active > 0 &&
-                `${plan.earlierJobs.active} in progress`}
-              . Their original job identities and saved status remain available.
+                t("{count} in progress", "{count} 个进行中", {
+                  count: plan.earlierJobs.active,
+                })}
+              {t(
+                ". Their original job identities and saved status remain available.",
+                "。仍可查看这些任务的原始编号和已保存状态。",
+              )}
             </p>
             <UiButton
               variant="ghost"
@@ -211,7 +250,7 @@ export function DirectorPlan({
               disabled={disabled || !connected}
               onClick={onHistory}
             >
-              View earlier jobs
+              {t("View earlier jobs", "查看先前任务")}
             </UiButton>
           </details>
         )}

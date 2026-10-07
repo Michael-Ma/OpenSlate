@@ -1,0 +1,109 @@
+{
+  "date": "2026-10-07",
+  "scope": "English and Simplified Chinese interface support",
+  "runtime": {
+    "node": "24.15.0",
+    "pnpm": "10.33.0"
+  },
+  "locales": [
+    "en",
+    "zh-CN"
+  ],
+  "preference": [
+    "valid lang URL",
+    "saved browser preference",
+    "supported browser language",
+    "English"
+  ],
+  "final_gate": {
+    "tests": 2402,
+    "passed": 2401,
+    "failed": 0,
+    "skipped": 1,
+    "builds": "passed",
+    "typechecks": "passed"
+  },
+  "targeted": {
+    "locale_suites": 24,
+    "safe_markdown": 5,
+    "independent_final_settings_markdown": 15,
+    "unchanged_settings_command_calls": 60
+  },
+  "offline_demo": {
+    "initial_fake_accepts": 4,
+    "edited_fake_accepts": 2,
+    "duplicates_after_restart": 0,
+    "unaffected_shot_preserved": true
+  },
+  "browser": {
+    "fixture": "actual built React and real local routes with fake providers, synthetic owned audio and no personal credentials",
+    "desktop": [
+      "EN/Chinese switching",
+      "draft selection and reference preservation",
+      "HTML lang and URL preservation",
+      "localized plan and settings",
+      "protected delayed model preview and unsent Ctrl+Enter"
+    ],
+    "mobile": {
+      "viewport": [
+        390,
+        844
+      ],
+      "appearances_and_locales": [
+        "Day Chinese",
+        "Night English"
+      ],
+      "document_horizontal_overflow": 0,
+      "visible_panes": 1
+    },
+    "fixture_attempts_before_and_after": 8,
+    "prohibited_shortcut_messages": 0,
+    "new_media_attempts": 0,
+    "new_native_turns": 0,
+    "real_media_calls": 0,
+    "model_preview_outcome": "definite failure for deliberately unavailable metadata-only offline profile",
+    "inspector_breakpoints": {
+      "side_by_side_viewport": [
+        1207,
+        849
+      ],
+      "bounded_height_px": 361.68,
+      "stacked_viewport": [
+        900,
+        850
+      ],
+      "stacked_max_height": "none",
+      "overflow": 0,
+      "validation": "CSS-only final repair rebuilt and visually checked after the full gate"
+    },
+    "account_count_final": "1 media account / 1 个媒体账号 confirmed in the rebuilt browser"
+  },
+  "content_preserved": [
+    "project names",
+    "shot prose",
+    "prompts",
+    "recording names",
+    "scripts/transcripts",
+    "questions and messages",
+    "provider model/voice names",
+    "hashes and protocol values",
+    "pending command body/key/metadata"
+  ],
+  "limits": [
+    "UI localization does not translate stored content or model messages",
+    "unknown diagnostics remain original",
+    "no new real-provider language or quality acceptance"
+  ],
+  "logs": {
+    "gate": "/private/tmp/openslate-locale-final-check.log",
+    "demo": "/private/tmp/openslate-locale-demo.log"
+  },
+  "authentication_material_included": false,
+  "final_frontend_gate": {
+    "tests": 253,
+    "passed": 253,
+    "failed": 0,
+    "typecheck": "passed",
+    "scope": "final source including CSS-only breakpoint repair"
+  }
+}

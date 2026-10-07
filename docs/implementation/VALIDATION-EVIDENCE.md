@@ -6,6 +6,7 @@ Dated verification is retained independently of current capability claims. A res
 
 | Checkpoint | Evidence and limits |
 |---|---|
+| October 7 language support | [English/Chinese interface verification](OCTOBER-7-LANGUAGE-REVIEW.md): 2,401-pass gate, content/draft/reference and frozen-request preservation, protected save and 390px checks; zero real-media calls |
 | October 7 Day/Night | [Current Frame workbench verification](OCTOBER-7-DAY-NIGHT-REVIEW.md): supplied design implementation, exact scoped image/video review, project references, persisted Timeline edits and desktop/mobile checks; no real-provider media calls |
 | October 5 conversation/results | [2,324-pass final gate and persistent result hierarchy](OCTOBER-5-CONVERSATION-RESULTS-REVIEW.md): two-scene/four-shot actual React flow, 390px exact frame viewing, protected inline tools, editing/history and full uncommitted import review; zero new real media calls |
 | October 5 Light workspace | [2,222-pass full gate and Radix/Light studio](OCTOBER-5-LIGHT-WORKSPACE.md): disposable actual-React/browser checks for storyboard/review/scoped editing, keyboard resizing, settings impact/same-command recovery/focus and 390×844 settings layout; no new real-provider media acceptance |
@@ -17,7 +18,7 @@ Dated verification is retained independently of current capability claims. A res
 | Fresh checkout | [Configured macOS source/dependency campaign](CLEAN-CHECKOUT-VALIDATION.md): not a bare-OS installer |
 | Recovery | [Same-root browser/process campaign](INSTALLATION-RECOVERY-VALIDATION.md): fixture media and quarantine/fences; no relocation |
 
-Current [Day/Night evidence](day-night-evidence.json) records the final gate and browser boundaries. [Conversation/results evidence](conversation-results-evidence.json) preserves the earlier campaign.
+Current [language evidence](language-evidence.json) records the bilingual extension. [Day/Night evidence](day-night-evidence.json) preserves the underlying workbench campaign. [Conversation/results evidence](conversation-results-evidence.json) preserves the earlier campaign.
 
 ## Preserved machine-readable records
 

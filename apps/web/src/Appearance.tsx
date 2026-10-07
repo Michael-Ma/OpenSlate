@@ -1,3 +1,4 @@
+import { useTranslation } from "./Locale";
 import {
   createContext,
   useCallback,
@@ -111,12 +112,13 @@ export function useAppearance(): AppearanceContextValue {
   return context;
 }
 export function AppearanceSwitch() {
+  const { t, ui } = useTranslation();
   const { appearance, setAppearance } = useAppearance();
   return (
     <div
       className="appearance-switch"
       role="group"
-      aria-label="Workspace appearance"
+      aria-label={t("Workspace appearance", "工作区外观")}
     >
       <button
         type="button"
@@ -124,7 +126,7 @@ export function AppearanceSwitch() {
         onClick={() => setAppearance("day")}
       >
         <Icon name="sun" size={14} />
-        <span>Day</span>
+        <span>{t("Day", "日间")}</span>
       </button>
       <button
         type="button"
@@ -132,7 +134,7 @@ export function AppearanceSwitch() {
         onClick={() => setAppearance("night")}
       >
         <Icon name="moon" size={14} />
-        <span>Night</span>
+        <span>{t("Night", "夜间")}</span>
       </button>
     </div>
   );

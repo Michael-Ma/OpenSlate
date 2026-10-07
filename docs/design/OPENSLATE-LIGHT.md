@@ -41,6 +41,18 @@ Bundled **Inter Variable** renders supported glyphs; system **PingFang SC**, Mic
 - Timeline video drag/order buttons and Alt+Arrow persist shot order. Saved 3–15s controls edit **shot plan timing**, which may require an affected video update. Music drag/keyboard, gain and mute persist actual placement; browser audition and local render share the same source-local sample calculation. Zoom, playhead and panel sizing are viewing state. Arbitrary source trim/split, redo/version adoption and multiple independently arranged music/effect lanes remain unsupported; omit inert controls.
 - Protected saves block conflicting project/creation/chat/generation mutations. Unknown responses retain their exact request body/key. Background refresh preserves same-identity connected content and reading position; new messages do not force an older conversation to the bottom.
 
+## Interface language
+
+English and Simplified Chinese are available from the header and startup page. Preference precedence is valid URL `lang=en|zh-CN` (the `zh` alias is accepted), saved browser preference, supported browser language, then English. Switching changes React context and `html.lang` in place; it does not key/remount the app, submit a request, edit the project or replace pending command identity.
+
+Static copy uses explicit English/Chinese pairs, with parameter interpolation preserving inserted values. Controlled derived labels/errors use explicit exact whitelists and scoped presenters. Never apply translation to project/shot writing, native Director questions/answers, recording names, scripts, transcripts, model/provider names, IDs, hash values or command bodies. Unknown service diagnostics remain original unless they have a registered sanitized interface message. Scene/shot resource chips localize presentation around their stable identity; sent reference text remains the saved text.
+
+Use contextual pairs for singular/plural English labels; a shared Chinese term may represent multiple English nouns and cannot resolve context by reverse lookup alone. Longer copy must wrap within its owning control/tool. Language and theme selectors remain reachable at narrow widths.
+
+- `Locale.tsx`, `locale-model.ts`, `locale.css`: browser preference, in-place context, selector and metadata.
+- `locale-ui-messages.ts`, shell/error and workbench/settings/media catalogs: registered interface copy.
+- Settings/media/workbench presenters translate controlled dynamic feedback while preserving source records.
+
 ## Responsive contract and source ownership
 
 Desktop retains a remembered/clamped Director divider, large preview, compact inspector and scrollable scene shelves. At narrow widths, explicit Conversation/Workspace navigation presents one pane at a time; inspector/actions stack without clipping, and major mobile controls target 44px. Appearance remains accessible in the header. Long metadata and prompts wrap or scroll within their owning area; reduced motion is respected.

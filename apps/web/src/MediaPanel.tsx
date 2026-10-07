@@ -1,3 +1,5 @@
+import { useTranslation } from "./Locale";
+import { mediaUiCopy } from "./media-ui-copy";
 import { useProjectRefreshVersion } from "./project-updates";
 import { useRecoveryReadOnly } from "./RecoveryPanel";
 import {
@@ -56,6 +58,8 @@ function MediaWorkspace({
   mode = "render",
   active = true,
 }: MediaPanelProps) {
+  const { t, ui } = useTranslation();
+
   const projectUpdate = useProjectRefreshVersion();
   const recoveryReadOnly = useRecoveryReadOnly();
   const projectId = snapshot.project.id,
@@ -156,39 +160,47 @@ function MediaWorkspace({
               mode === "upload" ? "uploaded-video-title" : "local-media-title"
             }
           >
-            {mode === "upload" ? "Upload a video" : "Export"}
+            {mode === "upload"
+              ? ui("Upload a video", mediaUiCopy)
+              : ui("Export", mediaUiCopy)}
           </h3>
         </div>
-        <span className="tag">Local rendering</span>
+        <span className="tag">{ui("Local rendering", mediaUiCopy)}</span>
       </div>
       {mode === "upload" && (
         <p>
-          Uploaded video audio is removed. Add narration from a shot in the
-          storyboard.
+          {ui(
+            "Uploaded video audio is removed. Add narration from a shot in the storyboard.",
+            mediaUiCopy,
+          )}
         </p>
       )}
       {(error || loadError) && (
         <p role="alert" className="form-error">
-          {error || loadError}
+          {ui(error, mediaUiCopy) || ui(loadError, mediaUiCopy)}
         </p>
       )}
       {pending && busy && (
         <p role="status">
-          Your saved request is still running. Switching projects will not start
-          it again.
+          {ui(
+            "Your saved request is still running. Switching projects will not start it again.",
+            mediaUiCopy,
+          )}
         </p>
       )}
       {pending && !busy && (
         <div className="notice warning">
           <span>
-            The result was not confirmed. Retry the saved request to check its
-            outcome.
+            {ui(
+              "The result was not confirmed. Retry the saved request to check its outcome.",
+              mediaUiCopy,
+            )}
           </span>
           <button
             disabled={recoveryReadOnly}
             onClick={() => void execute(pending)}
           >
-            Retry same action
+            {ui("Retry same action", mediaUiCopy)}
           </button>
         </div>
       )}
@@ -211,7 +223,9 @@ function MediaWorkspace({
             });
           }}
         >
-          <label htmlFor="supplied-video">Video file · up to 128 MiB</label>
+          <label htmlFor="supplied-video">
+            {ui("Video file · up to 128 MiB", mediaUiCopy)}
+          </label>
           <input
             key={fileVersion}
             id="supplied-video"
@@ -228,14 +242,16 @@ function MediaWorkspace({
                 disabled={recoveryReadOnly || busy || !!pending}
                 onChange={(event) => setReuse(event.target.checked)}
               />
-              Add this clip to the current edit
+              {ui("Add this clip to the current edit", mediaUiCopy)}
             </label>
           )}
           <button
             className="button small"
             disabled={recoveryReadOnly || busy || !!pending || !file}
           >
-            {busy ? "Working…" : "Import clip"}
+            {busy
+              ? ui("Working…", mediaUiCopy)
+              : ui("Import clip", mediaUiCopy)}
           </button>
         </form>
       )}
@@ -247,7 +263,7 @@ function MediaWorkspace({
               disabled={recoveryReadOnly || busy || !!pending}
               onClick={() => onContinue(currentImportRequest)}
             >
-              Discuss these clips with OpenSlate
+              {ui("Discuss these clips with OpenSlate", mediaUiCopy)}
             </button>
           )}
           <div className="render-controls">
@@ -264,26 +280,39 @@ function MediaWorkspace({
                 })
               }
             >
-              Render current plan
+              {ui("Render current plan", mediaUiCopy)}
             </button>
             <p>
               {renderNode
-                ? "Uses the current clips and accepted narration. Pending edits and pause still apply."
-                : "A timeline plan is needed before rendering."}
+                ? ui(
+                    "Uses the current clips and accepted narration. Pending edits and pause still apply.",
+                    mediaUiCopy,
+                  )
+                : ui(
+                    "A timeline plan is needed before rendering.",
+                    mediaUiCopy,
+                  )}
             </p>
           </div>
           {!!state?.jobs.length && (
             <details>
-              <summary>Render history · {state.jobs.length}</summary>
+              <summary>
+                {ui("Render history ·", mediaUiCopy)} {state.jobs.length}
+              </summary>
               <div className="render-jobs">
                 {state.jobs.map((job) => (
                   <div key={job.id}>
                     <strong>
-                      {job.state.replaceAll("_", " ")} ·{" "}
+                      {ui(job.state.replaceAll("_", " "), mediaUiCopy)} ·{" "}
                       {durationLabel(job.totalFrames)}
                     </strong>
                     {job.errorCode && (
-                      <p>{errorText(new ApiError(job.errorCode))}</p>
+                      <p>
+                        {ui(
+                          errorText(new ApiError(job.errorCode)),
+                          mediaUiCopy,
+                        )}
+                      </p>
                     )}
                     <div className="render-actions">
                       {job.canRun && (
@@ -291,7 +320,7 @@ function MediaWorkspace({
                           disabled={recoveryReadOnly || busy || !!pending}
                           onClick={() => run(`${base}/renders/${job.id}/run`)}
                         >
-                          Run prepared render
+                          {ui("Run prepared render", mediaUiCopy)}
                         </button>
                       )}
                       {job.canRecover && (
@@ -301,7 +330,7 @@ function MediaWorkspace({
                             run(`${base}/renders/${job.id}/recover`)
                           }
                         >
-                          Check saved completion
+                          {ui("Check saved completion", mediaUiCopy)}
                         </button>
                       )}
                       {["prepared", "running"].includes(job.state) && (
@@ -311,7 +340,7 @@ function MediaWorkspace({
                             run(`${base}/renders/${job.id}/cancel`)
                           }
                         >
-                          Cancel
+                          {ui("Cancel", mediaUiCopy)}
                         </button>
                       )}
                     </div>

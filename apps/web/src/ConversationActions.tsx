@@ -1,3 +1,5 @@
+import { useTranslation } from "./Locale";
+import { mediaHierarchyLabel, mediaUiCopy } from "./media-ui-copy";
 import {
   useCallback,
   useEffect,
@@ -55,6 +57,8 @@ type SceneActionMeta = {
 
 /** Contextual decisions belong in the same scroll surface as the conversation; result media stays on the right. */
 export function ConversationActions(props: ConversationActionsProps) {
+  const { t, ui, locale } = useTranslation();
+
   const { api, snapshot, sceneIds, onChanged } = props,
     projectId = snapshot.project.id;
   const registry = pendingCommandsFor(api, "conversation-scenes");
@@ -111,15 +115,20 @@ export function ConversationActions(props: ConversationActionsProps) {
     !snapshot.project.scenes.some((scene) => scene.id === pendingMeta?.sceneId);
   if (!scenes.length && !orphanedDecision) return null;
   return (
-    <div className="conversation-actions" aria-label="Scene decisions">
+    <div
+      className="conversation-actions"
+      aria-label={ui("Scene decisions", mediaUiCopy)}
+    >
       {orphanedDecision && (
         <section
           className="conversation-scene-action conversation-scene-body"
-          aria-label="Earlier scene decision"
+          aria-label={ui("Earlier scene decision", mediaUiCopy)}
         >
           <p className="conversation-scene-note" role="status">
-            An earlier scene decision was not confirmed. Its exact saved request
-            is kept.
+            {ui(
+              "An earlier scene decision was not confirmed. Its exact saved request is kept.",
+              mediaUiCopy,
+            )}
           </p>
           <UiButton
             variant="secondary"
@@ -132,12 +141,12 @@ export function ConversationActions(props: ConversationActionsProps) {
             onClick={() => run(slot.command!)}
           >
             {slot.running
-              ? "Checking saved decision…"
-              : "Check saved scene decision"}
+              ? ui("Checking saved decision…", mediaUiCopy)
+              : ui("Check saved scene decision", mediaUiCopy)}
           </UiButton>
           {!!slot.error && (
             <p className="inline-error" role="alert">
-              {errorText(slot.error)}
+              {ui(errorText(slot.error), mediaUiCopy)}
             </p>
           )}
         </section>
@@ -184,6 +193,8 @@ function ConversationSceneAction({
   slot: PendingCommandSnapshot;
   run(command: PendingCommand): void;
 }) {
+  const { t, ui, locale } = useTranslation();
+
   const exposedFrames =
     reviewedFrames === undefined
       ? seenFrames
@@ -195,7 +206,16 @@ function ConversationSceneAction({
   const [view, setView] = useState<ConversationSceneView | null>(null),
     [error, setError] = useState(""),
     [localRefresh, setLocalRefresh] = useState(0);
-  const labels = sceneGenerationLabels(snapshot, sceneId),
+  const rawLabels = sceneGenerationLabels(snapshot, sceneId),
+    labels = {
+      scene: mediaHierarchyLabel(rawLabels.scene, locale),
+      shots: Object.fromEntries(
+        Object.entries(rawLabels.shots).map(([id, label]) => [
+          id,
+          mediaHierarchyLabel(label, locale),
+        ]),
+      ),
+    },
     scene = snapshot.project.scenes.find((item) => item.id === sceneId);
   useEffect(() => {
     const controller = new AbortController();
@@ -248,7 +268,12 @@ function ConversationSceneAction({
       ? "Needs attention"
       : "Checking saved work…"
     : waitingForSavedDecision
-      ? `${settledMeta.kind === "image" ? "Keyframes" : "Video"} requested`
+      ? t("{media} requested", "已请求{media}", {
+          media:
+            settledMeta.kind === "image"
+              ? ui("Keyframes", mediaUiCopy)
+              : ui("Video", mediaUiCopy),
+        })
       : state.unknown
         ? "Job outcome unconfirmed"
         : state.existingWork
@@ -258,9 +283,23 @@ function ConversationSceneAction({
               ? "Narration to review"
               : "Media saved"
             : state.stage === "image"
-              ? `${state.targets.length} keyframe${state.targets.length === 1 ? "" : "s"} to create`
+              ? t(
+                  "{count} keyframe{plural} to create",
+                  "待生成 {count} 个关键帧",
+                  {
+                    count: state.targets.length,
+                    plural: state.targets.length === 1 ? "" : "s",
+                  },
+                )
               : state.stage === "video"
-                ? `${state.targets.length} video${state.targets.length === 1 ? "" : "s"} to create`
+                ? t(
+                    "{count} video{plural} to create",
+                    "待生成 {count} 个视频",
+                    {
+                      count: state.targets.length,
+                      plural: state.targets.length === 1 ? "" : "s",
+                    },
+                  )
                 : "No shots yet";
   // Terminal scenes remain a concise saved result. They cannot leave stale action buttons in the conversation.
   if (
@@ -273,13 +312,14 @@ function ConversationSceneAction({
   )
     return (
       <p className="conversation-scene-saved">
-        <Icon name="check" size={14} /> {labels.scene} · media saved
+        <Icon name="check" size={14} /> {labels.scene}
+        {ui("· media saved", mediaUiCopy)}
       </p>
     );
   return (
     <section
       className="conversation-scene-action"
-      aria-label={`${labels.scene} generation`}
+      aria-label={t("{v0} generation", "{v0}生成", { v0: labels.scene })}
     >
       <UiButton
         variant="ghost"
@@ -290,7 +330,7 @@ function ConversationSceneAction({
       >
         <span>
           <strong>{labels.scene}</strong>
-          <span>{summary}</span>
+          <span>{ui(summary, mediaUiCopy)}</span>
         </span>
         <span className={`conversation-scene-chevron${open ? " open" : ""}`}>
           <Icon name="chevron" size={16} />
@@ -305,12 +345,12 @@ function ConversationSceneAction({
               variant="ghost"
               onClick={() => onFocusScene(sceneId)}
             >
-              See scene
+              {ui("See scene", mediaUiCopy)}
             </UiButton>
           </div>
           {error && (
             <p className="inline-error" role="alert">
-              {error}
+              {ui(error, mediaUiCopy)}
             </p>
           )}
           {!view && (
@@ -320,7 +360,7 @@ function ConversationSceneAction({
               disabled={disabled || slot.running}
               onClick={() => setLocalRefresh((value) => value + 1)}
             >
-              Refresh scene
+              {ui("Refresh scene", mediaUiCopy)}
             </UiButton>
           )}
           {view && state && (
@@ -333,8 +373,12 @@ function ConversationSceneAction({
                   return (
                     <li key={row.shotId}>
                       <div className="conversation-scene-shot-heading">
-                        <strong>{labels.shots[row.shotId] ?? "Shot"}</strong>
-                        <span>{sceneShotMediaStatus(row)}</span>
+                        <strong>
+                          {labels.shots[row.shotId] ?? ui("Shot", mediaUiCopy)}
+                        </strong>
+                        <span>
+                          {ui(sceneShotMediaStatus(row), mediaUiCopy)}
+                        </span>
                       </div>
                       {row.purpose && (
                         <p className="conversation-scene-shot-purpose">
@@ -344,32 +388,43 @@ function ConversationSceneAction({
                       <p className="conversation-scene-motion">
                         <span>
                           {state.stage === "video"
-                            ? "Video motion"
-                            : "Planned motion"}
+                            ? ui("Video motion", mediaUiCopy)
+                            : ui("Planned motion", mediaUiCopy)}
                         </span>
-                        {row.motionPrompt || "Motion is not saved yet."}
+                        {row.motionPrompt ||
+                          ui("Motion is not saved yet.", mediaUiCopy)}
                       </p>
                       <p className="conversation-scene-recipe-meta">
                         {durationLabel(row.durationFrames)}
                         {row.durationFrames !== row.plannedFrames
-                          ? ` generated · ${durationLabel(row.plannedFrames)} in the film`
+                          ? t(
+                              " generated · {v0} in the film",
+                              "生成时长 · 成片中使用 {v0}",
+                              { v0: durationLabel(row.plannedFrames) },
+                            )
                           : ""}{" "}
                         ·{" "}
                         {state.stage === "image"
                           ? view.imageProfileLabel
                           : row.videoProfileLabel}
-                        {row.imageFixture ? " · Demo frame" : ""}
+                        {row.imageFixture
+                          ? ui(" · Demo frame", mediaUiCopy)
+                          : ""}
                       </p>
                       {state.stage === "image" && shot?.imagePrompt && (
                         <details className="conversation-scene-prompt">
-                          <summary>Keyframe prompt</summary>
+                          <summary>
+                            {ui("Keyframe prompt", mediaUiCopy)}
+                          </summary>
                           <p>{shot.imagePrompt}</p>
                         </details>
                       )}
                       {state.stage === "video" &&
                         Object.keys(row.videoSettings).length > 0 && (
                           <details className="conversation-scene-prompt">
-                            <summary>Video settings</summary>
+                            <summary>
+                              {ui("Video settings", mediaUiCopy)}
+                            </summary>
                             <dl>
                               {Object.entries(row.videoSettings).map(
                                 ([name, value]) => (
@@ -393,11 +448,12 @@ function ConversationSceneAction({
               {view.rows.length > state.targets.length &&
                 state.targets.length > 0 && (
                   <p className="conversation-scene-note">
-                    {view.rows.length - state.targets.length} completed shot
+                    {view.rows.length - state.targets.length}
+                    {ui("completed shot", mediaUiCopy)}
                     {view.rows.length - state.targets.length === 1
                       ? ""
-                      : "s"}{" "}
-                    kept.
+                      : t("s", "")}{" "}
+                    {ui("kept.", mediaUiCopy)}
                   </p>
                 )}
               {state.reason && (
@@ -408,8 +464,11 @@ function ConversationSceneAction({
                   !state.unknown &&
                   !view.busy &&
                   !waitingForSavedDecision
-                    ? "先查看每个当前关键帧，并确认此画面，再检查视频方案。"
-                    : state.reason}
+                    ? t(
+                        "Inspect every current keyframe and confirm it before reviewing the video plan.",
+                        "先查看每个当前关键帧，并确认此画面，再检查视频方案。",
+                      )
+                    : ui(state.reason, mediaUiCopy)}
                 </p>
               )}
               {state.narrationShotIds.map((shotId) => (
@@ -420,7 +479,8 @@ function ConversationSceneAction({
                   disabled={disabled || slot.running}
                   onClick={() => onNarrationShot(shotId)}
                 >
-                  Open narration · {labels.shots[shotId] ?? "Shot"}
+                  {ui("Open narration ·", mediaUiCopy)}
+                  {labels.shots[shotId] ?? ui("Shot", mediaUiCopy)}
                 </UiButton>
               ))}
               {(state.stage === "image" || state.stage === "video") && (
@@ -450,10 +510,14 @@ function ConversationSceneAction({
                 >
                   <Icon name="check" size={16} />
                   {slot.running && ownPending
-                    ? "Saving scene decision…"
+                    ? ui("Saving scene decision…", mediaUiCopy)
                     : state.stage === "image"
-                      ? `Generate keyframes · ${labels.scene}`
-                      : `Generate video · ${labels.scene}`}
+                      ? t("Generate keyframes · {v0}", "生成关键帧 · {v0}", {
+                          v0: labels.scene,
+                        })
+                      : t("Generate video · {v0}", "生成视频 · {v0}", {
+                          v0: labels.scene,
+                        })}
                 </UiButton>
               )}
             </>
@@ -461,8 +525,10 @@ function ConversationSceneAction({
           {ownPending && !slot.running && (
             <div className="conversation-scene-retry">
               <p role="status">
-                The response was not confirmed. Check the saved decision with
-                the same request.
+                {ui(
+                  "The response was not confirmed. Check the saved decision with the same request.",
+                  mediaUiCopy,
+                )}
               </p>
               <UiButton
                 variant="secondary"
@@ -473,19 +539,22 @@ function ConversationSceneAction({
                 }
                 onClick={() => run(slot.command!)}
               >
-                Check saved scene decision
+                {ui("Check saved scene decision", mediaUiCopy)}
               </UiButton>
             </div>
           )}
           {ownCompletion && !!slot.error && (
             <p className="inline-error" role="alert">
-              {errorText(slot.error)}
+              {ui(errorText(slot.error), mediaUiCopy)}
             </p>
           )}
           {ownCompletion && slot.lastSuccess && (
             <p className="conversation-scene-note" role="status">
-              {settledMeta.kind === "image" ? "Keyframes" : "Video"} requested
-              for {labels.scene}.
+              {settledMeta.kind === "image"
+                ? ui("Keyframes", mediaUiCopy)
+                : ui("Video", mediaUiCopy)}
+              {ui("requested for", mediaUiCopy)}
+              {labels.scene}.
             </p>
           )}
         </div>

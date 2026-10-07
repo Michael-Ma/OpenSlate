@@ -1,3 +1,5 @@
+import { useTranslation } from "./Locale";
+import { mediaUiCopy } from "./media-ui-copy";
 import {
   useCallback,
   useEffect,
@@ -45,6 +47,8 @@ function AudioListen({
   projectId: string;
   recording: AudioLibraryEntry;
 }) {
+  const { t, ui } = useTranslation();
+
   const identity = JSON.stringify([projectId, recording.id, recording.sha256]);
   const [result, setResult] = useState<{
     api: StudioApi;
@@ -94,11 +98,12 @@ function AudioListen({
           controls
           preload="metadata"
           src={visible.url}
-          aria-label={`Listen to ${recording.label}`}
+          aria-label={t("Listen to {v0}", "试听 {v0}", { v0: recording.label })}
         />
       ) : (
         <p role={visible?.error ? "alert" : "status"}>
-          {visible?.error || "Loading verified audio…"}
+          {ui(visible?.error ?? "", mediaUiCopy) ||
+            ui("Loading verified audio…", mediaUiCopy)}
         </p>
       )}
     </div>
@@ -117,6 +122,8 @@ function AudioLibraryWorkspace({
   readOnly = false,
   onReference,
 }: Props) {
+  const { t, ui } = useTranslation();
+
   const projectUpdate = useProjectRefreshVersion(),
     recovery = useRecoveryReadOnly(),
     base = `/api/projects/${encodeURIComponent(projectId)}/audio-library`;
@@ -194,17 +201,17 @@ function AudioLibraryWorkspace({
     >
       <div className="section-heading">
         <h3 id="owned-audio-title">
-          Recordings{" "}
-          <HelpTip label="Audio library">
-            Upload music or a recording, then listen. Importing adds an owned
-            asset only. Choose background music in Timeline, or attach narration
-            from a shot. Audio is normalized locally; no provider request or
-            voice enrollment occurs.
+          {ui("Recordings", mediaUiCopy)}{" "}
+          <HelpTip label={ui("Audio library", mediaUiCopy)}>
+            {ui(
+              "Upload music or a recording, then listen. Importing adds an owned asset only. Choose background music in Timeline, or attach narration from a shot. Audio is normalized locally; no provider request or voice enrollment occurs.",
+              mediaUiCopy,
+            )}
           </HelpTip>
         </h3>
         <IconButton
           icon="refresh"
-          label="Refresh recordings"
+          label={ui("Refresh recordings", mediaUiCopy)}
           onClick={() => setRefresh((value) => value + 1)}
         />
       </div>
@@ -236,7 +243,7 @@ function AudioLibraryWorkspace({
           }}
         >
           <label className="sr-only" htmlFor="library-audio-file">
-            Import a recording or music
+            {ui("Import a recording or music", mediaUiCopy)}
           </label>
           <input
             key={fileVersion}
@@ -249,8 +256,8 @@ function AudioLibraryWorkspace({
           <button
             className="icon-button"
             type="submit"
-            aria-label="Import selected audio"
-            title="Import selected audio"
+            aria-label={ui("Import selected audio", mediaUiCopy)}
+            title={ui("Import selected audio", mediaUiCopy)}
             disabled={
               blocked || !file || invalidFile || !library?.capabilities.import
             }
@@ -261,36 +268,43 @@ function AudioLibraryWorkspace({
       )}
       {library && !library.capabilities.import && (
         <p role="status">
-          Local FFmpeg and ffprobe are needed. Run{" "}
-          <code>./start.sh --doctor</code> for setup instructions.
+          {ui("Local FFmpeg and ffprobe are needed. Run", mediaUiCopy)}{" "}
+          <code>./start.sh --doctor</code>
+          {ui("for setup instructions.", mediaUiCopy)}
         </p>
       )}
       {invalidFile && (
         <p role="alert">
-          Choose nonempty audio up to {Math.floor(maxBytes / 1048576)} MiB.
+          {ui("Choose nonempty audio up to", mediaUiCopy)}
+          {Math.floor(maxBytes / 1048576)}
+          {ui("MiB.", mediaUiCopy)}
         </p>
       )}
       {!!(loadError || slot.error) && (
-        <p role="alert">{loadError || errorText(slot.error)}</p>
+        <p role="alert">
+          {ui(loadError, mediaUiCopy) || ui(errorText(slot.error), mediaUiCopy)}
+        </p>
       )}
       {!readOnly && slot.command && (
         <div className="audio-library-pending">
           <span>
             {slot.running
-              ? "Importing and verifying audio…"
-              : "The import was not confirmed."}
+              ? ui("Importing and verifying audio…", mediaUiCopy)
+              : ui("The import was not confirmed.", mediaUiCopy)}
           </span>
           {!slot.running && (
             <IconButton
               icon="refresh"
-              label="Retry the same audio import"
+              label={ui("Retry the same audio import", mediaUiCopy)}
               disabled={recovery}
               onClick={() => execute(slot.command!)}
             />
           )}
         </div>
       )}
-      {!library && !loadError && <p role="status">Loading recordings…</p>}
+      {!library && !loadError && (
+        <p role="status">{ui("Loading recordings…", mediaUiCopy)}</p>
+      )}
       {!!library?.recordings.length && (
         <ul className="audio-library-list">
           {library.recordings.map((recording) => (
@@ -302,9 +316,14 @@ function AudioLibraryWorkspace({
               >
                 <Icon name="play" size={17} />
                 <strong>{recording.label}</strong>
-                <span>{recording.durationSeconds.toFixed(1)}s</span>
+                <span>
+                  {recording.durationSeconds.toFixed(1)}
+                  {t("s", "秒")}
+                </span>
                 <small>
-                  {recording.origin === "generated" ? "Generated" : "Uploaded"}
+                  {recording.origin === "generated"
+                    ? ui("Generated", mediaUiCopy)
+                    : ui("Uploaded", mediaUiCopy)}
                 </small>
               </button>
             </li>
@@ -312,12 +331,12 @@ function AudioLibraryWorkspace({
         </ul>
       )}
       {library?.recordings.length === 0 && (
-        <p className="field-help">No recordings yet.</p>
+        <p className="field-help">{ui("No recordings yet.", mediaUiCopy)}</p>
       )}
       {selected && onReference && (
         <button className="text-button" onClick={() => onReference(selected)}>
           <Icon name="at" size={16} />
-          引用到对话
+          {t("Add to conversation", "引用到对话")}
         </button>
       )}
       {selected && active && (
@@ -325,7 +344,7 @@ function AudioLibraryWorkspace({
           <div className="audio-library-selected">
             <strong>{selected.label}</strong>
             <IconButton
-              label="Close audio preview"
+              label={ui("Close audio preview", mediaUiCopy)}
               onClick={() => setSelected(null)}
             />
           </div>
@@ -338,21 +357,26 @@ function AudioLibraryWorkspace({
         </>
       )}
       {library && (offset > 0 || library.coverage.nextOffset !== null) && (
-        <nav className="audio-library-pages" aria-label="Recording pages">
+        <nav
+          className="audio-library-pages"
+          aria-label={ui("Recording pages", mediaUiCopy)}
+        >
           <button
             className="text-button"
             disabled={offset === 0}
             onClick={() => setOffset(Math.max(0, offset - 40))}
           >
-            Previous
+            {ui("Previous", mediaUiCopy)}
           </button>
-          <span>{library.coverage.total} recordings</span>
+          <span>
+            {library.coverage.total} {ui("recordings", mediaUiCopy)}
+          </span>
           <button
             className="text-button"
             disabled={library.coverage.nextOffset === null}
             onClick={() => setOffset(library.coverage.nextOffset!)}
           >
-            Next
+            {ui("Next", mediaUiCopy)}
           </button>
         </nav>
       )}

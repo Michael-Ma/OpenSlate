@@ -1,3 +1,4 @@
+import { LocaleProvider, initializeLocale } from "./Locale";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { initializeAppearance, StudioTheme } from "./Appearance";
@@ -32,15 +33,19 @@ import "./frame-workspace.css";
 import "./timeline-editor.css";
 import "./reference-composer.css";
 import "./frame-shell.css";
+import "./locale.css";
 import App from "./App";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root element");
 const initialAppearance = initializeAppearance();
+const initialLocale = initializeLocale();
 createRoot(root).render(
   <StrictMode>
-    <StudioTheme initialAppearance={initialAppearance}>
-      <App />
-    </StudioTheme>
+    <LocaleProvider initialLocale={initialLocale}>
+      <StudioTheme initialAppearance={initialAppearance}>
+        <App />
+      </StudioTheme>
+    </LocaleProvider>
   </StrictMode>,
 );

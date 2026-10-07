@@ -500,11 +500,14 @@
   cursor: pointer;
 }
 @container (max-width:780px) {
-  #root .fw-inspector {
-    max-height: none;
-  }
   #root .fw-main-media {
     height: clamp(210px, 30dvh, 300px);
+  }
+}
+/* Keep a bounded inspector while it sits beside the preview; remove the bound only at the actual stacked layout. */
+@media (max-width: 1000px) {
+  #root .fw-inspector {
+    max-height: none;
   }
 }
 @media (max-width: 760px) {

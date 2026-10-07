@@ -1,3 +1,5 @@
+import { useTranslation } from "./Locale";
+import { settingsUiTranslations } from "./settings-ui-translations";
 import { useEffect, useRef, useState } from "react";
 import type { StudioApi } from "./api";
 import type { ProjectSnapshot } from "./model";
@@ -31,6 +33,8 @@ export function PlanImport({
   native: boolean;
   action(path: string, body: unknown, label: string, key?: string): void;
 }) {
+  const { t, ui } = useTranslation();
+
   const version = useProjectRefreshVersion(),
     base = `/api/projects/${encodeURIComponent(snapshot.project.id)}/plan-imports`,
     [pending, setPending] = useState<Import | null>(null),
@@ -62,30 +66,32 @@ export function PlanImport({
     return () => c.abort();
   }, [api, base, version, snapshot.project.headVersion]);
   return (
-    <section aria-label="Bring a brief">
-      {error && <p role="alert">{error}</p>}
+    <section aria-label={t("Bring a brief", "导入创作简报")}>
+      {error && <p role="alert">{ui(error, settingsUiTranslations)}</p>}
       {pending ? (
         <>
           <h4>
             {pending.stale
-              ? "Draft needs a fresh interpretation"
+              ? t("Draft needs a fresh interpretation", "需要重新解读草稿")
               : pending.draft
-                ? "Review the proposed film"
-                : "Reading your material"}
+                ? t("Review the proposed film", "检查建议的影片方案")
+                : t("Reading your material", "正在阅读素材")}
           </h4>
           <p>{pending.name}</p>
           <details>
-            <summary>Source material</summary>
+            <summary>{t("Source material", "原始素材")}</summary>
             <pre>{pending.text}</pre>
           </details>
           {pending.draft && (
             <div className="import-draft-summary">
               <p>{pending.draft.project.brief}</p>
               <details>
-                <summary>Proposed film direction</summary>
+                <summary>
+                  {t("Proposed film direction", "建议的影片方向")}
+                </summary>
                 <p>
                   {pending.draft.project.story ||
-                    "No additional film direction."}
+                    t("No additional film direction.", "没有补充的影片方向。")}
                 </p>
                 {pending.draft.project.narration?.script && (
                   <p>{pending.draft.project.narration.script}</p>
@@ -94,7 +100,8 @@ export function PlanImport({
               {pending.draft.project.scenes.map((scene, i) => (
                 <div key={scene.id}>
                   <strong>
-                    Scene {i + 1} · {scene.purpose}
+                    {t("Scene", "场景")}
+                    {i + 1} · {scene.purpose}
                   </strong>
                   <ol>
                     {pending
@@ -105,41 +112,66 @@ export function PlanImport({
                         <li key={s.id}>
                           <strong>{s.purpose}</strong>
                           <details>
-                            <summary>Proposed shot details</summary>
+                            <summary>
+                              {t("Proposed shot details", "建议的镜头细节")}
+                            </summary>
                             <dl>
                               <div>
-                                <dt>Action</dt>
-                                <dd>{s.action || "Not written"}</dd>
+                                <dt>{t("Action", "动作")}</dt>
+                                <dd>
+                                  {s.action || t("Not written", "尚未填写")}
+                                </dd>
                               </div>
                               <div>
-                                <dt>Framing</dt>
-                                <dd>{s.framing || "Not written"}</dd>
+                                <dt>{t("Framing", "构图")}</dt>
+                                <dd>
+                                  {s.framing || t("Not written", "尚未填写")}
+                                </dd>
                               </div>
                               <div>
-                                <dt>Motion</dt>
-                                <dd>{s.motion || "Not written"}</dd>
+                                <dt>{t("Motion", "运动")}</dt>
+                                <dd>
+                                  {s.motion || t("Not written", "尚未填写")}
+                                </dd>
                               </div>
                               <div>
-                                <dt>Planned duration</dt>
+                                <dt>{t("Planned duration", "计划时长")}</dt>
                                 <dd>{s.desiredFrames / 30}s</dd>
                               </div>
                               <div>
-                                <dt>Image prompt</dt>
-                                <dd>{s.imagePrompt || "Not written"}</dd>
-                              </div>
-                              <div>
-                                <dt>Video prompt</dt>
-                                <dd>{s.videoPrompt || "Not written"}</dd>
-                              </div>
-                              <div>
-                                <dt>Narration</dt>
+                                <dt>{t("Image prompt", "图片提示词")}</dt>
                                 <dd>
-                                  {s.narration?.mode?.replaceAll("_", " ") ||
-                                    "To decide"}
+                                  {s.imagePrompt ||
+                                    t("Not written", "尚未填写")}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>{t("Video prompt", "视频提示词")}</dt>
+                                <dd>
+                                  {s.videoPrompt ||
+                                    t("Not written", "尚未填写")}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>{t("Narration", "旁白")}</dt>
+                                <dd>
+                                  {(s.narration?.mode
+                                    ? ui(s.narration.mode, {
+                                        undecided: "待决定",
+                                        none: "无旁白",
+                                        generated: "生成旁白",
+                                        uploaded: "使用录音",
+                                      })
+                                    : "") || t("To decide", "待决定")}
                                   {s.narration?.text &&
                                     " · " + s.narration.text}
                                   {s.narration?.mode === "generated" &&
-                                    " · " + s.narration.voice + " voice"}
+                                    " · " +
+                                      ui(s.narration.voice, {
+                                        stock: "默认音色",
+                                        personal: "录音音色",
+                                      }) +
+                                      t(" voice", "音色")}
                                 </dd>
                               </div>
                             </dl>
@@ -168,7 +200,7 @@ export function PlanImport({
                 )
               }
             >
-              Confirm film plan
+              {t("Confirm film plan", "确认影片计划")}
             </UiButton>
             <UiButton
               disabled={disabled || pending.running}
@@ -180,14 +212,14 @@ export function PlanImport({
                 )
               }
             >
-              Discard draft
+              {t("Discard draft", "丢弃草稿")}
             </UiButton>
           </div>
         </>
       ) : (
         <>
           <label>
-            Upload text
+            {t("Upload text", "上传文本")}
             <input
               type="file"
               accept=".txt,.md,text/plain,text/markdown"
@@ -209,7 +241,7 @@ export function PlanImport({
             />
           </label>
           <label>
-            Or paste your brief
+            {t("Or paste your brief", "或粘贴创作简报")}
             <UiTextArea
               rows={6}
               value={text}
@@ -222,7 +254,12 @@ export function PlanImport({
             />
           </label>
           {!native && (
-            <p>Choose Codex in Models to interpret supplied material.</p>
+            <p>
+              {t(
+                "Choose Codex in Models to interpret supplied material.",
+                "请在“模型”中选择 Codex，以解读导入素材。",
+              )}
+            </p>
           )}
           <UiButton
             variant="primary"
@@ -243,7 +280,7 @@ export function PlanImport({
               );
             }}
           >
-            Interpret material
+            {t("Interpret material", "解读素材")}
           </UiButton>
         </>
       )}

@@ -1,3 +1,5 @@
+import { useTranslation } from "./Locale";
+import { workbenchCopy } from "./workbench-copy";
 import {
   useCallback,
   useEffect,
@@ -135,16 +137,27 @@ function frameExposure(
 }
 
 function MediaNote({ media }: { media: ResultMedia }) {
+  const { t, ui } = useTranslation();
+
   return (
     <>
       {media.fixture === true && (
-        <span className="fw-source-note fw-source-warning">演示素材</span>
+        <span className="fw-source-note fw-source-warning">
+          {t("Demo fixture", "演示素材")}
+        </span>
       )}
       {media.fixture === null && media.artifact && (
-        <span className="fw-source-note">素材来源未核实</span>
+        <span className="fw-source-note">
+          {t("Media source unverified", "素材来源未核实")}
+        </span>
       )}
       {!media.current && media.artifact && (
-        <span className="fw-source-note">保留的旧画面 · 不用于当前检查</span>
+        <span className="fw-source-note">
+          {t(
+            "Earlier frame · excluded from current review",
+            "保留的旧画面 · 不用于当前检查",
+          )}
+        </span>
       )}
     </>
   );
@@ -161,6 +174,8 @@ function FrameThumbnail({
   result: ResultShot;
   active: boolean;
 }) {
+  const { t, ui } = useTranslation();
+
   const node = useRef<HTMLDivElement>(null),
     [nearby, setNearby] = useState(false),
     [failedUrl, setFailedUrl] = useState<string | null>(null);
@@ -196,8 +211,8 @@ function FrameThumbnail({
           <Icon name="image" size={22} />
           <span>
             {image.error || (failedUrl === image.url && image.url)
-              ? "预览不可用"
-              : stateLabel(result.keyframe)}
+              ? t("Preview unavailable", "预览不可用")
+              : ui(stateLabel(result.keyframe), workbenchCopy)}
           </span>
         </div>
       )}
@@ -230,6 +245,8 @@ function SelectedStage({
   onExposure: (value: SceneFrameExposure) => void;
   currentExposures: SceneFrameExposure[];
 }) {
+  const { t, ui } = useTranslation();
+
   const { result, index, count } = selection,
     selectedMedia = mediaKind === "image" ? result.keyframe : result.video;
   const media = useArtifact(
@@ -373,26 +390,34 @@ function SelectedStage({
   return (
     <section
       className="fw-preview-stage"
-      aria-label={`Shot ${result.label} 画面预览`}
+      aria-label={t("Shot {v0} picture preview", "镜头 {v0} 的画面预览", {
+        v0: result.label,
+      })}
       tabIndex={0}
       onKeyDown={keyboard}
     >
       <header className="fw-stage-top">
         <span>
           <i />
-          {mediaKind === "image" ? "画面预览" : "视频预览"} · SHOT{" "}
-          {result.label}
+          {mediaKind === "image"
+            ? t("Frame preview", "画面预览")
+            : t("Video preview", "视频预览")}{" "}
+          · {t("SHOT", "镜头")} {result.label}
         </span>
         <div className="fw-stage-tools">
-          <span>{stateLabel(selectedMedia)}</span>
+          <span>{ui(stateLabel(selectedMedia), workbenchCopy)}</span>
           {mediaKind === "image" &&
             media.url &&
             failedUrl !== media.url &&
             onInspect && (
               <button
                 type="button"
-                aria-label={`放大 Shot ${result.label} 关键帧`}
-                title="放大画面"
+                aria-label={t(
+                  "Inspect keyframe for Shot {v0}",
+                  "放大镜头 {v0} 的关键帧",
+                  { v0: result.label },
+                )}
+                title={t("Enlarge frame", "放大画面")}
                 onClick={() =>
                   onInspect({
                     url: media.url!,
@@ -416,7 +441,11 @@ function SelectedStage({
             <img
               key={`${exposureId}:${media.url}`}
               src={media.url}
-              alt={`Shot ${result.label} 关键帧：${result.shot.purpose}`}
+              alt={t(
+                "Keyframe for Shot {v0}: {v1}",
+                "镜头 {v0} 的关键帧：{v1}",
+                { v0: result.label, v1: result.shot.purpose },
+              )}
               onLoad={(event) => {
                 if (exposureId)
                   loaded(event.currentTarget, media.url!, exposureId);
@@ -433,7 +462,9 @@ function SelectedStage({
               muted
               preload="metadata"
               onError={() => failed(media.url, null)}
-              aria-label={`Shot ${result.label} 视频`}
+              aria-label={t("Video for Shot {v0}", "镜头 {v0} 的视频", {
+                v0: result.label,
+              })}
             />
           )
         ) : (
@@ -441,15 +472,19 @@ function SelectedStage({
             <Icon name={mediaKind === "image" ? "image" : "play"} size={35} />
             <strong>
               {media.error || (failedUrl === media.url && media.url)
-                ? "预览暂时不可用"
+                ? t("Preview temporarily unavailable", "预览暂时不可用")
                 : selectedMedia.artifact
-                  ? "正在载入已保存的画面…"
-                  : stateLabel(selectedMedia)}
+                  ? t("Loading saved media…", "正在载入已保存的画面…")
+                  : ui(stateLabel(selectedMedia), workbenchCopy)}
             </strong>
             <p>
               {mediaKind === "image"
                 ? result.shot.framing || result.shot.purpose
-                : result.shot.motion || "视频会在生成后保留在这里。"}
+                : result.shot.motion ||
+                  t(
+                    "Video will remain here after generation.",
+                    "视频会在生成后保留在这里。",
+                  )}
             </p>
           </div>
         )}
@@ -458,20 +493,26 @@ function SelectedStage({
         )}
       </div>
       <footer className="fw-stage-bottom">
-        <div className="fw-stage-media-switch" aria-label="镜头媒体">
+        <div
+          className="fw-stage-media-switch"
+          aria-label={t("Shot media", "镜头媒体")}
+        >
           <button
             type="button"
             aria-pressed={mediaKind === "image"}
             onClick={() => onMediaKind("image")}
           >
-            关键帧
+            {" "}
+            {t("Keyframe", "关键帧")}{" "}
           </button>
           <button
             type="button"
             aria-pressed={mediaKind === "video"}
             onClick={() => onMediaKind("video")}
           >
-            视频{result.video.current ? " · 已保存" : ""}
+            {" "}
+            {t("Video", "视频")}
+            {result.video.current ? t(" · saved", " · 已保存") : ""}
           </button>
         </div>
         <div className="fw-stage-navigation">
@@ -481,7 +522,7 @@ function SelectedStage({
           </span>
           <button
             type="button"
-            aria-label="上一个镜头"
+            aria-label={t("Previous shot", "上一个镜头")}
             disabled={!previous}
             onClick={() => {
               if (previous) onSelectShot(previous);
@@ -491,7 +532,7 @@ function SelectedStage({
           </button>
           <button
             type="button"
-            aria-label="下一个镜头"
+            aria-label={t("Next shot", "下一个镜头")}
             disabled={!next}
             onClick={() => {
               if (next) onSelectShot(next);
@@ -518,26 +559,34 @@ function HistoryImage({
   snapshot: ProjectSnapshot;
   entry: FrameHistoryEntry;
 }) {
+  const { t, ui } = useTranslation();
+
   const { url, error } = useArtifact(api, snapshot.project.id, entry.artifact),
     [failed, setFailed] = useState(false);
   return (
     <figure className="fw-history-frame">
       {url && !failed ? (
-        <img src={url} alt={entry.label} onError={() => setFailed(true)} />
+        <img
+          src={url}
+          alt={ui(entry.label, workbenchCopy)}
+          onError={() => setFailed(true)}
+        />
       ) : (
         <div className="fw-history-empty">
-          {error || failed ? "预览不可用" : "载入已保存的画面…"}
+          {error || failed
+            ? t("Preview unavailable", "预览不可用")
+            : t("Loading saved frame…", "载入已保存的画面…")}
         </div>
       )}
       <figcaption>
-        <strong>{entry.label}</strong>
+        <strong>{ui(entry.label, workbenchCopy)}</strong>
         <span>
           {entry.fixture === true
-            ? "演示素材"
+            ? t("Demo fixture", "演示素材")
             : entry.fixture === null
-              ? "来源未核实"
-              : "已保存素材"}{" "}
-          · 仅比较
+              ? t("Source unverified", "来源未核实")
+              : t("Saved media", "已保存素材")}{" "}
+          {t(" · comparison only", " · 仅比较")}{" "}
         </span>
       </figcaption>
     </figure>
@@ -569,6 +618,8 @@ function ShotInspector({
   onReferenceShot: FrameWorkspaceProps["onReferenceShot"];
   onGenerateKeyframes?: FrameWorkspaceProps["onGenerateKeyframes"];
 }) {
+  const { t, ui } = useTranslation();
+
   const { result, scene } = selection;
   const [historyOpen, setHistoryOpen] = useState(false);
   useEffect(() => {
@@ -577,17 +628,22 @@ function ShotInspector({
   return (
     <aside
       className="fw-inspector"
-      aria-label={`Shot ${result.label} 镜头设置`}
+      aria-label={t("Settings for Shot {v0}", "镜头 {v0} 的设置", {
+        v0: result.label,
+      })}
     >
       <header className="fw-inspector-head">
         <span>
-          镜头设置 <small>{result.label}</small>
+          {" "}
+          {t("Shot settings", "镜头设置")} <small>{result.label}</small>
         </span>
         <button
           type="button"
           className="fw-icon-control"
-          aria-label={`引用 Shot ${result.label}`}
-          title="引用到对话"
+          aria-label={t("Reference Shot {v0}", "引用镜头 {v0}", {
+            v0: result.label,
+          })}
+          title={t("Reference in conversation", "引用到对话")}
           disabled={disabled}
           onClick={() => onReferenceShot(result.shot.id)}
         >
@@ -595,70 +651,74 @@ function ShotInspector({
         </button>
       </header>
       <div className="fw-inspector-body">
-        <h2>{result.shot.purpose || "未命名镜头"}</h2>
+        <h2>{result.shot.purpose || t("Untitled shot", "未命名镜头")}</h2>
         <p>
           {result.shot.framing ||
             result.shot.action ||
-            "镜头计划会在这里显示。"}
+            t("The shot plan will appear here.", "镜头计划会在这里显示。")}
         </p>
         <dl className="fw-properties">
           <div>
-            <dt>时长</dt>
+            <dt>{t("Duration", "时长")}</dt>
             <dd>{durationLabel(result.shot.desiredFrames)}</dd>
           </div>
           <div>
-            <dt>关键帧</dt>
-            <dd>{stateLabel(result.keyframe)}</dd>
+            <dt>{t("Keyframe", "关键帧")}</dt>
+            <dd>{ui(stateLabel(result.keyframe), workbenchCopy)}</dd>
           </div>
           <div>
-            <dt>视频</dt>
-            <dd>{stateLabel(result.video)}</dd>
+            <dt>{t("Video", "视频")}</dt>
+            <dd>{ui(stateLabel(result.video), workbenchCopy)}</dd>
           </div>
           {result.keyframe.model && (
             <div>
-              <dt>图像模型</dt>
+              <dt>{t("Image model", "图像模型")}</dt>
               <dd>{result.keyframe.model}</dd>
             </div>
           )}
           {result.video.model && (
             <div>
-              <dt>视频模型</dt>
+              <dt>{t("Video model", "视频模型")}</dt>
               <dd>{result.video.model}</dd>
             </div>
           )}
         </dl>
         {result.shot.motion && (
           <div className="fw-motion">
-            <span>运动与节奏</span>
+            <span>{t("Motion and rhythm", "运动与节奏")}</span>
             <p>{result.shot.motion}</p>
           </div>
         )}
         <details className="fw-prompt-details">
-          <summary>Plan &amp; Prompt</summary>
+          <summary>{t("Plan & Prompt", "计划与提示词")}</summary>
           <dl>
             <div>
-              <dt>镜头计划</dt>
+              <dt>{t("Shot plan", "镜头计划")}</dt>
               <dd>{result.shot.purpose}</dd>
             </div>
             <div>
-              <dt>图像 Prompt</dt>
-              <dd>{result.shot.imagePrompt || "尚未编写"}</dd>
+              <dt>{t("Image prompt", "图像 Prompt")}</dt>
+              <dd>
+                {result.shot.imagePrompt || t("Not written yet", "尚未编写")}
+              </dd>
             </div>
             <div>
-              <dt>视频 Prompt</dt>
-              <dd>{result.shot.videoPrompt || "尚未编写"}</dd>
+              <dt>{t("Video prompt", "视频 Prompt")}</dt>
+              <dd>
+                {result.shot.videoPrompt || t("Not written yet", "尚未编写")}
+              </dd>
             </div>
             {result.keyframe.savedPrompt &&
               result.keyframe.savedPrompt !== result.shot.imagePrompt && (
                 <div>
-                  <dt>已保存关键帧的 Prompt</dt>
+                  <dt>{t("Saved keyframe prompt", "已保存关键帧的 Prompt")}</dt>
                   <dd>{result.keyframe.savedPrompt}</dd>
                 </div>
               )}
             {result.video.savedPrompt &&
               result.video.savedPrompt !== result.shot.videoPrompt && (
                 <div>
-                  <dt>已保存视频的 Prompt</dt>
+                  <dt>{t("Saved video prompt", "已保存视频的 Prompt")}</dt>
                   <dd>{result.video.savedPrompt}</dd>
                 </div>
               )}
@@ -666,10 +726,12 @@ function ShotInspector({
         </details>
         {(result.narration.text || result.shot.narration?.mode === "none") && (
           <details className="fw-prompt-details">
-            <summary>旁白与声音</summary>
-            <p>{result.narration.text || "无旁白"}</p>
+            <summary>{t("Narration and sound", "旁白与声音")}</summary>
+            <p>{result.narration.text || t("No narration", "无旁白")}</p>
             <small>
-              {result.narration.voice}
+              {result.narration.voice
+                ? ui(result.narration.voice, workbenchCopy)
+                : null}
               {result.narration.acceptedFrames
                 ? ` · ${durationLabel(result.narration.acceptedFrames)}`
                 : ""}
@@ -677,8 +739,16 @@ function ShotInspector({
           </details>
         )}
         {historyOpen && (
-          <section className="fw-history" aria-label="之前的关键帧">
-            <p>仅比较已保存的画面。旧版本不会替代当前画面或获得生成审批。</p>
+          <section
+            className="fw-history"
+            aria-label={t("Previous keyframes", "之前的关键帧")}
+          >
+            <p>
+              {t(
+                "Compare saved frames only. Earlier versions never replace the current frame or receive generation approval.",
+                "仅比较已保存的画面。旧版本不会替代当前画面或获得生成审批。",
+              )}
+            </p>
             {history.map((entry) => (
               <HistoryImage
                 key={entry.artifact.artifactId + entry.artifact.sha256}
@@ -702,7 +772,9 @@ function ShotInspector({
             onClick={() => onGenerateKeyframes(scene.id, result.shot.id)}
           >
             <Icon name="refresh" size={15} />
-            {result.keyframe.artifact ? "重新生成关键帧" : "生成关键帧"}
+            {result.keyframe.artifact
+              ? t("Regenerate keyframe", "重新生成关键帧")
+              : t("Generate keyframe", "生成关键帧")}
           </UiButton>
         )}
         <UiButton
@@ -710,8 +782,8 @@ function ShotInspector({
           disabled={disabled}
           onClick={() => onEditShot(result.shot.id)}
         >
-          <WorkIcon name="edit" />
-          编辑 Plan &amp; Prompt
+          <WorkIcon name="edit" />{" "}
+          {t("Edit Plan & Prompt", "编辑计划与提示词")}{" "}
         </UiButton>
         {!!history.length && (
           <UiButton
@@ -719,8 +791,8 @@ function ShotInspector({
             onClick={() => setHistoryOpen((value) => !value)}
             aria-expanded={historyOpen}
           >
-            <WorkIcon name="history" />
-            比较已保存的画面
+            <WorkIcon name="history" />{" "}
+            {t("Compare saved frames", "比较已保存的画面")}{" "}
           </UiButton>
         )}
         {onConfirmFrame && (
@@ -735,15 +807,26 @@ function ShotInspector({
             }}
           >
             <Icon name="check" size={16} />
-            {reviewed ? "此画面已检查" : "确认此画面"}
+            {reviewed
+              ? t("Frame checked", "此画面已检查")
+              : t("Confirm this frame", "确认此画面")}
           </UiButton>
         )}
         <p className="fw-review-hint">
           {reviewed
-            ? "检查记录用于本次视频生成；不会自动开始制作。"
+            ? t(
+                "Review is for this video generation; it will not start production automatically.",
+                "检查记录用于本次视频生成；不会自动开始制作。",
+              )
             : result.keyframe.current
-              ? "检查构图与内容，再确认此画面。"
-              : "生成符合当前计划的关键帧后再检查。"}
+              ? t(
+                  "Check composition and content, then confirm this frame.",
+                  "检查构图与内容，再确认此画面。",
+                )
+              : t(
+                  "Generate a keyframe matching the current plan before reviewing.",
+                  "生成符合当前计划的关键帧后再检查。",
+                )}
         </p>
       </div>
     </aside>
@@ -777,6 +860,8 @@ function FrameShelf({
   onReferenceShot: FrameWorkspaceProps["onReferenceShot"];
   onReviewScene?: FrameWorkspaceProps["onReviewScene"];
 }) {
+  const { t, ui } = useTranslation();
+
   const selected = scene.shots.find(
     (result) => result.shot.id === selectedShotId,
   );
@@ -788,11 +873,13 @@ function FrameShelf({
     >
       <header className="fw-shelf-head">
         <h2 id={`fw-scene-${scene.id}`}>
-          <span>分镜</span>
+          <span>{t("Storyboard", "分镜")}</span>
           <small>
-            {scene.unassigned ? "未分组镜头" : `SCENE ${scene.label}`}
+            {scene.unassigned
+              ? t("Unassigned shots", "未分组镜头")
+              : t("SCENE {v0}", "场景 {v0}", { v0: scene.label })}
           </small>
-          <b>{scene.purpose || "场景方向待定"}</b>
+          <b>{scene.purpose || t("Scene direction pending", "场景方向待定")}</b>
         </h2>
         {!scene.unassigned && (
           <div className="fw-shelf-actions">
@@ -800,8 +887,10 @@ function FrameShelf({
               type="button"
               disabled={disabled}
               onClick={() => onReferenceScene(scene.id)}
-              aria-label={`引用 Scene ${scene.label}`}
-              title="引用场景"
+              aria-label={t("Reference Scene {v0}", "引用场景 {v0}", {
+                v0: scene.label,
+              })}
+              title={t("Reference scene", "引用场景")}
             >
               <WorkIcon name="reference" />
             </button>
@@ -810,8 +899,7 @@ function FrameShelf({
               disabled={disabled}
               onClick={() => onEditScene(scene.id)}
             >
-              <WorkIcon name="edit" />
-              编辑场景
+              <WorkIcon name="edit" /> {t("Edit scene", "编辑场景")}{" "}
             </button>
           </div>
         )}
@@ -830,7 +918,10 @@ function FrameShelf({
               id={`project-results-shot-${result.shot.id}`}
               className={`fw-shot-card${result.shot.id === selectedShotId ? " selected" : ""}`}
               aria-pressed={result.shot.id === selectedShotId}
-              aria-label={`选择 Shot ${result.label}：${result.shot.purpose}`}
+              aria-label={t("Select Shot {v0}: {v1}", "选择镜头 {v0}：{v1}", {
+                v0: result.label,
+                v1: result.shot.purpose,
+              })}
               onClick={() => onSelectShot(result.shot.id)}
             >
               <FrameThumbnail
@@ -844,19 +935,23 @@ function FrameShelf({
                 className={`fw-shot-state${reviewed ? " checked" : result.keyframe.state === "saved" ? " pending" : ""}`}
               >
                 {reviewed
-                  ? "已检查"
+                  ? t("Checked", "已检查")
                   : result.keyframe.current
-                    ? "待检查"
-                    : stateLabel(result.keyframe)}
+                    ? t("Awaiting review", "待检查")
+                    : ui(stateLabel(result.keyframe), workbenchCopy)}
               </span>
               <span className="fw-shot-meta">
-                <strong>{result.shot.purpose || "未命名镜头"}</strong>
+                <strong>
+                  {result.shot.purpose || t("Untitled shot", "未命名镜头")}
+                </strong>
                 <small>{durationLabel(result.shot.desiredFrames)}</small>
               </span>
               {result.video.artifact && (
                 <span className="fw-shot-video-note">
                   <Icon name="play" size={12} />
-                  {result.video.current ? "视频已保存" : "保留的旧视频"}
+                  {result.video.current
+                    ? t("Video saved", "视频已保存")
+                    : t("Previous video kept", "保留的旧视频")}
                 </span>
               )}
             </button>
@@ -864,12 +959,17 @@ function FrameShelf({
         })}
       </div>
       {!scene.shots.length && (
-        <p className="fw-empty-scene">这个场景还没有镜头。</p>
+        <p className="fw-empty-scene">
+          {t("This scene has no shots yet.", "这个场景还没有镜头。")}
+        </p>
       )}
       <footer className="fw-shelf-footer">
         <span>
-          <Icon name="image" size={14} />
-          静态关键帧 · 运动与节奏保留在视频计划中
+          <Icon name="image" size={14} />{" "}
+          {t(
+            "Static keyframes · motion and rhythm remain in the video plan",
+            "静态关键帧 · 运动与节奏保留在视频计划中",
+          )}{" "}
         </span>
         <div>
           {selected && (
@@ -878,8 +978,8 @@ function FrameShelf({
               disabled={disabled}
               onClick={() => onReferenceShot(selected.shot.id)}
             >
-              <WorkIcon name="reference" size={14} />
-              引用选中镜头
+              <WorkIcon name="reference" size={14} />{" "}
+              {t("Reference selected shot", "引用选中镜头")}{" "}
             </button>
           )}
           {onReviewScene && !scene.unassigned && scene.shots.length > 0 && (
@@ -888,7 +988,8 @@ function FrameShelf({
               disabled={disabled}
               onClick={() => onReviewScene(scene.id)}
             >
-              查看场景生成
+              {" "}
+              {t("View scene generation", "查看场景生成")}{" "}
               <WorkIcon name="right" size={14} />
             </button>
           )}
@@ -919,6 +1020,8 @@ function PlanView({
   onReferenceShot: FrameWorkspaceProps["onReferenceShot"];
   onReferenceScene: FrameWorkspaceProps["onReferenceScene"];
 }) {
+  const { t, ui } = useTranslation();
+
   const total = snapshot.project.shots.reduce(
     (sum, shot) => sum + shot.desiredFrames,
     0,
@@ -926,22 +1029,41 @@ function PlanView({
   return (
     <div className="fw-plan-view">
       <section className="fw-plan-intro">
-        <span className="fw-eyebrow">创作计划</span>
+        <span className="fw-eyebrow">{t("Creative plan", "创作计划")}</span>
         <h2>{snapshot.project.name}</h2>
         <div className="fw-plan-stats">
           <span>{durationLabel(total)}</span>
-          <span>{scenes.length} 个场景</span>
-          <span>{snapshot.project.shots.length} 个镜头</span>
+          <span>
+            {t(
+              scenes.length === 1 ? "{count} scene" : "{count} scenes",
+              "{count} 个场景",
+              { count: scenes.length },
+            )}
+          </span>
+          <span>
+            {t(
+              snapshot.project.shots.length === 1
+                ? "{count} shot"
+                : "{count} shots",
+              "{count} 个镜头",
+              { count: snapshot.project.shots.length },
+            )}
+          </span>
         </div>
         {snapshot.project.brief && <p>{snapshot.project.brief}</p>}
         {snapshot.project.story && (
           <details>
-            <summary>完整故事</summary>
+            <summary>{t("Full story", "完整故事")}</summary>
             <p>{snapshot.project.story}</p>
           </details>
         )}
         {!snapshot.project.brief && !snapshot.project.story && (
-          <p>通过左侧对话梳理创意，场景与镜头会保留在这份计划里。</p>
+          <p>
+            {t(
+              "Develop your idea in the conversation. Scenes and shots stay in this plan.",
+              "通过左侧对话梳理创意，场景与镜头会保留在这份计划里。",
+            )}
+          </p>
         )}
       </section>
       {scenes.map((scene) => (
@@ -953,16 +1075,22 @@ function PlanView({
           <header>
             <div>
               <span className="fw-eyebrow">
-                {scene.unassigned ? "未分组镜头" : `Scene ${scene.label}`}
+                {scene.unassigned
+                  ? t("Unassigned shots", "未分组镜头")
+                  : t("Scene {v0}", "场景 {v0}", { v0: scene.label })}
               </span>
-              <h2>{scene.purpose || "场景方向待定"}</h2>
+              <h2>
+                {scene.purpose || t("Scene direction pending", "场景方向待定")}
+              </h2>
             </div>
             {!scene.unassigned && (
               <div className="fw-plan-actions">
                 <button
                   type="button"
                   disabled={disabled}
-                  aria-label={`引用 Scene ${scene.label}`}
+                  aria-label={t("Reference Scene {v0}", "引用场景 {v0}", {
+                    v0: scene.label,
+                  })}
                   onClick={() => onReferenceScene(scene.id)}
                 >
                   <WorkIcon name="reference" />
@@ -972,8 +1100,7 @@ function PlanView({
                   disabled={disabled}
                   onClick={() => onEditScene(scene.id)}
                 >
-                  <WorkIcon name="edit" />
-                  编辑场景
+                  <WorkIcon name="edit" /> {t("Edit scene", "编辑场景")}{" "}
                 </button>
               </div>
             )}
@@ -990,29 +1117,37 @@ function PlanView({
                   aria-pressed={selectedShotId === result.shot.id}
                   onClick={() => onSelectShot(result.shot.id)}
                 >
-                  <span>Shot {result.label}</span>
-                  <h3>{result.shot.purpose || "未命名镜头"}</h3>
+                  <span>
+                    {t("Shot", "镜头")} {result.label}
+                  </span>
+                  <h3>
+                    {result.shot.purpose || t("Untitled shot", "未命名镜头")}
+                  </h3>
                 </button>
                 <small>{durationLabel(result.shot.desiredFrames)}</small>
               </div>
               <dl>
                 <div>
-                  <dt>画面</dt>
-                  <dd>{result.shot.framing || "尚未编写"}</dd>
+                  <dt>{t("Frame", "画面")}</dt>
+                  <dd>
+                    {result.shot.framing || t("Not written yet", "尚未编写")}
+                  </dd>
                 </div>
                 <div>
-                  <dt>运动</dt>
-                  <dd>{result.shot.motion || "尚未编写"}</dd>
+                  <dt>{t("Motion", "运动")}</dt>
+                  <dd>
+                    {result.shot.motion || t("Not written yet", "尚未编写")}
+                  </dd>
                 </div>
                 {result.shot.action && (
                   <div>
-                    <dt>动作</dt>
+                    <dt>{t("Action", "动作")}</dt>
                     <dd>{result.shot.action}</dd>
                   </div>
                 )}
                 {result.narration.text && (
                   <div>
-                    <dt>旁白</dt>
+                    <dt>{t("Narration", "旁白")}</dt>
                     <dd>{result.narration.text}</dd>
                   </div>
                 )}
@@ -1020,19 +1155,22 @@ function PlanView({
               <footer>
                 <div className="fw-plan-state">
                   <span>
-                    <Icon name="image" size={14} />
-                    关键帧 · {stateLabel(result.keyframe)}
+                    <Icon name="image" size={14} />{" "}
+                    {t("Keyframe ·", "关键帧 ·")}{" "}
+                    {ui(stateLabel(result.keyframe), workbenchCopy)}
                   </span>
                   <span>
-                    <Icon name="play" size={14} />
-                    视频 · {stateLabel(result.video)}
+                    <Icon name="play" size={14} /> {t("Video ·", "视频 ·")}{" "}
+                    {ui(stateLabel(result.video), workbenchCopy)}
                   </span>
                 </div>
                 <div className="fw-plan-actions">
                   <button
                     type="button"
                     disabled={disabled}
-                    aria-label={`引用 Shot ${result.label}`}
+                    aria-label={t("Reference Shot {v0}", "引用镜头 {v0}", {
+                      v0: result.label,
+                    })}
                     onClick={() => onReferenceShot(result.shot.id)}
                   >
                     <WorkIcon name="reference" />
@@ -1042,28 +1180,39 @@ function PlanView({
                     disabled={disabled}
                     onClick={() => onEditShot(result.shot.id)}
                   >
-                    <WorkIcon name="edit" />
-                    编辑 Plan &amp; Prompt
+                    <WorkIcon name="edit" />{" "}
+                    {t("Edit Plan & Prompt", "编辑计划与提示词")}{" "}
                   </button>
                 </div>
               </footer>
               <details className="fw-plan-prompts">
-                <summary>查看 Prompt</summary>
+                <summary>{t("View prompts", "查看 Prompt")}</summary>
                 <dl>
                   <div>
-                    <dt>图像</dt>
-                    <dd>{result.shot.imagePrompt || "尚未编写"}</dd>
+                    <dt>{t("Image", "图像")}</dt>
+                    <dd>
+                      {result.shot.imagePrompt ||
+                        t("Not written yet", "尚未编写")}
+                    </dd>
                   </div>
                   <div>
-                    <dt>视频</dt>
-                    <dd>{result.shot.videoPrompt || "尚未编写"}</dd>
+                    <dt>{t("Video", "视频")}</dt>
+                    <dd>
+                      {result.shot.videoPrompt ||
+                        t("Not written yet", "尚未编写")}
+                    </dd>
                   </div>
                 </dl>
               </details>
             </article>
           ))}
           {!scene.shots.length && (
-            <p className="fw-empty-scene">镜头会在场景计划完善后显示。</p>
+            <p className="fw-empty-scene">
+              {t(
+                "Shots will appear as the scene plan develops.",
+                "镜头会在场景计划完善后显示。",
+              )}
+            </p>
           )}
         </section>
       ))}
@@ -1092,6 +1241,8 @@ export function FrameWorkspace({
   onReviewScene,
   sceneActions,
 }: FrameWorkspaceProps) {
+  const { t, ui } = useTranslation();
+
   const results = useMemo(() => projectResults(snapshot), [snapshot]),
     selection = frameSelection(results.scenes, selectedShotId);
   const exposures = useMemo(
@@ -1148,17 +1299,27 @@ export function FrameWorkspace({
   return (
     <div
       className={`frame-workspace fw-view-${view}`}
-      aria-label="制作工作区"
+      aria-label={t("Production workspace", "制作工作区")}
       id={`project-results-project-${snapshot.project.id}`}
     >
       <div className="fw-workspace-content">
         <header className="fw-section-head">
           <div>
-            <h1>{view === "frames" ? "关键帧预览" : "创作计划"}</h1>
+            <h1>
+              {view === "frames"
+                ? t("Keyframe preview", "关键帧预览")
+                : t("Creative plan", "创作计划")}
+            </h1>
             <p>
               {view === "frames"
-                ? "先检查构图与内容，确认后再生成视频。"
-                : "每个场景与镜头的方向、Prompt 和当前状态。"}
+                ? t(
+                    "Check composition and content before generating video.",
+                    "先检查构图与内容，确认后再生成视频。",
+                  )
+                : t(
+                    "Direction, prompts and current state for every scene and shot.",
+                    "每个场景与镜头的方向、Prompt 和当前状态。",
+                  )}
             </p>
           </div>
           {view === "frames" &&
@@ -1178,8 +1339,8 @@ export function FrameWorkspace({
                 }
                 onClick={() => onGenerateKeyframes(selectedScene.id)}
               >
-                <Icon name="refresh" size={15} />
-                更新场景关键帧
+                <Icon name="refresh" size={15} />{" "}
+                {t("Update scene keyframes", "更新场景关键帧")}{" "}
               </UiButton>
             )}
         </header>
@@ -1230,9 +1391,18 @@ export function FrameWorkspace({
             ) : (
               <section className="fw-empty-project">
                 <Icon name="slate" size={35} />
-                <h2>把创意变成第一组画面。</h2>
+                <h2>
+                  {t(
+                    "Turn your idea into the first frames.",
+                    "把创意变成第一组画面。",
+                  )}
+                </h2>
                 <p>
-                  在左侧对话开始创作。场景、镜头与生成的画面会保留在这个工作区。
+                  {" "}
+                  {t(
+                    "Start creating in the conversation. Scenes, shots and generated media will stay in this workspace.",
+                    "在左侧对话开始创作。场景、镜头与生成的画面会保留在这个工作区。",
+                  )}{" "}
                 </p>
               </section>
             )}
@@ -1257,7 +1427,10 @@ export function FrameWorkspace({
         )}
       </div>
       {view === "frames" && sceneActions && (
-        <footer className="fw-work-footer" aria-label="场景生成操作">
+        <footer
+          className="fw-work-footer"
+          aria-label={t("Scene generation actions", "场景生成操作")}
+        >
           {sceneActions}
         </footer>
       )}

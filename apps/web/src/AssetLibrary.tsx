@@ -1,3 +1,5 @@
+import { useTranslation } from "./Locale";
+import { workbenchCopy } from "./workbench-copy";
 import { useEffect, useState } from "react";
 import type { StudioApi } from "./api";
 import type { Artifact, ProjectSnapshot } from "./model";
@@ -39,15 +41,25 @@ function AssetDetail({
   close(): void;
   onReference?(artifact: Artifact): void;
 }) {
+  const { t, ui } = useTranslation();
+
   const { url, error } = useArtifact(api, projectId, asset.artifact);
   return (
-    <section className="asset-detail" aria-label="Selected asset">
+    <section
+      className="asset-detail"
+      aria-label={t("Selected asset", "选中的素材")}
+    >
       <header>
         <h3>{asset.label}</h3>
-        <IconButton label="Close asset details" onClick={close} />
+        <IconButton
+          label={t("Close asset details", "关闭素材详情")}
+          onClick={close}
+        />
       </header>
-      {error && <p role="alert">{error}</p>}
-      {!url && !error && <p role="status">Loading asset…</p>}
+      {error && <p role="alert">{ui(error, workbenchCopy)}</p>}
+      {!url && !error && (
+        <p role="status">{t("Loading asset…", "正在载入素材…")}</p>
+      )}
       {url &&
         (asset.artifact.kind === "image" ? (
           <img src={url} alt={asset.label} />
@@ -59,8 +71,8 @@ function AssetDetail({
           variant="secondary"
           onClick={() => onReference(asset.artifact)}
         >
-          <Icon name="at" size={16} />
-          引用到对话
+          <Icon name="at" size={16} />{" "}
+          {t("Reference in conversation", "引用到对话")}{" "}
         </UiButton>
       )}
       <p>
@@ -68,8 +80,12 @@ function AssetDetail({
           ? `${asset.width} × ${asset.height} · `
           : ""}
         {asset.durationSeconds ? `${asset.durationSeconds.toFixed(1)}s · ` : ""}
-        {asset.source}
-        {asset.fixture ? " · Demo fixture" : ""}
+        {ui(asset.source, {
+          uploaded: "已上传",
+          generated: "已生成",
+          export: "导出文件",
+        })}
+        {asset.fixture ? t(" · Demo fixture", " · 演示素材") : ""}
       </p>
     </section>
   );
@@ -87,6 +103,8 @@ export function AssetLibrary({
   focusArtifactId?: string | null;
   onReference?(artifact: Artifact): void;
 }) {
+  const { t, ui } = useTranslation();
+
   const projectId = snapshot.project.id,
     revision = useProjectRefreshVersion();
   const [kind, setKind] = useState("all"),
@@ -156,21 +174,25 @@ export function AssetLibrary({
     <section className="asset-library" aria-labelledby="asset-library-title">
       <header className="library-heading">
         <h2 id="asset-library-title">
-          Assets{" "}
-          <HelpTip label="About assets">
-            All saved images and videos, including earlier generated takes and
-            uploads. Select an asset to inspect it. Download and discuss saved
-            images from Import in the conversation.
+          {" "}
+          {t("Assets", "素材")}{" "}
+          <HelpTip label={t("About assets", "关于素材")}>
+            {" "}
+            {t(
+              "All saved images and videos, including earlier generated takes and uploads. Select an asset to inspect it. Download and discuss saved images from Import in the conversation.",
+              "所有已保存的图像与视频，包括早期生成版本和上传素材。选择素材可查看详情；在对话的导入工具中下载和讨论已保存的图像。",
+            )}{" "}
           </HelpTip>
         </h2>
       </header>
       <div className="asset-filters">
         <label className="sr-only" htmlFor="asset-search">
-          Find an asset
+          {" "}
+          {t("Find an asset", "查找素材")}{" "}
         </label>
         <UiTextField
           id="asset-search"
-          placeholder="Find an asset…"
+          placeholder={t("Find an asset…", "查找素材…")}
           maxLength={160}
           value={search}
           onChange={(event) => {
@@ -179,7 +201,8 @@ export function AssetLibrary({
           }}
         />
         <label className="sr-only" htmlFor="asset-kind">
-          Asset type
+          {" "}
+          {t("Asset type", "素材类型")}{" "}
         </label>
         <UiSelect
           id="asset-kind"
@@ -189,13 +212,14 @@ export function AssetLibrary({
             setOffset(0);
           }}
           options={[
-            { value: "all", label: "All types" },
-            { value: "image", label: "Images" },
-            { value: "video", label: "Videos" },
+            { value: "all", label: t("All types", "所有类型") },
+            { value: "image", label: t("Images", "图片") },
+            { value: "video", label: t("Videos", "视频") },
           ]}
         />
         <label className="sr-only" htmlFor="asset-source">
-          Asset source
+          {" "}
+          {t("Asset source", "素材来源")}{" "}
         </label>
         <UiSelect
           id="asset-source"
@@ -205,10 +229,10 @@ export function AssetLibrary({
             setOffset(0);
           }}
           options={[
-            { value: "all", label: "All sources" },
-            { value: "uploaded", label: "Uploaded" },
-            { value: "generated", label: "Generated" },
-            { value: "export", label: "Exports" },
+            { value: "all", label: t("All sources", "所有来源") },
+            { value: "uploaded", label: t("Uploaded", "已上传") },
+            { value: "generated", label: t("Generated", "已生成") },
+            { value: "export", label: t("Exports", "导出文件") },
           ]}
         />
       </div>
@@ -224,18 +248,21 @@ export function AssetLibrary({
       )}
       {error && (
         <p role="alert">
-          {error}{" "}
+          {ui(error, workbenchCopy)}{" "}
           <IconButton
             icon="refresh"
-            label="Reload assets"
+            label={t("Reload assets", "重新载入素材")}
             onClick={() => setRetry((value) => value + 1)}
           />
         </p>
       )}
-      {loading && <p role="status">Loading assets…</p>}
+      {loading && <p role="status">{t("Loading assets…", "正在载入素材…")}</p>}
       {!loading && !error && page && (
         <>
-          <div className="asset-list" aria-label="Image and video assets">
+          <div
+            className="asset-list"
+            aria-label={t("Image and video assets", "图像与视频素材")}
+          >
             {page.assets.map((asset) => (
               <UiButton
                 variant="ghost"
@@ -254,8 +281,14 @@ export function AssetLibrary({
                 <span>
                   <strong>{asset.label}</strong>
                   <small>
-                    {asset.artifact.kind} · {asset.source}
-                    {asset.fixture ? " · Demo fixture" : ""}
+                    {ui(asset.artifact.kind, { image: "图片", video: "视频" })}{" "}
+                    ·{" "}
+                    {ui(asset.source, {
+                      uploaded: "已上传",
+                      generated: "已生成",
+                      export: "导出文件",
+                    })}
+                    {asset.fixture ? t(" · Demo fixture", " · 演示素材") : ""}
                   </small>
                 </span>
                 <Icon name="chevron" size={16} />
@@ -266,21 +299,31 @@ export function AssetLibrary({
             <div className="empty-filter">
               <h3>
                 {search || kind !== "all" || source !== "all"
-                  ? "No matching assets"
-                  : "No assets yet"}
+                  ? t("No matching assets", "没有匹配的素材")
+                  : t("No assets yet", "还没有素材")}
               </h3>
               <p>
                 {search || kind !== "all" || source !== "all"
-                  ? "Try another type or source, or clear your search."
-                  : "Upload a reference or generate your first keyframes from the storyboard."}
+                  ? t(
+                      "Try another type or source, or clear your search.",
+                      "尝试其他类型或来源，或清除搜索。",
+                    )
+                  : t(
+                      "Upload a reference or generate your first keyframes from the storyboard.",
+                      "上传参考素材，或按分镜计划生成第一组关键帧。",
+                    )}
               </p>
             </div>
           )}
           <div className="asset-pagination">
             <span>
               {page.total
-                ? `${page.offset + 1}–${page.offset + page.assets.length} of ${page.total}`
-                : "0 assets"}
+                ? t("{v0}–{v1} of {v2}", "第 {v0}–{v1} 项，共 {v2} 项", {
+                    v0: page.offset + 1,
+                    v1: page.offset + page.assets.length,
+                    v2: page.total,
+                  })
+                : t("0 assets", "0 个素材")}
             </span>
             {(page.offset > 0 || page.nextOffset !== null) && (
               <>
@@ -289,7 +332,8 @@ export function AssetLibrary({
                   disabled={offset === 0}
                   onClick={() => setOffset(Math.max(0, offset - 40))}
                 >
-                  Previous
+                  {" "}
+                  {t("Previous", "上一页")}{" "}
                 </UiButton>
                 <UiButton
                   className="button small"
@@ -298,7 +342,8 @@ export function AssetLibrary({
                     page.nextOffset !== null && setOffset(page.nextOffset)
                   }
                 >
-                  Next
+                  {" "}
+                  {t("Next", "下一页")}{" "}
                 </UiButton>
               </>
             )}
