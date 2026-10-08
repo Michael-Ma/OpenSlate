@@ -16,13 +16,15 @@
     "build:packages": "pnpm --filter './packages/*' -r build",
     "build": "pnpm -r build",
     "typecheck": "pnpm build:packages && pnpm -r typecheck",
-    "check": "pnpm test && pnpm -r typecheck",
-    "test": "pnpm build && node --test --test-concurrency=4 scripts/test/*.test.mjs packages/core/test/*.test.mjs packages/providers/test/*.test.mjs packages/director/test/*.test.mjs apps/server/test/*.test.mjs apps/web/test/*.test.mjs",
+    "check": "node scripts/test-toolchain.mjs && pnpm test && pnpm -r typecheck",
+    "test": "pnpm build && node scripts/run-tests.mjs",
     "demo:headless": "pnpm build && node apps/server/dist/demo.js",
     "probe:runtime": "pnpm build:packages && node packages/director/dist/probe/cli.js",
     "probe:launcher": "pnpm build && node apps/server/test/launcher-smoke.mjs",
     "probe:workflow": "pnpm build && node apps/server/test/six-minute-workflow-smoke.mjs",
-    "probe:toolchain": "pnpm build && node apps/server/dist/toolchain-probe.js"
+    "probe:toolchain": "pnpm build && node apps/server/dist/toolchain-probe.js",
+    "setup:test-media": "node scripts/setup-test-media.mjs",
+    "check:toolchain": "node scripts/test-toolchain.mjs"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: pnpm/action-setup@v6.1.0
@@ -18,11 +18,15 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - name: Install media test tools
+      - name: Install media build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          test -x /usr/bin/ffmpeg
-          test -x /usr/bin/ffprobe
+          sudo apt-get install -y build-essential pkg-config nasm libx264-dev zlib1g-dev
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .cache/test-toolchain/
+          key: test-media-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/test-media-toolchain.json', 'scripts/setup-test-media.mjs') }}
+      - run: pnpm setup:test-media
+      - run: pnpm check:toolchain
       - run: pnpm install --frozen-lockfile
       - run: pnpm check

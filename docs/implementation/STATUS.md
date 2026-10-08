@@ -1,6 +1,6 @@
 # Current implementation status
 
-Reconciled October 7, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 8, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
 ## Available behavior
 
@@ -16,6 +16,12 @@ Reconciled October 7, 2026. OpenSlate is an early single-user local studio. The 
 | Local operation | Source launcher, pairing, doctor/private config, migrations and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
 
 Requested workflow items 1–5 are implemented. Item 6 is partial because provider voice-ID synthesis does not create a new voice clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 code review](V1-COMPLETION-REVIEW.md) records fixes and scope.
+
+## October 8 CI/local toolchain parity
+
+The development gate now pins Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 from shared repository inputs. CI uses Ubuntu 24.04 and the same checksummed media setup; the preflight checks exact versions and required codecs, and the test runner propagates the selected absolute paths into all tests/child tools. System media binaries and production configuration remain separate from the ignored test cache.
+
+The previous CI failure reproduced on Ubuntu with Node 24.15.0 and FFmpeg 6.1.1: a repeated voice segment lost most of its expected signal power. The original assertions pass in the same environment with FFmpeg 8.1.1. No renderer change or assertion relaxation was needed. Both macOS and disposable Ubuntu full validation passed 2,408 tests, zero failures and one optional skip; Linux/hosted CI evidence is recorded in the [parity review](OCTOBER-8-TOOLCHAIN-PARITY.md).
 
 ## October 7 Day / Night workbench
 

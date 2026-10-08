@@ -33,7 +33,7 @@ test('reports all missing keys, output hosts and tools together rather than stop
   const report = inspectSetup(input);
   assert.equal(report.ready, false);
   assert.deepEqual(report.checks.filter(check => check.state === 'blocked').map(check => check.id), ['openai-media', 'minimax-video', 'viggle-video', 'ffmpeg', 'ffprobe', 'OPENSLATE_H3_DOWNLOAD_HOSTS', 'OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS']);
-  assert.match(formatSetup(report), /OPENSLATE_MINIMAX_API_KEY/); assert.match(formatSetup(report), /brew install ffmpeg/);
+  assert.match(formatSetup(report), /OPENSLATE_MINIMAX_API_KEY/); assert.match(formatSetup(report), /pnpm setup:test-media/);
 });
 
 test('disabled generation keeps missing media tools optional but makes their import/export purpose clear', t => {

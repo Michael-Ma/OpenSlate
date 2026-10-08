@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-08",
+  "scope": "local and CI test-toolchain parity",
+  "baseline": {
+    "node": "24.15.0",
+    "pnpm": "10.33.0",
+    "ffmpeg": "8.1.1",
+    "ffprobe": "8.1.1",
+    "ci_os": "ubuntu-24.04"
+  },
+  "source": {
+    "url": "https://ffmpeg.org/releases/ffmpeg-8.1.1.tar.xz",
+    "sha256": "b6863adde98898f42602017462871b5f6333e65aec803fdd7a6308639c52edf3",
+    "verified_release_fingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8"
+  },
+  "prior_failure": {
+    "run": "https://github.com/Michael-Ma/OpenSlate/actions/runs/37664605332",
+    "ffmpeg": "6.1.1-3ubuntu5",
+    "node_reproduction": "24.15.0",
+    "message": "wrong voice at 9",
+    "expected_frequency_hz": 500,
+    "signal_power": 36072487.35221441
+  },
+  "linux_same_environment_ffmpeg8": {
+    "tests": 2,
+    "passed": 2,
+    "failed": 0,
+    "voice9_signal_power": 5416672130371.689,
+    "original_assertions_preserved": true
+  },
+  "local_gate": {
+    "tests": 2409,
+    "passed": 2408,
+    "failed": 0,
+    "skipped": 1,
+    "builds": "passed",
+    "typechecks": "passed"
+  },
+  "linux_gate": {
+    "os": "Ubuntu24.04 linux/amd64",
+    "tests": 2409,
+    "passed": 2408,
+    "failed": 0,
+    "skipped": 1,
+    "builds": "passed",
+    "typechecks": "passed"
+  },
+  "drift_regressions": 7,
+  "offline_demo": {
+    "initial_fake_accepts": 4,
+    "edited_fake_accepts": 2,
+    "duplicates_after_restart": 0
+  },
+  "constraints": {
+    "real_provider_calls": 0,
+    "private_data_or_credentials_mounted_in_container": false,
+    "system_media_binaries_replaced": false,
+    "renderer_changed": false,
+    "audio_assertions_weakened": false
+  },
+  "hosted_ci": "checked after publication; see final response",
+  "logs": {
+    "local": "/private/tmp/openslate-ci-toolchain/local-check.log",
+    "linux": "task outputs/openslate-ci-parity/linux-full-check.log"
+  }
+}

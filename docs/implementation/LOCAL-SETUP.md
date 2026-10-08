@@ -6,7 +6,7 @@ OpenSlate runs from a source checkout on one computer. The launcher installs loc
 
 1. Install **Node 24**; with nvm use `nvm install 24` and `nvm use 24`.
 2. The pinned package manager is **pnpm 10.33.0**. The launcher can use that version through npx; alternatively install it with `npm install --global pnpm@10.33.0`.
-3. For media import/export, install FFmpeg/ffprobe (`brew install ffmpeg` on macOS). A source build of SQLite may also require Python and compiler tools.
+3. For media import/export, use the verified FFmpeg/ffprobe **8.1.1** pair (`brew install ffmpeg` may select a different release). `pnpm setup:test-media` can build the pinned pair in an isolated repository cache; set `OPENSLATE_FFMPEG` and `OPENSLATE_FFPROBE` to the printed absolute paths when using that pair in the studio. A source build of SQLite may also require Python and compiler tools.
 4. Run `./start.sh --init-config` to create ignored private `.env.live.local`; an existing file is preserved.
 5. Run `./start.sh --doctor` or `--doctor --json` for redacted local checks, then `./start.sh`.
 

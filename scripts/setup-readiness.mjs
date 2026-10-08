@@ -42,7 +42,7 @@ export function inspectSetup({ root, environment = process.env, nodeVersion = pr
     const candidates = (override ? [override] : [...(environment.PATH ?? '').split(':').filter(Boolean).map(directory => join(directory, tool)), `/opt/homebrew/bin/${tool}`, `/usr/local/bin/${tool}`]).map(candidate => resolve(root, candidate));
     const path = candidates.find(candidate => probe(candidate, ['-version']).status === 0);
     tools[tool] = path ?? null;
-    add(tool, tool, path ? 'ready' : realEnabled ? 'blocked' : 'warning', path ? 'Executable available.' : 'Needed to import, preview and export media.', 'On macOS run brew install ffmpeg. On Ubuntu run sudo apt-get install ffmpeg. Set OPENSLATE_FFMPEG / OPENSLATE_FFPROBE for explicit executables.');
+    add(tool, tool, path ? 'ready' : realEnabled ? 'blocked' : 'warning', path ? 'Executable available.' : 'Needed to import, preview and export media.', 'Use the verified FFmpeg/ffprobe 8.1.1 pair. Run pnpm setup:test-media for an isolated pinned pair, then set OPENSLATE_FFMPEG / OPENSLATE_FFPROBE to its printed absolute paths.');
   }
   for (const provider of [{ switch: 'H3_GENERATION', variable: 'OPENSLATE_H3_DOWNLOAD_HOSTS' }, { switch: 'VIGGLE_H3_GENERATION', variable: 'OPENSLATE_VIGGLE_H3_DOWNLOAD_HOSTS' }]) {
     if (environment[`OPENSLATE_ENABLE_${provider.switch}`] !== '1') continue;

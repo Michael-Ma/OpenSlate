@@ -63,6 +63,8 @@ pnpm dev
 pnpm check
 ```
 
+The verified development/CI baseline is Node **24.15.0**, pnpm **10.33.0**, and FFmpeg/ffprobe **8.1.1**. Use `nvm install`, `nvm use`, `pnpm setup:test-media` and `pnpm check:toolchain` before running the full gate. The media setup reuses a matching installed pair or builds an isolated checksummed release; [contributing](CONTRIBUTING.md) lists prerequisites. Application startup continues to support Node 24.
+
 Development UI: [127.0.0.1:5173](http://127.0.0.1:5173). `pnpm check` builds, runs isolated offline tests and checks TypeScript; local integration tests need permission to bind loopback ports. Rebuild shared packages/restart development after changing them.
 
 | Command | Purpose |

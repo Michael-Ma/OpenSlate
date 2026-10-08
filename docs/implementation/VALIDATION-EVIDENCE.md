@@ -6,6 +6,7 @@ Dated verification is retained independently of current capability claims. A res
 
 | Checkpoint | Evidence and limits |
 |---|---|
+| October 8 toolchain parity | [Pinned Node/media and Linux reproduction](OCTOBER-8-TOOLCHAIN-PARITY.md): reproduced the old FFmpeg audio failure without changing Node, preserved original assertions and shared exact test prerequisites |
 | October 7 language support | [English/Chinese interface verification](OCTOBER-7-LANGUAGE-REVIEW.md): 2,401-pass gate, content/draft/reference and frozen-request preservation, protected save and 390px checks; zero real-media calls |
 | October 7 Day/Night | [Current Frame workbench verification](OCTOBER-7-DAY-NIGHT-REVIEW.md): supplied design implementation, exact scoped image/video review, project references, persisted Timeline edits and desktop/mobile checks; no real-provider media calls |
 | October 5 conversation/results | [2,324-pass final gate and persistent result hierarchy](OCTOBER-5-CONVERSATION-RESULTS-REVIEW.md): two-scene/four-shot actual React flow, 390px exact frame viewing, protected inline tools, editing/history and full uncommitted import review; zero new real media calls |

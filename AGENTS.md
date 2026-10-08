@@ -1,7 +1,7 @@
 # Working on OpenSlate
 
 - Read `docs/implementation/STATUS.md` before planning work. Technical designs describe the target; do not claim pending features are implemented.
-- Use Node 24 and pnpm 10.33.0. `pnpm check` builds, tests and typechecks; local tests need loopback-listener permission. `pnpm demo:headless` runs the offline integration proof.
+- Application startup supports Node 24. For development/CI use the exact `.nvmrc` Node patch, pnpm from `package.json` and media profile from `scripts/test-media-toolchain.json`; run `pnpm setup:test-media` and `pnpm check:toolchain` to resolve drift. `pnpm check` builds, tests and typechecks; local tests need loopback-listener permission. `pnpm demo:headless` runs the offline integration proof.
 - V0 is single-user and single-machine: app, SQLite, media, workers and native Codex run on the same computer. Cloud LLM/media APIs remain supported; multi-host, remote GPU and shared-database deployment are outside v0.
 - Native Codex uses the accepted `LocalCodexPolicy` (`mode: "local"`) for an exact pinned version/configuration. Trust the installed runtime/sandbox; keep catalog checks, loopback bridge, epochs and application authorization. Independent code-host/authentication isolation is unverified, not a separate mandatory deployment gate. See `docs/implementation/RUNTIME-TRUST-DECISION.md`.
 - Keep application authority, project state and execution in OpenSlate. Models only propose validated data. Never evaluate model-authored JavaScript.
