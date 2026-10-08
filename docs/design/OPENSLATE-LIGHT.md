@@ -27,6 +27,8 @@ The new brief permits direct right-side editing/reference/regeneration shortcuts
 
 Purple-blue identifies actions and selection; green identifies checked/saved results; amber identifies stale/pending/unknown work. Labels and geometry accompany color. Media viewing stays dark in both appearances and uses `object-fit: contain` so current frame review never crops the underlying artifact.
 
+Workspace navigation uses one selected surface on the outer Radix button. Its visible label and hidden width-measurement label share spacing and remain transparent; hover and keyboard focus also belong to the button. Selection must not add an inner plaque or change tab height in either appearance or language.
+
 `frame-theme.css` owns the palette, semantic/Radix aliases, inputs, dialogs, Markdown and states. Day auxiliary text and Night hover fills are adjusted slightly from the reference to preserve readable contrast. Root layout/components use `--zone-*`, `--ink`, `--muted`, `--line`, `--control`, `--selected`, `--action-*` and semantic status roles. Do not introduce another component palette.
 
 Bundled **Inter Variable** renders supported glyphs; system **PingFang SC**, Microsoft YaHei and system sans provide language fallbacks. No font/network request is required. Title 22px/630, body 14px, controls 12–13px, auxiliary metadata 10–11px. Icons use one rounded outline style, 1.85 strokes, round caps/joins. Shared shapes are 7–8px controls, 10px cards, 11px composer; spacing follows a 4px rhythm.

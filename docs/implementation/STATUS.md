@@ -17,6 +17,12 @@ Reconciled October 8, 2026. OpenSlate is an early single-user local studio. The 
 
 Requested workflow items 1–5 are implemented. Item 6 is partial because provider voice-ID synthesis does not create a new voice clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 code review](V1-COMPLETION-REVIEW.md) records fixes and scope.
 
+## October 8 workspace navigation highlight
+
+Workspace tabs now use a single selected surface on the outer Radix button. The legacy inner background/padding is removed, visible and hidden measurement labels share spacing, and hover/keyboard focus use the same button. This fixes the overlapping white plaque and label overflow without changing navigation state or application authority.
+
+Source review, final builds/typechecks and the offline restart/edit demo passed. The full gate passed **2,408 tests, zero failures and one optional skip**. Browser checks covered all four views, Day/Night, English/Chinese, 390px layout and keyboard focus. The existing live tab and its unsent draft were preserved; the updated connected preview was checked through Vite without restarting the production session. No media was generated.
+
 ## October 8 CI/local toolchain parity
 
 The development gate now pins Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 from shared repository inputs. CI uses Ubuntu 24.04 and the same checksummed media setup; the preflight checks exact versions and required codecs, and the test runner propagates the selected absolute paths into all tests/child tools. System media binaries and production configuration remain separate from the ignored test cache.

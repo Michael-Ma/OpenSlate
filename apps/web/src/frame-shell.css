@@ -227,6 +227,27 @@
   margin: 0;
   border: 1px solid transparent;
 }
+/* The button owns the selected surface. Keep Radix's visible and hidden
+   label-measurement layers identical so selection cannot add a nested pill. */
+#root .workspace-views :is(.rt-TabNavLinkInner, .rt-TabNavLinkInnerHidden) {
+  padding: 0;
+  gap: 6px;
+  align-items: center;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+}
+#root .workspace-views .rt-TabNavLink:not([data-active]):hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+#root .workspace-views .rt-TabNavLink:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+#root .workspace-views .rt-TabNavLink:focus-visible .rt-TabNavLinkInner {
+  outline: none;
+}
 #root .workspace-views .rt-TabNavLink[data-active] {
   background: var(--selection-bg);
   color: var(--selection-text);

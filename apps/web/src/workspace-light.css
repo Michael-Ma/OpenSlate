@@ -278,16 +278,8 @@
   padding: 0;
   background: transparent;
 }
-#root .workspace-views .rt-TabNavLinkInner {
-  padding: 8px 13px;
-  border-radius: var(--radius-compact);
-}
 #root .workspace-views .rt-TabNavLink[data-active] {
   font-weight: 600;
-}
-#root .workspace-views .rt-TabNavLink[data-active] .rt-TabNavLinkInner {
-  background: var(--surface);
-  color: var(--accent);
 }
 #root .workspace-views .rt-TabNavLink::before {
   display: none;
