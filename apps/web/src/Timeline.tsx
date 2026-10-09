@@ -35,6 +35,9 @@ import type { TimelineCommand } from "./timeline-editor-model";
 import type { DragEvent } from "react";
 import "./timeline-editor.css";
 import { UiButton } from "./ui";
+import { clearLocalDraft, isLocalFieldText, readLocalDraft, writeLocalDraft } from "./local-draft-cache";
+import { musicDraftBase, musicDraftStale, validMusicGain, validMusicStart } from "./timeline-music-draft";
+import type { TimelineMusicDraftBase } from "./timeline-music-draft";
 interface TimelineProps {
   api: StudioApi;
   snapshot: ProjectSnapshot;
@@ -752,6 +755,7 @@ function TimelineWorkspace({
                 </div>
               </div>
               <TimelineMusic
+                key={`${api.cacheNamespace ?? ""}:${snapshot.project.id}:${snapshot.project.soundtrack?.audioId ?? ""}`}
                 api={api}
                 snapshot={snapshot}
                 totalFrames={editor.totalFrames}
@@ -784,6 +788,7 @@ function TimelineWorkspace({
           </div>
           <TimelineDuration
             key={`${snapshot.project.id}:${selected.shot.id}`}
+            cacheNamespace={api.cacheNamespace}
             snapshot={snapshot}
             shot={selected.shot}
             disabled={locked}
@@ -957,22 +962,53 @@ function TimelineDuration({
   shot,
   disabled,
   send,
+  cacheNamespace,
 }: {
   snapshot: ProjectSnapshot;
   shot: Shot;
   disabled: boolean;
   send(body: TimelineCommand | null): void;
+  cacheNamespace: string | undefined;
 }) {
   const { t, ui } = useTranslation();
 
-  const [draft, setDraft] = useState(String(shot.desiredFrames / 30)),
+  const field = `shot:${shot.id}:timeline-duration`;
+  const recovered = useRef<ReturnType<typeof readLocalDraft<string>> | undefined>(undefined);
+  if (recovered.current === undefined)
+    recovered.current = readLocalDraft(cacheNamespace, snapshot.project.id,
+      field, isLocalFieldText);
+  const cacheRevision = useRef(recovered.current?.revision ?? null);
+  const writeCache = (value: string, base: { headVersion: number; frames: number }) => {
+    const result = writeLocalDraft(cacheNamespace, snapshot.project.id,
+      field, value, base, cacheRevision.current);
+    if (result.status === "saved") cacheRevision.current = result.revision!;
+  };
+  const clearCache = () => {
+    const result = clearLocalDraft(cacheNamespace, snapshot.project.id,
+      field, cacheRevision.current ?? undefined);
+    if (result === "saved") cacheRevision.current = null;
+  };
+  const recoveredBase = recovered.current?.base as { headVersion?: unknown; frames?: unknown } | undefined;
+  const [draft, setDraft] = useState(recovered.current?.value ?? String(shot.desiredFrames / 30)),
     [error, setError] = useState("");
-  const base = useRef(snapshot.project.headVersion),
-    editing = useRef(false);
+  const [base, setBase] = useState({
+    headVersion: typeof recoveredBase?.headVersion === "number"
+      ? recoveredBase.headVersion : snapshot.project.headVersion,
+    frames: typeof recoveredBase?.frames === "number"
+      ? recoveredBase.frames : shot.desiredFrames,
+  });
+  const editing = useRef(!!recovered.current);
+  const stale = draft !== String(shot.desiredFrames / 30) &&
+    (base.headVersion !== snapshot.project.headVersion ||
+      base.frames !== shot.desiredFrames);
   useEffect(() => {
-    if (!editing.current) {
+    if (timelineDurationFrames(draft) === shot.desiredFrames) {
+      clearCache();
+      editing.current = false;
+      setBase({ headVersion: snapshot.project.headVersion, frames: shot.desiredFrames });
+    } else if (!editing.current) {
       setDraft(String(shot.desiredFrames / 30));
-      base.current = snapshot.project.headVersion;
+      setBase({ headVersion: snapshot.project.headVersion, frames: shot.desiredFrames });
     }
   }, [shot.desiredFrames, snapshot.project.headVersion]);
   return (
@@ -981,7 +1017,7 @@ function TimelineDuration({
       onSubmit={(event) => {
         event.preventDefault();
         if (disabled) return;
-        if (base.current !== snapshot.project.headVersion) {
+        if (stale) {
           setError(
             t(
               "The project changed. Enter the current duration again.",
@@ -1000,9 +1036,8 @@ function TimelineDuration({
           snapshot,
           shot.id,
           draft,
-          base.current,
+          base.headVersion,
         );
-        editing.current = false;
         setError("");
         send(body);
       }}
@@ -1023,12 +1058,14 @@ function TimelineDuration({
           value={draft}
           disabled={disabled}
           onFocus={() => {
-            if (!editing.current) base.current = snapshot.project.headVersion;
+            if (!editing.current)
+              setBase({ headVersion: snapshot.project.headVersion, frames: shot.desiredFrames });
             editing.current = true;
           }}
           onChange={(event) => {
             editing.current = true;
             setDraft(event.target.value);
+            writeCache(event.target.value, base);
             setError("");
           }}
         />
@@ -1037,7 +1074,7 @@ function TimelineDuration({
       <UiButton
         type="submit"
         disabled={
-          disabled || timelineDurationFrames(draft) === shot.desiredFrames
+          disabled || stale || timelineDurationFrames(draft) === shot.desiredFrames
         }
       >
         {" "}
@@ -1049,6 +1086,20 @@ function TimelineDuration({
           "这是镜头计划时长；已有视频可能需要更新。",
         )}
       </small>
+      {stale && <p role="status" className="inline-error">
+        {t("The project changed. Your local duration is kept. Review it before saving.", "项目已更新。本地时长已保留，请检查后再保存。")}
+        <UiButton type="button" variant="ghost" className="text-button" onClick={() => {
+          const next = { headVersion: snapshot.project.headVersion, frames: shot.desiredFrames };
+          setBase(next);
+          writeCache(draft, next);
+        }}>{t("Keep my duration for current version", "在当前版本保留我的时长")}</UiButton>
+        <UiButton type="button" variant="ghost" className="text-button" onClick={() => {
+          setDraft(String(shot.desiredFrames / 30));
+          setBase({ headVersion: snapshot.project.headVersion, frames: shot.desiredFrames });
+          editing.current = false;
+          clearCache();
+        }}>{t("Use saved duration", "使用已保存的时长")}</UiButton>
+      </p>}
       {error && (
         <p role="alert" className="inline-error">
           {ui(error, workbenchCopy)}
@@ -1056,8 +1107,9 @@ function TimelineDuration({
             type="button"
             onClick={() => {
               setDraft(String(shot.desiredFrames / 30));
-              base.current = snapshot.project.headVersion;
+              setBase({ headVersion: snapshot.project.headVersion, frames: shot.desiredFrames });
               editing.current = false;
+              clearCache();
               setError("");
             }}
           >
@@ -1068,6 +1120,63 @@ function TimelineDuration({
       )}
     </form>
   );
+}
+function useTimelineMusicDraft(cacheNamespace: string | undefined, projectId: string, audioId: string,
+  fieldName: "gainMilliDb" | "startFrame", savedValue: number, headVersion: number,
+  valid: (value: unknown) => value is number) {
+  const field = audioId ? `music:${audioId}:${fieldName}` : "";
+  const recovered = useRef<ReturnType<typeof readLocalDraft<number>> | undefined>(undefined);
+  if (recovered.current === undefined)
+    recovered.current = readLocalDraft(cacheNamespace, projectId, field, valid);
+  const currentBase = (): TimelineMusicDraftBase => ({ headVersion, audioId, savedValue });
+  const initialBase = useRef<TimelineMusicDraftBase | null>(
+    recovered.current ? musicDraftBase(recovered.current.base) : currentBase());
+  const [value, setValue] = useState(recovered.current?.value ?? savedValue);
+  const [base, setBase] = useState(initialBase.current);
+  const baseRef = useRef(base);
+  const editing = useRef(!!recovered.current);
+  const revision = useRef(recovered.current?.revision ?? null);
+  const changeBase = (next: TimelineMusicDraftBase) => { baseRef.current = next; setBase(next); };
+  const clear = () => {
+    const result = clearLocalDraft(cacheNamespace, projectId, field, revision.current ?? undefined);
+    if (result === "saved") revision.current = null;
+  };
+  const write = (next: number, nextBase: TimelineMusicDraftBase) => {
+    const result = writeLocalDraft(cacheNamespace, projectId, field, next, nextBase, revision.current);
+    if (result.status === "saved") revision.current = result.revision!;
+  };
+  useEffect(() => {
+    if (value === savedValue) {
+      if (editing.current) clear();
+      editing.current = false;
+      changeBase(currentBase());
+    } else if (!editing.current) {
+      setValue(savedValue);
+      changeBase(currentBase());
+    }
+  }, [value, savedValue, headVersion, audioId]);
+  const stage = (next: number) => {
+    if (!valid(next)) return;
+    if (next === savedValue) {
+      setValue(next); editing.current = false; clear(); changeBase(currentBase());
+      return;
+    }
+    const nextBase = editing.current ? baseRef.current : currentBase();
+    if (!nextBase) return;
+    editing.current = true;
+    setValue(next);
+    changeBase(nextBase);
+    write(next, nextBase);
+  };
+  const keep = () => {
+    const next = currentBase();
+    changeBase(next);
+    write(value, next);
+  };
+  const discard = () => {
+    clear(); editing.current = false; setValue(savedValue); changeBase(currentBase());
+  };
+  return { value, base, stale: musicDraftStale(value, base, savedValue, headVersion, audioId), stage, keep, discard };
 }
 function TimelineMusic({
   api,
@@ -1095,8 +1204,12 @@ function TimelineMusic({
     | undefined;
   const [recording, setRecording] = useState<AudioLibraryEntry | null>(null),
     [error, setError] = useState(""),
-    [dragFrame, setDragFrame] = useState<number | null>(null),
-    [gain, setGain] = useState(soundtrack?.gainMilliDb ?? -18000);
+    [dragFrame, setDragFrame] = useState<number | null>(null);
+  const audioId = soundtrack?.audioId ?? "";
+  const gainDraft = useTimelineMusicDraft(api.cacheNamespace, snapshot.project.id, audioId,
+    "gainMilliDb", soundtrack?.gainMilliDb ?? -18000, snapshot.project.headVersion, validMusicGain);
+  const startDraft = useTimelineMusicDraft(api.cacheNamespace, snapshot.project.id, audioId,
+    "startFrame", soundtrack?.startFrame ?? 0, snapshot.project.headVersion, validMusicStart);
   const track = useRef<HTMLDivElement>(null),
     drag = useRef<{
       x: number;
@@ -1105,8 +1218,7 @@ function TimelineMusic({
       head: number;
       projectId: string;
       pointerId: number;
-    } | null>(null),
-    gainHead = useRef(snapshot.project.headVersion);
+    } | null>(null);
   useEffect(() => {
     const abort = new AbortController();
     setRecording(null);
@@ -1139,15 +1251,12 @@ function TimelineMusic({
   useEffect(() => {
     drag.current = null;
     setDragFrame(null);
-    setGain(soundtrack?.gainMilliDb ?? -18000);
-    gainHead.current = snapshot.project.headVersion;
   }, [
     snapshot.project.id,
     snapshot.project.headVersion,
-    soundtrack?.gainMilliDb,
     soundtrack?.startFrame,
   ]);
-  const startFrame = soundtrack?.startFrame ?? 0,
+  const startFrame = startDraft.value,
     sourceFrames =
       recording && Number.isFinite(recording.durationSeconds)
         ? Math.round(recording.durationSeconds * 30)
@@ -1159,11 +1268,15 @@ function TimelineMusic({
     sourceFrames,
     totalFrames,
   );
-  const saveGain = () => {
-    if (!disabled)
+  const saveGain = (value = gainDraft.value) => {
+    if (!disabled && !gainDraft.stale)
       send(
-        timelineMusicCommand(snapshot, "gainMilliDb", gain, gainHead.current),
+        timelineMusicCommand(snapshot, "gainMilliDb", value, gainDraft.base?.headVersion ?? -1),
       );
+  };
+  const saveStart = (frame: number, headVersion = startDraft.base?.headVersion ?? -1) => {
+    if (!disabled && !startDraft.stale)
+      send(timelineMusicCommand(snapshot, "startFrame", frame, headVersion));
   };
   const cancel = () => {
     drag.current = null;
@@ -1177,7 +1290,7 @@ function TimelineMusic({
           {soundtrack ? (
             <div
               role="slider"
-              tabIndex={disabled ? -1 : 0}
+              tabIndex={disabled || startDraft.stale ? -1 : 0}
               aria-label={t("Music start", "配乐起点")}
               aria-valuemin={0}
               aria-valuemax={Math.max(0, (totalFrames - 1) / 30)}
@@ -1185,7 +1298,7 @@ function TimelineMusic({
               aria-valuetext={t("{v0} seconds", "{v0} 秒", {
                 v0: ((dragFrame ?? startFrame) / 30).toFixed(1),
               })}
-              aria-disabled={disabled}
+              aria-disabled={disabled || startDraft.stale}
               className={`timeline-music-clip ${soundtrack.muted ? "muted" : ""} ${span.width === null ? "duration-unknown" : ""}`}
               style={{
                 left: `${span.left}%`,
@@ -1193,14 +1306,14 @@ function TimelineMusic({
               }}
               title={recording?.label || t("Saved music", "已保存配乐")}
               onPointerDown={(event) => {
-                if (disabled || event.button !== 0 || !track.current) return;
+                if (disabled || startDraft.stale || event.button !== 0 || !track.current) return;
                 event.currentTarget.focus();
                 event.currentTarget.setPointerCapture(event.pointerId);
                 drag.current = {
                   x: event.clientX,
                   frame: startFrame,
                   width: track.current.getBoundingClientRect().width,
-                  head: snapshot.project.headVersion,
+                  head: startDraft.base?.headVersion ?? -1,
                   projectId: snapshot.project.id,
                   pointerId: event.pointerId,
                 };
@@ -1227,24 +1340,15 @@ function TimelineMusic({
                   captured.projectId !== snapshot.project.id
                 )
                   return;
-                send(
-                  timelineMusicCommand(
-                    snapshot,
-                    "startFrame",
-                    timelineMusicStart(
-                      captured.frame,
-                      event.clientX - captured.x,
-                      captured.width,
-                      totalFrames,
-                    ),
-                    captured.head,
-                  ),
-                );
+                const next = timelineMusicStart(captured.frame,
+                  event.clientX - captured.x, captured.width, totalFrames);
+                startDraft.stage(next);
+                saveStart(next, captured.head);
               }}
               onPointerCancel={cancel}
               onKeyDown={(event) => {
                 if (
-                  disabled ||
+                  disabled || startDraft.stale ||
                   !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
                     event.key,
                   )
@@ -1265,14 +1369,8 @@ function TimelineMusic({
                                 (event.shiftKey ? 1 : 30),
                           ),
                         );
-                send(
-                  timelineMusicCommand(
-                    snapshot,
-                    "startFrame",
-                    frame,
-                    snapshot.project.headVersion,
-                  ),
-                );
+                startDraft.stage(frame);
+                saveStart(frame);
               }}
             >
               <strong>
@@ -1308,16 +1406,10 @@ function TimelineMusic({
               min="-60000"
               max="0"
               step="1000"
-              value={gain}
-              disabled={disabled}
-              onPointerDown={() => {
-                gainHead.current = snapshot.project.headVersion;
-              }}
-              onFocus={() => {
-                gainHead.current = snapshot.project.headVersion;
-              }}
-              onChange={(event) => setGain(Number(event.target.value))}
-              onPointerUp={saveGain}
+              value={gainDraft.value}
+              disabled={disabled || gainDraft.stale}
+              onChange={(event) => gainDraft.stage(Number(event.target.value))}
+              onPointerUp={(event) => saveGain(Number(event.currentTarget.value))}
               onKeyUp={(event) => {
                 if (
                   [
@@ -1329,11 +1421,27 @@ function TimelineMusic({
                     "End",
                   ].includes(event.key)
                 )
-                  saveGain();
+                  saveGain(Number(event.currentTarget.value));
               }}
             />
-            <span>{gain / 1000} dB</span>
+            <span>{gainDraft.value / 1000} dB</span>
           </label>
+          {gainDraft.value !== soundtrack.gainMilliDb && !gainDraft.stale && (
+            <UiButton disabled={disabled} onClick={() => saveGain()}>
+              {t("Save volume", "保存音量")}
+            </UiButton>
+          )}
+          {gainDraft.stale && (
+            <p role="status" className="inline-error">
+              {t("The project changed. Your local volume is kept. Review it before saving.", "项目已更新。本地音量已保留，请检查后再保存。")}
+              <UiButton type="button" variant="ghost" className="text-button" onClick={gainDraft.keep}>
+                {t("Keep my volume for current version", "在当前版本保留我的音量")}
+              </UiButton>
+              <UiButton type="button" variant="ghost" className="text-button" onClick={gainDraft.discard}>
+                {t("Use saved volume", "使用已保存的音量")}
+              </UiButton>
+            </p>
+          )}
           <label className="timeline-mute">
             <input
               type="checkbox"
@@ -1352,6 +1460,22 @@ function TimelineMusic({
             />{" "}
             {t("Mute", "静音")}{" "}
           </label>
+          {startDraft.value !== (soundtrack.startFrame ?? 0) && !startDraft.stale && (
+            <UiButton disabled={disabled} onClick={() => saveStart(startDraft.value)}>
+              {t("Save music start", "保存配乐起点")}
+            </UiButton>
+          )}
+          {startDraft.stale && (
+            <p role="status" className="inline-error">
+              {t("The project changed. Your local music start is kept. Review it before saving.", "项目已更新。本地配乐起点已保留，请检查后再保存。")}
+              <UiButton type="button" variant="ghost" className="text-button" onClick={startDraft.keep}>
+                {t("Keep my music start for current version", "在当前版本保留我的配乐起点")}
+              </UiButton>
+              <UiButton type="button" variant="ghost" className="text-button" onClick={startDraft.discard}>
+                {t("Use saved music start", "使用已保存的配乐起点")}
+              </UiButton>
+            </p>
+          )}
           {startFrame >= totalFrames && (
             <>
               <small>
@@ -1362,16 +1486,7 @@ function TimelineMusic({
               </small>
               <UiButton
                 disabled={disabled}
-                onClick={() =>
-                  send(
-                    timelineMusicCommand(
-                      snapshot,
-                      "startFrame",
-                      0,
-                      snapshot.project.headVersion,
-                    ),
-                  )
-                }
+                onClick={() => { startDraft.stage(0); saveStart(0); }}
               >
                 {" "}
                 {t("Move to film start", "移至影片起点")}{" "}

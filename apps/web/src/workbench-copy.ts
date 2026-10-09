@@ -50,8 +50,6 @@ export const workbenchCopy: Readonly<Record<string, string>> = {
   "Regenerate keyframe": "重新生成关键帧",
   "Generate keyframe": "生成关键帧",
   "Compare saved frames": "比较已保存的画面",
-  "Frame checked": "此画面已检查",
-  "Confirm this frame": "确认此画面",
   "Review is for this video generation; it will not start production automatically.":
     "检查记录用于本次视频生成；不会自动开始制作。",
   "Check composition and content, then confirm this frame.":
@@ -66,7 +64,6 @@ export const workbenchCopy: Readonly<Record<string, string>> = {
   "Scene direction pending": "场景方向待定",
   "Reference scene": "引用场景",
   "Edit scene": "编辑场景",
-  Checked: "已检查",
   "Awaiting review": "待检查",
   "Video saved": "视频已保存",
   "This scene has no shots yet.": "这个场景还没有镜头。",

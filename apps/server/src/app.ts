@@ -55,7 +55,7 @@ export function createApp(options: AppOptions = {}) {
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
-  registerSceneGeneration(app, service);
+  registerSceneGeneration(app, service, options.narrationRoutes?.narration);
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403
@@ -100,7 +100,13 @@ export function createApp(options: AppOptions = {}) {
   registerStoryboard(app, service);
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
   options.webAssets?.register(app);
-  if (options.studioSessions) registerStudioSessions(app, options.studioSessions);
+  if (options.studioSessions) registerStudioSessions(app, options.studioSessions, () => {
+    const storageId = options.service?.engine.outputStore?.storageId;
+    if (!storageId) return undefined;
+    // This public cache partition follows the persistent installation output identity,
+    // including a new generation after same-root recovery, without exposing a credential or path.
+    return digest({ storageId, restoreId: options.service!.store.installationRecoveries().at(-1)?.receipt.restoreId ?? null });
+  });
   if (options.service) registerRecoveryRoutes(app, options.service);
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);

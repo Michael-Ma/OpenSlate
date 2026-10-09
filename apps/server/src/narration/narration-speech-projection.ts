@@ -1,3 +1,4 @@
+import { activeAttemptIngestionIssue } from '../execution/ingestion-issue.js';
 import { digest, DomainError, invariant } from '@openslate/core';
 import { OPENAI_SPEECH_VOICES, OPENAI_SPEECH_BUDGET } from '@openslate/providers';
 import type { ProviderProfile } from '@openslate/core';
@@ -11,7 +12,8 @@ import { currentNarrationSpeechReview } from './narration-speech-review-state.js
 import { assertNarrationSpeechAttemptInput, resolveNarrationSpeechApplication } from './narration-speech-authorization.js';
 import type { NarrationSpeechProposal, NarrationSpeechApplyReceipt } from './narration-speech-types.js';
 import { assertNarrationSpeechCurrent } from '../execution/narration-speech-execution.js';
-import type { SegmentRevision } from './types.js';
+import type { SegmentRevision, GeneratedNarrationSummary } from './types.js';
+import { resolveGeneratedNarrationAudio, summarizeGeneratedNarrationAudio } from './generated-audio.js';
 import { projectPersonalVoices } from './personal-voices.js';
 import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from './narration-scope.js';
 
@@ -25,6 +27,8 @@ export interface NarrationSpeechSummary {
 export interface NarrationSpeechDetail {
   proposal: NarrationSpeechSummary; eligibility: { current: boolean; code: string | null }; application: NarrationSpeechApplyReceipt | null;
   execution: { state: string; candidateId: string | null; attemptId: string | null; code: string | null };
+  /** Exact completed output only; no library fallback or provider request. */
+  recording?: GeneratedNarrationSummary | null;
 }
 const validId = (value: unknown): value is string => typeof value === 'string' && Buffer.byteLength(value) >= 1 && Buffer.byteLength(value) <= 160;
 const boundedIdSql = 'CASE WHEN length(CAST(id AS BLOB)) BETWEEN 1 AND 160 THEN id ELSE NULL END id';
@@ -117,7 +121,7 @@ export function projectNarrationSpeechProposal(store: Store, projectId: string, 
   return read(store, () => {
     const view = new ProjectionReader(store, projectId); view.project(); const proposal = summary(view, proposalId);
     const result: NarrationSpeechDetail = { proposal, eligibility: { current: false, code: null }, application: null,
-      execution: { state: 'not_applied', candidateId: null, attemptId: null, code: null } };
+      execution: { state: 'not_applied', candidateId: null, attemptId: null, code: null }, recording: null };
     try {
       const reviews = store.db.prepare(`SELECT ${boundedIdSql} FROM entities WHERE kind='narration_speech_review' AND project_id=? AND json_extract(body,'$.proposal.id')=? LIMIT 2`).all(projectId, proposalId) as { id: string | null }[];
       invariant(reviews.length <= 1, 'PROPOSAL_UNAVAILABLE', 'Speech proposal has conflicting reviews');
@@ -140,7 +144,20 @@ export function projectNarrationSpeechProposal(store: Store, projectId: string, 
           invariant(attempt && attempt.id === row.id && attempt.projectId === projectId && phases.includes(attempt.phase)
             && assertNarrationSpeechAttemptInput(view.reader, attempt)?.application.id === application.id,
           'PROPOSAL_UNAVAILABLE', 'Speech attempt differs from its exact application');
-          result.execution = { state: attempt.phase, candidateId: application.id, attemptId: attempt.id, code: attempt.phase === 'failed' ? 'EXECUTION_FAILED' : null };
+          const ingestionIssue = activeAttemptIngestionIssue(view.reader, attempt);
+          result.execution = { state: attempt.phase, candidateId: application.id, attemptId: attempt.id, code: attempt.phase === 'failed' ? 'EXECUTION_FAILED' : ingestionIssue?.code ?? null };
+          if (attempt.phase === 'succeeded') {
+            invariant(attempt.outputs.audio, 'PROPOSAL_UNAVAILABLE', 'Completed speech lost its exact recording');
+            // The historical admission helper probes an empty legacy allowance key for
+            // configured operations. Preserve Store's missing-key semantics without
+            // allowing an empty identity through the bounded projection reader.
+            const reader = { ...view.reader, get: <T>(kind: string, id: string): T | undefined =>
+              kind === 'external_allowance' && id === '' ? undefined : view.get<T>(kind, id) };
+            const recording = resolveGeneratedNarrationAudio(reader, projectId, attempt.outputs.audio.artifactId);
+            invariant(recording.attempt.id === attempt.id && recording.attempt.candidateId === application.id && recording.attempt.nodeId === resolved.review.nodeId,
+              'PROPOSAL_UNAVAILABLE', 'Completed recording belongs to another speech operation');
+            result.recording = summarizeGeneratedNarrationAudio(recording);
+          }
           beforeDispatch = attempt.phase === 'submitting' && !view.get('speech_execution_dispatch', attempt.id) && !view.get('speech_execution_result', attempt.id);
         }
         if (beforeDispatch) {
@@ -151,6 +168,7 @@ export function projectNarrationSpeechProposal(store: Store, projectId: string, 
     } catch (error) {
       if (!(error instanceof DomainError) || error.code === 'PROPOSAL_TOO_LARGE') throw error;
       result.execution = { state: 'unavailable', candidateId: result.application?.candidateId ?? null, attemptId: null, code: 'PROPOSAL_UNAVAILABLE' };
+      result.recording = null;
     }
     const recovery = recoveryCode(view, proposalId);
     if (recovery) result.eligibility = { current: false, code: recovery };

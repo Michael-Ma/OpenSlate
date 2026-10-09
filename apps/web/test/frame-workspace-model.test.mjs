@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   adjacentFrameShot,
   canExposeFrame,
-  canConfirmAfterSeen,
   currentFrameExposures,
   frameHistory,
   frameSelection,
@@ -297,50 +296,5 @@ test("missing current-attempt selection cannot classify arbitrary attempts as hi
     }),
     [],
     "Direct conditioning artifacts do not borrow an unrelated image history",
-  );
-});
-
-test("explicit confirmation can follow a valid visible decode after scrolling to the inspector", () => {
-  const frame = exposure(),
-    current = [frame],
-    seen = new Map([[frameExposureIdentity(frame), frame]]);
-  assert.equal(
-    canExposeFrame(frame, current, {
-      active: true,
-      visible: false,
-      decoded: true,
-    }),
-    false,
-    "Offscreen content cannot establish a new exposure",
-  );
-  assert.equal(
-    canConfirmAfterSeen(frame, current, seen, true),
-    true,
-    "The explicit action can follow the earlier successful exact view",
-  );
-  assert.equal(canConfirmAfterSeen(frame, current, seen, false), false);
-});
-
-test("hidden first loads, thumbnails, failed decodes or changed identities cannot supply confirmation proof", () => {
-  const frame = exposure(),
-    current = [frame],
-    seen = new Map();
-  assert.equal(canConfirmAfterSeen(frame, current, seen, true), false);
-  seen.set(frameExposureIdentity(frame), { ...frame, displayed: false });
-  assert.equal(canConfirmAfterSeen(frame, current, seen, true), false);
-  seen.set(frameExposureIdentity(frame), frame);
-  for (const changed of [
-    { ...frame, artifactId: "new" },
-    { ...frame, sha256: "b".repeat(64) },
-    { ...frame, projectRevisionId: "r2" },
-  ]) {
-    assert.equal(canConfirmAfterSeen(changed, [changed], seen, true), false);
-    assert.equal(canConfirmAfterSeen(frame, [changed], seen, true), false);
-  }
-  seen.delete(frameExposureIdentity(frame));
-  assert.equal(
-    canConfirmAfterSeen(frame, current, seen, true),
-    false,
-    "A failed main decode revokes previous proof",
   );
 });

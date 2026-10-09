@@ -6,6 +6,33 @@ type MediaTranslation = (
 ) => string;
 /** Controlled media UI only. Never translate owned names, scripts, transcripts or prompts. */
 export const mediaUiCopy: Readonly<Record<string, string>> = {
+  "Local scene recovery is unavailable. Keep this tab open until the request settles.":
+    "此浏览器无法使用本地场景恢复。请求结束前请保持此页面打开。",
+  "A local scene continuation could not be restored. Check the saved project before another decision.":
+    "无法恢复本地场景请求。作出新决定前，请核对已保存的项目。",
+  "Local scene recovery could not be saved. Keep this tab open and check the request before retrying.":
+    "无法保存本地场景恢复记录。请保持此页面打开，并在重试前核对请求。",
+  "This browser cannot lock scene recovery across tabs. Use a browser with Web Locks to check this request.":
+    "此浏览器无法跨标签页锁定场景恢复。请使用支持 Web Locks 的浏览器核对该请求。",
+  "Another tab is handling this project. Check it there or retry after it finishes.":
+    "另一个标签页正在处理此项目。请在那里核对，或等待其完成后重试。",
+  "A different scene request was saved in another tab. Reload and check that request before continuing.":
+    "另一个标签页保存了不同的场景请求。请刷新并核对该请求后再继续。",
+  "Local scene recovery could not protect this request. Check browser storage before continuing.":
+    "本地场景恢复无法保护此请求。请检查浏览器存储后再继续。",
+  "Local recovery could not protect this request. Keep the tab open and check browser storage before continuing.":
+    "本地恢复无法保护此请求。请保持此页面打开，并检查浏览器存储后再继续。",
+  "The saved scene continuation changed. Review the current scene before continuing.":
+    "已保存的场景恢复记录发生变化。继续前请检查当前场景。",
+  "Importing narration audio…": "正在导入旁白音频…",
+  "Generating narration…": "正在生成旁白…",
+  "Saving narration and timing…": "正在保存旁白与时序…",
+  "Preparing scene…": "正在准备场景…",
+  "Narration has returned, but audio import needs attention. Check the saved scene decision to continue the same job.":
+    "旁白已返回，但音频导入需要处理。请检查已保存的场景请求，以继续同一个任务。",
+
+  "Confirm a scene with at most 64 unfinished shots before preparing narration.":
+    "请确认未完成镜头不超过 64 个的场景，再准备旁白。",
   "Scene decisions": "场景生成",
   "Earlier scene decision": "之前的场景决定",
   "An earlier scene decision was not confirmed. Its exact saved request is kept.":
@@ -75,8 +102,8 @@ export const mediaUiCopy: Readonly<Record<string, string>> = {
   "s voice ·": "秒旁白 ·",
   "s shot": "秒镜头",
   "Match the shot to the recording (3–15s)": "让镜头时长匹配录音（3–15 秒）",
-  "Save the words or describe this recording before accepting it.":
-    "请先保存文稿或录音描述，再确认使用。",
+  "Save the words or describe this recording before saving its timing.":
+    "请先保存文稿或录音描述，再保存时序。",
   "Choose a 3–15 second range within this recording.":
     "请在录音中选择 3–15 秒的片段。",
   "Choose a nonempty range within this shot’s planned duration, or explicitly match a longer recording.":
@@ -451,7 +478,7 @@ export const mediaUiCopy: Readonly<Record<string, string>> = {
   "Check saved completion": "检查已保存的完成结果",
   Cancel: "取消",
   "Saved.": "已保存。",
-  "Narration accepted for this shot.": "此镜头的旁白已确认。",
+  "Recording and timing saved for this shot.": "此镜头的录音与时序已保存。",
   "Narration accepted. Update the visual plan: {v0}":
     "旁白已确认，请更新画面计划：{v0}",
   "The audio request could not complete.": "音频请求未能完成。",
@@ -488,8 +515,8 @@ export const mediaUiCopy: Readonly<Record<string, string>> = {
     "响应尚未确认 · 不会自动重复请求",
   "Narration in progress": "正在生成旁白",
   "Saving the recording": "正在保存录音",
-  "Recording ready · listen and attach it to a section":
-    "录音已就绪 · 试听后关联到段落",
+  "Recording ready · optional listening and timing edits":
+    "录音已就绪 · 可选试听或编辑时序",
   "Narration did not complete": "旁白未能完成",
   "Saved execution details are unavailable": "已保存的执行信息不可用",
   "Checking progress": "正在检查进度",
@@ -620,8 +647,35 @@ export const mediaUiCopy: Readonly<Record<string, string>> = {
     "此场景的关键帧和视频已保存。",
   "Update the motion or choose a model that supports these shot durations.":
     "请更新运动描述，或选择支持这些镜头时长的模型。",
-  "Finish the requested narration timing before video.":
-    "生成视频前，请先完成旁白时间范围。",
+  "Checking the current scene confirmation.": "正在检查当前场景确认内容。",
+  "Preparing narration…": "正在准备旁白…",
+  "Generating scene video…": "正在生成场景视频…",
+  "The scene changed. Review its current keyframes, motion and narration.":
+    "场景已更改，请检查当前的关键帧、动作与旁白。",
+  "Choose your registered narration voice before confirming this scene.":
+    "确认场景前，请选择已登记的旁白音色。",
+  "Choose a narration model and save its script before confirming this scene.":
+    "确认场景前，请选择旁白模型并保存文稿。",
+  "Choose a configured narration model before confirming this scene.":
+    "确认场景前，请选择已配置的旁白模型。",
+  "Add a recording for this shot before confirming the scene.":
+    "确认场景前，请为这个镜头添加录音。",
+  "Choose narration or No narration for each shot before confirming the scene.":
+    "确认场景前，请为每个镜头选择旁白或无旁白。",
+  "Shorten the narration or choose a recording range that fits the planned shot.":
+    "请缩短旁白，或选择不超过镜头计划时长的录音范围。",
+  "The selected narration recording changed. Review the current scene.":
+    "所选旁白录音已更改，请检查当前场景。",
+  "Add a recording or choose a narration model before confirming this scene.":
+    "确认场景前，请添加录音或选择旁白模型。",
+  "Narration job outcome is unconfirmed. Check the saved scene decision; no new job will be created.":
+    "旁白任务结果尚未确认。请检查已保存的场景请求，不会创建新任务。",
+  "Narration could not finish. Inspect its existing job or edit the shot, then confirm the current scene.":
+    "旁白未能完成。请检查已有任务或编辑镜头，然后确认当前场景。",
+  "Narration is still being prepared. Check the saved scene decision to continue its existing job.":
+    "旁白仍在准备中。请检查已保存的场景请求，以继续已有任务。",
+  "Narration is longer than the planned shot. Shorten its script or recording range before confirming the scene.":
+    "旁白超出镜头计划时长。请缩短文稿或录音范围，然后确认场景。",
   "Display every current keyframe on the right before generating video.":
     "生成视频前，请先查看右侧所有当前关键帧。",
   "Refresh this scene before generating.": "生成前请先刷新此场景。",
@@ -731,11 +785,18 @@ export function mediaControlledMessage(
       "段落 {section} 超过六分钟时长上限。",
       { section: match[1]! },
     );
-  const prefix = "Narration accepted. Update the visual plan: ";
-  if (text.startsWith(prefix))
+  const earlierPrefix = "Narration accepted. Update the visual plan: ";
+  if (text.startsWith(earlierPrefix))
     return t(
       "Narration accepted. Update the visual plan: {message}",
       "旁白已确认，请更新画面计划：{message}",
+      { message: ui(text.slice(earlierPrefix.length), mediaUiCopy) },
+    );
+  const prefix = "Recording and timing saved. Update the visual plan: ";
+  if (text.startsWith(prefix))
+    return t(
+      "Recording and timing saved. Update the visual plan: {message}",
+      "录音与时序已保存，请更新画面计划：{message}",
       { message: ui(text.slice(prefix.length), mediaUiCopy) },
     );
   return ui(text, mediaUiCopy);

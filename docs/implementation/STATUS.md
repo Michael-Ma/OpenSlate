@@ -1,6 +1,6 @@
 # Current implementation status
 
-Reconciled October 8, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 9, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
 ## Available behavior
 
@@ -16,6 +16,43 @@ Reconciled October 8, 2026. OpenSlate is an early single-user local studio. The 
 | Local operation | Source launcher, pairing, doctor/private config, migrations and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
 
 Requested workflow items 1–5 are implemented. Item 6 is partial because provider voice-ID synthesis does not create a new voice clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 code review](V1-COMPLETION-REVIEW.md) records fixes and scope.
+
+## October 9 compatibility fix and local recovery — verified
+
+The explicitly approved generated-narration validator fix now accepts the existing compact shot API only with exact local-human, single-shot and pinned-section evidence. Project-wide acceptance and recording/timing/provenance checks remain. Invalid foreign shot, section, project, principal and multi-scope evidence is rejected; historical acceptance survives backup/restore. The earlier failing compatibility test now passes.
+
+Generation remains nonmodal. Versioned browser-local caches retain an atomic composer draft (text, scopes, references, question/continuation context), active project/shot, settings/editor/brief/audio drafts, personal-voice text, and Timeline duration/music edits. Scene recovery stores its original command, frozen per-step request keys/bodies and completion checkpoints together. Reload restores an idle manual continuation without POSTing. Web Locks serialize same-project tabs; live authority remains on the server. Stale contexts need explicit resolution, and valid older checkpoints survive storage failures. Session responses expose a nonsecret installation/restore cache namespace; credentials, binary uploads and voice consent are never cached.
+
+Final `pnpm check` passed **2,480 tests, zero failures and one optional skip** (2,481 total), including all package builds/typechecks under Node 24.15.0 and the pinned media profile. Frontend: **295 passed**. Astra designed the recovery boundaries and independently reviewed the implementation; GPT-6 Sol agents implemented the fixes. Astra independently ran **37 targeted tests** and reported no remaining material findings.
+
+Built-browser checks verified draft/reference/scope/shot restoration, unsaved Director selection without apply, brief recovery, failed shot-edit recovery without canonical changes, failed Timeline gain/start recovery, installation cache isolation, and an accepted generation whose withheld response survives reload and resolves through its exact original key. Reload alone produced no generation POST. English/Chinese and Day/Night remain supported. No live-provider call, production-data edit or production restart occurred. The [authority and workflow review](../design/AUTHORITY-AND-WORKFLOW-REVIEW.md) records scope and storage limits. The offline restart/edit/export demo also passed: four initial fake accepts plus two scoped replacements, zero duplicates after restart, and the untouched shot preserved. Remote CI is checked on the published commit.
+
+## October 9 earlier nonmodal checkpoint — superseded
+
+The verified compatibility and recovery entry above resolves the release blocker and memory-only limits recorded at this earlier checkpoint.
+
+
+Generation/keyframe decisions now close immediately when their exact command is captured, including fast failures. Workspace activity retains phase, errors, same-request recovery and Stop across dialog dismissal/project switching. Read-only browsing, local draft/reference/scope changes and project switching remain available; conflicting project writes stay fenced until resolution or explicit Stop. Settings reads and settled uncertain voice requests no longer trap dismissal; failed media previews have read-only retry; Timeline propagates save failure and exposes errors in the visible mobile pane; active export status expands automatically. Current V5 Director context describes one scene confirmation without separate narration approval.
+
+The final full offline run passed **2,453 tests**, with **one known failure and one optional skip** (2,455 total). The failure remains `GENERATED_NARRATION_CONFLICT: Canonical generated acceptance lacks its human project request evidence`; the exact shot-scope compatibility patch is still inactive after automatic execution approval review denied it. All package typechecks passed; the final frontend run passed **272 tests**. Final draft-scope navigation adjustment also passed frontend typecheck/build and browser verification. Independent UI/source review found no remaining material findings in this change.
+
+Actual built-UI fixture checks covered held scene dispatch, immediate return/focus, fast keyframe rejection, mobile Escape/cancel, uncertain-response exact retry, Stop then reconciliation, definitive-error dismissal, project/draft/shot isolation, preview failure/retry without generation, visible Timeline conflict, Settings dismissal during a held read, English Day and Chinese Night at desktop/390px. No live media calls, production job/data edits or production restart occurred. The UI coordinator and unsent drafts are memory-only across page reload; submitted backend jobs remain durable. Source is uncommitted/unpushed while the integrated narration compatibility failure remains. See the [authority debrief and workflow audit](../design/AUTHORITY-AND-WORKFLOW-REVIEW.md).
+
+## October 8 generated narration import stall — source fix prepared
+
+Read-only live diagnosis found a complete OpenAI PCM response with unknown-length RIFF/data fields (0xffffffff). The previous fixed-size WAV inspector rejected it with `AUDIO_PCM_INVALID`, leaving its owned job in ingestion before any normalized recording. No video job had started. The saved first response contains 97,200 mono samples at 24 kHz (4.05 seconds); it can be reused without another synthesis call.
+
+The source supports that exact standard 44-byte streaming header only with a verified completed byte count. Strict FFmpeg decoding uses a private finite-length header copy, while the original response and its hash remain unchanged. Exact endpoint/provenance checks, default strict readers and original cancellation remain enforced. Owned ingestion issues are sanitized and exposed without changing phase, authority, liability or retry policy; the scene action shows generation/import/save progress and retains its original request for local processing attention.
+
+Independent review and synthetic PCM/import/provenance tests passed. The full recheck passed **2,443 tests**, with one failure for the separately pending shot-ownership compatibility patch and one optional skip. A lease-timing failure on the first run passed isolated and full rechecks; its assertions were not changed. No live job, raw bytes or production database were modified, and the running server was not restarted. Both fixes and final scene acceptance must be verified before the pending workflow is committed or pushed.
+
+## October 8 single scene confirmation — pending final compatibility fix
+
+The working source removes per-shot keyframe checks and separate narration-review navigation. The scene decision shows narration alongside the actual video recipe, then uses one green **Confirm & generate** action. A UI coordinator calls existing scoped, idempotent shot-generation/attachment/save endpoints before scene video generation; listening is optional, exact sample timing and writing versions are fenced, and Stop remains reachable inside the dialog. No new broad scene authorization path was added.
+
+Review found and reproduced an existing generated-audio compatibility defect: the compact shot acceptance API is rejected by a historical canonical validator that assumes project-wide human scope. Geometry/read-only projection fixes and the UI are implemented; the exact pinned-shot provenance compatibility patch remains inactive because automatic approval review rejected that authorization-related change. A precise human approval request and reviewed patch are pending. Do not treat this workflow as complete or release it until that patch and final integrated checks pass.
+
+At this checkpoint, the full offline gate passed **2,428 tests**, had one failure reproducing that known defect and one optional skip. Later targeted tests also cover lost speech/save/video responses, existing unknown jobs, new writing without stale-audio reuse, concurrent narration trim, same-head newer requests and bounded long-ID retry keys. Final frontend tests/types/builds and browser evidence are recorded in the task artifacts; no real media calls were made. Source remains uncommitted pending the final fix.
 
 ## October 8 workspace navigation highlight
 

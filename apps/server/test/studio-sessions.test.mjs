@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +9,9 @@ import { StudioSessions } from '../dist/studio-sessions.js';
 import { studioUrl, openStudioBrowser } from '../dist/studio-launcher.js';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
+import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { ProductionService } from '../dist/application/service.js';
+import { installRecoveryQuarantine } from '../dist/application/installation-recovery.js';
 import { FakeProvider } from '../../../packages/providers/dist/index.js';
 
 const token = 'local_studio_test_012345678901234567890';
@@ -18,13 +21,14 @@ function fixture(t) {
   let now = 1000;
   const root = mkdtempSync(join(tmpdir(), 'openslate-studio-session-'));
   const store = new Store(join(root, 'app.sqlite')), provider = new FakeProvider(join(root, 'fake.sqlite'));
-  const service = new ProductionService(store, new Engine(store, provider, { artifactDir: join(root, 'artifacts') }));
+  const outputStore = new ExecutionOutputStore(store, { rootDir: join(root, 'execution-output') });
+  const service = new ProductionService(store, new Engine(store, provider, { artifactDir: join(root, 'artifacts'), outputStore }));
   const sessions = new StudioSessions(() => now);
   const app = createApp({ service, localToken: token, studioSessions: sessions });
   t.after(async () => { await app.close(); provider.close(); store.close(); rmSync(root, { recursive: true, force: true }); });
   const req = (url, options = {}) => app.inject({ url, ...options, headers: { host: '127.0.0.1:3001', ...options.headers } });
   const connect = code => req('/api/session', { method: 'POST', headers: browserHeaders, payload: { code: code ?? sessions.issueLaunch() } });
-  return { app, store, service, sessions, req, connect, advance: ms => { now += ms; } };
+  return { app, root, store, service, sessions, outputStore, req, connect, advance: ms => { now += ms; } };
 }
 const cookieOf = response => response.headers['set-cookie'].split(';')[0];
 
@@ -38,14 +42,36 @@ test('launcher credential mints a single-use link; browser obtains only cookie a
   assert.equal(connected.statusCode, 200);
   assert.match(connected.headers['set-cookie'], /HttpOnly; SameSite=Strict; Path=\/api; Max-Age=43200/);
   assert.equal(connected.headers['cache-control'], 'no-store');
-  assert.deepEqual(Object.keys(connected.json()), ['csrf']); assert.ok(!connected.body.includes(token));
+  assert.deepEqual(Object.keys(connected.json()).sort(), ['csrf', 'cacheNamespace'].sort());
+  assert.match(connected.json().cacheNamespace, /^[a-f0-9]{64}$/); assert.ok(!connected.body.includes(token));
   const cookie = cookieOf(connected);
   assert.ok(!connected.body.includes(cookie.split('=')[1]));
   assert.equal((await f.connect(code)).json().error.code, 'STUDIO_LINK_EXPIRED');
   const restored = await f.req('/api/session', { headers: { cookie } });
   assert.equal(restored.json().csrf, connected.json().csrf);
+  assert.equal(restored.json().cacheNamespace, connected.json().cacheNamespace);
   assert.equal((await f.req('/api/projects', { headers: { cookie } })).statusCode, 200);
   assert.equal((await f.req('/api/studio/launch', { method: 'POST', headers: { ...browserHeaders, cookie, 'x-openslate-csrf': connected.json().csrf } })).statusCode, 403);
+});
+
+test('public cache namespace is stable for one installation and changes across data roots or a restore generation', async t => {
+  const f = fixture(t), first = await f.connect(), cookie = cookieOf(first), namespace = first.json().cacheNamespace;
+  assert.equal(new ExecutionOutputStore(f.store, { rootDir: join(f.root, 'execution-output') }).storageId, f.outputStore.storageId);
+  assert.equal((await f.req('/api/session', { headers: { cookie } })).json().cacheNamespace, namespace);
+  const restartedSessions = new StudioSessions(), restarted = createApp({ service: f.service, localToken: token, studioSessions: restartedSessions });
+  t.after(() => restarted.close());
+  const reconnect = await restarted.inject({ url: '/api/session', method: 'POST', payload: { code: restartedSessions.issueLaunch() },
+    headers: { host: '127.0.0.1:3001', ...browserHeaders } });
+  assert.equal(reconnect.statusCode, 200); assert.equal(reconnect.json().cacheNamespace, namespace);
+  const other = fixture(t), otherNamespace = (await other.connect()).json().cacheNamespace;
+  assert.notEqual(otherNamespace, namespace);
+  f.service.createProject('Restore cache partition');
+  installRecoveryQuarantine(f.store, { restoreId: randomUUID(), backupId: randomUUID(), backupManifestSha256: 'a'.repeat(64), sourceDatabaseSha256: 'b'.repeat(64),
+    originalDataRoot: f.root, backupCreatedAt: '2026-09-11T00:00:00.000Z', restoredAt: '2026-09-12T00:00:00.000Z' });
+  const restoredNamespace = (await f.req('/api/session', { headers: { cookie } })).json().cacheNamespace;
+  assert.match(restoredNamespace, /^[a-f0-9]{64}$/); assert.notEqual(restoredNamespace, namespace);
+  assert.equal((await f.connect()).json().cacheNamespace, restoredNamespace);
+  assert.ok(!first.body.includes(f.root)); assert.ok(!first.body.includes(f.outputStore.storageId));
 });
 
 test('cookie mutations require the exact session CSRF and an allowed Origin, while bearer clients still work', async t => {

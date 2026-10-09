@@ -192,3 +192,23 @@ export function continueReferencedWork(
     throw Error("制作已暂停。先清除镜头与场景引用，或显式引用整个项目后继续。");
   return continueStoppedWork(command, control);
 }
+
+/** Replying to a question disables mentions without disabling submission of the reply itself. */
+export function composerEnterAction(input: {
+  disabled: boolean;
+  pending: boolean;
+  allowReferences: boolean;
+  pickerOpen: boolean;
+  hasOption: boolean;
+  modified: boolean;
+}): "choose" | "send" | "none" {
+  if (input.pending) return "none";
+  if (
+    input.allowReferences &&
+    input.pickerOpen &&
+    input.hasOption &&
+    !input.modified
+  )
+    return "choose";
+  return input.disabled ? "none" : "send";
+}

@@ -45,7 +45,7 @@ export class SpoolAudioIngestor implements ExecutionOutputIngestor {
       const owned = await this.outputs.resolveOutput(attempt.projectId, attempt.id, output, { signal });
       // The Engine may recover a generic spool without calling the provider bridge. Re-establish speech's exact response lineage here.
       this.owned(attempt, signal, owned.spool.id);
-      const raw = await inspectPcmWave(owned.path, AUDIO_DERIVATION_LIMITS.inputBytes, signal);
+      const raw = await inspectPcmWave(owned.path, AUDIO_DERIVATION_LIMITS.inputBytes, signal, { completedStreamBytes: owned.spool.byteLength });
       invariant(raw.sha256 === output.sha256 && raw.byteLength === output.byteLength, "AUDIO_DERIVATION_CONFLICT", "Raw PCM bytes differ from their spool");
       this.owned(attempt, signal, owned.spool.id);
       const id = audioDerivationId(attempt.projectId, attempt.id), saved = this.outputs.store.get<AudioDerivationIntent>("audio_derivation_intent", id);
@@ -75,7 +75,7 @@ export class SpoolAudioIngestor implements ExecutionOutputIngestor {
           invariant(canonical(normalization) === canonical(intent.normalization), "AUDIO_DERIVATION_RECIPE_CHANGED", "Incomplete derivation requires its original normalization recipe and toolchain");
         }
         this.owned(attempt, signal, owned.spool.id);
-        const source = await this.media.importMedia({ artifactId: intent.artifactId, path: owned.path, kind: "audio" }, { signal });
+        const source = await this.media.importMedia({ artifactId: intent.artifactId, path: owned.path, kind: "audio" }, { signal, completedStreamBytes: owned.spool.byteLength });
         const verified = await this.media.verifiedSource(source, { signal });
         const normalized = await inspectPcmWave(verified.path, intent.normalization.maxOutputBytes, signal);
         invariant(normalized.sha256 === source.sha256 && normalized.byteLength === source.byteLength

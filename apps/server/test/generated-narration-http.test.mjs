@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonical, digest } from '@openslate/core';
 import { createApp } from '../dist/app.js';
@@ -9,6 +10,9 @@ import { MediaApplicationService, registerMediaRoutes } from '../dist/media/inde
 import { ManagedUploadStore } from '../dist/narration/managed-upload.js';
 import { projectDirectorContext, DIRECTOR_PROJECTION_LIMITS } from '../dist/application/context-projection.js';
 import { generatedNarrationFixture } from './generated-narration-fixture.mjs';
+import { assertGeneratedCanonicalNarrationSegment } from '../dist/narration/generated-audio.js';
+import { createInstallationBackup, inspectInstallationBackup } from '../dist/persistence/installation-backup.js';
+import { restoreInstallationBackup } from '../dist/persistence/installation-restore.js';
 
 const token = 'offline_generated_narration_http_token';
 async function setup(t) {
@@ -127,4 +131,88 @@ test('context distinguishes generated evidence from human labels while preservin
   assert.equal(next.applicationCapabilities.narration.generatedRecordingAttachment.toolAvailable, false);
   assert.equal(next.applicationCapabilities.narration.speechSynthesis.available, false); assert.equal(next.applicationCapabilities.narration.transcription.available, false);
   assert.equal(f.store.db.prepare('SELECT total_changes() AS n').get().n, before); assert.deepEqual(f.calls, f.initialCalls);
+});
+
+async function scopedGeneratedShot(t,options={}) {
+  const f=await generatedNarrationFixture(t,options),shape=(await import('./execution-fixture.mjs')).projectFixture(f.project.id,2),current=f.store.getProject(f.project.id);
+  const project=f.store.saveProject({...current,...shape,capabilityLockId:current.capabilityLockId,activePlanId:null,shots:shape.shots.map((shot,index)=>({...shot,narration:{mode:index?'none':'generated',text:index?'':'Leather boots.',voice:'stock'},narrationPending:!index}))},current.headVersion);
+  f.store.insert('project_revision',project.revisionId,project.id,{project});
+  f.app=createApp({service:f.production,localToken:token});registerNarrationRoutes(f.app,{production:f.production,narration:f.narration,canonical:f.canonical,uploadDirectory:join(f.root,'uploads')});await f.app.ready();t.after(()=>f.app.close());
+  f.request=(suffix,payload,commandKey=randomUUID())=>f.app.inject({method:payload===undefined?'GET':'POST',url:`/api/projects/${project.id}/narration${suffix}`,...(payload===undefined?{}:{payload}),headers:{host:'127.0.0.1',authorization:`Bearer ${token}`,'idempotency-key':commandKey}});
+  let result=await f.request('/shots/shot-0/initialize',{expectedHeadVersion:project.headVersion,expectedNarrationVersion:f.narration.workspaceSnapshot(project.id).state.version,text:'Leather boots.',mode:'generated',voice:'coral',profileId:f.profile.id});
+  assert.equal(result.statusCode,200,result.body);const detail=result.json(),session=detail.session;
+  const recording=(await f.request('/generated-recordings')).json().recordings[0];
+  result=await f.request('/generated-audio-bindings',{sessionId:session.id,expectedVersion:f.narration.workspaceSnapshot(project.id).state.version,segmentId:detail.segment.entry.segmentId,segmentRevisionId:detail.segment.script.id,artifactId:recording.id,...recording.selection});
+  assert.equal(result.statusCode,200,result.body);
+  const row=(await f.request('/shots/shot-0')).json().segment;
+  f.acceptBody={sessionId:session.id,expectedHeadVersion:f.store.getProject(project.id).headVersion,expectedVersion:f.narration.workspaceSnapshot(project.id).state.version,segmentId:row.entry.segmentId,segmentRevisionId:row.script.id,audioId:row.audio.id,sha256:row.audio.media.sha256,startSample:0,endSample:row.audio.media.probe.audio.samples,durationMode:'keep'};
+  return f;
+}
+test('a verified generated take accepts through the existing narrow shot API and retains full within-shot provenance',async t=>{
+  const f=await scopedGeneratedShot(t,{samples:24001}),before=f.store.getProject(f.project.id),response=await f.request('/shots/shot-0/accept',f.acceptBody,'verified-within-shot');
+  assert.equal(response.statusCode,200,response.body);
+  const current=f.store.getProject(f.project.id),saved=f.canonical.workspaceCurrent(f.project.id),segment=saved.segments[0];
+  assert.equal(current.shots[0].desiredFrames,180);assert.deepEqual(current.shots[1],before.shots[1]);
+  assert.equal(segment.placementMode,'shot');assert.equal(segment.timingMode,'within_shot');
+  assert.equal(segment.cue.durationFrames,Math.ceil(f.acceptBody.endSample/1600));assert.equal(segment.audioPlacement.durationSamples,f.acceptBody.endSample);
+  assert.equal(segment.provenance.originEvidence,'verified_generated_audio');assert.equal(segment.provenance.generation.attemptId,f.attempt.id);
+  assert.equal(f.store.list('narration_acceptance',f.project.id).length,3);assert.deepEqual(f.calls,f.initialCalls);
+  const replay=await f.request('/shots/shot-0/accept',f.acceptBody,'verified-within-shot');assert.equal(replay.statusCode,200,replay.body);assert.deepEqual(replay.json(),response.json());
+  assert.equal(f.store.list('narration_acceptance',f.project.id).length,3);assert.deepEqual(f.calls,f.initialCalls);
+});
+test('existing generated shot acceptance refuses overlong ranges before saving decisions or changing planned duration',async t=>{
+  const f=await scopedGeneratedShot(t,{samples:168001}),before=canonical(f.store.getProject(f.project.id)),state=canonical(f.narration.workspaceSnapshot(f.project.id));
+  const response=await f.request('/shots/shot-0/accept',f.acceptBody,'overlong-verified-voice');
+  assert.equal(response.json().error.code,'NARRATION_CUE_OUT_OF_RANGE');assert.equal(canonical(f.store.getProject(f.project.id)),before);assert.equal(canonical(f.narration.workspaceSnapshot(f.project.id)),state);
+  assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);assert.deepEqual(f.calls,f.initialCalls);
+});
+test('the existing narrow narration helper proves the genuine shot pin and rejects unrelated sections',async t=>{
+  const f=await scopedGeneratedShot(t),{narrationAuthorScope,narrationScopeTarget}=await import('../dist/narration/narration-scope.js');
+  const session=f.store.get('narration_session',f.acceptBody.sessionId),request=f.store.get('message',session.requestId),scope=narrationAuthorScope(f.store,f.project.id,request.id,request.principalId,f.acceptBody.segmentId);
+  assert.equal(request.principalId,'local-user');assert.deepEqual(request.scopeIds,['shot-0']);assert.equal(scope.shotId,'shot-0');
+  assert.equal(narrationScopeTarget(f.store,scope).segmentId,f.acceptBody.segmentId);
+  const unrelated=f.narration.workspaceSnapshot(f.project.id).segments.find(row=>row.entry.segmentId!==f.acceptBody.segmentId);
+  assert.throws(()=>narrationAuthorScope(f.store,f.project.id,request.id,request.principalId,unrelated.entry.segmentId),{code:'SCOPE_DENIED'});
+  assert.deepEqual(f.calls,f.initialCalls);
+});
+
+test('historical generated shot provenance rejects a different shot, section, project, principal or multiple scopes',async t=>{
+  const f=await scopedGeneratedShot(t),response=await f.request('/shots/shot-0/accept',f.acceptBody,'scope-bound-accept');
+  assert.equal(response.statusCode,200,response.body);
+  const saved=f.canonical.workspaceCurrent(f.project.id),segment=saved.segments[0],selection={narrationRevisionId:saved.narrationRevisionId,narrationVersion:saved.narrationVersion};
+  const session=f.store.get('narration_session',f.acceptBody.sessionId),otherSection=f.narration.workspaceSnapshot(f.project.id).segments.find(row=>row.entry.segmentId!==f.acceptBody.segmentId);
+  const verify=()=>assertGeneratedCanonicalNarrationSegment(f.store,f.project.id,segment,selection);
+  verify();
+  const damage=(name,kind,id,edit,expectedCode)=>{
+    const row=f.store.db.prepare('SELECT body,project_id FROM entities WHERE kind=? AND id=?').get(kind,id);
+    assert.ok(row,`${name} evidence exists`);
+    const changed=edit(JSON.parse(row.body),row.project_id);
+    f.store.db.prepare('UPDATE entities SET body=?,project_id=? WHERE kind=? AND id=?').run(canonical(changed.body),changed.projectId??row.project_id,kind,id);
+    try { assert.throws(verify,{code:expectedCode},name); }
+    finally { f.store.db.prepare('UPDATE entities SET body=?,project_id=? WHERE kind=? AND id=?').run(row.body,row.project_id,kind,id); }
+    verify();
+  };
+  damage('other shot','message',session.requestId,body=>({body:{...body,scopeIds:['shot-1']}}),'SCOPE_DENIED');
+  damage('multiple shot scopes','message',session.requestId,body=>({body:{...body,scopeIds:['shot-0','shot-1']}}),'SCOPE_DENIED');
+  damage('other principal','message',session.requestId,body=>({body:{...body,principalId:'other-human'}}),'GENERATED_NARRATION_CONFLICT');
+  damage('other section','narration_shot_scope_target',session.requestId,body=>({body:{...body,segmentId:otherSection.entry.segmentId}}),'SCOPE_DENIED');
+  const otherProject=f.production.createProject('Foreign provenance project');
+  damage('other project','narration_shot_scope_target',session.requestId,(body)=>({body,projectId:otherProject.id}),'SCOPE_DENIED');
+  assert.deepEqual(f.calls,f.initialCalls);
+});
+
+test('accepted generated shot provenance survives independent backup inspection and same-root restore',async t=>{
+  const f=await scopedGeneratedShot(t),response=await f.request('/shots/shot-0/accept',f.acceptBody,'backup-shot-accept');
+  assert.equal(response.statusCode,200,response.body);
+  const saved=f.canonical.workspaceCurrent(f.project.id),selection={narrationRevisionId:saved.narrationRevisionId,narrationVersion:saved.narrationVersion};
+  assertGeneratedCanonicalNarrationSegment(f.store,f.project.id,saved.segments[0],selection);
+  const backup=await createInstallationBackup({sourceRoot:f.root,destination:join(f.parent,'shot-backup')});
+  assert.deepEqual(await inspectInstallationBackup({directory:backup.directory}),backup);
+  f.store.close();renameSync(f.root,join(f.parent,'original-installation'));
+  const restored=await restoreInstallationBackup({directory:backup.directory,destination:f.root});
+  assert.equal(restored.status,'restored');f.open(true);
+  const historical=f.canonical.workspaceCurrent(f.project.id);
+  assert.equal(canonical(historical),canonical(saved));
+  assertGeneratedCanonicalNarrationSegment(f.store,f.project.id,historical.segments[0],selection);
+  assert.deepEqual(f.calls,f.initialCalls);
 });

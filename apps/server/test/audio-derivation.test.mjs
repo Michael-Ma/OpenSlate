@@ -199,3 +199,15 @@ test("malformed or null completion metadata never becomes an absent completion o
     assert.equal(readFileSync(index(f), "utf8"), content);
   }
 });
+
+test('completed streaming speech WAV normalizes once from retained original bytes without another provider request', async t => {
+  const bytes=wav(24000,1,97200);bytes.writeUInt32LE(0xffffffff,4);bytes.writeUInt32LE(0xffffffff,40);
+  const f=await fixture(t,{bytes});await f.engine.runReady();
+  assert.equal(attempt(f).phase,'succeeded');
+  const intent=f.store.list('audio_derivation_intent',f.project.id)[0],receipt=result(f);
+  assert.equal(intent.rawPcm.sampleCount,97200);assert.equal(receipt.normalizedSamples,194400);
+  assert.equal(receipt.source.originalSha256,hash(bytes));assert.equal(receipt.source.originalByteLength,bytes.length);
+  assert.deepEqual(readFileSync(join(f.media.rootDir,'blobs',`${hash(bytes)}.source`)),bytes);
+  expire(f);await f.engine.reconcile();assert.equal(attempt(f).phase,'succeeded');
+  assert.deepEqual(f.calls,{submit:1,normalize:1,recipe:1});
+});

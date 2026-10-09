@@ -1,5 +1,5 @@
 import { constants, mkdirSync, realpathSync } from "node:fs";
-import { chmod, link, lstat, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
+import { chmod, copyFile, link, lstat, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
@@ -198,23 +198,52 @@ export class LocalMediaService {
     }));
   }
 
-  async importMedia(input: { artifactId: string; path: string; kind: "video" | "audio" }, options: { signal?: AbortSignal } = {}): Promise<SuppliedMedia> {
+  async importMedia(input: { artifactId: string; path: string; kind: "video" | "audio" }, options: { signal?: AbortSignal; completedStreamBytes?: number } = {}): Promise<SuppliedMedia> {
+    input = structuredClone(input);
+    const { signal, completedStreamBytes } = options;
     return this.exclusive(async () => this.temporary(async dir => {
       invariant(typeof input.artifactId === "string" && ID.test(input.artifactId) && (input.kind === "video" || input.kind === "audio"), "MEDIA_INVALID_INPUT", "Invalid supplied-media identity or kind");
       const sourcePath = join(dir, "input");
-      await this.snapshot(input.path, sourcePath, options.signal);
-      const inputProbe = await this.inspect(sourcePath, options.signal);
+      await this.snapshot(input.path, sourcePath, signal);
+      let decoderPath = sourcePath;
+      if (completedStreamBytes !== undefined) {
+        invariant(input.kind === "audio", "MEDIA_INVALID_INPUT", "Only completed generated audio may use streaming WAV framing");
+        await inspectPcmWave(sourcePath, this.limits.maxInputBytes, signal, { completedStreamBytes });
+        const file = await open(sourcePath, "r");
+        const header = Buffer.alloc(8);
+        try { invariant((await file.read(header, 0, 8, 0)).bytesRead === 8, "AUDIO_PCM_INVALID", "WAV header changed before normalization"); }
+        finally { await file.close(); }
+        if (header.readUInt32LE(4) === 0xffffffff) {
+          // Keep the paid response byte-for-byte. FFmpeg's strict WAV demuxer
+          // needs finite sizes, so only a private decoder copy is re-framed.
+          decoderPath = join(dir, "framed-input.wav");
+          aborted(signal);
+          await copyFile(sourcePath, decoderPath, constants.COPYFILE_EXCL);
+          const decoder = await open(decoderPath, constants.O_RDWR | constants.O_NOFOLLOW);
+          try {
+            const size = Buffer.alloc(4);
+            size.writeUInt32LE(completedStreamBytes - 8);
+            invariant((await decoder.write(size, 0, 4, 4)).bytesWritten === 4, "MEDIA_WRITE_FAILED", "Unable to frame completed WAV input");
+            size.writeUInt32LE(completedStreamBytes - 44);
+            invariant((await decoder.write(size, 0, 4, 40)).bytesWritten === 4, "MEDIA_WRITE_FAILED", "Unable to frame completed WAV input");
+            await decoder.sync();
+          } finally { await decoder.close(); }
+          aborted(signal);
+          await inspectPcmWave(decoderPath, this.limits.maxInputBytes, signal);
+        }
+      }
+      const inputProbe = await this.inspect(decoderPath, signal);
       invariant(inputProbe[input.kind], "MEDIA_STREAM_MISSING", `Supplied file has no ${input.kind} stream`);
-      const toolchainDigest = await this.toolchainDigest(options.signal);
+      const toolchainDigest = await this.toolchainDigest(signal);
       const output = join(dir, input.kind === "video" ? "normalized.mp4" : "normalized.wav");
-      const args = ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", sourcePath, "-map_metadata", "-1", "-map_chapters", "-1"];
+      const args = ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", decoderPath, "-map_metadata", "-1", "-map_chapters", "-1"];
       if (input.kind === "video") args.push("-map", `0:${inputProbe.video!.streamIndex}`, "-an", "-vf", "fps=30,setsar=1,pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "18", "-metadata:s:v:0", "rotate=0", "-movflags", "+faststart");
       else args.push("-map", `0:${inputProbe.audio!.streamIndex}`, "-vn", "-af", "aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2");
       // The extra second detects an overlong source instead of silently accepting
       // the truncated prefix. Time and byte limits also bound bad metadata.
       args.push("-t", String(this.limits.maxDurationFrames / FPS + 1), "-fs", String(this.limits.maxOutputBytes), output);
-      await this.run(this.ffmpeg, args, options.signal);
-      const probe = await this.inspect(output, options.signal);
+      await this.run(this.ffmpeg, args, signal);
+      const probe = await this.inspect(output, signal);
       if (input.kind === "video") invariant(probe.video?.frameRate === "30/1" && probe.video.frames > 0 && !probe.audio, "MEDIA_VALIDATION_FAILED", "Normalized video must be silent 30 fps media");
       else invariant(probe.audio?.sampleRate === SAMPLE_RATE && probe.audio.channels === 2 && probe.audio.samples !== null && !probe.video, "MEDIA_VALIDATION_FAILED", "Normalized audio must have measured 48 kHz stereo samples");
       const expectedDuration = inputProbe[input.kind]!.durationSeconds;
@@ -222,8 +251,8 @@ export class LocalMediaService {
       // Decoder delay/padding can differ slightly from compressed audio metadata;
       // a size-limited prefix must never become an apparently complete import.
       invariant(Math.abs(expectedDuration - observedDuration) <= (input.kind === "video" ? 1 / FPS + 0.001 : 0.1), "MEDIA_VALIDATION_FAILED", "Normalization truncated or changed source duration");
-      await this.decode(output, options.signal);
-      aborted(options.signal);
+      await this.decode(output, signal);
+      aborted(signal);
       const original = await this.installFile(sourcePath, "source", this.limits.maxInputBytes);
       const normalized = await this.installFile(output, input.kind === "video" ? "mp4" : "wav", this.limits.maxOutputBytes);
       const body = { artifactId: input.artifactId, kind: input.kind, originalSha256: original.sha256, originalByteLength: original.byteLength, sha256: normalized.sha256, byteLength: normalized.byteLength, probe, toolchainDigest };

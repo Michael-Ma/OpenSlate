@@ -40,6 +40,7 @@ import { FrameDecision, SceneDecisionFooter } from "./FrameDecision";
 import type { FrameRequest } from "./frame-decision-model";
 import { pendingCommandsFor } from "./pending-command";
 import "./frame-shell.css";
+import { SceneActivity } from "./SceneActivity";
 import { ConversationActions } from "./ConversationActions";
 import { exposedSceneFrameKey } from "./conversation-actions-model";
 import "./conversation-workspace.css";
@@ -76,7 +77,7 @@ import { ProjectSettings } from "./ProjectSettings";
 import { DirectorPlan } from "./DirectorPlan";
 import { MediaPanel } from "./MediaPanel";
 import { AssetLibrary } from "./AssetLibrary";
-import { NarrationPanel } from "./NarrationPanel";
+import { ShotAudioPanel } from "./ShotAudioPanel";
 import { NewProjectProviderFields } from "./ProviderSettings";
 import { RecoveryPanel, RecoveryReadOnly } from "./RecoveryPanel";
 import { canUseDemo, projectCreationCommand } from "./provider-model";
@@ -94,6 +95,24 @@ import {
   makeMessageCommand,
   makeQuestionReply,
 } from "./model";
+import {
+  cacheableComposerDraft,
+  composerContextIssues,
+  composerIsEmpty,
+  emptyComposerDraft,
+  isComposerDraft,
+  isShotScopeList,
+} from "./composer-draft-cache";
+import type { ComposerDraft } from "./composer-draft-cache";
+import {
+  clearLocalDraft,
+  discardUnreadableLocalDrafts,
+  isDraftText,
+  localDraftNotice,
+  readLocalDraft,
+  subscribeLocalDraftNotice,
+  writeLocalDraft,
+} from "./local-draft-cache";
 import type {
   DirectorStatus,
   MessageCommand,
@@ -103,6 +122,17 @@ import type {
 } from "./model";
 
 const projectPath = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
+const localDraftUiMessages = {
+  "A draft changed in another tab. Save or copy your current work before reloading to inspect it.": "另一个标签页修改了草稿。重新载入查看前，请先保存或复制当前内容。",
+  "Local draft recovery is unavailable in this browser. Keep this tab open until you save.": "此浏览器无法恢复本地草稿。保存前请保持此标签页打开。",
+  "Local draft recovery is unavailable until the studio identity is ready.": "工作区身份尚未就绪，暂时无法恢复本地草稿。",
+  "A local draft could not be restored. The saved project was not changed.": "一份本地草稿无法恢复。已保存的项目没有改变。",
+  "A local draft could not be read. Review this field before replacing it.": "一份本地草稿无法读取。覆盖前请检查此字段。",
+  "A newer local draft exists in another tab. Save or copy your current work before reloading to inspect it.": "另一个标签页有较新的本地草稿。重新载入查看前，请先保存或复制当前内容。",
+  "This draft is too large for local recovery. Save it to the project.": "这份草稿过大，无法保存在浏览器中。请保存到项目。",
+  "This draft exceeds local recovery limits. Save or shorten it before reloading.": "这份草稿超出本地恢复限制。重新载入前请保存或缩短内容。",
+  "Local draft recovery is full. Save or remove older drafts before continuing.": "本地草稿空间已满。继续前请保存或移除旧草稿。",
+};
 const offlineDirector: DirectorStatus = {
   mode: "offline",
   status: "not_connected",
@@ -184,7 +214,61 @@ function useProject(
     error,
   };
 }
-type PendingMessage = { command: MessageCommand; failed: boolean };
+type PendingMessage = {
+  command: MessageCommand;
+  failed: boolean;
+  source?: { text: string; referenceKeys: string[] };
+};
+const isReferenceKeyList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.length <= 12 &&
+  value.every((item) => typeof item === "string" && item.length <= 1000);
+const isPendingMessage = (value: unknown): value is PendingMessage => {
+  if (!value || typeof value !== "object") return false;
+  const command = (value as { command?: unknown }).command;
+  if (!command || typeof command !== "object") return false;
+  const item = command as Record<string, unknown>;
+  const body = item.body;
+  const source = (value as { source?: unknown }).source;
+  if (source !== undefined &&
+    (!source || typeof source !== "object" ||
+      !isDraftText((source as { text?: unknown }).text) ||
+      !isReferenceKeyList((source as { referenceKeys?: unknown }).referenceKeys)))
+    return false;
+  return typeof item.projectId === "string" &&
+    typeof item.key === "string" && item.key.length > 0 && item.key.length <= 160 &&
+    !!body && typeof body === "object" &&
+    isDraftText((body as { text?: unknown }).text) &&
+    (typeof (body as { replyToQuestionId?: unknown }).replyToQuestionId === "string" ||
+      (isShotScopeList((body as { scopeIds?: unknown }).scopeIds) &&
+        typeof (body as { editing?: unknown }).editing === "boolean"));
+};
+function restoredMap<T>(
+  namespace: string | undefined,
+  projects: ProjectSummary[],
+  field: string,
+  valid: (value: unknown) => value is T,
+) {
+  const result: Record<string, T> = {};
+  for (const project of projects) {
+    const item = readLocalDraft(namespace, project.id, field, valid);
+    if (item) result[project.id] = item.value;
+  }
+  return result;
+}
+function restoredComposerDrafts(
+  namespace: string | undefined,
+  projects: ProjectSummary[],
+) {
+  const drafts: Record<string, ComposerDraft> = {};
+  const revisions: Record<string, string> = {};
+  for (const project of projects) {
+    const cached = readLocalDraft(namespace, project.id, "composer", isComposerDraft);
+    if (!cached) continue;
+    drafts[project.id] = cached.value;
+    revisions[project.id] = cached.revision;
+  }
+  return { drafts, revisions };
+}
 type Action = {
   projectId: string;
   path: string;
@@ -202,9 +286,17 @@ function Studio({
   disconnect: () => void | Promise<void>;
 }) {
   const { t, ui } = useTranslation();
+  const namespace = api.cacheNamespace;
+  const cacheWarning = useSyncExternalStore(
+    subscribeLocalDraftNotice,
+    localDraftNotice,
+  );
   const [recoveryReadOnly, setRecoveryReadOnly] = useState(true);
   const [projects, setProjects] = useState(initialProjects);
-  const [projectId, setProjectId] = useState(initialProjects[0]?.id ?? "");
+  const [projectId, setProjectId] = useState(() => {
+    const saved = readLocalDraft(namespace, "__workspace__", "selected-project", isDraftText)?.value;
+    return initialProjects.find((project) => project.id === saved)?.id ?? initialProjects[0]?.id ?? "";
+  });
   const updates = useProjectUpdates(api, projectId);
   const split = useWorkspaceSplit(!!projectId);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -225,21 +317,44 @@ function Studio({
   } | null>(null);
   const demoAvailable =
     demoProfiles?.projectId === projectId && demoProfiles.allowed;
-  const [newName, setNewName] = useState("");
+  const [newName, setNewName] = useState(() =>
+    readLocalDraft(namespace, "__workspace__", "new-project-name", isDraftText)?.value ?? "");
   const [creating, setCreating] = useState(false);
   const [showNew, setShowNew] = useState(!initialProjects.length);
   const [showDirectorSettings, setShowDirectorSettings] = useState(false);
-  const [selectedShots, setSelectedShots] = useState<string[]>([]);
+  const restoredComposer = useRef<ReturnType<typeof restoredComposerDrafts> | null>(null);
+  if (!restoredComposer.current)
+    restoredComposer.current = restoredComposerDrafts(namespace, initialProjects);
+  const [composerDrafts, setComposerDrafts] = useState<Record<string, ComposerDraft>>(
+    restoredComposer.current.drafts);
+  const composerDraftsRef = useRef(composerDrafts);
+  const composerRevisions = useRef(restoredComposer.current.revisions);
+  const currentComposer = composerDrafts[projectId] ?? emptyComposerDraft();
+  const updateComposer = (
+    target: string,
+    change: (draft: ComposerDraft) => ComposerDraft,
+  ) => {
+    if (!target) return;
+    const next = change(composerDraftsRef.current[target] ?? emptyComposerDraft());
+    const all = { ...composerDraftsRef.current, [target]: next };
+    composerDraftsRef.current = all;
+    setComposerDrafts(all);
+    if (composerIsEmpty(next)) {
+      const removed = clearLocalDraft(namespace, target, "composer",
+        composerRevisions.current[target]);
+      if (removed === "saved") delete composerRevisions.current[target];
+    } else {
+      const saved = writeLocalDraft(namespace, target, "composer",
+        cacheableComposerDraft(next), null, composerRevisions.current[target] ?? null,
+        isComposerDraft);
+      if (saved.status === "saved") composerRevisions.current[target] = saved.revision!;
+    }
+  };
+  const selectedShots = currentComposer.scopeIds;
   const [selectedFrameIds, setSelectedFrameIds] = useState<
     Record<string, string>
-  >({});
-  const [referenceDrafts, setReferenceDrafts] = useState<
-    Record<string, StudioReference[]>
-  >({});
-  const referenceDraft = referenceDrafts[projectId] ?? [];
-  const [reviewedFrames, setReviewedFrames] = useState<Record<string, boolean>>(
-    {},
-  );
+  >(() => restoredMap(namespace, initialProjects, "selected-frame", isDraftText));
+  const referenceDraft = currentComposer.references;
   const [frameRequest, setFrameRequest] = useState<FrameRequest | null>(null);
   const [sceneReview, setSceneReview] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<string | null>(null);
@@ -256,20 +371,6 @@ function Studio({
     ),
   );
   const sceneBusy = sceneSlot.running;
-  const seenSceneSettlement = useRef(sceneSlot.settledVersion);
-  useEffect(() => {
-    if (sceneSlot.settledVersion <= seenSceneSettlement.current) return;
-    seenSceneSettlement.current = sceneSlot.settledVersion;
-    const meta = sceneSlot.settledCommand?.metadata as
-      | { sceneId?: string; kind?: string }
-      | undefined;
-    if (sceneSlot.lastSuccess && meta?.kind === "video")
-      setSceneReview((current) => (current === meta.sceneId ? null : current));
-  }, [
-    sceneSlot.settledVersion,
-    sceneSlot.lastSuccess,
-    sceneSlot.settledCommand,
-  ]);
   const conversationScroll = useRef<HTMLDivElement>(null),
     followChat = useRef(true);
   const [newChat, setNewChat] = useState(false);
@@ -301,8 +402,22 @@ function Studio({
     media.addEventListener("change", change);
     return () => media.removeEventListener("change", change);
   }, []);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState<Record<string, PendingMessage>>({});
+  const [pending, setPending] = useState<Record<string, PendingMessage>>(() => {
+    const values = restoredMap(namespace, initialProjects, "pending-message", isPendingMessage);
+    return Object.fromEntries(Object.entries(values).filter(([id, item]) => item.command.projectId === id)
+      .map(([id, item]) => [id, { ...item, failed: true }]));
+  });
+  const observedPending = useRef(pending);
+  useEffect(() => {
+    if (projectId) writeLocalDraft(namespace, "__workspace__", "selected-project", projectId, null);
+  }, [namespace, projectId]);
+  useEffect(() => {
+    for (const [id, item] of Object.entries(pending)) {
+      if (observedPending.current[id] === item) continue;
+      writeLocalDraft(namespace, id, "pending-message", item, null);
+    }
+    observedPending.current = pending;
+  }, [namespace, pending]);
   const [pendingActions, setPendingActions] = useState<Record<string, Action>>(
     {},
   );
@@ -324,8 +439,8 @@ function Studio({
   );
   const [importOpen, setImportOpen] = useState(false),
     [audioShotId, setAudioShotId] = useState<string | null>(null),
-    [musicImportOpen, setMusicImportOpen] = useState(false),
-    [advancedAudioOpen, setAdvancedAudioOpen] = useState(false);
+    [musicImportOpen, setMusicImportOpen] = useState(false);
+
   const [tab, updateTab] = useState<WorkspaceView>(() =>
     initialWorkspaceView(window.location.search),
   );
@@ -345,21 +460,32 @@ function Studio({
     workspaceScroll.current?.scrollTo({ top: 0 });
   }, [tab, projectId]);
   const [generationOpen, setGenerationOpen] = useState(false);
+  const [generationNavigation, setGenerationNavigation] = useState(0);
   const [generationHistoryRequest, setGenerationHistoryRequest] = useState<{
     projectId: string;
     id: string;
   } | null>(null);
-  const [draftContinuation, setDraftContinuation] = useState<{
-    projectId: string;
-    requestId: string;
-  } | null>(null);
+  const draftContinuation = currentComposer.continuationRequestId
+    ? { projectId, requestId: currentComposer.continuationRequestId } : null;
+  const setDraftContinuation = (value: { projectId: string; requestId: string } | null) =>
+    updateComposer(value?.projectId ?? projectId, (draft) => ({
+      ...draft, continuationRequestId: value?.requestId ?? null,
+    }));
   const [mobileView, setMobileView] = useState("workspace");
-  const [replyQuestionId, setReplyQuestionId] = useState<string | null>(null);
+  const replyQuestionId = currentComposer.replyQuestionId;
+  const setReplyQuestionId = (value: string | null) =>
+    updateComposer(projectId, (draft) => ({ ...draft, replyQuestionId: value }));
   const chatEnd = useRef<HTMLDivElement>(null),
     sceneDecisions = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const refresh = useCallback(() => setRefreshKey((key) => key + 1), []);
-  const draft = drafts[projectId] ?? "";
+  const sceneStarted = () => {
+    setSceneReview(null);
+    setFrameRequest(null);
+    setMobileView("workspace");
+    requestAnimationFrame(() => workspaceScroll.current?.focus({ preventScroll: true }));
+  };
+  const draft = currentComposer.text;
   const pendingMessage = pending[projectId];
   const pendingAction = pendingActions[projectId];
   const connected =
@@ -371,7 +497,6 @@ function Studio({
     setBriefImportOpen(false);
     setExportOpen(false);
     setExposedFrames({});
-    setReviewedFrames({});
     setFrameRequest(null);
     setSceneReview(null);
     setEditorTarget(null);
@@ -383,22 +508,10 @@ function Studio({
     setAudioShotId(null);
     setMusicImportOpen(false);
     setImportOpen(false);
-    setAdvancedAudioOpen(false);
-    setDraftContinuation(null);
-    setSelectedShots([]);
     setFeedback("");
     setActionError("");
-    setReplyQuestionId(null);
   }, [projectId]);
 
-  useEffect(() => {
-    if (snapshot)
-      setSelectedShots((ids) =>
-        ids.filter((id) =>
-          snapshot.project.shots.some((shot) => shot.id === id),
-        ),
-      );
-  }, [snapshot]);
   useEffect(() => {
     const stream = conversationScroll.current;
     if (stream && followChat.current)
@@ -470,6 +583,7 @@ function Studio({
       ]);
       setProjectId(project.id);
       setNewName("");
+      clearLocalDraft(namespace, "__workspace__", "new-project-name");
       setShowNew(false);
       setShowDirectorSettings(true);
       void reloadProjects().catch(() => {});
@@ -488,11 +602,12 @@ function Studio({
     }
   }
   async function send() {
-    if (!pendingMessage && !draft.trim()) return;
+    const composerAtSend = composerDraftsRef.current[projectId] ?? emptyComposerDraft();
+    if (!pendingMessage && !composerAtSend.text.trim()) return;
     if (
       recoveryReadOnly ||
       protectedTool ||
-      sceneRegistry.snapshot(projectId).running ||
+      (!!sceneRegistry.snapshot(projectId).command && !snapshot?.control?.paused) ||
       !connected ||
       !snapshot ||
       creating ||
@@ -509,22 +624,35 @@ function Studio({
     let command: MessageCommand;
     try {
       const question = snapshot.questions?.find(
-        (item) => item.id === replyQuestionId,
+        (item) => item.id === composerAtSend.replyQuestionId &&
+          item.state === "pending" && item.canAnswer !== false,
       );
-      if (replyQuestionId && !question)
+      const context = composerContextIssues(
+        composerAtSend, projectId, snapshot);
+      if (!pendingMessage && context.staleReply)
         throw new Error(
-          "That question is no longer available. Refresh to continue.",
+          "That question changed. Your text is kept. Clear the reply target to send it as a new message.",
         );
+      if (!pendingMessage && context.staleContinuation)
+        throw new Error(
+          "That saved edit continuation changed. Your text is kept. Clear the continuation to send it as a new message.",
+        );
+      if (!pendingMessage && context.conflictingTargets)
+        throw new Error("This draft has conflicting targets. Review its reply and edit continuation before sending.");
+      if (!pendingMessage && context.missingScopeIds.length)
+        throw new Error("A selected shot no longer exists. Your text is kept. Choose the current scope before sending.");
+      if (!pendingMessage && context.missingReferences.length)
+        throw new Error("A referenced project item no longer exists. Your text is kept. Review references before sending.");
       command =
         pendingMessage?.command ??
         (question
-          ? makeQuestionReply(projectId, question, draft, crypto.randomUUID())
+          ? makeQuestionReply(projectId, question, composerAtSend.text, crypto.randomUUID())
           : continueReferencedWork(
               makeReferencedMessage(
                 snapshot.project,
-                draft,
-                selectedShots,
-                referenceDraft,
+                composerAtSend.text,
+                composerAtSend.scopeIds,
+                composerAtSend.references,
                 crypto.randomUUID(),
                 director.mode === "native",
                 director.mode === "native" &&
@@ -538,12 +666,12 @@ function Studio({
         !snapshot.control?.paused &&
         "scopeIds" in command.body
       ) {
-        if (draftContinuation?.projectId === projectId)
+        if (composerAtSend.continuationRequestId)
           command = {
             ...command,
             body: {
               ...command.body,
-              continuationRequestId: draftContinuation.requestId,
+              continuationRequestId: composerAtSend.continuationRequestId,
             },
           };
         else if (command.body.editing) {
@@ -563,10 +691,16 @@ function Studio({
     }
     setBusy(true);
     setActionError("");
+    const source = pendingMessage ? pendingMessage.source : {
+      text: composerAtSend.text,
+      referenceKeys: composerAtSend.references.map((ref) => ref.key),
+    };
     setPending((all) => ({
       ...all,
-      [command.projectId]: { command, failed: false },
+      [command.projectId]: { command, failed: false, ...(source ? { source } : {}) },
     }));
+    writeLocalDraft(namespace, command.projectId, "pending-message",
+      { command, failed: false, ...(source ? { source } : {}) }, null);
     try {
       await api.request(`${projectPath(command.projectId)}/messages`, {
         method: "POST",
@@ -578,10 +712,22 @@ function Studio({
         delete next[command.projectId];
         return next;
       });
-      setDrafts((all) => ({ ...all, [command.projectId]: "" }));
-      setReplyQuestionId(null);
-      setDraftContinuation(null);
-      setReferenceDrafts((all) => ({ ...all, [command.projectId]: [] }));
+      clearLocalDraft(namespace, command.projectId, "pending-message");
+      const consumedReply = "replyToQuestionId" in command.body
+        ? command.body.replyToQuestionId : null;
+      const consumedContinuation = "continuationRequestId" in command.body
+        ? command.body.continuationRequestId : null;
+      if (!pendingMessage && composerAtSend &&
+        composerDraftsRef.current[command.projectId] === composerAtSend)
+        updateComposer(command.projectId, (current) => ({
+          ...current,
+          text: "",
+          references: [],
+          replyQuestionId: consumedReply === current.replyQuestionId
+            ? null : current.replyQuestionId,
+          continuationRequestId: consumedContinuation === current.continuationRequestId
+            ? null : current.continuationRequestId,
+        }));
       setFeedback("Message saved.");
       refresh();
     } catch (error) {
@@ -593,7 +739,7 @@ function Studio({
       )
         setPending((all) => ({
           ...all,
-          [command.projectId]: { command, failed: true },
+          [command.projectId]: { command, failed: true, ...(source ? { source } : {}) },
         }));
       else {
         setPending((all) => {
@@ -601,12 +747,7 @@ function Studio({
           delete next[command.projectId];
           return next;
         });
-        if (
-          ["QUESTION_STALE", "RESTORED_AUTHORITY_REQUIRES_NEW"].includes(
-            error.code,
-          )
-        )
-          setReplyQuestionId(null);
+        clearLocalDraft(namespace, command.projectId, "pending-message");
         refresh();
       }
       setActionError(errorText(error));
@@ -619,6 +760,7 @@ function Studio({
     if (recoveryReadOnly || stopping.current.has(projectId)) return;
     const target = projectId,
       key = stops[target]?.key ?? crypto.randomUUID();
+    const composerAtStop = composerDraftsRef.current[target];
     stopping.current.add(target);
     setStops((all) => ({ ...all, [target]: { key, failed: false } }));
     setActionError("");
@@ -631,8 +773,9 @@ function Studio({
         ...all,
         [target]: { key, failed: false, acknowledgedCursor: stopped.cursor },
       }));
-      setReplyQuestionId(null);
-      setSelectedShots([]);
+      if (composerDraftsRef.current[target] === composerAtStop)
+        updateComposer(target, (draft) => ({ ...draft,
+          replyQuestionId: null, scopeIds: [] }));
       setFeedback(
         "Stopped. Saved work is kept. Send a new direction to continue; submitted provider jobs may still finish.",
       );
@@ -656,11 +799,11 @@ function Studio({
       stopping.current.delete(target);
     }
   }
-  async function runAction(action: Action) {
+  async function runAction(action: Action): Promise<boolean> {
     if (
       recoveryReadOnly ||
       protectedTool ||
-      sceneRegistry.snapshot(projectId).running ||
+      (!!sceneRegistry.snapshot(projectId).command && !snapshot?.control?.paused) ||
       !connected ||
       creating ||
       creationInFlight.current ||
@@ -670,7 +813,7 @@ function Studio({
       actionInFlight.current ||
       sending.current
     )
-      return;
+      return false;
     actionInFlight.current = true;
     setBusy(true);
     setActionError("");
@@ -689,6 +832,7 @@ function Studio({
       setFeedback(action.label);
       refresh();
       void reloadProjects().catch(() => {});
+      return true;
     } catch (error) {
       if (
         !(error instanceof ApiError) ||
@@ -706,6 +850,7 @@ function Studio({
       }
       setActionError(errorText(error));
       refresh();
+      return false;
     } finally {
       actionInFlight.current = false;
       setBusy(false);
@@ -732,7 +877,10 @@ function Studio({
     !!pendingAction ||
     !!pendingMessage ||
     !!stops[projectId];
-  const disabled = mutationsDisabled || protectedTool || sceneBusy;
+  // An unresolved command keeps its exact retry. Stop permits new direction;
+  // the server fences the old request, including any late provider response.
+  const sceneMutationBlocked = !!sceneSlot.command && !snapshot?.control?.paused;
+  const disabled = mutationsDisabled || protectedTool || sceneMutationBlocked;
   const frames = useKeyframeInspection({
     projectId,
     snapshot,
@@ -757,14 +905,13 @@ function Studio({
   const replyQuestion = pendingQuestions.find(
     (question) => question.id === replyQuestionId,
   );
-  useEffect(() => {
-    if (
-      snapshot?.control?.paused ||
-      snapshot?.questions?.find((q) => q.id === replyQuestionId)?.canAnswer ===
-        false
-    )
-      setReplyQuestionId(null);
-  }, [snapshot, replyQuestionId]);
+  const composerIssues = snapshot
+    ? composerContextIssues(currentComposer, projectId, snapshot) : null;
+  const staleReplyTarget = composerIssues?.staleReply ?? false;
+  const staleContinuationTarget = composerIssues?.staleContinuation ?? false;
+  const staleScopeIds = composerIssues?.missingScopeIds ?? [];
+  const staleReferences = composerIssues?.missingReferences ?? [];
+  const conflictingTargets = composerIssues?.conflictingTargets ?? false;
   useEffect(() => {
     const ack = stops[projectId]?.acknowledgedCursor;
     if (ack !== undefined && snapshot && snapshot.cursor >= ack)
@@ -786,49 +933,23 @@ function Studio({
         ).filter((group) => group.directorState !== "completed").length
       : 0;
 
+  const audioShot = snapshot?.project.shots.find(
+    (shot) => shot.id === audioShotId,
+  );
   const results = snapshot ? projectResults(snapshot) : null;
   const selectedFrame =
     snapshot && results
       ? frameSelection(results.scenes, selectedFrameIds[projectId] ?? null)
       : null;
-  const checkedFrames = { ...reviewedFrames };
-  if (
-    snapshot &&
-    review &&
-    review.planId === snapshot.project.activePlanId &&
-    review.headVersion === snapshot.project.headVersion &&
-    review.revisionId === snapshot.project.revisionId
-  ) {
-    for (const member of review.members) {
-      const actual = results?.scenes
-        .flatMap((s) => s.shots)
-        .find((r) => r.shot.id === member.shotId);
-      if (
-        member.approved &&
-        member.keyframe &&
-        actual?.keyframe.current &&
-        actual.keyframe.artifact?.artifactId === member.keyframe.artifactId &&
-        actual.keyframe.artifact.sha256 === member.keyframe.sha256
-      )
-        checkedFrames[
-          exposedSceneFrameKey(
-            projectId,
-            snapshot.project.revisionId,
-            member.shotId,
-            member.keyframe.artifactId,
-            member.keyframe.sha256,
-          )
-        ] = true;
-    }
-  }
   const selectedFrameId = selectedFrame?.result.shot.id ?? null;
   const selectedSceneId = selectedFrame?.scene.id ?? null;
   const updateReferences = (refs: StudioReference[]) =>
-    setReferenceDrafts((all) => ({ ...all, [projectId]: refs }));
+    updateComposer(projectId, (draft) => ({ ...draft, references: refs }));
   const chooseShot = (id: string) => {
     setSelectedFrameIds((all) => ({ ...all, [projectId]: id }));
-    setSelectedShots([id]);
-    setDraftContinuation(null);
+    writeLocalDraft(namespace, projectId, "selected-frame", id, null);
+    updateComposer(projectId, (draft) => ({ ...draft,
+      scopeIds: [id], continuationRequestId: null }));
   };
   const editTarget = (id: string) => {
     setEditorTarget(id);
@@ -902,23 +1023,6 @@ function Studio({
     });
     setMobileView("director");
   };
-  const confirmFrame = (shotId: string) => {
-    const current = results?.scenes
-      .flatMap((scene) => scene.shots)
-      .find((r) => r.shot.id === shotId);
-    if (!snapshot || !current?.keyframe.current || !current.keyframe.artifact)
-      return;
-    const artifact = current.keyframe.artifact,
-      key = exposedSceneFrameKey(
-        projectId,
-        snapshot.project.revisionId,
-        shotId,
-        artifact.artifactId,
-        artifact.sha256,
-      );
-    if (!exposedFrames[key] || disabled || !connected) return;
-    setReviewedFrames((previous) => ({ ...previous, [key]: true }));
-  };
   const exposeFrame = (event: {
     projectId: string;
     projectRevisionId: string;
@@ -941,13 +1045,6 @@ function Studio({
       else delete next[key];
       return next;
     });
-    if (!event.displayed)
-      setReviewedFrames((previous) => {
-        if (!previous[key]) return previous;
-        const next = { ...previous };
-        delete next[key];
-        return next;
-      });
   };
   useEffect(() => {
     if (!snapshot || !results) return;
@@ -971,9 +1068,47 @@ function Studio({
           );
     };
     setExposedFrames(prune);
-    setReviewedFrames(prune);
   }, [snapshot]);
 
+  const actionNotices = (<>
+                        {cacheWarning && (
+                          <div className="notice warning" role="status">
+                            <span>{ui(cacheWarning, localDraftUiMessages)}</span>
+                            {cacheWarning.includes("could not be read") ||
+                            cacheWarning.includes("could not be restored") ? (
+                              <UiButton type="button" variant="ghost" onClick={() =>
+                                discardUnreadableLocalDrafts(namespace)
+                              }>{t("Clear unreadable local drafts", "清除无法读取的本地草稿")}</UiButton>
+                            ) : null}
+                          </div>
+                        )}
+                        {(connectionError || actionError) && (
+                          <div className="notice error" role="alert">
+                            <span>{ui(actionError || connectionError)}</span>
+                            <IconButton
+                              icon="refresh"
+                              label={t("Refresh workspace", "刷新工作区")}
+                              onClick={refresh}
+                            />
+                          </div>
+                        )}
+                        {pendingAction && (
+                          <div className="notice warning">
+                            <span>
+                              {t(
+                                "This action wasn’t confirmed. Retry the same request to check its outcome.",
+                                "此操作尚未确认，请重试同一请求以检查结果。",
+                              )}
+                            </span>
+                            <UiButton
+                              disabled={recoveryReadOnly || busy}
+                              onClick={() => void runAction(pendingAction)}
+                            >
+                              {t("Retry action", "重试操作")}
+                            </UiButton>
+                          </div>
+                        )}
+  </>);
   return (
     <ProjectUpdatesProvider value={updates.revision + refreshKey}>
       <RecoveryReadOnly.Provider value={recoveryReadOnly}>
@@ -992,7 +1127,7 @@ function Studio({
                 </label>
                 <Select.Root
                   value={projectId || "__new__"}
-                  disabled={busy || creating || protectedTool || sceneBusy}
+                  disabled={busy || creating || protectedTool}
                   onValueChange={(value) => {
                     if (value !== "__new__") setProjectId(value);
                   }}
@@ -1145,10 +1280,11 @@ function Studio({
                               ? "__selected__"
                               : projectId
                         }
-                        disabled={disabled}
+                        disabled={!!pendingMessage || !!replyQuestion}
                         onValueChange={(value) => {
-                          setSelectedShots(value === projectId ? [] : [value]);
-                          setDraftContinuation(null);
+                          updateComposer(projectId, (draft) => ({ ...draft,
+                            scopeIds: value === projectId ? [] : [value],
+                            continuationRequestId: null }));
                         }}
                         options={[
                           {
@@ -1396,8 +1532,8 @@ function Studio({
                             setMobileView("workspace");
                           }}
                           onClearScope={() => {
-                            setSelectedShots([]);
-                            setDraftContinuation(null);
+                            updateComposer(projectId, (draft) => ({ ...draft,
+                              scopeIds: [], continuationRequestId: null }));
                             requestAnimationFrame(() =>
                               currentDecision.current
                                 ?.querySelector<HTMLElement>(
@@ -1464,13 +1600,13 @@ function Studio({
                         <div ref={sceneDecisions} tabIndex={-1}>
                           {snapshot && (
                             <ConversationActions
+                              onStarted={sceneStarted}
                               api={api}
                               snapshot={snapshot}
                               director={director}
-                              disabled={disabled || !connected}
+                              disabled={mutationsDisabled || protectedTool || !connected}
                               onChanged={refresh}
                               exposedFrames={exposedFrames}
-                              reviewedFrames={checkedFrames}
                               onFocusScene={(sceneId) => {
                                 setTab("frames");
                                 setMobileView("workspace");
@@ -1482,10 +1618,6 @@ function Studio({
                                     ?.scrollIntoView({ block: "start" }),
                                 );
                               }}
-                              onNarrationShot={(shotId) => {
-                                setAudioShotId(shotId);
-                                setMobileView("director");
-                              }}
                             />
                           )}
                         </div>
@@ -1495,32 +1627,7 @@ function Studio({
                           onState={setRecoveryReadOnly}
                           onChanged={refresh}
                         />
-                        {(connectionError || actionError) && (
-                          <div className="notice error" role="alert">
-                            <span>{ui(actionError || connectionError)}</span>
-                            <IconButton
-                              icon="refresh"
-                              label={t("Refresh workspace", "刷新工作区")}
-                              onClick={refresh}
-                            />
-                          </div>
-                        )}
-                        {pendingAction && (
-                          <div className="notice warning">
-                            <span>
-                              {t(
-                                "This action wasn’t confirmed. Retry the same request to check its outcome.",
-                                "此操作尚未确认，请重试同一请求以检查结果。",
-                              )}
-                            </span>
-                            <UiButton
-                              disabled={recoveryReadOnly || busy}
-                              onClick={() => void runAction(pendingAction)}
-                            >
-                              {t("Retry action", "重试操作")}
-                            </UiButton>
-                          </div>
-                        )}
+                        {(!compactScreen || mobileView === "director") && actionNotices}
                         {feedback && (
                           <div className="sr-only" role="status">
                             {ui(feedback)}
@@ -1552,9 +1659,14 @@ function Studio({
                               <UiTextField
                                 id="project-name"
                                 value={newName}
-                                onChange={(event) =>
-                                  setNewName(event.target.value)
-                                }
+                                onChange={(event) => {
+                                  const value = event.target.value;
+                                  setNewName(value);
+                                  if (value)
+                                    writeLocalDraft(namespace, "__workspace__", "new-project-name",
+                                      value, null);
+                                  else clearLocalDraft(namespace, "__workspace__", "new-project-name");
+                                }}
                                 maxLength={160}
                                 placeholder={t("Name your film", "为影片命名")}
                                 disabled={disabled || !!pendingCreation}
@@ -1588,7 +1700,7 @@ function Studio({
                           </section>
                         )}
                         <RecoveryReadOnly.Provider
-                          value={mutationsDisabled || !connected}
+                          value={mutationsDisabled || sceneMutationBlocked || !connected}
                         >
                           {showDirectorSettings && projectId && (
                             <ProjectSettings
@@ -1610,9 +1722,11 @@ function Studio({
                         </RecoveryReadOnly.Provider>
                         {frameRequest && snapshot && (
                           <RecoveryReadOnly.Provider
-                            value={mutationsDisabled || !connected}
+                            value={mutationsDisabled || sceneMutationBlocked || !connected}
                           >
                             <FrameDecision
+                              onStarted={sceneStarted}
+                              returnFocusRef={workspaceScroll}
                               api={api}
                               snapshot={snapshot}
                               director={director}
@@ -1621,7 +1735,7 @@ function Studio({
                                 mutationsDisabled || protectedTool || !connected
                               }
                               onChanged={refresh}
-                              close={() => setFrameRequest(null)}
+                              close={sceneStarted}
                             />
                           </RecoveryReadOnly.Provider>
                         )}
@@ -1646,19 +1760,17 @@ function Studio({
                               </p>
                             </ImportMedia>
                           )}
-                          {audioShotId && snapshot && (
+                          {audioShot && snapshot && (
                             <ImportMedia
                               title={t("Shot narration", "镜头旁白")}
                               close={() => setAudioShotId(null)}
                             >
-                              <NarrationPanel
+                              <ShotAudioPanel
+                                key={`${projectId}:${audioShot.id}`}
                                 api={api}
                                 projectId={projectId}
                                 headVersion={snapshot.project.headVersion}
-                                shots={snapshot.project.shots.filter(
-                                  (s) => s.id === audioShotId,
-                                )}
-                                directorMode={director.mode}
+                                shot={audioShot}
                                 onChanged={refresh}
                                 onContinue={(requestId) => {
                                   const ids = snapshot.pendingEditContinuations
@@ -1669,18 +1781,13 @@ function Studio({
                                       snapshot.project.shots.some(
                                         (shot) => shot.id === id,
                                       ),
-                                    ) ?? [audioShotId];
-                                  setSelectedShots(
-                                    ids.length ? ids : [audioShotId],
-                                  );
-                                  setDraftContinuation({
-                                    projectId,
-                                    requestId,
-                                  });
-                                  setDrafts((all) => ({
-                                    ...all,
-                                    [projectId]:
-                                      "Continue this shot using its accepted narration and update only the affected production plan.",
+                                    ) ?? [audioShot.id];
+                                  updateComposer(projectId, (draft) => ({
+                                    ...draft,
+                                    scopeIds: ids.length ? ids : [audioShot.id],
+                                    continuationRequestId: requestId,
+                                    replyQuestionId: null,
+                                    text: "Continue this shot using its saved narration and update only the affected production plan.",
                                   }));
                                   setAudioShotId(null);
                                   setMobileView("director");
@@ -1718,48 +1825,12 @@ function Studio({
                                   />
                                 }
                                 audio={
-                                  <>
-                                    <AudioLibraryPanel
-                                      active={importTab === "audio"}
-                                      api={api}
-                                      projectId={projectId}
-                                      onChanged={refresh}
-                                    />
-                                    <details
-                                      onToggle={(event) =>
-                                        setAdvancedAudioOpen(
-                                          event.currentTarget.open,
-                                        )
-                                      }
-                                    >
-                                      <summary>
-                                        {t(
-                                          "Advanced narration & transcripts",
-                                          "高级旁白与转录",
-                                        )}
-                                      </summary>
-                                      <NarrationPanel
-                                        active={
-                                          importTab === "audio" &&
-                                          advancedAudioOpen
-                                        }
-                                        api={api}
-                                        projectId={projectId}
-                                        headVersion={
-                                          snapshot.project.headVersion
-                                        }
-                                        shots={snapshot.project.shots}
-                                        directorMode={director.mode}
-                                        onChanged={refresh}
-                                        onRequested={() => {
-                                          setGenerationHistoryRequest(null);
-                                          setImportOpen(false);
-                                          setGenerationOpen(true);
-                                          setTab("frames");
-                                        }}
-                                      />
-                                    </details>
-                                  </>
+                                  <AudioLibraryPanel
+                                    active={importTab === "audio"}
+                                    api={api}
+                                    projectId={projectId}
+                                    onChanged={refresh}
+                                  />
                                 }
                               />
                               <AssetActions
@@ -1794,7 +1865,9 @@ function Studio({
                               close={() => setEditorOpen(false)}
                             >
                               <ProjectEditor
+                                key={projectId}
                                 snapshot={snapshot}
+                                cacheNamespace={namespace}
                                 {...(editorTarget
                                   ? { targetId: editorTarget }
                                   : {})}
@@ -1811,7 +1884,9 @@ function Studio({
                                 }
                                 onNarration={setAudioShotId}
                                 onDiscuss={(shotId) => {
-                                  setSelectedShots(shotId ? [shotId] : []);
+                                  updateComposer(projectId, (draft) => ({ ...draft,
+                                    scopeIds: shotId ? [shotId] : [],
+                                    continuationRequestId: null }));
                                   setMobileView("director");
                                   composer.current?.focus();
                                 }}
@@ -1824,6 +1899,7 @@ function Studio({
                               close={() => setBriefImportOpen(false)}
                             >
                               <PlanImport
+                                key={projectId}
                                 api={api}
                                 snapshot={snapshot}
                                 disabled={disabled || !connected}
@@ -1876,6 +1952,7 @@ function Studio({
                           )}
                           {generationOpen && snapshot && (
                             <GenerationGuide
+                              navigationVersion={generationNavigation}
                               snapshot={snapshot}
                               {...(generationHistoryRequest?.projectId ===
                               projectId
@@ -1913,7 +1990,37 @@ function Studio({
                         {t("View new messages", "查看新消息")}
                       </UiButton>
                     )}
-                    {replyQuestion && (
+                    {staleScopeIds.length > 0 && !pendingMessage && (
+                      <div className="scope-chip" role="status">
+                        <span>{t("A selected shot was removed. Your text is kept; the old scope cannot be sent.",
+                          "所选镜头已移除。文字已保留；无法发送旧范围。")}</span>
+                        <UiButton type="button" variant="ghost" onClick={() =>
+                          updateComposer(projectId, (draft) => ({ ...draft,
+                            scopeIds: [], continuationRequestId: null }))
+                        }>{t("Use whole project instead", "改用整个项目")}</UiButton>
+                      </div>
+                    )}
+                    {staleReferences.length > 0 && !pendingMessage && (
+                      <div className="scope-chip" role="status">
+                        <span>{t("A referenced item was removed. Your text is kept; review references before sending.",
+                          "引用的项目内容已移除。文字已保留；发送前请检查引用。")}</span>
+                        <UiButton type="button" variant="ghost" onClick={() =>
+                          updateComposer(projectId, (draft) => ({ ...draft,
+                            references: draft.references.filter((ref) => !staleReferences.some((missing) => missing.key === ref.key)) }))
+                        }>{t("Remove missing references", "移除失效的引用")}</UiButton>
+                      </div>
+                    )}
+                    {conflictingTargets && !pendingMessage && (
+                      <div className="scope-chip" role="status">
+                        <span>{t("This draft has both a question reply and edit continuation. Choose a new target before sending.",
+                          "这份草稿同时指定了问题回答和编辑续接。发送前请选择新的目标。")}</span>
+                        <UiButton type="button" variant="ghost" onClick={() =>
+                          updateComposer(projectId, (draft) => ({ ...draft,
+                            replyQuestionId: null, continuationRequestId: null }))
+                        }>{t("Use as new message", "作为新消息使用")}</UiButton>
+                      </div>
+                    )}
+                    {replyQuestion && !staleReplyTarget && (
                       <div className="scope-chip">
                         <span>
                           {t("Replying to:", "正在回答：")}{" "}
@@ -1933,12 +2040,24 @@ function Studio({
                         </UiButton>
                       </div>
                     )}
+                    {staleReplyTarget && !pendingMessage && (
+                      <div className="scope-chip" role="status">
+                        <span>{t("The saved question changed. Your text is kept; this reply cannot be sent.",
+                          "已保存的问题发生变化。文字已保留；无法发送这条回答。")}</span>
+                        <UiButton type="button" variant="ghost" onClick={() => setReplyQuestionId(null)}>
+                          {t("Use as new message", "作为新消息使用")}
+                        </UiButton>
+                      </div>
+                    )}
                     {!replyQuestion && selectedShots.length > 0 && (
                       <div className="scope-chip">
                         <Icon name="image" size={14} />
-                        <span>{selectedNames.join(", ")}</span>
+                        <span>{selectedNames.length
+                          ? selectedNames.join(", ")
+                          : t("Missing shot selection", "所选镜头已失效")}</span>
                         <UiButton
-                          onClick={() => setSelectedShots([])}
+                          onClick={() => updateComposer(projectId, (draft) => ({ ...draft,
+                            scopeIds: [], continuationRequestId: null }))}
                           aria-label={t("Clear shot selection", "清除镜头选择")}
                           title={t("Clear shot selection", "清除镜头选择")}
                         >
@@ -1969,15 +2088,16 @@ function Studio({
                     {draftContinuation?.projectId === projectId && (
                       <div className="scope-chip">
                         <span>
-                          {t("Continuing the saved edit", "继续已保存的编辑")}
+                          {staleContinuationTarget
+                            ? t("The saved edit changed. Your text is kept; this continuation cannot be sent.",
+                                "已保存的编辑发生变化。文字已保留；无法发送这条续接。")
+                            : t("Continuing the saved edit", "继续已保存的编辑")}
                         </span>
-                        <IconButton
-                          label={t(
-                            "Clear saved edit continuation",
-                            "取消继续已保存的编辑",
-                          )}
+                        <UiButton type="button" variant="ghost"
                           onClick={() => setDraftContinuation(null)}
-                        />
+                        >{staleContinuationTarget
+                            ? t("Use as new message", "作为新消息使用")
+                            : t("Clear saved edit continuation", "取消继续已保存的编辑")}</UiButton>
                       </div>
                     )}
                     <form
@@ -1992,7 +2112,7 @@ function Studio({
                         snapshot={snapshot}
                         value={draft}
                         changed={(value) =>
-                          setDrafts((all) => ({ ...all, [projectId]: value }))
+                          updateComposer(projectId, (draft) => ({ ...draft, text: value }))
                         }
                         textareaRef={composer}
                         references={replyQuestion ? [] : referenceDraft}
@@ -2000,7 +2120,8 @@ function Studio({
                         onNavigate={navigateReference}
                         send={() => void send()}
                         pending={!!pendingMessage}
-                        disabled={disabled || !!replyQuestion}
+                        disabled={disabled}
+                        allowReferences={!replyQuestion}
                         placeholder={
                           replyQuestion
                             ? t("Answer the current question…", "回答当前问题…")
@@ -2080,7 +2201,9 @@ function Studio({
                                 type="submit"
                                 className="send-button"
                                 disabled={
-                                  disabled || !draft.trim() || !snapshot
+                                  disabled || staleReplyTarget || staleContinuationTarget ||
+                                  staleScopeIds.length > 0 || staleReferences.length > 0 || conflictingTargets ||
+                                  !draft.trim() || !snapshot
                                 }
                                 aria-label={t("Send message", "发送消息")}
                                 title={t("Send message", "发送消息")}
@@ -2091,6 +2214,12 @@ function Studio({
                           </>
                         }
                       />
+                      {(draft || referenceDraft.length > 0) && !pendingMessage && (
+                        <small className="field-help" role="status">
+                          {t("Unsent draft in this browser. Send to save it to the project.",
+                            "浏览器中有尚未发送的草稿。发送后才会保存到项目。")}
+                        </small>
+                      )}
                     </form>
                   </div>
                 </section>
@@ -2098,6 +2227,7 @@ function Studio({
                 <section
                   id="production-pane"
                   ref={workspaceScroll}
+                  tabIndex={-1}
                   className="review-workspace"
                   aria-label={t("Production workspace", "制作工作区")}
                 >
@@ -2110,6 +2240,16 @@ function Studio({
                       {durationLabel(totalFrames)}
                     </span>
                   </div>
+                  {compactScreen && mobileView === "workspace" && actionNotices}
+                  {snapshot && (
+                    <SceneActivity api={api} snapshot={snapshot} slot={sceneSlot}
+                      disabled={mutationsDisabled || protectedTool || !connected}
+                      stopping={!!stops[projectId] && !stops[projectId]?.failed}
+                      stopFailed={!!stops[projectId]?.failed}
+                      canStop={!recoveryReadOnly && !snapshot.control?.paused && (!!sceneSlot.command || canStopWork(snapshot, director))}
+                      onStop={() => void stopWork()}
+                      onProgress={() => { setGenerationNavigation(version => version + 1); setGenerationOpen(true); setMobileView("director"); }} />
+                  )}
                   {!projectId ? (
                     <div className="result-empty">
                       <h2>{t("Start a new project", "开始一个新项目")}</h2>
@@ -2136,10 +2276,10 @@ function Studio({
                             (!compactScreen || mobileView === "workspace")
                           }
                           disabled={disabled || !connected}
+                          referencesDisabled={mutationsDisabled || protectedTool || !connected}
                           selectedShotId={selectedFrameId}
                           onSelectShot={chooseShot}
-                          reviewedFrames={checkedFrames}
-                          onConfirmFrame={confirmFrame}
+                          seenFrames={exposedFrames}
                           onEditShot={editTarget}
                           onEditScene={editTarget}
                           onReferenceShot={(id) => addReference("shot", id)}
@@ -2158,7 +2298,6 @@ function Studio({
                               sceneId={selectedSceneId}
                               disabled={disabled || !connected}
                               exposedFrames={exposedFrames}
-                              reviewedFrames={checkedFrames}
                               onReviewScene={setSceneReview}
                               onGenerateKeyframes={requestFrames}
                             />
@@ -2243,8 +2382,8 @@ function Studio({
                           selectedShotId={selectedFrameId}
                           onSelectShot={chooseShot}
                           disabled={disabled || !connected}
-                          command={(body) =>
-                            void runAction({
+                          command={async (body) => {
+                            if (!await runAction({
                               projectId,
                               path: projectPath(projectId) + "/storyboard",
                               body: {
@@ -2254,8 +2393,8 @@ function Studio({
                               },
                               key: crypto.randomUUID(),
                               label: "Timeline updated.",
-                            })
-                          }
+                            })) throw new Error(t("Timeline changes were not saved. Check the workspace message before retrying.", "时间线更改未保存。请先查看工作区提示再重试。"));
+                          }}
                           onEditShot={editTarget}
                           onImportAudio={() => {
                             setMusicImportOpen(true);
@@ -2273,19 +2412,19 @@ function Studio({
             <AppDialog
               inline={false}
               open
-              title={t("Review scene video plan", "检查场景视频方案")}
+              title={t("Confirm scene", "确认场景")}
               description={t(
-                "Use the checked current keyframes and the motion below to create video.",
-                "使用已检查的当前关键帧与下列动作制作视频。",
+                "Review the current keyframes, motion and narration together.",
+                "一起检查当前关键帧、动作和旁白。",
               )}
-              preventClose={sceneBusy}
-              closeDisabled={sceneBusy}
+              returnFocusRef={workspaceScroll}
               onOpenChange={(open) => {
-                if (!open) setSceneReview(null);
+                if (!open) sceneStarted();
               }}
-              closeLabel={t("Close video plan", "关闭视频方案")}
+              closeLabel={t("Close scene confirmation", "关闭场景确认")}
             >
               <ConversationActions
+                onStarted={sceneStarted}
                 api={api}
                 snapshot={snapshot}
                 director={director}
@@ -2293,7 +2432,6 @@ function Studio({
                 sceneIds={[sceneReview]}
                 initialOpenSceneId={sceneReview}
                 exposedFrames={exposedFrames}
-                reviewedFrames={checkedFrames}
                 onChanged={refresh}
                 onFocusScene={(id) => {
                   setSceneReview(null);
@@ -2304,12 +2442,18 @@ function Studio({
                   );
                   if (shot) chooseShot(shot.id);
                 }}
-                onNarrationShot={(id) => {
-                  setSceneReview(null);
-                  setAudioShotId(id);
-                  setMobileView("director");
-                }}
               />
+              {sceneBusy && !snapshot.control?.paused && (
+                <UiButton
+                  variant="secondary"
+                  disabled={!!stops[projectId] && !stops[projectId]?.failed}
+                  onClick={() => void stopWork()}
+                >
+                  {stops[projectId]?.failed
+                    ? t("Retry stop", "重试停止")
+                    : t("Stop", "停止")}
+                </UiButton>
+              )}
             </AppDialog>
           )}
           {frames.inspection && (

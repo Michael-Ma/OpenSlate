@@ -4,7 +4,7 @@ import {
   artifactView,
   type ArtifactViewState,
 } from "./artifact-view-model";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ButtonHTMLAttributes,
   FormEvent,
@@ -327,6 +327,8 @@ export function useArtifact(
   artifact: Artifact | null,
 ) {
   const identity = artifactIdentity(projectId, artifact);
+  const [version, setVersion] = useState(0);
+  const retry = useCallback(() => setVersion((current) => current + 1), []);
   const [result, setResult] = useState<ArtifactViewState<StudioApi> | null>(
     null,
   );
@@ -338,6 +340,7 @@ export function useArtifact(
       api,
       identity,
       signal: controller.signal,
+      version,
       url: null,
       error: "",
     });
@@ -349,7 +352,14 @@ export function useArtifact(
           return;
         }
         objectUrl = url;
-        setResult({ api, identity, signal: controller.signal, url, error: "" });
+        setResult({
+          api,
+          identity,
+          signal: controller.signal,
+          version,
+          url,
+          error: "",
+        });
       })
       .catch((error) => {
         if (!controller.signal.aborted)
@@ -357,6 +367,7 @@ export function useArtifact(
             api,
             identity,
             signal: controller.signal,
+            version,
             url: null,
             error: errorText(error),
           });
@@ -365,9 +376,9 @@ export function useArtifact(
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [api, identity]);
+  }, [api, identity, version]);
   // A new review must never render yesterday's bytes with today's onLoad/hash.
-  return artifactView(result, api, identity);
+  return { ...artifactView(result, api, identity, version), retry };
 }
 
 export function Lightbox({

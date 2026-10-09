@@ -30,9 +30,10 @@ export function PersonalVoiceSettings({
     useCallback(() => registry.snapshot(projectId), [registry, projectId]),
   );
   useEffect(() => {
-    busyChanged?.(slot.running || !!slot.command);
+    // An uncertain request keeps its exact retry in the registry, without trapping settings open.
+    busyChanged?.(slot.running);
     return () => busyChanged?.(false);
-  }, [slot.running, slot.command, busyChanged]);
+  }, [slot.running, busyChanged]);
   const execute = (command: PendingCommand) => {
     if (recovery) return;
     void registry.run(

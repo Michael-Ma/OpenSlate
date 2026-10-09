@@ -58,6 +58,14 @@ import {
   settingsSetupIssue,
 } from "./settings-presentation-model";
 import "./providers.css";
+import { clearLocalDraft, readLocalDraft, writeLocalDraft } from "./local-draft-cache";
+
+const isModelSelection = (value: unknown): value is ModelSelection =>
+  !!value && typeof value === "object" && !Array.isArray(value) &&
+  MODEL_KINDS.every((kind) => {
+    const id = (value as Record<string, unknown>)[kind];
+    return id === null || (typeof id === "string" && id.length <= 160);
+  });
 
 export function NewProjectProviderFields({
   api,
@@ -405,10 +413,31 @@ export function ProjectModelsSettings({
   const registry = pendingCommandsFor(api, "project-model-settings"),
     continuations = pendingCommandsFor(api, "project-model-continuation");
   const initial = useRef(restoredModelDraft(registry.snapshot(projectId))),
-    dirty = useRef(!!initial.current);
+    recovered = useRef<ReturnType<typeof readLocalDraft<ModelSelection>> | undefined>(undefined);
+  if (recovered.current === undefined)
+    recovered.current = readLocalDraft(api.cacheNamespace, projectId,
+      "settings:models", isModelSelection);
+  const cacheRevision = useRef(recovered.current?.revision ?? null);
+  const writeCache = (value: ModelSelection, selectionDigest: string | null) => {
+    const result = writeLocalDraft(api.cacheNamespace, projectId,
+      "settings:models", value, { selectionDigest }, cacheRevision.current);
+    if (result.status === "saved") cacheRevision.current = result.revision!;
+  };
+  const clearCache = () => {
+    const result = clearLocalDraft(api.cacheNamespace, projectId,
+      "settings:models", cacheRevision.current ?? undefined);
+    if (result === "saved") cacheRevision.current = null;
+  };
+  const dirty = useRef(!!initial.current || !!recovered.current);
+  const [draftBaseDigest, setDraftBaseDigest] = useState<string | null>(() => {
+    const base = recovered.current?.base;
+    return base && typeof base === "object" &&
+      typeof (base as { selectionDigest?: unknown }).selectionDigest === "string"
+      ? (base as { selectionDigest: string }).selectionDigest : null;
+  });
   const [status, setStatus] = useState<ModelSettingsStatus | null>(null),
     [selected, setSelected] = useState<ModelSelection>(
-      initial.current?.selected ?? {
+      initial.current?.selected ?? recovered.current?.value ?? {
         image: null,
         video: null,
         speech: null,
@@ -463,6 +492,13 @@ export function ProjectModelsSettings({
       .then((value) => {
         if (abort.signal.aborted) return;
         setStatus(value);
+        if (recovered.current &&
+          MODEL_KINDS.every((kind) => value.selected[kind] === selected[kind])) {
+          clearCache();
+          recovered.current = null;
+          dirty.current = false;
+          setDraftBaseDigest(null);
+        }
         if (!dirty.current) setSelected(value.selected);
       })
       .catch((error) => {
@@ -489,10 +525,16 @@ export function ProjectModelsSettings({
       slot.settledCommand?.path.endsWith("/apply")
     ) {
       const result = slot.result as ModelSettingsApplied;
-      dirty.current = false;
+      const requested = (slot.settledCommand?.metadata as { selected?: ModelSelection } | undefined)?.selected;
+      if (requested && MODEL_KINDS.every((kind) => requested[kind] === selected[kind])) {
+        dirty.current = false;
+        clearCache();
+        recovered.current = null;
+        setDraftBaseDigest(null);
+      }
       setCaptured(null);
       setStatus(result.status);
-      setSelected(result.status.selected);
+      if (!dirty.current) setSelected(result.status.selected);
       setRefresh((value) => value + 1);
       notify.current();
     }
@@ -537,6 +579,9 @@ export function ProjectModelsSettings({
       uncertain,
     );
   };
+  const staleDraft = !!status && !!draftBaseDigest &&
+    draftBaseDigest !== status.selectionDigest &&
+    MODEL_KINDS.some((kind) => selected[kind] !== status.selected[kind]);
   const disabled =
     externalBusy ||
     readOnly ||
@@ -545,7 +590,7 @@ export function ProjectModelsSettings({
     !!continuation.command ||
     checking ||
     !!loadError ||
-    !status;
+    !status || staleDraft;
   const currentPreview = modelPreviewCurrent(
     captured,
     status,
@@ -710,7 +755,11 @@ export function ProjectModelsSettings({
             ]}
             onValueChange={(choice) => {
               dirty.current = true;
-              setSelected((value) => ({ ...value, [kind]: choice || null }));
+              const next = { ...selected, [kind]: choice || null };
+              const base = draftBaseDigest ?? status?.selectionDigest ?? null;
+              setDraftBaseDigest(base);
+              writeCache(next, base);
+              setSelected(next);
               setFormError("");
             }}
           />
@@ -730,6 +779,19 @@ export function ProjectModelsSettings({
       className="project-settings-section settings-media"
       aria-label={t("Media model choices", "媒体模型选择")}
     >
+      {staleDraft && <p role="status" className="settings-inline-issue">
+        {t("The saved model choices changed. Your local draft is kept. Review it before saving.", "已保存的模型选择发生变化。本地草稿已保留，请检查后再保存。")}
+        <UiButton type="button" variant="ghost" onClick={() => {
+          setDraftBaseDigest(status!.selectionDigest);
+          writeCache(selected, status!.selectionDigest);
+        }}>{t("Keep my choices for current version", "在当前版本保留我的选择")}</UiButton>
+        <UiButton type="button" variant="ghost" onClick={() => {
+          setSelected(status!.selected);
+          setDraftBaseDigest(null);
+          dirty.current = false;
+          clearCache();
+        }}>{t("Use saved choices", "使用已保存的选择")}</UiButton>
+      </p>}
       {slot.command && !slot.running && (
         <div className="notice warning">
           <p ref={feedback} tabIndex={-1}>

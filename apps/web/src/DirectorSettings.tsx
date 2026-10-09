@@ -26,6 +26,16 @@ import type {
   DirectorSettingsStatus,
 } from "./project-settings-model";
 import { DirectorSettingsReadGate } from "./director-settings-read";
+import { clearLocalDraft, readLocalDraft, writeLocalDraft } from "./local-draft-cache";
+
+const isDirectorSelection = (value: unknown): value is DirectorSelection => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return (item.mode === "fake" || item.mode === "native") &&
+    ["binaryPath", "codexHome"].every((field) =>
+      item[field] === undefined || (typeof item[field] === "string" && (item[field] as string).length <= 4096)) &&
+    (item.model === undefined || (typeof item.model === "string" && item.model.length <= 120));
+};
 
 export function DirectorSettingsPanel({
   api,
@@ -50,15 +60,36 @@ export function DirectorSettingsPanel({
     path = `/api/projects/${encodeURIComponent(projectId)}/director/setup`;
   const registry = pendingCommandsFor(api, "project-director-settings"),
     initial = useRef(restoredDirectorDraft(registry.snapshot(projectId)));
+  const recovered = useRef<ReturnType<typeof readLocalDraft<DirectorSelection>> | undefined>(undefined);
+  if (recovered.current === undefined)
+    recovered.current = readLocalDraft(api.cacheNamespace, projectId,
+      "settings:director", isDirectorSelection);
+  const cacheRevision = useRef(recovered.current?.revision ?? null);
+  const writeCache = (value: DirectorSelection, selectionDigest: string | null) => {
+    const result = writeLocalDraft(api.cacheNamespace, projectId,
+      "settings:director", value, { selectionDigest }, cacheRevision.current);
+    if (result.status === "saved") cacheRevision.current = result.revision!;
+  };
+  const clearCache = () => {
+    const result = clearLocalDraft(api.cacheNamespace, projectId,
+      "settings:director", cacheRevision.current ?? undefined);
+    if (result === "saved") cacheRevision.current = null;
+  };
+  const [draftBaseDigest, setDraftBaseDigest] = useState<string | null>(() => {
+    const base = recovered.current?.base;
+    return base && typeof base === "object" &&
+      typeof (base as { selectionDigest?: unknown }).selectionDigest === "string"
+      ? (base as { selectionDigest: string }).selectionDigest : null;
+  });
   const [status, setStatus] = useState<DirectorSettingsStatus | null>(null),
     [draft, setDraft] = useState<DirectorSelection>(
-      initial.current ?? { mode: "fake" },
+      initial.current ?? recovered.current?.value ?? { mode: "fake" },
     );
   const [checking, setChecking] = useState(true),
     [loadError, setLoadError] = useState(""),
     [formError, setFormError] = useState(""),
     [refresh, setRefresh] = useState(0);
-  const dirty = useRef(!!initial.current),
+  const dirty = useRef(!!initial.current || !!recovered.current),
     catalogRequests = useRef(new Set<string>()),
     catalogAbort = useRef<AbortController | null>(null);
   const statusReads = useRef(new DirectorSettingsReadGate());
@@ -86,9 +117,10 @@ export function DirectorSettingsPanel({
     notify = useRef(changed);
   notify.current = changed;
   useEffect(() => {
-    busyChanged?.(slot.running || modelChecking);
+    // Catalog discovery is a cancellable read; it must not lock dismissal or unrelated work.
+    busyChanged?.(slot.running);
     return () => busyChanged?.(false);
-  }, [slot.running, modelChecking, busyChanged]);
+  }, [slot.running, busyChanged]);
   useEffect(() => {
     const abort = new AbortController();
     void statusReads.current.run(
@@ -103,6 +135,13 @@ export function DirectorSettingsPanel({
         },
         success: (value) => {
           setStatus(value);
+          if (recovered.current &&
+            directorDraftIdentity(value.selection) === directorDraftIdentity(draft)) {
+            clearCache();
+            recovered.current = null;
+            dirty.current = false;
+            setDraftBaseDigest(null);
+          }
           if (!dirty.current) setDraft(value.selection);
         },
         failure: (error) => setLoadError(errorText(error)),
@@ -115,7 +154,13 @@ export function DirectorSettingsPanel({
     if (slot.settledVersion <= observed.current) return;
     observed.current = slot.settledVersion;
     if (slot.lastSuccess) {
-      dirty.current = false;
+      const requested = (slot.settledCommand?.body as { selection?: DirectorSelection } | undefined)?.selection;
+      if (requested && directorDraftIdentity(requested) === directorDraftIdentity(draft)) {
+        dirty.current = false;
+        clearCache();
+        recovered.current = null;
+        setDraftBaseDigest(null);
+      }
       notify.current();
     }
     setRefresh((value) => value + 1);
@@ -200,9 +245,15 @@ export function DirectorSettingsPanel({
   ]);
   const edit = (value: DirectorSelection) => {
     dirty.current = true;
+    const base = draftBaseDigest ?? status?.selectionDigest ?? null;
+    setDraftBaseDigest(base);
+    writeCache(value, base);
     setDraft(value);
     setFormError("");
   };
+  const staleDraft = !!status && !!draftBaseDigest &&
+    draftBaseDigest !== status.selectionDigest &&
+    directorDraftIdentity(draft) !== directorDraftIdentity(status.selection);
   const disabled =
     externalBusy ||
     readOnly ||
@@ -213,7 +264,7 @@ export function DirectorSettingsPanel({
     !!loadError ||
     !status ||
     status.busy ||
-    !status.changeAvailable;
+    !status.changeAvailable || staleDraft;
   const feedback = useRef<HTMLParagraphElement>(null);
   const hasChanges =
     !!status &&
@@ -333,6 +384,19 @@ export function DirectorSettingsPanel({
       className="project-settings-section settings-director"
       aria-labelledby="project-director-title"
     >
+      {staleDraft && <p role="status" className="settings-inline-issue">
+        {t("The saved Director choice changed. Your local draft is kept. Review it before saving.", "已保存的导演设置发生变化。本地草稿已保留，请检查后再保存。")}
+        <UiButton type="button" variant="ghost" onClick={() => {
+          setDraftBaseDigest(status!.selectionDigest);
+          writeCache(draft, status!.selectionDigest);
+        }}>{t("Keep my choice for current version", "在当前版本保留我的选择")}</UiButton>
+        <UiButton type="button" variant="ghost" onClick={() => {
+          setDraft(status!.selection);
+          setDraftBaseDigest(null);
+          dirty.current = false;
+          clearCache();
+        }}>{t("Use saved choice", "使用已保存的选择")}</UiButton>
+      </p>}
       <form
         id={formId}
         onSubmit={(event) => {

@@ -1,3 +1,4 @@
+import { assertExpectedHumanRequest } from "../application/expected-human-request.js";
 import { soundtrackPlacement } from "./soundtrack-placement.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { canonical, digest, invariant, newId } from "@openslate/core";
@@ -154,10 +155,8 @@ export function registerShotAudioRoutes(
         (mapping) => mapping.shotId === shotId,
       )?.segmentId;
       const segmentId = saved?.segmentId ?? mapped ?? null;
-      const row =
-        narration
-          .workspaceSnapshot(projectId)
-          .segments.find((row) => row.entry.segmentId === segmentId) ?? null;
+      const workspace = narration.workspaceSnapshot(projectId);
+      const row = workspace.segments.find((row) => row.entry.segmentId === segmentId) ?? null;
       const segment =
         row && row.audio && isVerifiedGeneratedNarrationAudio(row.audio)
           ? { ...row, audio: summarizeGeneratedNarrationAudio(row.audio) }
@@ -175,6 +174,7 @@ export function registerShotAudioRoutes(
         shotId,
         headVersion: project.headVersion,
         plannedFrames: shot.desiredFrames,
+        narrationVersion: workspace.state.version,
         segment,
         session: sessionFor(projectId, shotId),
         intentCurrent:
@@ -351,6 +351,7 @@ export function registerShotAudioRoutes(
     Params: { projectId: string; shotId: string };
     Body: {
       expectedHeadVersion: number;
+      expectedRequestId?: string | null;
       expectedNarrationVersion?: number;
       sessionId?: string;
       continuationSessionId?: string;
@@ -366,6 +367,7 @@ export function registerShotAudioRoutes(
         body: object(
           {
             expectedHeadVersion: version,
+            expectedRequestId: { type: ["string", "null"], minLength: 1, maxLength: 160 },
             expectedNarrationVersion: version,
             sessionId: id,
             continuationSessionId: id,
@@ -406,6 +408,7 @@ export function registerShotAudioRoutes(
         commandKey,
         inputDigest,
         () => {
+          assertExpectedHumanRequest(production, projectId, body.expectedRequestId);
           const project = store.getProject(projectId),
             shot = project.shots.find((shot) => shot.id === shotId);
           invariant(
@@ -539,6 +542,7 @@ export function registerShotAudioRoutes(
     Params: { projectId: string; shotId: string };
     Body: {
       expectedHeadVersion: number;
+      expectedRequestId?: string | null;
       expectedNarrationVersion?: number;
       sessionId?: string;
       continuationSessionId?: string;
@@ -554,6 +558,7 @@ export function registerShotAudioRoutes(
         body: object(
           {
             expectedHeadVersion: version,
+            expectedRequestId: { type: ["string", "null"], minLength: 1, maxLength: 160 },
             expectedNarrationVersion: version,
             sessionId: id,
             continuationSessionId: id,
@@ -581,6 +586,7 @@ export function registerShotAudioRoutes(
         commandKey,
         digest({ shotId, ...b }),
         () => {
+          assertExpectedHumanRequest(production, projectId, b.expectedRequestId);
           const project = store.getProject(projectId),
             shot = project.shots.find((shot) => shot.id === shotId);
           invariant(

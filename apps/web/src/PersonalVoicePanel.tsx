@@ -5,6 +5,16 @@ import type { StudioApi } from "./api";
 import type { PendingCommand, PendingCommandSnapshot } from "./pending-command";
 import { HelpTip, IconButton, errorText } from "./components";
 import { useProjectRefreshVersion } from "./project-updates";
+import { UiButton } from "./ui";
+import { clearLocalDraft, readLocalDraft, writeLocalDraft } from "./local-draft-cache";
+
+interface VoiceDraft { label: string; providerVoiceId: string }
+const isVoiceDraft = (value: unknown): value is VoiceDraft =>
+  !!value && typeof value === "object" &&
+  typeof (value as VoiceDraft).label === "string" &&
+  (value as VoiceDraft).label.length <= 120 &&
+  typeof (value as VoiceDraft).providerVoiceId === "string" &&
+  (value as VoiceDraft).providerVoiceId.length <= 126;
 
 interface PersonalVoice {
   id: string;
@@ -35,14 +45,37 @@ export function PersonalVoicePanel({
 
   const base = `/api/projects/${encodeURIComponent(projectId)}/narration/personal-voices`,
     projectUpdate = useProjectRefreshVersion();
+  const cacheField = "settings:personal-voice";
+  const recovered = useRef<ReturnType<typeof readLocalDraft<VoiceDraft>> | undefined>(undefined);
+  if (recovered.current === undefined)
+    recovered.current = readLocalDraft(api.cacheNamespace, projectId,
+      cacheField, isVoiceDraft);
+  const cacheRevision = useRef(recovered.current?.revision ?? null);
+  const recoveredBase = recovered.current?.base;
+  const [draftBaseHead, setDraftBaseHead] = useState<number | null>(
+    typeof recoveredBase === "number" ? recoveredBase : null);
+  const writeCache = (next: VoiceDraft, baseVersion: number | null) => {
+    const result = writeLocalDraft(api.cacheNamespace, projectId, cacheField,
+      next, baseVersion, cacheRevision.current);
+    if (result.status === "saved") cacheRevision.current = result.revision!;
+  };
+  const clearCache = () => {
+    const result = clearLocalDraft(api.cacheNamespace, projectId,
+      cacheField, cacheRevision.current ?? undefined);
+    if (result === "saved") cacheRevision.current = null;
+  };
   const [voices, setVoices] = useState<PersonalVoice[]>([]),
-    [label, setLabel] = useState(""),
-    [providerVoiceId, setProviderVoiceId] = useState("");
+    [label, setLabel] = useState(recovered.current?.value.label ?? ""),
+    [providerVoiceId, setProviderVoiceId] = useState(
+      recovered.current?.value.providerVoiceId ?? "");
   const [ownVoice, setOwnVoice] = useState(false),
     [permitSynthesis, setPermitSynthesis] = useState(false),
     [error, setError] = useState(""),
     [refresh, setRefresh] = useState(0);
   const [headVersion, setHeadVersion] = useState<number | null>(null);
+  const staleDraft = !!(label || providerVoiceId) &&
+    headVersion !== null && draftBaseHead !== null &&
+    headVersion !== draftBaseHead;
   const observed = useRef(completion.settledVersion);
   useEffect(() => {
     const abort = new AbortController();
@@ -54,6 +87,7 @@ export function PersonalVoicePanel({
         if (!abort.signal.aborted) {
           setVoices(value.voices);
           setHeadVersion(value.headVersion);
+          setDraftBaseHead((current) => current ?? value.headVersion);
           setError("");
         }
       })
@@ -79,15 +113,22 @@ export function PersonalVoicePanel({
         (completion.settledCommand?.metadata as { personalVoice?: string })
           ?.personalVoice === "register"
       ) {
-        setLabel("");
-        setProviderVoiceId("");
+        const saved = completion.settledCommand?.body as VoiceDraft | undefined;
+        if (saved?.label === label.trim() &&
+          saved.providerVoiceId === providerVoiceId) {
+          setLabel("");
+          setProviderVoiceId("");
+          clearCache();
+          setHeadVersion(null);
+          setDraftBaseHead(null);
+        }
         setOwnVoice(false);
         setPermitSynthesis(false);
       }
     }
   }, [completion.settledVersion]);
   function register() {
-    if (headVersion === null) {
+    if (headVersion === null || staleDraft) {
       setError("Refresh the project before registering a voice.");
       return;
     }
@@ -181,13 +222,36 @@ export function PersonalVoicePanel({
             {ui("Provider requirements", mediaUiCopy)}
           </a>
         </p>
+        {staleDraft && <p role="status" className="settings-inline-issue">
+          {t("The project changed. Your local voice details are kept. Review them before saving.", "项目已更新。本地音色信息已保留，请检查后再保存。")}
+          <UiButton type="button" variant="ghost" onClick={() => {
+            setDraftBaseHead(headVersion);
+            writeCache({ label, providerVoiceId }, headVersion);
+          }}>{t("Keep details for current version", "在当前版本保留音色信息")}</UiButton>
+          <UiButton type="button" variant="ghost" onClick={() => {
+            setLabel("");
+            setProviderVoiceId("");
+            setDraftBaseHead(headVersion);
+            setOwnVoice(false);
+            setPermitSynthesis(false);
+            clearCache();
+          }}>{t("Discard local details", "丢弃本地信息")}</UiButton>
+        </p>}
         <label>
           {ui("Voice name", mediaUiCopy)}
           <input
             value={label}
             maxLength={120}
             disabled={disabled}
-            onChange={(event) => setLabel(event.target.value)}
+            onChange={(event) => {
+              const next = { label: event.target.value, providerVoiceId };
+              setLabel(next.label);
+              const baseVersion = draftBaseHead ?? headVersion;
+              if (draftBaseHead === null) setDraftBaseHead(baseVersion);
+              if (next.label || next.providerVoiceId)
+                writeCache(next, baseVersion);
+              else clearCache();
+            }}
             placeholder={ui("My narration voice", mediaUiCopy)}
           />
         </label>
@@ -197,7 +261,15 @@ export function PersonalVoicePanel({
             value={providerVoiceId}
             maxLength={126}
             disabled={disabled}
-            onChange={(event) => setProviderVoiceId(event.target.value.trim())}
+            onChange={(event) => {
+              const next = { label, providerVoiceId: event.target.value.trim() };
+              setProviderVoiceId(next.providerVoiceId);
+              const baseVersion = draftBaseHead ?? headVersion;
+              if (draftBaseHead === null) setDraftBaseHead(baseVersion);
+              if (next.label || next.providerVoiceId)
+                writeCache(next, baseVersion);
+              else clearCache();
+            }}
             placeholder="voice_…"
             autoComplete="off"
           />
@@ -227,6 +299,7 @@ export function PersonalVoicePanel({
           className="button"
           disabled={
             disabled ||
+            staleDraft ||
             headVersion === null ||
             !ownVoice ||
             !permitSynthesis ||

@@ -8,7 +8,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { StudioApi } from "./api";
-import { ApiError } from "./api";
+import { startSceneCommand } from "./scene-command";
+import type { RefObject } from "react";
 import { AppDialog, UiButton } from "./ui";
 import { errorText, Icon } from "./components";
 import type { DirectorStatus, ProjectSnapshot } from "./model";
@@ -75,9 +76,6 @@ export function useSceneView(
       : null;
   return { view: current, error };
 }
-const uncertain = (error: unknown) =>
-  !(error instanceof ApiError) ||
-  ["NETWORK_ERROR", "INTERNAL_ERROR", "REQUEST_FAILED"].includes(error.code);
 export function FrameDecision({
   api,
   snapshot,
@@ -86,6 +84,8 @@ export function FrameDecision({
   disabled,
   onChanged,
   close,
+  onStarted,
+  returnFocusRef,
 }: {
   api: StudioApi;
   snapshot: ProjectSnapshot;
@@ -94,6 +94,8 @@ export function FrameDecision({
   disabled: boolean;
   onChanged(): void;
   close(): void;
+  onStarted(): void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { t, ui } = useTranslation();
 
@@ -132,18 +134,7 @@ export function FrameDecision({
   ]);
   const run = (cmd: PendingCommand) => {
     if (disabled) return;
-    void registry.run(
-      projectId,
-      cmd,
-      (saved) =>
-        api.request(saved.path, {
-          method: "POST",
-          body: saved.body,
-          key: saved.key,
-          timeoutMs: 180000,
-        }),
-      uncertain,
-    );
+    if (startSceneCommand(api, projectId, cmd)) onStarted();
   };
   const targets =
     view?.rows.filter(
@@ -151,7 +142,7 @@ export function FrameDecision({
         (!request.targetShotIds || request.targetShotIds.includes(r.shotId)) &&
         (request.regenerate || !r.imageComplete),
     ) ?? [];
-  let allowed = false;
+  let allowed = false, eligibilityError = "";
   try {
     if (view) {
       scopedFrameCommand(
@@ -164,8 +155,8 @@ export function FrameDecision({
       );
       allowed = true;
     }
-  } catch {
-    /*Explanation appears next to the saved scope; server remains authoritative.*/
+  } catch (cause) {
+    eligibilityError = errorText(cause);
   }
   return (
     <AppDialog
@@ -184,10 +175,9 @@ export function FrameDecision({
         },
       )}
       onOpenChange={(v) => {
-        if (!v && !slot.running) close();
+        if (!v) close();
       }}
-      preventClose={slot.running}
-      closeDisabled={slot.running}
+      {...(returnFocusRef ? { returnFocusRef } : {})}
       closeLabel={t("Close keyframe proposal", "关闭关键帧方案")}
     >
       <p className="field-help">
@@ -297,25 +287,7 @@ export function FrameDecision({
       )}
       {!allowed && !slot.command && view && (
         <p className="field-help">
-          {targets.some(
-            (r) =>
-              r.imagePending ||
-              r.videoPending ||
-              r.blockedCode === "SUBMISSION_UNKNOWN",
-          )
-            ? t(
-                "Existing jobs for these shots still need checking.",
-                "这些镜头的已有任务还需核对。",
-              )
-            : snapshot.control?.paused
-              ? t(
-                  "Production is paused. Continue in the conversation.",
-                  "制作已暂停，请在对话里继续。",
-                )
-              : t(
-                  "Finish the current request, then review the latest generation proposal.",
-                  "先完成当前请求，再检查最新的生成方案。",
-                )}
+          {ui(eligibilityError, workbenchCopy)}
         </p>
       )}
     </AppDialog>
@@ -328,7 +300,6 @@ export function SceneDecisionFooter({
   sceneId,
   disabled,
   exposedFrames,
-  reviewedFrames,
   onReviewScene,
   onGenerateKeyframes,
 }: {
@@ -338,7 +309,6 @@ export function SceneDecisionFooter({
   sceneId: string | null;
   disabled: boolean;
   exposedFrames: ExposedSceneFrames;
-  reviewedFrames: ExposedSceneFrames;
   onReviewScene(sceneId: string): void;
   onGenerateKeyframes(sceneId: string): void;
 }) {
@@ -358,20 +328,17 @@ export function SceneDecisionFooter({
         </small>
       </div>
     );
-  const proof = Object.fromEntries(
-    Object.entries(exposedFrames).filter(([key]) => reviewedFrames[key]),
-  );
   const state = conversationSceneState(
     view,
     snapshot,
     director,
-    proof,
+    exposedFrames,
     disabled,
   );
-  const checked = view.rows.filter(
+  const viewed = view.rows.filter(
     (r) =>
       r.image &&
-      reviewedFrames[
+      exposedFrames[
         exposedSceneFrameKey(
           view.projectId,
           view.revisionId,
@@ -385,18 +352,24 @@ export function SceneDecisionFooter({
     <div className="frame-generation-footer">
       <div>
         <strong>
-          {state.stage === "complete"
-            ? t("Scene media saved", "本场景媒体已保存")
-            : t(
-                view.rows.length === 1
-                  ? "{v0} / {v1} shot checked"
-                  : "{v0} / {v1} shots checked",
-                "{v0} / {v1} 个镜头已检查",
-                {
-                  v0: checked,
-                  v1: view.rows.length,
-                },
-              )}
+          {state.unknown
+            ? t("Job outcome unconfirmed", "任务结果尚未确认")
+            : state.stage === "complete"
+              ? t("Scene media saved", "本场景媒体已保存")
+              : view.rows.some((row) => row.videoPending)
+                ? t("Scene confirmed", "场景已确认")
+                : state.stage === "image" && state.existingWork
+                  ? t("Generating keyframes…", "正在生成关键帧…")
+                  : t(
+                      view.rows.length === 1
+                        ? "{v0} / {v1} keyframe viewed"
+                        : "{v0} / {v1} keyframes viewed",
+                      "{v0} / {v1} 个关键帧已查看",
+                      {
+                        v0: viewed,
+                        v1: view.rows.length,
+                      },
+                    )}
         </strong>
         <small>
           {state.stage === "image"
@@ -404,25 +377,20 @@ export function SceneDecisionFooter({
                 "Check composition and content with keyframes first.",
                 "先用关键帧检查构图和内容",
               )
-            : state.narrationShotIds.length
-              ? t(
-                  "Video can start after narration and timing are ready.",
-                  "旁白与时序准备完成后可生成视频",
-                )
-              : state.existingWork
-                ? t("Updating requested media", "正在更新已请求的素材")
-                : state.stage === "complete"
-                  ? t(
-                      "Continue discussing changes or view the film.",
-                      "可以继续讨论修改，或查看成片",
-                    )
-                  : t(
-                      "Check the current keyframes and motion, then confirm the generation proposal.",
-                      "检查当前关键帧及动作，确认生成方案",
-                    )}
+            : state.existingWork
+              ? t("Updating requested media", "正在更新已请求的素材")
+              : state.stage === "complete"
+                ? t(
+                    "Continue discussing changes or view the film.",
+                    "可以继续讨论修改，或查看成片",
+                  )
+                : t(
+                    "View the current keyframes, then confirm the scene once for narration and video.",
+                    "查看当前关键帧后，一次确认场景的旁白与视频生成。",
+                  )}
         </small>
       </div>
-      {state.stage === "image" ? (
+      {state.stage === "image" && !state.existingWork && !state.unknown ? (
         <UiButton
           variant="primary"
           disabled={
@@ -434,7 +402,10 @@ export function SceneDecisionFooter({
           {t("Generate keyframes", "生成关键帧")}{" "}
         </UiButton>
       ) : (
-        state.stage !== "complete" && (
+        state.stage !== "complete" &&
+        state.stage !== "image" &&
+        !state.existingWork &&
+        !state.unknown && (
           <UiButton
             variant="primary"
             disabled={
@@ -447,7 +418,7 @@ export function SceneDecisionFooter({
             onClick={() => onReviewScene(sceneId)}
           >
             <Icon name="play" size={16} />{" "}
-            {t("Review video proposal", "检查视频方案")}{" "}
+            {t("Review & confirm scene", "检查并确认场景")}{" "}
           </UiButton>
         )
       )}

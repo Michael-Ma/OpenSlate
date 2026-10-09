@@ -162,3 +162,26 @@ for(const change of ['earlier_hold','new_pause','global_stop'])test(`configured 
  const attempt=rows(f,'attempt').find(attempt=>attempt.candidateId===result.receipt.candidateId);assert.equal(attempt.phase,'submission_unknown');assert.equal(attempt.request.providerUse.kind,'configured');
  await engine.reconcile();assert.equal(calls.http,1);assert.equal(rows(f,'attempt').filter(attempt=>attempt.candidateId===result.receipt.candidateId).length,1);
 });
+
+test('current narration contexts consistently group acceptance into one scene confirmation without altering frozen legacy guidance or authority',async t=>{
+ for(const version of ['4.0.0','5.0.0']) {
+  const f=await narrationSpeechFixture(t),lock=bind(t,f,version),before=canonicalState();
+  function canonicalState(){return JSON.stringify({project:f.store.getProject(f.project.id),lock:f.store.get('director_skill_lock',lock?.id),narration:f.narration.workspaceSnapshot(f.project.id),grants:rows(f,'grant'),acceptances:rows(f,'narration_acceptance')});}
+  const changes=f.store.db.prepare('SELECT total_changes() n').get().n;
+  const overview=f.production.readContext(f.project.id,f.actor,{}),narration=f.production.readContext(f.project.id,f.actor,{section:'narration'}),audio=f.production.readContext(f.project.id,f.actor,{section:'audio_operations'}).items[0];
+  if(version==='5.0.0'){
+   for(const authority of [overview.narrationDraft.authority,narration.narrationDraft.authority,audio.authority]){
+    assert.match(authority,/one (?:studio )?scene confirmation/i);assert.match(authority,/no separate narration|do not ask for a separate narration/);assert.match(authority,/pending/);
+   }
+   assert.match(narration.narrationDraft.authority,/read-context tool cannot synthesize, transcribe, attach recordings or accept/);
+   assert.match(audio.authority,/Transcript adoption remains an explicit human editorial choice/);
+   assert.ok(audio.sections.every(section=>section.generationNeedsReview===false));
+  }else{
+   assert.match(overview.narrationDraft.authority,/required in narration review/);assert.match(narration.narrationDraft.authority,/canonical application remain separate/);
+   assert.match(audio.authority,/human reviews the proposal and spending separately/i);assert.ok(audio.sections.every(section=>section.generationNeedsReview===true));
+   for(const authority of [overview.narrationDraft.authority,narration.narrationDraft.authority,audio.authority])assert.doesNotMatch(authority,/one (?:studio )?scene confirmation/i);
+  }
+  assert.equal(canonicalState(),before);assert.equal(f.store.db.prepare('SELECT total_changes() n').get().n,changes);assert.deepEqual(f.calls,{http:0,credentials:0});
+  assert.ok(f.narration.workspaceSnapshot(f.project.id).segments.every(row=>!row.accepted.script&&!row.accepted.audio&&!row.accepted.timing));
+ }
+});

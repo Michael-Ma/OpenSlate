@@ -11,7 +11,7 @@ import {
 import type { KeyboardEvent, ReactNode } from "react";
 import type { StudioApi } from "./api";
 import type { ArtifactFixture, ProjectSnapshot, Shot } from "./model";
-import { durationLabel } from "./model";
+import { durationLabel, errorMessage } from "./model";
 import { Icon, useArtifact } from "./components";
 import { UiButton } from "./ui";
 import { frameExposureIdentity, projectResults } from "./project-results-model";
@@ -24,7 +24,6 @@ import type {
 import {
   adjacentFrameShot,
   canExposeFrame,
-  canConfirmAfterSeen,
   currentFrameExposures,
   frameHistory,
   frameSelection,
@@ -45,8 +44,8 @@ export interface FrameWorkspaceProps {
   onSelectShot: (id: string) => void;
   active?: boolean;
   disabled?: boolean;
-  reviewedFrames?: Readonly<Record<string, boolean>>;
-  onConfirmFrame?: (shotId: string) => void;
+  referencesDisabled?: boolean;
+  seenFrames?: Readonly<Record<string, boolean>>;
   onEditShot: (id: string) => void;
   onEditScene: (id: string) => void;
   onReferenceShot: (id: string) => void;
@@ -477,6 +476,31 @@ function SelectedStage({
                   ? t("Loading saved media…", "正在载入已保存的画面…")
                   : ui(stateLabel(selectedMedia), workbenchCopy)}
             </strong>
+            {media.error && (
+              <p role="alert">
+                {media.error === errorMessage("REQUEST_FAILED") ||
+                media.error === errorMessage("NETWORK_ERROR")
+                  ? t(
+                      "This preview could not be loaded. Use Retry preview to load it again.",
+                      "预览未能载入，请点击「重试预览」重新载入。",
+                    )
+                  : ui(media.error, workbenchCopy)}
+              </p>
+            )}
+            {(media.error || (failedUrl === media.url && media.url)) && (
+              <UiButton
+                variant="secondary"
+                onClick={() => {
+                  decoded.current = null;
+                  if (mediaKind === "image" && exposure)
+                    onExposure({ ...exposure, displayed: false });
+                  setFailedUrl(null);
+                  media.retry();
+                }}
+              >
+                {t("Retry preview", "重试预览")}
+              </UiButton>
+            )}
             <p>
               {mediaKind === "image"
                 ? result.shot.framing || result.shot.purpose
@@ -544,7 +568,6 @@ function SelectedStage({
       </footer>
       <div className="fw-stage-provenance">
         <MediaNote media={selectedMedia} />
-        {media.error && <span role="alert">{media.error}</span>}
       </div>
     </section>
   );
@@ -598,10 +621,8 @@ function ShotInspector({
   snapshot,
   selection,
   disabled,
-  reviewed,
-  ready,
+  referencesDisabled,
   history,
-  onConfirmFrame,
   onEditShot,
   onReferenceShot,
   onGenerateKeyframes,
@@ -610,10 +631,8 @@ function ShotInspector({
   snapshot: ProjectSnapshot;
   selection: FrameSelection;
   disabled: boolean;
-  reviewed: boolean;
-  ready: boolean;
+  referencesDisabled: boolean;
   history: FrameHistoryEntry[];
-  onConfirmFrame?: FrameWorkspaceProps["onConfirmFrame"];
   onEditShot: FrameWorkspaceProps["onEditShot"];
   onReferenceShot: FrameWorkspaceProps["onReferenceShot"];
   onGenerateKeyframes?: FrameWorkspaceProps["onGenerateKeyframes"];
@@ -644,7 +663,7 @@ function ShotInspector({
             v0: result.label,
           })}
           title={t("Reference in conversation", "引用到对话")}
-          disabled={disabled}
+          disabled={referencesDisabled}
           onClick={() => onReferenceShot(result.shot.id)}
         >
           <WorkIcon name="reference" />
@@ -795,38 +814,16 @@ function ShotInspector({
             {t("Compare saved frames", "比较已保存的画面")}{" "}
           </UiButton>
         )}
-        {onConfirmFrame && (
-          <UiButton
-            variant={reviewed ? "soft" : "success"}
-            disabled={
-              disabled || reviewed || !ready || !result.keyframe.current
-            }
-            onClick={() => {
-              if (ready && result.keyframe.current)
-                onConfirmFrame(result.shot.id);
-            }}
-          >
-            <Icon name="check" size={16} />
-            {reviewed
-              ? t("Frame checked", "此画面已检查")
-              : t("Confirm this frame", "确认此画面")}
-          </UiButton>
-        )}
         <p className="fw-review-hint">
-          {reviewed
+          {result.keyframe.current
             ? t(
-                "Review is for this video generation; it will not start production automatically.",
-                "检查记录用于本次视频生成；不会自动开始制作。",
+                "View the scene’s keyframes, then confirm the scene once to generate narration and video.",
+                "查看场景关键帧后，只需确认一次场景，即可生成旁白与视频。",
               )
-            : result.keyframe.current
-              ? t(
-                  "Check composition and content, then confirm this frame.",
-                  "检查构图与内容，再确认此画面。",
-                )
-              : t(
-                  "Generate a keyframe matching the current plan before reviewing.",
-                  "生成符合当前计划的关键帧后再检查。",
-                )}
+            : t(
+                "Generate a keyframe matching the current plan before reviewing.",
+                "生成符合当前计划的关键帧后再检查。",
+              )}
         </p>
       </div>
     </aside>
@@ -840,7 +837,8 @@ function FrameShelf({
   selectedShotId,
   active,
   disabled,
-  reviewedFrames,
+  referencesDisabled,
+  seenFrames,
   onSelectShot,
   onEditScene,
   onReferenceScene,
@@ -853,7 +851,8 @@ function FrameShelf({
   selectedShotId: string | null;
   active: boolean;
   disabled: boolean;
-  reviewedFrames: Readonly<Record<string, boolean>>;
+  referencesDisabled: boolean;
+  seenFrames: Readonly<Record<string, boolean>>;
   onSelectShot: FrameWorkspaceProps["onSelectShot"];
   onEditScene: FrameWorkspaceProps["onEditScene"];
   onReferenceScene: FrameWorkspaceProps["onReferenceScene"];
@@ -885,7 +884,7 @@ function FrameShelf({
           <div className="fw-shelf-actions">
             <button
               type="button"
-              disabled={disabled}
+              disabled={referencesDisabled}
               onClick={() => onReferenceScene(scene.id)}
               aria-label={t("Reference Scene {v0}", "引用场景 {v0}", {
                 v0: scene.label,
@@ -907,10 +906,10 @@ function FrameShelf({
       <div className="fw-shot-shelf">
         {scene.shots.map((result) => {
           const exposure = frameExposure(snapshot, result),
-            reviewed =
+            viewed =
               result.keyframe.current &&
               !!exposure &&
-              reviewedFrames[frameExposureIdentity(exposure)] === true;
+              seenFrames[frameExposureIdentity(exposure)] === true;
           return (
             <button
               type="button"
@@ -932,12 +931,12 @@ function FrameShelf({
               />
               <span className="fw-shot-number">{result.label}</span>
               <span
-                className={`fw-shot-state${reviewed ? " checked" : result.keyframe.state === "saved" ? " pending" : ""}`}
+                className={`fw-shot-state${viewed ? " checked" : result.keyframe.state === "saved" ? " pending" : ""}`}
               >
-                {reviewed
-                  ? t("Checked", "已检查")
+                {viewed
+                  ? t("Viewed", "已查看")
                   : result.keyframe.current
-                    ? t("Awaiting review", "待检查")
+                    ? t("View keyframe", "查看关键帧")
                     : ui(stateLabel(result.keyframe), workbenchCopy)}
               </span>
               <span className="fw-shot-meta">
@@ -975,7 +974,7 @@ function FrameShelf({
           {selected && (
             <button
               type="button"
-              disabled={disabled}
+              disabled={referencesDisabled}
               onClick={() => onReferenceShot(selected.shot.id)}
             >
               <WorkIcon name="reference" size={14} />{" "}
@@ -983,11 +982,7 @@ function FrameShelf({
             </button>
           )}
           {onReviewScene && !scene.unassigned && scene.shots.length > 0 && (
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onReviewScene(scene.id)}
-            >
+            <button type="button" onClick={() => onReviewScene(scene.id)}>
               {" "}
               {t("View scene generation", "查看场景生成")}{" "}
               <WorkIcon name="right" size={14} />
@@ -1004,6 +999,7 @@ function PlanView({
   scenes,
   selectedShotId,
   disabled,
+  referencesDisabled,
   onSelectShot,
   onEditShot,
   onEditScene,
@@ -1014,6 +1010,7 @@ function PlanView({
   scenes: ResultScene[];
   selectedShotId: string | null;
   disabled: boolean;
+  referencesDisabled: boolean;
   onSelectShot: FrameWorkspaceProps["onSelectShot"];
   onEditShot: FrameWorkspaceProps["onEditShot"];
   onEditScene: FrameWorkspaceProps["onEditScene"];
@@ -1087,7 +1084,7 @@ function PlanView({
               <div className="fw-plan-actions">
                 <button
                   type="button"
-                  disabled={disabled}
+                  disabled={referencesDisabled}
                   aria-label={t("Reference Scene {v0}", "引用场景 {v0}", {
                     v0: scene.label,
                   })}
@@ -1167,7 +1164,7 @@ function PlanView({
                 <div className="fw-plan-actions">
                   <button
                     type="button"
-                    disabled={disabled}
+                    disabled={referencesDisabled}
                     aria-label={t("Reference Shot {v0}", "引用镜头 {v0}", {
                       v0: result.label,
                     })}
@@ -1229,8 +1226,8 @@ export function FrameWorkspace({
   onSelectShot,
   active = true,
   disabled = false,
-  reviewedFrames = {},
-  onConfirmFrame,
+  referencesDisabled = disabled,
+  seenFrames = {},
   onEditShot,
   onEditScene,
   onReferenceShot,
@@ -1253,7 +1250,6 @@ export function FrameWorkspace({
     callback = useRef(onFrameExposure);
   callback.current = onFrameExposure;
   const [mediaKind, setMediaKind] = useState<"image" | "video">("image");
-  const [, refreshProof] = useState(0);
   useLayoutEffect(() => {
     for (const exposure of revokedFrameExposures(seen.current, exposures)) {
       seen.current.delete(frameExposureIdentity(exposure));
@@ -1266,7 +1262,6 @@ export function FrameWorkspace({
       if (seen.current.has(identity)) return;
       seen.current.set(identity, exposure);
     } else seen.current.delete(identity);
-    refreshProof((value) => value + 1);
     callback.current?.(exposure);
   }, []);
   useEffect(() => {
@@ -1282,19 +1277,6 @@ export function FrameWorkspace({
       selection?.result.keyframe.artifact?.sha256,
     ],
   );
-  const selectedExposure = selection
-    ? frameExposure(snapshot, selection.result)
-    : null;
-  const canConfirm = canConfirmAfterSeen(
-    selectedExposure,
-    exposures,
-    seen.current,
-    active,
-  );
-  const reviewed =
-    !!selectedExposure &&
-    selection?.result.keyframe.current === true &&
-    reviewedFrames[frameExposureIdentity(selectedExposure)] === true;
   const selectedScene = selection?.scene;
   return (
     <div
@@ -1350,6 +1332,7 @@ export function FrameWorkspace({
             scenes={results.scenes}
             selectedShotId={selection?.result.shot.id ?? null}
             disabled={disabled}
+            referencesDisabled={referencesDisabled}
             onSelectShot={onSelectShot}
             onEditShot={onEditShot}
             onEditScene={onEditScene}
@@ -1379,10 +1362,8 @@ export function FrameWorkspace({
                   snapshot={snapshot}
                   selection={selection}
                   disabled={disabled}
-                  reviewed={reviewed}
-                  ready={canConfirm}
+                  referencesDisabled={referencesDisabled}
                   history={history}
-                  {...(onConfirmFrame ? { onConfirmFrame } : {})}
                   onEditShot={onEditShot}
                   onReferenceShot={onReferenceShot}
                   {...(onGenerateKeyframes ? { onGenerateKeyframes } : {})}
@@ -1415,7 +1396,8 @@ export function FrameWorkspace({
                 selectedShotId={selection?.result.shot.id ?? null}
                 active={active}
                 disabled={disabled}
-                reviewedFrames={reviewedFrames}
+                referencesDisabled={referencesDisabled}
+                seenFrames={seenFrames}
                 onSelectShot={onSelectShot}
                 onEditScene={onEditScene}
                 onReferenceScene={onReferenceScene}

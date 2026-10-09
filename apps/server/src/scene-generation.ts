@@ -1,4 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import { assertExpectedHumanRequest } from "./application/expected-human-request.js";
+import { sceneNarrationView } from "./scene-narration-view.js";
+import type { NarrationService } from "./narration/service.js";
 import {
   canonical,
   composeScenePlanIsolated,
@@ -24,6 +27,7 @@ import type { NodeBinding } from "./execution/engine.js";
 type Input = {
   headVersion: number;
   revisionId: string;
+  expectedRequestId?: string | null;
   kind: "image" | "video";
   reviewedFrames: { shotId: string; artifactId: string; sha256: string }[];
   reviewedHoldDigest: string;
@@ -314,12 +318,24 @@ function sceneView(
 export function registerSceneGeneration(
   app: FastifyInstance,
   service: () => ProductionService,
+  narration?: NarrationService,
 ) {
   app.get<{ Params: { projectId: string; sceneId: string } }>(
     "/api/projects/:projectId/scenes/:sceneId/generation",
-    async (request) =>
-      sceneView(service(), request.params.projectId, request.params.sceneId)
-        .view,
+    async (request) => {
+      const production = service(), { projectId, sceneId } = request.params,
+        saved = sceneView(production, projectId, sceneId),
+        audio = sceneNarrationView(production, saved.project, sceneId, narration);
+      const rows = saved.view.rows.map(row => ({ ...row, narration: audio.rows.find(value => value.shotId === row.shotId)!.narration }));
+      const sceneIntentDigest = digest({ scene: saved.project.scenes.find(scene => scene.id === sceneId), capabilityLock: saved.lock,
+        shots: saved.project.shots.filter(shot => shot.sceneId === sceneId).map(shot => ({ id: shot.id, purpose: shot.purpose, action: shot.action,
+          framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
+          imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
+            ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
+      const currentRequestId = production.snapshot(projectId).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
+      return { ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error,
+        confirmationDigest: audio.error ? null : digest({ ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
+    },
   );
   app.post<{ Params: { projectId: string; sceneId: string }; Body: Input }>(
     "/api/projects/:projectId/scenes/:sceneId/generate",
@@ -337,6 +353,7 @@ export function registerSceneGeneration(
             "reviewedControlAuthorityId",
           ],
           properties: {
+            expectedRequestId: { type: ["string", "null"], minLength: 1, maxLength: 160 },
             headVersion: { type: "integer", minimum: 0 },
             revisionId: { type: "string", minLength: 1, maxLength: 160 },
             kind: { enum: ["image", "video"] },
@@ -412,6 +429,7 @@ export function registerSceneGeneration(
         "Choose shots belonging to this scene",
       );
       const fresh = () => {
+        assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
         const now = sceneView(production, projectId, sceneId).view;
         invariant(
           now.headVersion === input.headVersion &&

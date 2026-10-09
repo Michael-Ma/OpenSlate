@@ -159,7 +159,8 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     const cursor = service.store.cursor(projectId);
     const domainCursor = (service.store.db.prepare("SELECT coalesce(max(sequence),0) AS cursor FROM events WHERE project_id=? AND json_extract(body,'$.kind') NOT IN ('tool.started','tool.finished','director.context_captured')").get(projectId) as { cursor: number }).cursor;
     const toolVersion = contextToolVersion(service.store, projectId, actor);
-    const applicationCapabilities = projectApplicationCapabilities(toolVersion, contextAudioRequests(service.store, projectId, actor));
+    const audioRequests = contextAudioRequests(service.store, projectId, actor);
+    const applicationCapabilities = projectApplicationCapabilities(toolVersion, audioRequests);
     const base: DirectorContextProjection = {
       section, project: { id, headVersion, revisionId, name, brief, story, narration, activePlanId, capabilityLockId, maxFrames, shots: [], scenes: [] },
       headVersion, revisionId, activePlanId, cursor,
@@ -181,7 +182,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       base.guard.dataDigest = digest({ domainCursor, narrationVersion: service.store.get<NarrationState>("narration_state", projectId)?.version ?? 0 });
       const audio = projectAudioOperations(service, projectId, offset, value => bytes({ ...base, items: [value],
         page: page(offset, value.coverage.returned, value.coverage.total), coverage: { ...base.coverage, audioOperations: value.coverage } }) <= DIRECTOR_PROJECTION_LIMITS.bytes,
-        contextAudioRequests(service.store, projectId, actor), actor);
+        audioRequests, actor);
       return withinBudget({ ...base, items: [audio], page: page(offset, audio.coverage.returned, audio.coverage.total), coverage: { ...base.coverage, audioOperations: audio.coverage } });
     }
     if (section === "narration") {
@@ -198,7 +199,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
         const writing = "transcriptSelectionId" in script && typeof script.transcriptSelectionId === "string" ? script.transcriptSelectionId : null;
         const timing = cue && "transcriptSelectionId" in cue && typeof cue.transcriptSelectionId === "string" ? cue.transcriptSelectionId : null;
         return { entry, script, audio: audio ? recording(audio) : null, cue, accepted,
-          ...(writing || timing ? { transcriptAdoption: { writingSelectionId: writing, timingSelectionId: timing, authority: "Human editorial selection from existing recognition; acceptance remains separate." } } : {}) };
+          ...(writing || timing ? { transcriptAdoption: { writingSelectionId: writing, timingSelectionId: timing, authority: audioRequests ? "Human editorial selection from existing recognition; recognition never adopts its own words or timing. Narration acceptance is saved through the scene confirmation, not a separate narration approval." : "Human editorial selection from existing recognition; acceptance remains separate." } } : {}) };
       });
       const audioLibrary = service.store.list<NarrationAudio>("narration_audio", projectId).reverse().map(recording);
       const gaps = snapshot.readiness.gaps;
@@ -207,7 +208,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       return adaptive(offset, total, count => ({ ...base,
         narrationDraft: { version: snapshot.state.version, revisionId: snapshot.state.revisionId, segments: segments.slice(offset, offset + count),
           readiness: { ...snapshot.readiness, gaps: gaps.slice(offset, offset + count) },
-          authority: "Draft text and source intent only. Recording metadata does not prove its words. Human exact script, audio and timing acceptance and reviewed canonical application remain separate. This tool cannot synthesize, transcribe, attach recordings or accept anything." },
+          authority: audioRequests ? "Draft text and source intent only. Recording metadata does not prove its words. The studio saves exact script, recording and measured within-shot timing acceptance through one scene confirmation after the keyframes, motion and narration are reviewed together. Listening and recording edits are optional; do not ask for a separate narration review. Acceptance and canonical provenance records remain required; missing or failed work is still pending until its saved canonical receipt. This read-context tool cannot synthesize, transcribe, attach recordings or accept anything." : "Draft text and source intent only. Recording metadata does not prove its words. Human exact script, audio and timing acceptance and reviewed canonical application remain separate. This tool cannot synthesize, transcribe, attach recordings or accept anything." },
         audioLibrary: audioLibrary.slice(offset, offset + count), page: page(offset, count, total),
         coverage: { ...base.coverage, narration: { pagination: "The same record window applies to segments, recordings and gaps. Follow nextOffset until null; compare guard/dataDigest across pages.",
           segments: { total: segments.length, returned: segments.slice(offset, offset + count).length },
@@ -250,7 +251,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
         project: { ...base.project, shots: slice(saved.shots).map(({ id, revisionId, sceneId, desiredFrames }) => ({ id, revisionId, sceneId, desiredFrames })), scenes: slice(saved.scenes).map(({ id, revisionId }) => ({ id, revisionId })) },
         messages: slice(messages), assistantMessages: slice(assistantMessages), questions: slice(questions), holds: slice(holds), toolCalls: slice(toolCalls),
         assets: slice(assets), cues: slice(saved.cues),
-        narrationDraft: { version: draft?.version ?? 0, segments: slice(segments), authority: "Draft records are context, not canonical cues or permission. Human script, recording and timing acceptance is required in narration review before a canonical commit. Use current canonical cues/assets for executable planning." },
+        narrationDraft: { version: draft?.version ?? 0, segments: slice(segments), authority: audioRequests ? "Draft records are context, not canonical cues or permission. One studio scene confirmation covers exact script, recording and measured timing acceptance before the canonical commit; no separate narration approval or mandatory listening is required. Preserve the backend acceptance and provenance records, and do not claim pending audio is accepted. Use current canonical cues/assets for executable planning." : "Draft records are context, not canonical cues or permission. Human script, recording and timing acceptance is required in narration review before a canonical commit. Use current canonical cues/assets for executable planning." },
         workflow: { ...readiness, scopes: slice(readiness.scopes), narration: { ...readiness.narration, acceptedMeasuredCues: slice(readiness.narration.acceptedMeasuredCues) } },
         page: page(offset, count, total),
         coverage: { ...base.coverage, overview: { pagination: "The same record window applies to each listed collection; follow nextOffset until null. Messages and tool calls are newest first.", messages: { total: messages.length, returned: slice(messages).length }, holds: { total: holds.length, returned: slice(holds).length }, toolCalls: { total: toolCalls.length, returned: slice(toolCalls).length }, scopes: { total: readiness.scopes.length, returned: slice(readiness.scopes).length }, shots: { total: saved.shots.length, returned: slice(saved.shots).length, detailsSection: "shots" }, scenes: { total: saved.scenes.length, returned: slice(saved.scenes).length, detailsSection: "scenes" }, assets: { total: assets.length, returned: slice(assets).length }, cues: { total: saved.cues.length, returned: slice(saved.cues).length }, narrationSegments: { total: segments.length, returned: slice(segments).length }, acceptedMeasuredCues: { total: readiness.narration.acceptedMeasuredCues.length, returned: slice(readiness.narration.acceptedMeasuredCues).length } } },

@@ -1,3 +1,4 @@
+import { startSceneCommand } from "./scene-command";
 import { useTranslation } from "./Locale";
 import { mediaHierarchyLabel, mediaUiCopy } from "./media-ui-copy";
 import {
@@ -8,7 +9,6 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { StudioApi } from "./api";
-import { ApiError } from "./api";
 import { errorText, Icon } from "./components";
 import type { DirectorStatus, ProjectSnapshot } from "./model";
 import { durationLabel } from "./model";
@@ -37,18 +37,14 @@ export interface ConversationActionsProps {
   director: DirectorStatus;
   disabled: boolean;
   exposedFrames: ExposedSceneFrames;
-  reviewedFrames?: ExposedSceneFrames;
   initialOpenSceneId?: string;
   /** Optional read-only navigation filter. The decision remains for the complete named scene. */
   sceneIds?: readonly string[];
   onChanged(): void;
+  onStarted?(): void;
   onFocusScene(sceneId: string): void;
-  onNarrationShot(shotId: string): void;
 }
 
-const uncertain = (cause: unknown) =>
-  !(cause instanceof ApiError) ||
-  ["NETWORK_ERROR", "REQUEST_FAILED", "INTERNAL_ERROR"].includes(cause.code);
 type SceneActionMeta = {
   sceneId: string;
   kind: "image" | "video";
@@ -97,19 +93,9 @@ export function ConversationActions(props: ConversationActionsProps) {
     setRefresh((value) => value + 1);
     onChanged();
   }, [api, projectId, slot.settledVersion, onChanged]);
-  const run = (command: PendingCommand) =>
-    void registry.run(
-      projectId,
-      command,
-      (saved) =>
-        api.request(saved.path, {
-          method: "POST",
-          body: saved.body,
-          key: saved.key,
-          timeoutMs: 180000,
-        }),
-      uncertain,
-    );
+  const run = (command: PendingCommand) => {
+    if (startSceneCommand(api, projectId, command)) props.onStarted?.();
+  };
   const orphanedDecision =
     !!slot.command &&
     !snapshot.project.scenes.some((scene) => scene.id === pendingMeta?.sceneId);
@@ -135,7 +121,6 @@ export function ConversationActions(props: ConversationActionsProps) {
             disabled={
               props.disabled ||
               slot.running ||
-              !!snapshot.control?.paused ||
               props.director.status === "running"
             }
             onClick={() => run(slot.command!)}
@@ -162,6 +147,9 @@ export function ConversationActions(props: ConversationActionsProps) {
             setOpenScene((current) => (current === scene.id ? null : scene.id))
           }
           slot={slot}
+          {...(slot.running && slot.progress
+            ? { executionPhase: slot.progress }
+            : {})}
           run={run}
         />
       ))}
@@ -174,33 +162,27 @@ function ConversationSceneAction({
   snapshot,
   director,
   disabled,
-  exposedFrames: seenFrames,
-  reviewedFrames,
+  exposedFrames,
   sceneId,
   onChanged: _onChanged,
   onFocusScene,
-  onNarrationShot,
   refresh,
   open,
   onOpen,
   slot,
   run,
+  executionPhase,
 }: ConversationActionsProps & {
   sceneId: string;
   refresh: number;
   open: boolean;
   onOpen(): void;
   slot: PendingCommandSnapshot;
+  executionPhase?: string;
   run(command: PendingCommand): void;
 }) {
   const { t, ui, locale } = useTranslation();
 
-  const exposedFrames =
-    reviewedFrames === undefined
-      ? seenFrames
-      : Object.fromEntries(
-          Object.entries(seenFrames).filter(([key]) => reviewedFrames[key]),
-        );
   const revision = useProjectRefreshVersion(),
     base = `/api/projects/${encodeURIComponent(snapshot.project.id)}/scenes/${encodeURIComponent(sceneId)}`;
   const [view, setView] = useState<ConversationSceneView | null>(null),
@@ -263,6 +245,8 @@ function ConversationSceneAction({
         disabled || slot.running || !!slot.command || waitingForSavedDecision,
       )
     : null;
+  const preparingNarration =
+    view?.narrationBusy === true || view?.confirmation?.state === "preparing";
   const summary = !state
     ? error
       ? "Needs attention"
@@ -277,11 +261,11 @@ function ConversationSceneAction({
       : state.unknown
         ? "Job outcome unconfirmed"
         : state.existingWork
-          ? "Generation in progress"
+          ? preparingNarration
+            ? t("Preparing narration & video", "正在准备旁白与视频")
+            : "Generation in progress"
           : state.stage === "complete"
-            ? state.narrationShotIds.length
-              ? "Narration to review"
-              : "Media saved"
+            ? "Media saved"
             : state.stage === "image"
               ? t(
                   "{count} keyframe{plural} to create",
@@ -306,7 +290,6 @@ function ConversationSceneAction({
     state?.fresh &&
     state.stage === "complete" &&
     !state.existingWork &&
-    !state.narrationShotIds.length &&
     !ownPending &&
     !(ownCompletion && !slot.lastSuccess)
   )
@@ -419,6 +402,42 @@ function ConversationSceneAction({
                           <p>{shot.imagePrompt}</p>
                         </details>
                       )}
+                      {state.stage === "video" && row.narration && (
+                        <div className="conversation-scene-narration">
+                          <p className="conversation-scene-motion">
+                            <span>{t("Narration", "旁白")}</span>
+                            {row.narration.mode === "none"
+                              ? t("No narration", "无旁白")
+                              : row.narration.text ||
+                                t("No script", "暂无文稿")}
+                          </p>
+                          {row.narration.mode !== "none" && (
+                            <p className="conversation-scene-recipe-meta">
+                              {[row.narration.voice, row.narration.profileLabel]
+                                .filter(Boolean)
+                                .join(" · ")}
+                              {row.narration.timing && (
+                                <>
+                                  {(row.narration.voice ||
+                                    row.narration.profileLabel) &&
+                                    " · "}
+                                  {t("Starts at {time}", "开始于 {time}", {
+                                    time: durationLabel(
+                                      row.narration.timing.startFrame,
+                                    ),
+                                  })}
+                                  {row.narration.timing.durationFrames
+                                    ? ` · ${durationLabel(row.narration.timing.durationFrames)}`
+                                    : t(
+                                        " · Full recording within the shot",
+                                        " · 在镜头内使用完整录音",
+                                      )}
+                                </>
+                              )}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       {state.stage === "video" &&
                         Object.keys(row.videoSettings).length > 0 && (
                           <details className="conversation-scene-prompt">
@@ -456,34 +475,35 @@ function ConversationSceneAction({
                     {ui("kept.", mediaUiCopy)}
                   </p>
                 )}
-              {state.reason && (
+              {slot.running && ownPending && executionPhase && (
                 <p className="conversation-scene-note" role="status">
-                  {state.stage === "video" &&
-                  !state.framesReady &&
-                  !state.existingWork &&
-                  !state.unknown &&
-                  !view.busy &&
-                  !waitingForSavedDecision
-                    ? t(
-                        "Inspect every current keyframe and confirm it before reviewing the video plan.",
-                        "先查看每个当前关键帧，并确认此画面，再检查视频方案。",
-                      )
-                    : ui(state.reason, mediaUiCopy)}
+                  {ui(executionPhase, mediaUiCopy)}
                 </p>
               )}
-              {state.narrationShotIds.map((shotId) => (
-                <UiButton
-                  key={shotId}
-                  size="1"
-                  variant="secondary"
-                  disabled={disabled || slot.running}
-                  onClick={() => onNarrationShot(shotId)}
-                >
-                  {ui("Open narration ·", mediaUiCopy)}
-                  {labels.shots[shotId] ?? ui("Shot", mediaUiCopy)}
-                </UiButton>
-              ))}
-              {(state.stage === "image" || state.stage === "video") && (
+              {state.reason &&
+                !(slot.running && ownPending && executionPhase) && (
+                  <p className="conversation-scene-note" role="status">
+                    {preparingNarration &&
+                    state.reason === "Following this scene’s existing jobs."
+                      ? t(
+                          "Preparing the narration. Video generation will continue automatically.",
+                          "正在准备旁白，视频生成将自动继续。",
+                        )
+                      : ui(state.reason, mediaUiCopy)}
+                  </p>
+                )}
+              {state.stage === "video" &&
+                !state.existingWork &&
+                !state.unknown && (
+                  <p className="conversation-scene-note">
+                    {t(
+                      "One confirmation covers these keyframes, motion and narration. No separate narration approval is needed.",
+                      "一次确认即可涵盖这些关键帧、动作与旁白，无需单独确认旁白。",
+                    )}
+                  </p>
+                )}
+              {(state.stage === "image" ||
+                (state.stage === "video" && !state.existingWork)) && (
                 <UiButton
                   variant="success"
                   className="conversation-scene-generate"
@@ -510,12 +530,12 @@ function ConversationSceneAction({
                 >
                   <Icon name="check" size={16} />
                   {slot.running && ownPending
-                    ? ui("Saving scene decision…", mediaUiCopy)
+                    ? ui(executionPhase || "Preparing scene…", mediaUiCopy)
                     : state.stage === "image"
                       ? t("Generate keyframes · {v0}", "生成关键帧 · {v0}", {
                           v0: labels.scene,
                         })
-                      : t("Generate video · {v0}", "生成视频 · {v0}", {
+                      : t("Confirm & generate · {v0}", "确认并生成 · {v0}", {
                           v0: labels.scene,
                         })}
                 </UiButton>
@@ -532,11 +552,7 @@ function ConversationSceneAction({
               </p>
               <UiButton
                 variant="secondary"
-                disabled={
-                  disabled ||
-                  !!snapshot.control?.paused ||
-                  director.status === "running"
-                }
+                disabled={disabled || director.status === "running"}
                 onClick={() => run(slot.command!)}
               >
                 {ui("Check saved scene decision", mediaUiCopy)}

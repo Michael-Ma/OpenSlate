@@ -56,18 +56,20 @@ export class StudioSessions {
   clear() { this.launches.clear(); this.sessions.clear(); }
 }
 
-export function registerStudioSessions(app: FastifyInstance, sessions: StudioSessions) {
+export function registerStudioSessions(app: FastifyInstance, sessions: StudioSessions, cacheNamespace?: () => string | undefined) {
   const noStore = (reply: import("fastify").FastifyReply) => reply.header("Cache-Control", "no-store").header("Referrer-Policy", "no-referrer");
   app.post("/api/studio/launch", async (_request, reply) => noStore(reply).send({ code: sessions.issueLaunch() }));
   app.post<{ Body: { code: string } }>("/api/session", {
     schema: { body: { type: "object", additionalProperties: false, required: ["code"], properties: { code: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" } } } },
   }, async (request, reply) => {
     const { cookie, csrf } = sessions.connect(request.body.code, request.headers.cookie);
-    return noStore(reply).header("Set-Cookie", cookie).send({ csrf });
+    const namespace = cacheNamespace?.();
+    return noStore(reply).header("Set-Cookie", cookie).send({ csrf, ...(namespace ? { cacheNamespace: namespace } : {}) });
   });
   app.get("/api/session", async (request, reply) => {
     const session = sessions.get(request.headers.cookie); invariant(session, "AUTH_REQUIRED", "Open studio from the launcher");
-    return noStore(reply).send({ csrf: session.csrf });
+    const namespace = cacheNamespace?.();
+    return noStore(reply).send({ csrf: session.csrf, ...(namespace ? { cacheNamespace: namespace } : {}) });
   });
   app.post("/api/session/logout", async (request, reply) => {
     sessions.logout(request.headers.cookie);

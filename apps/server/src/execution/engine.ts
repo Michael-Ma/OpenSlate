@@ -1,3 +1,5 @@
+import { activeAttemptIngestionIssue, reportableIngestionIssue, sanitizedIngestionIssueCode, INGESTION_ISSUE_MESSAGE } from './ingestion-issue.js';
+import type { AttemptIngestionIssue } from './ingestion-issue.js';
 import { requestedTranscriptionHoldIds } from '../narration/request-holds.js';
 import { assertCodexImageSpoolLineage, assertCodexImageArtifact } from "./codex-image-lineage.js";
 import { createHash } from "node:crypto";
@@ -1046,7 +1048,10 @@ export class Engine {
       if (!(error instanceof DomainError && error.code === "MEDIA_BUSY" && isSpoolCompletion(completed)
         && completed.outputs.length === 1 && role && (role.kind === "video" || role.kind === "audio")
         && output?.kind === role.kind && output.port === role.port && output.mimeType === role.mimeType && output.extension === role.extension
-        && this.completionBound(attempt, completed))) throw error;
+        && this.completionBound(attempt, completed))) {
+        if (error instanceof DomainError && reportableIngestionIssue(error.code)) this.recordIngestionIssue(attempt, error.code);
+        throw error;
+      }
       // A trusted local normalizer is occupied. Keep the durable completion and
       // liability, but let the next cycle recover it without a vendor call.
       this.store.transaction(() => {
@@ -1074,8 +1079,13 @@ export class Engine {
         if (transcript) this.store.insert("transcript_candidate", transcript.candidate.id, attempt.projectId, transcript.candidate);
         this.store.appendEvent(attempt.projectId, "artifact.published", { artifactId: record.id, attemptId: attempt.id, fixture: record.fixture });
       }
+      const issue = activeAttemptIngestionIssue(this.store, current);
       const finished: Attempt = { ...current, phase: "succeeded", outputs: mapped, taskId: executionTaskId(completed), leaseExpiresAt: 0 };
       this.store.put("attempt", current.id, current.projectId, finished); this.setReservation(current, "charged");
+      if (issue) {
+        this.store.put("attempt_ingestion_issue", current.id, current.projectId, { ...issue, active: false, resolvedAt: new Date().toISOString() });
+        this.store.appendEvent(current.projectId, "attempt.ingestion_issue_resolved", { attemptId: current.id });
+      }
       const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
       if (binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
         const project = this.store.getProject(current.projectId);
@@ -1095,6 +1105,21 @@ export class Engine {
       this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase: "succeeded" });
     });
   }
+  private recordIngestionIssue(attempt: Attempt, observedCode: string): void {
+    this.store.transaction(() => {
+      const current = this.owns(attempt);
+      if (!current || current.phase !== "ingesting" || current.nodeId !== attempt.nodeId || current.candidateId !== attempt.candidateId
+        || current.specDigest !== attempt.specDigest || current.fingerprint !== attempt.fingerprint || canonical(current.request) !== canonical(attempt.request)) return;
+      const code = sanitizedIngestionIssueCode(observedCode), previous = activeAttemptIngestionIssue(this.store, current);
+      if (previous?.code === code) return;
+      const issue: AttemptIngestionIssue = { id: current.id, version: 1, projectId: current.projectId, attemptId: current.id,
+        nodeId: current.nodeId, candidateId: current.candidateId, requestDigest: digest(current.request), source: "local_ingestion",
+        code, message: INGESTION_ISSUE_MESSAGE, active: true, observedAt: new Date().toISOString(), resolvedAt: null };
+      this.store.put("attempt_ingestion_issue", current.id, current.projectId, issue);
+      this.store.appendEvent(current.projectId, "attempt.ingestion_attention", { attemptId: current.id, code });
+    });
+  }
+
   private setReservation(attempt: Attempt, state: Reservation["state"]): void {
     if (!attempt.reservationId) return;
     const reservation = this.store.get<Reservation>("reservation", attempt.reservationId)!;

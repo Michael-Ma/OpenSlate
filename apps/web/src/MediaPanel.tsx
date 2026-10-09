@@ -100,6 +100,9 @@ function MediaWorkspace({
   const renderNode = snapshot.plan?.nodes?.find(
     (node) => node.kind === "render",
   );
+  const hasActiveRender =
+    state?.jobs.some((job) => ["prepared", "running"].includes(job.state)) ??
+    false;
   useEffect(() => {
     if (!active) return;
     const abort = new AbortController();
@@ -295,9 +298,12 @@ function MediaWorkspace({
             </p>
           </div>
           {!!state?.jobs.length && (
-            <details>
+            <details open={hasActiveRender || undefined}>
               <summary>
-                {ui("Render history ·", mediaUiCopy)} {state.jobs.length}
+                {hasActiveRender
+                  ? t("Rendering & history ·", "渲染与历史 ·")
+                  : ui("Render history ·", mediaUiCopy)}{" "}
+                {state.jobs.length}
               </summary>
               <div className="render-jobs">
                 {state.jobs.map((job) => (

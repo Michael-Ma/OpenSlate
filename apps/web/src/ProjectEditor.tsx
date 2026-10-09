@@ -11,6 +11,7 @@ export function ProjectEditor({
   action,
   onNarration,
   onDiscuss,
+  cacheNamespace,
 }: {
   snapshot: ProjectSnapshot;
   targetId?: string;
@@ -18,6 +19,7 @@ export function ProjectEditor({
   action(body: Record<string, unknown>): void;
   onNarration(shotId: string): void;
   onDiscuss(shotId?: string): void;
+  cacheNamespace: string | undefined;
 }) {
   const { t } = useTranslation();
 
@@ -73,6 +75,8 @@ export function ProjectEditor({
       {selected === project.id && (
         <>
           <InlineField
+            key={`${project.id}:brief`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: "project:brief" }}
             multiline
             value={project.brief}
             label={t("Film brief", "创作简报")}
@@ -88,6 +92,8 @@ export function ProjectEditor({
             }
           />
           <InlineField
+            key={`${project.id}:story`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: "project:story" }}
             multiline
             value={project.story}
             label={t("Film direction", "影片方向")}
@@ -114,6 +120,8 @@ export function ProjectEditor({
       {scene && (
         <>
           <InlineField
+            key={`${scene.id}:purpose`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: `scene:${scene.id}:purpose` }}
             multiline
             value={scene.purpose}
             label={t("Scene direction", "场景方向")}
@@ -134,6 +142,8 @@ export function ProjectEditor({
       {shot && (
         <>
           <InlineField
+            key={`${shot.id}:purpose`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:purpose` }}
             multiline
             value={shot.purpose}
             label={t("Shot purpose", "镜头意图")}
@@ -150,6 +160,8 @@ export function ProjectEditor({
             }
           />
           <InlineField
+            key={`${shot.id}:framing`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:framing` }}
             multiline
             value={shot.framing}
             label={t("Shot framing", "镜头构图")}
@@ -166,6 +178,8 @@ export function ProjectEditor({
             }
           />
           <InlineField
+            key={`${shot.id}:motion`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:motion` }}
             multiline
             value={shot.motion}
             label={t("Camera movement", "镜头运动")}
@@ -182,6 +196,8 @@ export function ProjectEditor({
             }
           />
           <InlineField
+            key={`${shot.id}:action`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:action` }}
             multiline
             value={shot.action}
             label={t("Shot content", "镜头内容")}
@@ -200,6 +216,8 @@ export function ProjectEditor({
           <details className="project-editor-prompts">
             <summary>{t("Plan & Prompt", "计划与提示词")}</summary>
             <InlineField
+              key={`${shot.id}:imagePrompt`}
+              cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:imagePrompt` }}
               multiline
               value={shot.imagePrompt}
               label={t("Keyframe Prompt", "关键帧提示词")}
@@ -216,6 +234,8 @@ export function ProjectEditor({
               }
             />
             <InlineField
+              key={`${shot.id}:videoPrompt`}
+              cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:videoPrompt` }}
               multiline
               value={shot.videoPrompt}
               label={t("Video Prompt", "视频提示词")}
@@ -233,6 +253,8 @@ export function ProjectEditor({
             />
           </details>
           <InlineField
+            key={`${shot.id}:desiredFrames`}
+            cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:desiredFrames` }}
             value={String(shot.desiredFrames / 30)}
             label={t("Shot seconds", "镜头时长（秒）")}
             version={version}
@@ -274,6 +296,8 @@ export function ProjectEditor({
           </label>
           {shot.narration?.mode === "generated" && (
             <InlineField
+              key={`${shot.id}:narration`}
+              cache={{ namespace: cacheNamespace, projectId: project.id, field: `shot:${shot.id}:narration` }}
               multiline
               value={shot.narration.text}
               label={t("Narration script", "旁白文稿")}

@@ -88,3 +88,37 @@ test('narration preparation retains its result and UI metadata across unmount an
   assert.deepEqual(completion.settledCommand, saved); assert.equal(completion.result.shotImpact[0].shotId, 'shot');
   assert.throws(() => completion.result.shotImpact.push({}), TypeError);
 });
+
+test('background scene progress survives dialog dismissal and project navigation without stale updates or redispatch', async () => {
+  const api = {}, registry = pendingCommandsFor(api, 'conversation-scenes'), response = deferred();
+  let calls = 0, modalNotifications = 0;
+  const unsubscribe = registry.subscribe('one', () => modalNotifications++);
+  const command = { path: '/api/projects/one/scenes/scene/confirm', key: 'scene-once', metadata: { sceneId: 'scene', kind: 'video' } };
+  const running = registry.run('one', command, () => { calls++; return response.promise; }, uncertain);
+  assert.equal(registry.snapshot('one').running, true, 'ownership is synchronous, before the server response');
+  unsubscribe(); const notificationsAtClose = modalNotifications;
+  registry.reportProgress('one', 'scene-once', 'Generating narration…');
+  assert.equal(registry.snapshot('one').progress, 'Generating narration…');
+  assert.equal(registry.snapshot('two').progress, null);
+  registry.reportProgress('two', 'scene-once', 'wrong project');
+  registry.reportProgress('one', 'other-request', 'stale callback');
+  assert.equal(registry.snapshot('one').progress, 'Generating narration…');
+  assert.equal(registry.snapshot('two').running, false);
+  let workspaceNotifications = 0;
+  const stop = registry.subscribe('one', () => workspaceNotifications++);
+  registry.reportProgress('one', 'scene-once', 'Generating narration…');
+  assert.equal(workspaceNotifications, 0, 'same progress does not cause refresh flicker');
+  assert.equal(await registry.run('one', command, () => { calls++; }, uncertain), false);
+  response.reject(network()); await running;
+  assert.equal(modalNotifications, notificationsAtClose);
+  assert.equal(workspaceNotifications, 1);
+  const saved = registry.snapshot('one').command;
+  assert.equal(saved.key, 'scene-once');
+  assert.equal(registry.snapshot('one').progress, null);
+  registry.reportProgress('one', 'scene-once', 'late success');
+  assert.equal(registry.snapshot('one').progress, null, 'completed callback cannot disguise a failure');
+  stop();
+  await registry.run('one', saved, () => { calls++; return {}; }, uncertain);
+  assert.equal(calls, 2, 'only explicit exact retry issues a second request');
+  assert.equal(registry.snapshot('one').lastSuccess, true);
+});

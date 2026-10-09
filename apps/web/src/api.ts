@@ -1,5 +1,5 @@
-import { EventStreamParser, type StreamEvent } from "./event-stream";
-import { errorMessage, hex } from "./model";
+import { EventStreamParser, type StreamEvent } from "./event-stream.ts";
+import { errorMessage, hex } from "./model.ts";
 import type { Artifact } from "./model";
 
 export class ApiError extends Error {
@@ -10,6 +10,9 @@ type RequestOptions = { method?: "GET" | "POST"; body?: unknown; rawBody?: Blob;
 /** Authentication stays in an HttpOnly cookie; only the CSRF value lives in tab memory. */
 export class StudioApi {
   #csrf: string;
+  /** Public installation and restore identity for browser-local recovery; never an auth token. */
+  #cacheNamespace?: string;
+  get cacheNamespace(): string | undefined { return this.#cacheNamespace; }
   #controllers = new Set<AbortController>();
   #closed = false;
   get closed(): boolean { return this.#closed; }
@@ -18,9 +21,11 @@ export class StudioApi {
   static async connect(code?: string): Promise<StudioApi> {
     const api = new StudioApi("");
     try {
-      const result = await api.request<{ csrf: string }>("/api/session", code === undefined ? {} : { method: "POST", body: { code } });
+      const result = await api.request<{ csrf: string; cacheNamespace?: string }>("/api/session", code === undefined ? {} : { method: "POST", body: { code } });
       if (!/^[A-Za-z0-9_-]{43}$/.test(result.csrf)) throw new ApiError("AUTH_REQUIRED");
-      api.#csrf = result.csrf; return api;
+      api.#csrf = result.csrf;
+      if (typeof result.cacheNamespace === "string" && /^[a-f0-9]{64}$/.test(result.cacheNamespace)) api.#cacheNamespace = result.cacheNamespace;
+      return api;
     } catch (error) { api.close(); throw error; }
   }
   close() { this.#closed = true; for (const controller of this.#controllers) controller.abort(); this.#controllers.clear(); this.#csrf = ""; }

@@ -35,6 +35,29 @@ import { speechStatus } from "./narration-speech-model";
 import type { SpeechDetail, SpeechOptions } from "./narration-speech-model";
 import { UiButton } from "./ui";
 import "./shot-audio.css";
+import { clearLocalDraft, readLocalDraft, writeLocalDraft } from "./local-draft-cache";
+interface ShotAudioDraft {
+  text: string;
+  mode: "uploaded" | "generated";
+  profileId: string;
+  voice: string;
+  recordingId: string;
+  start: string;
+  end: string;
+  matchDuration: boolean;
+  dirty: boolean;
+  trimDirty: boolean;
+}
+const isShotAudioDraft = (value: unknown): value is ShotAudioDraft => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.text === "string" && item.text.length <= 16000 &&
+    (item.mode === "uploaded" || item.mode === "generated") &&
+    ["profileId", "voice", "recordingId", "start", "end"].every((field) =>
+      typeof item[field] === "string" && (item[field] as string).length <= 160) &&
+    typeof item.matchDuration === "boolean" &&
+    typeof item.dirty === "boolean" && typeof item.trimDirty === "boolean";
+};
 interface ShotAudioView {
   shotId: string;
   headVersion: number;
@@ -68,7 +91,7 @@ const message = (cause: unknown) =>
 const ambiguous = (cause: unknown) =>
   !(cause instanceof ApiError) ||
   ["NETWORK_ERROR", "REQUEST_FAILED", "INTERNAL_ERROR"].includes(cause.code);
-/** Compact human workflow. Script/recording/range stay candidates until the explicit final acceptance. */
+/** Optional narration editing. Scene confirmation handles the ordinary generated take and timing. */
 export function ShotAudioPanel({
   active: visible = true,
   api,
@@ -84,6 +107,20 @@ export function ShotAudioPanel({
 
   const base = `/api/projects/${encodeURIComponent(projectId)}/narration`,
     shotBase = `${base}/shots/${encodeURIComponent(shot.id)}`;
+  const cacheField = `shot:${shot.id}:audio`;
+  const recovered = useRef<ReturnType<typeof readLocalDraft<ShotAudioDraft>> | undefined>(undefined);
+  if (recovered.current === undefined)
+    recovered.current = readLocalDraft(api.cacheNamespace, projectId,
+      cacheField, isShotAudioDraft);
+  const cacheRevision = useRef(recovered.current?.revision ?? null);
+  const clearCache = () => {
+    const result = clearLocalDraft(api.cacheNamespace, projectId,
+      cacheField, cacheRevision.current ?? undefined);
+    if (result === "saved") cacheRevision.current = null;
+  };
+  const recoveredBase = recovered.current?.base as {
+    headVersion?: unknown; scriptId?: unknown; cueId?: unknown
+  } | undefined;
   const updates = useProjectRefreshVersion(),
     recovery = useRecoveryReadOnly(),
     registry = pendingCommandsFor(api, "shot-audio");
@@ -98,25 +135,42 @@ export function ShotAudioPanel({
     [detail, setDetail] = useState<ShotAudioView | null>(null),
     [recordings, setRecordings] = useState<Recording[]>([]),
     [options, setOptions] = useState<SpeechOptions | null>(null);
-  const [text, setText] = useState(shot.narration?.text ?? ""),
-    [dirty, setDirty] = useState(false),
-    [scriptBase, setScriptBase] = useState<string | null>(null);
+  const [text, setText] = useState(recovered.current?.value.text ?? shot.narration?.text ?? ""),
+    [dirty, setDirty] = useState(recovered.current?.value.dirty ?? false),
+    [scriptBase, setScriptBase] = useState<string | null>(
+      typeof recoveredBase?.scriptId === "string" ? recoveredBase.scriptId : null);
+  const [draftBaseHead, setDraftBaseHead] = useState(
+    typeof recoveredBase?.headVersion === "number" ? recoveredBase.headVersion : headVersion);
+  const [cueBase, setCueBase] = useState<string | null>(
+    typeof recoveredBase?.cueId === "string" ? recoveredBase.cueId : null);
   const [mode, setMode] = useState<"uploaded" | "generated">(
-      shot.narration?.mode === "uploaded" ? "uploaded" : "generated",
+      recovered.current?.value.mode ??
+      (shot.narration?.mode === "uploaded" ? "uploaded" : "generated"),
     ),
-    [profileId, setProfileId] = useState(""),
-    [voice, setVoice] = useState("cedar");
-  const [recordingId, setRecordingId] = useState(""),
-    [start, setStart] = useState("0"),
-    [end, setEnd] = useState(""),
-    [trimDirty, setTrimDirty] = useState(false),
-    [matchDuration, setMatchDuration] = useState(false);
+    [profileId, setProfileId] = useState(recovered.current?.value.profileId ?? ""),
+    [voice, setVoice] = useState(recovered.current?.value.voice ?? "cedar");
+  const [recordingId, setRecordingId] = useState(recovered.current?.value.recordingId ?? ""),
+    [start, setStart] = useState(recovered.current?.value.start ?? "0"),
+    [end, setEnd] = useState(recovered.current?.value.end ?? ""),
+    [trimDirty, setTrimDirty] = useState(recovered.current?.value.trimDirty ?? false),
+    [matchDuration, setMatchDuration] = useState(recovered.current?.value.matchDuration ?? false);
+  useEffect(() => {
+    if (dirty || trimDirty) {
+      const result = writeLocalDraft(api.cacheNamespace, projectId, cacheField,
+        { text, mode, profileId, voice, recordingId, start, end, matchDuration,
+          dirty, trimDirty },
+        { headVersion: draftBaseHead, scriptId: scriptBase, cueId: cueBase },
+        cacheRevision.current);
+      if (result.status === "saved") cacheRevision.current = result.revision!;
+    }
+  }, [api.cacheNamespace, projectId, cacheField, text, mode, profileId, voice,
+    recordingId, start, end, matchDuration, dirty, trimDirty, draftBaseHead,
+    scriptBase, cueBase]);
   const [speech, setSpeech] = useState<SpeechDetail | null>(null),
     [speechId, setSpeechId] = useState(""),
     [refresh, setRefresh] = useState(0),
     [error, setError] = useState(""),
-    [notice, setNotice] = useState(""),
-    [listened, setListened] = useState("");
+    [notice, setNotice] = useState("");
   const [url, setUrl] = useState(""),
     [urlIdentity, setUrlIdentity] = useState(""),
     [audioBusy, setAudioBusy] = useState(false),
@@ -128,8 +182,8 @@ export function ShotAudioPanel({
     if (!element) audioPlayer.current?.pause();
     audioPlayer.current = element;
   }, []);
-  const writing = useRef({ dirty, text });
-  writing.current = { dirty, text };
+  const writing = useRef({ dirty, trimDirty, text });
+  writing.current = { dirty, trimDirty, text };
   const row = detail?.segment ?? null,
     active = view?.session?.state === "active",
     locked = !visible || recovery || slot.running || !!slot.command,
@@ -172,6 +226,11 @@ export function ShotAudioPanel({
           setScriptBase(next.segment?.script.id ?? null);
           setDirty(true);
         }
+        if (!writing.current.dirty && !writing.current.trimDirty) {
+          setDraftBaseHead(next.headVersion);
+          setScriptBase(next.segment?.script.id ?? null);
+          setCueBase(next.segment?.cue?.id ?? null);
+        }
         const merged = [
           ...workspace.audioLibrary,
           ...generated.recordings.filter(
@@ -198,7 +257,7 @@ export function ShotAudioPanel({
       .then((next) => {
         if (!abort.signal.aborted) {
           setOptions(next);
-          setProfileId((current) =>
+          if (!writing.current.dirty) setProfileId((current) =>
             next.preferredProfileId !== undefined
               ? (next.profiles.find(
                   (profile) => profile.id === next.preferredProfileId,
@@ -207,7 +266,7 @@ export function ShotAudioPanel({
                 ? current
                 : (next.profiles[0]?.id ?? ""),
           );
-          if (!personal)
+          if (!personal && !writing.current.dirty)
             setVoice((current) =>
               next.voices.includes(current)
                 ? current
@@ -224,12 +283,14 @@ export function ShotAudioPanel({
     if (!row || dirty) return;
     setText(row.script.text);
     setScriptBase(row.script.id);
+    if (view) setDraftBaseHead(view.headVersion);
     setMode(row.script.source.kind === "generated" ? "generated" : "uploaded");
     if (row.script.source.kind === "generated" && row.script.source.voice)
       setVoice(row.script.source.voice);
   }, [row?.script.id, dirty]);
   useEffect(() => {
     if (!trimDirty && row) {
+      setCueBase(row.cue?.id ?? null);
       setRecordingId(row.audio?.id ?? "");
       setStart(sampleSeconds(row.cue?.startSample ?? 0));
       setEnd(
@@ -281,13 +342,19 @@ export function ShotAudioPanel({
       setNotice(
         meta?.action === "accept"
           ? accepted.receipt?.planRebase?.status === "requires_plan_review"
-            ? `Narration accepted. Update the visual plan: ${accepted.receipt.planRebase.message ?? "the current plan needs review."}`
-            : "Narration accepted for this shot."
+            ? `Recording and timing saved. Update the visual plan: ${accepted.receipt.planRebase.message ?? "the current plan needs review."}`
+            : "Recording and timing saved for this shot."
           : "Saved.",
       );
       if (meta?.action === "script") {
-        setDirty(false);
-        setTrimDirty(false);
+        const sent = slot.settledCommand?.body as { text?: unknown } | undefined;
+        if (sent?.text === text.trim()) {
+          setDirty(false);
+          if (!trimDirty) {
+            clearCache();
+            recovered.current = null;
+          }
+        }
       }
       if (meta?.action === "upload") {
         const audio = slot.result as Recording;
@@ -301,11 +368,29 @@ export function ShotAudioPanel({
         meta?.action === "speech-request"
       ) {
         setSpeechId((slot.result as { proposal: { id: string } }).proposal.id);
-        setDirty(false);
-        setTrimDirty(false);
+        const sent = slot.settledCommand?.body as { text?: unknown } | undefined;
+        if (sent?.text === text.trim()) {
+          setDirty(false);
+          if (!trimDirty) {
+            clearCache();
+            recovered.current = null;
+          }
+        }
         if (meta.action === "speech-request") onRequested?.();
       }
-      if (meta?.action === "accept") setTrimDirty(false);
+      if (meta?.action === "accept") {
+        const sent = slot.settledCommand?.body as {
+          startSample?: unknown; endSample?: unknown; audioId?: unknown
+        } | undefined;
+        if (sent?.startSample === secondsToSamples(start) &&
+          sent.endSample === secondsToSamples(end) && sent.audioId === recordingId) {
+          setTrimDirty(false);
+          if (!dirty) {
+            clearCache();
+            recovered.current = null;
+          }
+        }
+      }
       onChanged();
       setRefresh((value) => value + 1);
     } else if (slot.error) setError(message(slot.error));
@@ -372,13 +457,15 @@ export function ShotAudioPanel({
       );
   };
   const changedElsewhere = dirty && !!row && row.script.id !== scriptBase;
+  const staleAudio = changedElsewhere ||
+    ((dirty || trimDirty) && !!view && view.headVersion !== draftBaseHead) ||
+    (trimDirty && !!row && (row.cue?.id ?? null) !== cueBase);
   const selectionKey = recording
     ? `${projectId}:${recording.id}:${recording.media.sha256}`
     : "";
   useEffect(() => {
     setUrl("");
     setUrlIdentity("");
-    setListened("");
     setAudioBusy(visible && !!recording);
     if (!visible || !recording) return;
     const abort = new AbortController();
@@ -422,9 +509,6 @@ export function ShotAudioPanel({
       if (owned) URL.revokeObjectURL(owned);
     };
   }, [visible, api, projectId, selectionKey]);
-  useEffect(() => {
-    setListened("");
-  }, [start, end]);
   let rangeSamples = 0,
     startSample: number | null = null,
     endSample: number | null = null;
@@ -441,21 +525,18 @@ export function ShotAudioPanel({
       ? url
       : "";
   const plannedFrames = detail?.plannedFrames ?? shot.desiredFrames ?? 180;
-  const rangeIdentity = `${selectionKey}:${start}:${end}`;
   const audioReview = shotAudioReview({
     active,
     locked,
     dirty: dirty || changedElsewhere,
     row,
     recording,
-    heardIdentity: listened,
-    displayedIdentity: rangeIdentity,
     startSample,
     endSample,
     plannedFrames,
     durationMode: matchDuration ? "match_audio" : "keep",
   });
-  const { canAccept, rangeValid } = audioReview;
+  const { canSave, rangeValid } = audioReview;
   const initialization = () => ({
     expectedHeadVersion: view?.headVersion ?? headVersion,
     expectedNarrationVersion: view?.snapshot.state.version,
@@ -470,7 +551,7 @@ export function ShotAudioPanel({
     ...(profileId ? { profileId } : {}),
   });
   const saveScript = () => {
-    if (!view || locked || changedElsewhere) return;
+    if (!view || locked || staleAudio) return;
     post(`${shotBase}/initialize`, initialization(), "script");
   };
   return (
@@ -482,6 +563,9 @@ export function ShotAudioPanel({
         <div>
           <h2>{ui("Narration", mediaUiCopy)}</h2>
           <p>{shot.purpose}</p>
+          <p className="field-help">
+            {t("Optional narration editing", "可选的旁白编辑")}
+          </p>
         </div>
         <IconButton
           icon="refresh"
@@ -595,18 +679,33 @@ export function ShotAudioPanel({
               }
             />
           </label>
-          {changedElsewhere && (
+          {staleAudio && (
             <p role="status">
-              {ui("A newer script was saved. Your draft is kept.", mediaUiCopy)}{" "}
+              {t("Saved audio changed. Your local draft is kept. Review it before saving.", "已保存的音频内容发生变化。本地草稿已保留，请检查后再保存。")}{" "}
               <button
                 className="text-button"
                 onClick={() => {
                   setScriptBase(row?.script.id ?? null);
+                  setCueBase(row?.cue?.id ?? null);
+                  setDraftBaseHead(view?.headVersion ?? headVersion);
                 }}
               >
                 {ui("Keep my draft", mediaUiCopy)}
               </button>
-              <button className="text-button" onClick={() => setDirty(false)}>
+              <button className="text-button" onClick={() => {
+                setDirty(false);
+                setTrimDirty(false);
+                setText(row?.script.text ?? shot.narration?.text ?? "");
+                setMode(row?.script.source.kind === "generated" ? "generated" : "uploaded");
+                setRecordingId(row?.audio?.id ?? "");
+                setStart(sampleSeconds(row?.cue?.startSample ?? 0));
+                setEnd(sampleSeconds(row?.cue?.endSample ?? 0));
+                setScriptBase(row?.script.id ?? null);
+                setCueBase(row?.cue?.id ?? null);
+                setDraftBaseHead(view?.headVersion ?? headVersion);
+                clearCache();
+                recovered.current = null;
+              }}>
                 {ui("Use saved script", mediaUiCopy)}
               </button>
             </p>
@@ -615,7 +714,7 @@ export function ShotAudioPanel({
             <IconButton
               icon="check"
               label={ui("Save shot script", mediaUiCopy)}
-              disabled={locked || !text.trim() || changedElsewhere}
+              disabled={locked || !text.trim() || staleAudio}
               onClick={saveScript}
             />
             {mode === "generated" ? (
@@ -623,7 +722,7 @@ export function ShotAudioPanel({
                 variant="primary"
                 disabled={
                   locked ||
-                  changedElsewhere ||
+                  staleAudio ||
                   !text.trim() ||
                   !profileId ||
                   !options?.capabilities.configured ||
@@ -642,7 +741,7 @@ export function ShotAudioPanel({
                 variant="primary"
                 disabled={
                   locked ||
-                  changedElsewhere ||
+                  staleAudio ||
                   view.capabilities?.audioImport === false
                 }
                 onClick={() => fileInput.current?.click()}
@@ -773,7 +872,6 @@ export function ShotAudioPanel({
                         audioPlayer.current.currentTime >= endSample / 48000)
                     )
                       audioPlayer.current.currentTime = startSample / 48000;
-                    setListened(rangeIdentity);
                   }}
                   onTimeUpdate={() => {
                     if (
@@ -834,7 +932,7 @@ export function ShotAudioPanel({
             {recording && !row && (
               <p role="status">
                 {ui(
-                  "Save the words or describe this recording before accepting it.",
+                  "Save the words or describe this recording before saving its timing.",
                   mediaUiCopy,
                 )}
               </p>
@@ -855,19 +953,18 @@ export function ShotAudioPanel({
             <div className="shot-audio-final">
               <span>
                 {detail?.committed && !dirty && !trimDirty
-                  ? ui("Accepted narration", mediaUiCopy)
-                  : ui(
-                      "Listen, then accept the script, recording and range.",
-                      mediaUiCopy,
+                  ? t("Recording and timing saved", "录音与时序已保存")
+                  : t(
+                      "Optional: listen or adjust the recording and timing. Scene confirmation does not require a separate narration approval.",
+                      "可选：试听或调整录音与时序。确认场景时无需再单独确认旁白。",
                     )}
               </span>
               <IconButton
                 icon="check"
-                label={ui(
-                  "Accept narration and timing for this shot",
-                  mediaUiCopy,
-                )}
-                disabled={disabled || !canAccept}
+                label={t("Save recording & timing", "保存录音与时序")}
+                disabled={
+                  disabled || staleAudio || !canSave || (detail?.committed && !trimDirty)
+                }
                 onClick={() => {
                   if (!view.session || !row || !recording) return;
                   try {

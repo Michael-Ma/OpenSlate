@@ -94,21 +94,6 @@ export function canExposeFrame(
   );
 }
 
-/** A deliberate confirmation may follow an earlier visible decode of these unchanged bytes. */
-export function canConfirmAfterSeen(
-  exposure: SceneFrameExposure | null,
-  current: readonly SceneFrameExposure[],
-  seen: ReadonlyMap<string, SceneFrameExposure>,
-  active: boolean,
-): boolean {
-  if (!exposure || !active) return false;
-  const identity = frameExposureIdentity(exposure);
-  return (
-    seen.get(identity)?.displayed === true &&
-    current.some((frame) => frameExposureIdentity(frame) === identity)
-  );
-}
-
 /** A history comparison is read-only. Unconfirmed or current attempts never become earlier takes. */
 export function frameHistory(
   snapshot: ProjectSnapshot,

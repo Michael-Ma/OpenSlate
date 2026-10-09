@@ -8,6 +8,14 @@ import { readPlanDocument } from "./read-plan-document";
 import { errorText } from "./components";
 import { PlanImportCommand } from "./plan-import-command";
 import { UiButton, UiTextArea } from "./ui";
+import { clearLocalDraft, readLocalDraft, writeLocalDraft } from "./local-draft-cache";
+type ImportSource = { name: string; text: string };
+const isImportSource = (value: unknown): value is ImportSource =>
+  !!value && typeof value === "object" &&
+  typeof (value as ImportSource).name === "string" &&
+  (value as ImportSource).name.length <= 200 &&
+  typeof (value as ImportSource).text === "string" &&
+  (value as ImportSource).text.length <= 12000;
 type Import = {
   id: string;
   name: string;
@@ -38,9 +46,38 @@ export function PlanImport({
   const version = useProjectRefreshVersion(),
     base = `/api/projects/${encodeURIComponent(snapshot.project.id)}/plan-imports`,
     [pending, setPending] = useState<Import | null>(null),
-    [text, setText] = useState(""),
-    [name, setName] = useState("Pasted brief.md"),
     [error, setError] = useState("");
+  const recovered = useRef<ReturnType<typeof readLocalDraft<ImportSource>> | undefined>(undefined);
+  if (recovered.current === undefined)
+    recovered.current = readLocalDraft(api.cacheNamespace,
+      snapshot.project.id, "plan-import:source", isImportSource);
+  const cacheRevision = useRef(recovered.current?.revision ?? null);
+  const writeCache = (value: ImportSource, headVersion: number) => {
+    const result = writeLocalDraft(api.cacheNamespace, snapshot.project.id,
+      "plan-import:source", value, headVersion, cacheRevision.current);
+    if (result.status === "saved") cacheRevision.current = result.revision!;
+  };
+  const clearCache = () => {
+    const result = clearLocalDraft(api.cacheNamespace, snapshot.project.id,
+      "plan-import:source", cacheRevision.current ?? undefined);
+    if (result === "saved") cacheRevision.current = null;
+  };
+  const [text, setText] = useState(recovered.current?.value.text ?? ""),
+    [name, setName] = useState(recovered.current?.value.name ?? "Pasted brief.md"),
+    [draftBase, setDraftBase] = useState(() => {
+      const base = recovered.current?.base;
+      return typeof base === "number" ? base : snapshot.project.headVersion;
+    });
+  const currentInput = useRef({ text, name });
+  currentInput.current = { text, name };
+  const updateSource = (next: ImportSource) => {
+    setText(next.text);
+    setName(next.name);
+    if (next.text)
+      writeCache(next, draftBase);
+    else clearCache();
+  };
+  const staleSource = !!text && draftBase !== snapshot.project.headVersion;
   const command = useRef(new PlanImportCommand()),
     fileRead = useRef(0);
   useEffect(
@@ -57,7 +94,12 @@ export function PlanImport({
         if (!c.signal.aborted) {
           setPending(v.pending);
           setError("");
-          if (v.pending) command.current.observedSavedImport();
+          if (v.pending) {
+            command.current.observedSavedImport();
+            if (v.pending.name === currentInput.current.name &&
+              v.pending.text === currentInput.current.text)
+              clearCache();
+          }
         }
       })
       .catch((e) => {
@@ -68,6 +110,17 @@ export function PlanImport({
   return (
     <section aria-label={t("Bring a brief", "导入创作简报")}>
       {error && <p role="alert">{ui(error, settingsUiTranslations)}</p>}
+      {staleSource && !pending && <p role="status" className="inline-error">
+        {t("The project changed since this local brief was written. Review it before interpreting.", "写下这份本地简报后，项目已发生变化。请检查后再解读。")}
+        <UiButton type="button" variant="ghost" onClick={() => {
+          setDraftBase(snapshot.project.headVersion);
+          writeCache({ name, text }, snapshot.project.headVersion);
+        }}>{t("Keep brief for current project", "在当前项目保留简报")}</UiButton>
+        <UiButton type="button" variant="ghost" onClick={() => {
+          updateSource({ name: "Pasted brief.md", text: "" });
+          setDraftBase(snapshot.project.headVersion);
+        }}>{t("Discard local brief", "丢弃本地简报")}</UiButton>
+      </p>}
       {pending ? (
         <>
           <h4>
@@ -231,8 +284,7 @@ export function PlanImport({
                 try {
                   const d = await readPlanDocument(f);
                   if (sequence !== fileRead.current) return;
-                  setText(d.text);
-                  setName(d.name);
+                  updateSource({ text: d.text, name: d.name });
                   setError("");
                 } catch (e) {
                   if (sequence === fileRead.current) setError(errorText(e));
@@ -249,7 +301,7 @@ export function PlanImport({
               disabled={disabled}
               onChange={(e) => {
                 ++fileRead.current;
-                setText(e.target.value);
+                updateSource({ text: e.target.value, name });
               }}
             />
           </label>
@@ -263,7 +315,7 @@ export function PlanImport({
           )}
           <UiButton
             variant="primary"
-            disabled={disabled || !native || !text.trim()}
+            disabled={disabled || !native || !text.trim() || staleSource}
             onClick={() => {
               const saved = command.current.create(
                 base,

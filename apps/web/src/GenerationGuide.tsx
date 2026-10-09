@@ -21,11 +21,13 @@ const jobLabel = (phase: string) =>
 export function GenerationGuide({
   snapshot,
   historyRequestId,
+  navigationVersion,
   onChat,
   onTimeline,
 }: {
   snapshot: ProjectSnapshot;
   historyRequestId?: string;
+  navigationVersion?: number;
   onChat(): void;
   onTimeline(): void;
 }) {
@@ -35,7 +37,7 @@ export function GenerationGuide({
   useEffect(() => {
     guide.current?.scrollIntoView({ block: "start" });
     guide.current?.focus({ preventScroll: true });
-  }, [historyRequestId]);
+  }, [historyRequestId, navigationVersion]);
   const [showHistory, setShowHistory] = useState(false),
     historyId = useId();
   useEffect(() => {

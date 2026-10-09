@@ -8,6 +8,7 @@ import { Icon, IconButton, errorText } from "./components";
 import { UiButton, UiTextArea } from "./ui";
 import {
   consumeMention,
+  composerEnterAction,
   mentionAt,
   projectReferences,
   referenceKey,
@@ -27,6 +28,7 @@ interface Props {
   send(): void;
   pending: boolean;
   disabled: boolean;
+  allowReferences?: boolean;
   placeholder: string;
   continuation?: ReactNode;
   actions: ReactNode;
@@ -62,6 +64,7 @@ export function ReferenceComposer({
   send,
   pending,
   disabled,
+  allowReferences = true,
   placeholder,
   continuation,
   actions,
@@ -79,7 +82,7 @@ export function ReferenceComposer({
     version = useProjectRefreshVersion(),
     projectId = snapshot?.project.id;
   const range = mentionAt(value, cursor),
-    open = !!range && !dismissed && !pending,
+    open = !!range && !dismissed && !pending && allowReferences,
     query = range?.query.trim().toLowerCase() ?? "";
   useEffect(() => {
     setAssets([]);
@@ -201,7 +204,7 @@ export function ReferenceComposer({
         ?.scrollIntoView({ block: "nearest" });
   }, [open, index, id, filter]);
   const choose = (r: StudioReference) => {
-    if (disabled || pending) return;
+    if (pending || !allowReferences) return;
     referencesChanged(
       references.some((x) => x.key === r.key) ? references : [...references, r],
     );
@@ -236,12 +239,20 @@ export function ReferenceComposer({
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (open && !e.ctrlKey && !e.metaKey && options[index])
-        choose(options[index]!);
-      else send();
+      const action = composerEnterAction({
+        disabled,
+        pending,
+        allowReferences,
+        pickerOpen: open,
+        hasOption: !!options[index],
+        modified: e.ctrlKey || e.metaKey,
+      });
+      if (action === "choose") choose(options[index]!);
+      else if (action === "send") send();
     }
   };
   const addMention = () => {
+    if (pending || !allowReferences) return;
     const at = textareaRef.current?.selectionStart ?? value.length;
     const next =
       value.slice(0, at) +
@@ -331,7 +342,7 @@ export function ReferenceComposer({
                   key={r.key}
                   id={id + "-" + i}
                   className={i === index ? "active" : ""}
-                  disabled={disabled}
+                  disabled={pending}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => choose(r)}
                 >
@@ -394,7 +405,7 @@ export function ReferenceComposer({
             <IconButton
               icon="at"
               label={t("Reference project resources", "引用项目资源")}
-              disabled={disabled || pending || !snapshot}
+              disabled={pending || !snapshot || !allowReferences}
               onClick={addMention}
             />
           </div>

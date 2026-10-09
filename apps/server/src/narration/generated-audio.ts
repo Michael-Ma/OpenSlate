@@ -18,6 +18,7 @@ import { inspectPcmWave } from "../media/pcm-wave.js";
 import type { GeneratedNarrationEvidence, GeneratedNarrationSummary, NarrationAcceptance, NarrationAudio, NarrationCue, NarrationEntry, SegmentRevision, VerifiedGeneratedNarrationAudio } from "./types.js";
 import type { CanonicalNarration, GeneratedNarrationProvenance } from "./canonical-types.js";
 import { assertTranscriptCanonicalSegment, transcriptCanonicalProvenance } from "./transcript-selection.js";
+import { narrationAuthorScope, narrationScopeTarget } from "./narration-scope.js";
 
 export const GENERATED_NARRATION_LIMITS = Object.freeze({ recordBytes: 128 * 1024, sourceBytes: 32768, evidenceBytes: 8192, objectNodes: 8192 });
 export interface ResolvedGeneratedNarrationAudio {
@@ -182,7 +183,9 @@ export function assertGeneratedNarrationProvenance(store: SpeechAuthorityStore, 
 export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityStore, projectId: string, input: unknown,
   selection: Pick<CanonicalNarration, "narrationRevisionId" | "narrationVersion">): void {
   const segment = snapshot(input), selected = snapshot(selection);
-  exact(segment, ["segmentId", "segmentRevisionId", "cue", "frameCoverage", "audioPlacement", "provenance", ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment, "transcriptProvenance") ? ["transcriptProvenance"] : [])]);
+  exact(segment, ["segmentId", "segmentRevisionId", "cue", "frameCoverage", "audioPlacement", "provenance", ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment, "transcriptProvenance") ? ["transcriptProvenance"] : []), ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment,"placementMode") ? ["placementMode"] : []), ...(segment !== null && typeof segment === "object" && Object.hasOwn(segment,"timingMode") ? ["timingMode"] : [])]);
+  const shotRelative = segment.placementMode === 'shot', withinShot = segment.timingMode === 'within_shot';
+  fail((!Object.hasOwn(segment,'placementMode') || shotRelative) && (!Object.hasOwn(segment,'timingMode') || shotRelative && withinShot), 'Unsupported canonical narration placement or timing mode');
   exact(selected, ["narrationRevisionId", "narrationVersion"]);
   fail(id(segment.segmentId) && id(segment.segmentRevisionId) && id(selected.narrationRevisionId)
     && Number.isSafeInteger(selected.narrationVersion) && selected.narrationVersion > 0, "Canonical narration requires an exact saved revision");
@@ -233,16 +236,27 @@ export function assertGeneratedCanonicalNarrationSegment(store: SpeechAuthorityS
     // The authenticated human channel issued this request. Superseded/restored history
     // remains evidence; it does not become fresh mutation authority through this assertion.
     fail(request.id === accepted.requestId && request.projectId === projectId && request.principalId === accepted.principalId
-      && request.editing === true && Array.isArray(request.scopeIds) && request.scopeIds.length <= 400 && request.scopeIds.includes(projectId),
-    "Canonical generated acceptance lacks its human project request evidence");
+      && request.editing === true && Array.isArray(request.scopeIds) && request.scopeIds.length <= 400,
+    "Canonical generated acceptance lacks its human request evidence");
+    const scopeIds = request.scopeIds as string[];
+    // Preserve project acceptance and additionally honor the existing compact-shot
+    // API only when its immutable human scope pins this exact section.
+    const narrowScope = !scopeIds.includes(projectId) && shotRelative
+      ? narrationAuthorScope(store, projectId, accepted.requestId, accepted.principalId, script.segmentId) : null;
+    fail(scopeIds.includes(projectId) || shotRelative && request.principalId === "local-user"
+      && scopeIds.length === 1 && narrowScope && narrowScope.shotId === scopeIds[0]
+      && narrationScopeTarget(store, narrowScope)?.segmentId === script.segmentId,
+    "Canonical generated acceptance lacks its exact human project or pinned shot request evidence");
   }
   const durationSamples = cue.endSample - cue.startSample, atSample = Number(entry.atSample);
   const frame = (sample: number): number => Number((BigInt(sample) + 800n) / 1600n);
-  fail(atSample + durationSamples <= 48000 * 360 && frame(durationSamples) >= 1, "Canonical narration exceeds its accepted timeline bounds");
+  const relativeFrames = shotRelative ? Math.ceil(durationSamples / 1600) : frame(durationSamples);
+  fail(atSample + durationSamples <= 48000 * 360 && relativeFrames >= 1, "Canonical narration exceeds its accepted timeline bounds");
   const expected = { segmentId: entry.segmentId, segmentRevisionId: script.id,
-    cue: { id: cue.id, meaning: script.meaning, placementFrames: frame(atSample), durationFrames: frame(durationSamples),
+    ...(shotRelative ? { placementMode: 'shot', ...(withinShot ? { timingMode: 'within_shot' } : {}) } : {}),
+    cue: { id: cue.id, meaning: script.meaning, placementFrames: frame(atSample), durationFrames: relativeFrames,
       audio: { artifactId: audio.id, sha256: audio.media.sha256, kind: "audio" }, accepted: true, measured: true },
-    frameCoverage: { startFrame: frame(atSample), endFrame: frame(atSample + durationSamples) },
+    frameCoverage: { startFrame: frame(atSample), endFrame: shotRelative ? frame(atSample) + relativeFrames : frame(atSample + durationSamples) },
     audioPlacement: { source: audio.media, startSample: cue.startSample, durationSamples, atSample, gainMilliDb: 0 }, provenance,
     ...(transcriptProvenance ? { transcriptProvenance } : {}) };
   fail(canonical(segment) === canonical(expected), "Canonical generated section differs from its accepted script, cue, or placement");
@@ -292,7 +306,7 @@ export async function verifyGeneratedNarrationAudio(store: SpeechAuthorityStore,
   fail(initial.artifact.path === installedPath, "Generated artifact is outside its exact managed location");
   const storedSource = await sourceRecord(join(sources, `${source.id}.json`), signal); cancelled(signal);
   fail(canonical(storedSource) === canonical(source), "Normalized descriptor differs from the exact stored source");
-  const original = await inspectPcmWave(join(blobs, `${source.originalSha256}.source`), AUDIO_DERIVATION_LIMITS.inputBytes, signal); cancelled(signal);
+  const original = await inspectPcmWave(join(blobs, `${source.originalSha256}.source`), AUDIO_DERIVATION_LIMITS.inputBytes, signal, { completedStreamBytes: source.originalByteLength }); cancelled(signal);
   fail(original.sha256 === source.originalSha256 && original.byteLength === source.originalByteLength
     && canonical(original.pcm) === canonical(initial.derivationIntent.rawPcm), "Original generated PCM differs from its paid raw output");
   const verifyNormalized = async (path: string): Promise<void> => {
