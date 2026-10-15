@@ -1,4 +1,4 @@
-import { EventStreamParser, type StreamEvent } from "./event-stream.ts";
+import { EventStreamParser, type StreamEvent } from "../shared/event-stream.ts";
 import { errorMessage, hex } from "./model.ts";
 import type { Artifact } from "./model";
 

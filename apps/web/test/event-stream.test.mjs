@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventStreamParser } from '../src/legacy/event-stream.ts';
-import { ProjectSubscription, projectSubscription } from '../src/legacy/project-subscription.ts';
+import { EventStreamParser } from '../src/shared/event-stream.ts';
+import { ProjectSubscription, projectSubscription } from '../src/shared/project-subscription.ts';
 const bytes=value=>new TextEncoder().encode(value);
 test('SSE decoding preserves split UTF-8, CRLF, multiline data and discards unfinished frames',()=>{
  const events=[],parser=new EventStreamParser(event=>events.push(event)),source=bytes('\ufeff: heartbeat\r\nid: 4\r\nevent: message.recorded\r\ndata: {"text":"鞋"}\r\ndata: second\r\n\r\nid: 5\ndata: unfinished');

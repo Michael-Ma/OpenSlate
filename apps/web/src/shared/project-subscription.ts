@@ -1,5 +1,6 @@
-import type { StudioApi } from "./api";
-import type { StreamEvent } from "./event-stream";
+import type { StreamEvent } from "./event-stream.ts";
+/** Structural: works with the classic and the next API client. */
+interface EventSource { closed: boolean; events(projectId: string, options: { after?: number; signal: AbortSignal; onOpen(): void; onEvent(event: StreamEvent): void }): Promise<void> }
 export interface ProjectUpdateState { revision: number; connection: "connecting" | "connected" | "reconnecting" | "fallback" }
 type Listener = () => void;
 interface Visibility { readonly hidden: boolean; addEventListener(name: string, listener: Listener): void; removeEventListener(name: string, listener: Listener): void }
@@ -19,8 +20,8 @@ export class ProjectSubscription {
   #listeners = new Set<Listener>(); #cursor: number | undefined; #controller: AbortController | undefined; #generation = 0;
   #coalesced: ReturnType<typeof setTimeout> | undefined; #retry: ReturnType<typeof setTimeout> | undefined; #fallback: ReturnType<typeof setTimeout> | undefined;
   #failures = 0; #openedAt = 0; readonly #environment: SubscriptionEnvironment;
-  readonly api: Pick<StudioApi, "events" | "closed">; readonly projectId: string;
-  constructor(api: Pick<StudioApi, "events" | "closed">, projectId: string, environment = browserEnvironment()) { this.api = api; this.projectId = projectId; this.#environment = environment; }
+  readonly api: EventSource; readonly projectId: string;
+  constructor(api: EventSource, projectId: string, environment = browserEnvironment()) { this.api = api; this.projectId = projectId; this.#environment = environment; }
   readonly getSnapshot = (): ProjectUpdateState => this.#state;
   readonly subscribe = (listener: Listener): (() => void) => {
     this.#listeners.add(listener);
@@ -108,8 +109,8 @@ export class ProjectSubscription {
     this.#disconnect(); this.#environment.visibility?.removeEventListener("visibilitychange", this.#visibility); this.#environment.focus?.removeEventListener("focus", this.#focus);
   }
 }
-const subscriptions = new WeakMap<StudioApi, Map<string, ProjectSubscription>>();
-export function projectSubscription(api: StudioApi, projectId: string): ProjectSubscription {
+const subscriptions = new WeakMap<EventSource, Map<string, ProjectSubscription>>();
+export function projectSubscription(api: EventSource, projectId: string): ProjectSubscription {
   let entries = subscriptions.get(api); if (!entries) { entries = new Map(); subscriptions.set(api, entries); }
   let subscription = entries.get(projectId); if (!subscription) { subscription = new ProjectSubscription(api, projectId); entries.set(projectId, subscription); }
   return subscription;

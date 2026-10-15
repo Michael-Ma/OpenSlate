@@ -4,7 +4,7 @@ import { registerHooks } from 'node:module';
 import { createHash } from 'node:crypto';
 // Node runs the same browser transport source; Vite normally resolves this TS module.
 const hooks = registerHooks({ resolve(specifier, context, next) {
-  return next(['./model', './event-stream'].includes(specifier) && context.parentURL?.endsWith('/src/api.ts') ? specifier + '.ts' : specifier, context);
+  return next(['./model', './event-stream'].includes(specifier) && context.parentURL?.endsWith('/src/legacy/api.ts') ? specifier + '.ts' : specifier, context);
 } });
 const { StudioApi, ApiError } = await import('../src/legacy/api.ts'); hooks.deregister();
 const nativeFetch = globalThis.fetch;

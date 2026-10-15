@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import type { StudioApi } from "./api";
-import { projectSubscription } from "./project-subscription";
+import { projectSubscription } from "../shared/project-subscription.ts";
 const RefreshVersion = createContext(0);
 /** Mounted once by the project workspace; panels consume this number without opening streams. */
 export function ProjectUpdatesProvider({ value, children }: { value: number; children: ReactNode }) {
