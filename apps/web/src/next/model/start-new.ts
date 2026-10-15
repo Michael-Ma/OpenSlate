@@ -49,7 +49,11 @@ export interface DirectorSetupRead {
   defaults: { binaryPath: string; model: string; codexHome?: string };
 }
 
-/** Codex is per film on the server, but whether this computer has it is the same for every film. */
+/**
+ * Codex is per film on the server, but whether this computer has it is the same for every film.
+ * "unknown" until a film's Director setup has been read: on a first run no film is open, so the
+ * answer only comes once the new film exists (its Director step reads it).
+ */
 export type Codex = { state: "found"; model: string } | { state: "not_found" } | { state: "unknown" };
 
 export function codexFrom(setup: DirectorSetupRead | null | undefined): Codex {
@@ -68,11 +72,20 @@ export function directorSetupBody(setup: DirectorSetupRead): { mode: "native"; b
 
 export type Job = "director" | "keyframes" | "video" | "narration" | "transcription";
 
+export const JOB_LABEL: Record<Job, MessageId> = {
+  director: "start.job.director", keyframes: "start.job.keyframes", video: "start.job.video", narration: "start.job.narration", transcription: "start.job.transcription",
+};
+/** The same jobs inside a sentence ("MiniMax H3 video (about $0.50 a clip)"). */
+const JOB_INLINE: Record<Job, MessageId> = {
+  director: "start.models.job.director", keyframes: "start.models.job.keyframes", video: "start.models.job.video", narration: "start.models.job.narration", transcription: "start.models.job.transcription",
+};
+
+/** Each media job, its provider kind, and the unit its price is per (a transcription is one per recording). */
 const JOBS: readonly { job: Exclude<Job, "director">; kind: ProviderKind; price: MessageId }[] = [
   { job: "keyframes", kind: "image", price: "start.price.keyframe" },
   { job: "video", kind: "video", price: "start.price.clip" },
   { job: "narration", kind: "speech", price: "start.price.line" },
-  { job: "transcription", kind: "transcription", price: "start.price.line" },
+  { job: "transcription", kind: "transcription", price: "start.price.recording" },
 ];
 
 export interface ModelRow {
@@ -166,11 +179,19 @@ export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale
   };
 }
 
-/** The impact line above "See each model". */
-export function modelSummary(plan: ModelPlan): Msg {
-  if (plan.ready === plan.total) return msg("start.models.all_ready");
-  if (plan.ready === 0) return msg("start.models.none_ready");
-  return msg("start.models.some_ready", { ready: plan.ready, total: plan.total });
+/**
+ * The impact line above "See each model": which ready models the film gets, each with its price, so
+ * the paid defaults are named before Create. `say` translates one message (the list is built from
+ * translated parts, so it reads in the interface language).
+ */
+export function modelSummaryText(plan: ModelPlan, say: (message: Msg) => string): string {
+  if (plan.ready === 0) return say(msg("start.models.none_ready"));
+  const models = plan.rows
+    .filter((row) => row.ok && row.model)
+    .map((row) => say(msg("start.models.item", { job: say(msg(JOB_INLINE[row.job])), model: row.model!, price: say(row.price) })))
+    .join(say(msg("start.models.sep")));
+  if (plan.ready === plan.total) return say(msg("start.models.all_ready", { models }));
+  return say(msg("start.models.some_ready", { ready: plan.ready, total: plan.total, models }));
 }
 
 // ---- the first-run "Make your own film" card ----
@@ -209,13 +230,22 @@ export type FirstStep = "director" | "plan" | "empty";
 /** Talking to the Director and reading a written plan need the Codex Director (plan-imports.ts: DIRECTOR_REQUIRED). */
 export const stepNeedsCodex = (step: FirstStep): boolean => step !== "empty";
 export const stepAvailable = (step: FirstStep, codex: Codex): boolean => !stepNeedsCodex(step) || codex.state !== "not_found";
-export const defaultStep = (codex: Codex): FirstStep => (codex.state === "not_found" ? "empty" : "director");
+/** Talk to the Director only when Codex is known to be here; while it is unknown the safe default is the empty outline. */
+export const defaultStep = (codex: Codex): FirstStep => (codex.state === "found" ? "director" : "empty");
+
+/**
+ * The step the sheet shows: the one the person (or the button that opened the sheet) chose while it
+ * is possible, else this computer's default. Derived, so a Codex check that answers after the sheet
+ * opened moves an untouched choice to the right default and never leaves a step that is now off.
+ */
+export const effectiveStep = (chosen: FirstStep | null, codex: Codex): FirstStep => (chosen && stepAvailable(chosen, codex) ? chosen : defaultStep(codex));
 
 export type CreationStep = "create" | "director" | "import";
 
 /**
- * What Create runs, in order. The Codex Director is set up for every new film when this computer has
- * Codex (it is this computer's default Director, and a film's Director locks at its first conversation).
+ * What Create runs, in order. The Codex Director is set up for every new film unless this computer is
+ * known to have no Codex (it is this computer's default Director, and a film's Director locks at its
+ * first conversation); while Codex is unknown, this step is where the new film finds out.
  * The written plan is sent only when one was given.
  */
 export function creationSteps(step: FirstStep, codex: Codex, planText: string): CreationStep[] {
@@ -256,12 +286,43 @@ export function planFileName(filmName: string, chosen: string | null): string {
 
 // ---- after Create ----
 
-export type CreatedOutcome = "director" | "plan" | "plan_later" | "empty";
+/** How a creation run ended: the step that did not finish (null when all did) and the code it was refused with. */
+export interface CreationEnd {
+  failedAt: CreationStep | null;
+  code: string | null;
+}
 
-/** What the toast says once the film opens: a step that did not finish falls back to working in the Plan. */
-export function createdOutcome(step: FirstStep, planText: string, complete: boolean): CreatedOutcome {
-  if (step === "plan") return complete && planText.trim() ? "plan" : "plan_later";
-  return complete ? step : "empty";
+/** Client-made: the new film's Director setup shows no Codex executable on this computer. Trying again cannot help. */
+export const CODEX_NOT_FOUND = "CODEX_NOT_FOUND";
+
+/**
+ * What the sheet does when a step after Create did not finish (the film exists either way):
+ * - "open": the step was optional (an empty outline does not need the Director): open the film now;
+ * - "final": trying again cannot work (no Codex here): Open the film is the only way on;
+ * - "retry": offer Try again, which finishes the same film.
+ */
+export type AfterFailure = "open" | "final" | "retry";
+
+export function afterFailure(step: FirstStep, failedAt: Exclude<CreationStep, "create">, code: string | null): AfterFailure {
+  if (failedAt === "director" && !stepNeedsCodex(step)) return "open";
+  if (code === CODEX_NOT_FOUND) return "final";
+  return "retry";
+}
+
+/** The sheet's explanation once a later step failed. */
+export function failedMsg(step: FirstStep, failedAt: Exclude<CreationStep, "create">, code: string | null, name: string): Msg {
+  if (code === CODEX_NOT_FOUND) return msg(step === "plan" ? "start.new.failed.no_codex_plan" : "start.new.failed.no_codex", { name });
+  return msg(failedAt === "director" ? "start.new.failed.director" : "start.new.failed.import", { name });
+}
+
+export type CreatedOutcome = "director" | "plan" | "plan_later" | "empty" | "stand_in" | "setup_later";
+
+/** What the toast says once the film opens: a step that did not finish says what the film has instead. */
+export function createdOutcome(step: FirstStep, planText: string, end: CreationEnd): CreatedOutcome {
+  if (end.failedAt === null) return step === "plan" ? (planText.trim() ? "plan" : "plan_later") : step;
+  if (end.code === CODEX_NOT_FOUND) return "stand_in";
+  if (end.failedAt === "director") return "setup_later";
+  return "plan_later";
 }
 
 const CREATED: Record<CreatedOutcome, MessageId> = {
@@ -269,6 +330,8 @@ const CREATED: Record<CreatedOutcome, MessageId> = {
   plan: "start.created.plan",
   plan_later: "start.created.plan_later",
   empty: "start.created.empty",
+  stand_in: "start.created.stand_in",
+  setup_later: "start.created.setup_later",
 };
 
 export const createdMsg = (outcome: CreatedOutcome, name: string): Msg => msg(CREATED[outcome], { name });
