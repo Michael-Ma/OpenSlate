@@ -1,3 +1,4 @@
+import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 /** Implementation facts authored by the application, not provider profiles or model input. */
 export interface DirectorApplicationCapabilities {
   version: 5 | 6;
@@ -42,8 +43,8 @@ export function projectApplicationCapabilities(toolVersion = "1.0.0", audioReque
     authority: "application_implementation",
     scope: "Implementation facts only. These do not add tools to the locked catalog, verify host setup or API access, or grant permission.",
     narration: {
-      speechSynthesis: { implemented: true, available: false, toolAvailable: ["3.0.0", "4.0.0"].includes(toolVersion), reason: "Audio tools prepare a pending suggestion for an exact saved section. Only a human press on the existing audio request route starts paid speech. No usage allowance or separate spending approval is required. Preparation creates no execution grant or job. Completed recordings still need canonical attachment and timing evidence." },
-      transcription: { implemented: true, available: false, toolAvailable: ["3.0.0", "4.0.0"].includes(toolVersion), workflow: "human_review_owned_recording",
+      speechSynthesis: { implemented: true, available: false, toolAvailable: (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(toolVersion), reason: "Audio tools prepare a pending suggestion for an exact saved section. Only a human press on the existing audio request route starts paid speech. No usage allowance or separate spending approval is required. Preparation creates no execution grant or job. Completed recordings still need canonical attachment and timing evidence." },
+      transcription: { implemented: true, available: false, toolAvailable: (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(toolVersion), workflow: "human_review_owned_recording",
         hostReadiness: "not_evaluated", reason: "Human browser transcription is implemented. This turn may prepare an exact owned recording without a script only when its locked catalog includes that tool. Fresh native conversations load compatible current guidance automatically. The director cannot approve generation or spending.",
         requirements: "The human selects an owned recording in Story & narration, reviews the exact model/language proposal and presses the existing audio request action. No spending allowance is required. A script or section is not required first. Execution also requires a supported saved profile, enabled provider, API key and local audio tools. None of that host setup is verified by this context. A transcript remains an unreviewed suggestion; words, timing and narration acceptance stay separate.", },
       generatedSourceIntent: {

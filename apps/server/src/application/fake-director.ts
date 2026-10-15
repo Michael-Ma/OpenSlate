@@ -37,6 +37,22 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     await invoke("read_context", {});
     const command = this.service.store.get<DemoCommand>("demo_command", input.requestId);
     let text = "Your message is saved. This offline director is a scripted demonstration, so it cannot interpret arbitrary creative requests yet. Use Create a 2-shot demo, then review its frames or try a scoped close-up/wide edit. Real conversation requires the Codex runtime connection.";
+    const projectForNotes = this.service.store.getProject(input.projectId);
+    const request = this.service.store.get<{ scopeIds: string[] }>("message", input.requestId)!;
+    const scene = projectForNotes.scenes.find(scene => request.scopeIds.includes(scene.id));
+    const shots = projectForNotes.shots.filter(shot => shot.sceneId === scene?.id);
+    if (!command && scene && shots.length && input.bridge.toolContractVersion === "5.0.0") {
+      const first = shots[0]!, last = shots.at(-1)!;
+      await invoke("record_notes", { notes: [
+        { anchor: { shotIds: [first.id] }, kind: "observation", blocking: false,
+          text: "Scripted demo note: a live Director would compare this frame with the brief. This offline Director has not seen the picture.",
+          choices: [{ kind: "accept", label: "Keep this frame" }, { kind: "regenerate_keyframe", shotIds: [first.id] }] },
+        { anchor: { shotIds: [last.id] }, kind: "recommendation", blocking: true,
+          text: "Scripted demo recommendation: check whether the closing narration expresses the scene's intent.",
+          choices: [{ kind: "accept", label: "Keep narration" }, { kind: "edit_field", shotId: last.id, field: "narration" }] },
+      ] });
+      text = "Scripted demo review: two notes are saved for this scene. Keep the current choices, edit the narration, or use the human keyframe generation action. No picture was visually inspected.";
+    }
     if (command) {
       const project = this.service.store.getProject(input.projectId);
       let proposed = project;

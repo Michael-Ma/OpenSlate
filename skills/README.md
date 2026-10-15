@@ -1,6 +1,6 @@
 # Creative skills
 
-Two instruction-only packages are shipped and validated by the director loader. The current guidance is [V5 production](v5/production/SKILL.md) and [V5 plan authoring](v5/plan-authoring/SKILL.md), package version `5.0.0` with the existing `4.0.0` JSON tool contract. Historical V1–V4 package bytes remain available for verifying existing immutable locks.
+Two instruction-only packages are shipped and validated by the director loader. The current guidance is [V6 production](v6/production/SKILL.md) and [V6 plan authoring](v6/plan-authoring/SKILL.md), package version `6.0.0` with JSON tool contract `5.0.0`. Historical V1–V5 package bytes remain available for verifying existing immutable locks.
 
 - [production](v5/production/SKILL.md): intent and narration gap discovery, script development, story/shot planning, continuity/assets, human keyframe/video review, and conversational editing guidance.
 - [plan-authoring](v5/plan-authoring/SKILL.md): code-authored execution plans and focused patches against existing project state.

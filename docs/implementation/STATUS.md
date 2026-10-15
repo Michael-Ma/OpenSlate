@@ -2,6 +2,14 @@
 
 Reconciled October 9, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 15 structured Director notes — B5 worktree verified
+
+The B5 backend component adds immutable tool contract 5.0.0, V6 guidance, scoped lettered Director notes, keyed human resolution and a scene-video blocker for open blocking notes. Fresh native turns upgrade verified shipped locks to 5.0.0/V6; in-flight epochs retain their original catalogs. All 1.0.0–4.0.0 catalog digests remain unchanged. Discuss-only epochs may record notes without changing the film or starting media. Snapshots and paged Director context expose note states/resolutions; staleness is derived from pinned shot revisions and seen-frame hashes. Saved human edit/regeneration evidence is required for action resolutions, and resolving a note never dispatches work. Scene-scoped scripted requests produce two explicitly nonvisual demo notes.
+
+This is the B5 worktree component, pending the lead's review/merge. Held proposals, alongside request unification, generated-keyframe projection/review turns and web rendering remain later cards. `propose_change` is omitted from the still-unreleased 5.0.0 catalog; B9 explicitly permits adding and refreezing it before release. No browser-facing type in `studio-api.ts` changed.
+
+Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed preflight. Final `pnpm build` passed; all six touched test files passed **104 tests**. Final `pnpm test` passed **2,491 tests, zero failures and one optional native-probe skip** (2,492 total); all five package typechecks passed. Validation used disposable fixtures and fake providers, including actual local fake keyframe/video execution. No live provider/model call, production edit/restart, port 3001 listener, external network request or schema migration occurred. [B5 scope, decisions, files and exact verification](../ai/uiux-plan/codex/reports/B5-notes.md).
+
 ## Available behavior
 
 | Area | Implemented scope | Remaining boundary |

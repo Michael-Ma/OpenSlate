@@ -86,7 +86,7 @@ test('Opened is durable, independent of editing and authority, resets after rege
   await edit(f,{kind:'shot',id:'shot-1',field:'motion',value:'Move gently'});
   assert.equal((await f.overview()).shots['shot-0'].keyframe.opened,true);
   const noKey = await f.call('POST','/shots/shot-0/frame-views',body,null);
-  assert.equal(noKey.statusCode,409); assert.equal(noKey.json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
+  assert.equal(noKey.statusCode,400); assert.equal(noKey.json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
   await ok(await f.post(await f.get(),'image',randomUUID(),{targetShotIds:['shot-0'],regenerate:true}));
   assert.equal((await f.overview()).shots['shot-0'].keyframe.opened,false);
   await f.finish();

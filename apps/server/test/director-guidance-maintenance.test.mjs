@@ -46,7 +46,7 @@ function fixture(t, start, overrides = {}) {
   return { root, store, provider, service, director, project, configuration, settings, prepareInput, calls, install, fresh };
 }
 
-for (const version of ['1.0.0', '2.0.0', '3.0.0']) test(`next native ${version} request automatically loads V4 while historical evidence and all production authority stay unchanged`, async t => {
+for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0']) test(`next native ${version} request automatically loads V6 while historical evidence and all production authority stay unchanged`, async t => {
   const f = fixture(t); await f.director.configure(f.project.id, { mode: 'native', binaryPath: process.execPath, model: 'test-model' }, 'setup');
   const saved = f.install(version), oldHuman = f.service.beginRequest(f.project.id, 'local-user', 'Earlier unfinished request'), oldBridge = f.service.openEpoch(f.project.id, oldHuman);
   const captured = new DirectorContextService(f.service, saved.environment).capture(f.project.id, oldBridge.actor, { lockId: saved.lock.id, selectedSkillIds: ['production', 'plan-authoring'] });
@@ -59,7 +59,7 @@ for (const version of ['1.0.0', '2.0.0', '3.0.0']) test(`next native ${version} 
   const turn = f.director.enqueue(f.project.id, human); f.director.tick(); await f.director.settle();
   assert.equal(f.store.get('director_turn', turn.id).state, 'completed'); assert.equal(f.calls.length, 1);
   const input = f.calls[0], context = JSON.parse(input.context), successor = f.store.list('director_skill_lock', f.project.id).at(-1).lock;
-  assert.equal(input.resumeThreadId, undefined); assert.equal(input.bridge.toolContractVersion, '4.0.0');
+  assert.equal(input.resumeThreadId, undefined); assert.equal(input.bridge.toolContractVersion, '5.0.0');
   assert.equal(context.toolContract.lockId, successor.id); assert.equal(context.toolContract.lockDigest, successor.lockDigest);
   assert.equal(context.filmPlanning.narrationWriting.toolAvailable, true); assert.equal(context.filmPlanning.narrationWriting.upgradeRequired, false);
   assert.equal(context.snapshot.applicationCapabilities.narration.speechSynthesis.toolAvailable, true, 'the FIRST native snapshot advertises its actual bound catalog');
@@ -80,10 +80,10 @@ for (const version of ['1.0.0', '2.0.0', '3.0.0']) test(`next native ${version} 
 });
 
 test('an active bound legacy epoch retains its exact catalog and cannot upgrade mid-turn', t => {
-  const f = fixture(t), saved = f.install('1.0.0'), current = f.fresh('Already running');
+  const f = fixture(t), saved = f.install('4.0.0'), current = f.fresh('Already running');
   const context = new DirectorContextService(f.service, saved.environment).capture(f.project.id, current.bridge.actor, { lockId: saved.lock.id, selectedSkillIds: ['production', 'plan-authoring'] });
   const input = f.prepareInput(current.turn, current.human, current.bridge);
-  assert.equal(input.bridge.toolContractVersion, '1.0.0'); assert.equal(JSON.parse(input.context).filmPlanning.narrationWriting.toolAvailable, false);
+  assert.equal(input.bridge.toolContractVersion, '4.0.0'); assert.equal(JSON.parse(input.context).filmPlanning.narrationWriting.toolAvailable, true);
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 1);
   assert.equal(f.store.get('skill_activation', context.activation.activationId).activation.lockId, saved.lock.id);
 });
@@ -129,7 +129,7 @@ test('compatible maintenance is fenced by installation recovery and never rewrit
 test('a repeated first-input preparation keeps one successor and one epoch binding', t => {
   const f = fixture(t); f.install('3.0.0'); const current = f.fresh('Fresh V4 input');
   const first = f.prepareInput(current.turn, current.human, current.bridge), second = f.prepareInput(current.turn, current.human, current.bridge);
-  assert.equal(first.bridge.toolContractVersion, '4.0.0'); assert.equal(second.bridge.toolContractVersion, '4.0.0');
+  assert.equal(first.bridge.toolContractVersion, '5.0.0'); assert.equal(second.bridge.toolContractVersion, '5.0.0');
   assert.equal(JSON.parse(first.context).toolContract.lockId, JSON.parse(second.context).toolContract.lockId);
   assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2); assert.equal(f.store.list('director_epoch_lock', f.project.id).length, 1);
   assert.equal(f.store.db.prepare("SELECT count(*) total FROM events WHERE project_id=? AND json_extract(body,'$.kind')='director.lock_installed' AND json_extract(body,'$.payload.source')='application_compatible_upgrade'").get(f.project.id).total, 1);
@@ -214,14 +214,14 @@ test('native projection disables late historical packages while retaining their 
   assert.equal(f.store.list('grant', f.project.id).length, 0); assert.equal(f.store.list('attempt', f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
 });
 
- test('a fresh V4 project loads V5 guidance with the same tool catalog while prior V4 snapshots remain exact', t => {
+ test('a fresh V4 project loads V6 guidance with the notes catalog while prior V4 snapshots remain exact', t => {
   const f=fixture(t), saved=createDirectorSkillLock(f.configuration,'4.0.0','4');
   new DirectorContextService(f.service,saved.environment).bootstrapLock(f.project.id,saved.lock);
   const current=f.fresh('Use the current scene workflow'),before=f.store.getProject(f.project.id);
   const input=f.prepareInput(current.turn,current.human,current.bridge);
-  assert.equal(input.bridge.toolContractVersion,'4.0.0');
+  assert.equal(input.bridge.toolContractVersion,'5.0.0');
   const installed=f.store.list('director_skill_lock',f.project.id).at(-1).lock;
-  assert.ok(installed.skills.every(skill=>skill.version==='5.0.0'));
+  assert.ok(installed.skills.every(skill=>skill.version==='6.0.0'));
   const context=JSON.parse(input.context);assert.doesNotMatch(context.instructions,/finite spending approval/);assert.doesNotMatch(context.filmPlanning.procedure.join(' '),/account usage or spending allowance is separate/);
   const overview=f.service.readContext(f.project.id,current.bridge.actor,{});assert.equal(overview.applicationCapabilities.version,6);assert.doesNotMatch(JSON.stringify(overview.applicationCapabilities),/separate spending allowance|obtain human plan review/);
   assert.deepEqual(f.store.get('director_skill_lock',saved.lock.id).lock,saved.lock);

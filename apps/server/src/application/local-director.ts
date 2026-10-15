@@ -1,3 +1,4 @@
+import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -163,7 +164,7 @@ export class LocalDirectorController {
     try {
       const prepared = selection.mode === "native" ? await this.prepare(projectId, selection) : null;
       const changedMode = before.selection.mode !== selection.mode;
-      invariant(!oldLock || ["1.0.0", "2.0.0", "3.0.0", "4.0.0"].includes(oldLock.lock.compatibility.toolContract), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
+      invariant(!oldLock || (SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(oldLock.lock.compatibility.toolContract), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
       const replacement = changedMode && oldLock ? createDirectorSkillLock({ repositoryRoot: this.config.repositoryRoot,
         snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
         runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" }, oldLock.lock.compatibility.toolContract as ToolContractVersion).lock : null;
@@ -294,7 +295,7 @@ export class LocalDirectorController {
       const paths = new Set<string>();
       for (const row of this.service.store.list<{ lock: SkillCapabilityLock }>("director_skill_lock", input.projectId)) {
         if (!row.lock.bindings.some(binding => binding.kind === "runtime" && binding.id === "codex-app-server")) continue;
-        invariant(["1.0.0", "2.0.0", "3.0.0", "4.0.0"].includes(row.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Saved Director guidance is unsupported");
+        invariant((SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(row.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Saved Director guidance is unsupported");
         const environment = directorSkillEnvironment(configuration, row.lock.compatibility.toolContract as ToolContractVersion);
         for (const skill of verifySkillLock(row.lock, environment)) paths.add(skill.entryPath);
       }
