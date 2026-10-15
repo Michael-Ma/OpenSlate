@@ -29,7 +29,8 @@ export interface ProjectSnapshot {
       desiredFrames: number;
       imagePrompt: string;
       videoPrompt: string;
-      narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: "stock" | "personal" };
+      /** voice: "stock" follows the film's narrator, a stock voice id ("cedar") pins it, "personal" is the film's personal voice. */
+      narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: string };
     }[];
   };
   conversation?: ConversationEntry[];

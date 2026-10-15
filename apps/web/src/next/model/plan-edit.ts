@@ -1,6 +1,7 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { clipUnit } from "./inspector.ts";
+import { modeEdit, narrationChoiceOf, planRecordingImpact, type NarrationChoice as Choice } from "./narration.ts";
 import { promptText, promptToSave, secondsOf, written, type NarrationMode } from "./plan.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
@@ -12,7 +13,8 @@ import { msg, type Msg } from "./types.ts";
  * outdates only the clip; a new line outdates the voice line. Pure: no sentences, only message ids.
  */
 
-export type NarrationChoice = "none" | "line" | "undecided";
+/** No narration, a line the studio voices, the person's own recording (model/narration.ts), or not decided yet. */
+export type NarrationChoice = Choice | "undecided";
 
 export interface ShotDraft {
   purpose: string;
@@ -39,14 +41,13 @@ const inFlight = (slot: MediaSlot) => slot.state === "running";
 
 /** The editor's starting values for a shot as it is now. */
 export function draftOf(shot: ShotOverview, mode: NarrationMode | undefined, fps: number): ShotDraft {
-  const hasLine = shot.narration.state !== "none" && shot.narration.text.trim() !== "";
   return {
     purpose: written("purpose", shot.purpose),
     framing: written("framing", shot.framing),
     prompt: promptText(shot.imagePrompt),
     motion: written("motion", shot.motion),
     seconds: secondsOf(shot.durationFrames, fps),
-    narration: hasLine ? "line" : mode === "undecided" ? "undecided" : "none",
+    narration: narrationChoiceOf(mode, shot.narration),
     line: shot.narration.text,
   };
 }
@@ -80,18 +81,19 @@ export function draftProblem(base: ShotDraft, draft: ShotDraft): Msg | null {
  * `imagePrompt` is the shot's whole picture prompt as stored: a rewritten prompt keeps the server's direction
  * header in front of the person's words (see promptToSave).
  */
-export function draftEdits(base: ShotDraft, draft: ShotDraft, fps: number, mode: NarrationMode | undefined, imagePrompt = ""): { field: DraftField; edit: ShotFieldEdit }[] {
+export function draftEdits(base: ShotDraft, draft: ShotDraft, fps: number, narrationMode: NarrationMode | undefined, imagePrompt = ""): { field: DraftField; edit: ShotFieldEdit }[] {
   const fields = new Set(changedFields(base, draft));
   const out: { field: DraftField; edit: ShotFieldEdit }[] = [];
-  if (fields.has("narration") && draft.narration === "none") out.push({ field: "narration", edit: { kind: "narration", field: "mode", value: "none" } });
+  const mode = fields.has("narration") && draft.narration !== "undecided" ? modeEdit(draft.narration, narrationMode) : null;
+  if (mode === "none") out.push({ field: "narration", edit: { kind: "narration", field: "mode", value: "none" } });
   if (fields.has("length")) out.push({ field: "length", edit: { kind: "shot", field: "desiredFrames", value: String(Math.round(draft.seconds * fps)) } });
   if (fields.has("prompt")) out.push({ field: "prompt", edit: { kind: "shot", field: "imagePrompt", value: promptToSave(imagePrompt, draft.prompt.trim()) } });
   if (fields.has("motion")) out.push({ field: "motion", edit: { kind: "shot", field: "motion", value: draft.motion.trim() } });
   if (fields.has("purpose")) out.push({ field: "purpose", edit: { kind: "shot", field: "purpose", value: draft.purpose.trim() } });
   if (fields.has("framing")) out.push({ field: "framing", edit: { kind: "shot", field: "framing", value: draft.framing.trim() } });
   if (fields.has("line")) out.push({ field: "line", edit: { kind: "narration", field: "text", value: draft.line.trim() } });
-  if (fields.has("narration") && draft.narration === "line" && mode !== "generated" && mode !== "uploaded")
-    out.push({ field: "narration", edit: { kind: "narration", field: "mode", value: "generated" } });
+  // A line or a recording is chosen last, after the line it voices.
+  if (mode && mode !== "none") out.push({ field: "narration", edit: { kind: "narration", field: "mode", value: mode } });
   return out;
 }
 
@@ -192,6 +194,8 @@ export interface DraftEffects {
   clip: boolean;
   voice: boolean;
   voiceDropped: boolean;
+  /** "My recording" was chosen; it is added on the shot in Keyframes. */
+  recording: boolean;
   /** A keyframe or clip the change touches is being made right now. */
   running: boolean;
   promptLike: boolean;
@@ -211,6 +215,7 @@ export function draftEffects(shot: ShotOverview, base: ShotDraft, draft: ShotDra
     clip: clipLike && shot.video.state === "ready",
     voice: voiceReady && draft.narration === "line" && has("line"),
     voiceDropped: voiceReady && draft.narration === "none" && base.narration === "line",
+    recording: draft.narration === "recording" && has("narration"),
     running: (promptLike && inFlight(shot.keyframe)) || (clipLike && inFlight(shot.video)),
     promptLike,
     clipLike,
@@ -237,7 +242,9 @@ export function shotImpact(shot: ShotOverview, base: ShotDraft, draft: ShotDraft
   else if (effects.clip) parts.push(prices.clip !== null ? msg("plan.impact.clip", { shot: label, price: money(prices.clip) }) : msg("plan.impact.clip_unpriced", { shot: label }));
   if (effects.voice) parts.push(prices.voice !== null ? msg("plan.impact.voice", { price: money(prices.voice) }) : msg("plan.impact.voice_unpriced"));
   if (effects.voiceDropped) parts.push(msg("plan.impact.voice_dropped", { shot: label }));
-  const any = effects.keyframe || effects.clip || effects.voice || effects.voiceDropped;
+  const recording = effects.recording ? planRecordingImpact(shot) : null;
+  if (recording) parts.push(recording.message);
+  const any = effects.keyframe || effects.clip || effects.voice || effects.voiceDropped || !!recording?.replaces;
   if (!any && !effects.running) {
     const nothingMade = !shot.keyframe.previous && (shot.keyframe.state === "none" || shot.keyframe.state === "direction_required") && shot.video.state === "none" && shot.narration.state !== "ready";
     if (nothingMade) parts.push(msg("plan.impact.nothing_made", { shot: label }));

@@ -1,6 +1,7 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { cardStatus, isWorking, seconds, type CardTone } from "./keyframes.ts";
+import { narrationRow, type NarrationMode } from "./narration.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -155,27 +156,14 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   }
 }
 
-function narrationRow(shot: ShotOverview, fps: number): InspectorRow {
-  const line = shot.narration;
-  const label = msg("inspector.narration");
-  if (line.state === "none" || !line.text.trim()) return { key: "narration", label, value: msg("inspector.narration.none"), quoted: false, notes: [] };
-  const notes: InspectorRow["notes"] = [];
-  if (line.measuredSeconds !== undefined) notes.push({ message: msg("inspector.narration.measured", { seconds: Math.round(line.measuredSeconds * 10) / 10 }), tone: "plain" });
-  else if (line.estimatedSeconds !== undefined) notes.push({ message: msg("inspector.narration.estimated", { seconds: Math.round(line.estimatedSeconds * 10) / 10 }), tone: "plain" });
-  if (line.state === "making") notes.push({ message: msg("inspector.narration.making"), tone: "plain" });
-  if (line.state === "failed") notes.push({ message: msg("inspector.narration.failed"), tone: "warn" });
-  if (line.fit === "cut_to_shot") notes.push({ message: msg("inspector.line_cut", { seconds: seconds(shot.durationFrames, fps) }), tone: "plain" });
-  else if (line.fits === false) notes.push({ message: msg("inspector.narration.too_long"), tone: "warn" });
-  return { key: "narration", label, value: line.text, quoted: true, notes };
-}
-
-export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string): InspectorView {
+/** `narrationMode` is the shot's stored narration mode (the project snapshot), so a recording reads as one. */
+export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string, narrationMode?: NarrationMode): InspectorView {
   const scene = overview.scenes.find((s) => s.sceneId === shot.sceneId);
   const { status, tone } = cardStatus(shot);
   const rows: InspectorRow[] = [
     { key: "motion", label: msg("inspector.motion"), value: shot.motion, quoted: false, notes: [] },
     { key: "duration", label: msg("inspector.duration"), value: msg("inspector.duration_value", { seconds: seconds(shot.durationFrames, overview.fps) }), quoted: false, notes: [] },
-    narrationRow(shot, overview.fps),
+    narrationRow(shot, overview.fps, narrationMode),
   ];
   const takes = shot.keyframe.takeCount;
   if (takes > 1)
