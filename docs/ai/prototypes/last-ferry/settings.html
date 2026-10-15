@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Last Ferry · Settings</title>
+<link rel="stylesheet" href="system.css">
+<style>
+/* Settings: one page, not a chat card. Film settings first, then this computer. */
+.set-grid{display:grid;grid-template-columns:180px minmax(0,760px);gap:22px;align-items:start}
+.index{position:sticky;top:0;display:flex;flex-direction:column;gap:2px}
+.index a{display:block;text-decoration:none;color:var(--text-2);font-weight:600;font-size:13px;padding:6px 12px;border-radius:var(--r-pill)}
+.index a:hover{color:var(--text)}
+.index a[aria-current="true"]{background:var(--raised-2);color:var(--text)}
+.index .grp{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 12px 4px}
+.sections{display:flex;flex-direction:column;gap:14px;min-width:0}
+.sections > .panel{scroll-margin-top:8px}
+.sections h2{margin:0;font-size:16px;font-weight:700}
+.scope{font-size:12px;color:var(--muted);font-weight:500}
+.mtable{display:grid;grid-template-columns:110px minmax(0,1.4fr) minmax(0,1fr) 120px;gap:0 14px;margin-top:10px;font-size:13px;align-items:center}
+.mtable .h{font-size:11.5px;color:var(--muted);padding:0 0 6px}
+.mtable .c{padding:9px 0;border-top:1px solid var(--hairline);min-width:0}
+.mtable .job{font-weight:600}
+.mtable .select{padding:6px 9px}
+.mtable .price{color:var(--text-2);font-size:12.5px}
+.mtable .impact-row{grid-column:1/-1;padding:0 0 12px}
+.mrow{display:contents}
+.ready{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600}
+.ready.y{color:var(--green)}
+.ready.n{color:var(--text)}
+.srow{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--hairline)}
+.srow:first-of-type{border-top:0}
+.srow .txt{flex:1;min-width:0}
+.srow .txt b{display:block;font-weight:600}
+.srow .txt span{display:block;color:var(--text-2);font-size:12.5px;line-height:1.45;margin-top:2px}
+.srow .val{color:var(--text-2);font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px 12px;font-size:13px;margin-top:10px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+.voice-card{display:flex;gap:12px;align-items:center;border:1px solid var(--hairline);background:var(--bar);border-radius:12px;padding:10px 12px;margin-top:8px}
+.voice-card .vtxt{flex:1;min-width:0}
+.voice-card .vtxt b{display:block}
+.voice-card .vtxt small{display:block;font-size:12px;color:var(--text-2);margin-top:2px}
+.voice-card.revoked{opacity:.65}
+.add-voice{display:flex;flex-direction:column;gap:10px;border:1px solid var(--track);border-radius:12px;padding:12px;margin-top:10px;background:var(--bar)}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.inline-form{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+@media (max-width: 899px){
+  .set-grid{grid-template-columns:1fr;gap:12px}
+  .index{position:static;flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px;margin:0 -16px;padding:0 16px}
+  .index .grp{display:none}
+  .index a{white-space:nowrap;border:1px solid var(--hairline)}
+  .mtable{display:block}
+  .mtable .h{display:none}
+  .mrow{display:grid;grid-template-columns:1fr auto;gap:6px 10px;border-top:1px solid var(--hairline);padding:10px 0}
+  .mtable .c{border-top:0;padding:0}
+  .mtable .job{grid-column:1;grid-row:1}
+  .mtable .ready-c{grid-column:2;grid-row:1;text-align:right}
+  .mtable .model,.mtable .price,.mtable .impact-row{grid-column:1/-1}
+  .mtable .impact-row{padding:4px 0 0}
+  .two-col{grid-template-columns:1fr}
+  .srow{flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+(function(){
+/* ======================================================================
+ * Shell: identical in every P5 page (plan, film, assets, settings, start, states).
+ * Sample film, illustrations, top bar, Director column and composer, film-wide
+ * states (offline, stopped, restarted, session expired), dialogs, toast and the
+ * prototype review menu. Nothing here talks to a server; every action is simulated.
+ * ====================================================================== */
+'use strict';
+const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const narrow = () => window.matchMedia('(max-width: 899px)').matches;
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = id => document.getElementById(id);
+const keep = { get(k){ try { return window.localStorage.getItem(k); } catch(e){ return null; } }, set(k, v){ try { window.localStorage.setItem(k, v); } catch(e){} } };
+const L = { lang: keep.get('lastferry.lang') === 'zh' ? 'zh' : 'en' };
+/** English first, Chinese second. Content (prompts, lines, the Director's words) stays in its own language. */
+const t = (en, zh) => (L.lang === 'zh' && zh != null) ? zh : en;
+const sec = n => t(`${fmt(n)} s`, `${fmt(n)} 秒`);
+const fmt = n => (Math.round(n * 10) / 10).toString();
+const clock = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const money = n => '$' + n.toFixed(2);
+const about = n => t(`about ${money(n)}`, `约 ${money(n)}`);
+const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + t(' and ', ' 和 ') + a[a.length - 1];
+/** Host-configured estimates per operation (D15); the same numbers as last-ferry.html. */
+const PRICE = { keyframe: 0.04, clip: 0.50, voice: 0.01 };
+
+/* ---------------- the sample film (same as last-ferry.html) ---------------- */
+const FILM = {
+  title: 'The Last Ferry', fps: 30, demo: false,
+  brief: 'A short film, under a minute. Mara catches the last ferry of the season and leaves her town for good. Quiet and cold: blue dawn light, fog, almost no dialogue. Narration in her own voice, first person, past tense.',
+  story: 'At closing time Mara buys the last ticket for the morning boat. At dawn she waits on the empty pier while the ferry is readied. She boards, and as the harbour disappears into the fog she does not look back.',
+  music: { id: 'au-lowtide', name: 'low-tide.mp3', length: 72, start: 4, gain: -18, muted: false }
+};
+const SCENES = [
+  { id: 's1', title: 'Closing time', direction: 'Warm lamp light inside the ticket office. Mara arrives just before it shuts.', shots: ['sh11', 'sh12', 'sh13'] },
+  { id: 's2', title: 'Harbour at dawn', direction: 'Cold blue dawn, fog on the water. Mara waits alone on the pier.', shots: ['sh21', 'sh22', 'sh23'] },
+  { id: 's3', title: 'Departure', direction: 'The ferry pulls away. Mara does not look back.', shots: ['sh31', 'sh32'] }
+];
+const mk = (id, art, scene, framing, purpose, prompt, motion, dur, extra) => Object.assign({
+  id, art, scene, framing, purpose, prompt, motion, dur,
+  kf: 'ready', opened: true, takes: 1, clip: 'none', clipTakes: 0, narr: null, coat: 'maroon', fail: null
+}, extra || {});
+const SHOT = {};
+[
+  mk('sh11', '1.1', 's1', 'Wide', 'Establish the ticket office at closing time.', 'The ticket office at closing time, shutters half down, one lamp on.', 'Slow pan right', 6, { clip: 'ready', clipTakes: 1 }),
+  mk('sh12', '1.2', 's1', 'Medium', 'Mara buys the last ticket.', 'Mara at the counter, sliding coins across.', 'Static', 5, { clip: 'ready', clipTakes: 1, narr: { text: 'One for the morning boat.', voice: 'ready', sec: 2.1, fit: null } }),
+  mk('sh13', '1.3', 's1', 'Close-up', 'The ticket is stamped: it is real now.', 'The clerk stamps the ticket.', 'Slow push-in', 6, { clip: 'ready', clipTakes: 1 }),
+  mk('sh21', '2.1', 's2', 'Wide', 'The empty harbour; the ferry is waiting.', 'The empty harbour at dawn, the ferry moored, fog over the water.', 'Slow push-in', 5),
+  mk('sh22', '2.2', 's2', 'Medium', 'Mara waits on the pier, ticket in hand.', 'Mara on the pier in her red coat, a ticket in her hand.', 'Static, breath visible', 4, { opened: false }),
+  mk('sh23', '2.3', 's2', 'Close-up', 'The date tells us it is the last boat.', 'The ticket’s printed date, “Sunday 31 March”, under Mara’s thumb.', 'Slow tilt down', 6, { opened: false, narr: { text: 'It was the last boat of the season, and I nearly missed it.', voice: 'ready', sec: 7.4, fit: null } }),
+  mk('sh31', '3.1', 's3', 'Wide', 'The ferry pulls away into the fog.', 'The ferry pulls away into the fog.', 'Slow pull-back', 8, { kf: 'none', opened: false, takes: 0 }),
+  mk('sh32', '3.2', 's3', 'Close-up', 'Mara at the rail; she does not look back.', 'Mara at the rail, the harbour behind her.', 'Static', 8, { kf: 'none', opened: false, takes: 0, narr: { text: 'I didn’t look back.', voice: 'text_only', est: 1.2, fit: null } })
+].forEach(s => { SHOT[s.id] = s; });
+
+const S = id => SHOT[id];
+const sceneOf = s => SCENES.find(sc => sc.id === s.scene);
+const sceneNo = sc => SCENES.indexOf(sc) + 1;
+const filmShots = () => SCENES.flatMap(sc => sc.shots.map(S));
+const labelOf = s => { const sc = sceneOf(s); return sceneNo(sc) + '.' + (sc.shots.indexOf(s.id) + 1); };
+const sceneDur = sc => sc.shots.reduce((a, id) => a + S(id).dur, 0);
+const filmDur = () => filmShots().reduce((a, s) => a + s.dur, 0);
+const startOf = s => { let a = 0; for (const x of filmShots()) { if (x === s) return a; a += x.dur; } return a; };
+/** Narration settled = no line, a line that fits, or a fit chosen (D: narration-fit). */
+const narrLen = s => s.narr ? (s.narr.voice === 'ready' ? s.narr.sec : s.narr.est) : 0;
+const narrFits = s => !s.narr || s.narr.voice !== 'ready' ? null : (s.narr.sec <= s.dur + 1e-9 || !!s.narr.fit);
+const lowerFirst = x => x.charAt(0).toLowerCase() + x.slice(1);
+
+/* ---------------- pictures (flat SVG, 16:9; copied from last-ferry.html) ---------------- */
+let uid = 0;
+function pic(s){
+  const u = 'g' + (++uid);
+  const coat = s.coat === 'red' ? '#c8302c' : '#6e1f2b';
+  const sky = (a, b) => `<defs><linearGradient id="${u}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="320" height="180" fill="url(#${u})"/>`;
+  const fog = (y, o) => `<rect x="-10" y="${y}" width="340" height="9" rx="4" fill="#dfe7f0" opacity="${o}"/>`;
+  let b = '';
+  switch (s.art){
+    case '1.1': b = `<rect width="320" height="180" fill="#1f1611"/><rect x="36" y="26" width="248" height="154" fill="#4a2e1f"/><rect x="70" y="40" width="180" height="20" rx="2" fill="#2b1b12"/>
+      <text x="160" y="54.5" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" letter-spacing="3" fill="#e9b871">TICKETS</text>
+      <rect x="78" y="72" width="164" height="84" fill="#f0b866"/><rect x="78" y="72" width="164" height="44" fill="#6b4a33"/>
+      ${[78,84,90,96,102,108,114].map(y => `<rect x="78" y="${y}" width="164" height="1.4" fill="#553826"/>`).join('')}
+      <rect x="78" y="114" width="164" height="3" fill="#3a2518"/><rect x="96" y="132" width="128" height="24" fill="#c98b45"/>
+      <circle cx="268" cy="70" r="46" fill="#ffcf7a" opacity=".12"/><circle cx="268" cy="70" r="22" fill="#ffcf7a" opacity=".18"/>
+      <rect x="266" y="74" width="4" height="106" fill="#2b1b12"/><circle cx="268" cy="70" r="6" fill="#ffe3a8"/><rect y="166" width="320" height="14" fill="#24160f"/>`; break;
+    case '1.2': b = `<rect width="320" height="180" fill="#3b2418"/>
+      <rect x="190" y="18" width="110" height="88" fill="#f0b866" opacity=".9"/><rect x="190" y="18" width="110" height="88" fill="none" stroke="#2b1b12" stroke-width="4"/>
+      <circle cx="248" cy="60" r="12" fill="#2b1b12"/><path d="M226 106 q22-36 44 0z" fill="#2b1b12"/>
+      <circle cx="112" cy="62" r="15" fill="#d8a77f"/><path d="M96 58 q16-22 32 0 q-4-12-16-12 q-12 0-16 12z" fill="#2a1712"/>
+      <path d="M78 180 L84 98 q28-14 56 0 L146 180z" fill="#b8322c"/><path d="M134 104 L196 118 L194 126 L130 116z" fill="#a52b26"/><circle cx="198" cy="121" r="6" fill="#d8a77f"/>
+      <rect y="122" width="320" height="58" fill="#5c3a24"/><rect y="120" width="320" height="5" fill="#7a5032"/>
+      <circle cx="214" cy="121" r="4" fill="#f2c25b"/><circle cx="226" cy="121" r="4" fill="#f2c25b"/><circle cx="238" cy="121.5" r="4" fill="#e3b04a"/>`; break;
+    case '1.3': b = `<rect width="320" height="180" fill="#4a2e1f"/><circle cx="250" cy="20" r="60" fill="#ffcf7a" opacity=".1"/>
+      <g transform="rotate(-6 160 110)"><rect x="70" y="78" width="180" height="76" rx="4" fill="#f1e3c4"/>
+      <rect x="84" y="92" width="80" height="6" rx="2" fill="#b9a27a"/><rect x="84" y="104" width="60" height="5" rx="2" fill="#cdb995"/>
+      <circle cx="206" cy="118" r="20" fill="none" stroke="#b8322c" stroke-width="3" opacity=".75"/><text x="206" y="122" text-anchor="middle" font-family="Inter,sans-serif" font-size="9" font-weight="700" fill="#b8322c" opacity=".8">PAID</text></g>
+      <rect x="190" y="36" width="34" height="22" rx="4" fill="#2b1b12"/><rect x="200" y="8" width="14" height="30" rx="5" fill="#3b2418"/>
+      <ellipse cx="207" cy="62" rx="26" ry="11" fill="#d39c74"/><rect x="186" y="56" width="42" height="8" rx="3" fill="#1d120c"/>`; break;
+    case '2.1': b = sky('#6c83a6', '#b7c5d6') + `<path d="M0 96 Q60 80 120 92 T240 86 T320 92 V112 H0z" fill="#7f93b0"/><rect y="108" width="320" height="72" fill="#4c6282"/>
+      ${fog(92, .32)}${fog(102, .22)}<path d="M176 100 H290 L280 118 H186z" fill="#26344a"/><rect x="200" y="86" width="64" height="15" fill="#34465f"/><rect x="226" y="72" width="10" height="15" fill="#26344a"/>
+      ${[206,216,226,236,246,256].map(x => `<rect x="${x}" y="91" width="5" height="4" fill="#c9d4e2"/>`).join('')}
+      <rect x="0" y="112" width="168" height="8" fill="#2f3d52"/>${[14,52,90,128,160].map(x => `<rect x="${x}" y="118" width="5" height="24" fill="#2a374a"/>`).join('')}
+      <rect y="122" width="320" height="2" fill="#9fb2c8" opacity=".35"/><rect y="136" width="320" height="1.5" fill="#9fb2c8" opacity=".25"/>${fog(126, .18)}`; break;
+    case '2.2': b = sky('#6a81a4', '#b3c2d4') + `<rect y="96" width="320" height="84" fill="#4c6282"/>${fog(90, .28)}
+      <path d="M90 180 L136 98 H184 L230 180z" fill="#3a4a62"/><path d="M126 116 H194 M116 134 H204 M104 156 H216" stroke="#2c394d" stroke-width="2"/>
+      <rect x="150" y="140" width="7" height="26" fill="#1f2633"/><rect x="163" y="140" width="7" height="26" fill="#1f2633"/>
+      <path d="M146 82 H174 L184 146 H136z" fill="${coat}"/><path d="M172 88 L188 116 L183 119 L168 96z" fill="${coat}"/><rect x="183" y="112" width="10" height="7" rx="1" fill="#eef2f6" transform="rotate(-12 188 115)"/>
+      <circle cx="160" cy="70" r="11" fill="#c9b3a6"/><path d="M149 68 q11-16 22 0 q-2-9-11-9 q-9 0-11 9z" fill="#2a2a33"/>
+      <ellipse cx="180" cy="66" rx="9" ry="5" fill="#eef3f8" opacity=".35"/><ellipse cx="190" cy="62" rx="6" ry="3.5" fill="#eef3f8" opacity=".22"/>`; break;
+    case '2.3': b = `<rect width="320" height="180" fill="#56677e"/>${[0,30,60,90,120,150].map(y => `<rect y="${y}" width="320" height="1.5" fill="#4a5a70"/>`).join('')}
+      <g transform="rotate(-4 160 90)"><rect x="42" y="34" width="236" height="112" rx="5" fill="#e3e8ee"/><path d="M86 34 V146" stroke="#9aa8b8" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <text x="100" y="62" font-family="Inter,sans-serif" font-size="9" font-weight="600" letter-spacing="2" fill="#6b7a8e">HARBOUR FERRY</text>
+      <text x="100" y="92" font-family="Inter,sans-serif" font-size="19" font-weight="700" fill="#22303f">SUNDAY 31 MARCH</text>
+      <text x="100" y="112" font-family="Inter,sans-serif" font-size="9" font-weight="600" letter-spacing="1.5" fill="#6b7a8e">DEP 06:40 · SINGLE</text>
+      <text x="64" y="96" font-family="Inter,sans-serif" font-size="12" font-weight="700" fill="#22303f" transform="rotate(-90 64 92)">No 0418</text></g>
+      <ellipse cx="262" cy="160" rx="44" ry="30" fill="#c6a997"/><ellipse cx="246" cy="146" rx="15" ry="10" fill="#dcc3b4"/><path d="M270 180 Q300 150 320 146 V180z" fill="${coat}"/>`; break;
+    case '3.1': b = sky('#7287a6', '#c3cfdc') + `<rect y="100" width="320" height="80" fill="#566c8a"/>${fog(84, .35)}${fog(94, .3)}
+      <path d="M140 100 H184 L180 107 H144z" fill="#3a4a62" opacity=".85"/><rect x="150" y="93" width="22" height="7" fill="#46586f" opacity=".85"/>
+      <path d="M162 108 L110 150 M162 108 L214 150" stroke="#9fb2c8" stroke-width="1.5" opacity=".5"/>${fog(110, .25)}${fog(128, .18)}
+      <rect y="160" width="320" height="20" fill="#2f3d52"/>${[30,90,150,210,270].map(x => `<rect x="${x}" y="156" width="5" height="24" fill="#26324a"/>`).join('')}`; break;
+    case '3.2': b = sky('#6f86a8', '#bccad9') + `<rect y="92" width="320" height="88" fill="#4c6282"/>${fog(86, .3)}
+      ${[30,48,62,80].map((x, i) => `<rect x="${x}" y="${78 - i % 2 * 6}" width="12" height="${14 + i % 2 * 6}" fill="#5b6f8c"/>`).join('')}<circle cx="44" cy="76" r="1.6" fill="#f3d9a0"/><circle cx="70" cy="74" r="1.6" fill="#f3d9a0"/>
+      <path d="M170 180 L176 112 q30-14 60 0 L242 180z" fill="#c8302c"/><circle cx="206" cy="94" r="17" fill="#c9b3a6"/><path d="M188 90 q18-26 36 0 q-3-15-18-15 q-15 0-18 15z" fill="#2a2a33"/>
+      <rect y="140" width="320" height="6" fill="#26324a"/><rect y="160" width="320" height="4" fill="#26324a"/>${[20,80,140,260,300].map(x => `<rect x="${x}" y="140" width="4" height="40" fill="#26324a"/>`).join('')}`; break;
+    case 'ref': b = `<rect width="320" height="180" fill="#2a2f38"/><rect x="40" y="20" width="110" height="140" rx="4" fill="#d9d4cc"/><circle cx="95" cy="62" r="20" fill="#c9b3a6"/><path d="M75 58 q20-30 40 0 q-4-18-20-18 q-16 0-20 18z" fill="#2a2a33"/><path d="M62 160 L68 92 q27-12 54 0 L128 160z" fill="#c8302c"/>
+      <rect x="170" y="20" width="110" height="64" rx="4" fill="#c8302c"/><rect x="170" y="96" width="52" height="64" rx="4" fill="#6e1423"/><rect x="228" y="96" width="52" height="64" rx="4" fill="#9d1b2e"/>`; break;
+    case 'timetable': b = `<rect width="320" height="180" fill="#e7e2d6"/><rect x="24" y="18" width="272" height="22" fill="#22303f"/><text x="160" y="33" text-anchor="middle" font-family="Inter,sans-serif" font-size="10" font-weight="700" letter-spacing="2" fill="#e7e2d6">HARBOUR FERRY · WINTER</text>
+      ${[0,1,2,3,4,5].map(i => `<rect x="24" y="${52 + i * 20}" width="272" height="1" fill="#b9b2a2"/><rect x="34" y="${58 + i * 20}" width="40" height="7" rx="2" fill="#8a8170"/><rect x="96" y="${58 + i * 20}" width="${80 + (i * 37) % 90}" height="7" rx="2" fill="#a59c89"/>`).join('')}
+      <rect x="20" y="140" width="280" height="22" fill="none" stroke="#b8322c" stroke-width="2.5" transform="rotate(-1 160 150)"/>`; break;
+  }
+  return `<svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${esc(t('Picture', '画面'))} ${esc(s.label || s.art)}">${b}</svg>`;
+}
+/** A deterministic waveform for audio tiles and lanes. */
+function wave(seed, n){
+  let x = 0; for (const c of String(seed)) x = (x * 31 + c.charCodeAt(0)) % 997;
+  let h = '';
+  for (let i = 0; i < n; i++){ x = (x * 73 + 41) % 997; h += `<i style="height:${18 + (x % 70)}%"></i>`; }
+  return `<div class="wave" aria-hidden="true">${h}</div>`;
+}
+/** Motion preview by keyword (D17): push-in, pull-back, pan, tilt, breath. */
+function motionTransform(motion, p){
+  const m = motion.toLowerCase();
+  if (m.includes('push')) return `scale(${1 + .12 * p})`;
+  if (m.includes('pull')) return `scale(${1.12 - .12 * p})`;
+  if (m.includes('pan right')) return `scale(1.1) translateX(${4 - 8 * p}%)`;
+  if (m.includes('pan left')) return `scale(1.1) translateX(${-4 + 8 * p}%)`;
+  if (m.includes('tilt down')) return `scale(1.1) translateY(${4 - 8 * p}%)`;
+  if (m.includes('breath')) return `scale(${1.012 + .01 * Math.sin(p * Math.PI * 4)})`;
+  return 'none';
+}
+
+/* ---------------- media status (overview MediaState mapped to words; neutral unless done) ---------------- */
+const IC = { fail: '<i class="ic" aria-hidden="true">!</i>', ask: '<i class="ic" aria-hidden="true">?</i>' };
+function kfStatus(s){
+  if (s.fail && s.fail.slot === 'kf'){
+    if (s.fail.kind === 'no_answer') return `<span class="status fail">${IC.ask}${t('No answer from the service', '服务没有回应')}</span>`;
+    return `<span class="status fail">${IC.fail}${s.fail.charged ? t('Keyframe failed · counted as spent', '关键帧失败 · 已计费') : t('Keyframe failed · not charged', '关键帧失败 · 未计费')}</span>`;
+  }
+  if (s.kf === 'making') return `<span class="status busy">${t('Making keyframe…', '正在生成关键帧…')}</span>`;
+  if (s.kf === 'none') return `<span class="status">${t('No keyframe yet', '还没有关键帧')}</span>`;
+  if (s.kf === 'direction') return `<span class="status">${t('Needs direction first', '需要先写好画面描述')}</span>`;
+  if (s.kf === 'outdated') return `<span class="status">${t('Keyframe out of date', '关键帧已过期')}</span>`;
+  return s.opened ? `<span class="status ok">✓ ${t('Opened', '已查看')}</span>` : `<span class="status">${t('Not opened', '未查看')}</span>`;
+}
+function clipStatus(s){
+  if (s.fail && s.fail.slot === 'clip'){
+    if (s.fail.kind === 'no_answer') return `<span class="status fail">${IC.ask}${t('No answer from the service', '服务没有回应')}</span>`;
+    return `<span class="status fail">${IC.fail}${s.fail.charged ? t('Clip failed · counted as spent', '视频失败 · 已计费') : t('Clip failed · not charged', '视频失败 · 未计费')}</span>`;
+  }
+  if (s.clip === 'ready') return `<span class="status ok">✓ ${t('Clip', '视频')}</span>`;
+  if (s.clip === 'outdated') return `<span class="status">${t('Clip out of date', '视频已过期')}</span>`;
+  if (s.clip === 'running') return `<span class="status busy">${t('Making clip…', '正在生成视频…')}</span>`;
+  return `<span class="status">${t('No clip', '没有视频')}</span>`;
+}
+
+/* ---------------- shell state ---------------- */
+const Shell = {
+  conn: 'online',          // online | offline | expired
+  restarted: false,        // restart casualties strip
+  stopped: null,           // {sent, detached}
+  running: false,          // something is running: Stop shows in the top bar
+  jobProblems: false,      // Scene 3 keyframes: 3.1 failed (counted as spent), 3.2 no answer
+  dirOpen: false, chips: [], messages: [], picker: false, review: false,
+  page: null
+};
+const blocked = () => Shell.conn !== 'online';
+/** Guards: [data-needs="server"] needs the studio; [data-needs="run"] also starts work, so Stop turns it off. */
+function guard(root){
+  (root || document).querySelectorAll('[data-needs]').forEach(el => {
+    const need = el.dataset.needs;
+    let why = '';
+    if (blocked()) why = t('Can’t reach the studio. This works again once it’s back.', '连不上工作室，恢复连接后可用。');
+    else if (need === 'run' && Shell.stopped) why = t('Stopped. Continue first.', '已停止，请先继续。');
+    if (why){ el.disabled = true; el.setAttribute('title', why); el.dataset.guarded = '1'; }
+    else if (el.dataset.guarded){ el.removeAttribute('title'); delete el.dataset.guarded; if (!el.dataset.off) el.disabled = false; }
+  });
+}
+
+function setJobProblems(on){
+  Shell.jobProblems = on;
+  const a = S('sh31'), b = S('sh32');
+  if (on){ a.fail = { slot: 'kf', kind: 'failed', charged: true, at: '10:51' }; b.fail = { slot: 'kf', kind: 'no_answer', at: '10:51' }; }
+  else { a.fail = null; b.fail = null; }
+}
+
+/* ---------------- mount and render ---------------- */
+function mount(page){
+  Shell.page = page;
+  document.documentElement.lang = L.lang === 'zh' ? 'zh-Hans' : 'en';
+  const app = $('app');
+  app.innerHTML = `
+  <header class="topbar">
+    <a class="brand" href="start.html" aria-label="${t('OpenSlate, all films', 'OpenSlate，全部影片')}"><span class="logo" aria-hidden="true"><i></i></span><span class="word">OpenSlate</span></a>
+    <div class="film" id="sh-film"></div>
+    <nav class="tabs" id="sh-tabs" aria-label="${t('Views', '视图')}"></nav>
+    <div class="top-right" id="sh-right"></div>
+  </header>
+  <aside class="director" id="director" aria-label="${t('Director', '导演')}">
+    <div class="dir-head">
+      <span class="avatar" aria-hidden="true">D</span><b>${t('Director', '导演')}</b>
+      <span class="scene" id="sh-scope"></span>
+      <button class="pill sm dir-close" data-act="sh-dir" style="display:none">${t('Close', '关闭')}</button>
+    </div>
+    <div class="thread" id="thread" aria-live="polite"></div>
+    <div class="composer-wrap">
+      <div class="picker" id="picker" hidden></div>
+      <div class="composer">
+        <div class="chips" id="chips"></div>
+        <label class="sr" for="msg">${t('Message to the Director', '给导演的消息')}</label>
+        <textarea id="msg" rows="1"></textarea>
+        <div class="composer-foot">
+          <button class="at-btn" data-act="sh-at" aria-haspopup="listbox" aria-controls="picker">@</button>
+          <span id="sh-hint"></span>
+          <button class="send" data-act="sh-send" aria-label="${t('Send', '发送')}">
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 12V2M2.5 6.5 7 2l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <main class="work${page.workClass ? ' ' + page.workClass : ''}" id="work"><div id="strip-slot"></div><div id="view" class="view"></div></main>
+  <div class="menu review-menu" id="review" hidden role="menu" aria-label="Prototype states"></div>`;
+  let toastEl = $('toast');
+  if (!toastEl){ toastEl = document.createElement('div'); toastEl.id = 'toast'; toastEl.className = 'toast'; toastEl.setAttribute('role', 'status'); toastEl.setAttribute('aria-live', 'polite'); toastEl.hidden = true; document.body.appendChild(toastEl); }
+  bindShell();
+  renderAll();
+}
+function renderTop(){
+  const p = Shell.page;
+  const film = $('sh-film');
+  if (p.noFilm) film.innerHTML = `<b>${t('Films', '影片')}</b><span>${t('on this computer', '保存在本机')}</span>`;
+  else film.innerHTML = `<b>${esc(FILM.title)}${FILM.demo ? t(' (demo)', '（示例）') : ''}</b><span>${t(`${filmDur()} s · 16:9 · 1920 × 1080 · 30 fps`, `${filmDur()} 秒 · 16:9 · 1920 × 1080 · 30 帧/秒`)}</span>`;
+  const tabs = [['Plan', '计划', 'plan.html'], ['Keyframes', '关键帧', 'last-ferry.html'], ['Assets', '素材', 'assets.html'], ['Film', '成片', 'film.html']];
+  $('sh-tabs').innerHTML = p.noFilm ? '' : tabs.map(([en, zh, href]) => `<a class="tab" href="${href}"${p.view === en ? ' aria-current="page"' : ''}>${t(en, zh)}</a>`).join('');
+  const conn = Shell.conn === 'offline' ? `<span class="saved alert" role="status">${t('Reconnecting…', '正在重新连接…')}</span>`
+    : `<span class="saved">${t('Saved locally', '已保存在本机')}</span>`;
+  const stop = Shell.running && !Shell.stopped && !blocked() ? `<button class="pill sm stop-btn" data-act="sh-stop"><svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true"><rect width="9" height="9" rx="1.5" fill="currentColor"/></svg>${t('Stop', '停止')}</button>` : '';
+  $('sh-right').innerHTML = `${stop}
+    ${p.noFilm ? '' : `<span class="counts">${t(`${SCENES.length} scenes · ${filmShots().length} shots`, `${SCENES.length} 场 · ${filmShots().length} 个镜头`)}</span>`}
+    ${conn}
+    <a class="icon-btn settings-btn" href="settings.html" aria-label="${t('Settings', '设置')}" title="${t('Settings', '设置')}"${p.view === 'Settings' ? ' aria-current="page"' : ''}><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Zm6.1 3.6.1-.8-.1-.8 1.4-1.1-1.5-2.6-1.7.6a5.6 5.6 0 0 0-1.4-.8L10.6 1.5H7.6l-.3 1.8c-.5.2-1 .5-1.4.8l-1.7-.6-1.5 2.6L4 7.2 3.9 8l.1.8-1.4 1.1 1.5 2.6 1.7-.6c.4.3.9.6 1.4.8l.3 1.8h3l.3-1.8c.5-.2 1-.5 1.4-.8l1.7.6 1.5-2.6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></a>
+    <button class="review-btn" data-act="sh-review" aria-haspopup="menu" aria-expanded="${Shell.review}" aria-controls="review">Prototype ▾</button>
+    <button class="pill sm dir-toggle" data-act="sh-dir" aria-controls="director" aria-expanded="${Shell.dirOpen}">${t('Director', '导演')}</button>`;
+  $('sh-scope').textContent = p.scope ? p.scope() : '';
+  $('app').classList.toggle('dir-open', Shell.dirOpen);
+}
+function stripHTML(){
+  if (Shell.conn === 'offline') return `<div class="strip" role="status"><span class="ic" aria-hidden="true">!</span>
+    <div class="txt"><b>${t('Can’t reach the studio.', '连不上工作室。')}</b> <span>${t('Changes aren’t saved and paid buttons are off until it’s back. Retrying every 5 s.', '恢复连接前，修改不会保存，付费按钮不可用。每 5 秒自动重试。')}</span></div>
+    <div class="acts"><button class="pill sm" data-act="sh-retry">${t('Try now', '立即重试')}</button></div></div>`;
+  if (Shell.stopped){
+    const st = Shell.stopped;
+    return `<div class="strip" role="status"><span class="ic" aria-hidden="true">■</span>
+    <div class="txt"><b>${t('Stopped. Nothing new will be sent.', '已停止，不会再发送新任务。')}</b> <span>${t(`${st.sent} ${st.sent === 1 ? 'job' : 'jobs'} already sent will finish and be charged. ${st.detached} queued ${st.detached === 1 ? 'job was' : 'jobs were'} taken off and will need a new confirm.`, `已发送的 ${st.sent} 个任务会完成并计费。${st.detached} 个排队中的任务已撤下，需要重新确认。`)}</span></div>
+    <div class="acts"><button class="pill sm primary" data-act="sh-continue" data-needs="server">${t('Continue', '继续')}</button></div></div>`;
+  }
+  if (Shell.restarted) return `<div class="strip" role="status"><span class="ic" aria-hidden="true">?</span>
+    <div class="txt"><b>${t('OpenSlate restarted while 2 keyframes were being sent (3.1 and 3.2).', 'OpenSlate 重启时有 2 张关键帧正在发送（3.1 和 3.2）。')}</b> <span>${t('The service never confirmed them. They may still arrive and be charged.', '服务没有确认它们，它们可能稍后仍会返回并计费。')}</span></div>
+    <div class="acts"><a class="pill sm" href="states.html#restart">${t('Review them', '查看')}</a><button class="pill sm ghost" data-act="sh-restart-ok">${t('Dismiss', '关闭提示')}</button></div></div>`;
+  return '';
+}
+function renderStrip(){ $('strip-slot').innerHTML = stripHTML(); $('strip-slot').style.display = $('strip-slot').innerHTML ? '' : 'none'; }
+function renderThread(){
+  const th = $('thread'), p = Shell.page;
+  const ta = $('msg');
+  if (p.noFilm){
+    th.innerHTML = `<div class="dir-text muted" style="margin:auto 6px;text-align:center">${t('The Director works inside a film. Open a film, or start a new one and choose “Talk to the Director” as its first step.', '导演在影片里工作。打开一部影片，或新建影片并选择“和导演聊”作为第一步。')}</div>`;
+    ta.disabled = true; ta.placeholder = t('Open a film to talk to the Director', '打开影片后才能和导演对话');
+    $('sh-hint').textContent = ''; document.querySelector('.send').disabled = true; document.querySelector('.at-btn').disabled = true;
+    return;
+  }
+  const noteA = `<div class="note"><span class="letter">a</span>In 2.2 the coat came out maroon rather than red. I kept it because the light is low; regenerate 2.2 if you want it brighter.
+      <div class="row"><button class="pill sm" data-act="sh-open-shot" data-shot="sh22">Open 2.2</button></div></div>`;
+  const noteB = `<div class="note"><span class="letter">b</span>The narration for 2.3 is 7.4 seconds but the shot is 6 seconds. I suggest making 2.3 8 seconds, which moves Scene 3 two seconds later.
+      <div class="row"><button class="pill sm" data-act="sh-open-shot" data-shot="sh23">Open 2.3</button></div></div>`;
+  const extra = Shell.messages.map(m => m.who === 'you'
+    ? `<div class="byline you"><b>${t('You', '你')}</b> · ${m.time}</div><div class="bubble">${m.chips.map(c => `<span class="atchip">@${esc(c)}</span>`).join('')}${esc(m.text)}</div>`
+    : m.working ? `<div class="byline"><b>${t('Director', '导演')}</b> · ${m.time}</div><div class="working">${t('Working', '处理中')}<i></i><i></i><i></i></div>`
+    : `<div class="byline"><b>${t('Director', '导演')}</b> · ${m.time}</div><div class="dir-text">${esc(m.text)}</div><div class="scripted">${t('Replies in this prototype are scripted; nothing in the film was changed.', '原型里的回复是预设的，影片没有任何改动。')}</div>`).join('');
+  const atBottom = th.scrollHeight - th.scrollTop - th.clientHeight < 40;
+  th.innerHTML = `<div>
+    <div class="byline you"><b>${t('You', '你')}</b> · 10:42</div>
+    <div class="bubble"><span class="atchip">@Scene 2</span>make the harbour feel colder, more like early morning, and keep Mara’s red coat.</div>
+    <div class="byline"><b>${t('Director', '导演')}</b> · 10:44</div>
+    <div class="dir-text">I rewrote the three Scene 2 prompts with a blue dawn light and kept Mara’s red coat in 2.2. Keyframes for all three shots are back. Two things to check before I make video:</div>
+    ${noteA}${noteB}${extra}</div>`;
+  if (atBottom || Shell._scroll){ th.scrollTop = th.scrollHeight; Shell._scroll = false; }
+  $('chips').innerHTML = Shell.chips.map((c, i) => `<span class="atchip">@${esc(c)}<button data-act="sh-unchip" data-i="${i}" aria-label="${t('Remove', '移除')} ${esc(c)}">×</button></span>`).join('');
+  ta.disabled = false;
+  ta.placeholder = t('Reply to the Director…', '回复导演…');
+  const send = document.querySelector('.send');
+  if (blocked()){ $('sh-hint').textContent = t('Offline · your draft is kept', '离线 · 草稿会保留'); send.disabled = true; }
+  else if (Shell.stopped){ $('sh-hint').textContent = t('Stopped · sending a message continues the Director', '已停止 · 发消息会让导演继续'); send.disabled = false; }
+  else { $('sh-hint').textContent = t('a scene or shot to point at it', '指向一场或一个镜头'); send.disabled = false; }
+}
+function renderReview(){
+  const p = Shell.page, m = $('review');
+  const radio = (on, act, val, label) => `<button role="menuitemradio" aria-checked="${on}" data-act="${act}" data-v="${val}">${label}</button>`;
+  m.innerHTML = `${p.states && p.states.length ? `<h4>This page</h4>${p.states.map(s => radio(p.state === s.id, 'sh-state', s.id, esc(s.label))).join('')}<hr>` : ''}
+    <h4>Anywhere</h4>
+    ${radio(!blocked() && !Shell.stopped && !Shell.restarted && !Shell.running, 'sh-anywhere', 'normal', 'Normal')}
+    ${p.noFilm ? '' : radio(Shell.running && !Shell.stopped, 'sh-anywhere', 'running', 'Jobs running (Stop shows)')}
+    ${p.noFilm ? '' : radio(!!Shell.stopped, 'sh-anywhere', 'stopped', 'Stopped')}
+    ${radio(Shell.conn === 'offline', 'sh-anywhere', 'offline', 'Offline')}
+    ${p.noFilm ? '' : radio(Shell.restarted, 'sh-anywhere', 'restarted', 'Studio restarted (casualties)')}
+    ${radio(Shell.conn === 'expired', 'sh-anywhere', 'expired', 'Session expired')}
+    ${p.noFilm ? '' : `<button role="menuitemcheckbox" aria-checked="${Shell.jobProblems}" data-act="sh-problems">Scene 3 keyframe problems</button>`}
+    <hr><h4>Language</h4>${radio(L.lang === 'en', 'sh-lang', 'en', 'English')}${radio(L.lang === 'zh', 'sh-lang', 'zh', '中文 (layout check)')}
+    <div class="note-line">Prototype controls, not part of the studio. Nothing here is generated, charged or saved.</div>`;
+}
+function renderAll(){
+  renderTop(); renderStrip();
+  Shell.page.render();
+  renderThread(); renderReview();
+  guard();
+  if (Shell.conn === 'expired') showExpired();
+}
+
+/* ---------------- toast ---------------- */
+let toastTimer, toastUndo = null;
+function toast(msg, undo){
+  const el = $('toast');
+  toastUndo = undo || null;
+  el.innerHTML = `<span>${esc(msg)}</span>${undo ? `<button class="pill" data-act="sh-undo">${t('Undo', '撤销')}</button>` : ''}<button class="pill ghost" data-act="sh-toast-close" aria-label="${t('Dismiss', '关闭提示')}">×</button>`;
+  el.hidden = false; clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; toastUndo = null; }, undo ? 8000 : 4500);
+}
+function hideToast(){ $('toast').hidden = true; toastUndo = null; }
+
+/* ---------------- dialogs (native <dialog>; focus returns to the opener) ---------------- */
+function openDialog(html, cls){
+  const opener = document.activeElement;
+  const d = document.createElement('dialog');
+  d.className = cls || 'dialog';
+  d.innerHTML = html;
+  document.body.appendChild(d);
+  d.addEventListener('close', () => { d.remove(); if (opener && opener.isConnected) opener.focus({ preventScroll: true }); else { const w = $('view'); if (w) w.focus && w.focus(); } });
+  d.showModal();
+  const f = d.querySelector('[autofocus]') || d.querySelector('input,textarea,select,button:not([disabled])');
+  if (f) f.focus();
+  return d;
+}
+/** A small action menu under its button; Esc or an outside click closes it and focus returns. */
+function openMenu(btn, html){
+  closeMenu(false);
+  const m = document.createElement('div');
+  m.className = 'menu'; m.id = 'ctx-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = html;
+  m.style.position = 'fixed'; m.style.visibility = 'hidden';
+  document.body.appendChild(m);
+  const r = btn.getBoundingClientRect();
+  const left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8));
+  const top = r.bottom + 4 + m.offsetHeight > window.innerHeight - 8 ? r.top - 4 - m.offsetHeight : r.bottom + 4;
+  m.style.left = left + 'px'; m.style.top = Math.max(8, top) + 'px'; m.style.visibility = '';
+  Shell.menuOpener = btn; btn.setAttribute('aria-expanded', 'true');
+  const f = m.querySelector('button:not([disabled]),a'); f && f.focus();
+}
+function closeMenu(refocus){
+  const m = $('ctx-menu'); if (!m) return;
+  m.remove();
+  const o = Shell.menuOpener; Shell.menuOpener = null;
+  if (o && o.isConnected){ o.setAttribute('aria-expanded', 'false'); if (refocus !== false) o.focus({ preventScroll: true }); }
+}
+function showExpired(){
+  if (document.querySelector('dialog.expired')) return;
+  const d = openDialog(`<h2>${t('This window is no longer connected', '这个窗口已断开连接')}</h2>
+    <p>${t('OpenSlate restarted, or this session ended after 12 hours. Your films are saved on this computer, and your unsent message is kept.', 'OpenSlate 已重启，或会话已超过 12 小时。你的影片都保存在本机，未发送的消息也会保留。')}</p>
+    <p>${t('Run <b>pnpm studio</b> where OpenSlate runs and open the link it prints. The link works for 60 seconds.', '在运行 OpenSlate 的终端里执行 <b>pnpm studio</b>，打开它打印的链接，链接 60 秒内有效。')}</p>
+    <div class="foot"><button class="review-btn" data-act="sh-anywhere" data-v="normal" style="margin-right:auto">Prototype: back to normal</button><button class="pill primary" data-act="sh-expired-retry" autofocus>${t('Try again', '重试')}</button></div>`, 'dialog expired');
+  d.addEventListener('cancel', e => e.preventDefault());
+}
+
+/* ---------------- composer and picker ---------------- */
+function togglePicker(open){
+  Shell.picker = open != null ? open : !Shell.picker;
+  const p = $('picker'); p.hidden = !Shell.picker;
+  if (Shell.picker){
+    const extra = Shell.page.pickerExtra ? Shell.page.pickerExtra() : '';
+    p.innerHTML = `<h4>${t('Scenes', '场景')}</h4>` + SCENES.map((sc, i) => `<button data-act="sh-pick" data-ref="Scene ${i + 1}">${t('Scene', '第')} ${i + 1}${t('', ' 场')}<span>${esc(sc.title)}</span></button>`).join('') +
+      `<h4>${t('Shots', '镜头')}</h4>` + filmShots().map(s => `<button data-act="sh-pick" data-ref="${labelOf(s)}">${labelOf(s)}<span>${esc(s.framing)} · ${esc(s.prompt)}</span></button>`).join('') + extra;
+    p.querySelector('button').focus();
+  }
+}
+function pointAt(ref){
+  if (!Shell.chips.includes(ref)) Shell.chips.push(ref);
+  if (narrow()) Shell.dirOpen = true;
+  renderTop(); renderThread(); $('msg').focus({ preventScroll: true });
+  toast(t(`Pointing the Director at ${ref}. Write your message in the composer.`, `已让导演指向 ${ref}。请在输入框里写消息。`));
+}
+function send(){
+  const ta = $('msg'); const text = ta.value.trim();
+  if ((!text && !Shell.chips.length) || blocked()) return;
+  const n = Shell.messages.length;
+  Shell.messages.push({ who: 'you', text, chips: Shell.chips.slice(), time: '10:' + String(45 + n).padStart(2, '0') });
+  const reply = { who: 'dir', working: true, time: '10:' + String(46 + n).padStart(2, '0') };
+  Shell.messages.push(reply);
+  const pointed = Shell.chips.slice();
+  ta.value = ''; Shell.chips = []; Shell._scroll = true;
+  if (Shell.stopped){ Shell.stopped = null; renderAll(); }
+  renderThread();
+  setTimeout(() => {
+    reply.working = false;
+    reply.text = pointed.length ? `Noted for ${pointed.join(', ')}. I would make that change and show you what it affects before anything is made.` : 'Noted. I would make that change and show you what it affects before anything is made.';
+    Shell._scroll = true; renderThread();
+  }, 1400);
+}
+
+/* ---------------- events ---------------- */
+function setAnywhere(v){
+  Shell.conn = 'online'; Shell.stopped = null; Shell.restarted = false; Shell.running = false;
+  document.querySelectorAll('dialog.expired').forEach(d => d.close());
+  if (v === 'running') Shell.running = true;
+  if (v === 'stopped') Shell.stopped = { sent: 1, detached: 2 };
+  if (v === 'offline') Shell.conn = 'offline';
+  if (v === 'expired') Shell.conn = 'expired';
+  if (v === 'restarted'){ Shell.restarted = true; setJobProblems(true); S('sh31').fail = { slot: 'kf', kind: 'no_answer', at: '10:51', restart: true }; S('sh32').fail = { slot: 'kf', kind: 'no_answer', at: '10:51', restart: true }; }
+  if (Shell.page.onAnywhere) Shell.page.onAnywhere(v);
+  renderAll();
+}
+function bindShell(){
+  const ta = $('msg');
+  ta.addEventListener('input', () => { if (/(^|\s)@\S*$/.test(ta.value) && !Shell.picker){ togglePicker(true); ta.focus(); } });
+  ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
+  if (Shell._bound) return;
+  Shell._bound = true;
+  document.addEventListener('click', e => {
+    const el = e.target.closest('[data-act]');
+    if (Shell.review && !e.target.closest('#review') && !e.target.closest('[data-act="sh-review"]')){ Shell.review = false; $('review').hidden = true; renderTop(); }
+    if (Shell.picker && !e.target.closest('#picker') && !e.target.closest('[data-act="sh-at"]')) togglePicker(false);
+    if ($('ctx-menu') && !(Shell.menuOpener && Shell.menuOpener.contains(e.target))) closeMenu(!e.target.closest('#ctx-menu') && !el);
+    else if ($('ctx-menu') && Shell.menuOpener && Shell.menuOpener.contains(e.target)){ closeMenu(); return; }
+    if (!el || el.disabled) return;
+    const a = el.dataset.act;
+    if (el.tagName === 'BUTTON' && el.closest('form')) e.preventDefault();
+    switch (a){
+      case 'sh-dir': Shell.dirOpen = !Shell.dirOpen; renderTop(); if (Shell.dirOpen) $('msg').focus({ preventScroll: true }); else document.querySelector('.dir-toggle').focus(); return;
+      case 'sh-at': return togglePicker();
+      case 'sh-pick': { const ta = $('msg'); ta.value = ta.value.replace(/@\S*$/, ''); if (!Shell.chips.includes(el.dataset.ref)) Shell.chips.push(el.dataset.ref); togglePicker(false); renderThread(); ta.focus(); return; }
+      case 'sh-send': return send();
+      case 'sh-unchip': Shell.chips.splice(+el.dataset.i, 1); return renderThread();
+      case 'sh-open-shot': if (narrow()){ Shell.dirOpen = false; renderTop(); } return Shell.page.openShot ? Shell.page.openShot(el.dataset.shot) : (location.href = 'last-ferry.html');
+      case 'sh-review': Shell.review = !Shell.review; $('review').hidden = !Shell.review; renderReview(); renderTop(); if (Shell.review){ const f = $('review').querySelector('button'); f && f.focus(); } return;
+      case 'sh-state': Shell.review = false; $('review').hidden = true; $('work').scrollTop = 0; Shell.page.state = el.dataset.v; Shell.page.onState && Shell.page.onState(el.dataset.v); return renderAll();
+      case 'sh-anywhere': Shell.review = false; $('review').hidden = true; return setAnywhere(el.dataset.v);
+      case 'sh-problems': Shell.review = false; $('review').hidden = true; setJobProblems(!Shell.jobProblems); return renderAll();
+      case 'sh-lang': L.lang = el.dataset.v; keep.set('lastferry.lang', L.lang); Shell.review = false; return mount(Shell.page);
+      case 'sh-retry': Shell.conn = 'online'; renderAll(); return toast(t('Connected again. Nothing was lost.', '已重新连接，没有丢失任何内容。'));
+      case 'sh-expired-retry': document.querySelectorAll('dialog.expired').forEach(d => d.close()); Shell.conn = 'online'; renderAll(); return toast(t('Connected with a fresh studio link.', '已用新的工作室链接连接。'));
+      case 'sh-continue': Shell.stopped = null; Shell.running = false; renderAll(); return toast(t('Continued. Jobs that were taken off need a new confirm.', '已继续。撤下的任务需要重新确认。'));
+      case 'sh-restart-ok': Shell.restarted = false; return renderAll();
+      case 'sh-stop': {
+        const d = openDialog(`<h2>${t('Stop the film?', '停止这部影片？')}</h2>
+          <p>${t('Nothing new will be sent until you continue.', '在你继续之前，不会再发送新任务。')}</p>
+          <ul><li>${t('1 job already sent will finish and be charged.', '已发送的 1 个任务会完成并计费。')}</li><li>${t('2 queued jobs will be taken off; they need a new confirm later.', '2 个排队中的任务会被撤下，之后需要重新确认。')}</li><li>${t('The Director stops working.', '导演会停止工作。')}</li></ul>
+          <div class="foot"><button class="pill" data-act="sh-dialog-close">${t('Keep going', '不停止')}</button><button class="pill primary" data-act="sh-stop-yes">${t('Stop', '停止')}</button></div>`);
+        return d;
+      }
+      case 'sh-stop-yes': el.closest('dialog').close(); Shell.stopped = { sent: 1, detached: 2 }; Shell.running = false; return renderAll();
+      case 'sh-dialog-close': return el.closest('dialog').close();
+      case 'sh-undo': { const u = toastUndo; hideToast(); if (u) u(); return; }
+      case 'sh-toast-close': return hideToast();
+    }
+    if (Shell.page.act) Shell.page.act(a, el, e);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if ($('ctx-menu')){ closeMenu(); return; }
+    if (Shell.review){ Shell.review = false; $('review').hidden = true; renderTop(); document.querySelector('.review-btn').focus(); return; }
+    if (Shell.picker){ togglePicker(false); $('msg').focus(); return; }
+    if (Shell.page.onEscape && Shell.page.onEscape()) return;
+    if (Shell.dirOpen && narrow() && !document.querySelector('dialog[open]')){ Shell.dirOpen = false; renderTop(); document.querySelector('.dir-toggle').focus(); }
+  });
+}
+/* ====================== end of shell ====================== */
+
+
+/* ======================= Settings ======================= */
+/** Models per job, from GET /settings/models (readiness) and the provider catalog (host-configured estimates, D15). */
+const OPTIONS = {
+  director: [{ v: 'codex', label: 'Codex · gpt-6-astra', price: ['uses your Codex plan', '使用你的 Codex 套餐'], ready: true }, { v: 'demo', label: 'Demo Director', price: ['free stand-in, scripted', '免费替身，预设回复'], ready: true }],
+  keyframes: [{ v: 'gpt-image', label: 'OpenAI gpt-image-2', price: [`about $0.04 a keyframe`, '每张关键帧约 $0.04'], ready: true }, { v: 'codex-image', label: 'Codex image · gpt-6-astra', price: ['no price set (Codex plan)', '未设置价格（Codex 套餐）'], ready: true }, { v: 'demo', label: 'Demo keyframes', price: ['free stand-in', '免费替身'], ready: true }],
+  video: [{ v: 'minimax', label: 'MiniMax H3', price: ['about $0.50 a clip', '每段视频约 $0.50'], ready: true }, { v: 'viggle', label: 'MiniMax H3 via Viggle', price: ['about $0.45 a clip', '每段视频约 $0.45'], ready: false, why: ['key not set', '未设置密钥'] }, { v: 'demo', label: 'Demo video', price: ['free stand-in', '免费替身'], ready: true }],
+  narration: [{ v: 'tts', label: 'OpenAI gpt-4o-mini-tts', price: ['about $0.01 a voice line', '每条配音约 $0.01'], ready: true }, { v: 'demo', label: 'Demo narration', price: ['free stand-in', '免费替身'], ready: true }],
+  transcription: [{ v: 'whisper', label: 'OpenAI whisper-1', price: ['about $0.01 a line', '每句约 $0.01'], ready: true }, { v: 'demo', label: 'Demo transcription', price: ['free stand-in', '免费替身'], ready: true }]
+};
+const JOBS = [['director', 'Director', '导演'], ['keyframes', 'Keyframes', '关键帧'], ['video', 'Video', '视频'], ['narration', 'Narration', '旁白'], ['transcription', 'Transcription', '转写']];
+/** What a switch would touch: unfinished items use the new model; finished ones stay (POST /settings/models/preview). */
+const IMPACT = {
+  director: () => t('The Director’s next turn uses it. Notes and the conversation so far stay.', '导演的下一轮会用它。已有的建议和对话保留。'),
+  keyframes: () => t('2 keyframes not made yet (3.1, 3.2) would use it. The 6 keyframes already made stay as they are.', '还没生成的 2 张关键帧（3.1、3.2）会用它。已生成的 6 张保持不变。'),
+  video: () => t('5 clips not made yet would use it. The 3 clips already made in Scene 1 stay as they are.', '还没生成的 5 段视频会用它。第 1 场已生成的 3 段保持不变。'),
+  narration: () => t('1 line with no voice yet (3.2) would use it. The 2 voice lines already made stay.', '还没有配音的 1 句（3.2）会用它。已生成的 2 条配音保留。'),
+  transcription: () => t('Only new transcriptions use it.', '只有新的转写会用它。')
+};
+const ST = {
+  model: { director: 'codex', keyframes: 'gpt-image', video: 'minimax', narration: 'tts', transcription: 'whisper' },
+  pending: null,              // {job, v}
+  review: true,               // the Director reviews new keyframes (D4)
+  codex: true,                // Codex found on this computer
+  editDirector: false,
+  narrator: 'cedar',
+  voices: [{ id: 'pv1', label: 'Michael (my voice)', provider: 'ElevenLabs', vid: '…7f3a', at: '12 Oct', revoked: false }],
+  adding: false, add: { label: '', provider: 'openai', vid: '', own: false, permit: false },
+  checking: false, section: 'models'
+};
+const STOCK = ['cedar', 'marin', 'sage', 'verse', 'alloy', 'coral'];
+const opt = (job, v) => OPTIONS[job].find(o => o.v === v);
+function readyHTML(o, job){
+  if (job === 'director' && o.v === 'codex' && !ST.codex) return `<span class="ready n"><i class="ic" style="width:15px;height:15px;border-radius:50%;border:1.5px solid currentColor;display:inline-grid;place-items:center;font-size:9.5px;font-style:normal;font-weight:800">!</i>${t('Codex not found', '找不到 Codex')}</span>`;
+  return o.ready ? `<span class="ready y">✓ ${t('Ready', '就绪')}</span>` : `<span class="ready n">${t(o.why[0], o.why[1])}</span>`;
+}
+function render(){
+  const v = $('view');
+  const nav = (id, en, zh) => `<a href="#${id}" data-act="nav" data-v="${id}" aria-current="${ST.section === id}">${t(en, zh)}</a>`;
+  v.innerHTML = `
+  <div class="view-head"><h1>${t('Settings', '设置')}</h1><span class="line">${t('The first three apply to The Last Ferry; the last two to every film on this computer.', '前三项只对《The Last Ferry》生效；后两项对本机所有影片生效。')}</span></div>
+  <div class="set-grid">
+    <nav class="index" aria-label="${t('Settings sections', '设置分区')}"><span class="grp">${t('This film', '这部影片')}</span>${nav('models', 'Models', '模型')}${nav('director', 'Director', '导演')}${nav('voice', 'Voice', '声音')}<span class="grp">${t('Everywhere', '全局')}</span>${nav('computer', 'This computer', '本机')}${nav('language', 'Language', '语言')}</nav>
+    <div class="sections">
+      ${modelsHTML()}${directorHTML()}${voiceHTML()}${computerHTML()}${languageHTML()}
+    </div>
+  </div>`;
+  guard();
+}
+function modelsHTML(){
+  const rows = JOBS.map(([job, en, zh]) => {
+    const cur = opt(job, ST.model[job]);
+    const pend = ST.pending && ST.pending.job === job ? opt(job, ST.pending.v) : null;
+    return `<div class="mrow"><span class="c job">${t(en, zh)}</span>
+      <span class="c model"><label class="sr" for="m-${job}">${t(en, zh)} ${t('model', '模型')}</label><select class="select" id="m-${job}" data-job="${job}" data-needs="server">${OPTIONS[job].map(o => `<option value="${o.v}"${(pend ? pend.v : cur.v) === o.v ? ' selected' : ''}${o.ready ? '' : ' disabled'}>${esc(o.label)}${o.ready ? '' : ' — ' + t(o.why[0], o.why[1])}</option>`).join('')}</select></span>
+      <span class="c price">${t((pend || cur).price[0], (pend || cur).price[1])}</span>
+      <span class="c ready-c">${readyHTML(pend || cur, job)}</span>
+      ${pend ? `<div class="impact-row"><div class="impact cost" role="status"><span class="ic" aria-hidden="true">!</span><span><b>${t(`Use ${esc(pend.label)} for ${en.toLowerCase()}?`, `${zh}改用 ${esc(pend.label)}？`)}</b> ${IMPACT[job]()}</span></div>
+        <div class="edit-foot" style="display:flex;gap:8px;margin-top:8px"><button class="pill primary" data-act="apply" data-needs="server">${t('Switch', '切换')}</button><button class="pill" data-act="cancel-switch">${t('Cancel', '取消')}</button></div></div>` : ''}</div>`;
+  }).join('');
+  return `<section class="panel" id="models" aria-labelledby="h-models">
+    <div class="panel-head"><h2 id="h-models">${t('Models', '模型')}</h2><span class="scope">${t('for The Last Ferry', '用于《The Last Ferry》')}</span></div>
+    <div class="mtable" role="group" aria-label="${t('Model per job', '每项工作的模型')}"><span class="h">${t('Job', '工作')}</span><span class="h">${t('Model', '模型')}</span><span class="h">${t('Estimate', '估算价格')}</span><span class="h">${t('Status', '状态')}</span>${rows}</div>
+    <p class="hint" style="margin:10px 0 0">${t('Prices are estimates set on this computer (host-configured), not your provider’s bill. A failed try can still be charged. Video is priced per clip, whatever its length.', '价格是本机设置的估算值，不是服务商的账单。失败的尝试也可能计费。视频按段计价，与时长无关。')}</p>
+  </section>`;
+}
+function directorHTML(){
+  const codex = ST.model.director === 'codex';
+  return `<section class="panel" id="director" aria-labelledby="h-director">
+    <div class="panel-head"><h2 id="h-director">${t('Director', '导演')}</h2><span class="scope">${t('for The Last Ferry', '用于《The Last Ferry》')}</span>
+      ${codex && !ST.editDirector ? `<span class="end"><button class="pill sm" data-act="edit-director" data-needs="server">${t('Change…', '修改…')}</button></span>` : ''}</div>
+    ${codex ? (ST.editDirector ? `<form class="inline-form" data-form="director">
+        <label class="field"><span class="label">${t('Codex program', 'Codex 程序')}</span><input class="input mono" id="d-bin" value="/usr/local/bin/codex"></label>
+        <label class="field"><span class="label">${t('Model', '模型')}</span><select class="select" id="d-model"><option>gpt-6-astra</option><option>gpt-6-astra-mini</option></select></label>
+        <label class="field"><span class="label">${t('Codex home (its sign-in folder)', 'Codex 主目录（登录信息所在文件夹）')}</span><input class="input mono" id="d-home" value="~/.codex"></label>
+        <div class="impact"><span class="ic" aria-hidden="true">i</span><span>${t('Saving checks that Codex runs and is signed in before the Director uses it. Nothing in the film changes.', '保存时会先检查 Codex 能运行并已登录。影片内容不会改变。')}</span></div>
+        <div style="display:flex;gap:8px"><button class="pill primary" data-act="save-director" data-needs="server">${t('Save', '保存')}</button><button class="pill" type="button" data-act="cancel-director">${t('Cancel', '取消')}</button></div></form>`
+      : `<dl class="kv"><dt>${t('Program', '程序')}</dt><dd class="mono">/usr/local/bin/codex · 0.153.4</dd><dt>${t('Model', '模型')}</dt><dd>gpt-6-astra</dd><dt>${t('Codex home', 'Codex 主目录')}</dt><dd class="mono">~/.codex · ${t('signed in with ChatGPT', '已用 ChatGPT 登录')}</dd></dl>`)
+      : `<p class="lead">${t('The Demo Director gives scripted replies and cannot read a written plan or look at keyframes.', '示例导演只给出预设回复，不能读书面计划，也不能看关键帧。')}</p>`}
+    <div class="srow" style="margin-top:8px;border-top:1px solid var(--hairline)">
+      <div class="txt"><b id="rv-l">${t('The Director reviews new keyframes', '导演审阅新关键帧')}</b>
+        <span>${t('When keyframes come back, the Director looks at them and leaves notes, like “the coat came out maroon”. Each batch uses more of your Codex plan.', '关键帧回来后，导演会看一遍并留下建议，比如“外套出来是酱红色”。每批关键帧都会多用一些 Codex 套餐额度。')}</span>
+        ${!codex || !ST.codex ? `<span>${t('Needs the Codex Director.', '需要 Codex 导演。')}</span>` : ''}</div>
+      <button class="switch" role="switch" aria-checked="${ST.review && codex && ST.codex}" aria-labelledby="rv-l" data-act="review" data-needs="server" ${codex && ST.codex ? '' : 'disabled data-off="1"'}></button>
+    </div>
+  </section>`;
+}
+function voiceHTML(){
+  const ready = ST.voices.filter(x => !x.revoked);
+  const a = ST.add;
+  return `<section class="panel" id="voice" aria-labelledby="h-voice">
+    <div class="panel-head"><h2 id="h-voice">${t('Voice', '声音')}</h2><span class="scope">${t('for The Last Ferry', '用于《The Last Ferry》')}</span></div>
+    <div class="srow"><div class="txt"><b><label for="narrator">${t('Default narrator voice', '默认旁白声音')}</label></b><span>${t('Used for new voice lines. Lines already made keep the voice they were made with.', '用于新的配音。已生成的配音保留原来的声音。')}</span></div>
+      <select class="select" id="narrator" style="width:auto;min-width:200px" data-needs="server">
+        <optgroup label="${t('Stock voices (OpenAI)', '内置声音（OpenAI）')}">${STOCK.map(x => `<option value="${x}"${ST.narrator === x ? ' selected' : ''}>${x.charAt(0).toUpperCase() + x.slice(1)}${x === 'cedar' ? t(' (default)', '（默认）') : ''}</option>`).join('')}</optgroup>
+        ${ready.length ? `<optgroup label="${t('Personal voices', '个人声音')}">${ready.map(x => `<option value="${x.id}"${ST.narrator === x.id ? ' selected' : ''}>${esc(x.label)}</option>`).join('')}</optgroup>` : ''}
+      </select></div>
+    <div class="srow" style="flex-direction:column;align-items:stretch">
+      <div class="txt"><b>${t('Personal voices', '个人声音')}</b><span>${t('A voice you made in your own provider account. OpenSlate does not make voices from a recording; it only uses one you already have, with your consent.', '你在自己的服务商账号里创建的声音。OpenSlate 不会从录音生成声音，只会在你同意后使用你已有的声音。')}</span></div>
+      ${ST.voices.map(x => `<div class="voice-card${x.revoked ? ' revoked' : ''}"><div class="vtxt"><b>${esc(x.label)}</b><small>${x.provider} · ${t('voice ID', '声音 ID')} <code class="mono">${x.vid}</code> · ${x.revoked ? t(`revoked ${x.at}`, `已于 ${x.at} 撤回`) : t(`consent recorded ${x.at}`, `已于 ${x.at} 记录同意`)}</small></div>
+        ${x.revoked ? `<span class="status">${t('Revoked', '已撤回')}</span>` : `<span class="status ok">✓ ${t('Ready', '就绪')}</span><button class="pill sm" data-act="revoke" data-id="${x.id}" data-needs="server">${t('Revoke…', '撤回…')}</button>`}</div>`).join('')}
+      ${ST.adding ? `<form class="add-voice" data-form="voice" aria-label="${t('Add a personal voice', '添加个人声音')}">
+          <div class="two-col"><label class="field"><span class="label">${t('Name', '名称')}</span><input class="input" id="v-label" value="${esc(a.label)}" placeholder="${t('My voice', '我的声音')}" maxlength="120"></label>
+          <div class="field"><span class="label" id="v-pl">${t('Provider', '服务商')}</span><span class="segctl" role="radiogroup" aria-labelledby="v-pl"><button type="button" role="radio" aria-checked="${a.provider === 'openai'}" data-act="v-prov" data-v="openai">OpenAI</button><button type="button" role="radio" aria-checked="${a.provider === 'elevenlabs'}" data-act="v-prov" data-v="elevenlabs">ElevenLabs</button></span></div></div>
+          <label class="field"><span class="label">${t('Voice ID from your provider account', '服务商账号里的声音 ID')}</span><input class="input mono" id="v-id" value="${esc(a.vid)}" placeholder="voice_…"></label>
+          ${a.provider === 'elevenlabs' ? `<div class="impact"><span class="ic" aria-hidden="true">!</span><span>${t('The ElevenLabs key is not set on this computer, so this voice cannot be used until it is (see This computer).', '本机没有设置 ElevenLabs 密钥，设置之前不能使用这个声音（见“本机”）。')}</span></div>` : ''}
+          <label class="ack"><input type="checkbox" id="v-own" ${a.own ? 'checked' : ''}><span>${t('This voice is mine: it was made from my own voice.', '这是我自己的声音，由我本人的声音制作。')}</span></label>
+          <label class="ack"><input type="checkbox" id="v-permit" ${a.permit ? 'checked' : ''}><span>${t('I allow OpenSlate to make narration with it for this film. I can revoke this at any time.', '我允许 OpenSlate 用它为这部影片生成旁白，并可随时撤回。')}</span></label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pill primary" data-act="v-add" data-needs="server" ${a.own && a.permit && a.label.trim() && a.vid.trim() ? '' : 'disabled data-off="1"'}>${t('Add voice', '添加声音')}</button><button class="pill" type="button" data-act="v-cancel">${t('Cancel', '取消')}</button>
+            <span class="hint" style="align-self:center">${a.own && a.permit ? '' : t('Both confirmations are needed.', '需要两项确认。')}</span></div>
+        </form>` : `<div><button class="pill" data-act="v-open" data-needs="server" style="margin-top:10px">${t('Add a personal voice', '添加个人声音')}</button></div>`}
+    </div>
+  </section>`;
+}
+function computerHTML(){
+  const row = (ok, name, detail) => `<div class="srow"><div class="txt"><b>${name}</b><span>${detail}</span></div>${ok === true ? `<span class="ready y">✓ ${t('Found', '已找到')}</span>` : ok === 'set' ? `<span class="ready y">✓ ${t('Set', '已设置')}</span>` : `<span class="ready n">${ok}</span>`}</div>`;
+  return `<section class="panel" id="computer" aria-labelledby="h-computer">
+    <div class="panel-head"><h2 id="h-computer">${t('This computer', '本机')}</h2><span class="scope">${t('every film', '所有影片')}</span>
+      <span class="end"><button class="pill sm" data-act="recheck" data-needs="server">${ST.checking ? t('Checking…', '正在检查…') : t('Check again', '再次检查')}</button></span></div>
+    ${row(ST.codex ? true : t('Not found', '未找到'), 'Codex', ST.codex ? t('0.153.4 · signed in · the Director, written plans, Codex images', '0.153.4 · 已登录 · 导演、书面计划、Codex 图像') : t('Install Codex and sign in, then check again. The Director, written plans and Codex images need it.', '请安装 Codex 并登录，然后再次检查。导演、书面计划和 Codex 图像都需要它。'))}
+    ${row(true, 'FFmpeg · ffprobe', t('7.1 · importing media and exporting the film', '7.1 · 导入素材和导出影片'))}
+    ${row('set', t('OpenAI key', 'OpenAI 密钥'), t('keyframes, narration, transcription', '关键帧、旁白、转写'))}
+    ${row('set', t('MiniMax key', 'MiniMax 密钥'), t('video', '视频'))}
+    ${row(t('Not set', '未设置'), t('ElevenLabs key', 'ElevenLabs 密钥'), t('only for ElevenLabs personal voices', '只用于 ElevenLabs 个人声音'))}
+    ${row(t('Not set', '未设置'), t('Viggle key', 'Viggle 密钥'), t('only for MiniMax H3 via Viggle', '只用于通过 Viggle 使用 MiniMax H3'))}
+    <div class="impact" style="margin-top:6px"><span class="ic" aria-hidden="true">i</span><span>${t('Keys stay on this computer and are read when OpenSlate starts. To add one, put it in the studio’s config and run <b class="mono">./start.sh --restart</b>. <b class="mono">./start.sh --doctor</b> explains what is missing without calling any provider.', '密钥只保存在本机，OpenSlate 启动时读取。要添加密钥，请写进工作室配置并运行 <b class="mono">./start.sh --restart</b>。<b class="mono">./start.sh --doctor</b> 会说明缺什么，不会调用任何服务商。')}</span></div>
+  </section>`;
+}
+function languageHTML(){
+  return `<section class="panel" id="language" aria-labelledby="h-language">
+    <div class="panel-head"><h2 id="h-language">${t('Language', '语言')}</h2><span class="scope">${t('this browser', '这个浏览器')}</span></div>
+    <div class="srow"><div class="txt"><b id="lang-l">${t('Studio language', '界面语言')}</b><span>${t('Prompts, lines and the Director’s words stay in the language they were written in. The studio is dark only for now.', '画面描述、台词和导演的话保持原来的语言。界面目前只有深色。')}</span></div>
+      <span class="segctl" role="radiogroup" aria-labelledby="lang-l"><button role="radio" aria-checked="${L.lang === 'en'}" data-act="lang" data-v="en">English</button><button role="radio" aria-checked="${L.lang === 'zh'}" data-act="lang" data-v="zh">中文</button></span></div>
+  </section>`;
+}
+document.addEventListener('change', e => {
+  const job = e.target.dataset && e.target.dataset.job;
+  if (job){ ST.pending = e.target.value === ST.model[job] ? null : { job, v: e.target.value }; render(); const s = $('m-' + job); s && s.focus(); }
+  if (e.target.id === 'narrator'){ const nv = e.target.value; const before = ST.narrator; ST.narrator = nv; const name = (STOCK.includes(nv) ? nv.charAt(0).toUpperCase() + nv.slice(1) : ST.voices.find(x => x.id === nv).label); toast(t(`New voice lines use ${name}.`, `新的配音会使用 ${name}。`), () => { ST.narrator = before; render(); }); }
+  if (e.target.id === 'v-own') { ST.add.own = e.target.checked; render(); $('v-own').focus(); }
+  if (e.target.id === 'v-permit') { ST.add.permit = e.target.checked; render(); $('v-permit').focus(); }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'v-label' || e.target.id === 'v-id'){
+    ST.add[e.target.id === 'v-label' ? 'label' : 'vid'] = e.target.value;
+    const b = document.querySelector('[data-act="v-add"]'); const ok = ST.add.own && ST.add.permit && ST.add.label.trim() && ST.add.vid.trim();
+    if (b){ b.dataset.off = ok ? '' : '1'; if (!b.dataset.guarded) b.disabled = !ok; }
+  }
+});
+document.addEventListener('submit', e => e.preventDefault());
+
+const PAGE = {
+  view: 'Settings',
+  scope: () => t('Settings', '设置'),
+  states: [
+    { id: 'default', label: 'Settings as they are' },
+    { id: 'switch', label: 'Switching video to Demo (impact first)' },
+    { id: 'nocodex', label: 'Codex not found on this computer' },
+    { id: 'add', label: 'Adding a personal voice' },
+    { id: 'revoke', label: 'Revoking a personal voice' }
+  ],
+  state: 'default',
+  onState(id){
+    document.querySelectorAll('dialog[open]').forEach(d => d.close());
+    Object.assign(ST, { model: { director: 'codex', keyframes: 'gpt-image', video: 'minimax', narration: 'tts', transcription: 'whisper' }, pending: null, review: true, codex: true, editDirector: false, narrator: 'cedar', adding: false, add: { label: '', provider: 'openai', vid: '', own: false, permit: false }, section: 'models' });
+    ST.voices.forEach(x => { x.revoked = false; x.at = '12 Oct'; });
+    if (id === 'switch') ST.pending = { job: 'video', v: 'demo' };
+    if (id === 'nocodex') ST.codex = false;
+    if (id === 'add'){ ST.adding = true; ST.section = 'voice'; setTimeout(() => { $('voice').scrollIntoView(); }, 0); }
+    if (id === 'revoke'){ ST.section = 'voice'; setTimeout(() => { $('voice').scrollIntoView(); confirmRevoke('pv1'); }, 0); }
+  },
+  render,
+  act(a, el){
+    switch (a){
+      case 'nav': { ST.section = el.dataset.v; document.querySelectorAll('.index a').forEach(x => x.setAttribute('aria-current', x.dataset.v === ST.section)); const sec = $(ST.section); if (sec){ sec.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' }); } return; }
+      case 'apply': { const { job, v } = ST.pending; ST.model[job] = v; ST.pending = null; render(); return toast(t(`${JOBS.find(j => j[0] === job)[1]} now uses ${opt(job, v).label}.`, `${JOBS.find(j => j[0] === job)[2]}现在使用 ${opt(job, v).label}。`)); }
+      case 'cancel-switch': ST.pending = null; return render();
+      case 'edit-director': ST.editDirector = true; render(); $('d-bin').focus(); return;
+      case 'cancel-director': ST.editDirector = false; return render();
+      case 'save-director': ST.editDirector = false; render(); return toast(t('Codex runs and is signed in. The Director uses it from its next turn.', 'Codex 可以运行且已登录，导演下一轮起会使用它。'));
+      case 'review': ST.review = !ST.review; render(); { const s = document.querySelector('[data-act="review"]'); s && s.focus(); } return toast(ST.review ? t('The Director will review new keyframes.', '导演会审阅新的关键帧。') : t('The Director will not look at new keyframes.', '导演不会再看新的关键帧。'));
+      case 'revoke': return confirmRevoke(el.dataset.id);
+      case 'revoke-yes': {
+        el.closest('dialog').close();
+        const x = ST.voices.find(v => v.id === el.dataset.id); x.revoked = true; x.at = '15 Oct';
+        if (ST.narrator === x.id) ST.narrator = 'cedar';
+        render(); return toast(t(`Revoked ${x.label}. New voice lines can’t use it.`, `已撤回 ${x.label}，新的配音不能再使用它。`));
+      }
+      case 'v-open': ST.adding = true; render(); $('v-label').focus(); return;
+      case 'v-cancel': ST.adding = false; ST.add = { label: '', provider: 'openai', vid: '', own: false, permit: false }; return render();
+      case 'v-prov': ST.add.provider = el.dataset.v; render(); { const b = document.querySelector(`[data-act="v-prov"][data-v="${el.dataset.v}"]`); b && b.focus(); } return;
+      case 'v-add': {
+        const x = { id: 'pv' + (ST.voices.length + 1), label: ST.add.label.trim(), provider: ST.add.provider === 'openai' ? 'OpenAI' : 'ElevenLabs', vid: '…' + ST.add.vid.trim().slice(-4), at: '15 Oct', revoked: false };
+        ST.voices.push(x); ST.adding = false; ST.add = { label: '', provider: 'openai', vid: '', own: false, permit: false }; render();
+        return toast(t(`Added ${x.label}. Choose it as the narrator voice, or on a shot in Keyframes.`, `已添加 ${x.label}。可以把它设为旁白声音，或在关键帧里给某个镜头使用。`));
+      }
+      case 'recheck': ST.checking = true; render(); return setTimeout(() => { ST.checking = false; render(); toast(t('Checked this computer. Nothing changed.', '已检查本机，没有变化。')); }, 1000);
+      case 'lang': L.lang = el.dataset.v; keep.set('lastferry.lang', L.lang); return mount(PAGE);
+    }
+  }
+};
+function confirmRevoke(id){
+  const x = ST.voices.find(v => v.id === id);
+  openDialog(`<h2>${t(`Revoke ${esc(x.label)}?`, `撤回 ${esc(x.label)}？`)}</h2>
+    <ul><li>${t('New voice lines in this film can’t use it.', '这部影片新的配音不能再使用它。')}</li><li>${t('Voice lines already made with it keep their audio.', '已经用它生成的配音保留原有音频。')}</li><li>${t('To use this voice again, make a new voice in your provider account and add it again.', '想再次使用，需要在服务商账号里新建一个声音再添加。')}</li></ul>
+    <div class="foot"><button class="pill" data-act="sh-dialog-close">${t('Keep it', '保留')}</button><button class="pill primary" data-act="revoke-yes" data-id="${id}" data-needs="server">${t('Revoke voice', '撤回声音')}</button></div>`);
+}
+mount(PAGE);
+if (location.hash && $(location.hash.slice(1))){ ST.section = location.hash.slice(1); render(); $(ST.section).scrollIntoView(); }
+window.LastFerrySettings = { ST, PAGE };
+})();
+</script>
+</body>
+</html>
