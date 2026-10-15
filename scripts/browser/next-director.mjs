@@ -164,6 +164,42 @@ export const scenarios = [
     },
   },
   {
+    name: "next-director-narrow-drawer",
+    query,
+    viewport: { width: 390, height: 844 },
+    async run({ page }) {
+      await page.waitForSelector(".director .thread [data-entry]", { state: "attached", timeout: 20000 });
+      const toggle = page.locator('[aria-controls="director"]');
+      if (!(await toggle.count())) {
+        console.log("     note: no Director toggle in the top bar yet; drawer check skipped");
+        return;
+      }
+      const open = () => page.$eval(".app", (node) => node.classList.contains("dir-open"));
+      await toggle.click();
+      await page.waitForFunction(() => document.querySelector(".app").classList.contains("dir-open"));
+      // Esc inside the @ picker closes only the picker; the next Esc closes the drawer.
+      const box = page.locator('[data-field="message"]');
+      await box.click();
+      await box.pressSequentially("@");
+      await page.waitForSelector('.picker [role="listbox"]');
+      await box.press("Escape");
+      await page.waitForSelector(".picker", { state: "detached" });
+      if (!(await open())) fail("Esc in the @ picker closed the drawer");
+      const widths = await page.evaluate(() => [document.documentElement.scrollWidth, document.querySelector(".director").scrollWidth - document.querySelector(".director").clientWidth]);
+      if (widths[0] > 390 || widths[1] > 0) fail(`The drawer scrolls sideways: ${widths}`);
+      await page.screenshot({ path: shot("narrow-390") });
+      await box.press("Escape");
+      await page.waitForFunction(() => !document.querySelector(".app").classList.contains("dir-open"));
+      // Close is the way out on phones.
+      await toggle.click();
+      await page.waitForFunction(() => document.querySelector(".app").classList.contains("dir-open"));
+      const close = page.locator(".dir-close");
+      if (!(await close.isVisible())) fail("Close is missing in the narrow drawer");
+      await close.click();
+      await page.waitForFunction(() => !document.querySelector(".app").classList.contains("dir-open"), null, { timeout: 2000 }).catch(() => fail("Close did not close the drawer"));
+    },
+  },
+  {
     name: "next-director-chinese",
     query: `${query}&lang=zh`,
     viewport: { width: 1440, height: 900 },
