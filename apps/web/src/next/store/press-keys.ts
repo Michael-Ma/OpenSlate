@@ -6,6 +6,9 @@
  * reply is lost, pressing again resends the same body with the same key, so the server replays its
  * receipt instead of charging twice, even across a reload. The entry is dropped once the server has
  * answered definitely (success or a 4xx refusal).
+ *
+ * Presses are kept per film. While no film is open (a first run, or Start before a film is chosen) the
+ * library-level presses (create a film, the demo) are kept in their own library namespace.
  */
 export interface SavedPress {
   key: string;
@@ -14,6 +17,9 @@ export interface SavedPress {
 }
 
 type KeyStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** Where library-level presses are kept; a film's are under `openslate.next.presses.<projectId>`. */
+export const LIBRARY_KEY = "openslate.next.library-presses";
 
 /** Stable JSON with sorted object keys, so equal requests compare equal. */
 export function canonicalJson(value: unknown): string {
@@ -29,9 +35,10 @@ export class PressKeys {
   readonly #newKey: () => string;
   #memory: Record<string, SavedPress>;
 
-  constructor(projectId: string, storage: KeyStorage | null, newKey: () => string) {
+  /** `projectId` null: the library namespace, for presses made while no film is open. */
+  constructor(projectId: string | null, storage: KeyStorage | null, newKey: () => string) {
     this.#storage = storage;
-    this.#storageKey = `openslate.next.presses.${projectId}`;
+    this.#storageKey = projectId === null ? LIBRARY_KEY : `openslate.next.presses.${projectId}`;
     this.#newKey = newKey;
     this.#memory = this.#read();
   }

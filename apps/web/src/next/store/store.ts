@@ -33,7 +33,8 @@ export class StudioStore {
   #state: StudioState = initialState;
   readonly #listeners = new Set<() => void>();
   readonly #deps: StoreDeps;
-  #keys: PressKeys | null = null;
+  /** The open film's presses, or the library's while no film is open (Start on a first run). */
+  #keys: PressKeys;
   #subscription: ProjectSubscription | null = null;
   #unsubscribe: (() => void) | null = null;
   #refreshing: Promise<void> | null = null;
@@ -41,6 +42,7 @@ export class StudioStore {
 
   constructor(deps: StoreDeps) {
     this.#deps = deps;
+    this.#keys = new PressKeys(null, deps.storage, deps.newKey);
   }
 
   getState = (): StudioState => this.#state;
@@ -138,7 +140,7 @@ export class StudioStore {
    */
   async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg, timeoutMs?: number): Promise<T | undefined> {
     const keys = this.#keys;
-    if (!keys || this.#state.pending[pressId]) return undefined;
+    if (this.#state.pending[pressId]) return undefined;
     this.dispatch({ type: "pending", pressId, pending: true });
     try {
       const saved = keys.saved(pressId);
@@ -226,7 +228,7 @@ export class StudioStore {
    */
   async edit(edit: StoryboardEdit, toast?: Msg): Promise<string | null> {
     const snapshot = this.#state.snapshot;
-    if (!snapshot || !this.#keys) return null;
+    if (!snapshot) return null;
     const body = { ...edit, expectedHeadVersion: snapshot.project.headVersion };
     const pressId = `edit:${edit.kind}:${"id" in edit ? edit.id : edit.commandId}`;
     const receipt = await this.#press<{ commandId: string }>(pressId, body, async () => ({ path: path(snapshot.project.id, "/storyboard"), body }));

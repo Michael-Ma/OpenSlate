@@ -298,9 +298,9 @@ test('a press the store did not send is said, never silent', async () => {
   assert.equal(toast.message.id, 'start.not_sent');
 });
 
-// Lead items 1 and 2: with no film open the store has no press keys, so Create and the demo are not sent.
-// This runs them the way a real first run would (nothing selected); it passes once library commands have their own keys.
-test('a real first run with no film open can create a film and open the demo', { todo: 'lead: library-level press keys while no film is open' }, async t => {
+// With no film open the store keeps library-level presses (Create, the demo) in their own namespace.
+// This runs them the way a real first run does: the studio opens with no film selected.
+test('a real first run with no film open can create a film and open the demo', async t => {
   const port = new FixturePort();
   const store = new StudioStore({ client: port, storage: null, newKey: () => crypto.randomUUID() });
   t.after(() => { store.stop(); port.close(); });
