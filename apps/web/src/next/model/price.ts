@@ -11,6 +11,7 @@ export function formatMicros(micros: string | number, locale: string): string {
 /** Prices are host-configured estimates (plan decision D15): "about $1.50", or "no price set". Never "$0.00". */
 export function priceMsg(quote: PriceQuote, locale: string): Msg {
   if (quote.priceUnknown || Number(quote.micros) === 0) return msg("price.unknown");
-  if (quote.units > 1) return msg("price.about_each", { total: formatMicros(quote.micros, locale), count: quote.units, each: formatMicros(quote.unitMicros, locale) });
+  // A mixed quote (clips plus voice lines) has no single unit price; show only the total.
+  if (quote.units > 1 && Number(quote.unitMicros) > 0) return msg("price.about_each", { total: formatMicros(quote.micros, locale), count: quote.units, each: formatMicros(quote.unitMicros, locale) });
   return msg("price.about", { total: formatMicros(quote.micros, locale) });
 }
