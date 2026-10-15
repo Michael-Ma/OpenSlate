@@ -186,6 +186,9 @@ export const scenarios = [
       await toastSays(page, /^Moved 2\.2; it is now 2\.1\. Nothing made goes out of date\./);
       await sceneTwo(page, `2.1:${shot("2.2")},2.2:${shot("2.1")},2.3:${shot("2.3")}`, "The scene did not reorder");
       await expectText(page, "[data-act='tools-shot']", /^2\.1 Medium$/);
+      // The playhead follows the moved shot to its new place.
+      await page.waitForFunction(() => document.querySelector(".player .scrub .num")?.textContent === "0:17", null, { timeout: 8000 })
+        .catch(async () => { throw new Error(`The playhead did not follow the moved shot: ${await time(page)}`); });
       await undo(page);
       await sceneTwo(page, `2.1:${shot("2.1")},2.2:${shot("2.2")},2.3:${shot("2.3")}`, "Undo did not restore the order");
       // 1.1 has a clip: its length note says a new length outdates it.

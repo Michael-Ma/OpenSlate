@@ -114,7 +114,7 @@ function FilmWorkspace() {
   const runEdit = useCallback(async (edit: FilmEdit, toast: Msg) => {
     const current = store.getState().snapshot;
     const pressId = editPressId(edit);
-    if (!current || editingRef.current) return;
+    if (!current || editingRef.current) return false;
     editingRef.current = pressId;
     setEditing(pressId);
     try {
@@ -123,6 +123,7 @@ function FilmWorkspace() {
       if (receipt) store.dispatch({ type: "toast", message: toast, tone: "info", undoCommandId: receipt.commandId });
       // The next edit must carry the head version this one produced.
       await store.refresh();
+      return !!receipt;
     } finally {
       editingRef.current = null;
       setEditing(null);
@@ -137,11 +138,22 @@ function FilmWorkspace() {
     const film = Math.round((timeline.total - selectedShot.seconds + next.seconds) * 10) / 10;
     void runEdit(next.edit, lengthToast(selectedShot.label, next.seconds, film, selectedShot.picture === "clip"));
   };
+  // After a move the playhead follows the shot to its new place.
+  const follow = useRef<{ shotId: string; start: number } | null>(null);
   const move = (direction: -1 | 1) => {
     if (!selectedShot) return;
     const next = moveEdit(overview, selectedShot.shotId, direction);
-    if (next) void runEdit(next.edit, msg("film.toast.moved", { from: selectedShot.label, to: next.label }));
+    if (!next) return;
+    follow.current = { shotId: selectedShot.shotId, start: selectedShot.start };
+    void runEdit(next.edit, msg("film.toast.moved", { from: selectedShot.label, to: next.label })).then((moved) => { if (!moved) follow.current = null; });
   };
+  useEffect(() => {
+    const target = follow.current;
+    const shot = target && timeline.shots.find((s) => s.shotId === target.shotId);
+    if (!target || !shot || shot.start === target.start) return;
+    follow.current = null;
+    clock.seek(shot.start);
+  }, [timeline, clock]);
   const musicStart = (step: -1 | 1) => {
     const edit = music && musicStartEdit(music, overview.fps, step, timeline.total);
     if (edit) void runEdit(edit, msg("film.toast.music_start", { time: formatClock(Number(edit.kind === "soundtrack" ? edit.value : 0) / overview.fps) }));
