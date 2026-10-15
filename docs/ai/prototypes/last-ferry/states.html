@@ -16,9 +16,11 @@
 .card .tag{position:absolute;right:8px;top:8px;z-index:2;font-size:11px;font-weight:700;background:rgba(20,21,23,.86);border-radius:var(--r-pill);padding:2px 8px;color:var(--text)}
 .pv-note{position:absolute;right:12px;top:12px;z-index:2}
 .vpanel .go{min-height:34px}
-@media (max-width: 899px){
-  .work.kf-ctx{overflow:visible}
-  #view{display:flex;flex-direction:column;gap:14px}
+/* The Keyframes grid needs about 1366 px; below that the view stacks (last-ferry.html scrolls sideways there). */
+@media (max-width: 1365px){
+  .work.kf-ctx{overflow:auto}
+  #view{display:flex;flex-direction:column;gap:14px;flex:none}
+  #view > *{flex:none}
   .scene-head{flex-wrap:wrap;gap:4px 10px}
   .scene-head .line{white-space:normal;width:100%}
   .scene-pills{margin-left:0;width:100%;overflow-x:auto;padding-bottom:2px}
@@ -35,7 +37,8 @@
   .cards .card{flex:0 0 72%;scroll-snap-align:start}
   .vpanel .go{margin-top:12px}
 }
-@media (min-width: 900px){ .cards{display:contents} }
+@media (max-width: 899px){ .work.kf-ctx{overflow:visible} }
+@media (min-width: 1366px){ .cards{display:contents} }
 </style>
 </head>
 <body>
@@ -398,12 +401,18 @@ function hideToast(){ $('toast').hidden = true; toastUndo = null; }
 
 /* ---------------- dialogs (native <dialog>; focus returns to the opener) ---------------- */
 function openDialog(html, cls){
-  const opener = document.activeElement;
+  let opener = document.activeElement;
+  if ((!opener || opener === document.body) && Shell.lastMenuOpener && Shell.lastMenuOpener.isConnected) opener = Shell.lastMenuOpener;
   const d = document.createElement('dialog');
   d.className = cls || 'dialog';
   d.innerHTML = html;
   document.body.appendChild(d);
-  d.addEventListener('close', () => { d.remove(); if (opener && opener.isConnected) opener.focus({ preventScroll: true }); else { const w = $('view'); if (w) w.focus && w.focus(); } });
+  d.addEventListener('close', () => {
+    d.remove();
+    if (opener && opener.isConnected && opener !== document.body) return opener.focus({ preventScroll: true });
+    const h = document.querySelector('#view h1'); /* the opener went away (e.g. a deleted scene): land on the view title */
+    if (h){ h.tabIndex = -1; h.focus({ preventScroll: true }); }
+  });
   d.showModal();
   const f = d.querySelector('[autofocus]') || d.querySelector('input,textarea,select,button:not([disabled])');
   if (f) f.focus();
@@ -427,7 +436,7 @@ function openMenu(btn, html){
 function closeMenu(refocus){
   const m = $('ctx-menu'); if (!m) return;
   m.remove();
-  const o = Shell.menuOpener; Shell.menuOpener = null;
+  const o = Shell.menuOpener; Shell.menuOpener = null; Shell.lastMenuOpener = o;
   if (o && o.isConnected){ o.setAttribute('aria-expanded', 'false'); if (refocus !== false) o.focus({ preventScroll: true }); }
 }
 function showExpired(){

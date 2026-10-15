@@ -46,6 +46,19 @@
 .add-voice{display:flex;flex-direction:column;gap:10px;border:1px solid var(--track);border-radius:12px;padding:12px;margin-top:10px;background:var(--bar)}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .inline-form{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+@media (min-width: 900px) and (max-width: 1099px){
+  .set-grid{grid-template-columns:1fr;gap:12px}
+  .index{position:static;flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px}
+  .index .grp{display:none}
+  .index a{white-space:nowrap;border:1px solid var(--hairline)}
+  .mtable{display:block}
+  .mtable .h{display:none}
+  .mrow{display:grid;grid-template-columns:1fr auto;gap:6px 10px;border-top:1px solid var(--hairline);padding:10px 0}
+  .mtable .c{border-top:0;padding:0}
+  .mtable .job{grid-column:1;grid-row:1}
+  .mtable .ready-c{grid-column:2;grid-row:1;text-align:right}
+  .mtable .model,.mtable .price,.mtable .impact-row{grid-column:1/-1}
+}
 @media (max-width: 899px){
   .set-grid{grid-template-columns:1fr;gap:12px}
   .index{position:static;flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px;margin:0 -16px;padding:0 16px}
@@ -424,12 +437,18 @@ function hideToast(){ $('toast').hidden = true; toastUndo = null; }
 
 /* ---------------- dialogs (native <dialog>; focus returns to the opener) ---------------- */
 function openDialog(html, cls){
-  const opener = document.activeElement;
+  let opener = document.activeElement;
+  if ((!opener || opener === document.body) && Shell.lastMenuOpener && Shell.lastMenuOpener.isConnected) opener = Shell.lastMenuOpener;
   const d = document.createElement('dialog');
   d.className = cls || 'dialog';
   d.innerHTML = html;
   document.body.appendChild(d);
-  d.addEventListener('close', () => { d.remove(); if (opener && opener.isConnected) opener.focus({ preventScroll: true }); else { const w = $('view'); if (w) w.focus && w.focus(); } });
+  d.addEventListener('close', () => {
+    d.remove();
+    if (opener && opener.isConnected && opener !== document.body) return opener.focus({ preventScroll: true });
+    const h = document.querySelector('#view h1'); /* the opener went away (e.g. a deleted scene): land on the view title */
+    if (h){ h.tabIndex = -1; h.focus({ preventScroll: true }); }
+  });
   d.showModal();
   const f = d.querySelector('[autofocus]') || d.querySelector('input,textarea,select,button:not([disabled])');
   if (f) f.focus();
@@ -453,7 +472,7 @@ function openMenu(btn, html){
 function closeMenu(refocus){
   const m = $('ctx-menu'); if (!m) return;
   m.remove();
-  const o = Shell.menuOpener; Shell.menuOpener = null;
+  const o = Shell.menuOpener; Shell.menuOpener = null; Shell.lastMenuOpener = o;
   if (o && o.isConnected){ o.setAttribute('aria-expanded', 'false'); if (refocus !== false) o.focus({ preventScroll: true }); }
 }
 function showExpired(){

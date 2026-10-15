@@ -70,6 +70,14 @@
 .summary-row div{min-width:0}
 .summary-row b{display:block;font-size:15px}
 .sugg{margin:0;padding-left:18px;color:var(--text-2);font-size:13px;line-height:1.55}
+@media (min-width: 900px) and (max-width: 1239px){
+  .shot-row{grid-template-columns:112px minmax(0,1fr) auto;gap:8px 14px}
+  .shot-say,.shot-state{grid-column:2}
+  .shot-state{flex-direction:row;flex-wrap:wrap}
+  .shot-acts{grid-column:3;grid-row:1}
+  .form-grid{grid-template-columns:1fr 1fr}
+  .form-grid .len,.form-grid .len-hint{grid-column:1/-1}
+}
 @media (max-width: 899px){
   .brief-grid{grid-template-columns:1fr}
   .scene-top{padding:12px 12px 4px}
@@ -449,12 +457,18 @@ function hideToast(){ $('toast').hidden = true; toastUndo = null; }
 
 /* ---------------- dialogs (native <dialog>; focus returns to the opener) ---------------- */
 function openDialog(html, cls){
-  const opener = document.activeElement;
+  let opener = document.activeElement;
+  if ((!opener || opener === document.body) && Shell.lastMenuOpener && Shell.lastMenuOpener.isConnected) opener = Shell.lastMenuOpener;
   const d = document.createElement('dialog');
   d.className = cls || 'dialog';
   d.innerHTML = html;
   document.body.appendChild(d);
-  d.addEventListener('close', () => { d.remove(); if (opener && opener.isConnected) opener.focus({ preventScroll: true }); else { const w = $('view'); if (w) w.focus && w.focus(); } });
+  d.addEventListener('close', () => {
+    d.remove();
+    if (opener && opener.isConnected && opener !== document.body) return opener.focus({ preventScroll: true });
+    const h = document.querySelector('#view h1'); /* the opener went away (e.g. a deleted scene): land on the view title */
+    if (h){ h.tabIndex = -1; h.focus({ preventScroll: true }); }
+  });
   d.showModal();
   const f = d.querySelector('[autofocus]') || d.querySelector('input,textarea,select,button:not([disabled])');
   if (f) f.focus();
@@ -478,7 +492,7 @@ function openMenu(btn, html){
 function closeMenu(refocus){
   const m = $('ctx-menu'); if (!m) return;
   m.remove();
-  const o = Shell.menuOpener; Shell.menuOpener = null;
+  const o = Shell.menuOpener; Shell.menuOpener = null; Shell.lastMenuOpener = o;
   if (o && o.isConnected){ o.setAttribute('aria-expanded', 'false'); if (refocus !== false) o.focus({ preventScroll: true }); }
 }
 function showExpired(){

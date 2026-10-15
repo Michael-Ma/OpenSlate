@@ -63,7 +63,7 @@ a{color:var(--text-2)}
 a.brand:hover .word{text-decoration:underline;text-underline-offset:3px}
 .logo{width:20px;height:20px;border-radius:6px;background:var(--text);display:grid;place-items:center;flex:none}
 .logo i{display:block;width:12px;height:3px;border-radius:2px;background:var(--bar);box-shadow:0 -4px 0 var(--bar)}
-.film{display:flex;align-items:baseline;gap:10px;min-width:0;width:326px;flex:none}
+.film{display:flex;align-items:baseline;gap:10px;min-width:0;width:326px;flex:none;padding-right:12px}
 .film b{font-size:15px;font-weight:700;white-space:nowrap;flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .film span{color:var(--text-2);font-size:12.5px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .tabs{display:flex;gap:4px;align-items:center}
@@ -397,10 +397,21 @@ dialog::backdrop{background:var(--scrim)}
   .toast{left:16px;right:16px;bottom:14px;transform:none;border-radius:16px;max-width:none}
   .toast > span{flex:1}
   .sheet{width:100vw;border-left:0}
+  .sheet-foot .grow{flex:1 1 100%}
   .dialog{padding:18px 16px 14px}
 }
 @media (min-width: 900px){
   .dir-close{display:none !important}
+}
+/* between the phone layout and 1440: the top bar gives up its least useful parts first */
+@media (min-width: 900px) and (max-width: 1279px){
+  .top-right .counts{display:none}
+  .brand{width:auto;margin-right:20px}
+  .film{width:auto;flex:0 1 auto;max-width:300px}
+}
+@media (min-width: 900px) and (max-width: 1099px){
+  .film span{display:none}
+  .brand .word{display:none}
 }
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation:none !important;transition:none !important;scroll-behavior:auto !important}
