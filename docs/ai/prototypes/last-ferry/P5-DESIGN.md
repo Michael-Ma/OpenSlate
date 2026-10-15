@@ -254,3 +254,16 @@ Most Chinese strings are narrower than the English ones. The tightest places are
 10. **Keyframes between 900 and 1366 px.** The Keyframes layout needs about 1366 px; `last-ferry.html` scrolls sideways below that. States stacks instead. Which should the built view do: stack, or narrow the Director column?
 11. **Opening a film.** `Open` on The Last Ferry goes to Keyframes, as "where you left off". Should the studio remember the last view per film?
 12. **Transcription.** It has a model row but no surface in these views. Is it only used inside narration upload?
+
+## Lead decisions on the open questions (2026-10-15)
+
+1. Failures stay neutral (icon and words, no red). Amber stays the Director's only colour.
+2. The films list shows name, length, scene and shot counts, clips made and last change; no poster or demo flag until the server provides them.
+3. Archived films can be restored: the Start view has an "Archived" filter with Restore (the server has `unarchive`).
+4. Export renders 1280 × 720 (the server default from card B6); the Export panel says so.
+5. A plan-import draft does not preview media effects in this version.
+6. "Point the Director" on an asset points at the asset's shot, or its scene; assets cannot be referenced in a message yet.
+7. Film reorders shots within a scene; moving a shot to another scene happens in Plan.
+8. Between 900 and 1366 px the built Keyframes view narrows the Director column (320 px below 1280 px) and lets the workspace shrink; nothing scrolls sideways at any width from 900 px up.
+- The top bar shows "48 s · 30 fps": the overview does not report aspect ratio or resolution, so the studies' "16:9 · 1920 × 1080" is left out.
+- The "Prototype ▾" state menu is a study tool only; the built views have no such menu.
