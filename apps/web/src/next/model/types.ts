@@ -34,6 +34,8 @@ export interface ProjectSnapshot {
   };
   conversation?: ConversationEntry[];
   questions?: PendingQuestion[];
+  /** Director turns with honest endings and progress (DC-16); absent on older servers. */
+  turns?: TurnView[];
   /** Director notes (phase P4); absent on servers without contract 5.0.0. */
   notes?: DirectorNote[];
   control?: { paused: boolean; authorityId?: string };
@@ -51,6 +53,19 @@ export interface ConversationEntry {
   at?: string;
   /** Which Director runtime wrote an assistant entry, when the server reports it (DC-15). */
   runtime?: "scripted" | "live";
+}
+
+export interface TurnView {
+  id: string;
+  requestId: string;
+  state: string;
+  at?: string;
+  runtime?: "scripted" | "live";
+  action?: "conversation" | "keyframe_review";
+  /** Why a turn ended other than with a reply: no_reply, failed, timeout, superseded, interrupted, owner_lost. */
+  reason?: string | null;
+  effects?: { notesCreated: number; proposalsHeld: number; changesApplied: number };
+  progress?: { tool: string; state: string } | null;
 }
 
 export interface PendingQuestion {

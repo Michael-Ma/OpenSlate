@@ -63,9 +63,10 @@ export function recordNotes(service: ProductionService, projectId: string, actor
       invariant(!input.blocking || input.choices.some(c => c.kind === 'accept'), 'VALIDATION_ERROR', 'Blocking notes must offer a keep choice');
       if (input.seenKeyframe) {
         const seen = input.seenKeyframe;
-        const evidence = store.list<{ epochId: string; snapshot: { attachedKeyframes?: { shotId: string; artifactId: string; sha256: string }[] } }>('director_context', projectId)
-          .filter(c => c.epochId === actor.epochId).flatMap(c => c.snapshot.attachedKeyframes ?? []);
-        invariant(ids.has(seen.shotId) && evidence.some(e => canonical(e) === canonical(seen)), 'SCOPE_DENIED', 'The Director was not shown this exact keyframe');
+        const projection = store.get<import('./keyframe-projector.js').KeyframeProjection>('request_keyframe_projection', actor.requestId);
+        invariant(projection?.projectId === projectId && projection.epochId === actor.epochId && ids.has(seen.shotId)
+          && projection.images.some(e => e.shotId === seen.shotId && e.artifactId === seen.artifactId && e.sha256 === seen.sha256),
+          'SCOPE_DENIED', 'The Director was not shown this exact keyframe');
       }
       return { ...structuredClone(input), noteId: newId(), requestId: actor.requestId, turnId: turn.id, letter: letter(start + index), state: 'open', version: 1, createdAt: new Date().toISOString() };
     });

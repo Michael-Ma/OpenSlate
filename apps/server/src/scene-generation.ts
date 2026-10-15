@@ -1,3 +1,4 @@
+import { isKeyframeReview } from "./application/keyframe-review.js";
 import { requiredCommandKey } from "./application/command-key.js";
 import { sceneNotes, openBlockingNotes } from "./application/director-notes.js";
 import type { FastifyInstance } from "fastify";
@@ -116,7 +117,7 @@ export function sceneView(
     const request = requestId
       ? store.get<{ scopeIds?: string[] }>("message", requestId)
       : null;
-    return requestScopesIntersect(project, commandScopes, request?.scopeIds);
+    return !isKeyframeReview(service, requestId) && requestScopesIntersect(project, commandScopes, request?.scopeIds);
   };
   const busy =
     store
@@ -646,7 +647,7 @@ export async function generateScene(production: ProductionService, projectId: st
         );
         production.approve(projectId, actor, displayed.id, ids);
       }
-      store.insert("scene_generation_action", actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId) });
+      store.insert("scene_generation_action", actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId), ...(input.kind === "image" ? { imageNodes: store.list<NodeBinding>("node_binding", projectId).filter(b => b.state === "active" && b.planId === applied.activePlanId && b.node.kind === "image" && selected.some(r => r.shotId === b.node.shotId)).map(b => ({ nodeId: b.id, candidateId: b.candidateId })) } : {}) });
       if (input.kind === "image") options.enqueueVoice?.(projectId, sceneId, targets.map(row => row.shotId), actor);
       return {
         ...applied,
