@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classicHref, codeSegments, connectionPill, connectScreen, directorHasFilm, escClosesDrawer, filmHeading, hasNoFilms, otherLocale,
+  classicHref, codeSegments, connectionPill, connectScreen, directorHasFilm, escClosesDrawer, filmHeading, hasNoFilms, noteOpenView, otherLocale,
   pauseCountdown, resumeCountdown, searchWithLocale, shownView, showProjectPicker, startCountdown, tabKeyTarget,
   toastLifetime, topBarMode, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS, VIEWS,
 } from '../../src/next/model/shell.ts';
@@ -148,4 +148,10 @@ test('backticks in a message mark code', () => {
   assert.deepEqual(codeSegments('No code here'), [{ text: 'No code here', code: false }]);
   assert.deepEqual(codeSegments('An `unpaired tick'), [{ text: 'An `unpaired tick', code: false }]);
   assert.deepEqual(codeSegments(''), []);
+});
+
+test('a Director note\'s Open stays in a view that shows shots; Settings and Start go to Keyframes', () => {
+  for (const view of ['plan', 'keyframes', 'assets', 'film']) assert.equal(noteOpenView(view), view);
+  assert.equal(noteOpenView('settings'), 'keyframes');
+  assert.equal(noteOpenView('start'), 'keyframes');
 });

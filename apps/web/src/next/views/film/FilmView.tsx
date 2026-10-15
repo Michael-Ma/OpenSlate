@@ -64,7 +64,7 @@ function FilmWorkspace() {
   const projectId = useStudio((s) => s.projectId);
   const connection = useStudio((s) => s.connection);
   const pending = useStudio((s) => s.pending);
-  const storeShot = useStudio((s) => s.shotId);
+  const focus = useStudio((s) => s.focus);
   const narrow = useNarrow();
   const live = mode === "live";
   const writable = connection === "connected";
@@ -114,12 +114,15 @@ function FilmWorkspace() {
     const view = work.getBoundingClientRect();
     if (box.bottom > view.bottom + 1 || box.top < view.top - 1) tools.scrollIntoView({ block: "nearest" });
   }, [selectionKey]);
-  // "Open 2.2" from elsewhere (the Director, a note) selects and seeks the shot here.
-  const seenStoreShot = useRef(storeShot);
+  // "Open 2.2" from elsewhere (a Director note) selects and seeks the shot here, even when it is opened again;
+  // a scene opens on its first shot.
+  const seenFocus = useRef(focus?.nonce);
   useEffect(() => {
-    if (storeShot && storeShot !== seenStoreShot.current && overview.shots[storeShot]) selectShot(storeShot, false);
-    seenStoreShot.current = storeShot;
-  }, [storeShot, overview, selectShot]);
+    if (!focus || focus.nonce === seenFocus.current) return;
+    seenFocus.current = focus.nonce;
+    const shotId = focus.kind === "shot" ? focus.id : overview.scenes.find((scene) => scene.sceneId === focus.id)?.shotIds[0];
+    if (shotId && overview.shots[shotId]) selectShot(shotId, false);
+  }, [focus, overview, selectShot]);
 
   // ---- free edits with Undo ---------------------------------------------------------------------
   const [editing, setEditing] = useState<string | null>(null);
@@ -192,7 +195,6 @@ function FilmWorkspace() {
   };
   const openInKeyframes = () => {
     if (!selectedShot) return;
-    seenStoreShot.current = selectedShot.shotId;
     store.selectShot(selectedShot.shotId);
     store.setView("keyframes");
   };

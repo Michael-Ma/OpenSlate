@@ -20,6 +20,16 @@ export interface Toast {
   undoCommandId?: string;
 }
 
+/**
+ * A shot or scene opened from elsewhere (a Director note's "Open 2.2"). The nonce is new on every open, so the
+ * view on screen can react to the same shot opened twice: Plan scrolls to the row, Film seeks, Assets scrolls.
+ */
+export interface Focus {
+  kind: "shot" | "scene";
+  id: string;
+  nonce: number;
+}
+
 export interface StudioState {
   connection: Connection;
   projects: ProjectSummary[];
@@ -34,6 +44,8 @@ export interface StudioState {
   view: ViewName;
   sceneId: string | null;
   shotId: string | null;
+  /** The last shot or scene opened from elsewhere; it is selected too. */
+  focus: Focus | null;
   /** Narrow layouts show the Director as a drawer. */
   directorOpen: boolean;
   composer: { text: string; targets: Target[]; sending: boolean };
@@ -55,6 +67,7 @@ export const initialState: StudioState = {
   view: "keyframes",
   sceneId: null,
   shotId: null,
+  focus: null,
   directorOpen: false,
   composer: { text: "", targets: [], sending: false },
   edit: null,

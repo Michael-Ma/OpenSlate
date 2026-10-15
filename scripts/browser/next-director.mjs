@@ -230,9 +230,23 @@ export const scenarios = [
       await reply.getByRole("button", { name: "Open 2.3" }).click();
       await page.waitForSelector('.shot-row.flash[data-shot="shot-2-3"]');
       if (!(await page.locator('[data-act="tab"][data-view="plan"][aria-selected="true"]').count())) fail("Open 2.3 left Plan");
-      // From a view still in the classic studio, Open 2.3 comes back to Keyframes with 2.3 selected.
+      // In Film, Open 2.2 stays in Film and selects the shot on the timeline; opened again, it is selected again.
       await page.locator('[data-act="tab"][data-view="film"]').click();
       await page.waitForSelector('[data-act="tab"][data-view="film"][aria-selected="true"]');
+      await reply.getByRole("button", { name: "Open 2.2" }).click();
+      await page.waitForSelector('main.work[data-view="film"] .blk.sel[data-shot="shot-2-2"]');
+      await page.locator('main.work[data-view="film"] .blk[data-shot="shot-2-2"]').click();
+      await page.waitForSelector('main.work[data-view="film"] .blk.sel', { state: "detached" });
+      await reply.getByRole("button", { name: "Open 2.2" }).click();
+      await page.waitForSelector('main.work[data-view="film"] .blk.sel[data-shot="shot-2-2"]');
+      // In Assets, Open 2.3 stays and brings the shot's set into view.
+      await page.locator('[data-act="tab"][data-view="assets"]').click();
+      await page.waitForSelector('main.work[data-view="assets"] #av-set-shot-2-3');
+      await reply.getByRole("button", { name: "Open 2.3" }).click();
+      await page.waitForSelector('main.work[data-view="assets"] .shotset.flash[data-shot="shot-2-3"]');
+      // Settings shows no shots: Open 2.3 goes to Keyframes with 2.3 selected.
+      await page.locator('.topbar [data-act="settings"]').click();
+      await page.waitForSelector('.app[data-view="settings"]');
       await reply.getByRole("button", { name: "Open 2.3" }).click();
       await page.waitForSelector('[data-act="tab"][data-view="keyframes"][aria-selected="true"]');
       await page.waitForSelector('.card.sel[data-card="shot-2-3"]');

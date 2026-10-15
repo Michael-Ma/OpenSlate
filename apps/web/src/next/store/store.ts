@@ -341,6 +341,9 @@ export class StudioStore {
   setView = (view: ViewName) => this.dispatch({ type: "view", view });
   selectScene = (sceneId: string) => this.dispatch({ type: "scene", sceneId });
   selectShot = (shotId: string) => this.dispatch({ type: "shot", shotId });
+  /** Open a shot from elsewhere (a Director note): selected, and the view on screen brings it into view, even again. */
+  focusShot = (shotId: string) => this.dispatch({ type: "focus", kind: "shot", id: shotId });
+  focusScene = (sceneId: string) => this.dispatch({ type: "focus", kind: "scene", id: sceneId });
   setDirectorOpen = (open: boolean) => this.dispatch({ type: "directorOpen", open });
   setComposerText = (text: string) => this.dispatch({ type: "composerText", text });
   pointAt = (target: Target, add = true) => this.dispatch({ type: "composerTarget", target, add });

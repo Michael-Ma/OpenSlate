@@ -14,6 +14,7 @@ export type Action =
   | { type: "view"; view: ViewName }
   | { type: "scene"; sceneId: string }
   | { type: "shot"; shotId: string }
+  | { type: "focus"; kind: "shot" | "scene"; id: string }
   | { type: "directorOpen"; open: boolean }
   | { type: "composerText"; text: string }
   | { type: "composerTarget"; target: Target; add: boolean }
@@ -35,7 +36,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, projects: action.projects };
     case "project":
       if (action.projectId === state.projectId) return state;
-      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false } };
+      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, focus: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false } };
     case "snapshot":
       if (action.snapshot.project.id !== state.projectId) return state;
       // A stale read (lower cursor) never replaces a newer one.
@@ -67,6 +68,11 @@ export function reducer(state: StudioState, action: Action): StudioState {
       // Selecting a shot never changes what the composer points at (plan item LG-3).
       const sceneId = state.overview?.shots[action.shotId]?.sceneId ?? state.sceneId;
       return { ...state, shotId: action.shotId, sceneId, edit: state.edit?.shotId === action.shotId ? state.edit : null };
+    }
+    case "focus": {
+      // Selected like any selection, and marked as opened from elsewhere with a new nonce.
+      const selected = reducer(state, action.kind === "shot" ? { type: "shot", shotId: action.id } : { type: "scene", sceneId: action.id });
+      return { ...selected, focus: { kind: action.kind, id: action.id, nonce: (state.focus?.nonce ?? 0) + 1 } };
     }
     case "directorOpen":
       return { ...state, directorOpen: action.open };

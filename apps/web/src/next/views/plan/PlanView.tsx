@@ -7,7 +7,6 @@ import { importName, importNotes, importReview, importStage, type PlanImportsRea
 import { addedScene, addedShot, deleteSceneFacts, deleteShotFacts, planOutline, sceneMove, shotMove, type SceneView, type ShotRowView } from "../../model/plan.ts";
 import { NARROW_QUERY } from "../../model/shell.ts";
 import { msg, type Msg, type ProjectSnapshot, type Target } from "../../model/types.ts";
-import type { StudioStore } from "../../store/store.ts";
 import { useMode, useStore, useStudio } from "../../store/react.tsx";
 import { useResource } from "../../store/useResource.ts";
 import { confirmImport, discardImport, headAfter, infoToast, refusal, sendImport, storyboard, storyboardSequence, takeRefusal, undoToast, type StoryboardReceipt } from "./commands.ts";
@@ -25,36 +24,6 @@ type Editing = { kind: "brief" | "story" } | { kind: "title" | "direction"; scen
 type Confirming = { kind: "scene"; sceneId: string } | { kind: "shot"; shotId: string };
 
 const focusLater = (selector: string) => requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true }));
-
-/**
- * The Director's "Open 2.3" (director/NoteCards.tsx) switches to Keyframes from every view. In Plan it should
- * stay in Plan and bring the row into view (P5-DESIGN, shell item 9). Until the Director column keeps the
- * current view itself, Plan takes that click first, while it is on screen: it selects the shot or scene, and
- * the view scrolls to it and flashes it. Remove this once NoteCards no longer leaves Plan.
- */
-function useNoteOpenStaysInPlan(store: StudioStore, onOpen: (kind: "shot" | "scene", id: string) => void) {
-  const latest = useRef(onOpen);
-  latest.current = onOpen;
-  useEffect(() => {
-    const onClick = (event: MouseEvent) => {
-      const button = event.target instanceof Element ? event.target.closest('[data-act="note-open"][data-target]') : null;
-      if (!button) return;
-      const [kind, ...rest] = (button.getAttribute("data-target") ?? "").split(":");
-      const id = rest.join(":");
-      if (!id || (kind !== "shot" && kind !== "scene")) return;
-      // Captured on the document, before React's own handler on the app root: the column's switch never runs.
-      event.preventDefault();
-      event.stopPropagation();
-      if (kind === "shot") store.selectShot(id);
-      else store.selectScene(id);
-      latest.current(kind, id);
-      // On narrow screens the Director is a drawer over the workspace: get out of the way, as NoteCards does.
-      if (window.matchMedia?.(NARROW_QUERY).matches) store.setDirectorOpen(false);
-    };
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, [store]);
-}
 
 /**
  * The Plan view (plan items SB-20, SB-13, SB-9, SB-12, SB-10): the film's outline as a document. Brief and story on
@@ -87,7 +56,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   const director = useStudio((s) => s.director);
   const connection = useStudio((s) => s.connection);
   const pending = useStudio((s) => s.pending);
-  const selectedShot = useStudio((s) => s.shotId);
+  const focus = useStudio((s) => s.focus);
   const imports = useResource<PlanImportsRead>("/plan-imports");
   const outline = useMemo(() => planOutline(snapshot, overview, proposals), [snapshot, overview, proposals]);
   const fps = overview.fps;
@@ -129,12 +98,13 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     window.setTimeout(() => { flashed.current = null; setFlash((current) => (current === flash ? null : current)); }, 1600);
   }, [flash, outline, reduced]);
 
-  const seenShot = useRef(selectedShot);
+  // A shot or scene opened from elsewhere (the Director's "Open 2.3") stays in Plan: its row or panel comes into view.
+  const seenFocus = useRef(focus?.nonce);
   useEffect(() => {
-    if (selectedShot && selectedShot !== seenShot.current) setFlash(rowId(selectedShot));
-    seenShot.current = selectedShot;
-  }, [selectedShot]);
-  useNoteOpenStaysInPlan(store, (kind, id) => setFlash(kind === "shot" ? rowId(id) : sceneElementId(id)));
+    if (!focus || focus.nonce === seenFocus.current) return;
+    seenFocus.current = focus.nonce;
+    setFlash(focus.kind === "shot" ? rowId(focus.id) : sceneElementId(focus.id));
+  }, [focus]);
 
   // ---- helpers -----------------------------------------------------------------------------------------
   const startEdit = (next: Editing) => { setError(null); setEditing(next); };

@@ -1,12 +1,14 @@
 import { useI18n } from "../i18n/I18n.tsx";
 import type { NoteOpen, ThreadNote } from "../model/director.ts";
-import { NARROW_QUERY } from "../model/shell.ts";
+import { NARROW_QUERY, noteOpenView, shownView } from "../model/shell.ts";
 import { useStore } from "../store/react.tsx";
 
 /**
  * The Director's lettered notes under the reply that wrote them (DC-18): an amber card per open note,
  * neutral once settled (a green "✓ …" line) or out of date. The only action here is Open: the note's
- * choices live in the banner, so they are never offered twice.
+ * choices live in the banner, so they are never offered twice. Open acts in the current view when it shows
+ * shots (Plan scrolls to the row, Film selects and seeks, Assets scrolls to the shot's set, Keyframes selects
+ * the card); from Settings and Start it goes to Keyframes (P5-DESIGN shell item 9).
  */
 export function NoteCards({ notes }: { notes: ThreadNote[] }) {
   const { t, tm } = useI18n();
@@ -14,9 +16,10 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
   if (!notes.length) return null;
 
   const open = (target: NoteOpen) => {
-    if (target.kind === "shot") store.selectShot(target.id);
-    else store.selectScene(target.id);
-    store.setView("keyframes");
+    if (target.kind === "shot") store.focusShot(target.id);
+    else store.focusScene(target.id);
+    const view = shownView(store.getState());
+    if (noteOpenView(view) !== view) store.setView(noteOpenView(view));
     // On narrow screens the Director is a drawer over the workspace: get out of the way (the shell returns focus).
     if (window.matchMedia(NARROW_QUERY).matches) store.setDirectorOpen(false);
   };

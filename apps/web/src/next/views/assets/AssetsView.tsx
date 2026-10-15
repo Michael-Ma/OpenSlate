@@ -65,7 +65,7 @@ function Library() {
   const { t, tm, locale } = useI18n();
   const overview = useStudio((s) => s.overview)!;
   const connected = useStudio((s) => s.connection === "connected");
-  const shotId = useStudio((s) => s.shotId);
+  const focus = useStudio((s) => s.focus);
   const narrow = useNarrow();
   const list = useAssetList();
   const items = list.items ?? EMPTY;
@@ -91,20 +91,22 @@ function Library() {
     if (window.matchMedia("(max-width: 899px)").matches) setSheet(true);
   }, []);
 
-  // A shot chosen elsewhere (e.g. "Open 2.2" from a note) is scrolled to here, like the study does.
-  const firstShot = useRef(shotId);
+  // A shot or scene opened elsewhere (a Director note's "Open 2.2") is scrolled to here, like the study does,
+  // even when it is opened again.
+  const seenFocus = useRef(focus?.nonce);
   useEffect(() => {
-    if (!shotId || shotId === firstShot.current) return;
-    firstShot.current = shotId;
+    if (!focus || focus.nonce === seenFocus.current) return;
+    seenFocus.current = focus.nonce;
     setFilters(ALL_ASSETS);
     requestAnimationFrame(() => {
-      const set = document.getElementById(`av-set-${shotId}`);
+      const target = document.getElementById(focus.kind === "shot" ? `av-set-${focus.id}` : `av-g-${focus.id}`);
+      const set = focus.kind === "shot" ? target : target?.closest<HTMLElement>(".group");
       if (!set) return;
       set.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       set.classList.add("flash");
       setTimeout(() => set.classList.remove("flash"), 1600);
     });
-  }, [shotId]);
+  }, [focus]);
 
   // After an import, the new file is selected once the library lists it.
   useEffect(() => {

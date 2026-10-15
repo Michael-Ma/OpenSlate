@@ -55,6 +55,12 @@ export function directorHasFilm(state: Pick<StudioState, "view" | "projectId" | 
   return !!state.projectId && shownView(state) !== "start";
 }
 
+/** The views that show a film's shots, so a Director note's Open selects the shot there instead of leaving. */
+const SHOWS_SHOTS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
+
+/** Where a Director note's "Open 2.2" lands: the current view when it can show the shot, else Keyframes (from Settings and Start). */
+export const noteOpenView = (view: ViewName): ViewName => (SHOWS_SHOTS.includes(view) ? view : "keyframes");
+
 /**
  * The top bar in a film (title, tabs, counts, Stop) or on Start, where no film is open
  * (the films on this computer; no tabs, no counts, no Stop).
