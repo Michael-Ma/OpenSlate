@@ -154,14 +154,20 @@ export const scenarios = [
       expect(scroll.height <= scroll.inner, "The classic panel makes the page scroll");
       await shot(page, "next-shell-classic-plan");
 
-      // Keyboard: arrows move along the tabs, Enter opens one.
+      // Keyboard: arrows move along the tabs, Enter opens one. Assets is built; Film still opens the classic panel.
       await tab(page, "plan").focus();
       await page.keyboard.press("ArrowRight");
       await page.keyboard.press("ArrowRight");
       expect((await page.evaluate(() => document.activeElement?.getAttribute("data-view"))) === "assets", "ArrowRight did not move focus to Assets");
+      expect((await tab(page, "assets").getAttribute("aria-describedby")) === null, "The Assets tab still says it opens in the classic studio");
       await page.keyboard.press("Enter");
-      await page.locator(".classic-view[data-view='assets']").waitFor();
-      expect((await page.locator(".classic-view [data-act='open-classic']").getAttribute("href")) === "?ui=classic&view=assets", "Assets links to the wrong classic view");
+      await page.locator("main[data-view='assets']:not(.classic-view)").waitFor();
+      await tab(page, "assets").focus();
+      await page.keyboard.press("ArrowRight");
+      expect((await page.evaluate(() => document.activeElement?.getAttribute("data-view"))) === "film", "ArrowRight did not move focus to Film");
+      await page.keyboard.press("Enter");
+      await page.locator(".classic-view[data-view='film']").waitFor();
+      expect((await page.locator(".classic-view [data-act='open-classic']").getAttribute("href")) === "?ui=classic&view=cut", "Film links to the wrong classic view");
 
       await page.locator(".classic-view [data-act='back-to-keyframes']").click();
       await page.waitForFunction(() => document.querySelector(".topbar [data-view='keyframes']")?.getAttribute("aria-selected") === "true");

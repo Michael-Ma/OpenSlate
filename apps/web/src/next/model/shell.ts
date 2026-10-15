@@ -11,7 +11,7 @@ export const NARROW_QUERY = "(max-width: 899px)";
 export const VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
 
 /** Views the next studio has designed; the rest open in the classic studio for now (plan decision D13). */
-export const isDesignedView = (view: ViewName): boolean => view === "keyframes";
+export const isDesignedView = (view: ViewName): boolean => view === "keyframes" || view === "assets";
 
 export interface ViewTab {
   view: ViewName;
