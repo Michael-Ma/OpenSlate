@@ -7,7 +7,7 @@ import { legacyChangeProposalSchema } from "./legacy-change-schema.js";
 export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"] as const);
 export const V2_TOOL_NAMES = Object.freeze([...TOOL_NAMES, "revise_narration_draft"] as const);
 const V3_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transcription", "prepare_narration_speech"] as const);
-export const ALL_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes"] as const);
+export const ALL_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
 export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"] as const);
@@ -102,12 +102,24 @@ export const recordNotesSchema = object({ notes: { type: "array", minItems: 1, m
     object({ kind: { const: "reply" } }, ["kind"]),
   ] } },
 }, ["anchor", "kind", "blocking", "text", "choices"]) } }, ["notes"]);
+// B9: 5.0.0 is unreleased; earlier catalogs remain byte-for-byte unchanged.
+export const proposalPatchSchema = object({
+  updateShots: { type: "array", minItems: 1, maxItems: 400, items: { ...object({
+    id, desiredFrames: { type: "integer", minimum: 1, maximum: 10800 },
+    motion: { type: "string", minLength: 1, maxLength: 16000 },
+    imagePrompt: { type: "string", minLength: 1, maxLength: 16000 },
+    videoPrompt: { type: "string", minLength: 1, maxLength: 16000 },
+    narration: object({ mode: { enum: ["undecided", "none", "generated", "uploaded"] }, text: { type: "string", maxLength: 16000 }, voice: { enum: ["stock", "personal"] } }, ["mode", "text", "voice"]),
+  }, ["id"]), minProperties: 2 } },
+  updateScenes: { type: "array", minItems: 1, maxItems: 400, items: object({ id, purpose: { type: "string", minLength: 1, maxLength: 16000 } }, ["id", "purpose"]) },
+});
+export const proposeChangeSchema = object({ patch: { ...proposalPatchSchema, minProperties: 1 } }, ["patch"]);
 const v5Descriptors = freeze(v4Descriptors.map(tool => tool.name === "read_context" ? { ...tool,
   description: `${tool.description} Select notes for open, resolved and stale notes and human resolutions.`,
   inputSchema: object({ section: { enum: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", "narration", "audio_operations", "notes"] }, offset: { type: "integer", minimum: 0, maximum: 10_000_000 } }) }
   : tool.name === "prepare_narration_speech" ? { ...tool, description: "Save a pending speech suggestion for an exact saved narration section. Only a person's press on the audio request route starts paid work. This tool never generates, attaches or accepts audio. No spending allowance or separate approval is needed." }
   : tool.name === "prepare_recording_transcription" ? { ...tool, description: "Save a pending transcription suggestion for an exact owned recording and optional section. Only a person's press on the audio request route starts paid work. This tool never transcribes, attaches or adopts text. No spending allowance or separate approval is needed." }
-  : tool).concat(descriptor("record_notes", "Record one point per shot-anchored note, including typed human choices. Use the returned app-assigned letters. Allowed in discuss-only turns. Notes never edit the film or start paid work. Never judge a picture absent from attachedKeyframes or re-raise settled notes.", recordNotesSchema, false)));
+  : tool).concat(descriptor("record_notes", "Record one point per shot-anchored note, including typed human choices. Use the returned app-assigned letters. Allowed in discuss-only turns. Notes never edit the film or start paid work. Never judge a picture absent from attachedKeyframes or re-raise settled notes.", recordNotesSchema, false), descriptor("propose_change", "Hold one creative patch for human review with an application-computed Now/After preview. Allowed in discuss-only epochs. No holds, plan, grants or generation. Propose duration, narration and changes that outdate paid media; apply harmless text directly with a receipt.", proposeChangeSchema, false)));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },

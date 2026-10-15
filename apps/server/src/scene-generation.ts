@@ -176,7 +176,7 @@ export function sceneGenerationView(production: ProductionService, projectId: st
   const openNotes = sceneNotes(production.store, projectId, sceneId).filter(n => n.state === "open");
   const blockingNotes = openNotes.filter(n => n.blocking);
   const notesDigest = digest(openNotes);
-  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
+  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.concurrency !== "alongside" && message.state === "active").at(-1)?.id ?? null;
   return { ...saved.view, openNotes, blockingNotes, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error, narrationEvidence: audio.rows,
     confirmationDigest: audio.error ? null : digest({ ...saved.view, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
 }
@@ -515,7 +515,7 @@ export function registerSceneGeneration(
             `${input.regenerate ? "Regenerate" : "Generate"} ${input.kind === "image" ? "keyframes" : "video"} for ${input.targetShotIds ? "the selected shots in" : ""} this reviewed scene.`,
             {
               editing: true,
-              supersede: "intersecting",
+              ...(input.regenerate ? { concurrency: "alongside" as const } : { supersede: "intersecting" as const }),
               scopeIds: input.targetShotIds
                 ? selected.map((row) => row.shotId)
                 : [sceneId],

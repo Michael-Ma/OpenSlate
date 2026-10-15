@@ -177,10 +177,10 @@ test('uploaded-to-generated writing updates the card and preserves visual revisi
  const row=f.view().segments[0];response=await f.request('/speech-proposals',{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,segmentId:row.entry.segmentId,segmentRevisionId:row.script.id,profileId:speechProfile.id,voice:'coral',instructions:''});assert.equal(response.statusCode,200,response.body);
  const proposal=f.store.get('narration_speech_proposal',response.json().proposal.id);response=await f.request('/speech-reviews',{sessionId:f.session.id,proposalId:proposal.id,proposalDigest:digest(proposal)});assert.equal(response.statusCode,200,response.body);
  const binding=f.store.get('node_binding',f.store.get('candidate',response.json().receipt.candidateId).nodeId),current=f.store.getProject(f.project.id);
- assert.equal(f.engine.held(current,binding.id),false,'only the exact reviewed speech job ignores its own writing hold');
- assert.ok(f.store.list('hold',current.id).some(h=>h.active&&h.ownerId===f.session.requestId&&h.scopeId===saved.shots[0].id));
+ assert.equal(f.engine.held(current,binding.id),false,'saved alongside writing releases only its own hold');
+ assert.ok(!f.store.list('hold',current.id).some(h=>h.active&&h.ownerId===f.session.requestId));
  assert.equal(current.shots[0].narrationPending,true);for(const frame of frames)assert.equal(f.engine.outputs(current.id).find(output=>output.nodeId===frame.nodeId).artifact.artifactId,frame.artifact.artifactId);
- const oldVideo=f.store.list('node_binding',current.id).find(binding=>binding.node.kind==='video'&&binding.node.shotId===saved.shots[0].id);assert.equal(f.engine.held(current,oldVideo.id),true);
+ const oldVideo=f.store.list('node_binding',current.id).find(binding=>binding.node.kind==='video'&&binding.node.shotId===saved.shots[0].id);assert.equal(f.engine.held(current,oldVideo.id),false,'pending narration independently blocks stale video after the writing hold is released');
  for(const hold of f.store.list('hold',current.id).filter(h=>h.active&&h.ownerId===f.session.requestId))f.engine.releaseHold(current.id,hold.id,f.session.requestId);
  const starts=await f.engine.runReady();assert.equal(starts.dispatched,1,'only the other reviewed video is eligible');assert.equal(f.provider.acceptedCount(),3);assert.equal(f.engine.attempts(current.id).filter(attempt=>attempt.request.kind==='image').length,2,'speech planning must not resubmit frames');
  assert.ok(starts.blocked.some(blocked=>blocked.nodeId===oldVideo.id&&blocked.code==='TIMING_REQUIRED'),'pending writing blocks old video even if another resolved operation releases the request hold');
@@ -295,4 +295,24 @@ test('overview estimates an unmade voice and clears a previous fit decision when
   const row = new GenerationOverviewReader(f.production,f.narration).read(f.project.id).shots[shotId].narration;
   assert.equal(row.state,'text_only'); assert.equal(row.estimatedSeconds,1.2); assert.equal(row.measuredSeconds,undefined); assert.equal(row.fit,undefined);
   assert.equal(f.provider.acceptedCount(),0);
+});
+test('narration editing and match-audio fit run alongside a captured Director and fence its older narration/duration fields',async t=>{
+ const f=await fixture(t),human=f.production.beginRequest(f.project.id,'local-user','Keep working on this film'),bridge=f.production.openEpoch(f.project.id,human);
+ f.store.insert('director_context','narration-concurrency-context',f.project.id,{requestId:human.requestId,epochId:bridge.actor.epochId,snapshot:f.production.readContext(f.project.id,bridge.actor)});
+ const originalHolds=f.store.list('hold',f.project.id).filter(h=>h.active&&h.ownerId===human.requestId);
+ const {audio,segment}=await f.ready(),shotId=f.project.shots[0].id;
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.equal(f.store.get('message',human.requestId).state,'active');
+ const accepted=await f.request(`/shots/${shotId}/accept`,{...f.acceptBody(audio,segment),endSample:336000,durationMode:'match_audio'});assert.equal(accepted.statusCode,200,accepted.body);
+ assert.equal(f.store.getProject(f.project.id).shots[0].desiredFrames,210);
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.deepEqual(f.store.list('hold',f.project.id).filter(h=>h.active&&h.ownerId===human.requestId),originalHolds);
+ assert.ok(!f.store.list('hold',f.project.id).some(h=>h.active&&h.ownerId===f.session.requestId));
+ for(const fields of [{desiredFrames:180},{narration:{mode:'none',text:'',voice:'stock'}}]) await assert.rejects(f.production.prepare(f.project.id,bridge.actor,{variant:'project',expectedHeadVersion:f.store.getProject(f.project.id).headVersion,creative:{updateShots:[{id:shotId,...fields,reauthorPrompts:true}]}}),{code:'HUMAN_EDITED_FIELD'});
+ assert.equal(f.provider.acceptedCount(),0);
+});
+test('full narration workspace sessions and writing do not supersede an active Director',async t=>{
+ const f=await fixture(t),human=f.production.beginRequest(f.project.id,'local-user','Continue planning'),bridge=f.production.openEpoch(f.project.id,human);
+ const response=await f.request('/sessions',{});assert.equal(response.statusCode,200,response.body);const session=response.json().session;
+ const saved=await f.request('/segments',{sessionId:session.id,expectedVersion:0,patch:{add:[{text:'Human draft',textKind:'draft',language:'en',meaning:'Opening',source:{kind:'undecided'}}]}});assert.equal(saved.statusCode,200,saved.body);
+ assert.equal(f.store.get('message',session.requestId).concurrency,'alongside');assert.equal(f.store.get('message',human.requestId).state,'active');assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');
+ assert.equal(f.provider.acceptedCount(),0);
 });

@@ -1,3 +1,4 @@
+import { registerDirectorProposals } from "./application/director-proposals.js";
 import { registerDirectorNotes } from "./application/director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { requiredCommandKey } from "./application/command-key.js";
@@ -63,6 +64,7 @@ export function createApp(options: AppOptions = {}) {
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   registerDirectorNotes(app, service);
+  registerDirectorProposals(app, service);
   registerSceneGeneration(app, service, options.narrationRoutes?.narration);
   registerGenerationOverview(app, service, options.narrationRoutes?.narration);
   app.setErrorHandler((error, _request, reply) => {

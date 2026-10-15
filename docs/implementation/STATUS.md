@@ -1,6 +1,16 @@
 # Current implementation status
 
-Reconciled October 9, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 15, 2026 (B9 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 15 held Director proposals and alongside edits — B9 worktree verified
+
+The B9 backend component adds `propose_change` to the explicitly unreleased 5.0.0 catalog and updates V6 guidance. Discuss-only turns can hold creative suggestions without holds, grants or generation. App-computed Now/After previews show field changes, timeline/film seconds and actual media effects. Owned keyed accept/reject/undo commands recheck the live preview, rebase unrelated changes, expire touched revisions/data and restored origins, and preserve human field edits. Selective undo leaves newer fields alone, returns its inverse preview and reopens the proposal note. Duration-only changes preserve exact keyframes; obsolete retained clips read as outdated.
+
+Storyboard, proposal/note decisions and narration editing/fit now share alongside request ownership without revoking the running Director. The earliest captured turn cursor fences later human field changes, including ABA edits and narration drafts/canonical changes, with `HUMAN_EDITED_FIELD`; typed new direction still interrupts. Session continuation invalidates the old narration session capability through its head rather than superseding the Director. Imports preserve reviewed IDs across unrelated alongside field edits and refuse overlap. Existing request-owned holds, immutable receipts and uncertain paid-outcome rules remain authoritative.
+
+This entry supersedes B5's pending held-proposal/alongside boundary. The component remains in this worktree for the lead's review/commit/merge, per the card rules. Generated-keyframe projection/review turns and web rendering remain later cards. No browser-facing type in `studio-api.ts`, web source or schema migration changed; V1–V4 tool digests and historical skill packages remain unchanged.
+
+Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed preflight. `pnpm build` passed; targeted and compatibility verification passed **149 tests**. Final `pnpm test` passed **2,560 tests, zero failures and one optional native-probe skip (2,561 total)**; all five package typechecks passed. Tests used disposable fixtures, synthetic audio and fake adapters, including a running fake Director that completes through alongside actions and actual fake keyframe/video output checks. No live model/provider call, production-data edit/restart, port 3001 listener, external network request or credential read occurred. [B9 scope, file lists, decisions and verification](../ai/uiux-plan/codex/reports/B9-proposals.md).
 
 ## October 15 structured Director notes — B5 worktree verified
 

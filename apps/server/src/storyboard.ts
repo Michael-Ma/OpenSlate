@@ -1,3 +1,4 @@
+import { recordHumanFields } from "./application/human-fields.js";
 import type { FastifyInstance } from "fastify";
 import { digest, DomainError, invariant, newId, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
@@ -79,7 +80,7 @@ export function editStoryboard(
         "The storyboard changed; reload before saving this edit.",
       );
       invariant(
-        !s.store
+        ["treatment", "scene", "shot", "narration"].includes(input.kind) || !s.store
           .list<{ state: string }>("plan_import", projectId)
           .some((x) => x.state === "pending"),
         "IMPORT_PENDING",
@@ -387,7 +388,8 @@ export function editStoryboard(
           source: "app",
           key: `storyboard:${key}`,
           editing: true,
-          directEdit: true,
+          concurrency: "alongside",
+          holdScopeIds: [], // Detached media below determines the exact transient holds.
           scopeIds: scopes.length ? scopes : [projectId],
         },
       );
@@ -478,6 +480,7 @@ export function editStoryboard(
       s.store.insert("project_revision", next.revisionId, projectId, {
         project: next,
       });
+      recordHumanFields(s.store, before, next, actor);
       const id = newId();
       s.store.insert("storyboard_edit", id, projectId, {
         id,
