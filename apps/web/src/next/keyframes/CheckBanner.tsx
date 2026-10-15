@@ -1,40 +1,27 @@
 import type { GenerationOverview } from "@openslate/core/public";
 import { useI18n } from "../i18n/I18n.tsx";
-import { checkActions, checkTimeline, checkTitle, settledTimeline, type AppCheck, type TimelineSegment } from "../model/checks.ts";
-import { filmMeta } from "../model/keyframes.ts";
+import { checkActions, checkTimeline, checkTitle, settledTimeline, type AppCheck } from "../model/checks.ts";
+import { filmMeta, seconds } from "../model/keyframes.ts";
 import { clock } from "../model/motion.ts";
+import { BannerFrame } from "./BannerFrame.tsx";
 
 /** A check the person just settled from the banner; shown until they move on, with Undo while it is allowed. */
 export interface SettledCheck {
-  kind: "extended" | "edited";
+  /** extended: the shot was lengthened; cut: the line is cut at the shot's end; edited: a new line was written. */
+  kind: "extended" | "cut" | "edited";
   sceneId: string;
   shotId: string;
   label: string;
   letter: string;
-  /** extended: the new shot length; edited: the estimated length of the new line. */
+  /** edited: the estimated length of the new line; cut: the seconds of the line that will not be heard. */
   seconds: number;
-  /** edited: the saved line, so the view can tell when it was undone elsewhere. */
-  text?: string;
-  /** The overview cursor when it was settled; only later overviews can contradict it. */
-  cursor: number;
   shotSeconds: number;
   hadClip: boolean;
+  /** edited: the saved line, so the view can tell when it was undone elsewhere. */
+  text?: string;
   commandId: string | null;
-}
-
-const PX_PER_SECOND = 15;
-
-function Segments({ segments }: { segments: TimelineSegment[] }) {
-  const { tm } = useI18n();
-  return (
-    <div className="segs">
-      {segments.map((segment, index) =>
-        segment.kind === "shot"
-          ? <span key={index} className={`seg${segment.hot ? " hot" : ""}`} style={{ width: segment.seconds * PX_PER_SECOND }}>{tm(segment.text)}</span>
-          : <span key={index} className="seg dash">{tm(segment.text)}</span>,
-      )}
-    </div>
-  );
+  /** The overview cursor when it was settled; only later overviews can contradict it. */
+  cursor: number;
 }
 
 interface Props {
@@ -44,6 +31,7 @@ interface Props {
   settled: SettledCheck | null;
   busy: boolean;
   onExtend(check: AppCheck): void;
+  onKeep(check: AppCheck): void;
   onEditNarration(check: AppCheck): void;
   onNext(): void;
   onUndo(commandId: string): void;
@@ -51,36 +39,39 @@ interface Props {
 
 /**
  * App-computed checks (plan decision D4), one at a time. Drawn neutral, never in the Director's amber:
- * the app found these, the Director did not recommend them.
+ * the app found these, the Director did not recommend them. Each option is one free, undoable command.
  */
-export function CheckBanner({ overview, sceneId, checks, settled, busy, onExtend, onEditNarration, onNext, onUndo }: Props) {
+export function CheckBanner({ overview, sceneId, checks, settled, busy, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
   const { t, tm } = useI18n();
 
   if (settled && settled.sceneId === sceneId) {
-    const title = settled.kind === "extended"
-      ? t("check.done.extended.title", { label: settled.label, seconds: settled.seconds })
+    const shot = overview.shots[settled.shotId];
+    // The shot's length as the server settled it, once the overview has caught up.
+    const shotSeconds = shot ? seconds(shot.durationFrames, overview.fps) : settled.shotSeconds;
+    const title = settled.kind === "extended" ? t("check.done.extended.title", { label: settled.label, seconds: shotSeconds })
+      : settled.kind === "cut" ? t("check.done.cut.title", { label: settled.label, seconds: shotSeconds })
       : t("check.done.edited.title", { label: settled.label, seconds: settled.seconds, shot: settled.shotSeconds });
     const sub = settled.kind === "extended"
       ? `${t("check.done.film", { seconds: filmMeta(overview).seconds })} ${t(settled.hadClip ? "check.done.clip" : "check.done.free")}`
+      : settled.kind === "cut" ? t("check.done.cut.sub", { seconds: settled.seconds })
       : t("check.done.edited.sub");
     return (
-      <section className="banner check done" aria-label={t("check.label")} data-check={settled.shotId} data-state="settled">
-        <div className="banner-main">
-          <div className="eyebrow"><span className="letter">{settled.letter}</span>{t("check.done.eyebrow")}</div>
-          <h2>{title}</h2>
-          <div className="sub">{sub}</div>
-          {settled.kind === "extended" ? (
-            <div className="tl" aria-label={t("check.timeline.label")}>
-              <span className="k">{t("check.timeline.now")}</span>
-              <Segments segments={settledTimeline(settled.shotId, overview, clock)} />
-            </div>
-          ) : null}
-        </div>
-        <div className="banner-actions">
-          <button type="button" className="pill chosen" data-act="check-next" onClick={onNext}>{t(checks.length ? "check.done.next" : "check.done.done")}</button>
-          {settled.commandId ? <button type="button" className="pill" data-act="undo" data-shot={settled.shotId} disabled={busy} onClick={() => onUndo(settled.commandId!)}>{t("check.undo")}</button> : null}
-        </div>
-      </section>
+      <BannerFrame
+        tone="check"
+        state="settled"
+        letter={settled.letter}
+        eyebrow={t("check.done.eyebrow")}
+        title={title}
+        sub={sub}
+        timeline={settled.kind === "extended" ? { now: settledTimeline(settled.shotId, overview, clock) } : null}
+        anchor={{ attribute: "data-check", value: settled.shotId }}
+        actions={
+          <>
+            <button type="button" className="pill chosen" data-act="check-next" onClick={onNext}>{t(checks.length ? "check.done.next" : "check.done.done")}</button>
+            {settled.commandId ? <button type="button" className="pill" data-act="undo" data-shot={settled.shotId} disabled={busy} onClick={() => onUndo(settled.commandId!)}>{t("check.undo")}</button> : null}
+          </>
+        }
+      />
     );
   }
 
@@ -97,33 +88,27 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, onExtend
   const { check, letter } = first;
   const timeline = checkTimeline(check, overview);
   const actions = checkActions(check, overview.fps);
-  const keepWhy = `keep-why-${check.shotId}`;
   return (
-    <section className="banner check" aria-label={t("check.label")} data-check={check.shotId} data-state="open">
-      <div className="banner-main">
-        <div className="eyebrow">
-          <span className="letter">{letter}</span>
-          {t("check.eyebrow")}
-          {checks.length > 1 ? <span className="of">{t("check.of", { index: 1, total: checks.length })}</span> : null}
-        </div>
-        <h2>{tm(checkTitle(check))}</h2>
-        <div className="sub">{t("check.narration.body", { label: check.label })}</div>
-        <div className="tl" aria-label={t("check.timeline.label")}>
-          <span className="k">{t("check.timeline.now")}</span>
-          <Segments segments={timeline.now} />
-          {actions.extend ? <><span className="k">{t("check.timeline.after")}</span><Segments segments={timeline.after} /></> : null}
-        </div>
-      </div>
-      <div className="banner-actions">
-        {actions.extend ? (
-          <button type="button" className="pill chosen" data-act="make-fit" data-shot={check.shotId} disabled={busy} onClick={() => onExtend(check)}>
-            {tm(actions.extend.label)}
-          </button>
-        ) : null}
-        <button type="button" className="pill" data-act="keep-fit" data-shot={check.shotId} disabled aria-describedby={keepWhy}>{tm(actions.keep.label)}</button>
-        <span className="why" id={keepWhy}>{tm(actions.keep.reason)}</span>
-        <button type="button" className={`pill ${actions.extend ? "ghost" : "chosen"}`} data-act="edit-narration" data-shot={check.shotId} onClick={() => onEditNarration(check)}>{tm(actions.edit.label)}</button>
-      </div>
-    </section>
+    <BannerFrame
+      tone="check"
+      state="open"
+      letter={letter}
+      eyebrow={checks.length > 1 ? `${t("check.eyebrow")} · ${t("check.of", { index: 1, total: checks.length })}` : t("check.eyebrow")}
+      title={tm(checkTitle(check))}
+      sub={t("check.narration.body", { label: check.label })}
+      timeline={{ now: timeline.now, after: actions.extend ? timeline.after : null }}
+      anchor={{ attribute: "data-check", value: check.shotId }}
+      actions={
+        <>
+          {actions.extend ? (
+            <button type="button" className="pill chosen" data-act="make-fit" data-shot={check.shotId} disabled={busy} onClick={() => onExtend(check)}>
+              {tm(actions.extend.label)}
+            </button>
+          ) : null}
+          <button type="button" className={`pill${actions.extend ? "" : " chosen"}`} data-act="keep-fit" data-shot={check.shotId} disabled={busy} onClick={() => onKeep(check)}>{tm(actions.keep.label)}</button>
+          <button type="button" className="pill ghost" data-act="edit-narration" data-shot={check.shotId} onClick={() => onEditNarration(check)}>{tm(actions.edit.label)}</button>
+        </>
+      }
+    />
   );
 }

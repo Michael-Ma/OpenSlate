@@ -41,14 +41,13 @@ test('after the change, the strip says when what follows now starts', () => {
     [['2.2 · 4 s', false], ['2.3 · 8 s', true], ['Scene 3 · from 0:34', false]]);
 });
 
-test('the check offers the fitting length in frames, an unavailable Keep with its reason, and Edit narration', () => {
+test('the check offers the fitting length, Keep with what would be cut, and Edit narration', () => {
   const overview = golden();
   const check = checkFor(overview, '2.3');
   const actions = checkActions(check, 30);
   assert.deepEqual(actions.extend && { seconds: actions.extend.seconds, frames: actions.extend.frames, label: en(actions.extend.label) }, { seconds: 8, frames: 240, label: 'Make 2.3 8 s' });
-  assert.equal(en(actions.keep.label), 'Keep 6 s');
-  assert.equal(actions.keep.available, false);
-  assert.ok(en(actions.keep.reason).length > 0);
+  assert.deepEqual([en(actions.keep.label), actions.keep.seconds, actions.keep.cutSeconds], ['Keep 6 s', 6, 1.4]);
+  assert.equal(en(actions.edit.label), 'Edit narration');
   assert.equal(zh(actions.extend.label), '把 2.3 改为 8 秒');
   // A line longer than any allowed shot cannot be fixed by lengthening.
   const long = { ...check, lineSeconds: 16.2, fitSeconds: 15 };

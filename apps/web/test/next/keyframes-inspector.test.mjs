@@ -45,7 +45,7 @@ test('the inspector rows: motion, duration, narration measured or estimated, and
   assert.deepEqual(rows(view(overview, '2.3')), [
     ['motion', 'Slow tilt down', []],
     ['duration', '6 s', []],
-    ['narration', 'It was the last boat of the season, and I nearly missed it.', ['7.4 s voice line', 'Longer than the shot']],
+    ['narration', 'It was the last boat of the season, and I nearly missed it.', ['7.4 s voiced', 'longer than the shot']],
   ]);
   assert.deepEqual(rows(view(overview, '3.2'))[2], ['narration', 'I didn’t look back.', ['about 1.6 s (estimate, not voiced yet)']]);
   assert.deepEqual(rows(view(overview, '2.1'))[2], ['narration', 'None', []]);
@@ -63,6 +63,14 @@ test('Regenerate keyframe shows its price, and what a finished clip would cost t
   assert.equal(en(view(overview, '1.1').regenerate.clipNote), 'Its clip will need redoing, about $0.50.');
   const r31 = view(overview, '3.1').regenerate;
   assert.deepEqual([en(r31.label), en(r31.cost), r31.primary, r31.kind], ['Make keyframe', 'About $0.04.', true, 'make']);
+});
+
+test("the shot's own regenerate quote wins, since it includes a voice line still to make", () => {
+  const overview = lastFerryOverview();
+  overview.shots[shotId('3.2')].quotes = { regenerateKeyframe: { micros: '55000', units: 2, unitMicros: '0', priceUnknown: false } };
+  assert.equal(en(view(overview, '3.2').regenerate.cost), 'About $0.06.');
+  overview.shots[shotId('2.1')].quotes = { regenerateKeyframe: { micros: '0', units: 1, unitMicros: '0', priceUnknown: true } };
+  assert.equal(en(view(overview, '2.1').regenerate.cost), 'no price set');
 });
 
 test('while making, out of date, failed, or waiting on a clip', () => {

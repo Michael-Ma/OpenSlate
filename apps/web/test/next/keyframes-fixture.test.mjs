@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { fixtureCommand, recompute, FIXTURE_TIMING } from '../../src/next/fixtures/fixture-commands.ts';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
-import { keyframesBody, videoBody } from '../../src/next/model/commands.ts';
+import { confirmBody, keyframesBody, videoBody } from '../../src/next/model/commands.ts';
 import { StudioStore } from '../../src/next/store/store.ts';
 
 /** A fixture world with a manual clock, so simulated provider time runs on demand. */
@@ -114,6 +114,49 @@ test('confirming Scene 2 makes one clip after another, then the scene reads vide
   assert.equal(scene(w, 2).counts.videosReady, 3);
 });
 
+test('the durable confirm binds the opened frames and the digest, then makes the clips', () => {
+  const w = world();
+  open(w, '2.2'); open(w, '2.3');
+  edit(w, { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '240' });
+  const body = confirmBody(w.overview, scene(w, 2));
+  assert.throws(() => post(w, `/scenes/${sceneId(2)}/confirm`, { ...body, confirmationDigest: 'old' }), refused('SCENE_REVIEW_STALE'));
+  assert.throws(() => post(w, `/scenes/${sceneId(2)}/confirm`, { ...body, expectedEstimateMicros: '1000000' }), refused('ESTIMATE_CHANGED'));
+  const view = post(w, `/scenes/${sceneId(2)}/confirm`, body);
+  assert.deepEqual([view.state, view.currentShotId], ['running', shotId('2.1')]);
+  assert.equal(scene(w, 2).confirmation.state, 'running');
+  assert.throws(() => post(w, `/scenes/${sceneId(2)}/confirm`, body), refused('ATTEMPT_EXISTS'));
+  w.advance(FIXTURE_TIMING.clipMs * 3);
+  assert.equal(scene(w, 2).confirmation.state, 'done');
+  assert.equal(scene(w, 2).state, 'video_saved');
+});
+
+test('narration fit: extend lengthens the shot to the whole second that fits; cut keeps it; both undo', () => {
+  const w = world();
+  const fitPost = (fit) => post(w, `/shots/${shotId('2.3')}/narration-fit`, { fit, expectedHeadVersion: w.snapshot.project.headVersion });
+  const extended = fitPost('extend_shot');
+  assert.deepEqual([extended.fit, extended.durationFrames], ['extend_shot', 240]);
+  assert.deepEqual([shot(w, '2.3').narration.fit, shot(w, '2.3').narration.fits], ['extend_shot', true]);
+  assert.ok(!scene(w, 2).blockers.some(b => b.code === 'narration_too_long'));
+  assert.equal(w.snapshot.project.shots.find(s => s.id === shotId('2.3')).desiredFrames, 240);
+  edit(w, { kind: 'undo', commandId: extended.commandId });
+  assert.deepEqual([shot(w, '2.3').durationFrames, shot(w, '2.3').narration.fit], [180, undefined]);
+  const cut = fitPost('cut_to_shot');
+  assert.deepEqual([cut.durationFrames, shot(w, '2.3').narration.fit, shot(w, '2.3').narration.fits], [180, 'cut_to_shot', false]);
+  assert.ok(!scene(w, 2).blockers.some(b => b.code === 'narration_too_long'), 'a cut line no longer blocks');
+  edit(w, { kind: 'undo', commandId: cut.commandId });
+  assert.ok(scene(w, 2).blockers.some(b => b.code === 'narration_too_long'));
+  assert.throws(() => post(w, `/shots/${shotId('2.3')}/narration-fit`, { fit: 'extend_shot', expectedHeadVersion: 1 }), refused('REVISION_CONFLICT'));
+  assert.throws(() => post(w, `/shots/${shotId('2.1')}/narration-fit`, { fit: 'cut_to_shot', expectedHeadVersion: w.snapshot.project.headVersion }), refused('VALIDATION_ERROR'));
+});
+
+test('shortening a shot below its line undoes an extend fit', () => {
+  const w = world();
+  post(w, `/shots/${shotId('2.3')}/narration-fit`, { fit: 'extend_shot', expectedHeadVersion: w.snapshot.project.headVersion });
+  edit(w, { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '180' });
+  assert.equal(shot(w, '2.3').narration.fit, undefined);
+  assert.ok(scene(w, 2).blockers.some(b => b.code === 'narration_too_long'));
+});
+
 test('a confirm is refused while frames are unopened or the line is too long', () => {
   const w = world();
   open(w, '2.2'); open(w, '2.3');
@@ -213,9 +256,15 @@ test('the store and the fixture agree on the whole Scene 2 path', async (t) => {
     await store.openFrame(shotId('2.3'));
     await settle();
     assert.equal(state().overview.scenes[1].counts.opened, 3);
-    assert.ok(await store.edit({ kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '240' }, { id: 'toast.saved' }));
+    assert.ok(await store.narrationFit(shotId('2.3'), 'extend_shot', { id: 'toast.saved' }));
     const undo = state().toast.undoCommandId;
     assert.ok(undo, 'the toast offers Undo');
+    await settle();
+    assert.equal(state().overview.shots[shotId('2.3')].durationFrames, 240);
+    assert.ok(await store.undo(undo));
+    await settle();
+    assert.equal(state().overview.shots[shotId('2.3')].durationFrames, 180);
+    assert.ok(await store.narrationFit(shotId('2.3'), 'cut_to_shot', { id: 'toast.saved' }));
     await settle();
     assert.deepEqual(state().overview.scenes[1].blockers, []);
     await store.confirmVideo(sceneId(2));

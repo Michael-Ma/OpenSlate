@@ -124,6 +124,26 @@ export const scenarios = [
     },
   },
   {
+    name: "next-keyframes-keep-and-cut",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await openCard(page, "2.2");
+      await openCard(page, "2.3");
+      await page.click('[data-act="keep-fit"][data-shot="shot-2-3"]');
+      await page.waitForSelector('.banner[data-state="settled"] [data-act="undo"]');
+      await expectText(page, ".banner", /2\.3 stays 6 s; the line is cut there[\s\S]*The last 1\.4 s of the line will not be heard/);
+      await expectText(page, '.insp [data-row="narration"]', /7\.4 s voiced · cut at 6 s/);
+      await expectText(page, '[data-card="shot-2-3"] .ttl', /6 s/);
+      await expectText(page, '[data-act="confirm-video"]', /about \$1\.50/);
+      await screenshot(page, "kept-1440");
+      await page.click('.banner [data-act="undo"]');
+      await page.waitForSelector('.banner[data-state="open"]');
+      await expectText(page, ".vpanel .why", /^Settle the narration in 2\.3 first$/);
+    },
+  },
+  {
     name: "next-keyframes-regenerate",
     query,
     viewport: { width: 1440, height: 900 },

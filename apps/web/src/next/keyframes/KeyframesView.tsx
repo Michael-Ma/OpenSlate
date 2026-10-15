@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { checkActions, lineEstimate, type AppCheck } from "../model/checks.ts";
 import { inspectorView } from "../model/inspector.ts";
-import { filmMeta, keyframesView } from "../model/keyframes.ts";
+import { keyframesView } from "../model/keyframes.ts";
 import { advance, playingShot, type Playback } from "../model/motion.ts";
 import { msg } from "../model/types.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
@@ -85,8 +85,8 @@ function Workspace() {
   useEffect(() => {
     if (!settled || overview.cursor <= settled.cursor) return;
     const shot = overview.shots[settled.shotId];
-    const still = settled.kind === "extended"
-      ? shot?.durationFrames === Math.round(settled.seconds * overview.fps)
+    const still = settled.kind === "extended" ? shot?.narration.fit === "extend_shot"
+      : settled.kind === "cut" ? shot?.narration.fit === "cut_to_shot"
       : shot?.narration.text === settled.text;
     if (!still) setSettled(null);
   }, [overview, settled]);
@@ -102,19 +102,23 @@ function Workspace() {
 
   const onScene = useCallback((id: string) => store.selectScene(id), [store]);
 
-  const extend = useCallback(async (check: AppCheck, letter: string) => {
+  /**
+   * Settle a too-long line with one free server command (SB-2, SB-3): lengthen the shot, or keep it and cut the
+   * line with a fade. The toast and the banner both offer Undo with the command's id.
+   */
+  const fit = useCallback(async (check: AppCheck, letter: string, kind: "extended" | "cut") => {
     const actions = checkActions(check, overview.fps);
     const shot = overview.shots[check.shotId];
-    if (!actions.extend || !shot || !currentSceneId) return;
-    const film = Math.round((filmMeta(overview).seconds + actions.extend.seconds - check.shotSeconds) * 10) / 10;
-    const ok = await store.edit(
-      { kind: "shot", id: check.shotId, field: "desiredFrames", value: String(actions.extend.frames) },
-      msg("check.toast.extended", { label: check.label, seconds: actions.extend.seconds, film }),
-    );
+    if (!shot || !currentSceneId || (kind === "extended" && !actions.extend)) return;
+    const ok = kind === "extended"
+      ? await store.narrationFit(check.shotId, "extend_shot", msg("toast.fit_extended", { shot: check.label, seconds: actions.extend!.seconds }))
+      : await store.narrationFit(check.shotId, "cut_to_shot", msg("toast.fit_cut", { shot: check.label, seconds: actions.keep.seconds }));
     if (!ok) return;
     setSettled({
-      kind: "extended", sceneId: currentSceneId, shotId: check.shotId, label: check.label, letter,
-      seconds: actions.extend.seconds, shotSeconds: actions.extend.seconds, hadClip: shot.video.state === "ready",
+      kind, sceneId: currentSceneId, shotId: check.shotId, label: check.label, letter,
+      seconds: kind === "extended" ? actions.extend!.seconds : actions.keep.cutSeconds,
+      shotSeconds: kind === "extended" ? actions.extend!.seconds : actions.keep.seconds,
+      hadClip: shot.video.state === "ready",
       commandId: store.getState().toast?.undoCommandId ?? null,
       cursor: store.getState().overview?.cursor ?? 0,
     });
@@ -222,8 +226,9 @@ function Workspace() {
         sceneId={view.scene.sceneId}
         checks={sceneOrdinalChecks}
         settled={settled}
-        busy={Object.keys(pending).some((key) => key.startsWith("edit:"))}
-        onExtend={(check) => void extend(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a")}
+        busy={Object.keys(pending).some((key) => key.startsWith("edit:") || key.startsWith("fit:"))}
+        onExtend={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a", "extended")}
+        onKeep={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a", "cut")}
         onEditNarration={(check) => editNarration(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a")}
         onNext={() => setSettled(null)}
         onUndo={(commandId) => { setSettled(null); void store.undo(commandId); }}

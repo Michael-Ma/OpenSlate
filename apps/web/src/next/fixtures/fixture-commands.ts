@@ -1,4 +1,5 @@
 import type {
+  ConfirmSceneInput,
   ControlInput,
   ControlReceipt,
   FrameViewInput,
@@ -6,25 +7,29 @@ import type {
   GenerationOverview,
   KeyframeSlot,
   MediaSlot,
+  NarrationFitInput,
+  NarrationFitReceipt,
   PriceQuote,
   ReleaseAttemptInput,
   ReleaseAttemptReceipt,
   SceneBlocker,
+  SceneConfirmationView,
   SceneOverview,
   ShotNarration,
   ShotOverview,
   StudioArtifactRef,
 } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
-import { estimateNarrationSeconds, narrationPace } from "../model/checks.ts";
+import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS, narrationPace } from "../model/checks.ts";
 import type { GenerateBody, SceneGenerationRead, StoryboardEdit } from "../model/commands.ts";
 import type { ProjectSnapshot } from "../model/types.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
 import { artifactFor } from "./last-ferry.ts";
 
 /**
- * Simulated commands for the fixture film: frame views, scene generation reads and presses,
- * storyboard edits with single-step undo, Stop / Continue and giving up on a job.
+ * Simulated commands for the fixture film: frame views, scene generation reads and presses, the
+ * durable scene confirm, narration fit, storyboard edits with single-step undo, Stop / Continue and
+ * giving up on a job.
  * Nothing is generated, charged or saved. Every change goes through `recompute`, so blockers,
  * counts, targets and quotes always agree with the shots.
  */
@@ -284,20 +289,47 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
   return { accepted: true, targetShotIds: targets };
 }
 
+/** The browser-run video press (before phase P3). Kept for older clients; new ones confirm through /confirm. */
 function generateVideo(world: FixtureWorld, scene: SceneOverview, body: GenerateInput): { accepted: true; targetShotIds: string[] } {
   if (body.targetShotIds !== undefined || body.regenerate !== undefined) throw new ApiError("VALIDATION_ERROR", 400);
+  const targets = clipTargets(world, scene, body.reviewedFrames);
+  assertEstimate(body, targets.length, FIXTURE_PRICES.clip);
+  startClips(world, scene, targets);
+  return { accepted: true, targetShotIds: targets };
+}
+
+/** Every shot without a finished clip, each reviewed as the exact keyframe the person opened; no blocker left. */
+function clipTargets(world: FixtureWorld, scene: SceneOverview, reviewedFrames: readonly { shotId: string; artifactId: string; sha256: string }[] | undefined): string[] {
   const targets = scene.shotIds.filter((id) => world.overview.shots[id]!.video.state !== "ready");
   if (!targets.length) throw new ApiError("ALREADY_COMPLETE", 409);
   if (scene.state === "making_video") throw new ApiError("ATTEMPT_EXISTS", 409);
   for (const id of targets) {
     const shot = world.overview.shots[id]!;
-    const reviewed = body.reviewedFrames?.find((frame) => frame.shotId === id);
+    const reviewed = reviewedFrames?.find((frame) => frame.shotId === id);
     const artifact = shot.keyframe.state === "ready" ? shot.keyframe.artifact : undefined;
     if (!reviewed || !artifact || reviewed.artifactId !== artifact.artifactId || reviewed.sha256 !== artifact.sha256) throw new ApiError("SCENE_REVIEW_STALE", 409);
   }
   const blocker = scene.blockers[0];
   if (blocker) throw new ApiError(blocker.code === "narration_too_long" ? "NARRATION_TOO_LONG" : "SCENE_NOT_READY", 409, { blocker: blocker.code });
-  assertEstimate(body, targets.length, FIXTURE_PRICES.clip);
+  return targets;
+}
+
+/**
+ * The durable scene confirm (phase P3, GR-3): binds the opened frames, settles narration by its chosen fit,
+ * then makes the clips one after another on the simulated clock.
+ */
+function confirmScene(world: FixtureWorld, sceneId: string, body: ConfirmSceneInput): SceneConfirmationView {
+  const scene = findScene(world, sceneId);
+  if (world.overview.stopped) throw new ApiError("EXECUTION_PAUSED", 409);
+  if (!body?.confirmationDigest || body.confirmationDigest !== scene.confirmationDigest) throw new ApiError("SCENE_REVIEW_STALE", 409);
+  const targets = clipTargets(world, scene, body.reviewedFrames);
+  if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== String(targets.length * FIXTURE_PRICES.clip)) throw new ApiError("ESTIMATE_CHANGED", 409);
+  const confirmationId = startClips(world, scene, targets);
+  return { confirmationId, state: "running", currentShotId: targets[0]!, currentStep: "video" };
+}
+
+/** Queue the clips, send the first, and run the rest on the simulated clock. Paid work ends any pending Undo. */
+function startClips(world: FixtureWorld, scene: SceneOverview, targets: string[]): string {
   extra(world).undo = null;
   const confirmationId = nextId(world, "confirmation");
   const since = now();
@@ -309,7 +341,7 @@ function generateVideo(world: FixtureWorld, scene: SceneOverview, body: Generate
     return { overview: startNextClip(next, scene.sceneId, world) };
   });
   scheduleClip(world, scene.sceneId, confirmationId);
-  return { accepted: true, targetShotIds: targets };
+  return confirmationId;
 }
 
 /** Send the first queued clip of the scene, unless the film is stopped. */
@@ -377,7 +409,12 @@ function editShot(shot: ShotOverview, edit: Extract<StoryboardEdit, { kind: "sho
     case "desiredFrames": {
       const frames = Number(edit.value);
       if (!Number.isInteger(frames) || frames < 3 * fps || frames > 15 * fps) throw new ApiError("VALIDATION_ERROR", 400);
-      return frames === shot.durationFrames ? shot : { ...shot, durationFrames: frames, video: outdateClip(shot.video, "desiredFrames") };
+      if (frames === shot.durationFrames) return shot;
+      // A line settled by lengthening the shot is unsettled again once the shot is too short for it.
+      const length = shot.narration.measuredSeconds ?? shot.narration.estimatedSeconds;
+      const { fit, ...rest } = shot.narration;
+      const narration = fit === "extend_shot" && length !== undefined && length > frames / fps + 1e-9 ? rest : shot.narration;
+      return { ...shot, durationFrames: frames, narration, video: outdateClip(shot.video, "desiredFrames") };
     }
     case "imagePrompt": {
       const prompt = edit.value.trim();
@@ -459,6 +496,37 @@ function storyboard(world: FixtureWorld, body: StoryboardBody): { commandId: str
   return { commandId };
 }
 
+/**
+ * Settle a too-long line (SB-2, SB-3), free and undoable: extend_shot lengthens the shot to the whole second
+ * that fits the line; cut_to_shot keeps the length and cuts the line at the end with a fade.
+ */
+function narrationFit(world: FixtureWorld, shotId: string, body: NarrationFitInput): NarrationFitReceipt {
+  if (body?.fit !== "extend_shot" && body?.fit !== "cut_to_shot") throw new ApiError("VALIDATION_ERROR", 400);
+  if (body.expectedHeadVersion !== world.snapshot.project.headVersion) throw new ApiError("REVISION_CONFLICT", 409);
+  const shot = findShot(world, shotId);
+  const length = shot.narration.measuredSeconds ?? shot.narration.estimatedSeconds;
+  if (shot.narration.state === "none" || length === undefined) throw new ApiError("VALIDATION_ERROR", 400);
+  if (isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
+  const fps = world.overview.fps;
+  let edited: ShotOverview;
+  if (body.fit === "extend_shot") {
+    const seconds = Math.min(MAX_SHOT_SECONDS, Math.max(MIN_SHOT_SECONDS, Math.ceil(length + 0.3)));
+    if (seconds + 1e-9 < length) throw new ApiError("SHOT_SHORTER_THAN_NARRATION", 409);
+    const frames = Math.max(shot.durationFrames, seconds * fps);
+    edited = { ...shot, durationFrames: frames, narration: { ...shot.narration, fit: "extend_shot" }, video: frames === shot.durationFrames ? shot.video : outdateClip(shot.video, "desiredFrames") };
+  } else {
+    edited = { ...shot, narration: { ...shot.narration, fit: "cut_to_shot" } };
+  }
+  const commandId = nextId(world, "command");
+  extra(world).undo = { commandId, shotId, fields: ["durationFrames", "narration", "video"], before: shot, beforeSnapshotShot: world.snapshot.project.shots.find((row) => row.id === shotId) };
+  commit(world, (overview, snapshot) => bumpRevision(
+    { ...snapshot, project: { ...snapshot.project, shots: snapshot.project.shots.map((row) => (row.id === shotId ? { ...row, desiredFrames: edited.durationFrames } : row)) } },
+    withShot(overview, shotId, () => edited),
+    world,
+  ));
+  return { shotId, fit: body.fit, durationFrames: edited.durationFrames, commandId };
+}
+
 // ---- controls and give-up -----------------------------------------------------------------
 
 function control(world: FixtureWorld, body: ControlInput): ControlReceipt {
@@ -521,6 +589,8 @@ export function fixtureCommand(world: FixtureWorld, method: "GET" | "POST", path
   } else {
     if ((id = match(/^\/shots\/([^/]+)\/frame-views$/))) return frameView(world, id, body as FrameViewInput);
     if ((id = match(/^\/scenes\/([^/]+)\/generate$/))) return generate(world, id, body as GenerateInput);
+    if ((id = match(/^\/scenes\/([^/]+)\/confirm$/))) return confirmScene(world, id, body as ConfirmSceneInput);
+    if ((id = match(/^\/shots\/([^/]+)\/narration-fit$/))) return narrationFit(world, id, body as NarrationFitInput);
     if (path === "/storyboard") return storyboard(world, body as StoryboardBody);
     if (path === "/controls") return control(world, body as ControlInput);
     if ((id = match(/^\/attempts\/([^/]+)\/release$/))) return release(world, id, body as ReleaseAttemptInput);

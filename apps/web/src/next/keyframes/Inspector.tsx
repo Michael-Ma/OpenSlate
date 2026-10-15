@@ -51,8 +51,13 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
             <div key={row.key} className="row-pair" data-row={row.key}>
               <dt>{tm(row.label)}</dt>
               <dd>
-                {typeof row.value === "string" ? (row.quoted ? `“${row.value}”` : row.value) : tm(row.value)}
-                {row.notes.map((note, index) => <small key={index} className={note.tone === "warn" ? "warn" : undefined}>{tm(note.message)}</small>)}
+                {typeof row.value === "string"
+                  ? (row.quoted ? <span className="quote" title={row.value}>{`“${row.value}”`}</span> : row.value)
+                  : tm(row.value)}
+                {row.notes.length ? (
+                  // One line, as in the design ("7.4 s voice line · cut at 6 s"), so the stacked actions keep their room.
+                  <small className={row.notes.some((note) => note.tone === "warn") ? "warn" : undefined}>{row.notes.map((note) => tm(note.message)).join(" · ")}</small>
+                ) : null}
               </dd>
             </div>
           ))}

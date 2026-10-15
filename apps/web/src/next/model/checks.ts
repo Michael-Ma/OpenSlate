@@ -189,11 +189,15 @@ export function settledTimeline(shotId: string, overview: GenerationOverview, cl
   ];
 }
 
-/** What the check offers. "Keep N s" needs a server command arriving in phase P3, so it is shown but unavailable. */
+/**
+ * What the check offers, each settled by one free server command (SB-2, SB-3) or an edit:
+ * lengthen the shot to fit the line, keep the shot and cut the line with a fade, or rewrite the line.
+ */
 export interface CheckActions {
-  /** Lengthen the shot to fit the line; free while no clip exists. Absent when even 15 s is too short. */
+  /** Lengthen the shot to fit the line. Absent when even 15 s is too short. */
   extend: { seconds: number; frames: number; label: Msg } | null;
-  keep: { label: Msg; available: false; reason: Msg };
+  /** Keep the shot's length; the line is cut at its end. `cutSeconds` is what will not be heard. */
+  keep: { seconds: number; cutSeconds: number; label: Msg };
   edit: { label: Msg };
 }
 
@@ -201,7 +205,7 @@ export function checkActions(check: AppCheck, fps: number): CheckActions {
   const extendFits = check.fitSeconds + 1e-9 >= check.lineSeconds && check.fitSeconds > check.shotSeconds;
   return {
     extend: extendFits ? { seconds: check.fitSeconds, frames: Math.round(check.fitSeconds * fps), label: msg("check.narration.extend", { label: check.label, seconds: check.fitSeconds }) } : null,
-    keep: { label: msg("check.narration.keep", { seconds: check.shotSeconds }), available: false, reason: msg("check.narration.keep_unavailable") },
+    keep: { seconds: check.shotSeconds, cutSeconds: round1(check.lineSeconds - check.shotSeconds), label: msg("check.narration.keep", { seconds: check.shotSeconds }) },
     edit: { label: msg("check.narration.edit") },
   };
 }

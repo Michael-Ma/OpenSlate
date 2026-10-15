@@ -17,14 +17,9 @@
 /* ---------- check banner: neutral ---------- */
 .banner.check { border-color: var(--hairline); background: var(--bar); }
 .banner.check .eyebrow { color: var(--text-2); }
-.banner.check .eyebrow .of { color: var(--muted); font-weight: 600; letter-spacing: .04em; }
 .banner.check .letter { background: var(--track); color: var(--text); }
 .banner.check.done .letter { background: var(--raised-2); color: var(--text-2); }
 .banner.check .seg.hot { background: var(--select); color: var(--select-ink); }
-.banner.check .banner-actions { gap: 6px; }
-.banner.check .banner-actions .pill { padding: 5px 12px; }
-/* The reason sits right under the unavailable option it explains. */
-.banner.check .banner-actions .why { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.3; margin-top: -3px; }
 
 /* ---------- neutral check chips on cards ---------- */
 .anno.check { background: var(--raised-2); color: var(--text); border: 1px solid var(--track); }
@@ -89,6 +84,8 @@
 .insp-body > form { margin-top: 10px; }
 .insp .rows .row-pair { display: contents; }
 .insp .rows dd { min-width: 0; overflow-wrap: anywhere; }
+/* A long line is clamped so its length and fit notes stay in view; the full line is in the editor and the title. */
+.insp .rows dd .quote { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .insp .rows dd small.warn, .insp .stale.warn, .insp .est.warn { color: var(--text); font-weight: 600; }
 .insp .est { font-size: 12.5px; color: var(--text-2); }
 .insp-notes { margin-top: 8px; }
@@ -103,6 +100,5 @@
 
 @media (max-width: 899px) {
   .insp-note { flex: 1 1 100%; }
-  .banner.check .banner-actions .why { flex: 1 1 100%; order: 10; margin-top: 0; }
   .kf-state { min-height: 60vh; }
 }

@@ -160,7 +160,8 @@ function prices(quote: PriceQuote | undefined, kind: PriceKind, locale: string):
   return {
     price: priceMsg(quote, locale),
     priceTotal: msg("price.about", { total: formatMicros(quote.micros, locale) }),
-    priceEach: quote.units > 1 ? msg(`panel.each.${kind}`, { count: quote.units, each: formatMicros(quote.unitMicros, locale) }) : null,
+    // A mixed quote (clips plus voice lines) has no single unit price: the total alone.
+    priceEach: quote.units > 1 && Number(quote.unitMicros) > 0 ? msg(`panel.each.${kind}`, { count: quote.units, each: formatMicros(quote.unitMicros, locale) }) : null,
   };
 }
 

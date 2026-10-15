@@ -114,7 +114,13 @@ export function clipUnit(overview: GenerationOverview, scene: SceneOverview | un
   return quoteUnit(scene?.quotes.confirmVideo) ?? quoteUnit(overview.scenes.find((s) => s.quotes.confirmVideo)?.quotes.confirmVideo);
 }
 
-function keyframeUnit(scene: SceneOverview | undefined): { unitMicros: string; unknown: boolean } | null {
+/**
+ * One keyframe's price for this shot. The shot's own quote is exact (it includes a voice line still to make,
+ * so it is a total, not a unit); the scene's quotes are the fallback.
+ */
+function keyframePrice(shot: ShotOverview, scene: SceneOverview | undefined): { unitMicros: string; unknown: boolean } | null {
+  const own = shot.quotes?.regenerateKeyframe;
+  if (own) return { unitMicros: own.micros, unknown: own.priceUnknown };
   return quoteUnit(scene?.quotes.regenerateKeyframe) ?? quoteUnit(scene?.quotes.makeKeyframes);
 }
 
@@ -128,7 +134,7 @@ function failureMessage(slot: MediaSlot, kind: "keyframe" | "video"): Msg {
 const canRetry = (slot: MediaSlot) => !slot.failure || (slot.failure.retryAllowed && !(slot.failure.technical && slot.failure.autoRetriesLeft > 0));
 
 function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scene: SceneOverview | undefined, locale: string): RegenerateAction {
-  const unit = keyframeUnit(scene);
+  const unit = keyframePrice(shot, scene);
   const clip = clipUnit(overview, scene);
   const clipPrice = clip && !clip.unknown && Number(clip.unitMicros) > 0 ? formatMicros(clip.unitMicros, locale) : null;
   const clipNote = shot.video.state === "ready" ? (clipPrice ? msg("inspector.clip_will_redo", { price: clipPrice }) : msg("inspector.clip_will_redo_unpriced")) : null;
