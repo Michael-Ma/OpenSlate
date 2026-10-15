@@ -9,7 +9,7 @@
 }
 
 /* ---------- loading, missing overview, empty film ---------- */
-.kf-state { display: grid; place-items: center; grid-template-rows: none; }
+.kf-state { display: grid; place-content: center; grid-template-rows: none; }
 .kf-message { display: flex; flex-direction: column; gap: 6px; max-width: 440px; text-align: center; color: var(--text-2); font-size: 13.5px; line-height: 1.5; border: 1px dashed var(--track); border-radius: var(--r-big); padding: 22px 26px; }
 .kf-message b { color: var(--text); font-size: 15px; }
 .preview.kf-empty-stage { grid-column: 1 / -1; }
@@ -78,6 +78,9 @@
   /* With more than three shots a scrollbar shares the row: the pictures give up the room. */
   .kf-row .cards.scrolls .card .pic { height: 106px; }
 }
+
+/* ---------- video panel: one segment per shot, however many ---------- */
+.vpanel .vsegs i { flex: 0 1 22px; min-width: 4px; }
 
 /* ---------- inspector ---------- */
 /* The rows scroll when they run long; the stacked actions always stay in view. */

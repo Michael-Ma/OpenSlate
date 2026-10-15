@@ -13,6 +13,10 @@ export interface SettledCheck {
   letter: string;
   /** extended: the new shot length; edited: the estimated length of the new line. */
   seconds: number;
+  /** edited: the saved line, so the view can tell when it was undone elsewhere. */
+  text?: string;
+  /** The overview cursor when it was settled; only later overviews can contradict it. */
+  cursor: number;
   shotSeconds: number;
   hadClip: boolean;
   commandId: string | null;

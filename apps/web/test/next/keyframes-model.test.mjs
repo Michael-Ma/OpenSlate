@@ -85,6 +85,22 @@ test('the reason names the first kind of blocker for every shot it applies to', 
   assert.equal(zh(keyframesView(overview, sceneId(2), null, 'zh-CN').panel.reason), '请先处理 2.3 的旁白长度');
 });
 
+test('a long scene counts its unopened frames instead of naming every one', () => {
+  const overview = lastFerryOverview();
+  const scene = overview.scenes[1];
+  scene.shotIds = [...scene.shotIds]; scene.videoTargets = [...scene.videoTargets];
+  for (const label of ['2.4', '2.5', '2.6']) {
+    const id = shotId(label);
+    overview.shots[id] = { ...overview.shots[shotId('2.2')], shotId: id, label };
+    scene.shotIds.push(id); scene.videoTargets.push(id);
+    scene.blockers.splice(scene.blockers.length - 1, 0, { code: 'frame_not_opened', shotId: id });
+  }
+  const panel = keyframesView(overview, sceneId(2), null, 'en-US').panel;
+  assert.equal(en(panel.reason), 'Open 5 frames and settle 2.3 first');
+  assert.equal(en(panel.note), 'Open the 5 frames still unopened to confirm. Earlier keyframes are kept.');
+  assert.equal(panel.segments.length, 6);
+});
+
 test('a scene whose keyframes are being made says so instead of offering a confirm', () => {
   const overview = lastFerryOverview();
   for (const id of overview.scenes[2].shotIds) overview.shots[id].keyframe = { state: 'running', takeCount: 0, opened: false };

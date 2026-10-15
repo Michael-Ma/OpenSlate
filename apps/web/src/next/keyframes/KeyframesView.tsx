@@ -80,6 +80,17 @@ function Workspace() {
     if (selectedId) setIntent((current) => (current?.shotId === selectedId ? current : { shotId: selectedId, nonce: ++nonce.current }));
   }, [selectedId]);
 
+  // A settled check describes the film as the edit left it; once that changes (Undo from the toast,
+  // another edit, a reload of an older state) the banner goes back to what the overview says.
+  useEffect(() => {
+    if (!settled || overview.cursor <= settled.cursor) return;
+    const shot = overview.shots[settled.shotId];
+    const still = settled.kind === "extended"
+      ? shot?.durationFrames === Math.round(settled.seconds * overview.fps)
+      : shot?.narration.text === settled.text;
+    if (!still) setSettled(null);
+  }, [overview, settled]);
+
   // Leaving a scene stops its playback.
   useEffect(() => { setPlayback(null); }, [currentSceneId]);
 
@@ -105,6 +116,7 @@ function Workspace() {
       kind: "extended", sceneId: currentSceneId, shotId: check.shotId, label: check.label, letter,
       seconds: actions.extend.seconds, shotSeconds: actions.extend.seconds, hadClip: shot.video.state === "ready",
       commandId: store.getState().toast?.undoCommandId ?? null,
+      cursor: store.getState().overview?.cursor ?? 0,
     });
   }, [overview, store, currentSceneId]);
 
@@ -126,8 +138,9 @@ function Workspace() {
       narrationFromCheck.current = null;
       setSettled({
         kind: "edited", sceneId: currentSceneId, shotId: shot.shotId, label: shot.label, letter: fromCheck.letter,
-        seconds: estimate.seconds, shotSeconds: estimate.shotSeconds, hadClip: false,
+        seconds: estimate.seconds, shotSeconds: estimate.shotSeconds, hadClip: false, text: next.value,
         commandId: store.getState().toast?.undoCommandId ?? null,
+        cursor: store.getState().overview?.cursor ?? 0,
       });
     }
   }, [overview, store, currentSceneId]);
@@ -239,7 +252,11 @@ function Workspace() {
                 release: Object.keys(pending).some((key) => key.startsWith("release:")),
                 video: !!pending[`confirm:${selected.sceneId}`],
               }}
-              onPoint={() => store.pointAt({ kind: "shot", id: selected.shotId })}
+              onPoint={() => {
+                store.pointAt({ kind: "shot", id: selected.shotId });
+                // On narrow screens the Director is a drawer: open it so the pointer is seen (as in the prototype).
+                if (window.matchMedia?.("(max-width: 899px)").matches) store.setDirectorOpen(true);
+              }}
               onRegenerate={regenerate}
               onRetryVideo={confirm}
               onEdit={editDraft}

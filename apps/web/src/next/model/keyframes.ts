@@ -132,15 +132,24 @@ export function listLabels(labels: readonly string[], locale: string): string {
   }
 }
 
+/** Shots named one by one up to this many; beyond it the panel counts them (it is 230 px wide). */
+const NAMED = 3;
+
 /** The first kind of blocker, naming every shot it applies to ("Open 2.2 and 2.3 first"). */
 function blockerMsg(blockers: readonly SceneBlocker[], overview: GenerationOverview, locale: string): Msg | null {
   const first = blockers[0];
   if (!first) return null;
-  const labelsOf = (code: SceneBlocker["code"]) => listLabels(blockers.filter((b) => b.code === code && b.shotId).map((b) => overview.shots[b.shotId!]?.label ?? "").filter(Boolean), locale);
+  const labels = (code: SceneBlocker["code"]) => blockers.filter((b) => b.code === code && b.shotId).map((b) => overview.shots[b.shotId!]?.label ?? "").filter(Boolean);
+  const unopened = labels("frame_not_opened");
   // The usual pair, said in one sentence: frames to open and a line to settle.
-  if (first.code === "frame_not_opened" && blockers.some((b) => b.code === "narration_too_long"))
-    return msg("panel.blocker.open_and_settle", { shots: labelsOf("frame_not_opened"), shot: labelsOf("narration_too_long") });
-  return msg(`panel.blocker.${first.code}`, { shot: labelsOf(first.code) });
+  if (first.code === "frame_not_opened" && blockers.some((b) => b.code === "narration_too_long")) {
+    const shot = listLabels(labels("narration_too_long"), locale);
+    return unopened.length > NAMED
+      ? msg("panel.blocker.open_many_and_settle", { count: unopened.length, shot })
+      : msg("panel.blocker.open_and_settle", { shots: listLabels(unopened, locale), shot });
+  }
+  if (first.code === "frame_not_opened" && unopened.length > NAMED) return msg("panel.blocker.frame_not_opened_many", { count: unopened.length });
+  return msg(`panel.blocker.${first.code}`, { shot: listLabels(labels(first.code), locale) });
 }
 
 type PriceKind = "clips" | "keyframes";
@@ -211,7 +220,8 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     enabled,
     label: msg("panel.confirm"),
     reason: blockerMsg(blockers, overview, locale),
-    note: unopened.length ? msg("panel.open_to_confirm", { shots: listLabels(unopened, locale) }) : msg("panel.all_opened"),
+    note: unopened.length > NAMED ? msg("panel.open_to_confirm_many", { count: unopened.length })
+      : unopened.length ? msg("panel.open_to_confirm", { shots: listLabels(unopened, locale) }) : msg("panel.all_opened"),
     headline: { value: msg("panel.count", { value: openedCount, total: targets.length }), unit: msg("panel.unit.frames_opened", { count: targets.length }) },
   };
 }

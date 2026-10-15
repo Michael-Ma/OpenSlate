@@ -137,7 +137,6 @@ export function Preview({ shot, card, fps, playing, intent, onTogglePlay, onEnde
             data-act="play"
             data-shot={shot.shotId}
             aria-label={playing ? t("preview.pause") : t("preview.play")}
-            aria-pressed={!!playing}
             disabled={!picture || making}
             onClick={onTogglePlay}
           >
