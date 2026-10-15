@@ -444,8 +444,9 @@ export function registerSceneGeneration(
           "SCENE_REVIEW_STALE",
           "Scene work changed while preparing generation. Review its refreshed results.",
         );
+        invariant(!now.paused, "EXECUTION_PAUSED", "The film is stopped. Continue before starting new generation.");
         invariant(
-          !now.busy && !now.paused,
+          !now.busy,
           "WAITING_USER",
           "Finish the current conversation before starting this scene",
         );
@@ -494,6 +495,7 @@ export function registerSceneGeneration(
             .attempts(projectId)
             .some(
               (attempt) =>
+                !attempt.released &&
                 nodeIds.has(attempt.nodeId) &&
                 !["succeeded", "failed"].includes(attempt.phase),
             ),

@@ -741,6 +741,14 @@ export class Store {
       if (kind === "attempt") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;
+        if (previous.released) invariant(canonical(previous.released) === canonical(next.released ?? null), "IMMUTABLE_RECORD", "Attempt release evidence is immutable");
+        else if (next.released) {
+          const released = next.released as Attempt["released"];
+          invariant(previous.phase === "submission_unknown" && next.phase === previous.phase
+            && released && typeof released.by === "string" && released.by.length > 0
+            && typeof released.at === "string" && Number.isFinite(Date.parse(released.at)),
+          "ATTEMPT_NOT_RELEASABLE", "Release requires a retained unknown submission and human audit evidence");
+        }
         invariant(Object.hasOwn(previous, "narrationSpeech") === Object.hasOwn(next, "narrationSpeech")
           && (!Object.hasOwn(previous, "narrationSpeech") || canonical(previous.narrationSpeech) === canonical(next.narrationSpeech)),
           "IMMUTABLE_RECORD", "Attempt speech review evidence is immutable");

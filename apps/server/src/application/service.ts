@@ -12,6 +12,7 @@ import type {
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
 import type { ArtifactRecord, NodeBinding } from "../execution/engine.js";
+import type { StopView, ReleaseAttemptInput, ReleaseAttemptReceipt } from "@openslate/core/public";
 import { projectDirectorContext } from "./context-projection.js";
 import type { DirectorContextQuery } from "./context-projection.js";
 import { selectedProviderProfiles } from "./provider-catalog.js";
@@ -651,19 +652,38 @@ export class ProductionService {
     return { status: "approved" as const, approvals: this.approve(projectId, human, snapshotId, snapshot.members.map(member => member.videoNodeId)) };
   }
 
-  control(projectId: string, actor: ActorContext, action: "pause" | "resume" | "stop") {
+  /** Read-only GR-13 projection for the generation overview (B2). */
+  stopView(projectId: string): StopView | null {
+    const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
+    const stopped = control?.paused ? this.store.get<StopView>("execution_stop", control.authorityId) : undefined;
+    return stopped ? { stopId: stopped.stopId, at: stopped.at, sentJobs: stopped.sentJobs, detachedJobs: stopped.detachedJobs } : null;
+  }
+
+  releaseAttempt(projectId: string, actor: ActorContext, attemptId: string, input: ReleaseAttemptInput): ReleaseAttemptReceipt {
+    this.assertActor(projectId, actor);
+    invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Releasing a job requires a human project command");
+    invariant(input.expectedPhase === "submission_unknown", "ATTEMPT_NOT_RELEASABLE", "Only an unconfirmed submission can be released");
+    return this.engine.releaseAttempt(projectId, attemptId, actor.principalId, input.acknowledgeDoubleCharge);
+  }
+
+  control(projectId: string, actor: ActorContext, action: "pause" | "resume" | "stop", expectedAuthorityId?: string | null) {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId, actor.requestId);
       this.assertActor(projectId, actor);
       invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Execution controls require a human project command");
+      if (action === "resume" && expectedAuthorityId !== undefined)
+        invariant((this.store.get<{ authorityId: string }>("execution_control", projectId)?.authorityId ?? null) === expectedAuthorityId,
+          "STOP_CHANGED", "The stop state changed. Refresh before continuing.");
       if (action === "stop") {
         for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== actor.requestId && prior.state === "active")
           this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
         for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked")
           this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+        const stopped: StopView = { stopId: actor.requestId, at: new Date().toISOString(), ...this.engine.detachUnsent(projectId, actor.requestId) };
+        this.store.insert("execution_stop", actor.requestId, projectId, stopped);
       }
       this.engine.setPaused(projectId, action !== "resume", actor.requestId);
-      return { action, cursor: this.store.cursor(projectId) };
+      return { action, stopped: this.stopView(projectId) };
     });
   }
 

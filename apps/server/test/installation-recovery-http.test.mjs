@@ -62,7 +62,8 @@ test("quarantine blocks every mutation family and future routes before body cons
   f.app.post("/api/future/write", async () => { futureCalls++; return {}; });
   f.app.get("/api/future/reconcile", async () => { futureCalls++; return {}; });
   f.quarantine(); const before = rows(f.store);
-  for (const [url, body] of [["/api/projects", { name: "No new project" }], [`${f.path}/messages`, { text: "New request" }], [`${f.path}/controls`, { action: "resume" }],
+  for (const [url, body] of [["/api/projects", { name: "No new project" }], [`${f.path}/messages`, { text: "New request" }], [`${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
+    [`${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
     [`${f.path}/approvals`, { snapshotId: "old", videoNodeIds: ["video"] }], [`${f.path}/director/setup`, { mode: "native" }],
     [`${f.path}/narration/sessions`, {}], [`${f.path}/media/renders`, { expectedHeadVersion: 0, renderNodeId: "render" }],
     [`${f.path}/spending/budget`, { expectedRevision: 0, expectedCapMicros: "100000", capMicros: "200000" }], ["/api/future/write", {}]]) denied(await f.request("POST", url, body));
