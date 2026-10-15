@@ -676,6 +676,8 @@ export class Store {
       const encoded = this.checkedBody(kind, id, projectId, body);
       try { this.db.prepare("INSERT INTO entities(kind,id,project_id,body) VALUES(?,?,?,?)").run(kind, id, projectId, encoded); }
       catch (error) { this.constraint(error); }
+      if (kind === "artifact" || kind === "narration_audio")
+        this.insert("asset_metadata", `${kind}:${id}`, projectId, { createdAt: new Date().toISOString() });
       return JSON.parse(encoded) as T;
     });
   }

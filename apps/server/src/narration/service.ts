@@ -1,3 +1,4 @@
+import { defaultNarratorVoice } from "./default-voice.js";
 import { digest, invariant, newId } from "@openslate/core";
 import type { ActorContext } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
@@ -94,7 +95,7 @@ export class NarrationService {
   }
 
   /** Host materialization of one saved shot. This never widens the Director's generic narration-edit capability. */
-  materializeRequestedShot(projectId: string, actor: ActorContext, input: { key: string; expectedHeadVersion: number; shotId: string; intentDigest: string; voice: string; profileRevisionId: string }) {
+  materializeRequestedShot(projectId: string, actor: ActorContext, input: { key: string; expectedHeadVersion: number; shotId: string; intentDigest: string; voice?: string; profileRevisionId: string }) {
     this.production.assertActor(projectId, actor, true);
     return this.store.command(`${actor.principalId}:${projectId}:${actor.requestId}:requested-shot-narration`, input.key, digest(input), () => {
       this.production.assertActor(projectId, actor, true);
@@ -112,7 +113,7 @@ export class NarrationService {
         || canonical?.shotMappings.some(mapping => mapping.segmentId === target && mapping.shotId !== shot.id));
       let entry = !shared && target ? state.entries.find(entry => entry.segmentId === target) : undefined;
       const draft = this.validateDraft({ text: shot.narration.text, textKind: 'draft', language: 'en', meaning: shot.purpose || 'Narration for this shot',
-        source: { kind: 'generated', voice: input.voice, profileRevisionId: input.profileRevisionId } });
+        source: { kind: 'generated', voice: input.voice ?? defaultNarratorVoice(this.store, project, shot), profileRevisionId: input.profileRevisionId } });
       const old = entry ? this.record<SegmentRevision>('narration_segment', entry.segmentRevisionId, projectId) : null;
       const changed = !old || digest(this.draft(old)) !== digest(draft);
       if (changed) {
@@ -158,6 +159,8 @@ export class NarrationService {
       const audio = this.record<NarrationAudio>("narration_audio", audioId, projectId);
       invariant(!isVerifiedGeneratedNarrationAudio(audio), "NARRATION_GENERATED_ATTACHMENT_REQUIRED", "Use the exact human generated-recording selection action");
       invariant(script.source.kind === narrationAudioOrigin(audio), "NARRATION_SOURCE_UNDECIDED", "Select the recording source before binding its audio");
+      const label = this.store.get<{ label: string }>("audio_library_label", audioId);
+      this.store.put("audio_library_label", audioId, projectId, { label: label?.label ?? "Voice line", role: "voice" });
       if (entry.audioId === audioId) return;
       entry.audioId = audioId; entry.cueId = null; entry.audioAcceptanceId = entry.timingAcceptanceId = null;
     });
