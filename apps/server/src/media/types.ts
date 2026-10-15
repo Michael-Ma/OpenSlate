@@ -77,6 +77,8 @@ export interface RenderManifestInput {
   targetRevisionId: string;
   width: number;
   height: number;
+  /** Trusted local demo export only; included in the immutable recipe. */
+  demo?: true;
   clips: SuppliedClip[];
   audio?: SuppliedAudioPlacement[];
 }
@@ -91,6 +93,8 @@ export interface FrozenRenderManifest {
   frameRate: { numerator: 30; denominator: 1 };
   sampleRate: 48000;
   totalFrames: number;
+  /** Trusted local demo export only; included in the immutable recipe. */
+  demo?: true;
   clips: SuppliedClip[];
   audio: (SuppliedAudioPlacement & { gainMilliDb: number })[];
   toolchainDigest: string;

@@ -5,6 +5,10 @@ import { LocalMediaService } from "./local-media.js";
 import { installManagedVideo } from "./managed-video.js";
 import type { RenderCompletion } from "./types.js";
 import type { ImportedVideo, ImportVideoInput, MediaPreview, MediaRenderJob, OwnedMediaSource, PrepareMediaRender, RealVideoArtifact } from "./application-types.js";
+import type { ExportRecord, ExportView, StartExportInput } from "@openslate/core/public";
+import type { StoryboardCapture } from "./storyboard-capture.js";
+import { captureStoryboard, changedFilm } from "./storyboard-capture.js";
+import { fixtureSource } from "./demo-source.js";
 import { captureRender } from "./timeline-capture.js";
 import type { CapturedRender } from "./timeline-capture.js";
 
@@ -15,6 +19,7 @@ const importReceipt = (value: ImportedVideo): ImportedVideo => ({ artifact: valu
 
 /** Local supplied-media bridge. It never starts generation or changes executor bindings. */
 export class MediaApplicationService {
+  private readonly preparingExports = new Map<string, Promise<MediaRenderJob>>();
   private readonly running = new Map<string, AbortController>();
   private readonly leaseMs: number;
   constructor(readonly production: ProductionService, readonly media: LocalMediaService, options: { leaseMs?: number } = {}) {
@@ -91,6 +96,76 @@ export class MediaApplicationService {
       this.store.insert("media_render", job.id, projectId, job);
       this.store.appendEvent(projectId, "media.render_prepared", { renderJobId: job.id, manifestDigest: manifest.digest });
       return job;
+    });
+  }
+
+  async prepareExport(projectId: string, actor: ActorContext, input: StartExportInput & { key: string }): Promise<MediaRenderJob> {
+    const request = structuredClone(input), authority = structuredClone(actor);
+    this.validateRequest(request, ["expectedHeadVersion", "key"]);
+    const reserved = this.store.transaction(() => {
+      this.authorize(projectId, authority);
+      invariant(authority.kind === "human", "ACTOR_DENIED", "Export requires a human request");
+      return this.store.command(`${authority.principalId}:${projectId}:storyboard_export`, request.key, digest({ request, authority }), () => {
+        invariant(this.store.getProject(projectId).headVersion === request.expectedHeadVersion, "REVISION_CONFLICT", "Film changed before export");
+        const capture = captureStoryboard(this.store, projectId);
+        if (!capture.readiness.ready) throw new DomainError("EXPORT_BLOCKED", "Film is not ready to export", capture.readiness);
+        const job = { projectId, target: capture.target };
+        this.assertUnpaused(job);
+        return { id: newId(), outputArtifactId: newId(), capture };
+      });
+    });
+    const prior = this.store.get<MediaRenderJob>("media_render", reserved.id); if (prior) return prior;
+    const pending = this.preparingExports.get(reserved.id); if (pending) return pending;
+    const promise = this.freezeExport(projectId, authority, reserved);
+    this.preparingExports.set(reserved.id, promise);
+    try { return await promise; } finally { this.preparingExports.delete(reserved.id); }
+  }
+
+  private async freezeExport(projectId: string, authority: ActorContext, reserved: { id: string; outputArtifactId: string; capture: StoryboardCapture }): Promise<MediaRenderJob> {
+    const { capture } = reserved, renderInput = structuredClone(capture.input);
+    for (const clip of capture.fixtureClips) {
+      const source = await fixtureSource(this.store, this.media, projectId, clip.artifact, clip.durationFrames);
+      renderInput.clips.push({ source, startFrame: 0, durationFrames: clip.durationFrames, fit: "contain" });
+    }
+    const fixtureAudioSources = new Map<string, Awaited<ReturnType<typeof fixtureSource>>>();
+    for (const placement of capture.fixtureAudio) {
+      let source = fixtureAudioSources.get(placement.artifact.artifactId);
+      if (!source) {
+        source = await fixtureSource(this.store, this.media, projectId, placement.artifact, Math.round(capture.readiness.seconds * 30));
+        fixtureAudioSources.set(placement.artifact.artifactId, source);
+      }
+      renderInput.audio!.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample });
+    }
+    const manifest = await this.media.freezeManifest(renderInput);
+    return this.store.transaction(() => {
+      this.authorize(projectId, authority);
+      const previous = this.store.get<MediaRenderJob>("media_render", reserved.id); if (previous) return previous;
+      invariant(canonical(captureStoryboard(this.store, projectId).target) === canonical(capture.target), "REVISION_CONFLICT", "Film changed while freezing export");
+      const job: MediaRenderJob = { id: reserved.id, projectId, actor: authority, target: capture.target, manifest, outputArtifactId: reserved.outputArtifactId,
+        state: "prepared", ownerToken: null, leaseUntil: null, cancelRequested: false, artifact: null, createdAt: new Date().toISOString(), finishedAt: null, errorCode: null };
+      this.store.insert("media_render", job.id, projectId, job);
+      this.store.appendEvent(projectId, "media.render_prepared", { renderJobId: job.id, manifestDigest: manifest.digest });
+      return job;
+    });
+  }
+
+  exportRecord(projectId: string, jobId: string): ExportRecord {
+    const job = this.job(projectId, jobId), target = job.target;
+    invariant("kind" in target && target.kind === "storyboard", "NOT_FOUND", "Export does not belong to the storyboard");
+    return { exportId: job.id, state: terminal(job) ? "done" : job.cancelRequested || job.state === "cancelled" ? "cancelled" :
+      ["failed", "interrupted"].includes(job.state) || job.errorCode ? "failed" : "rendering",
+      headVersion: target.headVersion, demo: target.demo, startedAt: job.createdAt,
+      ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}), ...(job.artifact ? { artifact: { ...job.artifact, kind: "video" as const } } : {}),
+      ...(job.errorCode ? { failure: { code: job.errorCode } } : {}),
+      outdatedBy: changedFilm(target.film, captureStoryboard(this.store, projectId).target.film) };
+  }
+
+  exportView(projectId: string): ExportView {
+    return this.store.transaction(() => {
+      const capture = captureStoryboard(this.store, projectId);
+      const records = this.store.list<MediaRenderJob>("media_render", projectId).filter(job => "kind" in job.target && job.target.kind === "storyboard").reverse()
+        .map(job => this.exportRecord(projectId, job.id));
+      return { readiness: capture.readiness, current: records[0] ?? null, history: records.slice(1) };
     });
   }
 
@@ -174,11 +249,14 @@ export class MediaApplicationService {
   }
 
   /** Trusted authenticated host view. Model-facing reads must call snapshot with an actor. */
-  workspaceSnapshot(projectId: string): { jobs: MediaRenderJob[]; preview: MediaPreview | null } {
+  workspaceSnapshot(projectId: string): { jobs: MediaRenderJob[]; preview: MediaPreview | null; lastExport: { artifact: ArtifactRef; outdated: boolean; outdatedBy: ExportRecord["outdatedBy"] } | null } {
     this.store.getProject(projectId);
     const jobs = this.store.list<MediaRenderJob>("media_render", projectId), preview = this.store.get<MediaPreview>("media_preview", projectId);
     const selected = preview ? jobs.find(job => job.id === preview.renderJobId) : undefined;
-    return { jobs, preview: preview && selected && this.matches(selected) ? preview : null };
+    const last = [...jobs].reverse().find(job => job.artifact);
+    const outdatedBy = last && "kind" in last.target ? this.exportRecord(projectId, last.id).outdatedBy : [];
+    const lastExport = last?.artifact ? { artifact: last.artifact, outdated: "kind" in last.target ? outdatedBy.length > 0 : !this.matches(last), outdatedBy } : null;
+    return { jobs, preview: preview && selected && this.matches(selected) ? preview : null, lastExport };
   }
 
   private job(projectId: string, id: string): MediaRenderJob {
@@ -196,7 +274,7 @@ export class MediaApplicationService {
       const current = this.job(job.projectId, job.id); if (terminal(current)) return current;
       invariant(current.ownerToken === job.ownerToken, "MEDIA_LEASE_LOST", "Another worker owns completion registration");
       const artifact: ArtifactRef = { artifactId: job.outputArtifactId, sha256: completion.artifact.sha256, kind: "video" };
-      const record: RealVideoArtifact = { id: artifact.artifactId, projectId: job.projectId, artifact, path, mimeType: "video/mp4", fixture: false, attemptId: null,
+      const record: RealVideoArtifact = { id: artifact.artifactId, projectId: job.projectId, artifact, path, mimeType: "video/mp4", fixture: "kind" in job.target && job.target.demo, attemptId: null,
         origin: "local_render", byteLength: completion.artifact.byteLength, physicalDurationSeconds: completion.artifact.probe.video!.frames / 30, manifestDigest: job.manifest.digest, renderJobId: job.id };
       this.store.insert("artifact", record.id, job.projectId, record);
       let publish = !current.cancelRequested && this.matches(job);
@@ -205,17 +283,20 @@ export class MediaApplicationService {
         finishedAt: new Date().toISOString(), errorCode: null };
       this.store.put("media_render", job.id, job.projectId, next);
       if (publish) this.store.put<MediaPreview>("media_preview", job.projectId, job.projectId, { id: job.projectId, projectId: job.projectId, renderJobId: job.id, artifact,
-        revisionId: job.target.revisionId, headVersion: job.target.headVersion, planId: job.target.planId, manifestDigest: job.manifest.digest, fixture: false });
+        revisionId: job.target.revisionId, headVersion: job.target.headVersion, planId: "planId" in job.target ? job.target.planId : null, manifestDigest: job.manifest.digest, fixture: "kind" in job.target && job.target.demo });
       this.store.appendEvent(job.projectId, publish ? "media.render_published" : "media.render_historical", { renderJobId: job.id, artifactId: artifact.artifactId, manifestDigest: job.manifest.digest });
       return next;
     });
   }
 
   private matches(job: MediaRenderJob): boolean {
-    try { return canonical(this.capture(job.projectId, job.target.renderNodeId).target) === canonical(job.target); } catch { return false; }
+    try {
+      const capture = "kind" in job.target ? captureStoryboard(this.store, job.projectId) : this.capture(job.projectId, job.target.renderNodeId);
+      return (!("readiness" in capture) || capture.readiness.ready) && canonical(capture.target) === canonical(job.target);
+    } catch { return false; }
   }
 
-  private assertUnpaused(job: MediaRenderJob): void {
+  private assertUnpaused(job: Pick<MediaRenderJob, "projectId" | "target">): void {
     invariant(!this.store.get<{ paused: boolean }>("execution_control", job.projectId)?.paused, "MEDIA_PAUSED", "Project execution is paused");
     const held = this.store.list<{ scopeId: string; active: boolean }>("hold", job.projectId)
       .some(hold => hold.active && (job.target.scopeIds.includes(hold.scopeId) || job.target.dependencyNodeIds.includes(hold.scopeId)));
