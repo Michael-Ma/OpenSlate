@@ -244,6 +244,15 @@ export class StudioStore {
     return true;
   }
 
+  /** Answer a pending Director question. The server takes exactly { text, replyToQuestionId }: no scope, no editing flag. */
+  async answerQuestion(questionId: string, text: string): Promise<boolean> {
+    const snapshot = this.#state.snapshot;
+    const body = { text: text.trim(), replyToQuestionId: questionId };
+    if (!snapshot || !body.text) return false;
+    const receipt = await this.#press<unknown>(`answer:${questionId}`, body, async () => ({ path: path(snapshot.project.id, "/messages"), body }));
+    return receipt !== undefined;
+  }
+
   stopFilm(): Promise<unknown> {
     const body: ControlInput = { action: "stop" };
     return this.#press<ControlReceipt>("control:stop", { action: "stop", cursor: this.#state.overview?.cursor ?? 0 }, async () => ({ path: path(this.#state.projectId!, "/controls"), body }));

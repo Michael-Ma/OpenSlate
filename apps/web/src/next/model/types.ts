@@ -47,6 +47,8 @@ export interface ConversationEntry {
   /** Scene and shot ids the message pointed at, when the server reports them. */
   scopeIds?: string[];
   at?: string;
+  /** Which Director runtime wrote an assistant entry, when the server reports it (DC-15). */
+  runtime?: "scripted" | "live";
 }
 
 export interface PendingQuestion {
