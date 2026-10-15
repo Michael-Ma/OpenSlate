@@ -4,6 +4,7 @@ import { checkCallout } from "../model/checks.ts";
 import type { ShotCard } from "../model/keyframes.ts";
 import type { Label, NoteCallout } from "../model/note-banner.ts";
 import { Picture, StatusPill } from "./parts.tsx";
+import { useGuarded } from "../app/useWriteGuard.ts";
 
 /** Columns the wide layout shows at once; more cards scroll inside the row, fewer leave a dashed placeholder. */
 const VISIBLE = 3;
@@ -27,6 +28,8 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoi
   const { t, tm, locale } = useI18n();
   const label = (value: Label) => ("text" in value ? value.text : tm(value));
   const row = useRef<HTMLDivElement>(null);
+  // A note's regenerate link is a paid make: off while offline, expired or stopped, with the reason.
+  const run = useGuarded("run");
   const selectedId = cards.find((card) => card.selected)?.shotId;
 
   // Keep the selected card in view when the row scrolls sideways (many shots, or the narrow layout).
@@ -80,7 +83,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoi
                       <span className="anno-text">{note.done && note.doneLabel ? t("note.callout.done", { choice: label(note.doneLabel) }) : note.text}</span>
                     </span>
                     {note.regenerate ? (
-                      <button type="button" className="link" data-act="note-regenerate" data-note={note.noteId} data-shot={card.shotId} disabled={busy} onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}>
+                      <button type="button" className="link" data-act="note-regenerate" data-note={note.noteId} data-shot={card.shotId} {...run} disabled={busy || run.disabled} onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}>
                         {label(note.regenerate.label)}
                       </button>
                     ) : null}

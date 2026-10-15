@@ -5,6 +5,7 @@ import { filmMeta, seconds } from "../model/keyframes.ts";
 import { clock } from "../model/motion.ts";
 import type { Msg } from "../model/types.ts";
 import { BannerFrame } from "./BannerFrame.tsx";
+import { useGuarded } from "../app/useWriteGuard.ts";
 
 /** A check the person just settled from the banner; shown until they move on, with Undo while it is allowed. */
 export interface SettledCheck {
@@ -42,10 +43,12 @@ interface Props {
 
 /**
  * App-computed checks (plan decision D4), one at a time. Drawn neutral, never in the Director's amber:
- * the app found these, the Director did not recommend them. Each option is one free, undoable command.
+ * the app found these, the Director did not recommend them. Each option is one free, undoable command, so each
+ * follows the shell's server guard (off while offline or expired, with the reason).
  */
 export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
   const { t, tm } = useI18n();
+  const server = useGuarded("server");
 
   if (settled && settled.sceneId === sceneId) {
     const shot = overview.shots[settled.shotId];
@@ -71,7 +74,7 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, o
         actions={
           <>
             <button type="button" className="pill chosen" data-act="check-next" onClick={onNext}>{t(checks.length ? "check.done.next" : "check.done.done")}</button>
-            {settled.commandId ? <button type="button" className="pill" data-act="undo" data-shot={settled.shotId} disabled={busy} onClick={() => onUndo(settled.commandId!)}>{t("check.undo")}</button> : null}
+            {settled.commandId ? <button type="button" className="pill" data-act="undo" data-shot={settled.shotId} {...server} disabled={busy || server.disabled} onClick={() => onUndo(settled.commandId!)}>{t("check.undo")}</button> : null}
           </>
         }
       />
@@ -104,12 +107,12 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, o
       actions={
         <>
           {actions.extend ? (
-            <button type="button" className="pill chosen" data-act="make-fit" data-shot={check.shotId} disabled={busy} onClick={() => onExtend(check)}>
+            <button type="button" className="pill chosen" data-act="make-fit" data-shot={check.shotId} {...server} disabled={busy || server.disabled} onClick={() => onExtend(check)}>
               {tm(actions.extend.label)}
             </button>
           ) : null}
-          <button type="button" className={`pill${actions.extend ? "" : " chosen"}`} data-act="keep-fit" data-shot={check.shotId} disabled={busy} onClick={() => onKeep(check)}>{tm(actions.keep.label)}</button>
-          <button type="button" className="pill ghost" data-act="edit-narration" data-shot={check.shotId} onClick={() => onEditNarration(check)}>{tm(actions.edit.label)}</button>
+          <button type="button" className={`pill${actions.extend ? "" : " chosen"}`} data-act="keep-fit" data-shot={check.shotId} {...server} disabled={busy || server.disabled} onClick={() => onKeep(check)}>{tm(actions.keep.label)}</button>
+          <button type="button" className="pill ghost" data-act="edit-narration" data-shot={check.shotId} {...server} onClick={() => onEditNarration(check)}>{tm(actions.edit.label)}</button>
         </>
       }
     />

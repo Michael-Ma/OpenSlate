@@ -1,7 +1,7 @@
 import type { GenerationOverview } from "@openslate/core/public";
 import type { Locale } from "../../shared/locale-preference.ts";
 import type { MessageId } from "../i18n/messages.ts";
-import type { Connection, Toast } from "../store/state.ts";
+import type { Connection, StudioState, Toast } from "../store/state.ts";
 import { filmMeta } from "./keyframes.ts";
 import { msg, type Msg, type ProjectSummary, type ViewName } from "./types.ts";
 
@@ -10,15 +10,12 @@ export const NARROW_QUERY = "(max-width: 899px)";
 
 export const VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
 
-/** Views the next studio has designed; the rest open in the classic studio for now (plan decision D13). */
-export const isDesignedView = (view: ViewName): boolean => view === "keyframes";
-
 export interface ViewTab {
   view: ViewName;
   label: MessageId;
   selected: boolean;
-  /** Not designed yet: the workspace links to the classic studio. */
-  classic: boolean;
+  /** The one tab the row's roving focus starts on: the selected tab, else the first (Settings has no tab). */
+  focusable: boolean;
 }
 
 const TAB_LABELS: Record<ViewName, MessageId> = {
@@ -31,10 +28,50 @@ const TAB_LABELS: Record<ViewName, MessageId> = {
 };
 
 export function viewTabs(current: ViewName): ViewTab[] {
-  return VIEWS.map((view) => ({ view, label: TAB_LABELS[view], selected: view === current, classic: !isDesignedView(view) }));
+  const anySelected = VIEWS.includes(current);
+  return VIEWS.map((view, index) => ({ view, label: TAB_LABELS[view], selected: view === current, focusable: anySelected ? view === current : index === 0 }));
 }
 
 export const viewLabel = (view: ViewName): MessageId => TAB_LABELS[view];
+
+/** The studio answered and has no films at all. */
+export const hasNoFilms = (state: Pick<StudioState, "projectId" | "projects" | "connection">): boolean =>
+  state.connection !== "connecting" && state.projects.length === 0 && !state.projectId;
+
+/**
+ * The view the workspace shows. A studio with no films at all opens on Start, whatever view was asked for,
+ * because there is nothing to plan or make yet.
+ */
+export function shownView(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection">): ViewName {
+  return hasNoFilms(state) ? "start" : state.view;
+}
+
+/**
+ * Whether a film is open for the Director. Start (from the mark, or held there because there are no films) has
+ * no film open even while the store still remembers the last one, so the Director column shows its no-film state
+ * there and its composer is off: a message typed on Start must not go to a film the page says is not open.
+ */
+export function directorHasFilm(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection">): boolean {
+  return !!state.projectId && shownView(state) !== "start";
+}
+
+/**
+ * The top bar in a film (title, tabs, counts, Stop) or on Start, where no film is open
+ * (the films on this computer; no tabs, no counts, no Stop).
+ */
+export const topBarMode = (view: ViewName): "film" | "films" => (view === "start" ? "films" : "film");
+
+/**
+ * When the whole page is the Connect screen instead of the studio. Before the film list has been read there
+ * is nothing to show behind a message, so the page connects (or explains why it cannot). Once the studio has
+ * loaded, an expired session is a dialog over the page instead, so nothing on screen is lost.
+ */
+export function connectScreen(state: Pick<StudioState, "connection" | "projectId" | "loadErrors">): "connecting" | "expired" | "failed" | null {
+  if (state.loadErrors.projects !== undefined) return state.connection === "expired" ? "expired" : "failed";
+  if (state.connection === "failed") return "failed";
+  if (state.connection === "connecting" && !state.projectId) return "connecting";
+  return null;
+}
 
 /** Roving focus in the tab row: arrows wrap, Home and End jump. Returns null for keys the row ignores. */
 export function tabKeyTarget(key: string, index: number, count: number): number | null {
@@ -86,7 +123,8 @@ export function connectionPill(connection: Connection): ConnectionPill {
   switch (connection) {
     case "connected": return { label: msg("shell.saved"), tone: "ok" };
     case "connecting": return { label: msg("connect.connecting"), tone: "waiting" };
-    default: return { label: msg("shell.offline"), tone: "waiting" };
+    case "reconnecting": return { label: msg("shell.offline"), tone: "waiting" };
+    default: return { label: msg("shell.not_connected"), tone: "waiting" };
   }
 }
 

@@ -4,16 +4,16 @@
  * the user's bubble, the composer and the notices are neutral; white is the send button and a chosen option.
  */
 
-/* header */
-.dir-head .dir-stop{flex:none}
-
-/* mode line, stopped banner, restart notice */
+/* mode line (stopped and restart casualties are the shell's film-wide strip) */
 .dir-notices{flex:none;display:flex;flex-direction:column;gap:8px;padding:10px 18px 0}
 .dir-mode{margin:0;font-size:12px;line-height:1.45;color:var(--muted)}
-.dir-mode.attention,.dir-banner{margin:0;border:1px solid var(--track);background:var(--raised);border-radius:12px;padding:9px 12px;font-size:12.5px;line-height:1.45;color:var(--text-2)}
-.dir-banner p{margin:0}
-.dir-banner p + p{margin-top:4px}
-.dir-banner .row{display:flex;gap:6px;margin-top:9px}
+.dir-mode.attention{margin:0;border:1px solid var(--track);background:var(--raised);border-radius:12px;padding:9px 12px;font-size:12.5px;line-height:1.45;color:var(--text-2)}
+
+/* no film open (Start): one muted line in the middle of the column; the composer is off */
+.director[data-film="none"] .thread-body{margin:auto 6px;text-align:center}
+.dir-no-film{margin:0;color:var(--muted);font-size:13.5px;line-height:1.55}
+.composer textarea:disabled{cursor:not-allowed}
+.at-btn:disabled{color:var(--muted);cursor:not-allowed}
 
 /* thread */
 .dir-empty{margin:0 0 4px;color:var(--muted);font-size:13px;line-height:1.5}
@@ -51,7 +51,7 @@
 .chips .atchip{display:inline-flex;align-items:center}
 .chips .atchip button{border-radius:4px;line-height:1}
 .chips .atchip button:hover{color:var(--text)}
-.at-btn:hover{color:var(--text);border-color:var(--track)}
+.at-btn:hover:not(:disabled){color:var(--text);border-color:var(--track)}
 .composer-note{margin:6px 4px 0;font-size:12px;line-height:1.4;color:var(--text-2)}
 
 /* @ picker (focus stays in the textarea; the active option is highlighted) */

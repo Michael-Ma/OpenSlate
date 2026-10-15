@@ -1,12 +1,17 @@
 import type { PriceQuote } from "@openslate/core/public";
 import { msg, type Msg } from "./types.ts";
 
-/** "$1.50" from integer micro-dollars. Sub-cent amounts keep two significant decimals ("$0.004"). */
+/**
+ * "$1.50" from integer micro-dollars. Sub-cent amounts keep three decimals ("$0.004"); amounts under a tenth of
+ * a cent keep two significant digits ("$0.0001"), so a real price never reads as "$0.000".
+ */
 export function formatMicros(micros: string | number, locale: string): string {
   const dollars = Number(micros) / 1_000_000;
-  const fractionDigits = dollars > 0 && dollars < 0.01 ? 3 : 2;
   // narrowSymbol: "$" in every locale (zh-CN would otherwise print "US$").
-  return new Intl.NumberFormat(locale, { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(dollars);
+  const base = { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol" } as const;
+  if (dollars > 0 && dollars < 0.001) return new Intl.NumberFormat(locale, { ...base, maximumSignificantDigits: 2 }).format(dollars);
+  const fractionDigits = dollars > 0 && dollars < 0.01 ? 3 : 2;
+  return new Intl.NumberFormat(locale, { ...base, minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(dollars);
 }
 
 /** Prices are host-configured estimates (plan decision D15): "about $1.50", or "no price set". Never "$0.00". */

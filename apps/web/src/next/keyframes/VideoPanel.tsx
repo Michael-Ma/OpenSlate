@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n/I18n.tsx";
 import type { VideoPanel as Panel } from "../model/keyframes.ts";
+import { useGuarded } from "../app/useWriteGuard.ts";
 
 interface Props {
   panel: Panel;
@@ -16,11 +17,15 @@ const ACT = { confirm: "confirm-video", make_keyframes: "make-keyframes", play: 
 /**
  * SCENE n VIDEO: opened-frame segments, the count, the note and the one primary button.
  * The enabled button carries its price with the breakdown under it; a disabled one says what is missing.
+ * Confirming and making keyframes start paid work, so they follow the shell's run guard (offline, expired,
+ * stopped); playing the scene needs nothing.
  */
 export function VideoPanel({ panel, sceneId, pending, playing, onConfirm, onMakeKeyframes, onPlay }: Props) {
   const { t, tm } = useI18n();
   const why = `why-${sceneId}`;
-  const enabled = panel.enabled && !pending;
+  const run = useGuarded("run");
+  const guarded = panel.action === "confirm" || panel.action === "make_keyframes";
+  const enabled = panel.enabled && !pending && !(guarded && run.disabled);
   const primary = panel.enabled && panel.action !== null;
   const label = panel.action === "play" ? (playing ? t("panel.stop_scene") : `▶ ${tm(panel.label)}`) : tm(panel.label);
   const price = panel.enabled && panel.priceTotal && panel.action !== "play" ? ` · ${tm(panel.priceTotal)}` : "";
@@ -39,6 +44,7 @@ export function VideoPanel({ panel, sceneId, pending, playing, onConfirm, onMake
         className={`pill go${primary ? " primary" : ""}`}
         data-act={panel.action ? ACT[panel.action] : "video-busy"}
         data-scene={sceneId}
+        {...(guarded ? run : {})}
         disabled={!enabled || !press}
         aria-describedby={why}
         onClick={press}

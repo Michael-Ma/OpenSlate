@@ -1,9 +1,12 @@
 /*
- * Shell additions on top of ui/studio.css: top bar extras, the workspace slot and the drawer scrim.
+ * Shell additions on top of ui/studio.css: top bar extras, the film-wide strip, the shell's dialogs, the
+ * workspace slot, the drawer scrim, and the widths between the phone layout and 1440 px.
  * This file can load before studio.css, so every rule that overrides it is more specific, never later.
  */
 
 /* ---------- top bar ---------- */
+.topbar button.brand{border:0;background:none;padding:0;color:var(--text);font:inherit;font-weight:700;font-size:15px;text-align:left;border-radius:6px;cursor:pointer}
+.topbar button.brand:hover .word{text-decoration:underline;text-underline-offset:3px}
 .topbar .film b,.topbar .film-meta{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .topbar .film b{flex:0 1 auto}
 /* The meta gives way long before the title does. */
@@ -20,6 +23,12 @@
 .topbar .lang:hover{color:var(--text)}
 .topbar .classic-link{color:var(--muted);text-decoration:none;font-size:12.5px;border-radius:4px}
 .topbar .classic-link:hover{color:var(--text-2);text-decoration:underline;text-underline-offset:2px}
+/* Stop: only while something runs. A plain pill with a stop mark; the confirm says what happens. */
+.topbar .stop-btn svg{flex:none}
+/* Settings: a 30 px round icon button; raised while Settings is open. */
+.topbar .icon-btn{width:30px;height:30px;border-radius:50%;border:1px solid var(--hairline);background:var(--raised);color:var(--text-2);display:grid;place-items:center;flex:none;padding:0}
+.topbar .icon-btn:hover{color:var(--text);border-color:var(--track)}
+.topbar .icon-btn[aria-current="page"]{background:var(--raised-2);color:var(--text);border-color:var(--track)}
 
 /* 900–1279 px: the fixed film column and the counts no longer fit beside the tabs. */
 @media (min-width:900px) and (max-width:1279px){
@@ -27,27 +36,79 @@
   .topbar .film{width:auto;flex:1 1 0;margin-right:18px}
   .topbar .top-right .counts{display:none}
 }
+/* 900–1099 px: the mark alone, and the film's title without its meta. */
 @media (min-width:900px) and (max-width:1099px){
-  .topbar .film:has(.film-pick-wrap) .film-meta{display:none}
+  .topbar .brand{margin-right:16px}
+  .topbar .brand .word{display:none}
+  .topbar .film .film-meta{display:none}
+  .topbar .top-right{gap:10px}
 }
 
-/* ---------- workspace slot ---------- */
+/* ---------- the Director column's width and the workspace gutter, shared with the toast (toast.css) ---------- */
+:root{--shell-director-w:392px;--shell-gutter:22px}
+/* 900–1279 px: a narrower Director column (lead decision 8). */
+@media (min-width:900px) and (max-width:1279px){:root{--shell-director-w:320px}}
+
+/* ---------- workspace: the strip row above the view ---------- */
 .workspace-slot{display:contents}
+@media (min-width:900px){
+  /* The workspace column shrinks with the window instead of pushing the page sideways. */
+  .app[data-ui="next"]{grid-template-columns:var(--shell-director-w) minmax(0,1fr);grid-template-rows:52px auto minmax(0,1fr)}
+  .app[data-ui="next"] > .director{grid-row:2 / -1}
+  .app[data-ui="next"] > .workspace-slot > .film-strip-slot{grid-column:2;grid-row:2;min-width:0}
+  .app[data-ui="next"] > .workspace-slot > :not(.film-strip-slot){grid-column:2;grid-row:3}
+}
+
+/* ---------- film-wide strip: offline, stopped, restart casualties (the same in every view) ---------- */
+.film-strip{display:flex;align-items:center;gap:12px;margin:10px 22px 4px;border:1px solid var(--track);background:var(--raised);border-radius:12px;padding:9px 10px 9px 14px;font-size:13px;line-height:1.45;min-width:0}
+.film-strip .ic{flex:none;width:22px;height:22px;border-radius:50%;background:var(--text);color:var(--surface);display:grid;place-items:center;font-size:12px;font-weight:800;line-height:1}
+.film-strip .txt{flex:1;min-width:0;margin:0}
+.film-strip .txt b{font-weight:700}
+.film-strip .txt span{color:var(--text-2)}
+.film-strip .acts{display:flex;gap:6px;flex:none;flex-wrap:wrap}
+
+/* ---------- the shell's dialogs: Stop, session expired (native <dialog>: focus stays inside) ---------- */
+dialog.shell-dialog{color:var(--text);font:inherit;width:min(460px,calc(100vw - 32px));max-width:calc(100vw - 32px);background:var(--bar);border:1px solid var(--track);border-radius:var(--r-big);padding:20px 20px 16px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
+.shell-dialog h2{margin:0 0 8px;font-size:18px;font-weight:700;letter-spacing:-.01em}
+.shell-dialog p{margin:0 0 10px;color:var(--text-2);line-height:1.5}
+.shell-dialog ul{margin:0 0 12px;padding-left:18px;color:var(--text-2);line-height:1.6}
+.shell-dialog code{font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);background:var(--raised-2);border-radius:5px;padding:1px 5px}
+.shell-dialog .still{color:var(--text);margin:4px 0 0}
+.shell-dialog .still:empty{margin:0}
+.shell-dialog .foot{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.shell-dialog .foot .pill{padding:7px 14px}
+.shell-dialog .pill[aria-disabled="true"]{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted);cursor:progress}
+
+/* ---------- 900–1279 px: the narrower Director column (lead decision 8); the Keyframes view's own
+   in-between rules live in keyframes/keyframes.css ---------- */
+@media (min-width:900px) and (max-width:1279px){
+  /* The header's indent lines the Director up with the 392 px column's film title; the narrow column starts flush. */
+  .app[data-ui="next"] > .director .dir-head{padding-left:18px}
+}
 
 /* ---------- narrow ---------- */
 .scrim{display:none}
 @media (max-width:899px){
-  /* Basis 0: the film shrinks (title ellipsis) instead of pushing the Director toggle onto the tab row. */
+  /* Basis 0: the film shrinks (title ellipsis) instead of pushing the Director toggle onto the tab row.
+     The title and meta are capped at the film's width, so a long title ellipsizes instead of running under 中文. */
   .topbar .film{flex:1 1 0}
+  .topbar .film b,.topbar .film-meta{max-width:100%}
   .topbar .tabs{flex:1 1 calc(100% - 120px)}
   .topbar .lang{order:3}
+  .topbar .top-right .stop-btn{order:3;margin-left:8px}
+  .topbar .top-right .settings-btn{order:3;margin-left:6px}
   /* Reconnecting gets its own slim row under the tabs instead of crowding the first row. */
   .topbar .top-right .saved.waiting{display:flex;order:7;flex:1 0 100%;justify-content:center;font-size:11.5px;padding:2px 9px;border-radius:8px}
   .topbar .classic-link{order:6;margin-left:auto;padding-left:10px;font-size:12px}
   .topbar .tab:focus-visible{outline-offset:-2px}
   .film-pick-wrap{max-width:100%}
+  .film-strip{flex-wrap:wrap;margin:14px 16px 0}
+  .film-strip .acts{width:100%;padding-left:34px}
+  .shell-dialog{padding:18px 16px 14px}
   .scrim{display:block;position:fixed;inset:0;z-index:35;background:rgba(10,11,12,.55)}
 }
 @media (max-width:400px){
   .topbar .tab{padding:6px 9px}
+  .topbar .top-right .stop-btn{padding:3px 8px}
 }

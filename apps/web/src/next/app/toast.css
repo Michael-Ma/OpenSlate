@@ -3,3 +3,11 @@
 .toast.error{border-color:var(--text-2)}
 .toast{animation:toast-in .16s ease-out}
 @keyframes toast-in{from{opacity:0}to{opacity:1}}
+/*
+ * From 900 px the toast centres over the Keyframes preview: past the Director column and the gutter (shell.css
+ * tokens, so the 320 px column below 1280 px follows by itself) and short of the inspector and its gap.
+ */
+:root{--toast-aside:266px}
+@media (min-width:900px){
+  .toast-live .toast{left:calc(var(--shell-director-w) + var(--shell-gutter) + (100vw - var(--shell-director-w) - 2 * var(--shell-gutter) - var(--toast-aside)) / 2)}
+}

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  canStop, stopNotices, modeLine, scopeLabel, bylineTime, userText, paragraphs, threadView, pendingQuestions,
+  canStop, modeLine, scopeLabel, bylineTime, userText, paragraphs, threadView, pendingQuestions,
   composeAnswer, composerView, pickerItems, filterPicker, mentionAt, removeMention, MESSAGE_LIMIT,
   threadNotes, noteOpens, byLetter,
 } from '../../src/next/model/director.ts';
@@ -127,16 +127,6 @@ test('Stop counts only real work: Director turns, running or queued media, runni
   assert.equal(canStop(stopped, { ...idle, status: 'running' }), false);
 });
 
-test('stop notices carry the counts for the shell catalog sentences', () => {
-  const overview = lastFerryOverview();
-  assert.deepEqual(stopNotices(overview), { stopped: null, restartCasualties: 0 });
-  const stopped = { ...overview, stopped: { stopId: 's', at: 'x', sentJobs: 1, detachedJobs: 2 }, restartCasualties: ['a', 'b'] };
-  const notices = stopNotices(stopped);
-  assert.deepEqual(notices, { stopped: { sent: 1, detached: 2 }, restartCasualties: 2 });
-  assert.equal(translateMsg('en', { id: 'stop.banner', values: { sent: notices.stopped.sent } }), 'Stopped. Nothing new will be sent. 1 job already sent will finish and be charged.');
-  assert.equal(translateMsg('en', { id: 'stop.detached', values: { count: 2 } }), '2 queued jobs will need a new confirm.');
-});
-
 test('the mode line: scripted, not connected, error and unreadable; nothing for a working real Director', () => {
   assert.equal(en(modeLine(idle, undefined).message), 'Scripted Director: replies are canned and nothing in the film changes.');
   assert.equal(modeLine(idle, undefined).tone, 'info');
@@ -156,15 +146,32 @@ test('the composer sends only real text while connected, within the server limit
   assert.equal(composerView({ ...base, text: '   ' }, true, overview).canSend, false);
   assert.equal(composerView({ ...base, text: 'Colder' }, true, overview).canSend, true);
   assert.equal(composerView({ ...base, text: 'Colder', sending: true }, true, overview).canSend, false);
+  assert.equal(en(composerView(base, true, overview).hint), 'a scene or shot to point at it');
   const offline = composerView({ ...base, text: 'Colder' }, false, overview);
   assert.equal(offline.canSend, false);
-  assert.equal(offline.problem.id, 'director.composer.offline');
+  assert.equal(offline.problem, null, 'the hint says it, once');
+  assert.equal(en(offline.hint), 'Offline · your draft is kept');
   const long = composerView({ ...base, text: 'x'.repeat(MESSAGE_LIMIT + 1) }, true, overview);
   assert.equal(long.canSend, false);
   assert.equal(en(long.problem), 'Keep the message under 16,000 characters.');
   assert.equal(composerView({ ...base, text: 'x'.repeat(MESSAGE_LIMIT) }, true, overview).canSend, true);
   const chips = composerView({ ...base, targets: [{ kind: 'shot', id: shotId('2.2') }, { kind: 'scene', id: sceneId(2) }, { kind: 'shot', id: 'gone' }] }, true, overview).chips;
   assert.deepEqual(chips.map(c => en(c.label)), ['2.2', 'Scene 2', 'Removed']);
+});
+
+test('the composer while stopped keeps Send on and says the Director waits; with no film it is off', () => {
+  const overview = lastFerryOverview();
+  const draft = { text: 'Colder', targets: [], sending: false };
+  const stopped = composerView(draft, true, overview, { open: true, stopped: true });
+  assert.equal(stopped.canSend, true, 'a message sent while stopped is kept for the Director');
+  assert.equal(en(stopped.hint), 'Stopped · the Director waits for Continue');
+  assert.equal(translateMsg('zh-CN', stopped.hint), '已停止 · 导演等你继续');
+  assert.equal(en(composerView(draft, false, overview, { open: true, stopped: true }).hint), 'Offline · your draft is kept', 'offline says more than stopped');
+  const none = composerView(draft, true, overview, { open: false, stopped: false });
+  assert.equal(none.off, true);
+  assert.equal(none.canSend, false);
+  assert.equal(none.hint, null);
+  assert.equal(composerView(draft, true, overview).off, false);
 });
 
 test('the picker lists scenes then shots with their own words, and filters by what follows @', () => {

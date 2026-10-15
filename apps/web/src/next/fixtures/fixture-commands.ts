@@ -708,10 +708,14 @@ function control(world: FixtureWorld, body: ControlInput): ControlReceipt {
     let sentJobs = 0;
     let detachedJobs = 0;
     commit(world, (overview, snapshot) => {
+      // As the server's Stop (engine.detachUnsent): every attempt not finished yet counts as sent (running, no
+      // answer, released and still polled); bound jobs not sent yet are taken off; running or blocked scene
+      // confirmations are cancelled, so the sent clip finishes on its own and nothing after it is sent.
       const shots: Record<string, ShotOverview> = {};
       for (const [id, shot] of Object.entries(overview.shots)) {
         const detach = <T extends MediaSlot>(slot: T): T => {
-          if (slot.state === "running") sentJobs++;
+          if (slot.state === "running" || slot.state === "no_answer") sentJobs++;
+          sentJobs += (slot.releasedAttemptIds ?? []).length;
           if (slot.state !== "queued") return slot;
           detachedJobs++;
           const { waiting: _held, ...rest } = slot;
@@ -719,9 +723,12 @@ function control(world: FixtureWorld, body: ControlInput): ControlReceipt {
         };
         shots[id] = { ...shot, keyframe: detach(shot.keyframe), video: detach(shot.video) };
       }
+      const scenes = overview.scenes.map((scene) => (scene.confirmation?.state === "running" || scene.confirmation?.state === "blocked"
+        ? { ...scene, confirmation: { confirmationId: scene.confirmation.confirmationId, state: "cancelled" as const } }
+        : scene));
       const stopped = { stopId: nextId(world, "stop"), at: now(), sentJobs, detachedJobs };
       return {
-        overview: { ...overview, shots, stopped, controlAuthorityId: nextId(world, "authority") },
+        overview: { ...overview, shots, scenes, stopped, controlAuthorityId: nextId(world, "authority") },
         snapshot: { ...snapshot, control: { paused: true } },
       };
     });
