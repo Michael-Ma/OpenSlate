@@ -1,7 +1,8 @@
 import type { DirectorNote, DirectorProposal, GenerationOverview, MediaSlot } from "@openslate/core/public";
 import type { Locale } from "../../shared/locale-preference.ts";
 import { noteViews, type NoteView } from "./notes.ts";
-import { msg, type ConversationEntry, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target } from "./types.ts";
+import type { MessageId } from "../i18n/messages.ts";
+import { msg, type ConversationEntry, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target, type TurnView } from "./types.ts";
 
 /**
  * The Director column's view models (thread, questions, composer, picker, Stop). Pure: no React,
@@ -163,6 +164,40 @@ export interface ThreadView {
   questions: QuestionView[];
   /** The Director is running a turn: show Working… */
   working: boolean;
+  /** What the running turn is doing, when the server says (DC-16). */
+  activity: Msg | null;
+  /** How the latest turn ended, when it ended without a reply (DC-16). */
+  ending: Msg | null;
+}
+
+const ENDINGS = new Set(["no_reply", "failed", "timeout", "superseded", "interrupted", "owner_lost"]);
+const TOOL_ACTIVITY: Record<string, MessageId> = {
+  read_context: "director.activity.reading",
+  record_notes: "director.activity.notes",
+  propose_change: "director.activity.proposing",
+  prepare_change: "director.activity.proposing",
+  apply_change: "director.activity.changing",
+};
+
+/** What the latest turn says about itself: its current activity while running, or an honest ending. */
+export function turnStatus(turns: readonly TurnView[] | undefined): { activity: Msg | null; ending: Msg | null } {
+  const latest = turns?.at(-1);
+  if (!latest) return { activity: null, ending: null };
+  if (latest.state === "running" || latest.state === "queued") {
+    if (latest.action === "keyframe_review") return { activity: msg("director.activity.review"), ending: null };
+    const id = latest.progress ? TOOL_ACTIVITY[latest.progress.tool] : undefined;
+    return { activity: id ? msg(id) : null, ending: null };
+  }
+  const reason = latest.reason ?? "";
+  return { activity: null, ending: ENDINGS.has(reason) ? msg(`director.ending.${reason as "no_reply" | "failed" | "timeout" | "superseded" | "interrupted" | "owner_lost"}`) : null };
+}
+
+/** The chosen options as structured answers (DC-17), alongside the readable text. */
+export function structuredAnswers(question: QuestionView, choices: Readonly<Record<string, string>>): { questionId: string; optionIndex: number }[] {
+  return question.items.flatMap((item) => {
+    const index = item.options.findIndex((option) => option.label === choices[item.id]);
+    return index >= 0 ? [{ questionId: item.id, optionIndex: index }] : [];
+  });
 }
 
 /** Questions the person can still answer (state pending and canAnswer not false). */
@@ -246,7 +281,7 @@ export function threadView(
     return { id: entry.id, who: "director", time, chips: [], paragraphs: paragraphs(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id) };
   });
   const working = director?.status === "running" || overview?.director.state === "working";
-  return { entries, questions: pendingQuestions(snapshot?.questions), working };
+  return { entries, questions: pendingQuestions(snapshot?.questions), working, ...turnStatus(snapshot?.turns) };
 }
 
 // ---- answers -------------------------------------------------------------------

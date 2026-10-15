@@ -1,6 +1,6 @@
 import { useId, useState, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { composeAnswer, MESSAGE_LIMIT, type QuestionView } from "../model/director.ts";
+import { composeAnswer, MESSAGE_LIMIT, structuredAnswers, type QuestionView } from "../model/director.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 
 /**
@@ -27,7 +27,7 @@ export function QuestionCard({ question }: { question: QuestionView }) {
     });
   const submit = async () => {
     if (!ready) return;
-    if (await store.answerQuestion(question.id, answer)) { setChoices({}); setFree(""); }
+    if (await store.answerQuestion(question.id, answer, structuredAnswers(question, choices))) { setChoices({}); setFree(""); }
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
