@@ -3,8 +3,10 @@
  * Sections 1-7 are extracted from last-ferry.html (unchanged values; that file keeps its own copy).
  * Section 8 holds the components added in P5. Rules: neutral greys; amber only for the Director's
  * content; white for the chosen option and the primary action; green for an opened frame or a done state.
- * Dark only (D12). No external requests: Inter is used when installed, otherwise the system font.
+ * Dark only (D12). No external requests: Inter comes from the repo's self-hosted copy when the page
+ * is opened inside the repository (or from an installed Inter), otherwise the system font.
  */
+@font-face{font-family:"Inter";src:local("Inter"),url("../../../../apps/web/public/fonts/InterVariable.woff2") format("woff2");font-weight:100 900;font-display:swap}
 
 /* ---------- 1. tokens ---------- */
 :root{
@@ -62,8 +64,8 @@ a.brand:hover .word{text-decoration:underline;text-underline-offset:3px}
 .logo{width:20px;height:20px;border-radius:6px;background:var(--text);display:grid;place-items:center;flex:none}
 .logo i{display:block;width:12px;height:3px;border-radius:2px;background:var(--bar);box-shadow:0 -4px 0 var(--bar)}
 .film{display:flex;align-items:baseline;gap:10px;min-width:0;width:326px;flex:none}
-.film b{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.film span{color:var(--text-2);font-size:12.5px;white-space:nowrap}
+.film b{font-size:15px;font-weight:700;white-space:nowrap;flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.film span{color:var(--text-2);font-size:12.5px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .tabs{display:flex;gap:4px;align-items:center}
 .tab{border:0;background:none;color:var(--text-2);font-weight:600;font-size:13.5px;padding:6px 13px;border-radius:var(--r-pill);text-decoration:none;white-space:nowrap}
 .tab:hover{color:var(--text)}
@@ -291,6 +293,7 @@ dialog::backdrop{background:var(--scrim)}
 .sheet-head h2{margin:0;font-size:17px;font-weight:700}
 .sheet-head .pill{margin-left:auto}
 .sheet-body{flex:1;min-height:0;overflow:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+.sheet-body > *{flex:none}
 .sheet-foot{flex:none;border-top:1px solid var(--hairline);padding:12px 18px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sheet-foot .grow{flex:1;min-width:0;font-size:12px;color:var(--text-2)}
 .sheet-foot .pill{padding:7px 14px}
