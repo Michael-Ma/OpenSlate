@@ -10,7 +10,7 @@ const STICK_PX = 40;
 
 /** The conversation, anchored to the bottom: bylines, the user's bubbles with @ chips, the Director's plain text. */
 export function Thread() {
-  const { t, locale } = useI18n();
+  const { t, tm, locale } = useI18n();
   const snapshot = useStudio((s) => s.snapshot);
   const overview = useStudio((s) => s.overview);
   const director = useStudio((s) => s.director);
@@ -40,9 +40,10 @@ export function Thread() {
         {view.working && (
           <div className="entry" data-entry="working">
             <div className="byline"><b>{t("director.title")}</b></div>
-            <div className="working" role="status">{t("director.working")}<i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></div>
+            <div className="working" role="status">{view.activity ? tm(view.activity) : t("director.working")}<i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></div>
           </div>
         )}
+        {!view.working && view.ending && <p className="dir-ending" role="status" data-entry="ending">{tm(view.ending)}</p>}
       </div>
     </div>
   );
