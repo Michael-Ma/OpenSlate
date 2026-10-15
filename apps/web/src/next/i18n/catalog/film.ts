@@ -106,6 +106,8 @@ export const filmMessages = {
   "film.export.failed": { en: "The last export stopped ({code}). Exports render on this computer and cost nothing; you can export again.", zh: "上次导出中断了（{code}）。导出在本机渲染，不收费，可以重新导出。" },
   "film.export.failed_no_file": { en: "Check again found no finished file. Export again to render the film.", zh: "再次检查没有找到已完成的文件。请重新导出。" },
   "film.export.cancelled": { en: "Export cancelled. Nothing was saved.", zh: "已取消导出，没有保存任何文件。" },
+  "film.export.unavailable": { en: "This studio can't export from the storyboard yet ({code}).", zh: "这个工作室还不能按故事板导出（{code}）。" },
+  "film.toast.export_done": { en: "Export finished. The MP4 is ready to download.", zh: "导出完成，MP4 可以下载了。" },
   "film.toast.export_started": { en: "Exporting the film on this computer. You can keep working.", zh: "正在本机导出影片，你可以继续工作。" },
   "film.toast.export_cancelled": { en: "Export cancelled.", zh: "已取消导出。" },
   "film.toast.export_found": { en: "Found the finished export. Nothing was rendered again.", zh: "找到了已完成的导出，没有重新渲染。" },
