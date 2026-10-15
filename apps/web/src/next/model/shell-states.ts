@@ -32,7 +32,9 @@ export function unreachable(input: { streamDown: boolean; graceOver: boolean; la
 
 /**
  * What a control needs (P5 shell change 8): `server` for anything that writes (an edit, Continue, a note's
- * choice), `run` for anything that starts work (a paid make, a confirm, sending to the Director while stopped).
+ * choice, an answer, sending to the Director), `run` for anything that starts work (a paid make, a confirm).
+ * The composer needs only `server`: while the film is stopped Send stays on and its hint says the Director
+ * waits for Continue (a message does not resume the film), so stopped changes the hint, not whether it sends.
  */
 export type Needs = "server" | "run";
 
@@ -175,7 +177,10 @@ export function showStop(overview: GenerationOverview | null, director: Director
 
 /** What a Stop would do, counted the way the server's Stop counts (sent jobs finish; unsent ones are taken off). */
 export interface StopPreview {
-  /** Jobs already with a provider (running, or sent and unanswered): they finish and are charged. */
+  /**
+   * Jobs already with a provider (running, sent and unanswered, or released by the person and still polled):
+   * they finish and are charged. The server's Stop counts every attempt that has not finished the same way.
+   */
   sent: number;
   /** Jobs bound but not sent yet: Stop takes them off and they need a new confirm. */
   queued: number;
@@ -186,13 +191,18 @@ export interface StopPreview {
 export function stopPreview(overview: GenerationOverview | null, director: DirectorStatus | null): StopPreview {
   let sent = 0;
   let queued = 0;
+  // A no-answer attempt the person gave up on is still polled and may still be charged; it is not the slot's
+  // current attempt any more, and two slots never share one, but count each id once all the same.
+  const released = new Set<string>();
   for (const shot of Object.values(overview?.shots ?? {})) {
     for (const slot of [shot.keyframe, shot.video]) {
       if (slot.state === "running" || slot.state === "no_answer") sent++;
       else if (slot.state === "queued") queued++;
+      for (const id of slot.releasedAttemptIds ?? []) if (id !== slot.attemptId) released.add(id);
     }
     if (shot.narration.state === "making" || shot.narration.state === "no_answer") sent++;
   }
+  sent += released.size;
   const directorBusy = director?.status === "running" || director?.status === "waiting_user" || (!!overview && overview.director.state !== "idle");
   return { sent, queued, director: directorBusy };
 }

@@ -17,8 +17,26 @@ const newKey = () => crypto.randomUUID();
 interface Session { store: StudioStore; media: MediaSource; mode: "live" | "fixture"; close(): void }
 
 /**
- * A new session's store has read the film list (and opened a film) before it replaces the page, so a reconnect
- * from the session-expired dialog goes straight back to the studio instead of through the Connect screen.
+ * Resolves once the store has read the film list (and chosen a film, whose reads go on behind the page), or the
+ * read failed. The store reports both through its state: the list read is the first thing start() does.
+ */
+function filmListRead(store: StudioStore): Promise<void> {
+  const read = () => {
+    const state = store.getState();
+    return state.connection !== "connecting" || state.loadErrors.projects !== undefined;
+  };
+  return new Promise((resolve) => {
+    if (read()) { resolve(); return; }
+    const off = store.subscribe(() => { if (read()) { off(); resolve(); } });
+  });
+}
+
+/**
+ * A new session's store has read the film list before it replaces the page, so a reconnect from the
+ * session-expired dialog goes straight back to the studio instead of through the Connect screen; the film's own
+ * reads (snapshot, overview, Director) go on behind the page, as on a first load. A session whose list read failed
+ * is closed and counts as not connected: the dialog says "Still not connected" instead of the page turning into
+ * the full Connect screen.
  */
 async function liveSession(): Promise<Session> {
   const client = await StudioClient.connect(takeStudioLaunchCode(window.location, window.history));
@@ -28,8 +46,15 @@ async function liveSession(): Promise<Session> {
     url: (artifact, signal) => client.artifactUrl(store.getState().projectId ?? "", artifact, signal),
     revoke: (url) => URL.revokeObjectURL(url),
   };
-  await store.start(new URLSearchParams(window.location.search).get("project"));
-  return { store, media, mode: "live", close: () => { store.stop(); client.close(); } };
+  const close = () => { store.stop(); client.close(); };
+  void store.start(new URLSearchParams(window.location.search).get("project"));
+  await filmListRead(store);
+  // The dispatches after the list read run in the same task as it, so the state is settled here.
+  if (store.getState().loadErrors.projects !== undefined) {
+    close();
+    throw new Error(`The film list could not be read: ${store.getState().loadErrors.projects}`);
+  }
+  return { store, media, mode: "live", close };
 }
 
 async function fixtureSession(): Promise<Session> {
@@ -45,6 +70,14 @@ function Root() {
   const fixture = new URLSearchParams(window.location.search).get("fixture") === "last-ferry";
   const latest = useRef(0);
   const shown = useRef(0);
+  const current = useRef<Session | null>(null);
+  // A replaced session is closed once the new one is on screen (its store stopped, its client's reads aborted),
+  // after the page has carried its unsent message over. React's development double effect sees the same session.
+  useEffect(() => {
+    const previous = current.current;
+    current.current = session;
+    if (previous && previous !== session) previous.close();
+  }, [session]);
   /**
    * Resolves true once this attempt's session replaced the page, false when it failed or a newer session is
    * already shown. Attempts can overlap (Try again, a new #connect= link, React's development double effect);

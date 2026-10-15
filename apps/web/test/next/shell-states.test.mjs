@@ -121,6 +121,11 @@ test('the Stop confirm counts sent jobs, queued jobs and the Director the way th
   // A sent job with no answer yet still finishes or not on the provider's side; Stop cannot take it back.
   const unsure = stopPreview(film({ 'shot-2-1': { video: noAnswer('a1') }, 'shot-1-2': { narration: { state: 'making', text: 'x', fits: true } } }), null);
   assert.equal(unsure.sent, 2);
+  // A no-answer clip the person gave up on is still polled and may still be charged: Stop counts it as sent,
+  // as the server does, next to the new try that replaced it.
+  const released = stopPreview(film({ 'shot-2-1': { video: { ...running('a2'), releasedAttemptIds: ['a1'] } }, 'shot-2-2': { keyframe: { ...lastFerryOverview().shots['shot-2-2'].keyframe, releasedAttemptIds: ['k1', 'a1'] } } }), null);
+  assert.equal(released.sent, 3, 'a2 running, a1 and k1 released and still out; a1 counted once');
+  assert.deepEqual(stopLines(released).map(en), ['3 jobs already sent will finish and be charged.']);
 });
 
 // ---- after the session expired --------------------------------------------------------
