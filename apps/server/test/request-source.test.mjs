@@ -48,7 +48,7 @@ test('controls require bounded identity, replay the same receipt and refuse chan
  assert.equal(f.store.list('message',f.project.id).length,0);
  const key=randomUUID(),first=await f.request('POST','/controls',{action:'stop'},key);
  assert.equal(first.statusCode,200,first.body);assert.deepEqual((await f.request('POST','/controls',{action:'stop'},key)).json(),first.json());
- const conflict=await f.request('POST','/controls',{action:'resume'},key);assert.equal(conflict.statusCode,409);assert.equal(conflict.json().error.code,'IDEMPOTENCY_CONFLICT');
+ const conflict=await f.request('POST','/controls',{action:'resume',expectedAuthorityId:null},key);assert.equal(conflict.statusCode,409);assert.equal(conflict.json().error.code,'IDEMPOTENCY_CONFLICT');
  assert.deepEqual(f.service.snapshot(f.project.id).conversation,[]);assert.equal(f.store.list('message',f.project.id)[0].source,'app');
 });
 test('a narration session stores app authority without adding a user message',async t=>{

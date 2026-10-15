@@ -15,6 +15,7 @@ import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync }
 import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
+import type { ControlInput, ReleaseAttemptInput } from "@openslate/core/public";
 import { ToolInvocationService } from "./application/tool-invocations.js";
 import { imageMessageContext, selectedDirectorImages } from "./application/director-images.js";
 import type { SelectedDirectorImage } from "./application/director-images.js";
@@ -289,15 +290,25 @@ export function createApp(options: AppOptions = {}) {
     const actor = service().beginRequest(request.params.projectId, "local-user", "Review the displayed keyframes", { source: "app", editing: false, contextDigest: digest({ snapshotId: request.body.snapshotId, videoNodeIds: [...request.body.videoNodeIds].sort() }), key: `review:${request.headers["idempotency-key"] ?? digest(request.body)}` });
     return service().approve(request.params.projectId, actor, request.body.snapshotId, request.body.videoNodeIds);
   });
-  app.post<{ Params: { projectId: string }; Body: { action: "pause" | "resume" | "stop" } }>("/api/projects/:projectId/controls", {
-    schema: { body: object({ action: { enum: ["pause", "resume", "stop"] } }, ["action"]) },
+  app.post<{ Params: { projectId: string }; Body: ControlInput }>("/api/projects/:projectId/controls", {
+    schema: { body: { oneOf: [object({ action: { const: "stop" } }, ["action"]),
+      object({ action: { const: "resume" }, expectedAuthorityId: { anyOf: [string, { type: "null" }] } }, ["action", "expectedAuthorityId"])] } },
   }, async request => {
     const key = requiredCommandKey(request);
-    const result = service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
+    // Continue changes control state only; it never drives a worker or Director tick.
+    return service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
       const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action === "stop" ? "Stop the current conversation and new generation." : request.body.action, { source: "app", editing: false, key: `control:${key}` });
-      return service().control(request.params.projectId, actor, request.body.action);
+      return service().control(request.params.projectId, actor, request.body.action, request.body.action === "resume" ? request.body.expectedAuthorityId : undefined);
     });
-    options.director?.tick(); return result;
+  });
+  app.post<{ Params: { projectId: string; attemptId: string }; Body: ReleaseAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/release", {
+    schema: { body: object({ expectedPhase: { const: "submission_unknown" }, acknowledgeDoubleCharge: { type: "boolean" } }, ["expectedPhase"]) },
+  }, async request => {
+    const key = requiredCommandKey(request);
+    return service().store.command(`local-user:${request.params.projectId}:release-attempt`, key, digest({ attemptId: request.params.attemptId, ...request.body }), () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", "Release an unconfirmed submission; both jobs may be charged.", { source: "app", editing: false, key: `release-attempt:${key}` });
+      return service().releaseAttempt(request.params.projectId, actor, request.params.attemptId, request.body);
+    });
   });
   if (options.service) registerProjectEventStream(app, { store: options.service.store,
     authorize: request => { if (!request.headers.authorization) options.studioSessions?.authorize(request); } });

@@ -839,7 +839,7 @@ test("shot generation respects current unanswered direction and Stop, while supe
         targetShotIds: ["shot-0"],
       })
     ).json().error.code,
-    "WAITING_USER",
+    "EXECUTION_PAUSED",
   );
   assert.equal(f.store.list("grant", f.project.id).length, 0);
 });

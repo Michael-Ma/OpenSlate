@@ -88,9 +88,10 @@ test('lost create/control responses can be replayed without duplicate projects o
   assert.equal(first.id,second.id);assert.equal(f.store.listProjects().length,1);
   assert.equal((await f.req('POST','/api/projects',{name:'Different'},'create-project')).statusCode,409);
   const path=`/api/projects/${first.id}/controls`;
-  await f.req('POST',path,{action:'pause'},'pause');const cursor=f.store.cursor(first.id);
-  await f.req('POST',path,{action:'pause'},'pause');assert.equal(f.store.cursor(first.id),cursor);
-  assert.equal((await f.req('POST',path,{action:'resume'},'pause')).statusCode,409);
+  const stop=await f.req('POST',path,{action:'stop'},'stop');assert.equal(stop.statusCode,200,stop.body);const cursor=f.store.cursor(first.id);
+  const replay=await f.req('POST',path,{action:'stop'},'stop');assert.deepEqual(replay.json(),stop.json());assert.equal(f.store.cursor(first.id),cursor);
+  const conflict=await f.req('POST',path,{action:'resume',expectedAuthorityId:stop.json().stopped.stopId},'stop');
+  assert.equal(conflict.statusCode,409);assert.equal(conflict.json().error.code,'IDEMPOTENCY_CONFLICT');
 });
 
 test('ordinary conversation never silently grants media or overwrites a nonempty project',async t=>{

@@ -38,6 +38,7 @@ export interface PlanRecord { id: string; projectId: string; compiled: CompiledP
 export interface NodeBinding {
   id: string; projectId: string; planId: string; node: PlanNode;
   candidateId: string | null; state: "active" | "retired"; outputs: Record<string, ArtifactRef>;
+  outdatedReason?: "stopped" | "released";
 }
 export type AttemptPhase = "submitting" | "preparing" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
 export interface Attempt {
@@ -50,6 +51,8 @@ export interface Attempt {
   applicationInput?: OwnedTranscriptionAttemptInput;
   narrationSpeech?: NarrationSpeechAttemptInput;
   outputs: Record<string, ArtifactRef>; createdAt: string;
+  /** Human release removes blocking/publication authority, never reconciliation or liability. */
+  released?: { by: string; at: string };
 }
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
@@ -331,6 +334,45 @@ export class Engine {
 
   attempts(projectId: string): Attempt[] { return this.store.list<Attempt>("attempt", projectId); }
 
+  /** Called in the Stop transaction. Admitted attempts keep their immutable submission intent. */
+  detachUnsent(projectId: string, stopId: string): { sentJobs: number; detachedJobs: number } {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      const pending = this.attempts(projectId).filter(attempt => !TERMINAL.has(attempt.phase));
+      let detachedJobs = 0;
+      for (const binding of this.store.list<NodeBinding>("node_binding", projectId)) {
+        if (binding.state !== "active" || !binding.candidateId || Object.keys(binding.outputs).length) continue;
+        if (pending.some(attempt => attempt.candidateId === binding.candidateId)) {
+          // Reconciliation may finish this intent, but a failure after Stop must
+          // not turn Continue into permission to buy a technical retry.
+          if (!this.store.get("candidate_stop", binding.candidateId))
+            this.store.insert("candidate_stop", binding.candidateId, projectId, { stopId });
+          continue;
+        }
+        this.store.put("node_binding", binding.id, projectId, { ...binding, candidateId: null, outdatedReason: "stopped" });
+        detachedJobs++;
+      }
+      return { sentJobs: pending.length, detachedJobs };
+    });
+  }
+
+  releaseAttempt(projectId: string, attemptId: string, by: string, acknowledgeDoubleCharge: boolean) {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      invariant(acknowledgeDoubleCharge === true, "DOUBLE_CHARGE_NOT_ACKNOWLEDGED", "Acknowledge that both jobs may be charged");
+      const attempt = this.store.get<Attempt>("attempt", attemptId);
+      invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
+      invariant(attempt.phase === "submission_unknown" && !attempt.released, "ATTEMPT_NOT_RELEASABLE", "Only an unreleased unconfirmed submission can be released");
+      const at = new Date().toISOString();
+      this.store.put("attempt", attempt.id, projectId, { ...attempt, released: { by, at } });
+      const binding = this.store.get<NodeBinding>("node_binding", attempt.nodeId);
+      if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId)
+        this.store.put("node_binding", binding.id, projectId, { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
+      this.store.appendEvent(projectId, "attempt.released", { attemptId, by, at, acknowledgeDoubleCharge: true });
+      return { attemptId, shotId: binding?.node.shotId ?? null, releasedAt: at };
+    });
+  }
+
   /** Read-only UI evidence. Historical attempts remain available for reconciliation. */
   currentAttemptIds(projectId: string, attempts = this.attempts(projectId)): string[] {
     const project = this.store.getProject(projectId);
@@ -342,6 +384,7 @@ export class Engine {
         && nodes.has(binding.id) && canonical(nodes.get(binding.id)) === canonical(binding.node))
       .map(binding => [binding.id, binding]));
     return attempts.filter(attempt => {
+      if (attempt.released) return false;
       const binding = bindings.get(attempt.nodeId);
       if (!binding || binding.node.specDigest !== attempt.specDigest || binding.node.kind !== attempt.request.kind) return false;
       try {
@@ -819,14 +862,16 @@ export class Engine {
         this.recovery.assertFreshAuthority(projectId, "grant", grant.id);
       } else invariant(!GENERATED.has(node.kind), "ORIGIN_NOT_AUTHORIZED", "Generation requires a candidate");
       const workKey = binding.candidateId ? null : digest({ projectId, nodeId, fingerprint: inputs.fingerprint });
-      const previous = this.attempts(projectId).filter(attempt => binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey).sort((a, b) => b.ordinal - a.ordinal)[0];
+      const previous = this.attempts(projectId).filter(attempt => !attempt.released && (binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey)).sort((a, b) => b.ordinal - a.ordinal)[0];
       if (previous) {
         invariant(previous.phase === "failed", "ATTEMPT_EXISTS", "Existing work must be reconciled, never resubmitted");
+        invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
+          "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's retry authority; generate again with a new press");
         invariant(binding.candidateId && previous.failure?.technical && previous.failure.retryAllowed && previous.ordinal <= (profile?.maxRetries ?? 0), "RETRY_NOT_AUTHORIZED", "No trusted technical retry allowance");
         invariant(previous.fingerprint === inputs.fingerprint, "NEW_CANDIDATE_REQUIRED", "A technical retry cannot change its creative inputs");
       }
       if (profile) {
-        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !TERMINAL.has(attempt.phase)
+        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !attempt.released && !TERMINAL.has(attempt.phase)
           && attempt.request.args.profileIdentity === profile.id && attempt.request.args.profileRevision === profile.revision
           && canonical(requestExecutionIdentity(attempt.request)) === canonical(execution)).length;
         invariant(active < profile.maxConcurrency, "CAPACITY_EXCEEDED", "Configured provider capacity is occupied");
@@ -1034,7 +1079,7 @@ export class Engine {
           retryAllowed: outcome.technical === true && outcome.retryAllowed === true } : null;
       const taskId = outcome.type === "accepted" || outcome.type === "failed" || outcome.type === "unknown" ? outcome.taskId ?? current.taskId : current.taskId;
       this.store.put("attempt", current.id, current.projectId, { ...current, phase, taskId, failure, leaseExpiresAt: 0 });
-      if (outcome.type === "rejected") this.setReservation(current, "released");
+      if (outcome.type === "rejected" && !current.released) this.setReservation(current, "released");
       if (outcome.type === "failed") this.setReservation(current, "charged");
       this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase }); return false;
     });
@@ -1087,7 +1132,7 @@ export class Engine {
         this.store.appendEvent(current.projectId, "attempt.ingestion_issue_resolved", { attemptId: current.id });
       }
       const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
-      if (binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
+      if (!current.released && binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
         const project = this.store.getProject(current.projectId);
         if (binding.planId === project.activePlanId) {
           try {
