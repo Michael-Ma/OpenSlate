@@ -225,14 +225,6 @@ export const scenarios = [
         expect((await tab(page, view).getAttribute("aria-selected")) === "true", `${view} is not the selected tab`);
       }
       expect((await page.locator(".topbar [data-act='classic']").getAttribute("href")) === "?ui=classic&view=cut", "The classic link does not follow the view");
-      // While Film is still the stub, its panel names the view, links to the same view in the classic studio and
-      // goes back to Keyframes.
-      if (await page.locator("main.classic-view[data-view='film']").count()) {
-        expect((await text(page, ".classic-view h1")) === "Film", `The Film stub is titled ${JSON.stringify(await text(page, ".classic-view h1"))}`);
-        expect((await page.locator(".classic-view [data-act='open-classic']").getAttribute("href")) === "?ui=classic&view=cut", "The Film stub does not link to the classic Film view");
-        await page.locator(".classic-view [data-act='back-to-keyframes']").click();
-        await until(page, shown, (value) => value === "keyframes", "Back to Keyframes did not open Keyframes");
-      }
 
       // Keyboard: arrows move along the tabs, Enter opens one.
       await tab(page, "plan").click();
@@ -250,8 +242,7 @@ export const scenarios = [
       expect((await gear.getAttribute("aria-current")) === "page", "Settings is not marked as the current page");
       expect(await page.locator(".topbar [role='tab'][aria-selected='true']").count() === 0, "A tab stays selected on Settings");
       expect(await page.locator(".topbar [role='tab'][tabindex='0']").count() === 1, "The tab row is not in the focus order on Settings");
-      if (await page.locator("main.classic-view").count())
-        expect((await text(page, ".classic-view h1")) === "Settings", `The Settings stub is titled ${JSON.stringify(await text(page, ".classic-view h1"))}`);
+      expect(await page.locator("main.work[data-view='settings']").count() === 1, "The gear did not show the Settings view");
       await shot(page, "next-shell-settings-1440");
 
       // The mark opens the films on this computer: no film is open there, so no tabs, counts or Stop.
@@ -268,8 +259,7 @@ export const scenarios = [
       expect(start.tabs === 0 && start.counts === 0, `Start still shows ${start.tabs} tabs and ${start.counts} counts`);
       expect(start.current === "page", "The mark is not marked as the current page on Start");
       expect(start.title === "OpenSlate", `Document title on Start is "${start.title}"`);
-      if (await page.locator("main.classic-view").count())
-        expect((await text(page, ".classic-view h1")) === "All films", `The Start stub is titled ${JSON.stringify(await text(page, ".classic-view h1"))}`);
+      expect(await page.locator("main.work[data-view='start']").count() === 1, "The mark did not show the Start view");
       // No film is open on Start, so the Director says it works inside a film and its composer is off.
       const director = await page.evaluate(() => {
         const column = document.getElementById("director");
@@ -723,6 +713,9 @@ export const scenarios = [
       await connect.waitFor({ timeout: 10000 });
       expect((await connect.locator("h1").textContent()) === "Connect to your studio", "Connect has the wrong heading");
       expect(await connect.locator("code").textContent() === "pnpm studio", "The command is not shown as code");
+      // Start's reconnect note: the films are safe, and jobs cut off by a restart are never resent by themselves.
+      expect((await connect.locator("[data-note='films-saved']").textContent()) === "Your films are saved on this computer.", "Connect does not say the films are saved");
+      expect(/nothing is resent by itself\.$/.test(await connect.locator("[data-note='no-answer']").textContent()), "Connect does not say cut-off jobs are not resent");
       const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-act"));
       expect(focused === "retry", `Focus is on ${focused}, not Try again`);
       await shot(page, "next-shell-connect-failed");

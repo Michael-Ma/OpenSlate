@@ -489,8 +489,8 @@ export const scenarios = [
       await page.waitForFunction(() => document.querySelector("main[data-view='start'] .view-head [data-act='open-demo']")?.disabled === true);
       expect((await demo.getAttribute("title")) === "The demo needs the stand-in Director, which this studio does not have.", `The demo button says ${await demo.getAttribute("title")}`);
       expect((await filmNames(page)).length === before + 1, "The demo film was not listed");
-      // Leave Start and come back: still off, and no second film.
-      await page.click(".topbar [data-act='tab'][data-view='keyframes']");
+      // Leave Start (Start has no tabs: open the film) and come back: still off, and no second film.
+      await row(page, "last-ferry").locator("[data-act='open-film']").click();
       await page.waitForSelector("main.work[data-view='keyframes']");
       await openStart(page);
       await page.waitForSelector("main[data-view='start'] .film-row");
