@@ -191,6 +191,8 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
   if (plan.pending && !DURING_IMPORT.has(body.kind ?? "")) throw new ApiError("IMPORT_PENDING", 409);
   // Another view's command (the Film view's music): the next /storyboard route answers it.
   if (OTHER_VIEWS_KINDS.has(body.kind ?? "")) return DECLINE;
+  // A shot's narration voice is the narration routes' (narration.ts).
+  if (body.kind === "narration" && body.field === "voice") return DECLINE;
   if (body.kind === "undo") return undo(world, body);
 
   const fps = world.overview.fps;
