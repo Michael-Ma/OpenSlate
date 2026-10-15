@@ -107,7 +107,7 @@ export function ShotEditor({ shot, row, mode, fps, prices, saving, guard, error,
         <div className="wide">
           <div className={`impact ${impact.tone}`} role="status" data-impact={impact.tone}>
             <span className="ic" aria-hidden="true">{impact.tone === "cost" ? "!" : "✓"}</span>
-            <span><Rich text={impact.parts.map((part) => tm(part)).join(" ")} /></span>
+            <span className="txt"><Rich text={impact.parts.map((part) => tm(part)).join(locale === "zh-CN" ? "" : " ")} /></span>
           </div>
         </div>
         {error ? <p className="wide edit-error" role="alert"><i className="ic" aria-hidden="true">!</i>{t("plan.edit.not_saved", { reason: tm(error) })}</p> : null}

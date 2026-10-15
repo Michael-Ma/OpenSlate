@@ -216,3 +216,27 @@ test('the fixture port serves the Plan routes before the Keyframes commands', as
     port.close();
   }
 });
+
+test('through the store: a multi-field save carries head versions, and a refusal keeps the server reason', async () => {
+  const { StudioStore } = await import('../../src/next/store/store.ts');
+  const { refusal, storyboardSequence } = await import('../../src/next/views/plan/commands.ts');
+  const port = new FixturePort();
+  let n = 0;
+  const store = new StudioStore({ client: port, storage: null, newKey: () => `key-${++n}` });
+  try {
+    await store.start();
+    const saved = await storyboardSequence(store, [
+      { pressId: 'a', input: { kind: 'shot', id: shotId('2.1'), field: 'motion', value: 'Slow pan left' } },
+      { pressId: 'b', input: { kind: 'shot', id: shotId('2.1'), field: 'purpose', value: 'The harbour, waiting.' } },
+    ]);
+    assert.deepEqual([saved.saved, saved.last.headVersion], [2, 14]);
+    await store.narrationFit(shotId('2.3'), 'extend_shot');
+    await store.refresh();
+    const refusedSave = await storyboardSequence(store, [{ pressId: 'c', input: { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '180' } }]);
+    assert.deepEqual([refusedSave.saved, refusedSave.last], [0, null]);
+    assert.deepEqual(refusal(store), { id: 'error.SHOT_SHORTER_THAN_NARRATION' });
+  } finally {
+    store.stop();
+    port.close();
+  }
+});

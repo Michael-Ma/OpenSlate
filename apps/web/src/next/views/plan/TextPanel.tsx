@@ -9,7 +9,7 @@ export function NoneImpact({ text }: { text: MessageId }) {
   return (
     <div className="impact none" data-impact="none">
       <span className="ic" aria-hidden="true">✓</span>
-      <span>{t(text)}</span>
+      <span className="txt">{t(text)}</span>
     </div>
   );
 }

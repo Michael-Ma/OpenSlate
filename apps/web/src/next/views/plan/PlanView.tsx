@@ -229,7 +229,10 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     const change = tm(last.label);
     store.dismissToast();
     const ok = await store.edit({ kind: "undo", commandId: last.commandId }, msg("plan.toast.undone", { change }));
-    if (ok) setLast(null);
+    if (!ok) return;
+    setLast(null);
+    // The Undo button turns off; focus stays in the view instead of falling to the page.
+    focusLater(`#${PLAN_TITLE_ID}`);
   };
 
   // ---- written plans -------------------------------------------------------------------------------------

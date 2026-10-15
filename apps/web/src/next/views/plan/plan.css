@@ -232,3 +232,4 @@
 @media (prefers-reduced-motion: reduce){
   .plan .progress.indet i{width:100%;left:0;opacity:.35;animation:none}
 }
+.plan .hint b{color:var(--text);font-weight:600}

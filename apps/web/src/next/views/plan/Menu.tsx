@@ -23,7 +23,7 @@ interface Props {
 
 /**
  * A `•••` button with a small action menu under it (system.css 8.12). Arrow keys move, Esc or a click outside
- * closes it and focus returns to the button. It closes when the page scrolls, since it is fixed in place.
+ * closes it and focus returns to the button. It is fixed in place and follows its button when the page scrolls.
  */
 export function Menu({ label, act, items, disabled, title, data }: Props) {
   const [open, setOpen] = useState(false);
@@ -37,18 +37,27 @@ export function Menu({ label, act, items, disabled, title, data }: Props) {
     if (refocus) button.current?.focus({ preventScroll: true });
   };
 
-  useLayoutEffect(() => {
-    if (!open) return;
+  /** Under the button, right-aligned, flipped above when there is no room below. */
+  const placeMenu = () => {
     const anchor = button.current?.getBoundingClientRect();
     const menu = list.current;
-    if (!anchor || !menu) return;
+    if (!anchor || !menu) return false;
+    if (anchor.bottom < 0 || anchor.top > window.innerHeight) return false;
     const width = menu.offsetWidth;
     const height = menu.offsetHeight;
     const left = Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8));
     const below = anchor.bottom + 4;
     const top = below + height > window.innerHeight - 8 ? Math.max(8, anchor.top - 4 - height) : below;
+    // Applied at once as well, so the first item can take focus before React renders the new place.
+    Object.assign(menu.style, { left: `${left}px`, top: `${top}px`, visibility: "visible" });
     setPlace({ left, top });
-    menu.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
+    return true;
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (placeMenu()) list.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus({ preventScroll: true });
+    else close(true);
   }, [open]);
 
   useEffect(() => {
@@ -58,14 +67,15 @@ export function Menu({ label, act, items, disabled, title, data }: Props) {
       if (list.current?.contains(target) || button.current?.contains(target)) return;
       close(false);
     };
-    const away = (event: Event) => { if (!list.current?.contains(event.target as Node)) close(false); };
+    // The page can scroll under a fixed menu (a smooth scroll to a moved row, the wheel): it follows its button.
+    const follow = () => { if (!placeMenu()) close(false); };
     document.addEventListener("pointerdown", outside, true);
-    window.addEventListener("scroll", away, true);
-    window.addEventListener("resize", away);
+    window.addEventListener("scroll", follow, true);
+    window.addEventListener("resize", follow);
     return () => {
       document.removeEventListener("pointerdown", outside, true);
-      window.removeEventListener("scroll", away, true);
-      window.removeEventListener("resize", away);
+      window.removeEventListener("scroll", follow, true);
+      window.removeEventListener("resize", follow);
     };
   }, [open]);
 
@@ -95,6 +105,10 @@ export function Menu({ label, act, items, disabled, title, data }: Props) {
         disabled={disabled}
         title={title}
         onClick={() => (open ? close(true) : setOpen(true))}
+        onKeyDown={(event) => {
+          if (open && event.key === "Escape") { event.preventDefault(); close(true); }
+          else if (!open && event.key === "ArrowDown") { event.preventDefault(); setOpen(true); }
+        }}
       >
         <span aria-hidden="true">•••</span>
       </button>
