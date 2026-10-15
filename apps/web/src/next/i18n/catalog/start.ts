@@ -58,7 +58,6 @@ export const startMessages = {
   "start.demo.body": { en: "A short sample film made by stand-in models. It is free: no keys are needed and nothing is sent anywhere. You can review it, play it and export it; the export is stamped Demo.", zh: "一部由替身模型生成的简短示例影片。免费：不需要密钥，也不会发送任何内容。你可以审阅、播放和导出；导出的视频会带“示例”水印。" },
   "start.demo.why": { en: "A demo film stays a demo; make your own film for real media.", zh: "示例影片一直是示例；要生成真实素材请新建自己的影片。" },
   "start.demo.mark": { en: "DEMO", zh: "示例" },
-  "start.demo.picture": { en: "A still from the demo film", zh: "示例影片的一帧画面" },
   "start.demo.film_name": { en: "Demo film", zh: "示例影片" },
   "start.demo.opened": { en: "Made {name}. The stand-in Director is filling it in; nothing is charged.", zh: "已新建《{name}》。替身导演正在填充内容，不收费。" },
   "start.own.title": { en: "Make your own film", zh: "制作你自己的影片" },

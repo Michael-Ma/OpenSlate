@@ -74,7 +74,8 @@ export interface CreationResult {
  */
 export async function runCreation(store: StartStore, input: CreationInput, onStep: (step: CreationStep) => void, resume?: { film: Film; from: CreationStep }): Promise<CreationResult> {
   let film = resume?.film ?? null;
-  const start = resume ? Math.max(0, input.steps.indexOf(resume.from)) : 0;
+  // A resumed run never creates again: a step that no longer applies (the plan was cleared) is simply done.
+  const start = !resume ? 0 : input.steps.includes(resume.from) ? input.steps.indexOf(resume.from) : input.steps.length;
   for (const step of input.steps.slice(start)) {
     onStep(step);
     if (step === "create") {

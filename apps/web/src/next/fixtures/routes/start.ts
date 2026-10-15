@@ -44,7 +44,11 @@ function mode(): string | null {
   try { return new URLSearchParams(globalThis.location?.search ?? "").get("start"); } catch { return null; }
 }
 
-const daysAgo = (now: Date, days: number, hours: number, minutes: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - days, hours, minutes).toISOString();
+/** A local time `days` before today, never later than a few minutes ago (early in the morning "today 10:44" has not happened yet). */
+function daysAgo(now: Date, days: number, hours: number, minutes: number): string {
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days, hours, minutes);
+  return new Date(Math.min(at.getTime(), now.getTime() - 16 * 60_000)).toISOString();
+}
 
 // ---- small simulated films ----
 
