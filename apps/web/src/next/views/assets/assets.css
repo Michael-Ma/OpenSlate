@@ -37,7 +37,7 @@
 @keyframes av-indet{0%{left:-30%}100%{left:100%}}
 .assets-work a.pill{text-decoration:none}
 .assets-work .linkish{border:0;background:none;padding:0;font:inherit;color:var(--text);text-decoration:underline;text-underline-offset:2px}
-.assets-work .linkish:hover{color:#fff}
+.assets-work .linkish:hover{color:var(--select);text-decoration-thickness:2px}
 
 /* ---------- filters ---------- */
 .assets-work .filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex:none}
@@ -74,7 +74,8 @@
 .assets-work .tile-pic .kind{left:5px}
 .assets-work .tile-pic .dur{right:5px}
 .assets-work .tile b{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.assets-work .tile .sub{font-size:11.5px;color:var(--text-2);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.assets-work .tile .sub{font-size:11.5px;color:var(--text-2);display:flex;gap:6px;align-items:center;white-space:nowrap;min-width:0;overflow:hidden}
+.assets-work .tile .sub > span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .assets-work .tile .cur{color:var(--green);font-weight:600}
 
 /* pictures, waveforms and placeholders */
@@ -101,6 +102,9 @@
 .assets-work .detail .acts{display:flex;flex-direction:column;gap:7px;margin-top:auto;padding-top:6px}
 .assets-work .detail .acts .pill{justify-content:center;padding:7px 10px;white-space:normal;text-align:center}
 .assets-work .detail .av-why{text-align:center}
+/* Download keeps focus while its file loads, so it is aria-disabled rather than disabled; it looks the same. */
+.assets-work .acts .pill[aria-disabled="true"],.assets-work .acts .pill.primary[aria-disabled="true"]:hover{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted);cursor:default}
+.assets-work .pill[aria-busy="true"]{cursor:progress}
 .assets-work .playrow{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums;flex:none}
 .assets-work .playrow .track i{transition:none}
 .assets-work .av-note{margin-top:-4px}
@@ -130,11 +134,22 @@
 .assets-work .av-stopped{margin:0}
 .assets-work .av-detail-sheet .sheet-body.detail{padding:16px 18px;gap:12px}
 
-/* ---------- 900–1239 px: a narrower detail, shot names above their tiles ---------- */
+/* ---------- 900–1239 px: a narrower detail, shot names above their tiles (tiles stay at least 150 px) ---------- */
 @media (min-width: 900px) and (max-width: 1239px){
   .assets-work .lib{grid-template-columns:minmax(0,1fr) 260px}
   .assets-work .shotset{grid-template-columns:1fr}
-  .assets-work .tiles{grid-template-columns:repeat(auto-fill,minmax(124px,1fr))}
+}
+
+/*
+ * The shell's toast, while this view is open, sits at the bottom of the workspace as in the study, not over
+ * the tiles. A workaround in this view's file until the shell moves it (see the lead's list); the shell's
+ * own phone placement is already at the bottom.
+ */
+@media (min-width: 900px){
+  .app:has(main[data-view="assets"]) ~ .toast-live .toast{top:auto;bottom:22px}
+}
+@media (min-width: 1280px){
+  .app:has(main[data-view="assets"]) ~ .toast-live .toast{left:calc(392px + (100vw - 392px) / 2);max-width:min(640px,calc(100vw - 424px))}
 }
 
 /* ---------- phone: one column, two tiles a row, the detail is a sheet ---------- */

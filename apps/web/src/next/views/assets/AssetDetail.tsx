@@ -25,17 +25,26 @@ function useReducedMotion(): boolean {
 const PlayIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>;
 const PauseIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1h2.2v8H2zM5.8 1H8v8H5.8z" fill="currentColor" /></svg>;
 
+/** Why a file could not be loaded, in words; a file over the studio's 256 MB limit says so. */
+function fileFailure(t: ReturnType<typeof useI18n>["t"], code: string): string {
+  return code === "ARTIFACT_TOO_LARGE" ? t("assets.download.too_large") : t("assets.download.failed", { code });
+}
+
 /**
- * The picture, or a player for clips and audio. In the studio the verified file plays; the sample film
- * has no video or audio files, so its clips play the keyframe's motion and its audio plays silently.
+ * The picture, or a player for clips and audio. In the studio the verified file plays; it is loaded when Play is
+ * first pressed (a clip or an export can be up to 256 MB), and until then a clip shows its keyframe. The sample
+ * film has no video or audio files, so its clips play the keyframe's motion and its audio plays silently.
  */
 function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: AssetTile; title: string }) {
   const { t } = useI18n();
   const mode = useMode();
   const reduced = useReducedMotion();
-  const file = useAssetFile(detail.item);
   const kind = detail.item.artifact.kind;
   const simulated = mode === "fixture" && kind !== "image";
+  // Pictures show through AssetPicture; clips and audio load their file once Play is pressed.
+  const [wanted, setWanted] = useState(false);
+  const file = useAssetFile(kind === "image" ? null : detail.item, wanted);
+  const autoplay = useRef(false);
   const media = useRef<HTMLMediaElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
@@ -58,11 +67,23 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
     return () => cancelAnimationFrame(frame);
   }, [simulated, playing, length]);
 
+  // The file arrived after Play was pressed: play it now.
+  useEffect(() => {
+    if (file.status !== "ready" || !autoplay.current) return;
+    autoplay.current = false;
+    void media.current?.play().catch(() => setPlaying(false));
+  }, [file.status]);
+
   const toggle = () => {
     if (simulated) {
       if (playing) { setPlaying(false); return; }
       if (at.current >= length) { at.current = 0; setPosition(0); }
       setPlaying(true);
+      return;
+    }
+    if (file.status !== "ready") {
+      autoplay.current = true;
+      setWanted(true);
       return;
     }
     const element = media.current;
@@ -79,7 +100,8 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
     onLoadedMetadata: () => { const d = media.current?.duration; if (d && Number.isFinite(d)) setLength(d); },
   };
   const fraction = length > 0 ? Math.min(1, position / length) : 0;
-  const ready = simulated || file.status === "ready";
+  const loading = !simulated && wanted && file.status === "loading";
+  const failed = !simulated && file.status === "failed";
 
   let face;
   if (kind === "image") face = <AssetPicture artifact={detail.picture} alt={title} />;
@@ -91,8 +113,8 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
 
   let note = null;
   if (simulated) note = t(kind === "audio" ? "assets.player.no_sound" : "assets.player.motion_only");
-  else if (kind !== "image" && file.status === "failed") note = t("assets.download.failed", { code: file.code });
-  else if (kind !== "image" && file.status === "loading") note = t("assets.player.loading");
+  else if (kind !== "image" && file.status === "failed") note = fileFailure(t, file.code);
+  else if (kind !== "image" && loading) note = t("assets.player.loading");
 
   return (
     <>
@@ -103,7 +125,7 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
       </div>
       {detail.playable && (
         <div className="playrow">
-          <button type="button" className="play" data-act="play-asset" aria-label={t(playing ? "assets.pause" : "assets.play")} aria-pressed={playing} disabled={!ready} onClick={toggle}>
+          <button type="button" className="play" data-act="play-asset" aria-label={t(playing ? "assets.pause" : "assets.play")} aria-busy={loading || undefined} disabled={failed} onClick={() => { if (!loading) toggle(); }}>
             {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
           <span>{clock(position)}</span>
@@ -111,27 +133,50 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
           <span>{clock(length)}</span>
         </div>
       )}
-      {note && <span className="hint av-note">{note}</span>}
+      {note && <span className="hint av-note" role={loading || failed ? "status" : undefined}>{note}</span>}
     </>
   );
 }
 
-/** Download the verified file. The sample film has no files, so it says what the studio would do. */
+/**
+ * Download the verified file. It is loaded and checked when Download is pressed (not when the asset is
+ * selected), then saved; the button keeps focus throughout. The sample film has no files, so it says what the
+ * studio would do.
+ */
 function DownloadAction({ detail, title }: { detail: AssetDetailView; title: string }) {
   const { t } = useI18n();
   const mode = useMode();
   const store = useStore();
-  const file = useAssetFile(mode === "fixture" ? null : detail.item);
+  const [wanted, setWanted] = useState(false);
+  const file = useAssetFile(mode === "fixture" ? null : detail.item, wanted);
+  const link = useRef<HTMLAnchorElement>(null);
+  const pending = useRef(false);
   const why = useId();
   const name = downloadName(title, detail.item.artifact.kind);
+
+  // Pressed before the file was ready: save it as soon as it is.
+  useEffect(() => {
+    if (file.status !== "ready" || !pending.current) return;
+    pending.current = false;
+    link.current?.click();
+  }, [file.status]);
+
   if (mode === "fixture")
     return <button type="button" className="pill primary" data-act="download" onClick={() => store.dispatch({ type: "toast", message: msg("assets.download.fixture", { name }), tone: "info" })}>{t("assets.download")}</button>;
-  if (file.status === "ready")
-    return <a className="pill primary" data-act="download" href={file.url} download={name}>{t("assets.download")}</a>;
+  const loading = wanted && file.status === "loading";
+  const failed = file.status === "failed";
+  const press = () => {
+    if (loading || failed) return;
+    if (file.status === "ready") { link.current?.click(); return; }
+    pending.current = true;
+    setWanted(true);
+  };
   return (
     <>
-      <button type="button" className="pill primary" data-act="download" disabled aria-describedby={why}>{t("assets.download")}</button>
-      <span className="hint av-why" id={why}>{file.status === "failed" ? t("assets.download.failed", { code: file.code }) : t("assets.download.preparing")}</span>
+      <button type="button" className="pill primary" data-act="download" data-state={file.status} aria-busy={loading || undefined} aria-disabled={loading || failed || undefined}
+        aria-describedby={loading || failed ? why : undefined} onClick={press}>{t("assets.download")}</button>
+      {file.status === "ready" && <a ref={link} className="av-save" href={file.url} download={name} hidden tabIndex={-1} aria-hidden="true" data-act="download-file" />}
+      {(loading || failed) && <span className="hint av-why" id={why} role="status">{failed ? fileFailure(t, file.code) : t("assets.download.preparing")}</span>}
     </>
   );
 }
@@ -153,7 +198,7 @@ export function AssetDetail({ detail, tile, headingId, onPoint, onOpen }: { deta
         ))}
       </dl>
       <div className="acts">
-        <DownloadAction detail={detail} title={title} />
+        <DownloadAction key={detail.key} detail={detail} title={title} />
         {detail.point && <button type="button" className="pill" data-act="point-director" onClick={onPoint}>{t("assets.point", { target: tm(detail.point.name) })}</button>}
         {detail.open && <button type="button" className="pill" data-act="open-in" data-target-view={detail.open.view} onClick={onOpen}>{tm(detail.open.label)}</button>}
       </div>

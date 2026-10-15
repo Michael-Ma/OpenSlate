@@ -48,6 +48,18 @@ export function AssetsView() {
   return <Library />;
 }
 
+/**
+ * After pointing the Director, the message is written in its composer: focus moves there (on a phone once its
+ * drawer has opened, so the next few frames are tried).
+ */
+function focusComposer(tries = 12): void {
+  requestAnimationFrame(() => {
+    const composer = document.querySelector<HTMLTextAreaElement>("#director textarea[data-field='message']");
+    composer?.focus({ preventScroll: true });
+    if (document.activeElement !== composer && tries > 1) focusComposer(tries - 1);
+  });
+}
+
 function Library() {
   const store = useStore();
   const { t, tm, locale } = useI18n();
@@ -64,6 +76,9 @@ function Library() {
   const [importing, setImporting] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const groups = useRef<HTMLDivElement>(null);
+  const roles = useRef<HTMLDivElement>(null);
+  /** After "Try again" succeeds, focus moves to the first group (the button it pressed is gone). */
+  const focusAfterLoad = useRef(false);
 
   const active = validFilters(filters, overview);
   const library = useMemo(() => assetLibrary(items, overview, active), [items, overview, active]);
@@ -102,8 +117,26 @@ function Library() {
     requestAnimationFrame(() => groups.current?.querySelector(`[data-asset="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "nearest" }));
   }, [pendingId, items]);
 
+  useEffect(() => {
+    if (!focusAfterLoad.current || !list.items) return;
+    focusAfterLoad.current = false;
+    requestAnimationFrame(() => groups.current?.querySelector<HTMLElement>(".group > h2")?.focus());
+  }, [list.items]);
+
+  const retry = () => {
+    focusAfterLoad.current = true;
+    list.reload();
+  };
+
+  /** Clear the filters; the "Show everything" button goes away, so focus moves to the All filter. */
+  const showAll = () => {
+    setFilters(ALL_ASSETS);
+    requestAnimationFrame(() => roles.current?.querySelector<HTMLElement>("[data-role='all']")?.focus());
+  };
+
   const imported = (result: ImportResult) => {
-    setImporting(false);
+    // An import that finished in the background must not close a sheet opened since.
+    if (!result.background) setImporting(false);
     setFilters(ALL_ASSETS);
     if (result.artifactId) setPendingId(result.artifactId);
     list.reload();
@@ -117,6 +150,7 @@ function Library() {
     // On a phone the Director is a drawer: open it so the pointer is seen.
     if (narrow) store.setDirectorOpen(true);
     store.dispatch({ type: "toast", message: msg("assets.point.toast", { target: tm(detail.point.name) }), tone: "info" });
+    focusComposer();
   };
 
   const open = () => {
@@ -132,14 +166,14 @@ function Library() {
     <main className="work assets-work" id="workspace" data-view="assets" data-state={list.items ? "ready" : list.error ? "failed" : "loading"}>
       <div className="view-head">
         <h1 tabIndex={-1}>{t("assets.title")}</h1>
-        <span className="line">{list.items ? t("assets.line", { count: items.length }) : ""}</span>
+        <span className="line">{list.items ? t("assets.line", { count: list.total }) : ""}</span>
         <div className="actions">
           <button type="button" className="pill" data-act="import" disabled={!connected} title={!connected ? t("assets.import.offline") : undefined} onClick={() => setImporting(true)}>{t("assets.import")}</button>
         </div>
       </div>
 
       <div className="filters">
-        <div className="segctl" role="group" aria-label={t("assets.filter.kind")}>
+        <div className="segctl" role="group" aria-label={t("assets.filter.kind")} ref={roles}>
           {ROLE_FILTERS.map((role) => (
             <button key={role} type="button" data-act="role-filter" data-role={role} aria-pressed={active.role === role} onClick={() => setRole(role)}>
               {t(ROLE_LABEL[role])} <span className="n">{library.counts[role]}</span>
@@ -152,20 +186,20 @@ function Library() {
           <option value="film">{t("assets.scene.film")}</option>
           {overview.scenes.map((scene) => <option key={scene.sceneId} value={scene.sceneId}>{t("assets.scene.option", { n: scene.ordinal, title: scene.title || scene.purpose })}</option>)}
         </select>
-        <span className="count" role="status">{list.items ? t("assets.showing", { shown: library.shown, total: library.total }) : ""}</span>
+        <span className="count" role="status">{list.items ? t("assets.showing", { shown: library.shown, total: list.total }) : ""}</span>
       </div>
 
       <div className="lib">
         <div className="groups" ref={groups}>
           {!list.items ? (
             <div className="panel empty-state" role={list.error ? "alert" : "status"} data-state={list.error ? "failed" : "loading"}>
-              {list.error ? <>{t("assets.load_failed", { code: list.error })} <button type="button" className="pill sm" data-act="retry" onClick={list.reload}>{t("assets.retry")}</button></> : t("assets.loading")}
+              {list.error ? <>{t("assets.load_failed", { code: list.error })} <button type="button" className="pill sm" data-act="retry" onClick={retry}>{t("assets.retry")}</button></> : t("assets.loading")}
             </div>
           ) : (
             <>
               {library.film && (
                 <section className="panel group" aria-labelledby="av-g-film" data-group="film">
-                  <h2 id="av-g-film">{t("assets.film.title")}<span className="meta">{t("assets.film.meta")}</span></h2>
+                  <h2 id="av-g-film" tabIndex={-1}>{t("assets.film.title")}<span className="meta">{t("assets.film.meta")}</span></h2>
                   {library.film.tiles.length > 0 && (
                     <div className="shotset">
                       <div className="who"><b>{t("assets.film.who")}</b><span>{t("assets.film.who_sub")}</span></div>
@@ -181,7 +215,7 @@ function Library() {
               )}
               {library.scenes.map((scene) => (
                 <section key={scene.sceneId} className="panel group" aria-labelledby={`av-g-${scene.sceneId}`} data-group={scene.sceneId}>
-                  <h2 id={`av-g-${scene.sceneId}`}><span className="sno" aria-hidden="true">{scene.ordinal}</span>{scene.title}<span className="meta">{t("assets.scene.meta", { n: scene.ordinal })}</span></h2>
+                  <h2 id={`av-g-${scene.sceneId}`} tabIndex={-1}><span className="sno" aria-hidden="true">{scene.ordinal}</span>{scene.title}<span className="meta">{t("assets.scene.meta", { n: scene.ordinal })}</span></h2>
                   {scene.sceneTiles.length > 0 && (
                     <div className="shotset">
                       <div className="who"><b>{t("assets.scene.whole")}</b></div>
@@ -198,13 +232,13 @@ function Library() {
               ))}
               {library.former.length > 0 && (
                 <section className="panel group" aria-labelledby="av-g-former" data-group="former">
-                  <h2 id="av-g-former">{t("assets.former.title")}<span className="meta">{t("assets.former.meta")}</span></h2>
+                  <h2 id="av-g-former" tabIndex={-1}>{t("assets.former.title")}<span className="meta">{t("assets.former.meta")}</span></h2>
                   <div className="shotset av-former"><div className="tiles">{tiles(library.former)}</div></div>
                 </section>
               )}
               {library.nothingMatches && (
                 <div className="panel empty-state" data-empty="filters">
-                  {t("assets.no_match")} <button type="button" className="pill sm" data-act="show-all" onClick={() => setFilters(ALL_ASSETS)}>{t("assets.show_all")}</button>
+                  {t("assets.no_match")} <button type="button" className="pill sm" data-act="show-all" onClick={showAll}>{t("assets.show_all")}</button>
                 </div>
               )}
               {list.truncated && <p className="hint av-truncated">{t("assets.truncated", { count: items.length })}</p>}

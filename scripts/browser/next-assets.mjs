@@ -72,6 +72,30 @@ function png(width, height, rgb) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0))]);
 }
 
+/** Just the start of a PNG (signature and IHDR) claiming the given size, padded to `length` bytes. */
+function pngStart(width, height, length = 30) {
+  const bytes = Buffer.alloc(length);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes, 0);
+  bytes.writeUInt32BE(13, 8); bytes.write("IHDR", 12, "ascii"); bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20);
+  return bytes;
+}
+
+/** Silence of the given length, 8 kHz 8-bit mono: small enough to build here, long enough for the 6-minute limit. */
+function longWav(seconds) {
+  const rate = 8000, data = Buffer.alloc(rate * seconds, 128), header = Buffer.alloc(44);
+  header.write("RIFF", 0); header.writeUInt32LE(36 + data.length, 4); header.write("WAVE", 8);
+  header.write("fmt ", 12); header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24); header.writeUInt32LE(rate, 28); header.writeUInt16LE(1, 32); header.writeUInt16LE(8, 34);
+  header.write("data", 36); header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+
+/** The element that has focus, as data-act / data-role / data-field / tag. */
+const focused = (page) => page.evaluate(() => {
+  const el = document.activeElement;
+  return el ? { act: el.getAttribute("data-act"), role: el.getAttribute("data-role"), field: el.getAttribute("data-field"), tag: el.tagName.toLowerCase(), id: el.id } : null;
+});
+
 /** One second of a quiet 440 Hz tone, 48 kHz 16-bit stereo. */
 function wav(seconds = 1) {
   const rate = 48000, channels = 2, frames = Math.round(rate * seconds);
@@ -109,8 +133,19 @@ export const scenarios = [
       await expectText(page, "[data-group='film'] [data-empty='exports']", /No exports yet/);
       await expectText(page, "#av-set-shot-3-1", /Nothing made yet/);
       await expectText(page, "main[data-view='assets'] aside.detail", /Select an asset to see where it is used/);
-      // Pictures load (keyframes and the two sample uploads); clip tiles show their keyframe.
+      // Pictures load near the screen first (a few at a time); scrolling the groups loads the rest. Keyframes, the two
+      // sample uploads and the clips (which show their keyframe): 11 pictures.
+      await page.waitForFunction(() => [...document.querySelectorAll("main[data-view='assets'] .tile img")].length >= 6, null, { timeout: 10000 });
+      await page.locator("main[data-view='assets'] .groups").evaluate((el) => { el.scrollTop = el.scrollHeight; });
       await page.waitForFunction(() => [...document.querySelectorAll("main[data-view='assets'] .tile img")].length >= 11 && [...document.querySelectorAll("main[data-view='assets'] .tile img")].every((img) => img.complete && img.naturalWidth > 0), null, { timeout: 10000 });
+      await page.locator("main[data-view='assets'] .groups").evaluate((el) => { el.scrollTop = 0; });
+      // A tile is named once: its picture is decorative inside the named button.
+      const naming = await page.evaluate(() => ({
+        alts: [...document.querySelectorAll("main[data-view='assets'] .tile img")].map((img) => img.getAttribute("alt")),
+        roleImg: document.querySelectorAll("main[data-view='assets'] .tile [role='img']").length,
+      }));
+      expect(naming.alts.every((alt) => alt === ""), `Tile pictures have alt text ${JSON.stringify(naming.alts)}`);
+      expect(naming.roleImg === 0, "A tile holds a named image");
       // The study at 1440 × 900: header row, filters, groups beside a 300 px detail panel; the page does not scroll.
       const head = await box(page, "main[data-view='assets'] .view-head h1");
       near("title left", head.left, 414); near("title top", head.top, 67, 8);
@@ -153,8 +188,10 @@ export const scenarios = [
       await page.locator("[data-act='scene-filter']").selectOption("film");
       await roleButton(page, "keyframe").click();
       await expectText(page, "[data-empty='filters']", /Nothing matches these filters/);
-      await page.locator("[data-act='show-all']").click();
+      await page.locator("[data-act='show-all']").focus();
+      await page.keyboard.press("Enter");
       await expectText(page, ".filters .count", /^Showing 16 of 16$/);
+      await page.waitForFunction(() => document.activeElement?.matches("[data-act='role-filter'][data-role='all']"), null, { timeout: 2000 });
 
       // Select the earlier voice line of 1.2 (the study's "selected" state).
       const earlier = tile(page, "[data-role='voice'][data-current='false']");
@@ -162,24 +199,33 @@ export const scenarios = [
       await earlier.click();
       expect((await earlier.getAttribute("aria-pressed")) === "true", "The chosen tile is not pressed");
       const rows = (await page.locator("aside.detail dl").innerText()).replace(/\s+/g, " ").trim();
-      expect(/^Kind Voice line Shot 1\.2 Medium Closing time In use No, an earlier take Source Generated Made Today 10:20 Length 2\.6 s$/.test(rows), `Detail rows read ${JSON.stringify(rows)}`);
+      // The sample library is dated in the past (the study's 10:20 is two hours and 24 minutes ago).
+      expect(/^Kind Voice line Shot 1\.2 Medium Closing time In use No, an earlier take Source Generated Made (Today|\d{1,2} [A-Z][a-z]{2}) \d\d:\d\d Length 2\.6 s$/.test(rows), `Detail rows read ${JSON.stringify(rows)}`);
       await expectText(page, "aside.detail h3", /^Voice line 1\.2$/);
       await expectText(page, "aside.detail .av-note", /No sound in the sample film/);
       await shot(page, "next-assets-1440-selected");
-      // Play moves the clock; the selected tile border is white.
-      await page.locator("aside.detail [data-act='play-asset']").click();
+      // Play moves the clock and its label says what the next press does (no pressed state); the selected tile border is white.
+      const play = page.locator("aside.detail [data-act='play-asset']");
+      expect((await play.getAttribute("aria-label")) === "Play" && (await play.getAttribute("aria-pressed")) === null, "The play button reads as a toggle");
+      await play.click();
       await page.waitForFunction(() => document.querySelector("aside.detail .playrow span")?.textContent !== "0:00", null, { timeout: 4000 });
+      expect((await play.getAttribute("aria-label")) === "Pause", "The play button does not offer Pause while playing");
       const border = await earlier.evaluate((el) => getComputedStyle(el).borderTopColor);
       expect(border === "rgb(236, 236, 238)", `The selected tile border is ${border}`);
       // Download says what the studio would do in the sample film.
       await page.locator("aside.detail [data-act='download']").click();
       await expectText(page, ".toast", /The sample film has no files to download/);
+      // The toast sits at the bottom of the workspace (as in the study), not over the tiles.
+      const toastBox = await box(page, ".toast");
+      near("toast bottom", toastBox.bottom, 878, 4);
+      near("toast centre", toastBox.left + toastBox.width / 2, 916, 4);
       // Point the Director at the asset's shot (assets cannot be named in a message yet).
       await expectText(page, "aside.detail [data-act='point-director']", /^Point the Director at 1\.2$/);
       await page.locator("aside.detail [data-act='point-director']").click();
       await expectText(page, ".toast", /Pointing the Director at 1\.2\. Write your message in the composer\./);
       const composer = await page.locator("#director").innerText();
       expect(/1\.2/.test(composer), "The composer does not show the shot it points at");
+      await page.waitForFunction(() => document.activeElement?.matches("#director textarea[data-field='message']"), null, { timeout: 2000 });
       // Whole-film assets cannot be pointed at.
       await tile(page, "[data-role='music']").first().click();
       expect(await page.locator("aside.detail [data-act='point-director']").count() === 0, "Music offers Point the Director");
@@ -209,11 +255,26 @@ export const scenarios = [
       await chooseFile(page, { name: "pier-sketch.jpg", mimeType: "image/jpeg", buffer: Buffer.from([255, 216, 255, 0]) });
       await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /Only PNG images can be imported/);
       expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a refused file");
-      // Refused by the (simulated) studio: not a readable PNG.
+      // Refused before sending, from the file's first bytes: not a PNG, or more pixels than the studio takes.
       await chooseFile(page, { name: "broken.png", mimeType: "image/png", buffer: Buffer.from("not a png") });
-      await page.locator("[data-act='import-go']").click();
       await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This is not a PNG image the studio can read\./);
+      expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a file that is not a PNG");
+      await chooseFile(page, { name: "panorama.png", mimeType: "image/png", buffer: pngStart(5000, 1200, 64) });
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This image is 5000 × 1200 pixels\. The studio takes PNG images up to 3840 × 2160/);
+      expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a PNG over the pixel limit");
+      // Refused by the (simulated) studio: the refusal is final for this file, so there is no Try again and
+      // the file loses its white "chosen" border until another file is chosen.
+      await chooseFile(page, { name: "stub.png", mimeType: "image/png", buffer: pngStart(16, 9) });
+      await page.locator("[data-act='import-go']").click();
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /The studio could not take this PNG\. It may be damaged, or larger than 3840 × 2160 pixels\./);
       expect(await page.locator(".toast").count() === 0, "A refusal also showed as a toast");
+      await expectText(page, "[data-act='import-go']", /^Import$/);
+      expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on again after a final refusal");
+      expect((await page.locator("dialog[data-act='import-sheet'] .file-opt").getAttribute("data-kind")) === "refused", "The refused file still looks chosen");
+      // Longer than 6 minutes: refused in place before anything is sent.
+      await chooseFile(page, { name: "night-ferry.wav", mimeType: "audio/wav", buffer: longWav(361) });
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This file is 6:01 long; the studio takes video and audio up to 6 minutes\./);
+      expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a file over 6 minutes");
       // Audio, as other audio; progress shows while sending.
       await chooseFile(page, { name: "harbour-ambience.wav", mimeType: "audio/wav", buffer: wav(1) });
       await expectText(page, "dialog[data-act='import-sheet'] .file-opt", /harbour-ambience\.wav[\s\S]*audio · /);
@@ -237,6 +298,58 @@ export const scenarios = [
       await expectText(page, "aside.detail h3", /^Imported image$/);
       await page.waitForFunction(() => { const img = document.querySelector("aside.detail .big-pic img"); return img?.complete && img.naturalWidth > 0; }, null, { timeout: 6000 });
       await expectText(page, ".filters .count", /^Showing 18 of 18$/);
+      // Once everything is sent, the sheet can be closed: the studio's check goes on in the background.
+      await opener.click();
+      await sheet.waitFor();
+      await chooseFile(page, { name: "gangway.png", mimeType: "image/png", buffer: png(32, 18, [150, 110, 80]) });
+      await page.locator("[data-act='import-go']").click();
+      await page.waitForSelector("dialog[data-act='import-sheet'] .av-progress[data-state='checking']", { timeout: 4000 });
+      await page.locator("[data-act='import-background']").click();
+      await page.waitForFunction(() => !document.querySelector("dialog[data-act='import-sheet']"));
+      await expectText(page, ".toast", /Still checking gangway\.png\. It shows up in Assets when it’s done\./, 2000);
+      await expectText(page, ".toast", /Imported gangway\.png\./, 8000);
+      await expectText(page, ".filters .count", /^Showing 19 of 19$/);
+      // Esc twice while the studio checks: the browser closes the dialog on the second Esc, and the sheet goes
+      // with it (never a closed dialog left behind). The import goes on; Import… opens a working sheet again.
+      await opener.click();
+      await sheet.waitFor();
+      await chooseFile(page, { name: "bollard.png", mimeType: "image/png", buffer: png(32, 18, [60, 60, 60]) });
+      await page.locator("[data-act='import-go']").click();
+      await page.waitForSelector("dialog[data-act='import-sheet'] .av-progress[data-state='checking']", { timeout: 4000 });
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(60);
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => !document.querySelector("dialog[data-act='import-sheet']"), null, { timeout: 2000 });
+      await expectText(page, ".toast", /Imported bollard\.png\./, 8000);
+      await expectText(page, ".filters .count", /^Showing 20 of 20$/);
+      // The browser can also close the dialog without an Esc we can hold; the sheet follows it.
+      await opener.click();
+      await sheet.waitFor();
+      await chooseFile(page, { name: "stub.png", mimeType: "image/png", buffer: pngStart(16, 9) });
+      await page.locator("[data-act='import-go']").click();
+      await page.waitForSelector("dialog[data-act='import-sheet'] .av-progress[data-state='checking']", { timeout: 4000 });
+      await page.evaluate(() => document.querySelector("dialog[data-act='import-sheet']").close());
+      await page.waitForFunction(() => !document.querySelector("dialog[data-act='import-sheet']"), null, { timeout: 2000 });
+      // Refused after the sheet closed: said in a toast that stays until dismissed.
+      await expectText(page, ".toast", /stub\.png was not imported\. The studio could not take this PNG\./, 8000);
+      expect((await page.locator(".toast").getAttribute("data-tone")) === "error", "A refusal after closing is not kept on screen");
+      await page.locator("[data-act='toast-close']").click();
+      await opener.click();
+      await sheet.waitFor();
+      expect(await sheet.evaluate((el) => el.open), "Import… opened a closed sheet");
+      await page.locator("[data-act='import-cancel']").click();
+      await page.waitForFunction(() => !document.querySelector("dialog[data-act='import-sheet']"));
+      // Closing while the bytes are still going out stops the transfer, and says so; nothing is imported.
+      await opener.click();
+      await sheet.waitFor();
+      await chooseFile(page, { name: "mooring.png", mimeType: "image/png", buffer: png(32, 18, [20, 90, 60]) });
+      await page.locator("[data-act='import-go']").click();
+      await page.waitForSelector("dialog[data-act='import-sheet'] .av-progress[data-state='sending']", { timeout: 2000 });
+      await page.locator("[data-act='import-close']").click();
+      await page.waitForFunction(() => !document.querySelector("dialog[data-act='import-sheet']"));
+      await expectText(page, ".toast", /Sending stopped\. Nothing was imported\./, 2000);
+      await page.waitForTimeout(1200);
+      await expectText(page, ".filters .count", /^Showing 20 of 20$/);
       // Esc closes the sheet.
       await opener.click();
       await sheet.waitFor();
@@ -278,6 +391,7 @@ export const scenarios = [
       await sheet.waitFor();
       await page.locator("dialog[data-act='asset-sheet'] [data-act='point-director']").click();
       await page.waitForFunction(() => !document.querySelector("dialog[data-act='asset-sheet']") && document.querySelector(".app")?.classList.contains("dir-open"));
+      await page.waitForFunction(() => document.activeElement?.matches("#director textarea[data-field='message']"), null, { timeout: 2000 });
       await noSidewaysScroll(page);
     },
   },
@@ -292,8 +406,22 @@ export const scenarios = [
       near("detail width", (await box(page, "main[data-view='assets'] aside.detail")).width, 260, 2);
       const set = await page.locator("#av-set-shot-1-1").evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
       expect(set === 1, `Shot sets use ${set} columns`);
+      // Tiles stay at least 150 px wide, so no title loses its take and the status stays on one line.
+      const cut = await page.evaluate(() => [...document.querySelectorAll("main[data-view='assets'] .tile")].filter((el) => {
+        const title = el.querySelector("b"), sub = el.querySelector(".sub");
+        return el.getBoundingClientRect().width < 150 || title.scrollWidth > title.clientWidth + 1 || sub.getBoundingClientRect().height > 20;
+      }).map((el) => el.querySelector("b").textContent));
+      expect(!cut.length, `Cut-off tiles at 1024 px: ${cut.join(", ")}`);
       await tile(page, "[data-role='keyframe']").first().click();
       await expectText(page, "aside.detail h3", /^Keyframe 1\.1 · take 1$/);
+      // Pictures on screen (and the detail's) load; the ones further down wait until they are near.
+      await page.waitForFunction(() => {
+        const view = document.querySelector("main[data-view='assets'] .groups").getBoundingClientRect();
+        const onScreen = [...document.querySelectorAll("main[data-view='assets'] .tile[data-role='keyframe'], main[data-view='assets'] .tile[data-role='clip']")]
+          .filter((el) => { const b = el.getBoundingClientRect(); return b.bottom > view.top && b.top < view.bottom; });
+        const loaded = (img) => img?.complete && img.naturalWidth > 0;
+        return onScreen.length > 0 && onScreen.every((el) => loaded(el.querySelector("img"))) && loaded(document.querySelector("aside.detail .big-pic img"));
+      }, null, { timeout: 6000 });
       await noSidewaysScroll(page);
       await shot(page, "next-assets-1024");
     },
@@ -333,7 +461,10 @@ export const scenarios = [
       await expectText(page, ".toast", /Imported pier\.png\./, 20000);
       await expectText(page, "aside.detail h3", /^Imported image$/, 10000);
       await page.waitForFunction(() => { const img = document.querySelector("aside.detail .big-pic img"); return img?.complete && img.naturalWidth > 0; }, null, { timeout: 10000 });
-      await page.waitForSelector("aside.detail a[data-act='download'][download$='.png']", { timeout: 10000 });
+      // Download loads and checks the file when pressed, then saves it.
+      const savedImage = page.waitForEvent("download", { timeout: 15000 });
+      await page.locator("aside.detail [data-act='download']").click();
+      expect((await savedImage).suggestedFilename() === "Imported image.png", "The PNG downloads under the wrong name");
       // A WAV as music through POST /audio-library/uploads?role=music; it plays from the narration audio route.
       await page.locator("[data-act='import']").click();
       await chooseFile(page, { name: "low-tide.wav", mimeType: "audio/wav", buffer: wav(1) });
@@ -341,11 +472,86 @@ export const scenarios = [
       await expectText(page, ".toast", /Imported low-tide\.wav as music\./, 30000);
       await expectText(page, "aside.detail h3", /^low-tide\.wav$/, 10000);
       await expectText(page, "aside.detail dl", /Music[\s\S]*Not on a shot[\s\S]*Imported/);
-      await page.waitForSelector("aside.detail a[data-act='download'][download='low-tide.wav']", { timeout: 15000 });
-      expect(!(await page.locator("aside.detail [data-act='play-asset']").isDisabled()), "The imported audio cannot be played");
+      // Selecting it loads nothing yet; Play loads the recording from the narration audio route and plays it.
+      expect((await page.locator("aside.detail [data-act='download']").getAttribute("data-state")) === "idle", "Selecting the audio loaded its file");
+      await page.locator("aside.detail [data-act='play-asset']").click();
+      await page.waitForSelector("aside.detail .big-pic audio[src^='blob:']", { state: "attached", timeout: 15000 });
+      // Download finds the file Play loaded (one shared, checked copy) and saves it.
+      const savedAudio = page.waitForEvent("download", { timeout: 15000 });
+      await page.locator("aside.detail [data-act='download']").click();
+      expect((await savedAudio).suggestedFilename() === "low-tide.wav", "The recording downloads under the wrong name");
       await expectText(page, "[data-act='role-filter'][data-role='all'] .n", new RegExp(`^${before + 2}$`), 10000);
       await expectText(page, "[data-act='role-filter'][data-role='music'] .n", /^1$/);
       await shot(page, "next-assets-live");
+    },
+  },
+  {
+    // A lost reply is resent exactly as first sent (same key, same film version), so the studio replays its
+    // receipt instead of importing twice; an out-of-date resend means the first try never arrived.
+    name: "next-assets-live-lost-reply",
+    query: "ui=next",
+    viewport: { width: 1440, height: 900 },
+    // The out-of-date resend in the second half is refused by the studio, as it should be.
+    allowConsoleErrors: [/^HTTP 409 \/api\/projects\/[^/]+\/images\/uploads$/],
+    async run({ page }) {
+      await openAssets(page);
+      const uploads = async () => Number((await page.locator("[data-act='role-filter'][data-role='upload'] .n").innerText()).trim());
+      const before = await uploads();
+      const sent = [];
+      let plan = [];
+      await page.route("**/images/uploads**", async (route) => {
+        const request = route.request();
+        sent.push({ search: new URL(request.url()).search, key: request.headers()["idempotency-key"] });
+        const step = plan.shift() ?? "pass";
+        if (step === "lose-after-commit") { await route.fetch(); await route.abort("failed"); return; }
+        if (step === "lose-before") { await route.abort("failed"); return; }
+        await route.continue();
+      });
+
+      // 1. The studio imports the file, but the reply is lost.
+      plan = ["lose-after-commit"];
+      await page.locator("[data-act='import']").click();
+      await chooseFile(page, { name: "pier.png", mimeType: "image/png", buffer: png(64, 36, [40, 70, 110]) });
+      await page.locator("[data-act='import-go']").click();
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /The studio did not answer\. Try again: the same import is checked, not made twice\./, 20000);
+      // The studio's event moves the film on (the import is in the library behind the sheet).
+      await page.waitForFunction((n) => Number(document.querySelector("[data-act='role-filter'][data-role='upload'] .n")?.textContent) === n, before + 1, { timeout: 15000 });
+      await page.locator("[data-act='import-go']").click();
+      await expectText(page, ".toast", /Imported pier\.png\./, 20000);
+      await page.waitForTimeout(1500);
+      expect(await uploads() === before + 1, `Uploads went from ${before} to ${await uploads()}: the resend imported again`);
+      expect(sent.length === 2 && sent[1].key === sent[0].key && sent[1].search === sent[0].search, `The resend differs: ${JSON.stringify(sent)}`);
+
+      // 2. The first try never arrives, and the film moves on before Try again: the saved request is out of date,
+      //    so a new one is sent once, and the file is imported once.
+      sent.length = 0;
+      plan = ["lose-before"];
+      await page.locator("[data-act='import']").click();
+      await chooseFile(page, { name: "dock.png", mimeType: "image/png", buffer: png(48, 27, [90, 60, 30]) });
+      await page.locator("[data-act='import-go']").click();
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /The studio did not answer/, 20000);
+      // Something else changes the film meanwhile (another import, straight through the route).
+      const side = await page.evaluate(async ({ bytes }) => {
+        const projectId = new URLSearchParams(location.search).get("project") ?? (await (await fetch("/api/projects", { headers: { "x-openslate-client": "studio" } })).json()).projects[0].id;
+        const session = await (await fetch("/api/session", { headers: { "x-openslate-client": "studio" } })).json();
+        const project = await (await fetch(`/api/projects/${projectId}`, { headers: { "x-openslate-client": "studio" } })).json();
+        const response = await fetch(`/api/projects/${projectId}/images/uploads?expectedHeadVersion=${project.project.headVersion}`, {
+          method: "POST", body: new Uint8Array(bytes),
+          headers: { "content-type": "application/octet-stream", "x-openslate-client": "studio", "x-openslate-csrf": session.csrf, "idempotency-key": crypto.randomUUID() },
+        });
+        return response.status;
+      }, { bytes: [...png(16, 9, [200, 200, 200])] });
+      expect(side === 200, `The side import answered ${side}`);
+      await page.waitForFunction((n) => Number(document.querySelector("[data-act='role-filter'][data-role='upload'] .n")?.textContent) === n, before + 2, { timeout: 15000 });
+      await page.locator("[data-act='import-go']").click();
+      await expectText(page, ".toast", /Imported dock\.png\./, 20000);
+      await page.waitForTimeout(1500);
+      expect(await uploads() === before + 3, `Uploads went from ${before} to ${await uploads()}, expected ${before + 3}`);
+      expect(sent.length === 4, `Expected the lost try, the side import, the out-of-date resend and a new request: ${JSON.stringify(sent)}`);
+      const [lost, , resend, fresh] = sent;
+      expect(resend.key === lost.key && resend.search === lost.search, `The resend differs from the lost try: ${JSON.stringify(sent)}`);
+      expect(fresh.key !== lost.key && fresh.search !== lost.search, `The new request reused the old key or version: ${JSON.stringify(sent)}`);
+      await shot(page, "next-assets-live-lost-reply");
     },
   },
 ];

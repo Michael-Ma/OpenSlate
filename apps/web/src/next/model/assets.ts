@@ -393,8 +393,59 @@ export function waveHeights(seed: string, count: number): number[] {
   return out;
 }
 
+/** Extensions of the files people import; only these are taken off an imported file's name ("Voice line 2.10" keeps its ".10"). */
+const MEDIA_EXTENSION = /\.(?:png|jpe?g|gif|webp|mp4|m4v|mov|webm|mkv|avi|wav|mp3|m4a|aac|flac|ogg|oga|opus|aiff?|weba)$/i;
+
 /** A file name for Download: the title made safe, with the stored file's extension. */
 export function downloadName(title: string, kind: StudioArtifactRef["kind"]): string {
-  const base = title.replace(/\.[a-z0-9]{2,4}$/i, "").replace(/[\u0000-\u001f\u007f/\\:*?"<>|]+/g, " ").replace(/\s*·\s*/g, " - ").replace(/\s+/g, " ").trim().slice(0, 100) || "openslate-asset";
+  const base = title.replace(MEDIA_EXTENSION, "").replace(/[\u0000-\u001f\u007f/\\:*?"<>|]+/g, " ").replace(/\s*·\s*/g, " - ").replace(/\s+/g, " ").trim().slice(0, 100) || "openslate-asset";
   return `${base}.${kind === "image" ? "png" : kind === "video" ? "mp4" : "wav"}`;
+}
+
+// ---- reading and loading at a measured pace ------------------------------------------------------
+
+/**
+ * How long the library waits after the studio's event cursor moves before reading every page again. Events
+ * come in bursts while jobs run; one read per burst is enough. A reload the person asks for is not delayed.
+ */
+export const ASSET_REREAD_DELAY_MS = 500;
+
+/** How many tile pictures load at once; the rest wait their turn (and only tiles near the screen ask). */
+export const PICTURE_LOADS_AT_ONCE = 6;
+
+/**
+ * A small first-come queue of slots. `take` calls `grant` when a slot is free (at once if one is) and returns
+ * `release`, which frees the slot, or leaves the queue if it was still waiting. Releasing twice does nothing.
+ */
+export class SlotQueue {
+  #free: number;
+  readonly #waiting: (() => void)[] = [];
+
+  constructor(size: number) {
+    this.#free = Math.max(1, size);
+  }
+
+  get waiting(): number {
+    return this.#waiting.length;
+  }
+
+  take(grant: () => void): () => void {
+    let state: "waiting" | "held" | "done" = "waiting";
+    const start = () => { state = "held"; grant(); };
+    if (this.#free > 0) { this.#free--; start(); }
+    else this.#waiting.push(start);
+    return () => {
+      if (state === "done") return;
+      if (state === "waiting") {
+        const index = this.#waiting.indexOf(start);
+        if (index >= 0) this.#waiting.splice(index, 1);
+        state = "done";
+        return;
+      }
+      state = "done";
+      const next = this.#waiting.shift();
+      if (next) next();
+      else this.#free++;
+    };
+  }
 }

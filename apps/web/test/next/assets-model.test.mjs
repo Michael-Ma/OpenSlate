@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { lastFerryOverview, shotId, sceneId, artifactFor } from '../../src/next/fixtures/last-ferry.ts';
 import {
   ALL_ASSETS, assetDetail, assetKey, assetLibrary, compareAssets, downloadName, durationMsg, madeMsg, placement,
-  readAllAssets, roleCounts, stillFor, titleMsg, useMsg, validFilters, waveHeights,
+  readAllAssets, roleCounts, SlotQueue, stillFor, titleMsg, useMsg, validFilters, waveHeights,
 } from '../../src/next/model/assets.ts';
 import { translate } from '../../src/next/i18n/translate.ts';
 
@@ -174,4 +174,34 @@ test('waveforms are stable per asset and download names are safe', () => {
   assert.equal(downloadName('low-tide.mp3', 'audio'), 'low-tide.wav');
   assert.equal(downloadName('a/b:c', 'video'), 'a b c.mp4');
   assert.equal(downloadName('   ', 'video'), 'openslate-asset.mp4');
+});
+
+test('download names keep shot numbers from 10 up and only drop real file extensions', () => {
+  assert.equal(downloadName('Voice line 2.10', 'audio'), 'Voice line 2.10.wav');
+  assert.equal(downloadName('Keyframe 3.11', 'image'), 'Keyframe 3.11.png');
+  assert.equal(downloadName('Clip 12.104 · take 2', 'video'), 'Clip 12.104 - take 2.mp4');
+  assert.equal(downloadName('harbour.final.MOV', 'video'), 'harbour.final.mp4');
+  assert.equal(downloadName('pier.jpeg', 'image'), 'pier.png');
+  assert.equal(downloadName('notes.v2', 'audio'), 'notes.v2.wav');
+});
+
+test('the load queue hands out a few slots at a time, first come first served', () => {
+  const queue = new SlotQueue(2);
+  const granted = [];
+  const a = queue.take(() => granted.push('a'));
+  const b = queue.take(() => granted.push('b'));
+  const c = queue.take(() => granted.push('c'));
+  const d = queue.take(() => granted.push('d'));
+  assert.deepEqual(granted, ['a', 'b']);
+  assert.equal(queue.waiting, 2);
+  d(); // d leaves the queue before its turn
+  assert.equal(queue.waiting, 1);
+  a();
+  assert.deepEqual(granted, ['a', 'b', 'c']);
+  a(); // releasing twice does nothing
+  b(); c();
+  const e = queue.take(() => granted.push('e'));
+  const f = queue.take(() => granted.push('f'));
+  assert.deepEqual(granted, ['a', 'b', 'c', 'e', 'f'], 'both slots are free again');
+  e(); f();
 });

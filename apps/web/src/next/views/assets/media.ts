@@ -5,6 +5,7 @@ import { artifactKey, cacheFor } from "../../media/artifact-cache.ts";
 import type { MediaSource } from "../../media/media-source.ts";
 import type { ArtifactUrl } from "../../media/useArtifactUrl.ts";
 import { useMedia, useMode, useStore } from "../../store/react.tsx";
+import type { StudioStore } from "../../store/store.ts";
 
 type Ref = Pick<StudioArtifactRef, "artifactId" | "sha256" | "kind">;
 
@@ -47,13 +48,43 @@ function narrationSource(media: MediaSource, projectId: () => string | null): Me
   };
 }
 
-const narrationSources = new WeakMap<MediaSource, MediaSource>();
+/** Asks `first`; when it does not have the file (NOT_FOUND), asks `second`. Both check the SHA-256. */
+function fallbackSource(first: MediaSource, second: MediaSource): MediaSource {
+  return {
+    async url(artifact, signal) {
+      try {
+        return await first.url(artifact, signal);
+      } catch (error) {
+        if (signal?.aborted || !(error instanceof ApiError) || error.code !== "NOT_FOUND") throw error;
+        return second.url(artifact, signal);
+      }
+    },
+    revoke: (url) => first.revoke(url),
+  };
+}
 
-/** One narration source (and so one shared URL cache) per media source. */
-function narrationSourceFor(media: MediaSource, projectId: () => string | null): MediaSource {
-  let source = narrationSources.get(media);
-  if (!source) { source = narrationSource(media, projectId); narrationSources.set(media, source); }
-  return source;
+interface AudioSources {
+  /** Imported recordings: the narration store first. */
+  narrationFirst: MediaSource;
+  /** Everything else: the artifact store first. */
+  artifactFirst: MediaSource;
+}
+
+const audioSources = new WeakMap<MediaSource, AudioSources>();
+
+/**
+ * Audio lives in the artifact store or the narration store. Imported recordings are in the narration store; so are
+ * some others the library lists without an artifact record (generated narration not yet installed, say). Each is
+ * asked where it most likely is, then the other store. One pair (and so one shared URL cache each) per media source.
+ */
+function audioSourcesFor(media: MediaSource, projectId: () => string | null): AudioSources {
+  let sources = audioSources.get(media);
+  if (!sources) {
+    const narration = narrationSource(media, projectId);
+    sources = { narrationFirst: fallbackSource(narration, media), artifactFirst: fallbackSource(media, narration) };
+    audioSources.set(media, sources);
+  }
+  return sources;
 }
 
 /** useArtifactUrl with the source chosen by the caller; URLs come from that source's shared, reference-counted cache. */
@@ -77,16 +108,55 @@ function useSourceUrl(source: MediaSource, artifact: Ref | null): ArtifactUrl {
   return state.key === key ? state.value : { status: "loading", url: null };
 }
 
+const svgUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+
 /**
- * The verified file of one asset, for its player and Download. The sample film has pictures but no
- * video or audio files, so those stay idle there.
+ * In the sample film, the library's own pictures come from its fixture route file: the two sample uploads, and
+ * PNGs imported in this tab, which that sample film keeps (read through its simulated route, so another sample
+ * film never shows them). Every other picture comes from the shared fixture pictures.
  */
-export function useAssetFile(item: AssetItem | null): ArtifactUrl {
+function fixturePictureSource(media: MediaSource, store: StudioStore): MediaSource {
+  return {
+    async url(artifact, signal) {
+      const { fixtureAssetPicture, FIXTURE_PICTURE_ROUTE, isFixtureImport } = await import("../../fixtures/routes/assets.ts");
+      const sample = fixtureAssetPicture(artifact.artifactId);
+      if (sample) return svgUrl(sample);
+      if (!isFixtureImport(artifact.artifactId)) return media.url(artifact, signal);
+      const picture = await store.read<{ svg: string }>(`${FIXTURE_PICTURE_ROUTE}/${encodeURIComponent(artifact.artifactId)}`, signal);
+      return svgUrl(picture.svg);
+    },
+    revoke: (url) => media.revoke(url),
+  };
+}
+
+const fixtureSources = new WeakMap<StudioStore, MediaSource>();
+
+/** A picture (an image artifact, or the keyframe a clip shows) from the shared, reference-counted cache. */
+export function usePictureUrl(artifact: Ref | null): ArtifactUrl {
   const media = useMedia();
   const store = useStore();
   const mode = useMode();
-  const imported = item?.artifact.kind === "audio" && item.source === "imported";
-  const source = imported ? narrationSourceFor(media, () => store.getState().projectId) : media;
-  const skip = !item || (mode === "fixture" && item.artifact.kind !== "image");
+  let source = media;
+  if (mode === "fixture") {
+    source = fixtureSources.get(store) ?? fixturePictureSource(media, store);
+    fixtureSources.set(store, source);
+  }
+  return useSourceUrl(source, artifact);
+}
+
+/**
+ * The verified file of one asset, for its player and Download, loaded only once `wanted` (a clip or an export can
+ * be up to 256 MB). The sample film has pictures but no video or audio files, so those stay idle there.
+ */
+export function useAssetFile(item: AssetItem | null, wanted = true): ArtifactUrl {
+  const media = useMedia();
+  const store = useStore();
+  const mode = useMode();
+  let source = media;
+  if (item?.artifact.kind === "audio") {
+    const sources = audioSourcesFor(media, () => store.getState().projectId);
+    source = item.source === "imported" ? sources.narrationFirst : sources.artifactFirst;
+  }
+  const skip = !item || !wanted || (mode === "fixture" && item.artifact.kind !== "image");
   return useSourceUrl(source, skip ? null : item.artifact);
 }
