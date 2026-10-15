@@ -18,6 +18,8 @@ import { applyCreativePatch, shotIntentDigest, compilePlan, DEFAULT_PROFILES } f
 import { NarrationService, NarrationCanonicalService } from '../apps/server/dist/narration/index.js';
 import { LocalImageStore, LocalMediaService, ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from '../apps/server/dist/media/index.js';
 import { ManagedUploadStore } from '../apps/server/dist/narration/managed-upload.js';
+const portFlag=process.argv.indexOf("--port"),port=portFlag>=0?Number(process.argv[portFlag+1]):5173;
+if(!Number.isInteger(port)||port<1024||port>65535||port===3001) throw new Error("--port must be a free port above 1023 and never 3001");
 const root = mkdtempSync(join(tmpdir(),'openslate-storyboard-review-')), repo = resolve(import.meta.dirname,'..');
 const store = new Store(join(root,'db.sqlite')), provider = new FakeProvider(join(root,'fake.sqlite'));
 const engine = new Engine(store,provider,{ artifactDir:join(root,'artifacts') }), service = new ProductionService(store,engine);
@@ -40,7 +42,7 @@ mkdirSync(join(root,'uploads'),{recursive:true});
 const media=new LocalMediaService({rootDir:join(root,'media'),allowedInputRoots:[join(root,'uploads')],ffmpegPath,ffprobePath});
 const narration=new NarrationService(service,media),canonical=new NarrationCanonicalService(narration);
 const mediaApp=new MediaApplicationService(service,media),images=new ImageApplicationService(service,new LocalImageStore({rootDir:join(root,'artifacts','images'),ffmpegPath,ffprobePath}));
-const director=new LocalDirectorController(service,{repositoryRoot:repo,dataDirectory:root,endpoint:'http://127.0.0.1:5173',ffmpegPath, setup:async input=>{const result=await setupLocalCodex(input);console.log(JSON.stringify({readiness:result.readiness}));return result;}});
+const director=new LocalDirectorController(service,{repositoryRoot:repo,dataDirectory:root,endpoint:`http://127.0.0.1:${port}`,ffmpegPath, setup:async input=>{const result=await setupLocalCodex(input);console.log(JSON.stringify({readiness:result.readiness}));return result;}});
 const uiReplay = process.argv.includes('--ui-replay');
 if (uiReplay && process.argv.includes('--native')) throw new Error('UI replay cannot launch a native turn');
 let replayActor = null, replayTimer = null;
@@ -53,12 +55,12 @@ if (uiReplay) {
 }
 const visibleDirector=uiReplay?{enqueue(){},tick(){},status(){return{mode:'native',status:'running',activeRequestId:replayActor.requestId,imageAttachmentsAvailable:false};}}:director;
 const sessions=new StudioSessions();
-const app=createApp({service,allowanceRoutes:{service,allowances:new ExternalAllowanceService(store)},director:visibleDirector,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
+const app=createApp({allowedOrigins:[`http://127.0.0.1:${port}`,`http://localhost:${port}`,'http://127.0.0.1:5173','http://localhost:5173'],service,allowanceRoutes:{service,allowances:new ExternalAllowanceService(store)},director:visibleDirector,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
  narrationRoutes:{production:service,narration,canonical,uploadDirectory:join(root,'uploads','audio')},
  mediaRoutes:{production:service,media:mediaApp,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','video')})},
  imageRoutes:{production:service,images,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','image'),maxBytes:PNG_IMPORT_MAX_BYTES})}});
-await app.listen({host:'127.0.0.1',port:5173});
-const url=`http://127.0.0.1:5173/#connect=${sessions.issueLaunch()}`;
+await app.listen({host:'127.0.0.1',port});
+const url=`http://127.0.0.1:${port}/#connect=${sessions.issueLaunch()}`;
 writeFileSync(join(root,'launch.txt'),url,{mode:0o600});console.log(JSON.stringify({root,url,projectId:project.id}));
 if(process.argv.includes('--native')) { try {
  const setup=await director.configure(project.id,{mode:'native',binaryPath:director.defaults.binaryPath,model:'gpt-6-astra'},randomUUID());

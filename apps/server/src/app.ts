@@ -33,6 +33,8 @@ import { InstallationRecoveryGuard } from "./application/installation-recovery.j
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
 
 interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+  /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
+  allowedOrigins?: readonly string[];
   studioSessions?: StudioSessions;
   allowanceRoutes?: Parameters<typeof registerAllowanceRoutes>[1];
   providerCatalog?: InstalledProviderCatalog;
@@ -42,12 +44,14 @@ interface AppOptions { service?: ProductionService; localToken?: string; logger?
   narrationRoutes?: Parameters<typeof registerNarrationRoutes>[1];
   imageRoutes?: Parameters<typeof registerImageRoutes>[1];
   mediaRoutes?: Parameters<typeof registerMediaRoutes>[1] }
+const DEFAULT_ALLOWED_ORIGINS = ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"];
 const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
 export function createApp(options: AppOptions = {}) {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 3 * 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
+  const allowedOrigins = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
   const actors = new WeakMap<object, ActorContext>();
   const recovery = options.service ? new InstallationRecoveryGuard(options.service.store) : undefined;
   const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
@@ -68,7 +72,7 @@ export function createApp(options: AppOptions = {}) {
     const host = request.headers.host?.split(":")[0];
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
-    invariant(!origin || ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"].includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
+    invariant(!origin || allowedOrigins.includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
     const commandKey = request.headers["idempotency-key"];
     invariant(commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
