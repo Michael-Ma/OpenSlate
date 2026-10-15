@@ -9,16 +9,19 @@ import { useMode, useStore, useStudio } from "../store/react.tsx";
 import type { EditDraft } from "../store/state.ts";
 import { CheckBanner, type SettledCheck } from "./CheckBanner.tsx";
 import { Inspector } from "./Inspector.tsx";
+import { NoteBanner } from "./NoteBanner.tsx";
 import { Preview, type OpenIntent } from "./Preview.tsx";
 import { SceneHeader } from "./SceneHeader.tsx";
 import { ShotCards } from "./ShotCards.tsx";
+import { useDirectorNotes } from "./useDirectorNotes.ts";
 import { VideoPanel } from "./VideoPanel.tsx";
 import "./keyframes.css";
 
 /**
- * The Keyframes view of the chosen design: scene header and pills, the check banner, the preview with
- * the shot inspector, and the shot cards with the scene's video panel. Every state comes from the
- * generation overview through pure view models; presses go to the store.
+ * The Keyframes view of the chosen design: scene header and pills, the banner (the Director's open notes in
+ * amber first, else the app's own neutral checks), the preview with the shot inspector, and the shot cards with
+ * the scene's video panel. Every state comes from the generation overview and the Director's notes through pure
+ * view models; presses go to the store.
  */
 export function KeyframesView() {
   const { t } = useI18n();
@@ -102,6 +105,8 @@ function Workspace() {
 
   const onScene = useCallback((id: string) => store.selectScene(id), [store]);
 
+  const notes = useDirectorNotes({ overview, sceneId: currentSceneId, locale, openShot });
+
   /**
    * Settle a too-long line with one free server command (SB-2, SB-3): lengthen the shot, or keep it and cut the
    * line with a fade. The toast and the banner both offer Undo with the command's id.
@@ -136,8 +141,9 @@ function Workspace() {
     const shot = overview.shots[next.shotId];
     const fromCheck = narrationFromCheck.current;
     const estimate = shot && next.field === "narration" ? lineEstimate(next.value, shot, overview.fps) : null;
-    const ok = await store.saveEdit(next);
-    if (!ok || !shot || !currentSceneId) return;
+    const commandId = await store.saveEdit(next);
+    if (!commandId || !shot || !currentSceneId) return;
+    notes.editSaved(next.shotId, next.field, commandId);
     if (next.field === "narration" && fromCheck?.shotId === next.shotId && estimate?.fits) {
       narrationFromCheck.current = null;
       setSettled({
@@ -147,7 +153,7 @@ function Workspace() {
         cursor: store.getState().overview?.cursor ?? 0,
       });
     }
-  }, [overview, store, currentSceneId]);
+  }, [overview, store, currentSceneId, notes]);
 
   /** Motion and duration are two storyboard fields; each changed one is its own edit, saved in turn. */
   const saveMotion = useCallback(async (motion: string, secondsValue: number) => {
@@ -159,20 +165,24 @@ function Workspace() {
     if (frames !== selected.durationFrames) changes.push({ field: "desiredFrames", value: String(frames) });
     if (!changes.length) { store.setEdit(null); return; }
     store.setEdit({ ...base, saving: true });
+    let motionCommand: string | null = null;
     for (const [index, change] of changes.entries()) {
       // The next edit must carry the head version the previous one produced.
       if (index > 0) await store.refresh();
-      const ok = await store.edit({ kind: "shot", id: selected.shotId, ...change }, msg("toast.saved"));
-      if (!ok) { store.setEdit({ ...base, saving: false }); return; }
+      const commandId = await store.edit({ kind: "shot", id: selected.shotId, ...change }, msg("toast.saved"));
+      if (!commandId) { store.setEdit({ ...base, saving: false }); return; }
+      if (change.field === "motion") motionCommand = commandId;
     }
     store.setEdit(null);
-  }, [selected, overview.fps, store]);
+    notes.editSaved(selected.shotId, "motion", motionCommand);
+  }, [selected, overview.fps, store, notes]);
 
   const editDraft = useCallback((next: EditDraft | null) => {
     // Leaving the narration editor (cancel, or another form) forgets that it came from a check.
     if (!next || next.field !== "narration" || next.shotId !== narrationFromCheck.current?.shotId) narrationFromCheck.current = null;
+    notes.editChanged(next);
     store.setEdit(next);
-  }, [store]);
+  }, [store, notes]);
 
   const regenerate = useCallback(() => {
     if (!selected) return;
@@ -182,11 +192,12 @@ function Workspace() {
 
   const confirm = useCallback(() => {
     if (!currentSceneId) return;
-    // A paid press uses the current state: the settled check can no longer be undone from here.
+    // A paid press uses the current state: the settled check or note can no longer be undone from here.
     setSettled(null);
+    notes.forgetUndo();
     store.dismissToast();
     void store.confirmVideo(currentSceneId);
-  }, [currentSceneId, store]);
+  }, [currentSceneId, store, notes]);
 
   const playScene = useCallback(() => {
     if (!view) return;
@@ -216,16 +227,33 @@ function Workspace() {
   const inspector = selected ? inspectorView(overview, selected, locale) : null;
   const playingHere = playingShot(playback) === selectedId ? playback!.kind : null;
   const sceneOrdinalChecks = view.checks;
+  // A card already carrying a Director note for its shot does not repeat the app's check about it.
+  const cards = view.cards.map((c) => {
+    const callouts = notes.calloutsFor(c.shotId);
+    return { card: callouts.length ? { ...c, callouts: [] } : c, notes: callouts };
+  });
   const editBusy = selected ? !!pending[`edit:shot:${selected.shotId}`] || !!pending[`edit:narration:${selected.shotId}`] : false;
 
   return (
     <main className="work kf" data-view="keyframes" data-scene={view.scene.sceneId}>
       <SceneHeader view={view} onScene={onScene} />
+      {notes.banner ? (
+        <NoteBanner
+          view={notes.banner}
+          busy={notes.busy || Object.keys(pending).some((key) => key.startsWith("regenerate:"))}
+          nextLetter={notes.nextLetter}
+          canUndo={notes.canUndo}
+          onChoose={notes.choose}
+          onNext={notes.next}
+          onUndo={notes.undo}
+        />
+      ) : (
       <CheckBanner
         overview={overview}
         sceneId={view.scene.sceneId}
         checks={sceneOrdinalChecks}
         settled={settled}
+        quiet={notes.allSettled ? msg("note.all_settled") : null}
         busy={Object.keys(pending).some((key) => key.startsWith("edit:") || key.startsWith("fit:"))}
         onExtend={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a", "extended")}
         onKeep={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a", "cut")}
@@ -233,6 +261,7 @@ function Workspace() {
         onNext={() => setSettled(null)}
         onUndo={(commandId) => { setSettled(null); void store.undo(commandId); }}
       />
+      )}
       <div className="stage">
         {selected && card && inspector ? (
           <>
@@ -275,7 +304,14 @@ function Workspace() {
         )}
       </div>
       <div className="row kf-row">
-        <ShotCards cards={view.cards} sceneOrdinal={view.scene.ordinal} onOpen={openShot} />
+        <ShotCards
+          cards={cards.map((c) => c.card)}
+          notes={Object.fromEntries(cards.map((c) => [c.card.shotId, c.notes]))}
+          sceneOrdinal={view.scene.ordinal}
+          busy={notes.busy}
+          onOpen={openShot}
+          onNoteChoice={notes.chooseOnCard}
+        />
         <VideoPanel
           panel={view.panel}
           sceneId={view.scene.sceneId}

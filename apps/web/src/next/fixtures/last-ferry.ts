@@ -1,10 +1,11 @@
-import type { GenerationOverview, KeyframeSlot, MediaSlot, SceneOverview, ShotNarration, ShotOverview } from "@openslate/core/public";
+import type { DirectorNote, DirectorProposal, GenerationOverview, KeyframeSlot, MediaSlot, SceneOverview, ShotNarration, ShotOverview } from "@openslate/core/public";
 import type { DirectorStatus, ProjectSnapshot } from "../model/types.ts";
 
 /**
  * The Last Ferry: the fictional film from the chosen design (docs/ai/prototypes/last-ferry).
  * Its state matches the prototype at the start: Scene 1 saved, Scene 2 keyframes back with
- * 2.2 and 2.3 not opened and 2.3's line too long, Scene 3 not started.
+ * 2.2 and 2.3 not opened and 2.3's line too long, the Director's notes a and b open on Scene 2,
+ * Scene 3 not started.
  */
 export const FPS = 30;
 export const PROJECT_ID = "last-ferry";
@@ -110,6 +111,8 @@ export function lastFerryOverview(): GenerationOverview {
         ? [
             ...inScene.filter((row) => !row.opened).map((row) => ({ code: "frame_not_opened" as const, shotId: shotId(row.id) })),
             ...inScene.filter((row) => row.narrationSeconds > row.seconds).map((row) => ({ code: "narration_too_long" as const, shotId: shotId(row.id) })),
+            // The Director's blocking note b on 2.3 (see lastFerryNotes).
+            ...(ordinal === 2 ? [{ code: "recommendation_open" as const, shotId: shotId("2.3") }] : []),
           ]
         : [],
       confirmationDigest: state === "keyframes_back" ? "f".repeat(64) : null,
@@ -164,9 +167,65 @@ export function lastFerrySnapshot(now: Date = new Date()): ProjectSnapshot {
       { id: "m2", role: "assistant", text: "I rewrote the three Scene 2 prompts with a blue dawn light and kept Mara's red coat in 2.2. Keyframes for all three shots are back. Two things to check before I make video:", at: todayAt(now, 10, 44) },
     ],
     questions: [],
+    notes: lastFerryNotes(now),
     control: { paused: false },
     cursor: 100,
   };
+}
+
+/**
+ * The Director's two notes from the design, written with its 10:44 reply: (a) an observation on 2.2's coat,
+ * (b) a blocking recommendation on 2.3's line, carried out by the held proposal p1.
+ */
+export function lastFerryNotes(now: Date = new Date()): DirectorNote[] {
+  const createdAt = todayAt(now, 10, 44);
+  const base = { requestId: "request-scene-2", turnId: "turn-1", state: "open" as const, version: 1, createdAt };
+  return [
+    {
+      ...base,
+      noteId: "note-a",
+      letter: "a",
+      anchor: { sceneId: sceneId(2), shotIds: [shotId("2.2")] },
+      kind: "observation",
+      blocking: false,
+      text: "Mara's coat came out maroon, not red.",
+      seenKeyframe: { shotId: shotId("2.2"), ...(({ artifactId, sha256 }) => ({ artifactId, sha256 }))(artifactFor("2.2")) },
+      choices: [{ kind: "accept", label: "Keep maroon" }, { kind: "regenerate_keyframe", shotIds: [shotId("2.2")] }],
+    },
+    {
+      ...base,
+      noteId: "note-b",
+      letter: "b",
+      anchor: { sceneId: sceneId(2), shotIds: [shotId("2.3")] },
+      kind: "recommendation",
+      blocking: true,
+      text: "The 2.3 line runs 7.4 s but the shot is 6 s.",
+      choices: [{ kind: "proposal", proposalId: "p1" }, { kind: "edit_field", shotId: shotId("2.3"), field: "narration" }],
+    },
+  ];
+}
+
+/** The held proposal behind note b: make 2.3 eight seconds (film 48 s → 50 s); it keeps 2.3's keyframe. */
+export function lastFerryProposals(now: Date = new Date()): DirectorProposal[] {
+  return [{
+    proposalId: "p1",
+    noteId: "note-b",
+    requestId: "request-scene-2",
+    state: "held",
+    preview: {
+      changes: [{ shotId: shotId("2.3"), field: "desiredFrames", before: String(6 * FPS), after: String(8 * FPS) }],
+      timeline: [
+        { shotId: shotId("2.1"), sceneId: sceneId(2), label: "2.1", nowSeconds: 5, afterSeconds: 5, changed: false },
+        { shotId: shotId("2.2"), sceneId: sceneId(2), label: "2.2", nowSeconds: 4, afterSeconds: 4, changed: false },
+        { shotId: shotId("2.3"), sceneId: sceneId(2), label: "2.3", nowSeconds: 6, afterSeconds: 8, changed: true },
+      ],
+      effects: [{ shotId: shotId("2.3"), effect: "keeps_keyframe" }],
+      filmSecondsNow: 48,
+      filmSecondsAfter: 50,
+    },
+    previewDigest: "p1-preview",
+    createdAt: todayAt(now, 10, 44),
+  }];
 }
 
 export const lastFerryDirector: DirectorStatus = { mode: "fake", status: "idle", activeRequestId: null };
