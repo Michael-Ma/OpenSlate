@@ -25,7 +25,7 @@ interface PlanMetadata {
 }
 type ProjectMetadata = Pick<ProjectRecord, "id" | "headVersion" | "revisionId" | "name" | "brief" | "story" | "narration" | "activePlanId" | "capabilityLockId" | "maxFrames"> & {
   shots: Pick<ProjectRecord["shots"][number], "id" | "revisionId" | "sceneId" | "desiredFrames">[];
-  scenes: Pick<ProjectRecord["scenes"][number], "id" | "revisionId">[];
+  scenes: Pick<ProjectRecord["scenes"][number], "id" | "revisionId" | "title" | "purpose">[];
 };
 export interface DirectorContextProjection {
   section: DirectorContextSection;
@@ -255,7 +255,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       const slice = <T>(values: T[]) => values.slice(offset, offset + count);
       return {
         ...base,
-        project: { ...base.project, shots: slice(saved.shots).map(({ id, revisionId, sceneId, desiredFrames }) => ({ id, revisionId, sceneId, desiredFrames })), scenes: slice(saved.scenes).map(({ id, revisionId }) => ({ id, revisionId })) },
+        project: { ...base.project, shots: slice(saved.shots).map(({ id, revisionId, sceneId, desiredFrames }) => ({ id, revisionId, sceneId, desiredFrames })), scenes: slice(saved.scenes).map(({ id, revisionId, title, purpose }) => ({ id, revisionId, title: title?.trim() || purpose, purpose })) },
         messages: slice(messages), applicationActions: slice(applicationActions), directorActions: slice(directorActions), assistantMessages: slice(assistantMessages), questions: slice(questions), holds: slice(holds), toolCalls: slice(toolCalls),
         assets: slice(assets), cues: slice(saved.cues),
         narrationDraft: { version: draft?.version ?? 0, segments: slice(segments), authority: audioRequests ? "Draft records are context, not canonical cues or permission. One studio scene confirmation covers exact script, recording and measured timing acceptance before the canonical commit; no separate narration approval or mandatory listening is required. Preserve the backend acceptance and provenance records, and do not claim pending audio is accepted. Use current canonical cues/assets for executable planning." : "Draft records are context, not canonical cues or permission. Human script, recording and timing acceptance is required in narration review before a canonical commit. Use current canonical cues/assets for executable planning." },

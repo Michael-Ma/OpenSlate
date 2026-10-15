@@ -3,6 +3,8 @@ import { digest, DomainError, invariant, newId, shotIntentDigest } from "@opensl
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationAudio } from "./narration/types.js";
+import { assertNoRunningAttempts } from "./project-library.js";
+import { projectPersonalVoices, assertPersonalVoiceCurrent } from "./narration/personal-voices.js";
 import type { NodeBinding } from "./execution/engine.js";
 
 type Edit = {
@@ -10,6 +12,9 @@ type Edit = {
   kind:
     | "treatment"
     | "scene"
+    | "sceneTitle"
+    | "deleteScene"
+    | "moveScene"
     | "addScene"
     | "shot"
     | "addShot"
@@ -24,6 +29,7 @@ type Edit = {
   field?: string;
   value?: string;
   commandId?: string;
+  withShots?: boolean;
 };
 type SavedEdit = {
   id: string;
@@ -119,6 +125,28 @@ export function editStoryboard(
         next.shots
           .filter((x) => x.sceneId === row.id)
           .forEach((x) => changed.add(x.id));
+      } else if (input.kind === "sceneTitle") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        row.title = value();
+        row.revisionId = newId();
+      } else if (input.kind === "deleteScene") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        const shots = next.shots.filter(x => x.sceneId === row.id);
+        invariant(!shots.length || input.withShots === true, "SCENE_HAS_SHOTS", "Confirm deletion of this scene and its shots.");
+        assertNoRunningAttempts(s, projectId, new Set(shots.map(x => x.id)));
+        for (const shot of shots) changed.add(shot.id);
+        next.shots = next.shots.filter(x => x.sceneId !== row.id);
+        next.scenes = next.scenes.filter(x => x.id !== row.id);
+        global = true;
+      } else if (input.kind === "moveScene") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        invariant(!input.beforeId || (input.beforeId !== row.id && next.scenes.some(x => x.id === input.beforeId)), "VALIDATION_ERROR", "Invalid reorder target.");
+        next.scenes = next.scenes.filter(x => x.id !== row.id);
+        next.scenes.splice(input.beforeId ? next.scenes.findIndex(x => x.id === input.beforeId) : next.scenes.length, 0, row);
+        global = true;
       } else if (input.kind === "addScene") {
         next.scenes.push({
           id: newId(),
@@ -264,6 +292,11 @@ export function editStoryboard(
             "VALIDATION_ERROR",
             "Invalid voice choice.",
           );
+          if (input.value === "personal") {
+            const ready = projectPersonalVoices(s.store, projectId).filter(x => x.ready);
+            invariant(ready.length > 0, "PERSONAL_VOICE_REQUIRED", "Register a ready personal voice before selecting personal narration.");
+            assertPersonalVoiceCurrent(s.store, projectId, ready[0]!.id);
+          }
           draft.voice = input.value as "stock" | "personal";
         }
         const writingChanged =
@@ -303,6 +336,8 @@ export function editStoryboard(
               "NOT_FOUND",
               "Choose a recording owned by this film.",
             );
+            const label = s.store.get<{ label: string }>("audio_library_label", audio.id);
+            s.store.put("audio_library_label", audio.id, projectId, { label: label?.label ?? "Music", role: "music" });
             next.soundtrack = {
               audioId: audio.id,
               gainMilliDb: next.soundtrack?.gainMilliDb ?? -18000,
@@ -408,7 +443,7 @@ export function editStoryboard(
         bindings
           .filter(
             (x) =>
-              ["timeline", "render"].includes(x.node.kind) ||
+              (input.kind !== "sceneTitle" && ["timeline", "render"].includes(x.node.kind)) ||
               ((input.kind === "treatment" || input.kind === "scene") &&
                 (x.node.kind === "image" || x.node.kind === "video") &&
                 intentChanged(x.node.shotId, x.node.kind)) ||
@@ -455,7 +490,7 @@ export function editStoryboard(
       }
       // Hold only shots whose queued media is detached, never music/order/add operations.
       // The surrounding command transaction rolls back these holds on failure.
-      const holdFree = ["soundtrack", "moveShot", "addScene", "addShot"].includes(input.kind);
+      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot"].includes(input.kind);
       if (!holdFree)
         for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
           s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });
@@ -519,6 +554,9 @@ export function registerStoryboard(
               enum: [
                 "treatment",
                 "scene",
+                "sceneTitle",
+                "deleteScene",
+                "moveScene",
                 "addScene",
                 "shot",
                 "addShot",
@@ -534,6 +572,7 @@ export function registerStoryboard(
             sceneId: text,
             beforeId: text,
             commandId: text,
+            withShots: { type: "boolean" },
             field: text,
             value: { type: "string", maxLength: 16000 },
           },

@@ -1,3 +1,4 @@
+import { defaultNarratorVoice } from "./narration/default-voice.js";
 import { digest, shotVideoTiming } from "@openslate/core";
 import type { ProjectRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
@@ -62,22 +63,18 @@ export function sceneNarrationView(
           voice =
             savedVoice && options.voices.includes(savedVoice)
               ? savedVoice
-              : options.voices.includes("cedar")
-                ? "cedar"
-                : (options.voices.find(
-                    (value) => !value.startsWith("openai-custom:"),
-                  ) ?? "");
+              : defaultNarratorVoice(production.store, project, shot);
           if (shot.narration?.voice === "personal") {
             if (
-              !savedVoice?.startsWith("openai-custom:") ||
+              !voice.startsWith("openai-custom:") ||
               !options.personalVoices.some(
-                (value) => value.id === savedVoice && value.ready,
+                (value) => value.id === voice && value.ready,
               )
             ) {
               if (!ready)
                 error ??=
                   "Choose your registered narration voice before confirming this scene.";
-            } else voice = savedVoice;
+            }
           }
           const selected = options.profiles.find(
             (profile) => profile.id === options!.preferredProfileId,

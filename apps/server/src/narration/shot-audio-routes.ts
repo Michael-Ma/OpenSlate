@@ -1,3 +1,4 @@
+import { defaultNarratorVoice } from "./default-voice.js";
 import { assertExpectedHumanRequest } from "../application/expected-human-request.js";
 import { soundtrackPlacement } from "./soundtrack-placement.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -453,7 +454,7 @@ export function registerShotAudioRoutes(
             "NARRATION_SPEECH_INVALID",
             "Write narration for this shot before generating speech.",
           );
-          const voice = body.voice ?? "cedar";
+          const voice = body.voice ?? defaultNarratorVoice(store, project, shot, profile.adapter);
           if (shot.narration?.voice === "personal") {
             invariant(
               voice.startsWith("openai-custom:"),

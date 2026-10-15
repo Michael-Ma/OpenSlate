@@ -4,6 +4,7 @@ import { registerSceneGeneration } from './scene-generation.js';
 import { continueEditsSchema, type ContinueEdits } from './application/pending-edit-continuation.js';
 import { registerStoryboard } from "./storyboard.js";
 import { registerPlanImports } from "./plan-imports.js";
+import { registerProjectLibrary } from "./project-library.js";
 import { registerAssetLibrary } from "./asset-library.js";
 import { registerGenerationPermission } from "./generation-permission.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
@@ -119,7 +120,7 @@ export function createApp(options: AppOptions = {}) {
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
-  app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
+  registerProjectLibrary(app, service);
   app.get("/api/providers", async () => providerCatalog().view());
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
     const project = service().store.getProject(request.params.projectId);

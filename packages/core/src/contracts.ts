@@ -92,9 +92,13 @@ export interface ProjectRecord {
   revisionId: Id;
   headVersion: number;
   name: string;
+  /** Default for new narration only; existing takes retain their voice. */
+  narratorVoice?: string;
+  archived?: boolean;
+  updatedAt?: string;
   brief: string;
   story: string;
-  scenes: Array<{ id: Id; revisionId: Id; purpose: string }>;
+  scenes: Array<{ id: Id; revisionId: Id; purpose: string; title?: string }>;
   narration: {
     script: string;
     source: "undecided" | "uploaded" | "generated" | "mixed";

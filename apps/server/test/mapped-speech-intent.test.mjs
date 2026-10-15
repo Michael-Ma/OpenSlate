@@ -1,3 +1,4 @@
+import { PersonalVoiceService } from "../dist/narration/personal-voices.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { digest } from '@openslate/core';
@@ -18,6 +19,8 @@ async function mapped(t, options = {}) {
   project.shots[0].narration = { mode: 'generated', text: f.view().segments[0].script.text, voice: 'stock' };
   f.store.saveProject(project, before.headVersion); f.project = f.store.getProject(f.project.id);
   f.store.insert('project_revision', f.project.revisionId, f.project.id, { project: f.project });
+  const registration=f.production.beginRequest(f.project.id,'local-user','Register the offline owned voice',{editing:false});
+  new PersonalVoiceService(f.production).register(f.project.id,registration,{key:'offline-ready-voice',expectedHeadVersion:f.project.headVersion,label:'Offline voice',provider:'openai',providerVoiceId:'voice_mapped_test',ownVoice:true,permitSynthesis:true});
   const segmentId = f.view().segments[0].entry.segmentId, shotId = f.project.shots[0].id;
   f.store.put('narration_shot_draft', digest({ projectId: f.project.id, shotId }), f.project.id, { projectId: f.project.id, shotId, segmentId, intentDigest: digest(f.project.shots[0].narration) });
   f.edit = (field, value, id = shotId) => editStoryboard(f.production, f.project.id, { expectedHeadVersion: f.store.getProject(f.project.id).headVersion, kind: 'narration', id, field, value }, key());
@@ -91,4 +94,11 @@ test('post-marker unknown speech is reconciled without a fresh dispatch after ma
   const attempt = f.admit(f.applied), outcome = await f.bridge.submit(attempt.request, context(attempt)); assert.equal(outcome.type, 'unknown');
   f.edit('mode', 'none'); assert.equal((await f.bridge.lookup(attempt.id)).type, 'unknown');
   assert.equal(f.store.list('speech_execution_dispatch', f.project.id).length, 1); assert.equal(f.calls.http, 1);
+});
+
+test('scene deletion refuses an unresolved section speech job for every mapped shot without dispatching it',async t=>{
+ const f=await mapped(t);await f.prepareAndReview();const attempt=f.admit(f.applied),project=f.store.getProject(f.project.id),segmentId=f.view().segments[0].entry.segmentId;
+ const other=project.shots[1];f.store.put('narration_shot_draft',digest({projectId:project.id,shotId:other.id}),project.id,{shotId:other.id,segmentId});
+ for(const scene of project.scenes)assert.throws(()=>editStoryboard(f.production,project.id,{kind:'deleteScene',id:scene.id,withShots:true,expectedHeadVersion:project.headVersion},key()),{code:'ATTEMPTS_RUNNING'});
+ assert.deepEqual(f.store.getProject(project.id),project);assert.deepEqual(f.store.get('attempt',attempt.id),attempt);assert.deepEqual(f.calls,{http:0,credentials:0});
 });

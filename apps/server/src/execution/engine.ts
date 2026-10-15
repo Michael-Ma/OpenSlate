@@ -821,7 +821,7 @@ export class Engine {
     invariant(node.args.prompt === (node.kind === "image" ? shot.imagePrompt : shot.videoPrompt), "STALE_PROMPT_INTENT", "Prompt no longer matches the current shot");
   }
   private held(project: ProjectRecord, nodeId: string): boolean {
-    if (this.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return true;
+    if (project.archived || this.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return true;
     const holds = this.store.list<Hold>("hold", project.id).filter(hold => hold.active);
     const visited = new Set<string>();
     const visit = (id: string): boolean => {
