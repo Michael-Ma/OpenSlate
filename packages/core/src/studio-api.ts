@@ -279,3 +279,211 @@ export type StudioErrorCode =
   | "ATTEMPT_NOT_RELEASABLE"
   | "DOUBLE_CHARGE_NOT_ACKNOWLEDGED"
   | "HUMAN_EDITED_FIELD";
+
+// ---------------------------------------------------------------------------
+// Director notes (phase P4: DC-1, DC-9, DC-10). Returned in the project snapshot as `notes`.
+// ---------------------------------------------------------------------------
+
+/**
+ * A typed action attached to a note. The web renders every label from the action itself
+ * ("Make 2.3 8 s", "Regenerate 2.2"); the model never writes button text, except the short
+ * `label` of an "accept" choice (e.g. "Keep maroon").
+ */
+export type NoteChoice =
+  | { kind: "accept"; label: string }
+  | { kind: "proposal"; proposalId: string }
+  | { kind: "regenerate_keyframe"; shotIds: string[] }
+  | { kind: "edit_field"; shotId: string; field: "narration" | "imagePrompt" | "motion" }
+  | { kind: "reply" };
+
+export interface DirectorNote {
+  noteId: string;
+  requestId: string;
+  turnId: string;
+  /** App-assigned per turn: "a", "b", ... */
+  letter: string;
+  anchor: { sceneId?: string; shotIds?: string[] };
+  kind: "observation" | "recommendation";
+  /** A blocking note must be settled before the scene's video confirm. */
+  blocking: boolean;
+  text: string;
+  /** The keyframe the Director looked at when writing the note, if any. */
+  seenKeyframe?: { shotId: string; artifactId: string; sha256: string };
+  choices: NoteChoice[];
+  /** stale: the anchored shot or the seen keyframe changed since the note was written. */
+  state: "open" | "resolved" | "stale";
+  resolution?: { choiceIndex: number; at: string; resultRef?: string };
+  version: number;
+  createdAt: string;
+}
+
+/** POST /api/projects/:projectId/director/notes/:noteId/resolve (Idempotency-Key required). */
+export interface ResolveNoteInput {
+  choiceIndex: number;
+  expectedVersion: number;
+  /** The request or edit that carried out the choice (a regenerate press, a hand edit). */
+  resultRef?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Export from storyboard order (phase P5: SB-15..SB-18)
+// ---------------------------------------------------------------------------
+
+export type ExportBlockerCode = "no_clip" | "clip_outdated" | "voice_unsettled" | "mixed_demo_media" | "too_long" | "empty_film";
+
+export interface ExportReadiness {
+  ready: boolean;
+  /** Every shot's clip is a demo fixture: the export is stamped "Demo". */
+  demo: boolean;
+  seconds: number;
+  blockers: { code: ExportBlockerCode; shotId?: string }[];
+}
+
+export interface ExportRecord {
+  exportId: string;
+  state: "rendering" | "done" | "failed" | "cancelled";
+  headVersion: number;
+  demo: boolean;
+  startedAt: string;
+  finishedAt?: string;
+  /** The MP4 when done. Download through the artifact content route. */
+  artifact?: StudioArtifactRef;
+  failure?: { code: string };
+  /** What changed in the film since this export (empty when it is current). */
+  outdatedBy: ("shots" | "order" | "music" | "narration")[];
+}
+
+/** GET /api/projects/:projectId/exports */
+export interface ExportView {
+  readiness: ExportReadiness;
+  current: ExportRecord | null;
+  history: ExportRecord[];
+}
+
+/** POST /api/projects/:projectId/exports (Idempotency-Key required) and POST .../exports/:exportId/cancel | recover. */
+export interface StartExportInput {
+  expectedHeadVersion: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase P3: the server owns the generation chain (GR-3, GR-4, SB-2, SB-3, SB-5, SB-9, GR-6)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/projects/:projectId/scenes/:sceneId/confirm (Idempotency-Key required).
+ * One durable command: it binds the opened frames, makes any voice line still missing, settles
+ * narration by the chosen fit, then makes the clips. Returns the confirmation's view.
+ */
+export interface ConfirmSceneInput {
+  confirmationDigest: string;
+  reviewedFrames: { shotId: string; artifactId: string; sha256: string }[];
+  expectedEstimateMicros?: Micros;
+}
+
+/**
+ * POST /api/projects/:projectId/shots/:shotId/narration-fit (Idempotency-Key required). Free.
+ * extend_shot: lengthen the shot to fit the line (whole seconds, within the model's range) and accept the line.
+ * cut_to_shot: keep the shot length and accept the line cut at the shot's end with a short fade.
+ */
+export interface NarrationFitInput {
+  fit: "extend_shot" | "cut_to_shot";
+  expectedHeadVersion: number;
+}
+export interface NarrationFitReceipt {
+  shotId: string;
+  fit: "extend_shot" | "cut_to_shot";
+  durationFrames: number;
+  /** Storyboard command id, for Undo. */
+  commandId: string;
+}
+
+/** POST /api/projects/:projectId/shots/:shotId/takes/:artifactId/use (Idempotency-Key required). Free; outdates the clip. */
+export interface UseTakeReceipt {
+  shotId: string;
+  artifactId: string;
+  commandId: string;
+}
+
+/** Earlier takes of a shot, newest first. GET /api/projects/:projectId/shots/:shotId/takes */
+export interface ShotTakes {
+  shotId: string;
+  keyframes: { artifact: StudioArtifactRef; current: boolean; createdAt: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Held Director proposals (phase P4: DC-2, DC-3, DC-4, DC-5; decision D1)
+// ---------------------------------------------------------------------------
+
+export type MediaEffect = "keeps_keyframe" | "keyframe_remade" | "clip_remade" | "voice_remade" | "no_media_yet";
+
+/** App-computed preview of a proposal; the web draws Now / After from it without diffing anything itself. */
+export interface ProposalPreview {
+  changes: { shotId?: string; sceneId?: string; field: string; before: string; after: string }[];
+  /** Per-shot seconds now and after, in film order, for the Now / After timeline. */
+  timeline: { shotId: string; sceneId: string; label: string; nowSeconds: number; afterSeconds: number; changed: boolean }[];
+  effects: { shotId: string; effect: MediaEffect }[];
+  filmSecondsNow: number;
+  filmSecondsAfter: number;
+}
+
+export interface DirectorProposal {
+  proposalId: string;
+  noteId?: string;
+  requestId: string;
+  state: "held" | "accepted" | "rejected" | "stale" | "undone";
+  /** Why it went stale, e.g. SHOT_CHANGED. */
+  staleReason?: string;
+  preview: ProposalPreview;
+  previewDigest: string;
+  createdAt: string;
+  /** After accept: what can be undone. Fields a person changed since are left alone. */
+  accepted?: { at: string; touchedFields: { shotId?: string; sceneId?: string; field: string }[] };
+}
+
+/** GET /api/projects/:projectId/director/proposals */
+export interface ProposalList {
+  proposals: DirectorProposal[];
+}
+
+/** POST .../director/proposals/:proposalId/accept (Idempotency-Key required). reject and undo take no body. */
+export interface AcceptProposalInput {
+  previewDigest: string;
+}
+export interface ProposalReceipt {
+  proposal: DirectorProposal;
+  /** For undo: fields left as the person changed them. */
+  leftAlone?: { shotId?: string; field: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// Scenes, projects and the asset library (phase P5: SB-13, SB-14, SB-21, SB-24)
+// ---------------------------------------------------------------------------
+
+/** GET /api/projects: each film with its status counts. */
+export interface ProjectListItem {
+  id: string;
+  name: string;
+  archived: boolean;
+  scenes: number;
+  shots: number;
+  seconds: number;
+  videosReady: number;
+  updatedAt: string;
+}
+
+export type AssetRole = "keyframe" | "clip" | "voice" | "music" | "upload" | "export";
+
+/** GET /api/projects/:projectId/assets?sceneId=&shotId=&role= */
+export interface AssetItem {
+  artifact: StudioArtifactRef;
+  role: AssetRole;
+  sceneId?: string;
+  shotId?: string;
+  /** 1-based take number for keyframes and clips. */
+  takeIndex?: number;
+  current: boolean;
+  source: "generated" | "imported" | "demo";
+  label: string;
+  createdAt: string;
+  durationSeconds?: number;
+}
