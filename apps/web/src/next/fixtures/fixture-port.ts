@@ -87,7 +87,9 @@ export async function fixtureMedia(): Promise<MediaSource> {
     async url(artifact) {
       const svg = pictures[pictureKey(artifact.artifactId)];
       if (!svg) throw new ApiError("NOT_FOUND", 404);
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      // A standalone SVG image needs its namespace; the illustrations were written for inline use.
+      const standalone = /^<svg[^>]*\sxmlns=/.test(svg) ? svg : svg.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(standalone)}`;
     },
     revoke() { /* data URLs need no cleanup */ },
   };
