@@ -1,8 +1,8 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { Locale } from "../../../shared/locale-preference.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
-import type { ModelSettingsStatus, ProviderCatalogView } from "../../model/settings.ts";
+import { activeSection, type ModelSettingsStatus, type ProviderCatalogView } from "../../model/settings.ts";
 import type { DirectorReview, DirectorSetup } from "../../model/settings-director.ts";
 import type { PersonalVoices, VoiceSetting } from "../../model/settings-voice.ts";
 import { searchWithLocale } from "../../model/shell.ts";
@@ -37,24 +37,72 @@ export function SettingsView() {
   const film = useStudio((s) => s.snapshot?.project.name ?? s.projects.find((p) => p.id === s.projectId)?.name ?? "");
   const connection = useStudio((s) => s.connection);
   const offline = connection === "connected" ? null : t("set.offline");
-  const models = useResource<ModelSettingsStatus>("/settings/models");
+  // What makes each section read again. A studio restart reconnects, so every follow includes the connection.
+  const head = useStudio((s) => s.snapshot?.project.headVersion ?? s.overview?.headVersion ?? 0);
+  const filmChanged = `${head}|${connection === "connected"}`;
+  // The film's models and narrator change only with the film (both move its head version).
+  const models = useRead<ModelSettingsStatus>("/settings/models", { follow: filmChanged });
+  const voice = useRead<VoiceSetting>("/settings/voice", { follow: filmChanged });
+  // The Director's state (busy, the setup check), the review setting and personal voices move without the head.
   const setup = useResource<DirectorSetup>("/director/setup");
   const review = useRead<DirectorReview>("/settings/director-review");
-  const voice = useResource<VoiceSetting>("/settings/voice");
   const personal = useResource<PersonalVoices>("/narration/personal-voices");
-  // The installed catalog belongs to this computer, not to a film.
-  const providers = useRead<ProviderCatalogView>("/api/providers", { film: false });
+  // The installed catalog belongs to this computer, not to a film: read on opening, Check again and a restart.
+  const providers = useRead<ProviderCatalogView>("/api/providers", { film: false, follow: String(connection === "connected") });
   const [section, setSection] = useState(hasFilm ? "set-models" : "set-computer");
+  /** The section last chosen in the index: it stays marked at the end of the scroll, where it cannot reach the top. */
+  const chosen = useRef<string | null>(section);
+  /** Until when the scroll is the index's own jump: the sections it passes on the way are not marked. */
+  const jumping = useRef(0);
 
   // Without a film, open at This computer, as the study's gear on Start does (settings.html#computer).
   useEffect(() => {
     if (hasFilm) return;
+    chosen.current = "set-computer";
     setSection("set-computer");
     document.getElementById("set-computer")?.scrollIntoView({ block: "start" });
   }, [hasFilm]);
 
+  // The index follows the scroll: the section at the top of the page is marked, including after a form opens.
+  useEffect(() => {
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      if (Date.now() < jumping.current) return;
+      const main = document.querySelector<HTMLElement>("main[data-view='settings']");
+      if (!main) return;
+      // From 900 px the workspace scrolls; below it the page does.
+      const own = main.scrollHeight > main.clientHeight + 1 && getComputedStyle(main).overflowY !== "visible";
+      const scroller = own ? main : document.scrollingElement ?? document.documentElement;
+      const top = own ? main.getBoundingClientRect().top : 0;
+      const bottom = own ? main.getBoundingClientRect().bottom : window.innerHeight;
+      const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+      const panels = SECTIONS.flatMap((entry) => {
+        const rect = document.getElementById(entry.id)?.getBoundingClientRect();
+        return rect ? [{ id: entry.id, top: rect.top, bottom: rect.bottom }] : [];
+      });
+      const next = activeSection(panels, top + 24, bottom, atEnd, chosen.current);
+      if (next) setSection(next);
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    const landed = () => { jumping.current = 0; schedule(); };
+    // Scroll events do not bubble, but they reach a capturing listener on the document from any scroller.
+    document.addEventListener("scroll", schedule, { capture: true, passive: true });
+    document.addEventListener("scrollend", landed, { capture: true, passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      document.removeEventListener("scroll", schedule, { capture: true });
+      document.removeEventListener("scrollend", landed, { capture: true });
+      window.removeEventListener("resize", schedule);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
   const go = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
+    chosen.current = id;
+    // A smooth jump passes other sections; mark the chosen one until it lands (scrollend), at most a second.
+    jumping.current = Date.now() + 1000;
     setSection(id);
     const target = document.getElementById(id);
     target?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });

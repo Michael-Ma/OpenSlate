@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
-import { draftProblems, emptyDraft, idTail, narratorChoices, narratorName, narratorRequest, registerRequest, revokeRequest, voiceCards } from '../../src/next/model/settings-voice.ts';
+import { draftProblems, emptyDraft, idTail, narratorChoices, narratorName, narratorRequest, registerRequest, revokeRequest, undoTarget, usableNarrator, voiceCards } from '../../src/next/model/settings-voice.ts';
 
 const en = (m) => translateMsg('en', m);
 const voices = [
@@ -50,4 +50,15 @@ test('Add voice stays off until the name, the voice id and both consents are the
 test('registration sends both consents as literal true', () => {
   const request = registerRequest({ label: ' My voice ', provider: 'openai', voiceId: ' voice_abc ', ownVoice: true, permitSynthesis: true }, 12);
   assert.deepEqual(request, { path: '/narration/personal-voices', body: { expectedHeadVersion: 12, label: 'My voice', provider: 'openai', providerVoiceId: 'voice_abc', ownVoice: true, permitSynthesis: true } });
+});
+
+test('Undo goes back only to a voice that can still narrate, and only while the change is the current setting', () => {
+  assert.equal(usableNarrator('cedar', voices), true);
+  assert.equal(usableNarrator('openai-custom:voice_m7f3a', voices), true);
+  assert.equal(usableNarrator('openai-custom:voice_old99', voices), false, 'revoked');
+  assert.equal(usableNarrator('elevenlabs-personal:abc123', voices), false, 'not usable for narration');
+  assert.equal(undoTarget({ previous: 'cedar', set: 'marin' }, 'marin', voices), 'cedar');
+  assert.equal(undoTarget({ previous: 'cedar', set: 'marin' }, 'ash', voices), null, 'changed again since');
+  assert.equal(undoTarget({ previous: 'openai-custom:voice_old99', set: 'marin' }, 'marin', voices), null, 'the old voice was revoked since');
+  assert.equal(undoTarget(null, 'marin', voices), null);
 });

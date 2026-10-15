@@ -69,7 +69,28 @@ export function narratorName(value: string, voices: readonly PersonalVoice[]): s
   return voices.find((voice) => voice.id === value)?.label ?? value;
 }
 
-export const narratorRequest = (voice: string, headVersion: number): Request => ({ path: "/settings/voice", body: { narratorVoice: voice, expectedHeadVersion: headVersion } });
+/** Whether a narrator setting can be chosen for new lines now: a stock voice or a ready OpenAI personal voice. */
+export function usableNarrator(value: string, voices: readonly PersonalVoice[]): boolean {
+  return isStock(value) || voices.some((voice) => voice.id === value && voice.ready && voice.id.startsWith("openai-custom:"));
+}
+
+/** How long "Was Cedar · Undo" stays after a narrator change, like the study's toast Undo. */
+export const UNDO_MS = 8000;
+
+export interface NarratorUndo {
+  /** The voice before the change. */
+  previous: string;
+  /** The voice the change set: Undo is offered only while it is still the narrator. */
+  set: string;
+}
+
+/** The voice Undo would go back to, or null when it is gone (changed since, or no longer a usable choice). */
+export function undoTarget(undo: NarratorUndo | null, current: string | null, voices: readonly PersonalVoice[]): string | null {
+  if (!undo || current !== undo.set || undo.previous === current) return null;
+  return usableNarrator(undo.previous, voices) ? undo.previous : null;
+}
+
+export const narratorRequest =(voice: string, headVersion: number): Request => ({ path: "/settings/voice", body: { narratorVoice: voice, expectedHeadVersion: headVersion } });
 
 // ---- personal voices -------------------------------------------------------------------
 
