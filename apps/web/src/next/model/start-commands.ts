@@ -5,6 +5,7 @@ import { errorMsg } from "../i18n/translate.ts";
 import type { Action } from "../store/reducer.ts";
 import type { StudioState, Toast } from "../store/state.ts";
 import { CommandRefused } from "./commands.ts";
+import { CODEX_CHECK_TIMEOUT_MS } from "./settings-director.ts";
 import { CODEX_NOT_FOUND, SETUP_BUSY, directorSetupBody, type Codex, type CreateBody, type CreationStep, type DirectorSetupRead } from "./start-new.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
@@ -27,8 +28,8 @@ export interface StartStore {
 export const FILMS_PATH = "/api/projects?includeArchived=true";
 export const PROVIDERS_PATH = "/api/providers";
 export const projectPath = (projectId: string, rest = "") => `/api/projects/${encodeURIComponent(projectId)}${rest}`;
-/** The server's Codex setup check can take about 90 s (local-director.ts prepare); the client's default is 15 s. */
-export const DIRECTOR_SETUP_TIMEOUT_MS = 120_000;
+/** The server's Codex setup check can take about 90 s (local-director.ts prepare); the same allowance as Settings'. */
+export const DIRECTOR_SETUP_TIMEOUT_MS = CODEX_CHECK_TIMEOUT_MS;
 
 export interface Film {
   id: string;
