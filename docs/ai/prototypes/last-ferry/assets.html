@@ -249,7 +249,7 @@ const Shell = {
   dirOpen: false, chips: [], messages: [], picker: false, review: false,
   page: null
 };
-const blocked = () => Shell.conn !== 'online';
+const blocked = () => Shell.conn !== 'online' || !!Shell.noSession;
 /** Guards: [data-needs="server"] needs the studio; [data-needs="run"] also starts work, so Stop turns it off. */
 function guard(root){
   (root || document).querySelectorAll('[data-needs]').forEach(el => {
@@ -318,31 +318,38 @@ function renderTop(){
   else film.innerHTML = `<b>${esc(FILM.title)}${FILM.demo ? t(' (demo)', '（示例）') : ''}</b><span>${t(`${filmDur()} s · 16:9 · 1920 × 1080 · 30 fps`, `${filmDur()} 秒 · 16:9 · 1920 × 1080 · 30 帧/秒`)}</span>`;
   const tabs = [['Plan', '计划', 'plan.html'], ['Keyframes', '关键帧', 'last-ferry.html'], ['Assets', '素材', 'assets.html'], ['Film', '成片', 'film.html']];
   $('sh-tabs').innerHTML = p.noFilm ? '' : tabs.map(([en, zh, href]) => `<a class="tab" href="${href}"${p.view === en ? ' aria-current="page"' : ''}>${t(en, zh)}</a>`).join('');
-  const conn = Shell.conn === 'offline' ? `<span class="saved alert" role="status">${t('Reconnecting…', '正在重新连接…')}</span>`
+  const conn = Shell.noSession ? `<span class="saved alert" role="status">${t('Not connected', '未连接')}</span>`
+    : Shell.conn === 'offline' ? `<span class="saved alert" role="status">${t('Reconnecting…', '正在重新连接…')}</span>`
     : `<span class="saved">${t('Saved locally', '已保存在本机')}</span>`;
   const stop = Shell.running && !Shell.stopped && !blocked() ? `<button class="pill sm stop-btn" data-act="sh-stop"><svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true"><rect width="9" height="9" rx="1.5" fill="currentColor"/></svg>${t('Stop', '停止')}</button>` : '';
   $('sh-right').innerHTML = `${stop}
     ${p.noFilm ? '' : `<span class="counts">${t(`${SCENES.length} scenes · ${filmShots().length} shots`, `${SCENES.length} 场 · ${filmShots().length} 个镜头`)}</span>`}
     ${conn}
-    <a class="icon-btn settings-btn" href="settings.html" aria-label="${t('Settings', '设置')}" title="${t('Settings', '设置')}"${p.view === 'Settings' ? ' aria-current="page"' : ''}><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Zm6.1 3.6.1-.8-.1-.8 1.4-1.1-1.5-2.6-1.7.6a5.6 5.6 0 0 0-1.4-.8L10.6 1.5H7.6l-.3 1.8c-.5.2-1 .5-1.4.8l-1.7-.6-1.5 2.6L4 7.2 3.9 8l.1.8-1.4 1.1 1.5 2.6 1.7-.6c.4.3.9.6 1.4.8l.3 1.8h3l.3-1.8c.5-.2 1-.5 1.4-.8l1.7.6 1.5-2.6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></a>
+    <a class="icon-btn settings-btn" href="settings.html${p.noFilm ? '#computer' : ''}" aria-label="${t('Settings', '设置')}" title="${t('Settings', '设置')}"${p.view === 'Settings' ? ' aria-current="page"' : ''}><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Zm6.1 3.6.1-.8-.1-.8 1.4-1.1-1.5-2.6-1.7.6a5.6 5.6 0 0 0-1.4-.8L10.6 1.5H7.6l-.3 1.8c-.5.2-1 .5-1.4.8l-1.7-.6-1.5 2.6L4 7.2 3.9 8l.1.8-1.4 1.1 1.5 2.6 1.7-.6c.4.3.9.6 1.4.8l.3 1.8h3l.3-1.8c.5-.2 1-.5 1.4-.8l1.7.6 1.5-2.6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></a>
     <button class="review-btn" data-act="sh-review" aria-haspopup="menu" aria-expanded="${Shell.review}" aria-controls="review">Prototype ▾</button>
     <button class="pill sm dir-toggle" data-act="sh-dir" aria-controls="director" aria-expanded="${Shell.dirOpen}">${t('Director', '导演')}</button>`;
   $('sh-scope').textContent = p.scope ? p.scope() : '';
   $('app').classList.toggle('dir-open', Shell.dirOpen);
 }
 function stripHTML(){
+  const p = Shell.page;
   if (Shell.conn === 'offline') return `<div class="strip" role="status"><span class="ic" aria-hidden="true">!</span>
     <div class="txt"><b>${t('Can’t reach the studio.', '连不上工作室。')}</b> <span>${t('Changes aren’t saved and paid buttons are off until it’s back. Retrying every 5 s.', '恢复连接前，修改不会保存，付费按钮不可用。每 5 秒自动重试。')}</span></div>
     <div class="acts"><button class="pill sm" data-act="sh-retry">${t('Try now', '立即重试')}</button></div></div>`;
   if (Shell.stopped){
     const st = Shell.stopped;
     return `<div class="strip" role="status"><span class="ic" aria-hidden="true">■</span>
-    <div class="txt"><b>${t('Stopped. Nothing new will be sent.', '已停止，不会再发送新任务。')}</b> <span>${t(`${st.sent} ${st.sent === 1 ? 'job' : 'jobs'} already sent will finish and be charged. ${st.detached} queued ${st.detached === 1 ? 'job was' : 'jobs were'} taken off and will need a new confirm.`, `已发送的 ${st.sent} 个任务会完成并计费。${st.detached} 个排队中的任务已撤下，需要重新确认。`)}</span></div>
+    <div class="txt"><b>${t('Stopped. Nothing new will be sent.', '已停止，不会再发送新任务。')}</b> <span>${st.sent ? t(`${st.sent} ${st.sent === 1 ? 'job' : 'jobs'} already sent will finish and be charged. `, `已发送的 ${st.sent} 个任务会完成并计费。`) : ''}${st.detached ? t(`${st.detached} queued ${st.detached === 1 ? 'job was' : 'jobs were'} taken off and will need a new confirm.`, `${st.detached} 个排队中的任务已撤下，需要重新确认。`) : ''}</span></div>
     <div class="acts"><button class="pill sm primary" data-act="sh-continue" data-needs="server">${t('Continue', '继续')}</button></div></div>`;
   }
-  if (Shell.restarted) return `<div class="strip" role="status"><span class="ic" aria-hidden="true">?</span>
-    <div class="txt"><b>${t('OpenSlate restarted while 2 keyframes were being sent (3.1 and 3.2).', 'OpenSlate 重启时有 2 张关键帧正在发送（3.1 和 3.2）。')}</b> <span>${t('The service never confirmed them. They may still arrive and be charged.', '服务没有确认它们，它们可能稍后仍会返回并计费。')}</span></div>
-    <div class="acts"><a class="pill sm" href="states.html#restart">${t('Review them', '查看')}</a><button class="pill sm ghost" data-act="sh-restart-ok">${t('Dismiss', '关闭提示')}</button></div></div>`;
+  if (Shell.restarted){
+    const r = p.restartStrip ? p.restartStrip() : {
+      b: t('OpenSlate restarted while 2 keyframes were being sent (3.1 and 3.2).', 'OpenSlate 重启时有 2 张关键帧正在发送（3.1 和 3.2）。'),
+      acts: `<a class="pill sm" href="states.html#restart">${t('Review them', '查看')}</a>` };
+    return `<div class="strip" role="status"><span class="ic" aria-hidden="true">?</span>
+    <div class="txt"><b>${r.b}</b> <span>${t('The service never confirmed them. They may still arrive and be charged; nothing is resent by itself.', '服务没有确认它们，它们可能稍后仍会返回并计费；不会自动重发。')}</span></div>
+    <div class="acts">${r.acts}<button class="pill sm ghost" data-act="sh-restart-ok">${t('Dismiss', '关闭提示')}</button></div></div>`;
+  }
   return '';
 }
 function renderStrip(){ $('strip-slot').innerHTML = stripHTML(); $('strip-slot').style.display = $('strip-slot').innerHTML ? '' : 'none'; }
@@ -355,10 +362,12 @@ function renderThread(){
     $('sh-hint').textContent = ''; document.querySelector('.send').disabled = true; document.querySelector('.at-btn').disabled = true;
     return;
   }
-  const noteA = `<div class="note"><span class="letter">a</span>In 2.2 the coat came out maroon rather than red. I kept it because the light is low; regenerate 2.2 if you want it brighter.
-      <div class="row"><button class="pill sm" data-act="sh-open-shot" data-shot="sh22">Open 2.2</button></div></div>`;
-  const noteB = `<div class="note"><span class="letter">b</span>The narration for 2.3 is 7.4 seconds but the shot is 6 seconds. I suggest making 2.3 8 seconds, which moves Scene 3 two seconds later.
-      <div class="row"><button class="pill sm" data-act="sh-open-shot" data-shot="sh23">Open 2.3</button></div></div>`;
+  const done = p.notesDone || {};
+  const handled = k => done[k] ? `<span class="handled">✓ ${esc(t(done[k][0], done[k][1]))}</span>` : '';
+  const noteA = `<div class="note${done.a ? ' done' : ''}"><span class="letter">a</span>In 2.2 the coat came out maroon rather than red. I kept it because the light is low; regenerate 2.2 if you want it brighter.
+      <div class="row"><button class="pill sm" data-act="sh-open-shot" data-shot="sh22">Open 2.2</button></div>${handled('a')}</div>`;
+  const noteB = `<div class="note${done.b ? ' done' : ''}"><span class="letter">b</span>The narration for 2.3 is 7.4 seconds but the shot is 6 seconds. I suggest making 2.3 8 seconds, which moves Scene 3 two seconds later.
+      <div class="row"><button class="pill sm" data-act="sh-open-shot" data-shot="sh23">Open 2.3</button></div>${handled('b')}</div>`;
   const extra = Shell.messages.map(m => m.who === 'you'
     ? `<div class="byline you"><b>${t('You', '你')}</b> · ${m.time}</div><div class="bubble">${m.chips.map(c => `<span class="atchip">@${esc(c)}</span>`).join('')}${esc(m.text)}</div>`
     : m.working ? `<div class="byline"><b>${t('Director', '导演')}</b> · ${m.time}</div><div class="working">${t('Working', '处理中')}<i></i><i></i><i></i></div>`
@@ -376,7 +385,7 @@ function renderThread(){
   ta.placeholder = t('Reply to the Director…', '回复导演…');
   const send = document.querySelector('.send');
   if (blocked()){ $('sh-hint').textContent = t('Offline · your draft is kept', '离线 · 草稿会保留'); send.disabled = true; }
-  else if (Shell.stopped){ $('sh-hint').textContent = t('Stopped · sending a message continues the Director', '已停止 · 发消息会让导演继续'); send.disabled = false; }
+  else if (Shell.stopped){ $('sh-hint').textContent = t('Stopped · the Director waits for Continue', '已停止 · 导演等你继续'); send.disabled = false; }
   else { $('sh-hint').textContent = t('a scene or shot to point at it', '指向一场或一个镜头'); send.disabled = false; }
 }
 function renderReview(){
@@ -482,11 +491,12 @@ function send(){
   Shell.messages.push(reply);
   const pointed = Shell.chips.slice();
   ta.value = ''; Shell.chips = []; Shell._scroll = true;
-  if (Shell.stopped){ Shell.stopped = null; renderAll(); }
+  const wasStopped = !!Shell.stopped;
   renderThread();
   setTimeout(() => {
     reply.working = false;
-    reply.text = pointed.length ? `Noted for ${pointed.join(', ')}. I would make that change and show you what it affects before anything is made.` : 'Noted. I would make that change and show you what it affects before anything is made.';
+    reply.text = wasStopped ? 'Noted. The film is stopped, so I will pick this up when you continue.'
+      : pointed.length ? `Noted for ${pointed.join(', ')}. I would make that change and show you what it affects before anything is made.` : 'Noted. I would make that change and show you what it affects before anything is made.';
     Shell._scroll = true; renderThread();
   }, 1400);
 }

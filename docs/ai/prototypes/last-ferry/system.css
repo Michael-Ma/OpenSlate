@@ -244,6 +244,7 @@ a.brand:hover .word{text-decoration:underline;text-underline-offset:3px}
 .panel-head .end{margin-left:auto;display:flex;gap:6px;align-items:center}
 .panel p.lead{margin:6px 0 0;color:var(--text-2);font-size:13px;line-height:1.5}
 .muted{color:var(--muted)}
+.cmd{white-space:nowrap}
 .dim{color:var(--text-2)}
 .num{font-variant-numeric:tabular-nums}
 
