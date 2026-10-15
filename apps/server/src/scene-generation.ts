@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { requestScopesIntersect } from "./application/request-scopes.js";
 import { assertExpectedHumanRequest } from "./application/expected-human-request.js";
 import { sceneNarrationView } from "./scene-narration-view.js";
 import type { NarrationService } from "./narration/service.js";
@@ -40,6 +41,7 @@ function sceneView(
   service: ProductionService,
   projectId: string,
   sceneId: string,
+  targetShotIds?: string[],
 ) {
   const snapshot = service.snapshot(projectId),
     project = snapshot.project,
@@ -272,16 +274,21 @@ function sceneView(
           : durationCode,
       };
     });
+  const commandScopes = targetShotIds ?? [sceneId];
+  const intersectsRequest = (requestId?: string) => {
+    const request = requestId
+      ? store.get<{ scopeIds?: string[] }>("message", requestId)
+      : null;
+    return requestScopesIntersect(project, commandScopes, request?.scopeIds);
+  };
   const busy =
     store
-      .list<{ state: string }>("director_turn", projectId)
-      .some((t) => ["running", "queued"].includes(t.state)) ||
-    snapshot.questions.some(
-      (question) =>
-        (question as { state?: string; canAnswer?: boolean }).state ===
-          "pending" &&
-        (question as { canAnswer?: boolean }).canAnswer !== false,
-    );
+      .list<{ state: string; requestId?: string }>("director_turn", projectId)
+      .some(t => ["running", "queued"].includes(t.state) && intersectsRequest(t.requestId)) ||
+    snapshot.questions.some(question => {
+      const row = question as { state?: string; canAnswer?: boolean; requestId?: string };
+      return row.state === "pending" && row.canAnswer !== false && intersectsRequest(row.requestId);
+    });
   return {
     project,
     plan,
@@ -430,7 +437,7 @@ export function registerSceneGeneration(
       );
       const fresh = () => {
         assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
-        const now = sceneView(production, projectId, sceneId).view;
+        const now = sceneView(production, projectId, sceneId, input.targetShotIds).view;
         invariant(
           now.headVersion === input.headVersion &&
             now.revisionId === input.revisionId &&
@@ -655,6 +662,7 @@ export function registerSceneGeneration(
             `${input.regenerate ? "Regenerate" : "Generate"} ${input.kind === "image" ? "keyframes" : "video"} for ${input.targetShotIds ? "the selected shots in" : ""} this reviewed scene.`,
             {
               editing: true,
+              supersede: "intersecting",
               scopeIds: input.targetShotIds
                 ? selected.map((row) => row.shotId)
                 : [sceneId],
