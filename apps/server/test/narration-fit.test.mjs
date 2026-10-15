@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { narrationFitFrames } from '../dist/narration-fit.js';
+import { projectAudioPlacements, storyboardAudioCuts } from '../dist/narration/audio-placement.js';
+import { confirmationFixture } from './helpers/confirmation-fixture.mjs';
+
+test('fit rounds 7.4 seconds to eight and respects locked model min/max', () => {
+  assert.equal(narrationFitFrames(180, 355200, { minFrames: 90, maxFrames: 450 }, 'extend_shot'), 240);
+  assert.equal(narrationFitFrames(180, 355200, { minFrames: 90, maxFrames: 450 }, 'cut_to_shot'), 180);
+  assert.throws(() => narrationFitFrames(180, 355200, { maxFrames: 180 }, 'extend_shot'), { code: 'PROFILE_INCOMPATIBLE' });
+  assert.throws(() => narrationFitFrames(180, 800000, {}, 'extend_shot'), { code: 'PROFILE_INCOMPATIBLE' });
+  assert.equal(narrationFitFrames(90, 48000, { minFrames: 180 }, 'extend_shot'), 180);
+});
+for (const fit of ['extend_shot', 'cut_to_shot']) test(`${fit} accepts exact narration, preserves the frame, re-quotes and undoes as one command`, async t => {
+  const f = await confirmationFixture(t, { seconds: 7.4 }); await f.make(); await f.tick(12);
+  const project = f.store.getProject(f.project.id), before = await f.overview(), key = randomUUID();
+  const payload = { fit, expectedHeadVersion: project.headVersion }, receipt = await f.call('POST', '/shots/shot-0/narration-fit', payload, key).then(f.ok);
+  assert.equal(receipt.durationFrames, fit === 'extend_shot' ? 240 : 180);
+  const saved = f.store.getProject(project.id), shot = saved.shots[0], cue = saved.cues.find(c => c.id === shot.cueId), view = await f.overview();
+  assert.equal(shot.narrationPending, false); assert.equal(shot.narrationFit, fit);
+  assert.equal(cue.durationFrames, fit === 'cut_to_shot' ? 180 : 222);
+  assert.deepEqual(view.shots['shot-0'].keyframe.artifact, before.shots['shot-0'].keyframe.artifact);
+  assert.equal(view.shots['shot-0'].narration.fit, fit); assert.equal(view.shots['shot-0'].narration.fits, true);
+  assert.equal(view.shots['shot-0'].narration.measuredSeconds, 7.4);
+  assert.ok(!view.scenes[0].blockers.some(b => b.code === 'narration_too_long'));
+  assert.equal(view.scenes[0].quotes.confirmVideo.units, 2);
+  assert.notEqual(view.scenes[0].confirmationDigest, before.scenes[0].confirmationDigest);
+  const segment = f.canonical.workspaceCurrent(project.id).segments[0];
+  const placement = projectAudioPlacements(segment, storyboardAudioCuts(saved))[0];
+  if (fit === 'cut_to_shot') { assert.equal(placement.durationSamples, 180 * 1600); assert.equal(placement.fadeOutSamples, 3840); }
+  else assert.equal(placement.fadeOutSamples, undefined);
+  assert.deepEqual(await f.call('POST', '/shots/shot-0/narration-fit', payload, key).then(f.ok), receipt);
+  assert.equal(f.calls.speech, 1);
+  await f.call('POST', '/storyboard', { kind: 'undo', commandId: receipt.commandId, expectedHeadVersion: saved.headVersion }).then(f.ok);
+  const undone = f.store.getProject(project.id).shots[0];
+  assert.equal(undone.desiredFrames, 180); assert.equal(undone.narrationFit, undefined); assert.equal(undone.narrationPending, true);
+  assert.equal((await f.overview()).shots['shot-0'].narration.fits, false);
+});
+
+test('fit rejects missing voice, stale version, invalid choice and absent command identity without changes', async t => {
+  const f = await confirmationFixture(t), before = f.store.cursor(f.project.id);
+  for (const [body, key, code] of [
+    [{ fit: 'extend_shot', expectedHeadVersion: f.project.headVersion }, undefined, 'NARRATION_RECORDING_REQUIRED'],
+    [{ fit: 'cut_to_shot', expectedHeadVersion: 999 }, undefined, 'REVISION_CONFLICT'],
+    [{ fit: 'invented', expectedHeadVersion: f.project.headVersion }, undefined, 'VALIDATION_ERROR'],
+    [{ fit: 'cut_to_shot', expectedHeadVersion: f.project.headVersion }, null, 'IDEMPOTENCY_KEY_REQUIRED'],
+  ]) {
+    const r = await f.call('POST', '/shots/shot-0/narration-fit', body, key); assert.equal(r.json().error.code, code, r.body);
+    assert.equal(f.store.cursor(f.project.id), before);
+  }
+});

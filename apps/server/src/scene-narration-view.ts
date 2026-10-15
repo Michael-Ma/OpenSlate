@@ -180,8 +180,8 @@ export function sceneNarrationView(
             ? (row?.audio?.media.sha256 ?? null)
             : null,
           recordingCurrent,
-          measuredSeconds: ready
-            ? (canonical?.segments?.find(segment => segment.segmentId === segmentId)?.audioPlacement.durationSamples ?? (acceptedCue ? acceptedCue.durationFrames * 1600 : 0)) / 48000
+          measuredSeconds: (recordingCurrent || ready) && row?.audio?.media.probe.audio?.samples
+            ? row.audio.media.probe.audio.samples / 48000
             : durationSamples === null ? null : durationSamples / 48000,
           fit: ready ? shot.narrationFit ?? null : null,
           timing: {

@@ -1,3 +1,4 @@
+import { sceneConfirmationGuard, confirmationFramesCurrent, type ConfirmationFramePin } from "../scene-confirmation-state.js";
 import { activeAttemptIngestionIssue, reportableIngestionIssue, sanitizedIngestionIssueCode, INGESTION_ISSUE_MESSAGE } from './ingestion-issue.js';
 import type { AttemptIngestionIssue } from './ingestion-issue.js';
 import { requestedTranscriptionHoldIds } from '../narration/request-holds.js';
@@ -359,6 +360,13 @@ export class Engine {
         }
         this.store.put("node_binding", binding.id, projectId, { ...binding, candidateId: null, outdatedReason: "stopped" });
         detachedJobs++;
+      }
+      for (const row of this.store.list<import("../scene-confirmations.js").SceneConfirmationRecord>("scene_confirmation", projectId)) {
+        if (!["running", "blocked"].includes(row.state)) continue;
+        this.store.put("scene_confirmation", row.id, projectId, { ...row, state: "cancelled" });
+        for (const hold of this.store.list<Hold>("hold", projectId).filter(h => h.active && h.ownerId === row.id))
+          this.releaseHold(projectId, hold.id, row.id);
+        this.store.appendEvent(projectId, "scene.confirmation_changed", { confirmationId: row.id, state: "cancelled", stopId });
       }
       return { sentJobs: pending.length, detachedJobs };
     });
@@ -846,6 +854,14 @@ export class Engine {
       const ownedInput = resolveOwnedTranscriptionNode(this.store, project, node, binding.candidateId);
       if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, node, binding.candidateId, ownedInput.resolved);
       const speechInput = resolveNarrationSpeechNode(this.store, project, node, binding.candidateId);
+      const candidateOwner = binding.candidateId ? this.store.get<{ grantId: string }>("candidate", binding.candidateId) : undefined;
+      const ownerGrant = candidateOwner ? this.store.get<Grant>("grant", candidateOwner.grantId) : undefined;
+      const sceneOwner = speechInput ? this.store.get<{ confirmationId: string }>("scene_confirmation_request", speechInput.resolved.review.requestId) : undefined;
+      const confirmationId = sceneOwner?.confirmationId ?? ownerGrant?.authorityId;
+      const confirmation = confirmationId ? this.store.get<{ state: string; sceneId: string; guardDigest: string; framePins: ConfirmationFramePin[] }>("scene_confirmation", confirmationId) : undefined;
+      if (confirmation) invariant(["running", "done"].includes(confirmation.state) && confirmation.guardDigest === sceneConfirmationGuard(project, confirmation.sceneId, this.store.get("capability_lock", project.capabilityLockId)) && confirmationFramesCurrent(this.store, project, confirmation.framePins),
+        "SCENE_REVIEW_STALE", "The scene confirmation changed before dispatch");
+
       if (speechInput) assertNarrationSpeechCurrent(this.store, project, node, binding.candidateId, speechInput.resolved);
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
       invariant(!this.held(project, nodeId), "EXECUTION_HELD", "Dispatch is paused or held");
@@ -889,6 +905,7 @@ export class Engine {
       const workKey = binding.candidateId ? null : digest({ projectId, nodeId, fingerprint: inputs.fingerprint });
       const previous = this.attempts(projectId).filter(attempt => !attempt.released && (binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey)).sort((a, b) => b.ordinal - a.ordinal)[0];
       if (previous) {
+        invariant(!confirmation, "RETRY_NOT_AUTHORIZED", "A scene confirmation never retries paid work");
         invariant(previous.phase === "failed", "ATTEMPT_EXISTS", "Existing work must be reconciled, never resubmitted");
         invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
           "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's retry authority; generate again with a new press");

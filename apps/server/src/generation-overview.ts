@@ -1,4 +1,5 @@
 import { openBlockingNotes } from "./application/director-notes.js";
+import { confirmationView, type SceneConfirmationRecord } from "./scene-confirmations.js";
 import type { FastifyInstance } from "fastify";
 import { canonical, digest, invariant } from "@openslate/core";
 import type { ArtifactRef, FrameViewInput, FrameViewReceipt, GenerationOverview, MediaSlot, ShotNarration, StudioArtifactRef, WaitingCode } from "@openslate/core";
@@ -28,7 +29,7 @@ export function shotNarration(audio: SceneRead["narrationEvidence"][number]["nar
   const seconds = measured === undefined ? estimated : measured;
   return { state: measured !== undefined ? "ready" : audio.text.trim() ? "text_only" : "none", text: audio.text,
     ...(measured !== undefined ? { measuredSeconds: measured } : estimated !== undefined ? { estimatedSeconds: estimated } : {}),
-    fits: seconds === undefined ? null : seconds <= frames / 30, ...(audio.fit ? { fit: audio.fit } : {}) };
+    fits: audio.fit && audio.ready ? (audio.timing.durationFrames ?? Infinity) <= frames : seconds === undefined ? null : seconds <= frames / 30, ...(audio.fit ? { fit: audio.fit } : {}) };
 }
 
 /** One coherent snapshot and one inspection per cursor. Reads never mint authority or persist reviews. */
@@ -117,16 +118,17 @@ export class GenerationOverviewReader {
             const review = application ? store.get<{ section: { segmentId: string; segmentRevisionId: string } }>("narration_speech_review", application.review.id) : undefined;
             return review?.section.segmentId === row.narration.segmentId && review?.section.segmentRevisionId === row.narration.segmentRevisionId;
           }).at(-1);
-          if (!row.narration.ready && speech && !["failed", "succeeded"].includes(speech.phase)) audio.state = "making";
+          if (!row.narration.ready && speech?.phase === "submission_unknown") audio.state = "no_answer";
+          else if (!row.narration.ready && speech && !["failed", "succeeded"].includes(speech.phase)) audio.state = "making";
           else if (!row.narration.ready && speech?.phase === "failed") audio.state = "failed";
           overview.shots[shot.id] = { shotId: shot.id, sceneId: scene.id, label: `${index + 1}.${shotIndex + 1}`, framing: shot.framing, purpose: shot.purpose,
-            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio };
+            imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe") } };
           if (image.state === "direction_required") blockers.push({ code: "direction_required", shotId: shot.id });
           else if (image.state !== "ready") blockers.push({ code: "keyframe_missing", shotId: shot.id });
           else if (!opened && !row.videoComplete) blockers.push({ code: "frame_not_opened", shotId: shot.id });
           if (audio.fits === false) blockers.push({ code: "narration_too_long", shotId: shot.id });
           if (audio.state === "making") blockers.push({ code: "narration_making", shotId: shot.id });
-          if ([image.state, video.state].includes("no_answer")) blockers.push({ code: "no_answer_in_scene", shotId: shot.id });
+          if ([image.state, video.state, audio.state].includes("no_answer")) blockers.push({ code: "no_answer_in_scene", shotId: shot.id });
         }
         if (openBlockingNotes(store, projectId, scene.id).length) blockers.push({ code: "recommendation_open" });
         if (overview.stopped) blockers.push({ code: "stopped" });
@@ -134,11 +136,16 @@ export class GenerationOverviewReader {
         const shots = rows.map(r => overview.shots[r.shotId]!);
         const counts = { shots: shots.length, keyframesReady: shots.filter(s => s.keyframe.state === "ready").length, opened: shots.filter(s => s.keyframe.opened).length, videosReady: shots.filter(s => s.video.state === "ready").length };
         const attention = shots.some(s => [s.keyframe.state, s.video.state].some(state => ["failed", "no_answer", "outdated", "choose_take", "direction_required"].includes(state)));
+        const regenerationQuotes = rows.map(r => quote(captured.lock, [r], "regenerateKeyframe"));
+        const commonRegenerationQuote = regenerationQuotes.length && regenerationQuotes.every(q => canonical(q) === canonical(regenerationQuotes[0])) ? regenerationQuotes[0] : undefined;
+        const confirmation = store.list<SceneConfirmationRecord>("scene_confirmation", projectId).filter(r => r.sceneId === scene.id && r.kind === "video").at(-1);
+        if (confirmation?.state === "running") blockers.push({ code: "confirmation_running" });
         overview.scenes.push({ sceneId: scene.id, ordinal: index + 1, title: sceneTitle(scene.purpose), purpose: scene.purpose,
           state: attention ? "needs_attention" : shots.length && counts.videosReady === shots.length ? "video_saved" : shots.some(s => ["running", "queued"].includes(s.video.state)) ? "making_video" : shots.length && counts.keyframesReady === shots.length ? "keyframes_back" : counts.keyframesReady ? "keyframes_partial" : "not_started",
           shotIds: rows.map(r => r.shotId), counts,
           videoTargets: generationTargets(rows, "video").map(r => r.shotId), keyframeTargets: generationTargets(rows, "image").map(r => r.shotId),
-          quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), regenerateKeyframe: quote(captured.lock, rows, "regenerateKeyframe"), confirmVideo: quote(captured.lock, rows, "confirmVideo"), voice: quote(captured.lock, rows, "voice") },
+          quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), ...(commonRegenerationQuote ? { regenerateKeyframe: commonRegenerationQuote } : {}), confirmVideo: quote(captured.lock, rows, "confirmVideo"), voice: quote(captured.lock, rows, "voice") },
+          ...(confirmation ? { confirmation: confirmationView(confirmation) } : {}),
           blockers, confirmationDigest: shots.some(s => [s.keyframe.state, s.video.state].includes("choose_take")) ? null : view.confirmationDigest });
       }
       this.cache.set(projectId, overview);

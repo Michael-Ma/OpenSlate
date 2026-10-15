@@ -1,5 +1,5 @@
-import { sceneNotes, openBlockingNotes } from "./application/director-notes.js";
 import { requiredCommandKey } from "./application/command-key.js";
+import { sceneNotes, openBlockingNotes } from "./application/director-notes.js";
 import type { FastifyInstance } from "fastify";
 import { requestScopesIntersect } from "./application/request-scopes.js";
 import { assertExpectedHumanRequest } from "./application/expected-human-request.js";
@@ -26,18 +26,18 @@ import { generationTargets, sceneRow } from "./scene-row.js";
 import type { ReviewSnapshot } from "./execution/engine.js";
 import type { NodeBinding } from "./execution/engine.js";
 
-type Input = {
+export type SceneGenerationInput = {
   headVersion: number;
   revisionId: string;
   expectedRequestId?: string | null;
   kind: "image" | "video";
   reviewedFrames: { shotId: string; artifactId: string; sha256: string }[];
-  notesDigest?: string;
   reviewedHoldDigest: string;
   reviewedControlAuthorityId: string | null;
   /** A human keyframe action can address a subset without borrowing authority for its siblings. */
   targetShotIds?: string[];
   regenerate?: boolean;
+  notesDigest?: string;
   expectedEstimateMicros?: string;
 };
 export function sceneView(
@@ -173,10 +173,10 @@ export function sceneGenerationView(production: ProductionService, projectId: st
       framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
       imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
         ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
+  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
   const openNotes = sceneNotes(production.store, projectId, sceneId).filter(n => n.state === "open");
   const blockingNotes = openNotes.filter(n => n.blocking);
   const notesDigest = digest(openNotes);
-  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
   return { ...saved.view, openNotes, blockingNotes, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error, narrationEvidence: audio.rows,
     confirmationDigest: audio.error ? null : digest({ ...saved.view, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
 }
@@ -184,6 +184,7 @@ export function registerSceneGeneration(
   app: FastifyInstance,
   service: () => ProductionService,
   narration?: NarrationService,
+  enqueueVoice?: EnqueueSceneVoice,
 ) {
   app.get<{ Params: { projectId: string; sceneId: string } }>(
     "/api/projects/:projectId/scenes/:sceneId/generation",
@@ -192,7 +193,7 @@ export function registerSceneGeneration(
       return view;
     },
   );
-  app.post<{ Params: { projectId: string; sceneId: string }; Body: Input }>(
+  app.post<{ Params: { projectId: string; sceneId: string }; Body: SceneGenerationInput }>(
     "/api/projects/:projectId/scenes/:sceneId/generate",
     {
       schema: {
@@ -220,8 +221,8 @@ export function registerSceneGeneration(
               items: { type: "string", minLength: 1, maxLength: 160 },
             },
             regenerate: { type: "boolean" },
-            expectedEstimateMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 32 },
             notesDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+            expectedEstimateMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 32 },
             reviewedHoldDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
             reviewedControlAuthorityId: {
               type: ["string", "null"],
@@ -247,368 +248,387 @@ export function registerSceneGeneration(
       },
     },
     async (request) => {
-      const production = service(),
-        { projectId, sceneId } = request.params,
-        input = request.body,
-        store = production.store;
-      const key =
-          requiredCommandKey(request),
-        scope = `local-user:${projectId}:scene-generation`,
-        commandDigest = digest({ sceneId, ...input });
-      production.recovery.assertWritable(projectId);
-      const replay = store.commandReplay(scope, key, commandDigest);
-      if (replay) return replay.result;
-      invariant(
-        input.kind === "image" ||
-          (input.targetShotIds === undefined && input.regenerate === undefined),
-        "VALIDATION_ERROR",
-        "Video generation reviews the complete named scene",
-      );
-      invariant(
-        !input.regenerate || input.targetShotIds?.length,
-        "VALIDATION_ERROR",
-        "Choose the exact shots whose keyframes should be replaced",
-      );
-      const captured = sceneView(production, projectId, sceneId);
-      invariant(
-        !input.targetShotIds ||
-          input.targetShotIds.every((id) =>
-            captured.view.rows.some((row) => row.shotId === id),
+      return generateScene(service(), request.params.projectId, request.params.sceneId, request.body,
+        requiredCommandKey(request), narration, enqueueVoice ? { enqueueVoice } : {});
+    },
+  );
+}
+
+export type EnqueueSceneVoice = (projectId: string, sceneId: string, shotIds: string[], actor: import("@openslate/core").ActorContext) => void;
+/** Shared command implementation; durable confirmation uses its original human grants. */
+export async function generateScene(production: ProductionService, projectId: string, sceneId: string,
+  input: SceneGenerationInput, key: string, narration?: NarrationService,
+  options: { actor?: import("@openslate/core").ActorContext; enqueueVoice?: EnqueueSceneVoice } = {}) {
+  const store = production.store;
+  const scope = `local-user:${projectId}:scene-generation`,
+    commandDigest = digest({ sceneId, ...input });
+  production.recovery.assertWritable(projectId);
+  const replay = store.commandReplay(scope, key, commandDigest);
+  if (replay) return replay.result;
+  invariant(
+    input.kind === "image" ||
+      (input.targetShotIds === undefined && input.regenerate === undefined),
+    "VALIDATION_ERROR",
+    "Video generation reviews the complete named scene",
+  );
+  invariant(
+    !input.regenerate || input.targetShotIds?.length,
+    "VALIDATION_ERROR",
+    "Choose the exact shots whose keyframes should be replaced",
+  );
+  const captured = sceneView(production, projectId, sceneId);
+  invariant(
+    !input.targetShotIds ||
+      input.targetShotIds.every((id) =>
+        captured.view.rows.some((row) => row.shotId === id),
+      ),
+    "SCOPE_DENIED",
+    "Choose shots belonging to this scene",
+  );
+  const notesDigest = digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open"));
+  const fresh = () => {
+    if (input.kind === "video") {
+      invariant(openBlockingNotes(store, projectId, sceneId).length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before generating video");
+      invariant(digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open")) === (input.notesDigest ?? notesDigest), "SCENE_REVIEW_STALE", "Director notes changed during scene review");
+    }
+    assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
+    const now = sceneView(production, projectId, sceneId, undefined, input.targetShotIds).view;
+    invariant(
+      now.headVersion === input.headVersion &&
+        now.revisionId === input.revisionId &&
+        now.reviewedHoldDigest === input.reviewedHoldDigest &&
+        now.reviewedControlAuthorityId === input.reviewedControlAuthorityId,
+      "SCENE_REVIEW_STALE",
+      "The scene changed. Review its current frames and direction.",
+    );
+    invariant(
+      digest(now.rows) === digest(captured.view.rows),
+      "SCENE_REVIEW_STALE",
+      "Scene work changed while preparing generation. Review its refreshed results.",
+    );
+    invariant(!now.paused, "EXECUTION_PAUSED", "The film is stopped. Continue before starting new generation.");
+    invariant(
+      !now.busy,
+      "WAITING_USER",
+      "Finish the current conversation before starting this scene",
+    );
+    invariant(
+      !now.rows
+        .filter(
+          (row) =>
+            !input.targetShotIds ||
+            input.targetShotIds.includes(row.shotId),
+        )
+        .some(
+          (r) =>
+            r.blockedCode === "SUBMISSION_UNKNOWN" ||
+            r.imagePending ||
+            r.videoPending,
+        ),
+      "ATTEMPT_EXISTS",
+      "Follow the existing scene jobs before starting more work",
+    );
+  };
+  fresh();
+  invariant(captured.view.rows.length > 0, "SCENE_EMPTY", "Add a shot before generating this scene");
+  const audio = sceneNarrationView(production, captured.project, sceneId, narration);
+  const targets = generationTargets(captured.view.rows.map(row => ({ ...row, narration: audio.rows.find(a => a.shotId === row.shotId)!.narration })), input.kind, input.targetShotIds, input.regenerate);
+  const selected = targets.filter(row => input.kind !== "image" || input.regenerate || !row.imageComplete);
+  const placeholderIds = captured.project.shots.filter(shot => selected.some(row => row.shotId === shot.id) && shot.promptState === "placeholder").map(shot => shot.id);
+  if (placeholderIds.length) throw new DomainError("DIRECTION_REQUIRED", "Write direction for these shots before generating", { shotIds: placeholderIds });
+  const quotedRows = targets.map(row => ({ ...row, imageComplete: selected.includes(row) ? false : row.imageComplete }));
+  const estimate = quote(captured.lock, quotedRows, input.kind === "image" ? "makeKeyframes" : "confirmVideo");
+  invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros,
+    "ESTIMATE_CHANGED", "The estimate changed. Review the current price before generating.");
+  invariant(
+    targets.length > 0 && targets.length <= 64,
+    "ALREADY_COMPLETE",
+    "This scene already has the requested media",
+  );
+  const assertNoDetachedJobs = () => {
+    const nodeIds = new Set(
+      store
+        .list<NodeBinding>("node_binding", projectId)
+        .filter(
+          (binding) =>
+            selected.some((row) => row.shotId === binding.node.shotId) &&
+            ["image", "video"].includes(binding.node.kind),
+        )
+        .map((binding) => binding.id),
+    );
+    invariant(
+      !production.engine
+        .attempts(projectId)
+        .some(
+          (attempt) =>
+            !attempt.released &&
+            nodeIds.has(attempt.nodeId) &&
+            !["succeeded", "failed"].includes(attempt.phase),
+        ),
+      "ATTEMPT_EXISTS",
+      "Resolve this shot's existing jobs before creating another keyframe",
+    );
+  };
+  assertNoDetachedJobs();
+  if (input.kind === "video") {
+    invariant(
+      selected.every(
+        (row) =>
+          row.image &&
+          !row.narrationPending &&
+          !row.blockedCode &&
+          row.motionPrompt.trim(),
+      ),
+      "TIMING_REQUIRED",
+      "Generate the frames and finish any requested narration timing before video",
+    );
+    invariant(
+      input.reviewedFrames.length === selected.length &&
+        new Set(input.reviewedFrames.map((f) => f.shotId)).size ===
+          selected.length &&
+        selected.every((row) =>
+          input.reviewedFrames.some(
+            (f) =>
+              f.shotId === row.shotId &&
+              f.artifactId === row.image!.artifactId &&
+              f.sha256 === row.image!.sha256,
           ),
-        "SCOPE_DENIED",
-        "Choose shots belonging to this scene",
-      );
-      const notesDigest = digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open"));
-      const fresh = () => {
-        if (input.kind === "video") {
-          invariant(openBlockingNotes(store, projectId, sceneId).length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before generating video");
-          invariant(digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open")) === (input.notesDigest ?? notesDigest), "SCENE_REVIEW_STALE", "Director notes changed during scene review");
-        }
-        assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
-        const now = sceneView(production, projectId, sceneId, undefined, input.targetShotIds).view;
-        invariant(
-          now.headVersion === input.headVersion &&
-            now.revisionId === input.revisionId &&
-            now.reviewedHoldDigest === input.reviewedHoldDigest &&
-            now.reviewedControlAuthorityId === input.reviewedControlAuthorityId,
-          "SCENE_REVIEW_STALE",
-          "The scene changed. Review its current frames and direction.",
-        );
-        invariant(
-          digest(now.rows) === digest(captured.view.rows),
-          "SCENE_REVIEW_STALE",
-          "Scene work changed while preparing generation. Review its refreshed results.",
-        );
-        invariant(!now.paused, "EXECUTION_PAUSED", "The film is stopped. Continue before starting new generation.");
-        invariant(
-          !now.busy,
-          "WAITING_USER",
-          "Finish the current conversation before starting this scene",
-        );
-        invariant(
-          !now.rows
-            .filter(
-              (row) =>
-                !input.targetShotIds ||
-                input.targetShotIds.includes(row.shotId),
-            )
-            .some(
-              (r) =>
-                r.blockedCode === "SUBMISSION_UNKNOWN" ||
-                r.imagePending ||
-                r.videoPending,
-            ),
-          "ATTEMPT_EXISTS",
-          "Follow the existing scene jobs before starting more work",
-        );
-      };
+        ),
+      "SCENE_REVIEW_STALE",
+      "Approve the exact displayed keyframes for this scene",
+    );
+  } else
+    invariant(
+      input.reviewedFrames.length === 0,
+      "VALIDATION_ERROR",
+      "Keyframe generation reviews storyboard direction",
+    );
+  if (input.kind === "image" && !selected.length) {
+    return store.command(scope, key, commandDigest, () => {
       fresh();
-      invariant(captured.view.rows.length > 0, "SCENE_EMPTY", "Add a shot before generating this scene");
-      const selected = generationTargets(captured.view.rows, input.kind, input.targetShotIds, input.regenerate);
-      const placeholderIds = captured.project.shots.filter(shot => selected.some(row => row.shotId === shot.id) && shot.promptState === "placeholder").map(shot => shot.id);
-      if (placeholderIds.length) throw new DomainError("DIRECTION_REQUIRED", "Write direction for these shots before generating", { shotIds: placeholderIds });
-      const audio = sceneNarrationView(production, captured.project, sceneId, narration);
-      const quotedRows = selected.map(row => ({ ...row, imageComplete: false, narration: audio.rows.find(value => value.shotId === row.shotId)!.narration }));
-      const estimate = quote(captured.lock, quotedRows, input.kind === "image" ? "makeKeyframes" : "confirmVideo");
-      invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros,
-        "ESTIMATE_CHANGED", "The estimate changed. Review the current price before generating.");
-      invariant(
-        selected.length > 0 && selected.length <= 64,
-        "ALREADY_COMPLETE",
-        "This scene already has the requested media",
-      );
-      const assertNoDetachedJobs = () => {
-        const nodeIds = new Set(
-          store
-            .list<NodeBinding>("node_binding", projectId)
-            .filter(
-              (binding) =>
-                selected.some((row) => row.shotId === binding.node.shotId) &&
-                ["image", "video"].includes(binding.node.kind),
-            )
-            .map((binding) => binding.id),
-        );
-        invariant(
-          !production.engine
-            .attempts(projectId)
-            .some(
-              (attempt) =>
-                !attempt.released &&
-                nodeIds.has(attempt.nodeId) &&
-                !["succeeded", "failed"].includes(attempt.phase),
+      const actor = production.beginRequest(projectId, "local-user", "Make the missing voice lines for this scene's current keyframes.",
+        { source: "app", directEdit: true, scopeIds: targets.map(r => r.shotId), key: `scene-generation:${key}` });
+      invariant(options.enqueueVoice, "NARRATION_SPEECH_UNAVAILABLE", "Configure narration before making voice lines");
+      options.enqueueVoice(projectId, sceneId, targets.map(r => r.shotId), actor);
+      const project = store.getProject(projectId);
+      return { projectId, sceneId, kind: input.kind, shotIds: targets.map(r => r.shotId), revisionId: project.revisionId,
+        headVersion: project.headVersion, activePlanId: project.activePlanId, cursor: store.cursor(projectId) };
+    });
+  }
+  const aliases = {
+    ...(store.get<{ aliases: Record<string, string> }>(
+      "logical_ids",
+      projectId,
+    )?.aliases ?? {}),
+  };
+  const operations: SceneOperation[] = selected.map((row) => ({
+    shotId: row.shotId,
+    kind: input.kind,
+    profileId:
+      input.kind === "video"
+        ? row.videoProfileLabel
+        : captured.profiles.image.id,
+    ...(input.kind === "video" && row.videoNodeId
+      ? { nodeId: row.videoNodeId }
+      : input.kind === "image" && row.imageNodeId
+        ? { nodeId: row.imageNodeId }
+        : {}),
+    ...(input.kind === "video"
+      ? {
+          frame: row.image!,
+          ...(row.frameNodeId ? { frameNodeId: row.frameNodeId } : {}),
+        }
+      : {}),
+  }));
+  const compiled = await composeScenePlanIsolated(
+    captured.plan,
+    operations,
+    {
+      project: captured.project,
+      profiles: captured.lock.profiles,
+      logicalIds: aliases,
+      allocateId: newId,
+      ...(captured.lock.localExecution
+        ? {
+            localExecution: snapshotLocalExecution(
+              captured.lock.localExecution,
             ),
-          "ATTEMPT_EXISTS",
-          "Resolve this shot's existing jobs before creating another keyframe",
-        );
-      };
+          }
+        : {}),
+      transcriptionInputs: ownedTranscriptionCatalog(
+        store,
+        projectId,
+        captured.plan,
+      ),
+    },
+  );
+  fresh();
+  // The review installs only this scene. A whole-film planning hold is narrowed to its other scenes.
+  return store.transaction(() =>
+    store.command(scope, key, commandDigest, () => {
+      fresh();
       assertNoDetachedJobs();
+      for (const hold of store
+        .list<{
+          id: string;
+          scopeId: string;
+          ownerId: string;
+          active: boolean;
+        }>("hold", projectId)
+        .filter((h) => h.active)) {
+        if (
+          input.targetShotIds &&
+          (hold.scopeId === projectId ||
+            hold.scopeId === sceneId ||
+            selected.some((row) => row.shotId === hold.scopeId))
+        ) {
+          const owner = store.get<{
+            projectId: string;
+            principalId: string;
+            editing: boolean;
+          }>("message", hold.ownerId);
+          invariant(
+            owner?.projectId === projectId &&
+              owner.principalId === "local-user" &&
+              owner.editing,
+            "SCOPE_DENIED",
+            "This shot action cannot take ownership of another request's pause",
+          );
+        }
+        if (hold.scopeId === projectId) {
+          production.engine.releaseHold(projectId, hold.id, hold.ownerId);
+          for (const scene of captured.project.scenes.filter(
+            (s) => s.id !== sceneId,
+          ))
+            production.engine.setHold(projectId, {
+              scopeId: scene.id,
+              ownerId: hold.ownerId,
+            });
+          if (input.targetShotIds)
+            for (const row of captured.view.rows.filter(
+              (row) =>
+                !selected.some((target) => target.shotId === row.shotId),
+            ))
+              production.engine.setHold(projectId, {
+                scopeId: row.shotId,
+                ownerId: hold.ownerId,
+              });
+        } else if (
+          hold.scopeId === sceneId ||
+          selected.some((row) => row.shotId === hold.scopeId)
+        ) {
+          production.engine.releaseHold(projectId, hold.id, hold.ownerId);
+          if (hold.scopeId === sceneId && input.targetShotIds)
+            for (const row of captured.view.rows.filter(
+              (row) =>
+                !selected.some((target) => target.shotId === row.shotId),
+            ))
+              production.engine.setHold(projectId, {
+                scopeId: row.shotId,
+                ownerId: hold.ownerId,
+              });
+        }
+      }
+      if (options.actor) production.assertActor(projectId, options.actor, true);
+      const actor = options.actor ?? production.beginRequest(
+        projectId,
+        "local-user",
+        `${input.regenerate ? "Regenerate" : "Generate"} ${input.kind === "image" ? "keyframes" : "video"} for ${input.targetShotIds ? "the selected shots in" : ""} this reviewed scene.`,
+        {
+          editing: true,
+          supersede: "intersecting",
+          scopeIds: input.targetShotIds
+            ? selected.map((row) => row.shotId)
+            : [sceneId],
+          source: "app",
+          key: `scene-generation:${key}`,
+        },
+      );
+      if (!options.actor) production.authorize(
+        projectId,
+        actor,
+        selected.map((row) => ({ scopeId: row.shotId, kind: input.kind })),
+        `scene:${key}`,
+        "user_change",
+      );
+      // Same-spec regeneration still needs a fresh, one-use human grant. Detaching inside
+      // this transaction retains historical receipts and makes publication create that new candidate.
+      if (input.regenerate)
+        for (const row of selected) {
+          if (!row.imageNodeId) continue;
+          const binding = store.get<NodeBinding>(
+            "node_binding",
+            row.imageNodeId,
+          );
+          invariant(
+            binding?.state === "active" &&
+              binding.planId === captured.project.activePlanId,
+            "SCENE_REVIEW_STALE",
+            "The selected keyframe binding changed",
+          );
+          store.put("node_binding", binding.id, projectId, {
+            ...binding,
+            candidateId: null,
+            outputs: {},
+          });
+        }
+      const applied = production.applyCompiledSceneGeneration(
+        projectId,
+        actor,
+        compiled,
+        aliases,
+        input.headVersion,
+        digest(captured.lock),
+        input.kind,
+      );
       if (input.kind === "video") {
+        const displayed = production.engine.reviewSnapshot(projectId),
+          ids = compiled.nodes
+            .filter(
+              (n) =>
+                n.kind === "video" &&
+                selected.some((r) => r.shotId === n.shotId),
+            )
+            .map((n) => n.id);
         invariant(
-          selected.every(
-            (row) =>
-              row.image &&
-              !row.narrationPending &&
-              !row.blockedCode &&
-              row.motionPrompt.trim(),
-          ),
-          "TIMING_REQUIRED",
-          "Generate the frames and finish any requested narration timing before video",
-        );
-        invariant(
-          input.reviewedFrames.length === selected.length &&
-            new Set(input.reviewedFrames.map((f) => f.shotId)).size ===
-              selected.length &&
-            selected.every((row) =>
-              input.reviewedFrames.some(
-                (f) =>
-                  f.shotId === row.shotId &&
-                  f.artifactId === row.image!.artifactId &&
-                  f.sha256 === row.image!.sha256,
+          ids.length === selected.length &&
+            ids.every((id) =>
+              displayed.members.some(
+                (m) =>
+                  m.videoNodeId === id &&
+                  m.ready &&
+                  selected.some(
+                    (r) =>
+                      r.shotId === m.shotId &&
+                      canonical(r.image) === canonical(m.keyframe) &&
+                      compiled.nodes.some(
+                        (n) =>
+                          n.id === id &&
+                          n.args.prompt === r.motionPrompt &&
+                          n.args.durationFrames === r.durationFrames &&
+                          n.profileId === r.videoProfileLabel &&
+                          canonical(n.args.settings ?? {}) ===
+                            canonical(r.videoSettings) &&
+                          (!r.videoSpecDigest ||
+                            n.specDigest === r.videoSpecDigest),
+                      ),
+                  ),
               ),
             ),
           "SCENE_REVIEW_STALE",
-          "Approve the exact displayed keyframes for this scene",
+          "Published video inputs differ from the reviewed scene",
         );
-      } else
-        invariant(
-          input.reviewedFrames.length === 0,
-          "VALIDATION_ERROR",
-          "Keyframe generation reviews storyboard direction",
-        );
-      const aliases = {
-        ...(store.get<{ aliases: Record<string, string> }>(
-          "logical_ids",
-          projectId,
-        )?.aliases ?? {}),
-      };
-      const operations: SceneOperation[] = selected.map((row) => ({
-        shotId: row.shotId,
+        production.approve(projectId, actor, displayed.id, ids);
+      }
+      store.insert("scene_generation_action", actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId) });
+      if (input.kind === "image") options.enqueueVoice?.(projectId, sceneId, targets.map(row => row.shotId), actor);
+      return {
+        ...applied,
+        requestId: actor.requestId,
+        sceneId,
         kind: input.kind,
-        profileId:
-          input.kind === "video"
-            ? row.videoProfileLabel
-            : captured.profiles.image.id,
-        ...(input.kind === "video" && row.videoNodeId
-          ? { nodeId: row.videoNodeId }
-          : input.kind === "image" && row.imageNodeId
-            ? { nodeId: row.imageNodeId }
-            : {}),
-        ...(input.kind === "video"
-          ? {
-              frame: row.image!,
-              ...(row.frameNodeId ? { frameNodeId: row.frameNodeId } : {}),
-            }
-          : {}),
-      }));
-      const compiled = await composeScenePlanIsolated(
-        captured.plan,
-        operations,
-        {
-          project: captured.project,
-          profiles: captured.lock.profiles,
-          logicalIds: aliases,
-          allocateId: newId,
-          ...(captured.lock.localExecution
-            ? {
-                localExecution: snapshotLocalExecution(
-                  captured.lock.localExecution,
-                ),
-              }
-            : {}),
-          transcriptionInputs: ownedTranscriptionCatalog(
-            store,
-            projectId,
-            captured.plan,
-          ),
-        },
-      );
-      fresh();
-      // The review installs only this scene. A whole-film planning hold is narrowed to its other scenes.
-      return store.transaction(() =>
-        store.command(scope, key, commandDigest, () => {
-          fresh();
-          assertNoDetachedJobs();
-          for (const hold of store
-            .list<{
-              id: string;
-              scopeId: string;
-              ownerId: string;
-              active: boolean;
-            }>("hold", projectId)
-            .filter((h) => h.active)) {
-            if (
-              input.targetShotIds &&
-              (hold.scopeId === projectId ||
-                hold.scopeId === sceneId ||
-                selected.some((row) => row.shotId === hold.scopeId))
-            ) {
-              const owner = store.get<{
-                projectId: string;
-                principalId: string;
-                editing: boolean;
-              }>("message", hold.ownerId);
-              invariant(
-                owner?.projectId === projectId &&
-                  owner.principalId === "local-user" &&
-                  owner.editing,
-                "SCOPE_DENIED",
-                "This shot action cannot take ownership of another request's pause",
-              );
-            }
-            if (hold.scopeId === projectId) {
-              production.engine.releaseHold(projectId, hold.id, hold.ownerId);
-              for (const scene of captured.project.scenes.filter(
-                (s) => s.id !== sceneId,
-              ))
-                production.engine.setHold(projectId, {
-                  scopeId: scene.id,
-                  ownerId: hold.ownerId,
-                });
-              if (input.targetShotIds)
-                for (const row of captured.view.rows.filter(
-                  (row) =>
-                    !selected.some((target) => target.shotId === row.shotId),
-                ))
-                  production.engine.setHold(projectId, {
-                    scopeId: row.shotId,
-                    ownerId: hold.ownerId,
-                  });
-            } else if (
-              hold.scopeId === sceneId ||
-              selected.some((row) => row.shotId === hold.scopeId)
-            ) {
-              production.engine.releaseHold(projectId, hold.id, hold.ownerId);
-              if (hold.scopeId === sceneId && input.targetShotIds)
-                for (const row of captured.view.rows.filter(
-                  (row) =>
-                    !selected.some((target) => target.shotId === row.shotId),
-                ))
-                  production.engine.setHold(projectId, {
-                    scopeId: row.shotId,
-                    ownerId: hold.ownerId,
-                  });
-            }
-          }
-          const actor = production.beginRequest(
-            projectId,
-            "local-user",
-            `${input.regenerate ? "Regenerate" : "Generate"} ${input.kind === "image" ? "keyframes" : "video"} for ${input.targetShotIds ? "the selected shots in" : ""} this reviewed scene.`,
-            {
-              editing: true,
-              supersede: "intersecting",
-              scopeIds: input.targetShotIds
-                ? selected.map((row) => row.shotId)
-                : [sceneId],
-              source: "app",
-              key: `scene-generation:${key}`,
-            },
-          );
-          production.authorize(
-            projectId,
-            actor,
-            selected.map((row) => ({ scopeId: row.shotId, kind: input.kind })),
-            `scene:${key}`,
-            "user_change",
-          );
-          // Same-spec regeneration still needs a fresh, one-use human grant. Detaching inside
-          // this transaction retains historical receipts and makes publication create that new candidate.
-          if (input.regenerate)
-            for (const row of selected) {
-              if (!row.imageNodeId) continue;
-              const binding = store.get<NodeBinding>(
-                "node_binding",
-                row.imageNodeId,
-              );
-              invariant(
-                binding?.state === "active" &&
-                  binding.planId === captured.project.activePlanId,
-                "SCENE_REVIEW_STALE",
-                "The selected keyframe binding changed",
-              );
-              store.put("node_binding", binding.id, projectId, {
-                ...binding,
-                candidateId: null,
-                outputs: {},
-              });
-            }
-          const applied = production.applyCompiledSceneGeneration(
-            projectId,
-            actor,
-            compiled,
-            aliases,
-            input.headVersion,
-            digest(captured.lock),
-            input.kind,
-          );
-          if (input.kind === "video") {
-            const displayed = production.engine.reviewSnapshot(projectId),
-              ids = compiled.nodes
-                .filter(
-                  (n) =>
-                    n.kind === "video" &&
-                    selected.some((r) => r.shotId === n.shotId),
-                )
-                .map((n) => n.id);
-            invariant(
-              ids.length === selected.length &&
-                ids.every((id) =>
-                  displayed.members.some(
-                    (m) =>
-                      m.videoNodeId === id &&
-                      m.ready &&
-                      selected.some(
-                        (r) =>
-                          r.shotId === m.shotId &&
-                          canonical(r.image) === canonical(m.keyframe) &&
-                          compiled.nodes.some(
-                            (n) =>
-                              n.id === id &&
-                              n.args.prompt === r.motionPrompt &&
-                              n.args.durationFrames === r.durationFrames &&
-                              n.profileId === r.videoProfileLabel &&
-                              canonical(n.args.settings ?? {}) ===
-                                canonical(r.videoSettings) &&
-                              (!r.videoSpecDigest ||
-                                n.specDigest === r.videoSpecDigest),
-                          ),
-                      ),
-                  ),
-                ),
-              "SCENE_REVIEW_STALE",
-              "Published video inputs differ from the reviewed scene",
-            );
-            production.approve(projectId, actor, displayed.id, ids);
-          }
-          store.insert("scene_generation_action", actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId) });
-          return {
-            ...applied,
-            requestId: actor.requestId,
-            sceneId,
-            kind: input.kind,
-            shotIds: selected.map((r) => r.shotId),
-          };
-        }),
-      );
-    },
+        shotIds: selected.map((r) => r.shotId),
+      };
+    }),
   );
 }

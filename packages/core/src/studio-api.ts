@@ -99,8 +99,8 @@ export interface KeyframeSlot extends MediaSlot {
 }
 
 export interface ShotNarration {
-  /** none: no line; text_only: a line exists but no voice yet; making; ready: voice exists; failed. */
-  state: "none" | "text_only" | "making" | "ready" | "failed";
+  /** none: no line; text_only: a line exists but no voice yet; making; ready: voice exists; failed; no_answer: outcome unknown. */
+  state: "none" | "text_only" | "making" | "ready" | "failed" | "no_answer";
   text: string;
   /** Measured length of the accepted or current voice line. */
   measuredSeconds?: number;
@@ -125,6 +125,8 @@ export interface ShotOverview {
   keyframe: KeyframeSlot;
   video: MediaSlot;
   narration: ShotNarration;
+  /** Exact selected-shot estimate, including a missing voice line. */
+  quotes?: { regenerateKeyframe: PriceQuote };
 }
 
 export interface PriceQuote {

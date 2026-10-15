@@ -94,7 +94,7 @@ test('one explicit shot acceptance installs measured canonical audio, preserves 
   const accepted = await f.request(path, body, extras); assert.equal(accepted.statusCode, 200, accepted.body);
   const current = f.store.getProject(f.project.id); assert.deepEqual(current.shots[1], before.shots[1]);
   const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
-  assert.deepEqual(overview.shots[before.shots[0].id].narration, {state:'ready',text:'Made with care.',measuredSeconds:6,fits:true,fit:'cut_to_shot'});
+  assert.deepEqual(overview.shots[before.shots[0].id].narration, {state:'ready',text:'Made with care.',measuredSeconds:7,fits:true,fit:'cut_to_shot'});
   assert.equal(current.shots[0].desiredFrames, 180); assert.notEqual(current.shots[0].cueId, before.shots[0].cueId);
   assert.equal(f.store.list('narration_acceptance', f.project.id).length, 3);
   const replay = await f.request(path, body, extras); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), accepted.json());
@@ -120,7 +120,7 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   const accepted = await f.request(`/shots/${shotId}/accept`, body); assert.equal(accepted.statusCode, 200, accepted.body);
   let project = f.store.getProject(f.project.id), cue = project.cues.find(cue => cue.id === project.shots[0].cueId);
   const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
-  assert.equal(overview.shots[shotId].narration.measuredSeconds, 288001 / 48000);
+  assert.equal(overview.shots[shotId].narration.measuredSeconds, 7, 'original measured recording stays visible; accepted placement retains its exact range');
   assert.equal(overview.shots[shotId].narration.fit, 'extend_shot');
   assert.equal(overview.shots[shotId].narration.fits, true);
   assert.equal(project.shots[0].desiredFrames, 181); assert.equal(cue.durationFrames, 181);

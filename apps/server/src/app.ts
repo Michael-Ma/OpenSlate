@@ -1,5 +1,7 @@
 import { registerDirectorNotes } from "./application/director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
+import { SceneConfirmationRunner, registerSceneConfirmations } from "./scene-confirmations.js";
+import { registerNarrationFit } from "./narration-fit.js";
 import { requiredCommandKey } from "./application/command-key.js";
 import { registerGenerationOverview } from "./generation-overview.js";
 import { registerSceneGeneration } from './scene-generation.js';
@@ -36,7 +38,7 @@ import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./applicat
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
 
-interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string; logger?: boolean;
   /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
   allowedOrigins?: readonly string[];
   studioSessions?: StudioSessions;
@@ -63,7 +65,9 @@ export function createApp(options: AppOptions = {}) {
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   registerDirectorNotes(app, service);
-  registerSceneGeneration(app, service, options.narrationRoutes?.narration);
+  const sceneCommands = options.sceneCommands ?? (options.service ? new SceneConfirmationRunner(options.service, options.narrationRoutes) : undefined);
+  registerSceneGeneration(app, service, options.narrationRoutes?.narration, sceneCommands?.enqueueKeyframes);
+  if (sceneCommands) { registerSceneConfirmations(app, sceneCommands); registerNarrationFit(app, sceneCommands); }
   registerGenerationOverview(app, service, options.narrationRoutes?.narration);
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
@@ -78,7 +82,7 @@ export function createApp(options: AppOptions = {}) {
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
     invariant(!origin || allowedOrigins.includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
-    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate"].includes(request.routeOptions.url ?? "");
+    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate", "/api/projects/:projectId/scenes/:sceneId/confirm", "/api/projects/:projectId/shots/:shotId/narration-fit"].includes(request.routeOptions.url ?? "");
     const commandKey = request.headers["idempotency-key"];
     invariant(requiresCommandKey || commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
