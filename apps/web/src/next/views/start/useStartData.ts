@@ -36,8 +36,8 @@ export function useFilms(): Films {
     }
   }, [store]);
 
+  // The list does not need the event stream; reconnecting only reads it again.
   useEffect(() => {
-    if (!connected) return;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
