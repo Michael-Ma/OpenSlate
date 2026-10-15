@@ -163,6 +163,8 @@ export function applyCreativePatch(
     const shot = { ...original, ...fields, ...(fields.narration?.mode === 'none' ? { cueId: null } : {}),
       ...(writingChanged ? { narrationPending: fields.narration?.mode !== 'none' } : {}),
       revisionId: onlyWriting && (fields.narration?.mode !== 'none' || original.cueId === null || original.narrationTimingMode === 'within_shot') ? original.revisionId : newId() };
+    if (original.promptState === "placeholder" && ["action", "framing", "imagePrompt", "videoPrompt"].some(key => Object.hasOwn(fields, key))) shot.promptState = "ready";
+    if (writingChanged) delete shot.narrationFit;
     next.shots[index] = bind(shot, next.cues.find(cue => cue.id === shot.cueId));
   }
   invariant(next.scenes.length <= 400 && next.shots.length <= 400, "VALIDATION_ERROR", "Project exceeds current planning limits");

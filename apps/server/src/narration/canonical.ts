@@ -88,6 +88,11 @@ export class NarrationCanonicalService {
         if (withinShot) {
           invariant(cue && cue.durationFrames <= revised.desiredFrames, "NARRATION_CUE_OUT_OF_RANGE", "Trim the narration to this shot or explicitly match the shot to its recording duration");
           revised.narrationTimingMode = "within_shot";
+          const selected = snapshot.segments.find(row => row.entry.segmentId === mapping.segmentId);
+          if (!retained && input.shotDurationMode === "match_audio") revised.narrationFit = "extend_shot";
+          else if (!retained && selected?.cue && selected.audio?.media.probe.audio &&
+            selected.audio.media.probe.audio.samples !== null && selected.cue.endSample - selected.cue.startSample < selected.audio.media.probe.audio.samples) revised.narrationFit = "cut_to_shot";
+          else if (!retained) delete revised.narrationFit;
         }
         if (input.segmentIds && mapping.segmentId && input.segmentIds.includes(mapping.segmentId)) {
           const script = snapshot.segments.find(row => row.entry.segmentId === mapping.segmentId)!.script;

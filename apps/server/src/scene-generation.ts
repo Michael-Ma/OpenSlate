@@ -6,24 +6,23 @@ import { sceneNarrationView } from "./scene-narration-view.js";
 import type { NarrationService } from "./narration/service.js";
 import {
   canonical,
+  DomainError,
   composeScenePlanIsolated,
   digest,
   invariant,
   newId,
-  shotIntentDigest,
-  shotVideoTiming,
-  sceneVideoDurationFrames,
   snapshotLocalExecution,
 } from "@openslate/core";
 import type {
-  ActorContext,
-  ArtifactRef,
   CompiledPlan,
   ProviderProfile,
   SceneOperation,
 } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import { ownedTranscriptionCatalog } from "./narration/owned-transcription-records.js";
+import { quote } from "./generation-quotes.js";
+import { generationTargets, sceneRow } from "./scene-row.js";
+import type { ReviewSnapshot } from "./execution/engine.js";
 import type { NodeBinding } from "./execution/engine.js";
 
 type Input = {
@@ -37,14 +36,16 @@ type Input = {
   /** A human keyframe action can address a subset without borrowing authority for its siblings. */
   targetShotIds?: string[];
   regenerate?: boolean;
+  expectedEstimateMicros?: string;
 };
-function sceneView(
+export function sceneView(
   service: ProductionService,
   projectId: string,
   sceneId: string,
+  shared?: { snapshot: ReturnType<ProductionService["snapshot"]>; review: Omit<ReviewSnapshot, "id"> | null; tolerateAlternatives?: boolean },
   targetShotIds?: string[],
 ) {
-  const snapshot = service.snapshot(projectId),
+  const snapshot = shared?.snapshot ?? service.snapshot(projectId),
     project = snapshot.project,
     store = service.store;
   invariant(
@@ -100,181 +101,14 @@ function sceneView(
         typeof event.payload.holdId === "string"
       )
         holdSequences.set(event.payload.holdId, event.sequence);
-  const review = plan?.gates.length
-    ? service.engine.inspectReview(projectId)
-    : null;
-  const productionReview = (nodeId: string) =>
-    review?.members.find((m) => m.videoNodeId === nodeId) ?? null;
+  const review = shared ? shared.review : plan?.gates.length ? service.engine.inspectReview(projectId) : null;
+  const bindings = store.list<NodeBinding>("node_binding", projectId);
+  const approvals = store.list<{ videoNodeId: string; approvalDigest: string }>("approval", projectId);
+  const fixtures = Object.fromEntries(store.list<{ artifact: import("@openslate/core").ArtifactRef }>("artifact", projectId).map(a => [canonical(a.artifact), service.artifactFixture(projectId, a.artifact)]));
   const rows = project.shots
     .filter((s) => s.sceneId === sceneId)
-    .map((shot) => {
-      const cue = project.cues.find((c) => c.id === shot.cueId);
-      const images =
-          plan?.nodes.filter(
-            (n) => n.kind === "image" && n.shotId === shot.id,
-          ) ?? [],
-        videos =
-          plan?.nodes.filter(
-            (n) => n.kind === "video" && n.shotId === shot.id,
-          ) ?? [];
-      invariant(
-        images.length <= 1 && videos.length <= 1,
-        "SCENE_SELECTION_REQUIRED",
-        "This shot has multiple active alternatives. Choose its current take in the conversation before generating the scene.",
-      );
-      const imageTarget = images[0],
-        videoTarget = videos[0];
-      const imageCurrent =
-        imageTarget?.intentDigest === shotIntentDigest(shot, "image", cue) &&
-        imageTarget.args.prompt === shot.imagePrompt;
-      const imageOutput = imageCurrent
-        ? snapshot.outputs.find(
-            (o) => o.nodeId === imageTarget.id && o.artifact.kind === "image",
-          )
-        : undefined;
-      const oldProfile = videoTarget
-        ? lock.profiles.find(
-            (p) => p.id === videoTarget.profileId && p.kind === "video",
-          )
-        : undefined;
-      let recipeCurrent =
-        !!videoTarget &&
-        videoTarget.intentDigest === shotIntentDigest(shot, "video", cue) &&
-        videoTarget.args.prompt === shot.videoPrompt;
-      try {
-        recipeCurrent =
-          recipeCurrent &&
-          !!oldProfile &&
-          sceneVideoDurationFrames(shot, oldProfile!, videoTarget) ===
-            videoTarget!.args.durationFrames;
-      } catch {
-        recipeCurrent = false;
-      }
-      const retainedCandidate = videoTarget
-        ? store.get<{ candidateId: string | null }>(
-            "node_binding",
-            videoTarget.id,
-          )?.candidateId
-        : null;
-      const videoProfile =
-        recipeCurrent && retainedCandidate && oldProfile
-          ? oldProfile
-          : profiles.video;
-      let durationFrames = shot.desiredFrames,
-        durationCode: string | null = null;
-      try {
-        durationFrames = sceneVideoDurationFrames(
-          shot,
-          videoProfile,
-          videoTarget,
-        );
-      } catch {
-        durationCode = "PROFILE_INCOMPATIBLE";
-      }
-      const settings =
-        videoTarget?.profileId === videoProfile.id
-          ? (videoTarget.args.settings ?? {})
-          : {};
-      const videoCurrent =
-        !!videoTarget &&
-        videoTarget.profileId === videoProfile.id &&
-        videoTarget.intentDigest === shotIntentDigest(shot, "video", cue) &&
-        videoTarget.args.prompt === shot.videoPrompt &&
-        videoTarget.args.durationFrames === durationFrames;
-      const actualMember =
-        videoCurrent && plan?.gates.length
-          ? productionReview(videoTarget.id)
-          : null;
-      const firstFrame = videoTarget?.inputs.find(
-        (i) => i.destinationPort === "firstFrame",
-      )?.source;
-      // Review the actual retained first frame of an unchanged recipe; reauthored recipes use the current generated frame.
-      const retainedFrame = actualMember?.ready ? actualMember.keyframe : null;
-      const imageComplete = imageTarget ? !!imageOutput : !!retainedFrame;
-      const frame =
-        imageTarget && !imageOutput
-          ? null
-          : (retainedFrame ?? imageOutput?.artifact ?? null);
-      const frameNodeId =
-        retainedFrame && firstFrame?.kind === "output"
-          ? firstFrame.nodeId
-          : retainedFrame && firstFrame?.kind === "artifact"
-            ? null
-            : (imageTarget?.id ?? null);
-      const videoComplete =
-        videoCurrent &&
-        imageComplete &&
-        snapshot.outputs.some(
-          (o) => o.nodeId === videoTarget.id && o.artifact.kind === "video",
-        );
-      const active = snapshot.attempts.filter(
-        (a) =>
-          snapshot.currentAttemptIds.includes(a.id) &&
-          [imageTarget?.id, videoTarget?.id].includes(a.nodeId) &&
-          !["succeeded", "failed"].includes(a.phase),
-      );
-      const last = (nodeId: string | undefined) =>
-        snapshot.attempts
-          .filter(
-            (a) =>
-              a.nodeId === nodeId &&
-              a.candidateId ===
-                store.get<{ candidateId: string | null }>(
-                  "node_binding",
-                  nodeId ?? "",
-                )?.candidateId,
-          )
-          .at(-1);
-      const candidatePending = (nodeId: string | undefined) =>
-        !!nodeId &&
-        !holds.length &&
-        !!store.get<{ candidateId: string | null }>("node_binding", nodeId)
-          ?.candidateId &&
-        !["failed", "succeeded"].includes(last(nodeId)?.phase ?? "");
-      const reviewedVideo =
-        !!actualMember?.approvalDigest &&
-        store
-          .list<{
-            videoNodeId: string;
-            approvalDigest: string;
-          }>("approval", projectId)
-          .some(
-            (a) =>
-              a.videoNodeId === videoTarget?.id &&
-              a.approvalDigest === actualMember.approvalDigest,
-          );
-      const timing = shotVideoTiming(project, shot);
-      return {
-        shotId: shot.id,
-        purpose: shot.purpose,
-        image: frame,
-        imageFixture: frame ? service.artifactFixture(projectId, frame) : null,
-        imageComplete,
-        imageNodeId: imageTarget?.id ?? null,
-        videoNodeId: videoTarget?.id ?? null,
-        frameNodeId,
-        videoComplete,
-        motionPrompt: shot.videoPrompt,
-        plannedFrames: shot.desiredFrames,
-        durationFrames,
-        videoProfileLabel: videoProfile.id,
-        videoSpecDigest:
-          videoCurrent && actualMember?.ready ? videoTarget.specDigest : null,
-        videoSettings: settings,
-        narrationPending: !timing.ready,
-        imagePending:
-          active.some((a) => a.nodeId === imageTarget?.id) ||
-          (!imageOutput && candidatePending(imageTarget?.id)),
-        videoPending:
-          active.some((a) => a.nodeId === videoTarget?.id) ||
-          (!videoComplete &&
-            reviewedVideo &&
-            candidatePending(videoTarget?.id)),
-        blockedCode: active.some((a) => a.phase === "submission_unknown")
-          ? "SUBMISSION_UNKNOWN"
-          : durationCode,
-      };
-    });
+    .map((shot) => sceneRow(shot, { snapshot, plan, lock, profiles, holds, review, bindings, approvals, fixtures,
+      tolerateAlternatives: shared?.tolerateAlternatives ?? false }));
   const commandScopes = targetShotIds ?? [sceneId];
   const intersectsRequest = (requestId?: string) => {
     const request = requestId
@@ -323,6 +157,24 @@ function sceneView(
     },
   };
 }
+/** Shared freshness digest: the overview must expose the exact legacy confirmation token. */
+export function sceneGenerationView(production: ProductionService, projectId: string, sceneId: string, narration?: NarrationService,
+  captured?: ReturnType<typeof sceneView>, snapshot?: ReturnType<ProductionService["snapshot"]>) {
+  const saved = captured ?? sceneView(production, projectId, sceneId),
+    audio = sceneNarrationView(production, saved.project, sceneId, narration);
+  const rows = saved.view.rows.map(row => {
+    const { measuredSeconds: _measured, fit: _fit, ...legacyNarration } = audio.rows.find(value => value.shotId === row.shotId)!.narration;
+    return { ...row, narration: legacyNarration };
+  });
+  const sceneIntentDigest = digest({ scene: saved.project.scenes.find(scene => scene.id === sceneId), capabilityLock: saved.lock,
+    shots: saved.project.shots.filter(shot => shot.sceneId === sceneId).map(shot => ({ id: shot.id, purpose: shot.purpose, action: shot.action,
+      framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
+      imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
+        ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
+  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
+  return { ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error, narrationEvidence: audio.rows,
+    confirmationDigest: audio.error ? null : digest({ ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
+}
 export function registerSceneGeneration(
   app: FastifyInstance,
   service: () => ProductionService,
@@ -331,18 +183,8 @@ export function registerSceneGeneration(
   app.get<{ Params: { projectId: string; sceneId: string } }>(
     "/api/projects/:projectId/scenes/:sceneId/generation",
     async (request) => {
-      const production = service(), { projectId, sceneId } = request.params,
-        saved = sceneView(production, projectId, sceneId),
-        audio = sceneNarrationView(production, saved.project, sceneId, narration);
-      const rows = saved.view.rows.map(row => ({ ...row, narration: audio.rows.find(value => value.shotId === row.shotId)!.narration }));
-      const sceneIntentDigest = digest({ scene: saved.project.scenes.find(scene => scene.id === sceneId), capabilityLock: saved.lock,
-        shots: saved.project.shots.filter(shot => shot.sceneId === sceneId).map(shot => ({ id: shot.id, purpose: shot.purpose, action: shot.action,
-          framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
-          imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
-            ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
-      const currentRequestId = production.snapshot(projectId).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
-      return { ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error,
-        confirmationDigest: audio.error ? null : digest({ ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
+      const { narrationEvidence: _evidence, ...view } = sceneGenerationView(service(), request.params.projectId, request.params.sceneId, narration);
+      return view;
     },
   );
   app.post<{ Params: { projectId: string; sceneId: string }; Body: Input }>(
@@ -373,6 +215,7 @@ export function registerSceneGeneration(
               items: { type: "string", minLength: 1, maxLength: 160 },
             },
             regenerate: { type: "boolean" },
+            expectedEstimateMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 32 },
             reviewedHoldDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
             reviewedControlAuthorityId: {
               type: ["string", "null"],
@@ -431,7 +274,7 @@ export function registerSceneGeneration(
       );
       const fresh = () => {
         assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
-        const now = sceneView(production, projectId, sceneId, input.targetShotIds).view;
+        const now = sceneView(production, projectId, sceneId, undefined, input.targetShotIds).view;
         invariant(
           now.headVersion === input.headVersion &&
             now.revisionId === input.revisionId &&
@@ -469,12 +312,15 @@ export function registerSceneGeneration(
         );
       };
       fresh();
-      const selected = captured.view.rows.filter((r) =>
-        input.kind === "image"
-          ? (!input.targetShotIds || input.targetShotIds.includes(r.shotId)) &&
-            (input.regenerate || !r.imageComplete)
-          : !r.videoComplete,
-      );
+      invariant(captured.view.rows.length > 0, "SCENE_EMPTY", "Add a shot before generating this scene");
+      const selected = generationTargets(captured.view.rows, input.kind, input.targetShotIds, input.regenerate);
+      const placeholderIds = captured.project.shots.filter(shot => selected.some(row => row.shotId === shot.id) && shot.promptState === "placeholder").map(shot => shot.id);
+      if (placeholderIds.length) throw new DomainError("DIRECTION_REQUIRED", "Write direction for these shots before generating", { shotIds: placeholderIds });
+      const audio = sceneNarrationView(production, captured.project, sceneId, narration);
+      const quotedRows = selected.map(row => ({ ...row, imageComplete: false, narration: audio.rows.find(value => value.shotId === row.shotId)!.narration }));
+      const estimate = quote(captured.lock, quotedRows, input.kind === "image" ? "makeKeyframes" : "confirmVideo");
+      invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros,
+        "ESTIMATE_CHANGED", "The estimate changed. Review the current price before generating.");
       invariant(
         selected.length > 0 && selected.length <= 64,
         "ALREADY_COMPLETE",
