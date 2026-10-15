@@ -263,9 +263,10 @@ export class StudioStore {
   }
 
   /** Answer a pending Director question. The server takes exactly { text, replyToQuestionId }: no scope, no editing flag. */
-  async answerQuestion(questionId: string, text: string): Promise<boolean> {
+  async answerQuestion(questionId: string, text: string, answers?: { questionId: string; optionIndex: number }[]): Promise<boolean> {
     const snapshot = this.#state.snapshot;
-    const body = { text: text.trim(), replyToQuestionId: questionId };
+    // Structured answers (DC-17) carry the chosen option indexes next to the readable text.
+    const body = { text: text.trim(), replyToQuestionId: questionId, ...(answers?.length ? { answers } : {}) };
     if (!snapshot || !body.text) return false;
     const receipt = await this.#press<unknown>(`answer:${questionId}`, body, async () => ({ path: path(snapshot.project.id, "/messages"), body }));
     return receipt !== undefined;
