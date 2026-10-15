@@ -2,17 +2,19 @@ import { useCallback, useEffect, useRef, type FocusEvent, type KeyboardEvent } f
 import { useI18n } from "../i18n/I18n.tsx";
 import { pauseCountdown, resumeCountdown, startCountdown, toastLifetime, type Countdown } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
+import { useGuarded } from "./useWriteGuard.ts";
 import "./toast.css";
 
 /**
  * One toast at a time. Info leaves after about 6 s unless the pointer or focus is on it; errors stay
  * until dismissed. Two live regions exist from the start so screen readers hear each new toast:
- * polite for info, assertive for errors.
+ * polite for info, assertive for errors. Undo writes, so it follows the write guard.
  */
 export function Toast() {
   const store = useStore();
   const { t, tm } = useI18n();
   const toast = useStudio((s) => s.toast);
+  const undoGuard = useGuarded("server");
   const countdown = useRef<Countdown | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hovered = useRef(false);
@@ -92,7 +94,7 @@ export function Toast() {
     >
       <span>{tm(toast.message)}</span>
       {toast.undoCommandId && (
-        <button type="button" className="pill" data-act="undo" onClick={() => { const commandId = toast.undoCommandId!; close(() => void store.undo(commandId)); }}>
+        <button type="button" className="pill" data-act="undo" {...undoGuard} onClick={() => { const commandId = toast.undoCommandId!; close(() => void store.undo(commandId)); }}>
           {t("shell.undo")}
         </button>
       )}

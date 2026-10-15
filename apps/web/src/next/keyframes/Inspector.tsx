@@ -4,6 +4,7 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { lineEstimate, lineEstimateMsg, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
 import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../model/inspector.ts";
 import type { EditDraft } from "../store/state.ts";
+import { useGuarded } from "../app/useWriteGuard.ts";
 import { StatusPill } from "./parts.tsx";
 
 /** Common camera moves offered as suggestions in the interface language; motion stays free text. */
@@ -24,9 +25,15 @@ interface Props {
   onRelease(attemptId: string): void;
 }
 
-/** Shot 2.1: framing, status, rows, @ pointer, and the stacked actions with inline edit forms (plan item SB-10). */
+/**
+ * Shot 2.1: framing, status, rows, @ pointer, and the stacked actions with inline edit forms (plan item SB-10).
+ * Edits follow the shell's write guard (off while offline or expired); paid makes also stop while the film is
+ * stopped. A control the guard turns off says why in its title.
+ */
 export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease }: Props) {
   const { t, tm } = useI18n();
+  const server = useGuarded("server");
+  const run = useGuarded("run");
   const editing = draft && draft.shotId === shot.shotId ? draft : null;
   const regen = view.regenerate;
   return (
@@ -69,7 +76,7 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
         <div className="insp-alert" role="status">
           <p>{tm(view.failure.message)}</p>
           {view.failure.retryVideo ? (
-            <button type="button" className="pill sm" data-act="retry-video" data-shot={shot.shotId} disabled={!view.failure.retryVideo.enabled || busy.video} onClick={onRetryVideo}>
+            <button type="button" className="pill sm" data-act="retry-video" data-shot={shot.shotId} {...run} disabled={!view.failure.retryVideo.enabled || busy.video || run.disabled} onClick={onRetryVideo}>
               {t("inspector.retry_video")}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
             </button>
           ) : null}
@@ -80,15 +87,16 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
 
       {editing ? null : (
         <div className="insp-actions">
-          <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}>{t("inspector.edit_prompt")}</button>
-          <button type="button" className="pill" data-act="edit-motion" data-shot={shot.shotId} onClick={() => onEdit({ shotId: shot.shotId, field: "motion", value: shot.motion })}>{t("inspector.edit_motion")}</button>
+          <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}>{t("inspector.edit_prompt")}</button>
+          <button type="button" className="pill" data-act="edit-motion" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "motion", value: shot.motion })}>{t("inspector.edit_motion")}</button>
           <button
             type="button"
             className={`pill${regen.primary ? " primary" : ""}`}
             data-act="regen"
             data-shot={shot.shotId}
             data-kind={regen.kind}
-            disabled={!regen.enabled || busy.regenerate}
+            {...run}
+            disabled={!regen.enabled || busy.regenerate || run.disabled}
             aria-describedby={regen.cost || regen.clipNote || regen.reason ? `regen-note-${shot.shotId}` : undefined}
             onClick={onRegenerate}
           >
@@ -196,9 +204,10 @@ function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion 
 
 function FormButtons({ saving, disabled, onCancel }: { saving: boolean; disabled: boolean; onCancel(): void }) {
   const { t } = useI18n();
+  const server = useGuarded("server");
   return (
     <div className="two">
-      <button type="submit" className="pill chosen" data-act="save-edit" disabled={disabled || saving}>{t(saving ? "inspector.saving" : "inspector.save")}</button>
+      <button type="submit" className="pill chosen" data-act="save-edit" {...server} disabled={disabled || saving || server.disabled}>{t(saving ? "inspector.saving" : "inspector.save")}</button>
       <button type="button" className="pill" data-act="cancel-edit" onClick={onCancel}>{t("inspector.cancel")}</button>
     </div>
   );
@@ -207,6 +216,7 @@ function FormButtons({ saving, disabled, onCancel }: { saving: boolean; disabled
 /** Give up on a job the service never confirmed (plan decision D7): an explicit acknowledgement first. */
 function GiveUp({ attemptId, busy, onRelease }: { attemptId: string; busy: boolean; onRelease(attemptId: string): void }) {
   const { t } = useI18n();
+  const server = useGuarded("server");
   const [open, setOpen] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const ack = `give-up-ack-${attemptId}`;
@@ -220,12 +230,12 @@ function GiveUp({ attemptId, busy, onRelease }: { attemptId: string; busy: boole
             <span>{t("inspector.give_up_ack")}</span>
           </label>
           <div className="two">
-            <button type="button" className="pill chosen" data-act="give-up-confirm" disabled={!acknowledged || busy} onClick={() => onRelease(attemptId)}>{t("inspector.give_up_confirm")}</button>
+            <button type="button" className="pill chosen" data-act="give-up-confirm" {...server} disabled={!acknowledged || busy || server.disabled} onClick={() => onRelease(attemptId)}>{t("inspector.give_up_confirm")}</button>
             <button type="button" className="pill" data-act="give-up-cancel" onClick={() => { setOpen(false); setAcknowledged(false); }}>{t("inspector.cancel")}</button>
           </div>
         </>
       ) : (
-        <button type="button" className="pill sm" data-act="give-up" onClick={() => setOpen(true)}>{t("inspector.give_up")}</button>
+        <button type="button" className="pill sm" data-act="give-up" {...server} onClick={() => setOpen(true)}>{t("inspector.give_up")}</button>
       )}
     </div>
   );

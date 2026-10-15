@@ -7,6 +7,7 @@ import type { ShotCard } from "../model/keyframes.ts";
 import { clock, motionKind, motionTransform } from "../model/motion.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { Picture, StatusPill, useOnScreen, useReducedMotion } from "./parts.tsx";
+import { useGuarded } from "../app/useWriteGuard.ts";
 
 /** A request to record that the person opened a shot's frame: armed when they navigate to it. */
 export interface OpenIntent {
@@ -45,6 +46,8 @@ export function Preview({ shot, card, fps, playing, intent, onTogglePlay, onEnde
   const [loaded, setLoaded] = useState<string | null>(null);
   const [consumed, setConsumed] = useState(0);
   const openPending = useStudio((s) => !!s.pending[`frame-view:${shot.shotId}`]);
+  // Recording "Opened" writes; offline or expired the button is off and says why.
+  const openGuard = useGuarded("server");
   // The run restarts only for a new shot, motion or mode, not when the parent re-renders.
   const ended = useRef(onEnded);
   ended.current = onEnded;
@@ -126,7 +129,7 @@ export function Preview({ shot, card, fps, playing, intent, onTogglePlay, onEnde
         <span className="badge">{shot.label}</span>
         {picture && !making ? <StatusPill status={card.status} tone={card.tone} /> : null}
         {card.pictureDimmed && !making ? <span className="status">{t("preview.earlier_take")}</span> : null}
-        {canOpen ? <button type="button" className="pill sm" data-act="open-frame" data-shot={shot.shotId} onClick={() => onOpen(shot.shotId)}>{t("preview.open", { shot: shot.label })}</button> : null}
+        {canOpen ? <button type="button" className="pill sm" data-act="open-frame" data-shot={shot.shotId} {...openGuard} onClick={() => onOpen(shot.shotId)}>{t("preview.open", { shot: shot.label })}</button> : null}
       </div>
       <div className="pv-bottom">
         {picture && !making ? <p className="pv-caption">{caption}</p> : null}
