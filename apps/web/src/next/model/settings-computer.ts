@@ -1,5 +1,5 @@
 import type { MessageId } from "../i18n/messages.ts";
-import { JOB_LABEL, isMediaKind, type MediaKind, type ProviderCatalogView } from "./settings.ts";
+import { JOB_IN_SENTENCE, isMediaKind, type MediaKind, type ProviderCatalogView } from "./settings.ts";
 import { codexState, type DirectorSetup } from "./settings-director.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -17,7 +17,7 @@ export interface ComputerRow {
   tone: ComputerTone;
   status: Msg;
   detail: Msg;
-  /** Jobs that depend on it, in job order; the view joins their names. */
+  /** Jobs that depend on it, in job order, named as inside a sentence; the view joins them. */
   jobs: MessageId[];
 }
 
@@ -36,7 +36,7 @@ const KEY_NAME: Record<Credential, MessageId> = { openai: "set.computer.key.open
 const KIND_ORDER: readonly MediaKind[] = ["image", "video", "speech", "transcription"];
 const jobsOf = (kinds: Iterable<string>): MessageId[] => {
   const set = new Set(kinds);
-  return KIND_ORDER.filter((kind) => set.has(kind)).map((kind) => JOB_LABEL[kind]);
+  return KIND_ORDER.filter((kind) => set.has(kind)).map((kind) => JOB_IN_SENTENCE[kind]);
 };
 
 export interface CodexContext {

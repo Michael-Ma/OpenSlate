@@ -112,6 +112,23 @@ const ESTIMATE: Record<MediaKind, MessageId> = {
   transcription: "set.estimate.transcription",
 };
 
+/** A tenth of a cent, in micro-dollars: the smallest price formatMicros shows without rounding to zero. */
+const TENTH_CENT = 1000;
+const UNDER: Record<MediaKind, MessageId> = {
+  image: "set.estimate.under.image",
+  video: "set.estimate.under.video",
+  speech: "set.estimate.under.speech",
+  transcription: "set.estimate.under.transcription",
+};
+
+/** Job names inside a sentence ("used by keyframes, narration"): lowercase in English, the same in Chinese. */
+export const JOB_IN_SENTENCE: Record<MediaKind, MessageId> = {
+  image: "set.job_lc.image",
+  video: "set.job_lc.video",
+  speech: "set.job_lc.speech",
+  transcription: "set.job_lc.transcription",
+};
+
 export const isMediaKind = (value: string): value is MediaKind => (MEDIA_KINDS as readonly string[]).includes(value);
 
 const isFixture = (option: ProviderOption) => option.estimatedCost?.basis === "fixture" || option.profile?.adapter === "fake";
@@ -133,6 +150,8 @@ export function estimateMsg(option: ProviderOption, locale: string): Msg {
   const micros = Number(option.estimatedCost?.unitMicros ?? option.profile?.unitCostMicros ?? 0);
   const kind = option.profile?.kind;
   if (!Number.isFinite(micros) || micros <= 0 || !kind || !isMediaKind(kind)) return msg("set.estimate.none");
+  // Below a tenth of a cent the price would round to "$0.000": say "under $0.001" instead.
+  if (micros < TENTH_CENT) return msg(UNDER[kind], { price: formatMicros(TENTH_CENT, locale) });
   return msg(ESTIMATE[kind], { price: formatMicros(micros, locale) });
 }
 
@@ -225,15 +244,24 @@ export function previewCurrent(preview: ModelPreview, status: ModelSettingsStatu
 }
 
 /**
- * Whether Switch may apply a preview as shown. The server also refuses when the film's pending work changed
- * since the check (a job started or finished, the project changed), which the settings status cannot show:
- * any studio event since the check (`checkedAt`, the event cursor then) counts as such a change. A status
- * read older than the preview (lower head version, still being re-read) cannot speak for it.
+ * Whether Switch may apply a preview as shown: while the settings it was made from are the current ones.
+ * Studio events (a Director message, a job starting or finishing) do not count by themselves: the server
+ * re-checks the project, lock and pending work on apply and refuses only a real change
+ * (MODEL_SETTINGS_STALE), which the view then shows as a stale row. A status read older than the preview
+ * (lower head version, still being re-read) cannot speak for it.
  */
-export function previewUsable(preview: ModelPreview, status: ModelSettingsStatus, checkedAt: number, cursor: number): boolean {
-  if (cursor !== checkedAt) return false;
+export function previewUsable(preview: ModelPreview, status: ModelSettingsStatus): boolean {
   if (status.projectId === preview.projectId && status.headVersion < preview.base.headVersion) return true;
   return previewCurrent(preview, status);
+}
+
+/**
+ * Jobs whose saved model is no longer installed, other than `kind`. A preview sends every job's model and the
+ * server refuses an uninstalled one (PROVIDER_SELECTION_INVALID); leaving it out would quietly put that job on
+ * the built-in stand-in. So those jobs must be switched first.
+ */
+export function blockedBy(rows: readonly ModelRow[], kind: MediaKind): MediaKind[] {
+  return rows.filter((row) => row.kind !== kind && !!choiceFor(row, row.selected)?.missing).map((row) => row.kind);
 }
 
 /**
@@ -325,4 +353,31 @@ export function impactOf(preview: ModelPreview, kind: MediaKind, labels: Readonl
   if (preview.generationApprovalRequired) lines.push(msg("set.impact.review"));
   lines.push(msg("set.impact.nothing_made"));
   return { titleId: TITLE[kind], lines, changes: own.length + dependent.length > 0 };
+}
+
+// ---- section index ---------------------------------------------------------------------
+
+export interface PanelPlace {
+  id: string;
+  /** The panel's edges, in the same coordinates as `line` and `viewBottom`. */
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Which section the index marks while the page scrolls: the last panel whose top has passed `line` (just under
+ * the top of the scrolling area). At the end of the scroll the last panels can never reach the line, so the one
+ * last chosen in the index stays marked while it is on screen, and otherwise the panel that fills most of it.
+ */
+export function activeSection(panels: readonly PanelPlace[], line: number, viewBottom: number, atEnd: boolean, chosen: string | null): string | null {
+  if (!panels.length) return null;
+  if (atEnd) {
+    const shown = (panel: PanelPlace) => Math.max(0, Math.min(panel.bottom, viewBottom) - Math.max(panel.top, line));
+    const picked = panels.find((panel) => panel.id === chosen);
+    if (picked && shown(picked) > 0) return picked.id;
+    return panels.reduce((best, panel) => (shown(panel) >= shown(best) ? panel : best)).id;
+  }
+  let current = panels[0]!.id;
+  for (const panel of panels) if (panel.top <= line) current = panel.id;
+  return current;
 }

@@ -89,6 +89,9 @@
 .set-view .mtable .price{color:var(--text-2);font-size:12.5px;align-self:stretch;display:flex;align-items:center}
 .set-view .mtable .ready-c{align-self:stretch;display:flex;align-items:center}
 .set-view .mtable .model{align-self:stretch;display:flex;align-items:center}
+/* A select that is off says why in words under it (a disabled select cannot be focused for a tooltip). */
+.set-view .mtable .model.with-why{flex-direction:column;align-items:stretch;justify-content:center;gap:4px}
+.set-view .mtable .model .why{font-size:12px;color:var(--text);line-height:1.35}
 .set-view .mrow{display:contents}
 .set-view .impact-row{grid-column:1/-1;padding:0 0 12px;display:flex;flex-direction:column;gap:8px}
 .set-view .impact-acts,.set-view .form-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}

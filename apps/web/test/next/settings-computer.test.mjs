@@ -28,8 +28,10 @@ test('this computer lists Codex, FFmpeg and each key a model needs, with the job
     ['key-minimax', 'MiniMax key', 'Set', 'ok'],
     ['key-viggle', 'Viggle key', 'Not set', 'missing'],
   ]);
-  assert.deepEqual(view.rows[2].jobs.map((id) => translate('en', id)), ['Keyframes', 'Narration', 'Transcription']);
-  assert.deepEqual(view.rows[4].jobs.map((id) => translate('en', id)), ['Video']);
+  // Named inside a sentence: lowercase in English ("Used by keyframes, narration, transcription").
+  assert.deepEqual(view.rows[2].jobs.map((id) => translate('en', id)), ['keyframes', 'narration', 'transcription']);
+  assert.deepEqual(view.rows[2].jobs.map((id) => translate('zh-CN', id)), ['关键帧', '旁白', '转写']);
+  assert.deepEqual(view.rows[4].jobs.map((id) => translate('en', id)), ['video']);
 });
 
 test('Codex and FFmpeg say plainly when they are missing or not checked', () => {

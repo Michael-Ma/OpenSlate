@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
-import { estimateMsg, impactOf, modelRows, previewCurrent, previewRequest, previewUsable, readiness, sharedRequest, shotList, applyRequest, choiceFor } from '../../src/next/model/settings.ts';
+import { activeSection, blockedBy, estimateMsg, impactOf, modelRows, previewCurrent, previewRequest, previewUsable, readiness, sharedRequest, shotList, applyRequest, choiceFor } from '../../src/next/model/settings.ts';
 
 const ready = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: true, realExecutionEnabled: true };
 const option = (id, label, kind, adapter, micros, extra = {}) => ({
@@ -52,6 +52,15 @@ test('estimates are host-configured, per operation, and never $0.00 (D15)', () =
   assert.equal(zh(estimateMsg(option('x', 'X', 'video', 'minimax-h3', '500000'), 'zh-CN')), '每段视频约 $0.50');
 });
 
+test('a price under a tenth of a cent never rounds to $0.000', () => {
+  assert.equal(en(estimateMsg(option('x', 'X', 'image', 'openai-image', '1'), 'en')), 'under $0.001 a keyframe');
+  assert.equal(en(estimateMsg(option('x', 'X', 'speech', 'openai-speech', '499'), 'en')), 'under $0.001 a voice line');
+  assert.equal(en(estimateMsg(option('x', 'X', 'transcription', 'openai-transcription', '999'), 'en')), 'under $0.001 a transcription');
+  assert.equal(zh(estimateMsg(option('x', 'X', 'video', 'minimax-h3', '10'), 'zh-CN')), '每段视频不到 $0.001');
+  assert.equal(en(estimateMsg(option('x', 'X', 'image', 'openai-image', '1000'), 'en')), 'about $0.001 a keyframe');
+  for (const micros of ['1', '499', '500', '999', '1000', '4000']) assert.doesNotMatch(en(estimateMsg(option('x', 'X', 'image', 'openai-image', micros), 'en')), /\$0\.0+(?!\d*[1-9])/);
+});
+
 test('a model that cannot run is listed with the first missing piece as its reason', () => {
   const why = (patch) => readiness({ ...option('x', 'X', 'video', 'minimax-h3', '1'), readiness: { ...ready, realExecutionEnabled: false, ...patch } });
   assert.deepEqual(readiness(option('x', 'X', 'video', 'fake', '100')), { ready: true, reason: null });
@@ -94,14 +103,39 @@ test('a preview is current only for the exact settings it was made from', () => 
   assert.deepEqual(applyRequest(preview()), { path: '/settings/models/apply', body: { previewId: 'preview-1', previewDigest: 'c'.repeat(64) } });
 });
 
-test('Switch is offered only while nothing happened in the film since the check (the server also refuses changed pending work)', () => {
-  assert.equal(previewUsable(preview(), status, 40, 40), true);
-  // A job started or finished: the settings look the same, but the apply would be refused as stale.
-  assert.equal(previewUsable(preview(), status, 40, 41), false);
-  assert.equal(previewUsable(preview(), { ...status, selectionDigest: 'd'.repeat(64) }, 40, 40), false);
-  assert.equal(previewUsable(preview(), { ...status, catalogDigest: 'e'.repeat(64) }, 40, 40), false);
+test('Switch is offered while the settings are the ones checked; the server judges changes in pending work on apply', () => {
+  assert.equal(previewUsable(preview(), status), true);
+  assert.equal(previewUsable(preview(), { ...status, headVersion: 13 }), false);
+  assert.equal(previewUsable(preview(), { ...status, selectionDigest: 'd'.repeat(64) }), false);
+  assert.equal(previewUsable(preview(), { ...status, catalogDigest: 'e'.repeat(64) }), false);
+  assert.equal(previewUsable(preview(), { ...status, capabilityLockId: 'lock-2' }), false);
   // A settings read older than the preview (Check again read newer ones) does not make it stale.
-  assert.equal(previewUsable(preview({ base: { ...preview().base, headVersion: 13, selectionDigest: 'd'.repeat(64) } }), status, 40, 40), true);
+  assert.equal(previewUsable(preview({ base: { ...preview().base, headVersion: 13, selectionDigest: 'd'.repeat(64) } }), status), true);
+});
+
+test('another job whose saved model is no longer installed must be switched first', () => {
+  const rows = modelRows({ ...status, selected: { ...status.selected, video: 'old-h2' } }, 'en');
+  assert.deepEqual(blockedBy(rows, 'image'), ['video']);
+  assert.deepEqual(blockedBy(rows, 'speech'), ['video']);
+  // Switching the job with the missing model itself is what fixes it.
+  assert.deepEqual(blockedBy(rows, 'video'), []);
+  assert.deepEqual(blockedBy(modelRows(status, 'en'), 'image'), []);
+  const two = modelRows({ ...status, selected: { ...status.selected, video: 'old-h2', speech: 'old-tts' } }, 'en');
+  assert.deepEqual(blockedBy(two, 'image'), ['video', 'speech']);
+  assert.equal(translateMsg('en', { id: 'set.impact.blocked_title', values: { jobs: 'video' } }), 'Switch video first.');
+});
+
+test('the section index marks the section at the top, and the chosen one at the end of the page', () => {
+  const panels = [{ id: 'models', top: -500, bottom: -60 }, { id: 'director', top: -40, bottom: 286 }, { id: 'voice', top: 300, bottom: 686 }, { id: 'computer', top: 700, bottom: 866 }, { id: 'language', top: 880, bottom: 1000 }];
+  assert.equal(activeSection(panels, 24, 900, false, 'models'), 'director');
+  assert.equal(activeSection(panels.map((p) => ({ ...p, top: p.top + 600, bottom: p.bottom + 600 })), 24, 900, false, null), 'models');
+  // At the end the last panels cannot reach the top: the chosen one stays marked while it is on screen.
+  assert.equal(activeSection(panels, 24, 900, true, 'computer'), 'computer');
+  // Otherwise the panel that fills most of the screen.
+  assert.equal(activeSection(panels, 24, 900, true, 'models'), 'voice');
+  assert.equal(activeSection(panels, 24, 900, true, null), 'voice');
+  assert.equal(activeSection(panels, 24, 900, true, 'language'), 'language');
+  assert.equal(activeSection([], 24, 900, false, null), null);
 });
 
 test('asking for the same check while it is on its way reuses it; once settled, a new one starts', async () => {
