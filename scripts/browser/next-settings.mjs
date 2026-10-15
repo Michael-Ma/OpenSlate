@@ -124,6 +124,9 @@ export const scenarios = [
       expect(!amber, "Amber appears in the Settings view");
       // The rest of the page, for the side-by-side with the study.
       await page.locator("#set-computer").scrollIntoViewIfNeeded();
+      // The index follows the scroll: This computer fills the end of the page.
+      await page.waitForFunction(() => document.querySelector(".set-index [data-section='set-computer']")?.getAttribute("aria-current") === "true", null, { timeout: 3000 })
+        .catch(() => { throw new Error("The index does not mark This computer at the end of the page"); });
       await shot(page, "settings-1440-lower");
     },
   },
@@ -140,6 +143,9 @@ export const scenarios = [
       expect(/The 3 clips already made stay as they are\./.test(impact), `Impact reads ${impact}`);
       expect(/Switching makes nothing and charges nothing\./.test(impact), `Impact does not say nothing is charged: ${impact}`);
       await expectText(page, `${row(page, "video")} .price`, /^free stand-in$/);
+      // The select names its estimate and status for a screen reader.
+      const described = await select.evaluate((el) => (el.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent ?? "").join(" | "));
+      expect(/free stand-in/.test(described) && /Ready/.test(described), `The video select is described as ${JSON.stringify(described)}`);
       await shot(page, "settings-1440-switch");
       // Cancel puts it back, and focus returns to the select.
       await page.click(`${row(page, "video")} [data-act='model-cancel']`);
@@ -160,7 +166,8 @@ export const scenarios = [
     },
   },
   {
-    // The server refuses a switch when the film's pending work changed since the check; the row must not keep offering it.
+    // Studio events do not make a check stale by themselves; the server refuses a switch when the film's pending work
+    // changed since the check, and then the row stops offering it and keeps keyboard focus.
     name: "next-settings-stale-switch",
     query,
     viewport: { width: 1440, height: 900 },
@@ -170,11 +177,26 @@ export const scenarios = [
       await page.locator(`${video} select`).selectOption("fake-video-v1");
       await expectText(page, `${video} .impact`, /5 clips not made yet/);
       expect(await page.locator(`${video} [data-act='model-apply']`).isEnabled(), "Switch is off after the check");
-      // Scene 3's keyframes start (simulated): the settings look the same, the pending work does not.
+      // An event that changes no work (the review setting) keeps Switch.
       const store = await studioStore(page);
+      const cursor = await store.evaluate((s) => s.getState().overview.cursor);
+      const review = (on) => page.waitForFunction((value) => document.querySelector("#set-director [data-act='review-toggle']")?.getAttribute("aria-checked") === value, String(on));
+      await page.click("#set-director [data-act='review-toggle']");
+      await review(false);
+      await page.waitForTimeout(200);
+      expect((await store.evaluate((s) => s.getState().overview.cursor)) > cursor, "Turning the review setting off made no studio event");
+      expect(await page.locator(`${video} .impact-row[data-stale]`).count() === 0, "An unrelated event made the check stale");
+      expect(await page.locator(`${video} [data-act='model-apply']`).isEnabled(), "Switch went away after an unrelated event");
+      await page.click("#set-director [data-act='review-toggle']");
+      await review(true);
+      // Scene 3's keyframes start (simulated): the settings look the same, the pending work does not, so the server refuses.
       await store.evaluate((s) => s.makeKeyframes(s.getState().overview.scenes[2].sceneId));
+      await page.click(`${video} [data-act='model-apply']`);
+      await expectText(page, ".toast", /The model settings changed\. Check the switch again\./);
       await expectText(page, `${video} .impact-row[data-stale]`, /The film or its settings changed since this check\./);
-      expect(await page.locator(`${video} [data-act='model-apply']`).count() === 0, "Switch is still offered on a stale check");
+      expect(await page.locator(`${video} [data-act='model-apply']`).count() === 0, "Switch is still offered on a refused check");
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "model-recheck", null, { timeout: 3000 })
+        .catch(async () => { throw new Error(`Focus went to ${await focusedAct(page)} after the refused switch, not to Check again`); });
       await shot(page, "settings-1440-stale");
       // Once the keyframes are back, Check again reads the film as it is now, and Switch applies.
       await store.evaluate((s) => new Promise((resolve) => {
@@ -227,15 +249,20 @@ export const scenarios = [
       await page.click("#set-director [data-act='director-save']");
       await expectText(page, ".toast", /Codex runs and is signed in/);
       await expectText(page, "#set-director .kv", /gpt-6-astra-mini/);
-      // Switching the Director to the demo from the Models row: impact first, then the review switch turns off with its reason.
+      // Switching the Director to the demo from the Models row: impact first. The review setting stays as saved (the
+      // server reviews every film's batches; the demo's reviews are scripted and free) and can still be changed.
       await page.locator(`${row(page, "director")} select`).selectOption("fake");
       await expectText(page, `${row(page, "director")} .impact`, /Use Demo Director as the Director\?.*next turn/);
       await page.click(`${row(page, "director")} [data-act='model-apply']`);
       await expectText(page, ".toast", /scripted demo/);
-      await expectText(page, "#set-director [data-review-reason]", /Needs the Codex Director\./);
-      expect(await toggle.isDisabled(), "The review switch is still on without the Codex Director");
-      expect((await toggle.getAttribute("aria-checked")) === "false", "A disabled review switch still reads on");
       await expectText(page, "#set-director [data-act='director-edit']", /Set up Codex/);
+      await expectText(page, "#set-director [data-review-note]", /scripted notes: free/);
+      expect((await toggle.getAttribute("aria-checked")) === "true", "The review switch no longer shows the saved setting");
+      expect(!(await toggle.isDisabled()), "The review switch cannot be turned off with the Demo Director");
+      expect(await page.locator("#set-director [data-review-reason]").count() === 0, "The review switch gives a reason with the Demo Director");
+      await toggle.click();
+      await page.waitForFunction(() => document.querySelector("#set-director [data-act='review-toggle']")?.getAttribute("aria-checked") === "false");
+      await shot(page, "settings-1440-director-demo");
     },
   },
   {
@@ -255,6 +282,10 @@ export const scenarios = [
       await page.waitForFunction(() => document.querySelector("#set-voice [data-act='narrator']")?.value === "cedar");
       // Adding a personal voice needs a name, an id and both consents.
       await page.click("#set-voice [data-act='voice-open']");
+      // The section index follows the scroll, not only the last link pressed.
+      await page.locator("#set-voice").evaluate((el) => el.scrollIntoView({ block: "start" }));
+      await page.waitForFunction(() => document.querySelector(".set-index [data-section='set-voice']")?.getAttribute("aria-current") === "true", null, { timeout: 3000 })
+        .catch(() => { throw new Error("The index does not mark Voice while it is at the top"); });
       const add = page.locator("#set-voice [data-act='voice-add']");
       await page.locator("#set-voice form[data-form='voice'] input.input").first().fill("Second take");
       await page.locator("#set-voice form[data-form='voice'] input.mono").fill("voice_take2");
@@ -291,7 +322,7 @@ export const scenarios = [
       await openSettings(page);
       const rows = await page.locator("#set-computer .srow").evaluateAll((els) => els.map((el) => `${el.querySelector("b").textContent}: ${el.querySelector(".ready").textContent}`));
       expect(rows.join("|") === "Codex: ✓ Found|FFmpeg: ✓ Found|OpenAI key: ✓ Set|MiniMax key: ✓ Set|Viggle key: Not set", `This computer reads ${rows.join("|")}`);
-      await expectText(page, "#set-computer [data-row='key-openai']", /Used by Keyframes, Narration, Transcription/);
+      await expectText(page, "#set-computer [data-row='key-openai']", /Used by keyframes, narration, transcription/);
       await expectText(page, "#set-computer .keys-note", /\.\/start\.sh --restart/);
       await page.click("#set-computer [data-act='recheck']");
       await expectText(page, ".toast", /Checked this computer\./);
@@ -305,6 +336,9 @@ export const scenarios = [
       const tabs = await page.locator("#set-language [role='radio']").evaluateAll((els) => els.map((el) => `${el.dataset.v}:${el.tabIndex}`));
       expect(tabs.join("|") === "en:0|zh-CN:-1", `The language radios' tab order is ${tabs.join("|")}`);
       expect((await page.locator(".set-index [data-section='set-language']").getAttribute("aria-current")) === "true", "The index does not mark Language");
+      // Once the jump lands at the end of the page, the chosen section stays marked.
+      await page.waitForTimeout(1100);
+      expect((await page.locator(".set-index [data-section='set-language']").getAttribute("aria-current")) === "true", "The index lost Language after the jump landed");
       // Language: 中文, then back with the arrow keys.
       await page.click("#set-language [data-act='set-language'][data-v='zh-CN']");
       await expectText(page, "main[data-view='settings'] .view-head h1", /^设置$/);
@@ -375,7 +409,7 @@ export const scenarios = [
       expect(await page.locator("#set-models select, #set-voice select, #set-director form").count() === 0, "A film control shows with no film open");
       expect((await page.locator(".set-index [data-section='set-computer']").getAttribute("aria-current")) === "true", "The index does not mark This computer");
       await expectText(page, "#set-computer [data-row='codex']", /Codex is checked inside a film\..*Not checked/s);
-      await expectText(page, "#set-computer [data-row='key-openai']", /Used by Keyframes, Narration, Transcription/);
+      await expectText(page, "#set-computer [data-row='key-openai']", /Used by keyframes, narration, transcription/);
       const computer = await box(page, "#set-computer");
       expect(computer.top < 300, `This computer is at ${Math.round(computer.top)}, not scrolled into view`);
       await shot(page, "settings-1440-no-film");
@@ -391,14 +425,14 @@ export const scenarios = [
     name: "next-settings-live",
     query: "ui=next",
     viewport: { width: 1440, height: 900 },
-    // The review switch's route arrives with server card B10; until then the view reads a 404 and says so.
-    allowConsoleErrors: [/^HTTP 404 \/api\/projects\/[^/]+\/settings\/director-review$/],
     async run({ page }) {
       await page.waitForSelector(".app[data-ui='next'] .topbar", { timeout: 20000 });
       await page.waitForFunction(() => /scenes? ·/.test(document.querySelector(".topbar")?.textContent ?? ""), null, { timeout: 15000 });
-      // A read cancelled by a newer one (the overview arriving) is not an answer; count the 404 answers.
-      let reviewMisses = 0;
-      page.on("response", (response) => { if (response.status() === 404 && new URL(response.url()).pathname.endsWith("/settings/director-review")) reviewMisses++; });
+      // The review setting's real POST: body, head version and Idempotency-Key, answered by the server.
+      const reviewPosts = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/settings/director-review")) reviewPosts.push({ body: request.postDataJSON(), key: request.headers()["idempotency-key"] ?? "" });
+      });
       await page.evaluate(() => {
         const root = document.querySelector(".app");
         const key = Object.keys(root).find((name) => name.startsWith("__reactFiber$"));
@@ -414,11 +448,20 @@ export const scenarios = [
       expect(prices.every((p) => p && !/\$0\.00/.test(p)), `Estimates read ${prices.join("|")}`);
       await page.waitForSelector("#set-voice [data-act='narrator']", { timeout: 10000 });
       expect((await page.locator("#set-voice [data-act='narrator']").inputValue()) === "cedar", "The live narrator voice is not Cedar");
-      await expectText(page, "#set-director [data-review-reason]", /later update|Codex Director/);
-      expect(await page.locator("#set-director [data-act='review-toggle']").isDisabled(), "The review switch is on without its route");
+      // GET /settings/director-review answers the saved setting, on by default, for any Director.
+      const toggle = page.locator("#set-director [data-act='review-toggle']");
+      await page.waitForFunction(() => document.querySelector("#set-director [data-act='review-toggle']")?.getAttribute("aria-checked") === "true", null, { timeout: 10000 })
+        .catch(async () => { throw new Error(`The review switch reads ${await toggle.getAttribute("aria-checked")}, not the server's default (on)`); });
+      expect(!(await toggle.isDisabled()), "The review switch cannot be turned off");
+      await toggle.click();
+      await expectText(page, ".toast", /The Director will not look at new keyframes\./);
+      await page.waitForFunction(() => document.querySelector("#set-director [data-act='review-toggle']")?.getAttribute("aria-checked") === "false");
+      await toggle.click();
+      await page.waitForFunction(() => document.querySelector("#set-director [data-act='review-toggle']")?.getAttribute("aria-checked") === "true");
+      expect(reviewPosts.length === 2, `${reviewPosts.length} review POSTs were sent`);
+      expect(reviewPosts.every((p) => typeof p.body.expectedHeadVersion === "number" && Object.keys(p.body).sort().join() === "enabled,expectedHeadVersion" && p.key.length > 0), `Review POSTs: ${JSON.stringify(reviewPosts)}`);
+      expect(reviewPosts.map((p) => p.body.enabled).join() === "false,true", `Review POSTs: ${JSON.stringify(reviewPosts)}`);
       await page.waitForSelector("#set-computer [data-row='codex']", { timeout: 10000 });
-      await page.waitForTimeout(500);
-      expect(reviewMisses === 1, `The missing review route answered 404 ${reviewMisses} times`);
       await shot(page, "settings-live-1440");
     },
   },
