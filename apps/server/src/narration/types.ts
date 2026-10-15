@@ -16,6 +16,7 @@ export interface SegmentRevision extends SegmentDraft {
 }
 export interface SuppliedNarrationAudio {
   id: string; projectId: string; media: SuppliedMedia;
+  role?: "music" | "voice" | "upload";
   /** A human-declared origin for an already supplied recording; not provider evidence. */
   declaredOrigin: "uploaded" | "generated";
   requestId: string;
@@ -34,6 +35,7 @@ export interface GeneratedNarrationEvidence {
 /** An existing OpenSlate output, not an upload or a human-declared external recording. */
 export interface VerifiedGeneratedNarrationAudio {
   id: string; projectId: string; media: SuppliedMedia;
+  role?: "music" | "voice" | "upload";
   originEvidence: "verified_generated_audio"; generation: GeneratedNarrationEvidence;
 }
 export type NarrationAudio = SuppliedNarrationAudio | VerifiedGeneratedNarrationAudio;

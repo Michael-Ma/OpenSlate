@@ -1,8 +1,11 @@
+import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, type MediaUndo } from "./storyboard-history.js";
 import type { FastifyInstance } from "fastify";
 import { digest, DomainError, invariant, newId, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationAudio } from "./narration/types.js";
+import { assertNoRunningAttempts } from "./project-library.js";
+import { projectPersonalVoices, assertPersonalVoiceCurrent } from "./narration/personal-voices.js";
 import type { NodeBinding } from "./execution/engine.js";
 
 type Edit = {
@@ -10,6 +13,9 @@ type Edit = {
   kind:
     | "treatment"
     | "scene"
+    | "sceneTitle"
+    | "deleteScene"
+    | "moveScene"
     | "addScene"
     | "shot"
     | "addShot"
@@ -24,12 +30,15 @@ type Edit = {
   field?: string;
   value?: string;
   commandId?: string;
+  withShots?: boolean;
 };
 type SavedEdit = {
   id: string;
   before: ProjectRecord;
   headVersion: number;
   requestId: string;
+  input?: Edit;
+  undo?: MediaUndo;
 };
 const text = { type: "string", minLength: 1, maxLength: 160 };
 /** A direct edit is ordinary writing. Preserve independent prompt details while applying the human's changed direction. */
@@ -85,6 +94,8 @@ export function editStoryboard(
         "IMPORT_PENDING",
         "Confirm or discard the imported plan before editing.",
       );
+      const undo = captureMediaUndo(s, projectId);
+      let undoing: SavedEdit | undefined;
       let next = structuredClone(before);
       const changed = new Set<string>();
       let global = false;
@@ -119,6 +130,28 @@ export function editStoryboard(
         next.shots
           .filter((x) => x.sceneId === row.id)
           .forEach((x) => changed.add(x.id));
+      } else if (input.kind === "sceneTitle") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        row.title = value();
+        row.revisionId = newId();
+      } else if (input.kind === "deleteScene") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        const shots = next.shots.filter(x => x.sceneId === row.id);
+        invariant(!shots.length || input.withShots === true, "SCENE_HAS_SHOTS", "Confirm deletion of this scene and its shots.");
+        assertNoRunningAttempts(s, projectId, new Set(shots.map(x => x.id)));
+        for (const shot of shots) changed.add(shot.id);
+        next.shots = next.shots.filter(x => x.sceneId !== row.id);
+        next.scenes = next.scenes.filter(x => x.id !== row.id);
+        global = true;
+      } else if (input.kind === "moveScene") {
+        const row = next.scenes.find(x => x.id === input.id);
+        invariant(row, "NOT_FOUND", "Scene does not belong to this film.");
+        invariant(!input.beforeId || (input.beforeId !== row.id && next.scenes.some(x => x.id === input.beforeId)), "VALIDATION_ERROR", "Invalid reorder target.");
+        next.scenes = next.scenes.filter(x => x.id !== row.id);
+        next.scenes.splice(input.beforeId ? next.scenes.findIndex(x => x.id === input.beforeId) : next.scenes.length, 0, row);
+        global = true;
       } else if (input.kind === "addScene") {
         next.scenes.push({
           id: newId(),
@@ -264,6 +297,11 @@ export function editStoryboard(
             "VALIDATION_ERROR",
             "Invalid voice choice.",
           );
+          if (input.value === "personal") {
+            const ready = projectPersonalVoices(s.store, projectId).filter(x => x.ready);
+            invariant(ready.length > 0, "PERSONAL_VOICE_REQUIRED", "Register a ready personal voice before selecting personal narration.");
+            assertPersonalVoiceCurrent(s.store, projectId, ready[0]!.id);
+          }
           draft.voice = input.value as "stock" | "personal";
         }
         const writingChanged =
@@ -303,6 +341,8 @@ export function editStoryboard(
               "NOT_FOUND",
               "Choose a recording owned by this film.",
             );
+            const label = s.store.get<{ label: string }>("audio_library_label", audio.id);
+            s.store.put("audio_library_label", audio.id, projectId, { label: label?.label ?? "Music", role: "music" });
             next.soundtrack = {
               audioId: audio.id,
               gainMilliDb: next.soundtrack?.gainMilliDb ?? -18000,
@@ -351,13 +391,11 @@ export function editStoryboard(
           "storyboard_edit",
           input.commandId ?? "",
         );
-        invariant(
-          saved &&
-            saved.before.id === projectId &&
-            saved.headVersion === before.headVersion,
-          "REVISION_CONFLICT",
-          "Only the latest unchanged edit can be undone.",
-        );
+        invariant(saved?.before.id === projectId, "UNDO_UNAVAILABLE", "This storyboard command is unavailable.");
+        assertUndoUnused(s, projectId, saved.undo);
+        invariant(saved.headVersion === before.headVersion && s.store.list<SavedEdit>("storyboard_edit", projectId).at(-1)?.id === saved.id && saved.input?.kind !== "undo",
+          "UNDO_UNAVAILABLE", "Only the latest unchanged command can be undone.");
+        undoing = saved;
         next = {
           ...structuredClone(saved.before),
           headVersion: before.headVersion,
@@ -404,11 +442,12 @@ export function editStoryboard(
           shotIntentDigest(current, kind, next.cues.find(cue => cue.id === current.cueId));
       };
       const changedTiming = new Set(next.shots.filter(row => intentChanged(row.id, "video")).map(row => row.id));
+      const effectiveInput = undoing?.input ?? input;
       const affected = new Set(
         bindings
           .filter(
             (x) =>
-              ["timeline", "render"].includes(x.node.kind) ||
+              (input.kind !== "sceneTitle" && ["timeline", "render"].includes(x.node.kind)) ||
               ((input.kind === "treatment" || input.kind === "scene") &&
                 (x.node.kind === "image" || x.node.kind === "video") &&
                 intentChanged(x.node.shotId, x.node.kind)) ||
@@ -416,22 +455,22 @@ export function editStoryboard(
                 (next.brief !== before.brief || next.story !== before.story)) ||
               (input.kind !== "treatment" && input.kind !== "scene" && changed.has(x.node.shotId ?? "") &&
                 !(
-                  input.kind === "narration" &&
+                  effectiveInput.kind === "narration" &&
                   (x.node.kind === "image" ||
                     (x.node.kind === "video" &&
                       !changedTiming.has(x.node.shotId ?? "")))
                 ) &&
                 !(
-                  input.kind === "shot" &&
+                  effectiveInput.kind === "shot" &&
                   ["motion", "desiredFrames", "videoPrompt"].includes(
-                    input.field ?? "",
+                    effectiveInput.field ?? "",
                   ) &&
                   x.node.kind === "image"
                 ) &&
                 !(
-                  input.kind === "shot" &&
+                  effectiveInput.kind === "shot" &&
                   ["imagePrompt", "videoPrompt", "action"].includes(
-                    input.field ?? "",
+                    effectiveInput.field ?? "",
                   ) &&
                   !["image", "video"].includes(x.node.kind)
                 )),
@@ -455,13 +494,15 @@ export function editStoryboard(
       }
       // Hold only shots whose queued media is detached, never music/order/add operations.
       // The surrounding command transaction rolls back these holds on failure.
-      const holdFree = ["soundtrack", "moveShot", "addScene", "addShot"].includes(input.kind);
+      const holdFree = ["soundtrack", "moveShot", "moveScene", "sceneTitle", "deleteScene", "addScene", "addShot"].includes(input.kind);
       if (!holdFree)
         for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
           s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });
-      for (const b of bindings.filter((x) => affected.has(x.id)))
+      undo.bindings = bindings.filter(x => affected.has(x.id));
+      for (const b of undo.bindings) {
+        const { retainedTake: _retained, ...detached } = b;
         s.store.put("node_binding", b.id, projectId, {
-          ...b,
+          ...detached,
           candidateId: null,
           outputs: {},
           ...(Object.values(b.outputs)[0] || b.outdated ? { outdated: {
@@ -470,6 +511,7 @@ export function editStoryboard(
             previous: Object.values(b.outputs)[0] ?? b.outdated!.previous,
           } } : {}),
         });
+      }
       // Existing in-flight attempts retain their durable receipts and cannot publish into detached candidates.
       next = s.store.saveProject(
         { ...next, revisionId: newId() },
@@ -478,12 +520,18 @@ export function editStoryboard(
       s.store.insert("project_revision", next.revisionId, projectId, {
         project: next,
       });
+      if (undoing) {
+        restoreMediaUndo(s, next, undoing.undo);
+        if (undoing.undo) restoreCanonicalUndo(s, next, actor.requestId, undoing.undo);
+      }
       const id = newId();
       s.store.insert("storyboard_edit", id, projectId, {
         id,
         before,
         headVersion: next.headVersion,
         requestId: actor.requestId,
+        input,
+        undo,
       });
       for (const hold of s.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId))
         if (hold.active && hold.ownerId === actor.requestId)
@@ -519,6 +567,9 @@ export function registerStoryboard(
               enum: [
                 "treatment",
                 "scene",
+                "sceneTitle",
+                "deleteScene",
+                "moveScene",
                 "addScene",
                 "shot",
                 "addShot",
@@ -534,6 +585,7 @@ export function registerStoryboard(
             sceneId: text,
             beforeId: text,
             commandId: text,
+            withShots: { type: "boolean" },
             field: text,
             value: { type: "string", maxLength: 16000 },
           },
