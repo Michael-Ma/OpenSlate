@@ -136,7 +136,7 @@ export class StudioStore {
    * Run one press with a stable request identity. A lost reply keeps the saved key and body, so the
    * next press of the same thing resends them and the server replays its receipt.
    */
-  async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg): Promise<T | undefined> {
+  async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg, timeoutMs?: number): Promise<T | undefined> {
     const keys = this.#keys;
     if (!keys || this.#state.pending[pressId]) return undefined;
     this.dispatch({ type: "pending", pressId, pending: true });
@@ -144,7 +144,7 @@ export class StudioStore {
       const saved = keys.saved(pressId);
       const sent = saved && saved.logical === canonicalJson(logical) ? saved : keys.begin(pressId, logical, await build());
       const { path: target, body } = sent.body as { path: string; body: unknown };
-      const result = await this.#deps.client.request<T>(target, { method: "POST", body, key: sent.key });
+      const result = await this.#deps.client.request<T>(target, { method: "POST", body, key: sent.key, ...(timeoutMs ? { timeoutMs } : {}) });
       keys.settle(pressId);
       if (toast) this.dispatch({ type: "toast", message: toast, tone: "info" });
       void this.refresh();
@@ -315,20 +315,22 @@ export class StudioStore {
   // ---- generic primitives for views (phase P5): views define their commands in their own model files ----
 
   /** GET a project-relative path (e.g. "/assets") or an absolute /api path. */
-  read<T>(relativeOrApiPath: string, signal?: AbortSignal): Promise<T> {
+  read<T>(relativeOrApiPath: string, options?: AbortSignal | { signal?: AbortSignal; timeoutMs?: number }): Promise<T> {
     const target = relativeOrApiPath.startsWith("/api/") ? relativeOrApiPath : path(this.#state.projectId ?? "", relativeOrApiPath);
-    return this.#deps.client.request<T>(target, signal ? { signal } : {});
+    const { signal, timeoutMs } = options instanceof AbortSignal ? { signal: options, timeoutMs: undefined } : options ?? {};
+    return this.#deps.client.request<T>(target, { ...(signal ? { signal } : {}), ...(timeoutMs ? { timeoutMs } : {}) });
   }
 
   /**
    * POST with request identity (see #press): one press id per control, a logical identity for resends,
    * and a builder for the path and body. Refreshes the studio afterwards. Errors become toasts.
    */
-  command<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }> | { path: string; body: unknown }, toast?: Msg): Promise<T | undefined> {
+  /** `timeoutMs` for slow commands (e.g. Codex setup checks take up to 90 s); the default is 15 s. */
+  command<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }> | { path: string; body: unknown }, toast?: Msg, options?: { timeoutMs?: number }): Promise<T | undefined> {
     return this.#press<T>(pressId, logical, async () => {
       const request = await build();
       return { path: request.path.startsWith("/api/") ? request.path : path(this.#state.projectId ?? "", request.path), body: request.body };
-    }, toast);
+    }, toast, options?.timeoutMs);
   }
 
   // ---- plain UI state ----------------------------------------------------------

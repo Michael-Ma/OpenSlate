@@ -26,6 +26,8 @@ export const director = {
   "director.picker.scenes": { en: "Scenes", zh: "场" },
   "director.picker.shots": { en: "Shots", zh: "镜头" },
   "director.picker.empty": { en: "No scene or shot matches “{query}”.", zh: "没有与“{query}”匹配的场或镜头。" },
+  "director.scope.film": { en: "Whole film", zh: "整部影片" },
+  "director.scope.no_film": { en: "No film open", zh: "未打开影片" },
   "director.target.scene": { en: "Scene {scene}", zh: "第 {scene} 场" },
   "director.target.shot": { en: "{shot}", zh: "{shot}" },
   "director.target.gone": { en: "Removed", zh: "已移除" },
