@@ -225,6 +225,14 @@ export const scenarios = [
         expect((await tab(page, view).getAttribute("aria-selected")) === "true", `${view} is not the selected tab`);
       }
       expect((await page.locator(".topbar [data-act='classic']").getAttribute("href")) === "?ui=classic&view=cut", "The classic link does not follow the view");
+      // While Film is still the stub, its panel names the view, links to the same view in the classic studio and
+      // goes back to Keyframes.
+      if (await page.locator("main.classic-view[data-view='film']").count()) {
+        expect((await text(page, ".classic-view h1")) === "Film", `The Film stub is titled ${JSON.stringify(await text(page, ".classic-view h1"))}`);
+        expect((await page.locator(".classic-view [data-act='open-classic']").getAttribute("href")) === "?ui=classic&view=cut", "The Film stub does not link to the classic Film view");
+        await page.locator(".classic-view [data-act='back-to-keyframes']").click();
+        await until(page, shown, (value) => value === "keyframes", "Back to Keyframes did not open Keyframes");
+      }
 
       // Keyboard: arrows move along the tabs, Enter opens one.
       await tab(page, "plan").click();
@@ -242,6 +250,8 @@ export const scenarios = [
       expect((await gear.getAttribute("aria-current")) === "page", "Settings is not marked as the current page");
       expect(await page.locator(".topbar [role='tab'][aria-selected='true']").count() === 0, "A tab stays selected on Settings");
       expect(await page.locator(".topbar [role='tab'][tabindex='0']").count() === 1, "The tab row is not in the focus order on Settings");
+      if (await page.locator("main.classic-view").count())
+        expect((await text(page, ".classic-view h1")) === "Settings", `The Settings stub is titled ${JSON.stringify(await text(page, ".classic-view h1"))}`);
       await shot(page, "next-shell-settings-1440");
 
       // The mark opens the films on this computer: no film is open there, so no tabs, counts or Stop.
@@ -258,8 +268,35 @@ export const scenarios = [
       expect(start.tabs === 0 && start.counts === 0, `Start still shows ${start.tabs} tabs and ${start.counts} counts`);
       expect(start.current === "page", "The mark is not marked as the current page on Start");
       expect(start.title === "OpenSlate", `Document title on Start is "${start.title}"`);
+      if (await page.locator("main.classic-view").count())
+        expect((await text(page, ".classic-view h1")) === "All films", `The Start stub is titled ${JSON.stringify(await text(page, ".classic-view h1"))}`);
+      // No film is open on Start, so the Director says it works inside a film and its composer is off.
+      const director = await page.evaluate(() => {
+        const column = document.getElementById("director");
+        const box = column.querySelector("[data-field='message']");
+        return {
+          film: column.getAttribute("data-film"),
+          scope: column.querySelector(".dir-head .scene")?.textContent,
+          says: column.querySelector("[data-entry='no-film']")?.textContent,
+          thread: column.querySelectorAll(".thread [data-entry]:not([data-entry='no-film']), .thread .note, .dir-question").length,
+          notices: column.querySelectorAll(".dir-notices").length,
+          box: { disabled: box?.disabled, placeholder: box?.placeholder },
+          send: column.querySelector("[data-act='send']")?.disabled,
+          at: column.querySelector("[data-act='at']")?.disabled,
+        };
+      });
+      expect(director.film === "none" && director.scope === "No film open", `The Director on Start reads ${JSON.stringify(director)}`);
+      expect(director.says === "The Director works inside a film. Open a film, or start a new one and choose “Talk to the Director” as its first step.", `The Director on Start says ${JSON.stringify(director.says)}`);
+      expect(director.thread === 0 && director.notices === 0, `The previous film's thread or notes show on Start: ${JSON.stringify(director)}`);
+      expect(director.box.disabled === true && director.box.placeholder === "Open a film to talk to the Director", `The composer on Start is ${JSON.stringify(director.box)}`);
+      expect(director.send === true && director.at === true, `Send or @ is on with no film open: ${JSON.stringify(director)}`);
       await noSidewaysScroll(page, "start");
       await shot(page, "next-shell-start-1440");
+
+      // Back in the film the thread and the composer return.
+      await openView(page, "keyframes");
+      await until(page, () => page.evaluate(() => document.getElementById("director").getAttribute("data-film")), (value) => value === "open", "The Director did not come back with the film");
+      expect(!(await page.locator("#director [data-field='message']").isDisabled()), "The composer stayed off in the film");
     },
   },
   {
@@ -306,6 +343,21 @@ export const scenarios = [
       expect(box && Math.abs(box.x - 414) < 2 && Math.abs(box.y - 62) < 2 && Math.abs(box.width - 1004) < 2, `The strip is not at the top of the workspace: ${JSON.stringify(box)}`);
       const continueColour = await page.locator("[data-act='continue-film']").evaluate((node) => getComputedStyle(node).backgroundColor);
       expect(continueColour === "rgb(236, 236, 238)", `Continue is not the white primary action: ${continueColour}`);
+      // Stop, the stopped strip and Continue are the shell's: the Director column does not repeat them, and its
+      // composer says the Director waits for Continue while Send stays on.
+      const repeats = await page.locator("#director [data-act='stop'], #director [data-act='continue'], #director .dir-banner, #director [data-act='stop-film'], #director [data-act='continue-film']").count();
+      expect(repeats === 0, `The Director column repeats ${repeats} of the shell's stop controls`);
+      expect((await text(page, "#director [data-hint]")) === "Stopped · the Director waits for Continue", `The composer hint reads ${JSON.stringify(await text(page, "#director [data-hint]"))}`);
+      await page.locator("#director [data-field='message']").fill("Keep the fog");
+      expect(!(await page.locator("#director [data-act='send']").isDisabled()), "Send is off while stopped");
+      await page.locator("#director [data-field='message']").fill("");
+      // New paid work waits for Continue and says so; free edits still save.
+      const regen = page.locator(".insp [data-act='regen']");
+      expect((await regen.isDisabled()) && (await regen.getAttribute("data-needs")) === "run" && (await regen.getAttribute("title")) === "The film is stopped. Continue first to start new work.", `A new take is not held while stopped: ${await regen.getAttribute("title")}`);
+      expect(!(await page.locator(".insp [data-act='edit-prompt']").isDisabled()), "Edit prompt is off while stopped");
+      // The sent clip finishes; then the scene's video says it waits for Continue.
+      await until(page, () => text(page, ".vpanel .why"), (value) => value === "Stopped. Continue to make video", "The Video panel does not say it is stopped", 10000);
+      expect(await page.locator(".vpanel .go").isDisabled(), "The Video panel's button is on while stopped");
       await noSidewaysScroll(page);
       const height = await page.evaluate(() => document.documentElement.scrollHeight);
       expect(height <= 900, `The stopped Keyframes view scrolls: ${height}px`);
@@ -323,6 +375,10 @@ export const scenarios = [
       await page.locator("[data-act='continue-film']").click();
       await page.waitForSelector(".film-strip-slot[data-strip='none']", { state: "attached" });
       await until(page, () => text(page, ".toast"), (value) => value.startsWith("Continued."), "No toast after Continue");
+      // The jobs Stop took off need a new confirm, with its price.
+      const confirm = await until(page, () => text(page, "[data-act='confirm-video']"), (value) => / · about \$\d/.test(value), "The Video panel does not offer a new confirm with its price after Continue");
+      expect(/^Confirm frames & .+ · about \$\d/.test(confirm) && !(await page.locator("[data-act='confirm-video']").isDisabled()), `The new confirm reads ${JSON.stringify(confirm)}`);
+      expect((await text(page, "#director [data-hint]")) === "a scene or shot to point at it", "The composer hint did not come back after Continue");
     },
   },
   {
@@ -363,7 +419,7 @@ export const scenarios = [
     viewport: { width: 1366, height: 900 },
     async run({ page }) {
       await ready(page);
-      for (const width of [1366, 1280, 1024, 900]) {
+      for (const width of [1440, 1366, 1280, 1024, 900]) {
         await page.setViewportSize({ width, height: 900 });
         const column = width < 1280 ? 320 : 392;
         for (const view of [...VIEWS, "settings", "start"]) {
@@ -383,6 +439,21 @@ export const scenarios = [
         await page.waitForSelector("main.work[data-view='keyframes'] .preview");
         const height = await page.evaluate(() => document.documentElement.scrollHeight);
         expect(height <= 900, `Keyframes scrolls the page at ${width}: ${height}px`);
+        const kf = await page.evaluate(() => {
+          const line = document.querySelector(".scene-head .line");
+          const cards = document.querySelector(".kf-row .cards");
+          return {
+            line: [line.scrollWidth, line.clientWidth, line.textContent],
+            scrolls: cards.scrollWidth > cards.clientWidth + 1,
+            mask: getComputedStyle(cards).maskImage || getComputedStyle(cards).webkitMaskImage || "none",
+            links: [...document.querySelectorAll(".card .callout .link")].map((link) => Math.round(link.getBoundingClientRect().height)),
+          };
+        });
+        // The scene's status is read in full: the scene pills wrap below it before it is cut.
+        expect(kf.line[0] <= kf.line[1], `The scene status is cut at ${width}: ${JSON.stringify(kf.line)}`);
+        // A row with cards out of view says so with a faded edge.
+        expect(!kf.scrolls || /gradient/.test(kf.mask), `The card row hides cards without a sign at ${width}: ${kf.mask}`);
+        expect(kf.links.every((h) => h <= 24), `A note's link wraps onto the picture at ${width}: ${kf.links}`);
         await shot(page, `next-shell-keyframes-${width}`);
       }
     },
@@ -452,8 +523,17 @@ export const scenarios = [
       await page.waitForSelector(".film-strip[data-strip='offline']", { timeout: 9000 });
       const offline = await text(page, ".film-strip[data-strip='offline'] .txt");
       expect(offline === "Can’t reach the studio. Changes can’t be saved and nothing can be made until it’s back. OpenSlate keeps trying by itself.", `The offline strip reads ${JSON.stringify(offline)}`);
+      // Every write is off and says why: edits, paid makes and confirms, and Send (the draft is kept).
+      const guarded = await page.evaluate(() => [...document.querySelectorAll("main.work [data-needs]")].map((node) => ({ act: node.getAttribute("data-act"), needs: node.getAttribute("data-needs"), disabled: node.disabled, title: node.getAttribute("title") })));
+      const why = "Can’t reach the studio. This works again once it’s back.";
+      expect(guarded.some((control) => control.needs === "run") && guarded.some((control) => control.act === "edit-prompt"), `Keyframes has no guarded paid or edit control: ${JSON.stringify(guarded)}`);
+      expect(guarded.every((control) => control.disabled && control.title === why), `A write stays on offline: ${JSON.stringify(guarded.filter((control) => !control.disabled || control.title !== why))}`);
+      expect((await text(page, "#director [data-hint]")) === "Offline · your draft is kept", `The composer hint reads ${JSON.stringify(await text(page, "#director [data-hint]"))}`);
+      await page.locator("#director [data-field='message']").fill("Keep the fog");
+      expect(await page.locator("#director [data-act='send']").isDisabled(), "Send is on while offline");
       await noSidewaysScroll(page);
       await shot(page, "next-shell-offline-1440");
+      await page.locator("#director [data-field='message']").fill("");
 
       await page.unroute(api);
       await page.unroute(events);
