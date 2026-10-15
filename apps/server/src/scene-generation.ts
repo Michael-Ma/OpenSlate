@@ -553,6 +553,9 @@ export async function generateScene(production: ProductionService, projectId: st
       );
       // Same-spec regeneration still needs a fresh, one-use human grant. Detaching inside
       // this transaction retains historical receipts and makes publication create that new candidate.
+      const retained = input.regenerate ? store.list<NodeBinding>("node_binding", projectId)
+        .filter(b => b.state === "active" && b.planId === captured.project.activePlanId && Object.keys(b.retainedTake?.outputs ?? b.outputs).length)
+        .map(b => b.retainedTake ? { ...b, candidateId: b.retainedTake.candidateId, outputs: b.retainedTake.outputs } : b) : [];
       if (input.regenerate)
         for (const row of selected) {
           if (!row.imageNodeId) continue;
@@ -581,6 +584,29 @@ export async function generateScene(production: ProductionService, projectId: st
         digest(captured.lock),
         input.kind,
       );
+      // Publication needs empty execution slots for fresh grants, but presentation keeps
+      // the exact previous take and dependent outputs until replacement success.
+      for (const old of retained) {
+        const current = store.get<NodeBinding>("node_binding", old.id);
+        if (!current || current.planId !== applied.activePlanId) continue;
+        if (current.node.specDigest !== old.node.specDigest) {
+          if (old.node.kind === "video" && selected.some(r => r.shotId === old.node.shotId))
+            store.put("node_binding", old.id, projectId, { ...current, retainedTake: { candidateId: old.candidateId, outputs: old.outputs } });
+          continue;
+        }
+        const replacing = selected.some(r => r.imageNodeId === old.id);
+        if (replacing) store.put("node_binding", old.id, projectId, { ...current,
+          retainedTake: { candidateId: old.candidateId, outputs: old.outputs } });
+        else if (!Object.keys(current.outputs).length) store.put("node_binding", old.id, projectId, {
+          ...current, candidateId: old.candidateId, outputs: old.outputs,
+        });
+      }
+      if (input.regenerate) for (const row of selected.filter(r => !r.imageNodeId && r.image)) {
+        const node = compiled.nodes.find(n => n.kind === "image" && n.shotId === row.shotId);
+        const current = node && store.get<NodeBinding>("node_binding", node.id);
+        if (current) store.put("node_binding", current.id, projectId, { ...current,
+          retainedTake: { candidateId: null, outputs: { image: row.image! } } });
+      }
       if (input.kind === "video") {
         const displayed = production.engine.reviewSnapshot(projectId),
           ids = compiled.nodes

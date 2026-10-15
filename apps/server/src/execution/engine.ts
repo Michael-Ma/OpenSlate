@@ -41,10 +41,12 @@ export interface NodeBinding {
   outdated?: { at: string; fields: string[]; previous: ArtifactRef };
   candidateId: string | null; state: "active" | "retired"; outputs: Record<string, ArtifactRef>;
   outdatedReason?: "stopped" | "released";
+  /** Display-only current take while its replacement candidate runs. Never execution input. */
+  retainedTake?: { candidateId: string | null; outputs: Record<string, ArtifactRef> };
 }
 /** A new current output resolves the edit metadata; historical artifacts stay immutable. */
 function bindingWithOutputs(binding: NodeBinding, outputs: NodeBinding["outputs"]): NodeBinding {
-  const { outdated: _outdated, ...current } = binding;
+  const { outdated: _outdated, retainedTake: _retained, ...current } = binding;
   return { ...current, outputs };
 }
 export type AttemptPhase = "submitting" | "preparing" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
@@ -202,7 +204,7 @@ export class Engine {
         }
         const reuse = same && !grantId && !deferred.has(node.id) && !Object.hasOwn(node.args, "localExecution");
         if (!reuse) replaced.add(node.id);
-        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {}, ...(old?.outdated && old.node.shotId === node.shotId && old.node.kind === node.kind && !(reuse && Object.keys(old.outputs).length) ? { outdated: old.outdated } : {}) };
+        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {}, ...(reuse && old.retainedTake ? { retainedTake: old.retainedTake } : {}), ...(old?.outdated && old.node.shotId === node.shotId && old.node.kind === node.kind && !(reuse && Object.keys(old.outputs).length) ? { outdated: old.outdated } : {}) };
         this.store.put("node_binding", node.id, projectId, binding); nodes.push(binding);
       }
       for (const binding of previous.values()) if (!seen.has(binding.id)) this.store.put("node_binding", binding.id, projectId, { ...binding, state: "retired" });
@@ -426,11 +428,11 @@ export class Engine {
     const project = this.store.getProject(projectId);
     return this.store.list<NodeBinding>("node_binding", projectId).filter(binding => binding.state === "active" && binding.planId === project.activePlanId)
       .filter(binding => !Object.hasOwn(binding.node.args, "localExecution") || this.localBindingCurrent(binding))
-      .flatMap(binding => Object.entries(binding.outputs).map(([port, artifact]) => {
+      .flatMap(binding => Object.entries(binding.retainedTake?.outputs ?? binding.outputs).map(([port, artifact]) => {
         const record = this.store.get<ArtifactRecord>("artifact", artifact.artifactId);
         invariant(record?.projectId === projectId && record.artifact.sha256 === artifact.sha256,
           "ARTIFACT_UNAVAILABLE", "Output lacks its owned artifact record");
-        return { nodeId: binding.id, candidateId: binding.candidateId, port, artifact, fixture: record.fixture };
+        return { nodeId: binding.id, candidateId: (binding.retainedTake ? binding.retainedTake.candidateId : binding.candidateId), port, artifact, fixture: record.fixture };
       }));
   }
 
@@ -796,6 +798,23 @@ export class Engine {
     const binding = this.store.get<NodeBinding>("node_binding", nodeId); const project = this.store.getProject(projectId);
     invariant(binding?.projectId === projectId && binding.state === "active" && binding.planId === project.activePlanId, "STALE_BINDING", "Node no longer belongs to the active plan"); return binding;
   }
+  /** Exact original operation and resolved inputs must match before Undo reattaches media. */
+  outputsMatchOperation(binding: NodeBinding, outputs: NodeBinding["outputs"]): boolean {
+    try {
+      const inputs = this.resolveInputs(binding.projectId, binding.node);
+      return Object.values(outputs).every(artifact => {
+        const record = this.store.get<ArtifactRecord>("artifact", artifact.artifactId);
+        const attempt = record?.attemptId ? this.store.get<Attempt>("attempt", record.attemptId) : undefined;
+        return attempt?.projectId === binding.projectId && attempt.phase === "succeeded" &&
+          attempt.specDigest === binding.node.specDigest && attempt.fingerprint === inputs.fingerprint &&
+          Object.values(attempt.outputs).some(a => canonical(a) === canonical(artifact));
+      });
+    } catch (error) { if (!(error instanceof DomainError)) throw error; return false; }
+  }
+  /** Trusted host take/Undo operations use the same immutable-byte verification as admission. */
+  verifyArtifact(projectId: string, artifact: ArtifactRef): ArtifactRef {
+    return this.resolveSource(projectId, { kind: "artifact", artifact }, true);
+  }
   private resolveSource(projectId: string, source: InputSource, verifyBytes = false): ArtifactRef {
     const binding = source.kind === "output" ? this.currentBinding(projectId, source.nodeId) : null;
     invariant(!binding || !Object.hasOwn(binding.node.args, "localExecution") || this.localBindingCurrent(binding),
@@ -829,7 +848,7 @@ export class Engine {
     invariant(node.args.prompt === (node.kind === "image" ? shot.imagePrompt : shot.videoPrompt), "STALE_PROMPT_INTENT", "Prompt no longer matches the current shot");
   }
   private held(project: ProjectRecord, nodeId: string): boolean {
-    if (this.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return true;
+    if (project.archived || this.store.get<{ paused: boolean }>("execution_control", project.id)?.paused) return true;
     const holds = this.store.list<Hold>("hold", project.id).filter(hold => hold.active);
     const visited = new Set<string>();
     const visit = (id: string): boolean => {
@@ -1185,14 +1204,36 @@ export class Engine {
               assertNarrationSpeechCurrent(this.store, project, binding.node, binding.candidateId, speechInput.resolved);
               assertPersonalVoiceCurrent(this.store, current.projectId, String(binding.node.args.voice), String(binding.node.args.adapter));
             }
-            if (this.resolveInputs(current.projectId, binding.node).fingerprint === current.fingerprint)
+            if (this.resolveInputs(current.projectId, binding.node).fingerprint === current.fingerprint) {
+              if (binding.retainedTake) this.outdateImageDependents(binding);
               this.store.put("node_binding", binding.id, binding.projectId, bindingWithOutputs(binding, mapped));
+            }
           } catch (error) { if (!(error instanceof DomainError)) throw error; }
         }
       }
       this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase: "succeeded" });
     });
   }
+  /** Replacement success is the only point at which a retained clip leaves use. */
+  outdateImageDependents(image: NodeBinding): void {
+    const bindings = this.store.list<NodeBinding>("node_binding", image.projectId).filter(b => b.state === "active" && b.planId === image.planId);
+    const affected = new Set([image.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const b of bindings) if (!affected.has(b.id) &&
+        (b.node.kind === "video" && b.node.shotId === image.node.shotId ||
+          b.node.inputs.some(i => i.source.kind === "output" && affected.has(i.source.nodeId)) || b.node.requires.some(id => affected.has(id)))) {
+        affected.add(b.id); grew = true;
+      }
+    }
+    for (const b of bindings.filter(b => b.id !== image.id && affected.has(b.id))) {
+      const { retainedTake: _retained, ...rest } = b;
+      const previous = Object.values(b.retainedTake?.outputs ?? b.outputs)[0] ?? b.outdated?.previous;
+      this.store.put("node_binding", b.id, b.projectId, { ...rest, candidateId: null, outputs: {},
+        ...(previous ? { outdated: { at: new Date().toISOString(), fields: ["keyframe"], previous } } : {}) });
+    }
+  }
+
   private recordIngestionIssue(attempt: Attempt, observedCode: string): void {
     this.store.transaction(() => {
       const current = this.owns(attempt);

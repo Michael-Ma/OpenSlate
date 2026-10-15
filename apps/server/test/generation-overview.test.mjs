@@ -88,7 +88,7 @@ test('Opened is durable, independent of editing and authority, resets after rege
   const noKey = await f.call('POST','/shots/shot-0/frame-views',body,null);
   assert.equal(noKey.statusCode,400); assert.equal(noKey.json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
   await ok(await f.post(await f.get(),'image',randomUUID(),{targetShotIds:['shot-0'],regenerate:true}));
-  assert.equal((await f.overview()).shots['shot-0'].keyframe.opened,false);
+  assert.equal((await f.overview()).shots['shot-0'].keyframe.opened,true, 'the retained current frame remains opened until replacement succeeds');
   await f.finish();
   const stale = await f.call('POST','/shots/shot-0/frame-views',body);
   assert.equal(stale.statusCode,409); assert.equal(stale.json().error.code,'FRAME_STALE');

@@ -1,3 +1,5 @@
+import { captureMediaUndo, type MediaUndo } from "./storyboard-history.js";
+import type { NodeBinding } from "./execution/engine.js";
 import type { FastifyInstance } from "fastify";
 import { digest, invariant, newId } from "@openslate/core";
 import type { NarrationFitInput, NarrationFitReceipt, ProjectRecord, ProviderProfile } from "@openslate/core";
@@ -14,7 +16,7 @@ export function narrationFitFrames(currentFrames: number, samples: number, profi
   invariant(frames >= Math.max(90, profile.minFrames ?? 90) && frames <= Math.min(450, profile.maxFrames ?? 450), "PROFILE_INCOMPATIBLE", "This voice line cannot fit the selected video model's duration range");
   return frames;
 }
-interface FitIntent { before: ProjectRecord; commandId: string; durationFrames: number; accept: AcceptShotAudio }
+interface FitIntent { undo: MediaUndo; before: ProjectRecord; commandId: string; durationFrames: number; accept: AcceptShotAudio }
 export async function fitNarration(runner: SceneConfirmationRunner, projectId: string, shotId: string, input: NarrationFitInput, key: string): Promise<NarrationFitReceipt> {
   const production = runner.production, store = production.store, ports = runner.audio;
   production.recovery.assertWritable(projectId);
@@ -28,6 +30,8 @@ export async function fitNarration(runner: SceneConfirmationRunner, projectId: s
     return { kind: "human", principalId: "local-user", requestId: session.requestId };
   } });
   const intent = store.command<FitIntent>(`${scope}:intent`, key, inputDigest, () => {
+    const undo = captureMediaUndo(production, projectId);
+    undo.canonicalId = store.get<{ canonicalId: string }>("narration_canonical_head", projectId)?.canonicalId ?? null;
     const before = store.getProject(projectId), shot = before.shots.find(s => s.id === shotId);
     invariant(shot, "NOT_FOUND", "Choose a shot in this film");
     invariant(before.headVersion === input.expectedHeadVersion, "REVISION_CONFLICT", "Reload the shot before choosing a narration fit");
@@ -39,10 +43,12 @@ export async function fitNarration(runner: SceneConfirmationRunner, projectId: s
     invariant(profile, "PROFILE_INCOMPATIBLE", "Choose a video model");
     const samples = segment.audio.media.probe.audio?.samples ?? 0;
     const durationFrames = narrationFitFrames(shot.desiredFrames, samples, profile, input.fit);
+    undo.bindings = store.list<NodeBinding>("node_binding", projectId).filter(b => b.state === "active" && b.planId === before.activePlanId &&
+      (b.node.shotId === shotId || ["timeline", "render"].includes(b.node.kind)));
     if (durationFrames !== shot.desiredFrames) editStoryboard(production, projectId, { kind: "shot", id: shotId, field: "desiredFrames", value: String(durationFrames), expectedHeadVersion: before.headVersion }, digest({ key, action: "extend" }));
     const previous = store.get<{ sessionId: string }>("narration_shot_session_head", shotSessionHeadId(projectId, shotId));
     const session = createShotNarrationSession(production, projectId, shotId, digest({ key, action: "fit-session" }), previous?.sessionId, true);
-    return { before, commandId: newId(), durationFrames, accept: { sessionId: session.id, expectedHeadVersion: store.getProject(projectId).headVersion,
+    return { undo, before, commandId: newId(), durationFrames, accept: { sessionId: session.id, expectedHeadVersion: store.getProject(projectId).headVersion,
       expectedVersion: detail.narrationVersion, segmentId: segment.entry.segmentId, segmentRevisionId: segment.script.id,
       audioId: segment.audio.id, sha256: segment.audio.media.sha256, startSample: 0,
       endSample: input.fit === "cut_to_shot" ? Math.min(samples, durationFrames * 1600) : samples, durationMode: "keep" } };
@@ -56,7 +62,7 @@ export async function fitNarration(runner: SceneConfirmationRunner, projectId: s
     const saved = store.saveProject({ ...project, revisionId: newId() }, project.headVersion);
     store.insert("project_revision", saved.revisionId, projectId, { project: saved });
     store.insert("storyboard_edit", intent.commandId, projectId, { id: intent.commandId, before: intent.before, headVersion: saved.headVersion,
-      requestId: workspace.actorForShot(projectId, intent.accept.sessionId, shotId).requestId });
+      requestId: workspace.actorForShot(projectId, intent.accept.sessionId, shotId).requestId, undo: intent.undo });
     store.appendEvent(projectId, "storyboard.edited", { commandId: intent.commandId, kind: "narration-fit", shotId, fit: input.fit });
     return { shotId, fit: input.fit, durationFrames: intent.durationFrames, commandId: intent.commandId };
   });

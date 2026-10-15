@@ -1,3 +1,4 @@
+import { keyframeTakeHistory } from "./keyframe-take-history.js";
 import { openBlockingNotes } from "./application/director-notes.js";
 import { confirmationView, type SceneConfirmationRecord } from "./scene-confirmations.js";
 import type { FastifyInstance } from "fastify";
@@ -12,8 +13,9 @@ import { sceneView, sceneGenerationView } from "./scene-generation.js";
 import { generationTargets } from "./scene-row.js";
 import { quote } from "./generation-quotes.js";
 
-/** Until scenes have their own title, keep the fallback in one place. */
-export function sceneTitle(purpose: string): string {
+/** Existing scenes retain their purpose-derived label until named. */
+export function sceneTitle(purpose: string, title?: string): string {
+  if (title?.trim()) return title.trim();
   return purpose.trim().match(/^[\s\S]*?(?:[。！？]|[.!?](?=\s|$)|\n|$)/u)?.[0]?.trim() || purpose.trim();
 }
 const ref = (artifact: ArtifactRef): StudioArtifactRef => ({ artifactId: artifact.artifactId, sha256: artifact.sha256, kind: artifact.kind as StudioArtifactRef["kind"] });
@@ -45,6 +47,7 @@ export class GenerationOverviewReader {
       const plan = project.activePlanId ? store.get<PlanRecord>("plan", project.activePlanId)?.compiled ?? null : null;
       const review = plan?.gates.length ? this.production.engine.inspectReview(projectId) : null;
       const bindings = store.list<NodeBinding>("node_binding", projectId), events = store.readEvents(projectId);
+      const takeHistory = { attempts: snapshot.attempts, bindings, plans: store.list<PlanRecord>("plan", projectId) };
       const views = store.list<{ principal: string; shotId: string; artifactId: string; sha256: string }>("frame_view", projectId);
       const turns = store.list<DirectorTurn>("director_turn", projectId);
       const turn = turns.filter(t => ["running", "queued", "waiting_user"].includes(t.state) && snapshot.messages.some(m => m.id === t.requestId && m.state === "active")).at(-1);
@@ -72,7 +75,8 @@ export class GenerationOverviewReader {
             const nodes = plan?.nodes.filter(n => n.kind === kind && n.shotId === shot.id) ?? [];
             const binding = bindings.find(b => b.id === nodes[0]?.id && b.state === "active" && b.planId === project.activePlanId);
             const history = snapshot.attempts.filter(a => bindings.some(b => b.id === a.nodeId && b.node.shotId === shot.id && b.node.kind === kind));
-            const artifacts = history.flatMap(a => Object.values(a.outputs)).filter(a => a.kind === kind);
+            const artifacts = kind === "image" ? keyframeTakeHistory(this.production, projectId, shot.id, takeHistory).map(t => t.artifact).reverse()
+              : history.flatMap(a => Object.values(a.outputs)).filter(a => a.kind === kind);
             const output = kind === "image" ? row.image : snapshot.outputs.find(o => o.nodeId === row.videoNodeId && o.artifact.kind === "video")?.artifact;
             const current = kind === "image" ? row.imageComplete : row.videoComplete;
             const previous = binding?.outdated?.previous ?? artifacts.at(-1);
@@ -140,7 +144,7 @@ export class GenerationOverviewReader {
         const commonRegenerationQuote = regenerationQuotes.length && regenerationQuotes.every(q => canonical(q) === canonical(regenerationQuotes[0])) ? regenerationQuotes[0] : undefined;
         const confirmation = store.list<SceneConfirmationRecord>("scene_confirmation", projectId).filter(r => r.sceneId === scene.id && r.kind === "video").at(-1);
         if (confirmation?.state === "running") blockers.push({ code: "confirmation_running" });
-        overview.scenes.push({ sceneId: scene.id, ordinal: index + 1, title: sceneTitle(scene.purpose), purpose: scene.purpose,
+        overview.scenes.push({ sceneId: scene.id, ordinal: index + 1, title: sceneTitle(scene.purpose, scene.title), purpose: scene.purpose,
           state: attention ? "needs_attention" : shots.length && counts.videosReady === shots.length ? "video_saved" : shots.some(s => ["running", "queued"].includes(s.video.state)) ? "making_video" : shots.length && counts.keyframesReady === shots.length ? "keyframes_back" : counts.keyframesReady ? "keyframes_partial" : "not_started",
           shotIds: rows.map(r => r.shotId), counts,
           videoTargets: generationTargets(rows, "video").map(r => r.shotId), keyframeTargets: generationTargets(rows, "image").map(r => r.shotId),
