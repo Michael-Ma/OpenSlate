@@ -36,6 +36,10 @@ for (const fit of ['extend_shot', 'cut_to_shot']) test(`${fit} accepts exact nar
   const undone = f.store.getProject(project.id).shots[0];
   assert.equal(undone.desiredFrames, 180); assert.equal(undone.narrationFit, undefined); assert.equal(undone.narrationPending, true);
   assert.equal((await f.overview()).shots['shot-0'].narration.fits, false);
+  assert.equal(undone.cueId, project.shots[0].cueId);
+  assert.deepEqual(f.store.getProject(project.id).cues, project.cues);
+  assert.deepEqual(f.canonical.workspaceCurrent(project.id).segments, []);
+  assert.deepEqual((await f.overview()).shots['shot-0'].keyframe.artifact, before.shots['shot-0'].keyframe.artifact);
 });
 
 test('fit rejects missing voice, stale version, invalid choice and absent command identity without changes', async t => {
@@ -49,4 +53,18 @@ test('fit rejects missing voice, stale version, invalid choice and absent comman
     const r = await f.call('POST', '/shots/shot-0/narration-fit', body, key); assert.equal(r.json().error.code, code, r.body);
     assert.equal(f.store.cursor(f.project.id), before);
   }
+});
+
+test('undo a second fit re-commits the previous accepted cue and exact canonical projection', async t => {
+  const f = await confirmationFixture(t, { seconds: 7.4 }); await f.make(); await f.tick(12);
+  await f.call('POST', '/shots/shot-0/narration-fit', { fit: 'cut_to_shot', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  const before = f.store.getProject(f.project.id), canonical = f.canonical.workspaceCurrent(f.project.id);
+  const receipt = await f.call('POST', '/shots/shot-0/narration-fit', { fit: 'extend_shot', expectedHeadVersion: before.headVersion }).then(f.ok);
+  assert.equal(f.store.getProject(f.project.id).shots[0].desiredFrames, 240);
+  await f.call('POST', '/storyboard', { kind: 'undo', commandId: receipt.commandId, expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  const after = f.store.getProject(f.project.id), restored = f.canonical.workspaceCurrent(f.project.id);
+  assert.equal(after.shots[0].desiredFrames, 180); assert.equal(after.shots[0].cueId, before.shots[0].cueId);
+  assert.deepEqual(after.cues, before.cues); assert.deepEqual(restored.segments, canonical.segments);
+  assert.deepEqual(restored.shotMappings, canonical.shotMappings); assert.notEqual(restored.id, canonical.id);
+  assert.equal(restored.headVersion, after.headVersion); assert.equal(f.calls.speech, 1);
 });

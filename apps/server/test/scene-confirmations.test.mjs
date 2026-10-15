@@ -231,3 +231,32 @@ test('same-spec frame replacement fences an already queued voice before dispatch
   assert.equal(f.calls.speech, 0);
   assert.equal((await f.overview()).scenes[0].confirmation.blocker.code, 'SCENE_REVIEW_STALE');
 });
+
+test('open blocking Director note refuses confirmation before any voice attempt, grant or record', async t => {
+  const { recordNotes } = await import('../dist/application/director-notes.js');
+  const f = await confirmationFixture(t, { modes: ['none'] }); await f.make(); await f.tick(4);
+  await f.call('POST', '/storyboard', { kind: 'narration', id: 'shot-0', field: 'mode', value: 'generated', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  await f.call('POST', '/storyboard', { kind: 'narration', id: 'shot-0', field: 'text', value: 'A voice line still to buy.', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  const human = f.production.beginRequest(f.project.id, 'local-user', 'Review the scene', { editing: false, scopeIds: ['scene-0'] });
+  const epoch = f.production.openEpoch(f.project.id, human), turnId = randomUUID();
+  f.store.insert('director_turn', turnId, f.project.id, { id: turnId, projectId: f.project.id, requestId: human.requestId, epochId: epoch.actor.epochId, state: 'completed' });
+  recordNotes(f.production, f.project.id, epoch.actor, randomUUID(), { notes: [{ anchor: { shotIds: ['shot-0'] }, kind: 'recommendation', blocking: true,
+    text: 'Review the opening before making clips.', choices: [{ kind: 'accept', label: 'Keep the opening' }] }] });
+  await f.openFrames();
+  const body = await f.confirmBody(), grants = f.store.list('grant', f.project.id), records = f.store.list('scene_confirmation', f.project.id), cursor = f.store.cursor(f.project.id);
+  const response = await f.call('POST', '/scenes/scene-0/confirm', body);
+  assert.equal(response.json().error.code, 'RECOMMENDATION_OPEN', response.body);
+  await f.tick(3);
+  assert.equal(f.calls.speech, 0); assert.ok(!f.engine.attempts(f.project.id).some(a => a.request.kind === 'speech'));
+  assert.deepEqual(f.store.list('grant', f.project.id), grants); assert.deepEqual(f.store.list('scene_confirmation', f.project.id), records);
+  assert.equal(f.store.cursor(f.project.id), cursor);
+});
+
+test('server-owned voice writing derives Chinese language from CJK text', async t => {
+  const f = await confirmationFixture(t, { modes: ['generated'] });
+  await f.call('POST', '/storyboard', { kind: 'narration', id: 'shot-0', field: 'text', value: '最后一班渡轮驶向灯火。', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  await f.make(); await f.tick(12);
+  const segment = f.narration.workspaceSnapshot(f.project.id).segments[0];
+  assert.equal(segment.script.language, 'zh'); assert.equal(segment.script.text, '最后一班渡轮驶向灯火。');
+  assert.equal(f.calls.speech, 1); assert.equal(f.store.getProject(f.project.id).shots[0].narrationPending, false);
+});

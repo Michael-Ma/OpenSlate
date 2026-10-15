@@ -103,7 +103,7 @@ export function sceneRow(shot: ShotRecord, context: {
   const frame =
     imageTarget && !imageOutput
       ? null
-      : (retainedFrame ?? imageOutput?.artifact ?? null);
+      : (imageOutput?.artifact ?? retainedFrame ?? null);
   const frameNodeId =
     retainedFrame && firstFrame?.kind === "output"
       ? firstFrame.nodeId
@@ -165,7 +165,7 @@ export function sceneRow(shot: ShotRecord, context: {
     narrationPending: !timing.ready,
     imagePending:
       active.some((a) => a.nodeId === imageTarget?.id) ||
-      (!imageOutput && candidatePending(imageTarget?.id)),
+      ((!imageOutput || !!bindings.find(b => b.id === imageTarget?.id)?.retainedTake) && candidatePending(imageTarget?.id)),
     videoPending:
       active.some((a) => a.nodeId === videoTarget?.id) ||
       (!videoComplete &&

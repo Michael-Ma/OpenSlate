@@ -1,3 +1,4 @@
+import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, type MediaUndo } from "./storyboard-history.js";
 import type { FastifyInstance } from "fastify";
 import { digest, DomainError, invariant, newId, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
@@ -30,6 +31,8 @@ type SavedEdit = {
   before: ProjectRecord;
   headVersion: number;
   requestId: string;
+  input?: Edit;
+  undo?: MediaUndo;
 };
 const text = { type: "string", minLength: 1, maxLength: 160 };
 /** A direct edit is ordinary writing. Preserve independent prompt details while applying the human's changed direction. */
@@ -85,6 +88,8 @@ export function editStoryboard(
         "IMPORT_PENDING",
         "Confirm or discard the imported plan before editing.",
       );
+      const undo = captureMediaUndo(s, projectId);
+      let undoing: SavedEdit | undefined;
       let next = structuredClone(before);
       const changed = new Set<string>();
       let global = false;
@@ -351,13 +356,11 @@ export function editStoryboard(
           "storyboard_edit",
           input.commandId ?? "",
         );
-        invariant(
-          saved &&
-            saved.before.id === projectId &&
-            saved.headVersion === before.headVersion,
-          "REVISION_CONFLICT",
-          "Only the latest unchanged edit can be undone.",
-        );
+        invariant(saved?.before.id === projectId, "UNDO_UNAVAILABLE", "This storyboard command is unavailable.");
+        assertUndoUnused(s, projectId, saved.undo);
+        invariant(saved.headVersion === before.headVersion && s.store.list<SavedEdit>("storyboard_edit", projectId).at(-1)?.id === saved.id && saved.input?.kind !== "undo",
+          "UNDO_UNAVAILABLE", "Only the latest unchanged command can be undone.");
+        undoing = saved;
         next = {
           ...structuredClone(saved.before),
           headVersion: before.headVersion,
@@ -404,6 +407,7 @@ export function editStoryboard(
           shotIntentDigest(current, kind, next.cues.find(cue => cue.id === current.cueId));
       };
       const changedTiming = new Set(next.shots.filter(row => intentChanged(row.id, "video")).map(row => row.id));
+      const effectiveInput = undoing?.input ?? input;
       const affected = new Set(
         bindings
           .filter(
@@ -416,22 +420,22 @@ export function editStoryboard(
                 (next.brief !== before.brief || next.story !== before.story)) ||
               (input.kind !== "treatment" && input.kind !== "scene" && changed.has(x.node.shotId ?? "") &&
                 !(
-                  input.kind === "narration" &&
+                  effectiveInput.kind === "narration" &&
                   (x.node.kind === "image" ||
                     (x.node.kind === "video" &&
                       !changedTiming.has(x.node.shotId ?? "")))
                 ) &&
                 !(
-                  input.kind === "shot" &&
+                  effectiveInput.kind === "shot" &&
                   ["motion", "desiredFrames", "videoPrompt"].includes(
-                    input.field ?? "",
+                    effectiveInput.field ?? "",
                   ) &&
                   x.node.kind === "image"
                 ) &&
                 !(
-                  input.kind === "shot" &&
+                  effectiveInput.kind === "shot" &&
                   ["imagePrompt", "videoPrompt", "action"].includes(
-                    input.field ?? "",
+                    effectiveInput.field ?? "",
                   ) &&
                   !["image", "video"].includes(x.node.kind)
                 )),
@@ -459,9 +463,11 @@ export function editStoryboard(
       if (!holdFree)
         for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
           s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });
-      for (const b of bindings.filter((x) => affected.has(x.id)))
+      undo.bindings = bindings.filter(x => affected.has(x.id));
+      for (const b of undo.bindings) {
+        const { retainedTake: _retained, ...detached } = b;
         s.store.put("node_binding", b.id, projectId, {
-          ...b,
+          ...detached,
           candidateId: null,
           outputs: {},
           ...(Object.values(b.outputs)[0] || b.outdated ? { outdated: {
@@ -470,6 +476,7 @@ export function editStoryboard(
             previous: Object.values(b.outputs)[0] ?? b.outdated!.previous,
           } } : {}),
         });
+      }
       // Existing in-flight attempts retain their durable receipts and cannot publish into detached candidates.
       next = s.store.saveProject(
         { ...next, revisionId: newId() },
@@ -478,12 +485,18 @@ export function editStoryboard(
       s.store.insert("project_revision", next.revisionId, projectId, {
         project: next,
       });
+      if (undoing) {
+        restoreMediaUndo(s, next, undoing.undo);
+        if (undoing.undo) restoreCanonicalUndo(s, next, actor.requestId, undoing.undo);
+      }
       const id = newId();
       s.store.insert("storyboard_edit", id, projectId, {
         id,
         before,
         headVersion: next.headVersion,
         requestId: actor.requestId,
+        input,
+        undo,
       });
       for (const hold of s.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId))
         if (hold.active && hold.ownerId === actor.requestId)

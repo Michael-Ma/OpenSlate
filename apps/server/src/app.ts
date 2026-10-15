@@ -1,3 +1,4 @@
+import { registerShotTakes } from "./shot-takes.js";
 import { registerDirectorNotes } from "./application/director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { SceneConfirmationRunner, registerSceneConfirmations } from "./scene-confirmations.js";
@@ -113,6 +114,7 @@ export function createApp(options: AppOptions = {}) {
   });
   registerPlanImports(app, service, options.director);
   registerStoryboard(app, service);
+  registerShotTakes(app, service);
   app.get<{ Reply: HealthResponse }>("/api/health", async () => ({ name: APP_NAME, status: "ok", stage: "foundation" }));
   options.webAssets?.register(app);
   if (options.studioSessions) registerStudioSessions(app, options.studioSessions, () => {
