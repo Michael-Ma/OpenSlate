@@ -362,7 +362,8 @@ test('chat stop and continuation retries never override newer human intent or mu
   error(stale,409,'STOP_CHANGED');
   assert.deepEqual(f.engine.attempts(f.project.id),attemptsBefore);
   const holds=f.service.snapshot(f.project.id).holds.filter(h=>h.active);
-  assert.equal(holds.length,1);assert.equal(holds[0].ownerId,follow.json().requestId);
+  assert.deepEqual(holds,[], 'the second Stop retires the superseded follow-up holds');
+  assert.equal(f.store.get('message',follow.json().requestId).state,'superseded');
 });
 
 test('stopped continuation is project-wide and cannot be smuggled through a review reply',async t=>{

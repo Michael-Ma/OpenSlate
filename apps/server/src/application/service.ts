@@ -2,6 +2,7 @@ import { directorTurnViews } from "./director-turn-view.js";
 import { rebaseCreativeDraft } from "./creative-rebase.js";
 import { recordHumanFields, assertNoHumanFieldConflict } from "./human-fields.js";
 import { directorNotes } from "./director-notes.js";
+import { rebaseProposal, type ProposalRecord } from "./director-proposals.js";
 import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
@@ -137,10 +138,12 @@ export class ProductionService {
       if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
       const request: RequestRecord = { source: options.source ?? "user", ...(options.concurrency ? { concurrency: options.concurrency } : {}), id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
+      const supersededRequestIds = new Set<string>();
       // A fresh user message also ends application-only reviews, including discuss-only messages.
       if (request.source === "user") for (const review of this.store.list<RequestRecord>("message", projectId)) {
         if (review.state !== "active" || !this.store.get("keyframe_review_request", review.id)) continue;
         this.store.put("message", review.id, projectId, { ...review, state: "superseded" });
+        supersededRequestIds.add(review.id);
         for (const epoch of this.store.list<Epoch>("epoch", projectId).filter(e => e.requestId === review.id && e.state !== "revoked")) this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
       }
       // Direct writes fence stale prepared changes by headVersion without ending a Director turn.
@@ -148,8 +151,10 @@ export class ProductionService {
       if (options.editing !== false) {
         if (options.concurrency !== "alongside") {
           for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active"
-            && (!options.supersede || requestScopesIntersect(project, scopeIds, prior.scopeIds)))
+            && (!options.supersede || requestScopesIntersect(project, scopeIds, prior.scopeIds))) {
             this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+            supersededRequestIds.add(prior.id);
+          }
           for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked"
             && (!options.supersede || requestScopesIntersect(project, scopeIds, epoch.scopeIds)))
             this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
@@ -176,10 +181,14 @@ export class ProductionService {
           this.engine.releaseHold(projectId, hold.id, prior.id); owners.add(prior.id);
         }
         for (const fromRequestId of owners) this.store.insert("request_continuation", newId(), projectId, { fromRequestId, toRequestId: request.id });
-        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.state === "active")
+        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.state === "active") {
           this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+          supersededRequestIds.add(prior.id);
+        }
         this.engine.setPaused(projectId, false, request.id);
       }
+      // Validate explicit continuation against the original holds before retiring superseded owners.
+      for (const requestId of supersededRequestIds) this.releaseOwnedRequestHolds(projectId, requestId);
       this.store.appendEvent(projectId, "message.recorded", { requestId: request.id, text, editing: options.editing ?? true });
       return { kind: "human", principalId, requestId: request.id };
     });
@@ -602,6 +611,51 @@ export class ProductionService {
     });
   }
 
+  private releaseOwnedRequestHolds(projectId: string, requestId: string): number {
+    const request = this.store.get<RequestRecord>("message", requestId);
+    invariant(request?.projectId === projectId, "ACTOR_DENIED", "Edit holds belong to another project");
+    const holds = this.store.list<Hold>("hold", projectId).filter(hold => hold.active && hold.ownerId === requestId);
+    for (const hold of holds) this.engine.releaseHold(projectId, hold.id, requestId);
+    return holds.length;
+  }
+
+  /** Terminal reasoning alone is not an unfinished edit. Retain exact pending work for human review. */
+  releaseFinishedRequestHolds(projectId: string, requestId: string): void {
+    this.store.transaction(() => {
+      const request = this.store.get<RequestRecord>("message", requestId);
+      invariant(request?.projectId === projectId, "ACTOR_DENIED", "Edit holds belong to another project");
+      if (!this.store.list<Hold>("hold", projectId).some(hold => hold.active && hold.ownerId === requestId)) return;
+      if (request.state !== "superseded") {
+        const turns = this.store.list<{ requestId: string; state: string }>("director_turn", projectId).filter(turn => turn.requestId === requestId);
+        if (!turns.length || turns.some(turn => ["queued", "running", "waiting_user"].includes(turn.state))) return;
+        const project = this.store.getProject(projectId);
+        if (this.store.list<ProposalRecord>("director_proposal", projectId).some(proposal => proposal.requestId === requestId && rebaseProposal(project, proposal).state === "held")) return;
+        const applied = new Set(this.store.readEvents(projectId).filter(event => event.kind === "change.applied").map(event => event.payload.preparedId));
+        if (this.store.list<Prepared>("prepared", projectId).some(prepared => prepared.requestId === requestId && !applied.has(prepared.id))) return;
+      }
+      this.releaseOwnedRequestHolds(projectId, requestId);
+    });
+  }
+
+  /** Authenticated human abandonment fences only this request before releasing its holds. */
+  releaseRequestHolds(projectId: string, requestId: string, key: string, principalId = "local-user") {
+    this.recovery.assertWritable(projectId);
+    return this.store.command(`${principalId}:${projectId}:release-holds`, key, digest({ requestId }), () => {
+      this.store.getProject(projectId);
+      const request = this.store.get<RequestRecord>("message", requestId);
+      invariant(request?.projectId === projectId, "NOT_FOUND", "Choose an edit in this project");
+      invariant(request.principalId === principalId, "ACTOR_DENIED", "This edit belongs to another person");
+      invariant(!this.store.list<{ requestId: string; state: string }>("director_turn", projectId).some(turn => turn.requestId === requestId && ["queued", "running"].includes(turn.state)),
+        "DIRECTOR_WORKING", "Wait for the Director to finish this edit or stop it first");
+      this.store.put("message", requestId, projectId, { ...request, state: "superseded" });
+      for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.requestId === requestId && epoch.state !== "revoked")
+        this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+      const receipt = { requestId, releasedHolds: this.releaseOwnedRequestHolds(projectId, requestId) };
+      this.store.appendEvent(projectId, "request.holds_released", receipt);
+      return receipt;
+    });
+  }
+
   releaseAlongsideHolds(projectId: string, actor: ActorContext): void {
     this.assertActor(projectId, actor, true);
     invariant(this.request(projectId, actor).concurrency === "alongside", "ACTOR_DENIED", "Only release this alongside request's holds");
@@ -758,8 +812,10 @@ export class ProductionService {
         invariant((this.store.get<{ authorityId: string }>("execution_control", projectId)?.authorityId ?? null) === expectedAuthorityId,
           "STOP_CHANGED", "The stop state changed. Refresh before continuing.");
       if (action === "stop") {
-        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== actor.requestId && prior.state === "active")
+        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== actor.requestId && prior.state === "active") {
           this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+          this.releaseOwnedRequestHolds(projectId, prior.id);
+        }
         for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked")
           this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
         const stopped: StopView = { stopId: actor.requestId, at: new Date().toISOString(), ...this.engine.detachUnsent(projectId, actor.requestId) };

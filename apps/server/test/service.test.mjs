@@ -133,9 +133,9 @@ test('project-only semantic changes keep old execution held until that request s
   await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 1);
 });
 
-test('a later request cannot release a previous hold without explicit human continuation', async t => {
+test('an alongside request cannot release a previous active hold without explicit human continuation', async t => {
   const f = await withShot(t);
-  const newer = f.service.beginRequest(f.project.id,'human','A separate edit');
+  const newer = f.service.beginRequest(f.project.id,'human','A separate edit',{concurrency:'alongside'});
   f.service.authorize(f.project.id,newer,[{scopeId:f.shot.id,kind:'image'}],'newslot');
   const actor = f.service.openEpoch(f.project.id,newer).actor;
   const prep = await f.service.prepare(f.project.id,actor,{variant:'plan',expectedHeadVersion:f.project.headVersion,source:source(f.project)});

@@ -1,6 +1,16 @@
 # Current implementation status
 
-Reconciled October 15, 2026 (B12 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 15, 2026 (B13 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 15 classic UI server parity — B13 verified
+
+Resolved terminal Director turns and superseded requests release their own holds; pending preparations, questions and valid held proposals remain protected. A keyed human release route fences the named request, refuses queued/running Director work and leaves other owners alone. Overview waits identify their owner and clear stale held-state projections. Quarantined restorations expose the next studio's inspection reads, including narration playback/audio and settings, while writes remain refused; local preparation counts always include numeric zero.
+
+One raw recording route imports and attaches shot narration, automatically accepts a fitting measured take, and leaves an overlong take pending for free narration-fit. It runs alongside the Director with one durable replay identity and one narration/draft/media-restoring Undo. Async import/acceptance tests protect later edits and paid results that finish during either window. Per-shot stock voice selectors drive new lines and survive queued work/restart; a small authenticated voice read works without media setup. Cross-scene move tests verify the existing route preserves paid frames/clips and invalidates only assembly state.
+
+Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed setup/preflight without a download. Final `pnpm build` passed; all **302 tests across the 19 touched test files passed**, with zero failures/skips/todo. Final `pnpm test` passed **3,020 tests, zero failures and one optional native-probe skip (3,021 total)**. All five package typechecks passed. The offline restart/edit proof also passed: four initial fake accepts plus two scoped replacements, zero duplicates after restart, and the untouched shot preserved.
+
+No web source, `studio-api.ts`, DDL, frozen catalog or skill package changed. Existing hold tests were updated for supersede retirement while preserving active-owner, rollback, grant-scope, unknown-outcome and stale-write checks. Validation used disposable state, synthetic audio and fake transports. No real model/provider call, credential read, external network request, production-state access/restart or port 3001 listener occurred. All changes remain uncommitted for lead review, as the card rules require. [B13 scope, complete inventory, decisions and proposed commits](../ai/uiux-plan/codex/reports/B13-parity.md).
 
 ## October 15 P5 server follow-ups — B12 component verified; full gate has unchanged web failures
 

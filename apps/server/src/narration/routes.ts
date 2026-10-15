@@ -22,6 +22,7 @@ import { registerNarrationSpeechRoutes } from "./narration-speech-routes.js";
 import { assertNarrationAuthority, shotSessionHeadId } from './narration-scope.js';
 import type { NarrationSession } from './narration-scope.js';
 import { registerAudioLibraryRoutes } from './audio-library-routes.js';
+import { registerShotRecordingRoutes } from './shot-recording-routes.js';
 
 type Session = NarrationSession;
 interface Params { projectId: string }
@@ -84,6 +85,7 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
     registerOwnedTranscriptionRoutes(scoped, { production, narration, ownedTranscription: options.ownedTranscription, actorFor });
     // Authentication inherited from createApp runs before a handler consumes this stream.
     scoped.addContentTypeParser("application/octet-stream", (_request, payload, done) => done(null, payload));
+    registerShotRecordingRoutes(scoped, { production, narration, canonical, actorFor, uploads });
     registerAudioLibraryRoutes(scoped, { production, narration, uploads });
     scoped.get<{ Params: Params; Querystring: { audioOffset?: string } }>(base, { schema: { querystring: object({ audioOffset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" } }, []) } }, async request => view(request.params.projectId, Number(request.query.audioOffset ?? 0)));
     scoped.get<{ Params: Params; Querystring: { offset?: string; expectedDigest?: string } }>(`${base}/generated-recordings`, {

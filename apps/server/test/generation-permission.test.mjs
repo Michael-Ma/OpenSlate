@@ -43,7 +43,8 @@ test('explicit continuation transfers the selected earlier edit, while a directo
 });
 
 test('reviewed plural continuation transfers all covering edits with grants limited to the selected shots', async t => {
- const f=fixture(t), a=f.service.beginRequest(f.projectId,'local-user','First pending edit',{scopeIds:[f.projectId]}), b=f.service.beginRequest(f.projectId,'local-user','Second pending edit',{scopeIds:['shot-0']});
+ const f=fixture(t), a=f.service.beginRequest(f.projectId,'local-user','First pending edit',{scopeIds:[f.projectId]}), b=f.service.beginRequest(f.projectId,'local-user','Second pending edit',{scopeIds:['shot-0'],concurrency:'alongside'});
+ assert.equal(f.store.get('message',a.requestId).state,'active');assert.equal(f.store.get('message',b.requestId).state,'active');
  const snapshot=f.service.snapshot(f.projectId), continueEdits=f.service.pendingEditContinuation(f.projectId,'local-user',[f.projectId]);
  const body={...f.body,cursor:snapshot.cursor,continueEdits,continuationScope:'project'};
  const response=await f.post(body);assert.equal(response.statusCode,200,response.body); const result=response.json();

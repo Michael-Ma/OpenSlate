@@ -1,5 +1,6 @@
 import { recordHumanFields } from "./application/human-fields.js";
-import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, type MediaUndo } from "./storyboard-history.js";
+import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, restoreNarrationWorkspaceUndo, type MediaUndo } from "./storyboard-history.js";
+import { OPENAI_SPEECH_VOICES } from "@openslate/providers";
 import type { FastifyInstance } from "fastify";
 import { digest, DomainError, invariant, newId, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
@@ -276,7 +277,7 @@ export function editStoryboard(
         else {
           invariant(
             input.field === "voice" &&
-              ["stock", "personal"].includes(input.value ?? ""),
+              ["stock", "personal", ...OPENAI_SPEECH_VOICES].includes(input.value ?? ""),
             "VALIDATION_ERROR",
             "Invalid voice choice.",
           );
@@ -285,7 +286,7 @@ export function editStoryboard(
             invariant(ready.length > 0, "PERSONAL_VOICE_REQUIRED", "Register a ready personal voice before selecting personal narration.");
             assertPersonalVoiceCurrent(s.store, projectId, ready[0]!.id);
           }
-          draft.voice = input.value as "stock" | "personal";
+          draft.voice = input.value as NonNullable<ShotRecord["narration"]>["voice"];
         }
         const writingChanged =
           digest(
@@ -504,6 +505,7 @@ export function editStoryboard(
       if (undoing) {
         restoreMediaUndo(s, next, undoing.undo);
         if (undoing.undo) restoreCanonicalUndo(s, next, actor.requestId, undoing.undo);
+        if (undoing.undo) restoreNarrationWorkspaceUndo(s, next.id, actor.requestId, undoing.undo);
       }
       const id = newId();
       s.store.insert("storyboard_edit", id, projectId, {

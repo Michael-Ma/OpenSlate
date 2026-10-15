@@ -69,8 +69,9 @@ test('older proposal, changed head, and running interpretation cannot be confirm
   assert.notEqual((await f.call(`/${actor.requestId}/confirm`,{preparedId:latest.id,proposalDigest:latest.proposalDigest})).statusCode,200);
 });
 test('discard fences the import epoch and releases only that imports holds',async t=>{
-  const f=fixture(t);const prior=f.service.beginRequest(f.project.id,'local-user','Prior edit',{editing:true});
-  const {actor,bridge}=await f.draft();const r=await f.call(`/${actor.requestId}/discard`,{});assert.equal(r.statusCode,200,r.body);
+  const f=fixture(t),{actor,bridge}=await f.draft();
+  const prior=f.service.beginRequest(f.project.id,'local-user','Separate alongside edit',{editing:true,concurrency:'alongside'});
+  const r=await f.call(`/${actor.requestId}/discard`,{});assert.equal(r.statusCode,200,r.body);
   assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'revoked');
   assert.equal(f.store.list('hold',f.project.id).filter(h=>h.active&&h.ownerId===actor.requestId).length,0);
   assert.ok(f.store.list('hold',f.project.id).some(h=>h.active&&h.ownerId===prior.requestId));

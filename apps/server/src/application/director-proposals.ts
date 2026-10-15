@@ -141,6 +141,7 @@ export function proposalCommand(service: ProductionService, projectId: string, i
     } else next = { ...proposal, state: 'rejected', preview: current.preview, previewDigest: current.previewDigest };
     service.releaseAlongsideHolds(projectId, actor);
     store.put('director_proposal', id, projectId, next);
+    service.releaseFinishedRequestHolds(projectId, proposal.requestId);
     store.appendEvent(projectId, 'proposal.changed', { proposalId: id, state: next.state, requestId: actor.requestId });
     return { proposal: view(service, next), ...(action === 'undo' ? { leftAlone } : {}) };
   });
