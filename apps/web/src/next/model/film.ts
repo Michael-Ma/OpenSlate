@@ -1,4 +1,4 @@
-import type { DirectorNote, GenerationOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import type { DirectorNote, GenerationOverview, MediaSlot, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
@@ -100,6 +100,11 @@ function pictureOf(shot: ShotOverview): { picture: PictureKind; keyframe: Studio
   return { picture: clip ? "clip" : keyframe ? "keyframe" : "none", keyframe, clip };
 }
 
+/** Running, or queued to be sent. A slot waiting for a person's confirm, or stopped, is not being made. */
+export function making(slot: MediaSlot): boolean {
+  return slot.state === "running" || (slot.state === "queued" && slot.waiting?.code !== "review" && slot.waiting?.code !== "stopped");
+}
+
 /** The neutral words on a picture block for what the shot still lacks. Failures are words, never a colour. */
 export function lackOf(shot: ShotOverview): Msg | null {
   const video = shot.video.state;
@@ -107,8 +112,8 @@ export function lackOf(shot: ShotOverview): Msg | null {
   if (video === "ready" && shot.video.artifact) return null;
   if (video === "no_answer" || keyframe === "no_answer") return msg("film.lack.no_answer");
   if (video === "failed" || keyframe === "failed") return msg("film.lack.failed");
-  if (video === "running" || video === "queued") return msg("film.lack.making_clip");
-  if (keyframe === "running" || keyframe === "queued") return msg("film.lack.making_keyframe");
+  if (making(shot.video)) return msg("film.lack.making_clip");
+  if (making(shot.keyframe)) return msg("film.lack.making_keyframe");
   if (video === "outdated") return msg("film.lack.clip_outdated");
   if (keyframe === "ready" || keyframe === "outdated" || keyframe === "choose_take") return msg("film.lack.no_clip");
   return msg("film.lack.nothing");

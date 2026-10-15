@@ -148,6 +148,7 @@
 .mblk.sel { outline: 2px solid var(--select); outline-offset: -1px; }
 .mblk:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .none-music { font-size: 12px; color: var(--muted); line-height: 36px; white-space: nowrap; }
+.none-music .pill { line-height: 1.45; }
 .lane-k .mute-btn { width: 22px; height: 22px; }
 .head-sel { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); z-index: 4; pointer-events: none; margin-left: -1px; left: 0; }
 .head-sel::before { content: ""; position: absolute; top: -4px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--text); }

@@ -33,11 +33,14 @@ export function MusicMenu({ anchor, recordings, current, onPick, onImport, onClo
     setPlace({ left, top: Math.max(8, below ? rect.bottom + 4 : rect.top - 4 - height) });
   }, [anchor, recordings]);
 
+  // Focus the chosen item once the menu is placed (a hidden element cannot take focus).
+  const placed = place !== null;
   useEffect(() => {
+    if (!placed) return;
     const element = menu.current;
     const first = element?.querySelector<HTMLElement>('[aria-checked="true"]') ?? element?.querySelector<HTMLElement>("button:not(:disabled)");
-    first?.focus();
-  }, [recordings]);
+    if (!element?.contains(document.activeElement)) first?.focus();
+  }, [placed, recordings]);
 
   useEffect(() => {
     const away = (event: PointerEvent) => {
@@ -48,7 +51,11 @@ export function MusicMenu({ anchor, recordings, current, onPick, onImport, onClo
     return () => document.removeEventListener("pointerdown", away, true);
   }, [anchor]);
 
-  const finish = (action: () => void) => { action(); close.current(); anchor.isConnected && anchor.focus(); };
+  const finish = (action: () => void) => {
+    action();
+    close.current();
+    if (anchor.isConnected) anchor.focus();
+  };
 
   const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = [...(menu.current?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];

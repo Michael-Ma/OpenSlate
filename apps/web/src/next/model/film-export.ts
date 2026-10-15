@@ -1,4 +1,5 @@
 import type { ExportReadiness, ExportRecord, ExportView, GenerationOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { making } from "./film.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -35,10 +36,10 @@ export interface ReadinessRow {
 }
 
 export function clipCell(shot: ShotOverview, demo: boolean): ReadinessRow["clip"] {
+  if (making(shot.video)) return { text: msg("film.cell.making"), tone: "plain" };
   switch (shot.video.state) {
     case "ready": return shot.video.artifact ? { text: msg(demo ? "film.cell.demo_clip" : "film.cell.clip"), tone: "ok" } : { text: msg("film.cell.no_clip"), tone: "plain" };
     case "outdated": return { text: msg("film.cell.clip_outdated"), tone: "plain" };
-    case "running": case "queued": return { text: msg("film.cell.making"), tone: "plain" };
     case "failed": return { text: msg("film.cell.failed"), tone: "plain" };
     case "no_answer": return { text: msg("film.cell.no_answer"), tone: "plain" };
     default: return { text: msg("film.cell.no_clip"), tone: "plain" };

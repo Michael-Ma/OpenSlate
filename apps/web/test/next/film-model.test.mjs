@@ -164,3 +164,14 @@ test('the Film catalog adds ids without replacing any other area\'s message', as
   const clashes = Object.keys(filmMessages).filter(id => taken.has(id));
   assert.deepEqual(clashes, []);
 });
+
+test('a clip waiting for a person\'s confirm, or stopped, is not "being made"', async () => {
+  const { readinessRows } = await import('../../src/next/model/film-export.ts');
+  const overview = lastFerryOverview();
+  overview.shots[shotId('2.1')].video = { state: 'queued', takeCount: 0, waiting: { code: 'review', since: '' } };
+  overview.shots[shotId('2.2')].video = { state: 'queued', takeCount: 0, waiting: { code: 'capacity', ahead: 1, since: '' } };
+  overview.shots[shotId('2.3')].video = { state: 'running', takeCount: 0 };
+  const tl = filmTimeline(overview);
+  assert.deepEqual(tl.shots.slice(3, 6).map(s => en(s.lack)), ['no clip', 'making clip', 'making clip']);
+  assert.deepEqual(readinessRows(overview, false).slice(3, 6).map(r => en(r.clip.text)), ['no clip', 'making…', 'making…']);
+});
