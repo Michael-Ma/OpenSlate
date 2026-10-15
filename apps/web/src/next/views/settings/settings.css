@@ -1,0 +1,198 @@
+/*
+ * Settings view (docs/ai/prototypes/last-ferry/settings.html). Only :root tokens.
+ * The P5 system components this view uses (view header, panel, fields, segmented control, switch, impact,
+ * dialog, ack) are copied from the study's system.css section 8 and scoped to this view, so they cannot
+ * collide with other views until they move into ui/studio.css.
+ * Colour roles: amber never appears here; white is the chosen option and the primary action; green is done.
+ */
+
+/* ---------- workspace: one scrolling page ---------- */
+.work.set-view{display:flex;flex-direction:column;gap:0;padding:10px 22px 18px;overflow:auto;min-width:0;min-height:0;grid-template-rows:none}
+/* The page scrolls inside the workspace; its parts keep their height instead of shrinking to fit. */
+.work.set-view > *{flex:none}
+@media (min-width:900px){ .work.set-view{grid-column:2;grid-row:2} }
+
+/* ---------- 8.1 view header ---------- */
+.set-view .view-head{display:flex;align-items:center;gap:12px;min-height:36px;flex-wrap:wrap}
+.set-view .view-head h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.set-view .view-head h1:focus{outline:none}
+.set-view .view-head h1:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.set-view .view-head .line{color:var(--text-2);font-size:13.5px;min-width:0}
+
+/* ---------- 8.2 panel ---------- */
+.set-view .panel{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-big);padding:14px 16px;min-width:0}
+.set-view .panel-head{display:flex;align-items:center;gap:10px;min-height:26px;flex-wrap:wrap}
+.set-view .panel-head h2{margin:0;font-size:16px;font-weight:700}
+.set-view .panel-head h2:focus{outline:none}
+.set-view .panel-head h2:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.set-view .panel-head .end{margin-left:auto;display:flex;gap:6px;align-items:center}
+.set-view .panel p.lead{margin:6px 0 0;color:var(--text-2);font-size:13px;line-height:1.5}
+.set-view .scope{font-size:12px;color:var(--muted);font-weight:500}
+.set-view .dim{color:var(--text-2)}
+.set-view .mono,.set-dialog .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+.set-view .cmd{white-space:nowrap;color:var(--text);font-weight:600}
+.set-view .hint{font-size:12px;color:var(--text-2);line-height:1.4}
+
+/* ---------- 8.3 fields ---------- */
+.set-view .field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.set-view .field > .label{font-size:12px;color:var(--muted)}
+.set-view .input,.set-view .select{width:100%;background:var(--raised);border:1px solid var(--track);border-radius:var(--r-field,10px);color:var(--text);font:inherit;font-size:13px;padding:8px 10px;min-width:0}
+.set-view .input.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+.set-view .input::placeholder{color:var(--muted)}
+.set-view .input:disabled,.set-view .select:disabled{color:var(--muted);background:var(--raised-2)}
+.set-view .input[aria-invalid="true"]{border-color:var(--text-2)}
+.set-view .select option,.set-view .select optgroup{background:var(--raised);color:var(--text)}
+
+/* ---------- 8.4 segmented control ---------- */
+.set-view .segctl{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--hairline);background:var(--bar);border-radius:var(--r-pill);max-width:100%;overflow-x:auto;scrollbar-width:none;flex:none}
+.set-view .segctl button{border:0;background:none;color:var(--text-2);font-weight:600;font-size:12.5px;padding:4px 11px;border-radius:var(--r-pill);white-space:nowrap}
+.set-view .segctl button:hover{color:var(--text)}
+.set-view .segctl button[aria-checked="true"]{background:var(--raised-2);color:var(--text)}
+.set-view .segctl button:focus-visible{outline-offset:-2px}
+
+/* ---------- 8.5 switch: on = white (chosen), off = track ---------- */
+.set-view .switch{position:relative;width:38px;height:22px;border-radius:var(--r-pill);border:1px solid var(--track);background:var(--raised-2);flex:none;padding:0;margin-top:2px}
+.set-view .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--text-2);transition:transform .15s}
+.set-view .switch[aria-checked="true"]{background:var(--select);border-color:var(--select)}
+.set-view .switch[aria-checked="true"]::after{transform:translateX(16px);background:var(--select-ink)}
+.set-view .switch:disabled{opacity:.5}
+
+/* ---------- 8.7 impact: what a switch affects, shown before it applies (neutral) ---------- */
+.set-view .impact{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--hairline);background:var(--bar);border-radius:12px;padding:9px 12px;font-size:12.5px;color:var(--text-2);line-height:1.45}
+.set-view .impact .ic{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--text-2);display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--text);margin-top:1px;font-style:normal}
+.set-view .impact b{color:var(--text);font-weight:600}
+.set-view .impact.none .ic{border-color:var(--green-line);color:var(--green)}
+.set-view .impact.cost{border-color:var(--track);background:var(--raised)}
+
+/* ---------- 8.8 neutral failure pill ---------- */
+.set-view .status.fail{color:var(--text);border-color:var(--track);background:var(--raised)}
+.set-view .status .ic{width:15px;height:15px;border-radius:50%;border:1.5px solid currentColor;display:inline-grid;place-items:center;font-size:9.5px;font-weight:800;flex:none;line-height:1;font-style:normal}
+.set-view .status.fail .ic{background:var(--text);color:var(--surface);border-color:var(--text)}
+.set-readfail{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+
+/* ---------- layout: index + sections ---------- */
+.set-grid{display:grid;grid-template-columns:180px minmax(0,760px);gap:22px;align-items:start}
+.set-index{position:sticky;top:0;display:flex;flex-direction:column;gap:2px;z-index:1}
+.set-index a{display:block;text-decoration:none;color:var(--text-2);font-weight:600;font-size:13px;padding:6px 12px;border-radius:var(--r-pill)}
+.set-index a:hover{color:var(--text)}
+.set-index a[aria-current="true"]{background:var(--raised-2);color:var(--text)}
+.set-index .grp{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:10px 12px 4px}
+.set-sections{display:flex;flex-direction:column;gap:14px;min-width:0}
+.set-sections > .panel{scroll-margin-top:8px}
+
+/* ---------- models table ---------- */
+.set-view .mtable{display:grid;grid-template-columns:110px minmax(0,1.4fr) minmax(0,1fr) 120px;gap:0 14px;margin-top:10px;font-size:13px;align-items:center}
+.set-view .mtable .h{font-size:11.5px;color:var(--muted);padding:0 0 6px}
+.set-view .mtable .c{padding:9px 0;border-top:1px solid var(--hairline);min-width:0}
+.set-view .mtable .job{font-weight:600;align-self:stretch;display:flex;align-items:center}
+.set-view .mtable .select{padding:6px 9px}
+.set-view .mtable .price{color:var(--text-2);font-size:12.5px;align-self:stretch;display:flex;align-items:center}
+.set-view .mtable .ready-c{align-self:stretch;display:flex;align-items:center}
+.set-view .mtable .model{align-self:stretch;display:flex;align-items:center}
+/* A select that is off says why in words under it (a disabled select cannot be focused for a tooltip). */
+.set-view .mtable .model.with-why{flex-direction:column;align-items:stretch;justify-content:center;gap:4px}
+.set-view .mtable .model .why{font-size:12px;color:var(--text);line-height:1.35}
+.set-view .mrow{display:contents}
+.set-view .impact-row{grid-column:1/-1;padding:0 0 12px;display:flex;flex-direction:column;gap:8px}
+.set-view .impact-acts,.set-view .form-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.set-view .set-note{margin:10px 0 0}
+.set-view .ready{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600}
+.set-view .ready.y{color:var(--green)}
+.set-view .ready.n{color:var(--text)}
+
+/* ---------- rows, key-value lists, voices ---------- */
+.set-view .srow{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--hairline)}
+.set-view .panel-head + .srow{margin-top:8px}
+.set-view .srow.stack{flex-direction:column;align-items:stretch;gap:0}
+.set-view .srow .txt{flex:1;min-width:0}
+.set-view .srow .txt b{display:block;font-weight:600}
+.set-view .srow .txt b label{cursor:default}
+.set-view .srow .txt > span{display:block;color:var(--text-2);font-size:12.5px;line-height:1.45;margin-top:2px}
+.set-view .srow .txt > span.why{color:var(--text)}
+.set-view .review-row{margin-top:8px}
+.set-view .kv{display:grid;grid-template-columns:120px minmax(0,1fr);gap:7px 12px;font-size:13px;margin:10px 0 0}
+.set-view .kv dt{color:var(--muted)}
+.set-view .kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.set-view .inline-form{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.set-view .narrator-ctl{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
+.set-view .select.narrator{width:auto;min-width:200px}
+.set-view .undo-line{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
+.set-view .voice-card{display:flex;gap:12px;align-items:center;border:1px solid var(--hairline);background:var(--bar);border-radius:12px;padding:10px 12px;margin-top:8px}
+.set-view .srow.stack > .txt + .voice-card,.set-view .srow.stack > .txt + .lead{margin-top:14px}
+.set-view .voice-card .vtxt{flex:1;min-width:0}
+.set-view .voice-card .vtxt b{display:block}
+.set-view .voice-card .vtxt small{display:block;font-size:12px;color:var(--text-2);margin-top:2px}
+.set-view .voice-card.revoked{opacity:.65}
+.set-view .add-open{margin-top:12px}
+.set-view .add-voice{display:flex;flex-direction:column;gap:10px;border:1px solid var(--track);border-radius:12px;padding:12px;margin-top:12px;background:var(--bar)}
+.set-view .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.set-view .ack,.set-dialog .ack{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--track);border-radius:12px;background:var(--raised);line-height:1.45;cursor:pointer}
+.set-view .ack input{margin-top:3px;accent-color:var(--select);width:16px;height:16px;flex:none}
+.set-view .keys-note{margin-top:6px}
+.set-view .keys-note code{font-size:12px}
+
+/* ---------- dialog (native <dialog>) ---------- */
+.set-dialog{max-width:calc(100vw - 32px);width:min(460px,calc(100vw - 32px));background:var(--bar);color:var(--text);border:1px solid var(--track);border-radius:var(--r-big);padding:20px 20px 16px;box-shadow:0 24px 60px rgba(0,0,0,.6);font:inherit}
+.set-dialog::backdrop{background:rgba(8,9,10,.62)}
+.set-dialog h2{margin:0 0 8px;font-size:18px;font-weight:700;letter-spacing:-.01em}
+.set-dialog ul{margin:0 0 12px;padding-left:18px;color:var(--text-2);line-height:1.6}
+.set-dialog .foot{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.set-dialog .foot .pill{padding:7px 14px}
+
+/* ---------- 900–1279 px: the index becomes a row of pills; the table keeps its columns ---------- */
+@media (min-width:900px) and (max-width:1279px){
+  .set-view .view-head{margin-bottom:8px}
+  .set-grid{grid-template-columns:minmax(0,1fr);gap:12px}
+  .set-index{position:static;flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px}
+  .set-index .grp{display:none}
+  .set-index a{white-space:nowrap;border:1px solid var(--hairline)}
+}
+/* 900–1099 px: each model becomes a stacked card */
+@media (min-width:900px) and (max-width:1099px){
+  .set-view .mtable{display:block}
+  .set-view .mtable .h{display:none}
+  .set-view .mrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;border-top:1px solid var(--hairline);padding:10px 0}
+  .set-view .mtable .c{border-top:0;padding:0}
+  .set-view .mtable .job{grid-column:1;grid-row:1}
+  .set-view .mtable .ready-c{grid-column:2;grid-row:1;justify-content:flex-end}
+  .set-view .mtable .model,.set-view .mtable .price,.set-view .impact-row{grid-column:1/-1}
+}
+
+/* ---------- phone ---------- */
+@media (max-width:899px){
+  .work.set-view{overflow:visible;padding:14px 16px 28px}
+  .set-view .view-head{gap:4px 10px;margin-bottom:8px}
+  .set-view .view-head .line{width:100%}
+  .set-grid{grid-template-columns:minmax(0,1fr);gap:12px}
+  .set-index{position:static;flex-direction:row;overflow-x:auto;scrollbar-width:none;gap:4px;margin:0 -16px;padding:0 16px}
+  .set-index .grp{display:none}
+  .set-index a{white-space:nowrap;border:1px solid var(--hairline);flex:none}
+  .set-view .mtable{display:block}
+  .set-view .mtable .h{display:none}
+  .set-view .mrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;border-top:1px solid var(--hairline);padding:10px 0}
+  .set-view .mtable .c{border-top:0;padding:0}
+  .set-view .mtable .job{grid-column:1;grid-row:1}
+  .set-view .mtable .ready-c{grid-column:2;grid-row:1;justify-content:flex-end;text-align:right}
+  .set-view .mtable .model,.set-view .mtable .price,.set-view .impact-row{grid-column:1/-1}
+  .set-view .impact-row{padding:4px 0 0}
+  .set-view .two-col{grid-template-columns:minmax(0,1fr)}
+  .set-view .srow{flex-wrap:wrap}
+  .set-view .narrator-ctl{width:100%;align-items:stretch}
+  .set-view .select.narrator{width:100%;min-width:0}
+  .set-view .voice-card{flex-wrap:wrap}
+  .set-view .voice-card .vtxt{flex:1 1 100%}
+  .set-view .kv{grid-template-columns:minmax(0,96px) minmax(0,1fr)}
+  .set-dialog{padding:18px 16px 14px}
+}
+
+/*
+ * Toast placement while Settings is open: at the foot of the workspace, as in the study's system.css, so it
+ * never covers the row that just changed. A stopgap in this view until the shell places toasts per view.
+ */
+@media (min-width:900px){
+  body:has(main[data-view="settings"]) .toast{top:auto;bottom:22px;left:calc(392px + (100vw - 392px) / 2);max-width:min(640px,calc(100vw - 424px))}
+}
+
+@media (prefers-reduced-motion: reduce){
+  .set-view .switch::after{transition:none}
+}

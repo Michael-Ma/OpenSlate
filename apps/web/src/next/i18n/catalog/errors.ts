@@ -30,4 +30,22 @@ export const errors = {
   "error.EXECUTION_HELD": { en: "An edit is still being saved. Try again in a moment.", zh: "还有修改正在保存，请稍后再试。" },
   "error.NARRATION_CUE_OUT_OF_RANGE": { en: "The voice line is longer than the shot. Choose how to fit it.", zh: "配音比镜头长，请选择处理方式。" },
   "error.UNDO_UNAVAILABLE": { en: "This can no longer be undone.", zh: "这一步已无法撤销。" },
+  // Settings and Start (model and Director setup, personal voices). Defined once here: the catalog spreads its
+  // files into one object, so a copy in a view's file would silently replace (or be replaced by) another's.
+  "error.MODEL_SETTINGS_STALE": { en: "The model settings changed. Check the switch again.", zh: "模型设置已变化，请重新检查这次切换。" },
+  "error.MODEL_SETTINGS_LIMIT": { en: "This film has too much planned work to switch models here.", zh: "这部影片计划中的工作太多，不能在这里切换模型。" },
+  "error.MODEL_SETTINGS_CANCELLED": { en: "The model switch was cancelled. Nothing changed.", zh: "模型切换已取消，没有任何改动。" },
+  "error.LOCAL_EXECUTION_UPGRADE_REQUIRED": { en: "This film's pending video can't switch to H3. Start a new film to use H3 video.", zh: "这部影片待生成的视频不能切换到 H3。要使用 H3 视频，请新建影片。" },
+  "error.PROVIDER_CATALOG_CHANGED": { en: "The models installed on this computer changed. Check them and try again.", zh: "本机安装的模型有变化，请确认后重试。" },
+  "error.PROVIDER_SELECTION_INVALID": { en: "One of the chosen models isn't installed any more. Check them and try again.", zh: "所选的某个模型已不再安装，请确认后重试。" },
+  "error.DIRECTOR_SETUP_REQUIRED": { en: "Codex didn't pass its setup check. Make sure it is installed, up to date and signed in on this computer, then try again.", zh: "Codex 没有通过设置检查。请确认本机的 Codex 已安装、是最新版本并已登录，然后重试。" },
+  "error.DIRECTOR_SETUP_BUSY": { en: "The Director is busy with a turn or a setup check. Try again when it finishes.", zh: "导演正在进行一轮对话或设置检查，完成后再试。" },
+  "error.DIRECTOR_SELECTION_STALE": { en: "The Director setup changed. Check it and try again.", zh: "导演设置已变化，请确认后重试。" },
+  "error.DIRECTOR_SELECTION_LOCKED": { en: "This film's Director was already chosen at its first conversation. Change it in Settings.", zh: "这部影片的导演在第一次对话时已选定，可以在设置里修改。" },
+  "error.SERVICE_UNAVAILABLE": { en: "This isn't available in this studio.", zh: "这个工作室不支持这项操作。" },
+  "error.PERSONAL_VOICE_INVALID": { en: "Check the voice's name and ID, and tick both confirmations.", zh: "请检查声音的名称和 ID，并勾选两项确认。" },
+  "error.PERSONAL_VOICE_REVOKED": { en: "This voice was revoked. Make a new voice in your provider account to use it again.", zh: "这个声音已被撤回。要再次使用，请在服务商账号里新建一个声音。" },
+  "error.PERSONAL_VOICE_NOT_ENROLLED": { en: "That personal voice isn't registered for this film.", zh: "这个个人声音没有为这部影片登记。" },
+  "error.PERSONAL_VOICE_LIMIT": { en: "A film can have at most 32 personal voices.", zh: "一部影片最多可以有 32 个个人声音。" },
+  "error.PERSONAL_VOICE_PROVIDER_UNAVAILABLE": { en: "This voice's provider isn't connected to narration.", zh: "这个声音的服务商没有接入旁白。" },
 } satisfies Record<string, Entry>;
