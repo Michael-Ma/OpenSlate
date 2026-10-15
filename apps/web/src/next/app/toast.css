@@ -3,3 +3,7 @@
 .toast.error{border-color:var(--text-2)}
 .toast{animation:toast-in .16s ease-out}
 @keyframes toast-in{from{opacity:0}to{opacity:1}}
+/* 900–1279 px: the Director column is 320 px wide, so the toast centres over the narrower preview. */
+@media (min-width:900px) and (max-width:1279px){
+  .toast-live .toast{left:calc(320px + 22px + (100vw - 320px - 44px - 266px) / 2)}
+}
