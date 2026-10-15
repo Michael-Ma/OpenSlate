@@ -1,3 +1,5 @@
+import { proposeChange } from "./director-proposals.js";
+import type { ProposalPatch } from "@openslate/core";
 import { recordNotes, type NoteInput } from "./director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog, toolHandlerId } from "@openslate/core";
@@ -142,6 +144,8 @@ export class ToolInvocationService {
     invariant(actor.kind === "director", "ACTOR_DENIED", "Tool transport requires a director epoch");
     this.service.assertActor(projectId, actor);
     invariant(/^[A-Za-z0-9_-]{1,160}$/.test(callId), "VALIDATION_ERROR", "Invalid tool call identity");
+    invariant(!this.service.store.get("keyframe_review_request", actor.requestId) || ["read_context", "record_notes", "propose_change", "read_skill"].includes(tool),
+      "ACTOR_DENIED", "Keyframe reviews may only read context, record notes and propose changes");
     const selected = this.catalog(projectId, actor);
     const parsed = parseToolArguments(tool, input, selected.catalog.version);
     const argumentHash = digest(parsed.arguments);
@@ -184,6 +188,7 @@ export class ToolInvocationService {
       if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution"].includes(parsed.name),
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
+        case "propose_change": value = proposeChange(this.service, projectId, actor, id, parsed.arguments as unknown as { patch: ProposalPatch }); break;
         case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {
@@ -252,8 +257,8 @@ export class ToolInvocationService {
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
         let receipt: unknown = null;
-        if (call.tool === "record_notes" && call.toolContractVersion === "5.0.0" && call.catalogDigest === toolCatalog("5.0.0").digest) {
-          const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>("director_notes_receipt", call.id);
+        if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion === "5.0.0" && call.catalogDigest === toolCatalog("5.0.0").digest) {
+          const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>(call.tool === "record_notes" ? "director_notes_receipt" : "director_proposal_receipt", call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
         }
         if (call.tool === "apply_change" && call.recovery?.preparedId) {

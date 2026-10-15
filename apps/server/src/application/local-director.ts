@@ -9,6 +9,8 @@ import { DirectorSupervisor } from "./director-supervisor.js";
 import { FakeWorkflowDirector } from "./fake-director.js";
 import { createDirectorInput } from "./director-input.js";
 import { directorInputDigest } from "./director-input-identity.js";
+import { KeyframeProjector, describeUnattachedKeyframes } from "./keyframe-projector.js";
+import { triggerKeyframeReviews } from "./keyframe-review.js";
 import { DirectorImageProjector } from "./director-images.js";
 import type { SelectedDirectorImage } from "./director-images.js";
 import type { ActorContext, ToolContractVersion } from "@openslate/core";
@@ -49,18 +51,19 @@ export class LocalDirectorController {
   constructor(readonly service: ProductionService, readonly config: LocalDirectorOptions) {
     this.setup = config.setup ?? setupLocalCodex;
     this.defaults = config.defaults ?? { binaryPath: this.findBinary(), model: "gpt-6-astra" };
-    this.imageProjector = config.ffmpegPath ? new DirectorImageProjector(service, { ffmpegPath: config.ffmpegPath }) : null;
+    try { this.imageProjector = config.ffmpegPath ? new KeyframeProjector(service, { ffmpegPath: config.ffmpegPath }) : null; }
+    catch (error) { if (!['ENOENT', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; this.imageProjector = null; }
     this.toolSettings = new DirectorToolSettings(service, projectId => this.mode(projectId) === "native"
       ? { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "native", projectId, "workspace", ".agents", "skills"), runtimeId: "codex-app-server" }
       : { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), runtimeId: "fake-workflow-v1" },
       projectId => this.configuring.has(projectId));
     const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint });
-    this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: fakeInput });
+    this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: async (turn, human, bridge) => describeUnattachedKeyframes(service, await fakeInput(turn, human, bridge), bridge.actor, "scripted_runtime_not_visually_inspected") });
     const proxy: DirectorRuntime = { id: "codex-app-server", start: async (input, options) => this.startNative(input, options) };
     this.native = new DirectorSupervisor(service, proxy, { mode: "native", projectFilter: id => this.mode(id) === "native",
       prepareInput: async (turn, human, bridge, preparation) => {
         const input = await (await this.ready(turn.projectId)).input(turn, human, bridge);
-        if (!service.store.get("request_image_selection", turn.requestId)) return input;
+        if (!this.imageProjector && !service.store.get("request_image_selection", turn.requestId)) return describeUnattachedKeyframes(service, input, bridge.actor, "ffmpeg_unavailable");
         invariant(this.imageProjector, "DIRECTOR_IMAGES_UNAVAILABLE", "Local FFmpeg is required to prepare reference images");
         return this.imageProjector.prepare(input, bridge.actor, join(config.dataDirectory, "native", turn.projectId, "workspace"), preparation);
       } });
@@ -102,7 +105,7 @@ export class LocalDirectorController {
   }
   enqueue(...args: Parameters<DirectorSupervisor["enqueue"]>) { return this.controller(args[0]).enqueue(...args); }
   answerQuestion(...args: Parameters<DirectorSupervisor["answerQuestion"]>) { return this.controller(args[0]).answerQuestion(...args); }
-  tick(): void { this.fake.tick(); this.native.tick(); }
+  tick(): void { triggerKeyframeReviews(this.service, (id, actor) => this.enqueue(id, actor)); this.fake.tick(); this.native.tick(); }
   async settle(): Promise<void> { await Promise.all([this.fake.settle(), this.native.settle()]); }
   async close(): Promise<void> { await Promise.all([this.fake.close(), this.native.close()]); }
   settings(projectId: string) {

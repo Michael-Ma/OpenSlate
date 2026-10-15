@@ -1,3 +1,4 @@
+import { recordHumanFields } from "../application/human-fields.js";
 import { installNarrationPlanRebase, prepareNarrationPlanRebase } from './plan-rebase.js';
 import { digest, invariant, newId, requiredStages, shotIntentDigest, stageInputDigest, STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, RECIPE_DIGEST, validateStageRequirements } from "@openslate/core";
 import type { ActorContext, CueRecord, ProjectRecord, StageRequirement } from "@openslate/core";
@@ -179,7 +180,9 @@ export class NarrationCanonicalService {
       }
       this.ensureHolds(projectId, actor);
       const before = this.store.getProject(projectId);
+      const beforePublish = this.store.getProject(projectId);
       const next = this.store.saveProject({ ...candidateNext, activePlanId: derived.compiled ? derived.planId : candidateNext.activePlanId }, prepared.expectedHeadVersion);
+      recordHumanFields(this.store, beforePublish, next, actor);
       installNarrationPlanRebase(this.production, before, derived);
       this.store.insert("project_revision", next.revisionId, projectId, { project: next });
       for (const mapping of prepared.shotMappings) if (mapping.segmentId && prepared.shotRelativeSegmentIds?.includes(mapping.segmentId)) {
@@ -205,7 +208,7 @@ export class NarrationCanonicalService {
       this.store.insert("narration_canonical", record.id, projectId, record);
       this.store.put(canonicalHead, projectId, projectId, { canonicalId: record.id });
       this.bindStages(prepared, next);
-      if (derived.compiled) for (const hold of this.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId).filter(hold => hold.active && hold.ownerId === actor.requestId)) this.production.engine.releaseHold(projectId, hold.id, actor.requestId);
+      if (derived.compiled || this.store.get<{ concurrency?: string }>("message", actor.requestId)?.concurrency === "alongside") for (const hold of this.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId).filter(hold => hold.active && hold.ownerId === actor.requestId)) this.production.engine.releaseHold(projectId, hold.id, actor.requestId);
       for (const artifact of artifacts) this.store.appendEvent(projectId, "artifact.published", { artifactId: artifact.id, narrationCanonicalId: record.id, fixture: false });
       this.store.appendEvent(projectId, "narration.canonical_committed", { preparedId, canonicalId: record.id, revisionId: next.revisionId, headVersion: next.headVersion, narrationVersion: record.narrationVersion,
         shotImpact: prepared.shotImpact.map(impact => ({ ...impact })), matchingPlanInstalled: !!derived.compiled });

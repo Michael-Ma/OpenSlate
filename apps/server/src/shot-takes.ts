@@ -35,7 +35,7 @@ export function useShotTake(s: ProductionService, projectId: string, shotId: str
     s.engine.verifyArtifact(projectId, take.artifact);
     const undo = captureMediaUndo(s, projectId);
     const actor = s.beginRequest(projectId, "local-user", "Use the selected earlier keyframe. Its clip needs generating again.",
-      { source: "app", directEdit: true, editing: true, scopeIds: [shotId], key: `use-take:${key}` });
+      { source: "app", concurrency: "alongside", holdScopeIds: [], editing: true, scopeIds: [shotId], key: `use-take:${key}` });
     const base = s.store.get<PlanRecord>("plan", project.activePlanId!);
     invariant(base?.projectId === projectId, "STALE_BINDING", "The active keyframe plan is unavailable");
     const planId = newId();
@@ -51,6 +51,7 @@ export function useShotTake(s: ProductionService, projectId: string, shotId: str
     const commandId = newId();
     s.store.insert("storyboard_edit", commandId, projectId, { id: commandId, before: project, headVersion: saved.headVersion, requestId: actor.requestId, undo });
     s.store.appendEvent(projectId, "storyboard.edited", { commandId, kind: "use-take", shotId, artifactId });
+    s.releaseAlongsideHolds(projectId, actor);
     return { shotId, artifactId, commandId };
   });
 }

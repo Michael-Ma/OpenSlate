@@ -1,3 +1,4 @@
+import { isKeyframeReview } from "./application/keyframe-review.js";
 import { keyframeTakeHistory } from "./keyframe-take-history.js";
 import { openBlockingNotes } from "./application/director-notes.js";
 import { confirmationView, type SceneConfirmationRecord } from "./scene-confirmations.js";
@@ -99,6 +100,9 @@ export class GenerationOverviewReader {
                 charged: !last.reservationId || store.get<{ state: string }>("reservation", last.reservationId)?.state !== "released",
                 at: evidence?.recordedAt ?? last.createdAt } };
             }
+            // Proposal publication retains paid outputs. A stale completed recipe is
+            // outdated evidence, even while its historical candidate remains bound.
+            if (previous && binding && Object.keys(binding.outputs).length) return { ...base, state: "outdated" };
             if (binding?.candidateId) {
               const wait = store.get<{ code: string; since: string }>("node_wait", binding.id);
               const held = snapshot.holds.some(h => { const hold = h as { active: boolean; scopeId: string }; return hold.active && [projectId, scene.id, shot.id, binding.id].includes(hold.scopeId); });
@@ -136,7 +140,7 @@ export class GenerationOverviewReader {
         }
         if (openBlockingNotes(store, projectId, scene.id).length) blockers.push({ code: "recommendation_open" });
         if (overview.stopped) blockers.push({ code: "stopped" });
-        if (overview.director.state !== "idle" && (!scopeIds.length || scopeIds.includes(scene.id) || rows.some(r => scopeIds.includes(r.shotId)))) blockers.push({ code: "director_working" });
+        if (!isKeyframeReview(this.production, requestId) && overview.director.state !== "idle" && (!scopeIds.length || scopeIds.includes(scene.id) || rows.some(r => scopeIds.includes(r.shotId)))) blockers.push({ code: "director_working" });
         const shots = rows.map(r => overview.shots[r.shotId]!);
         const counts = { shots: shots.length, keyframesReady: shots.filter(s => s.keyframe.state === "ready").length, opened: shots.filter(s => s.keyframe.opened).length, videosReady: shots.filter(s => s.video.state === "ready").length };
         const attention = shots.some(s => [s.keyframe.state, s.video.state].some(state => ["failed", "no_answer", "outdated", "choose_take", "direction_required"].includes(state)));

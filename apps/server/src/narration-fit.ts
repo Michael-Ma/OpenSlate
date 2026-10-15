@@ -47,7 +47,7 @@ export async function fitNarration(runner: SceneConfirmationRunner, projectId: s
       (b.node.shotId === shotId || ["timeline", "render"].includes(b.node.kind)));
     if (durationFrames !== shot.desiredFrames) editStoryboard(production, projectId, { kind: "shot", id: shotId, field: "desiredFrames", value: String(durationFrames), expectedHeadVersion: before.headVersion }, digest({ key, action: "extend" }));
     const previous = store.get<{ sessionId: string }>("narration_shot_session_head", shotSessionHeadId(projectId, shotId));
-    const session = createShotNarrationSession(production, projectId, shotId, digest({ key, action: "fit-session" }), previous?.sessionId, true);
+    const session = createShotNarrationSession(production, projectId, shotId, digest({ key, action: "fit-session" }), previous?.sessionId, { holdScopeIds: [] });
     return { undo, before, commandId: newId(), durationFrames, accept: { sessionId: session.id, expectedHeadVersion: store.getProject(projectId).headVersion,
       expectedVersion: detail.narrationVersion, segmentId: segment.entry.segmentId, segmentRevisionId: segment.script.id,
       audioId: segment.audio.id, sha256: segment.audio.media.sha256, startSample: 0,

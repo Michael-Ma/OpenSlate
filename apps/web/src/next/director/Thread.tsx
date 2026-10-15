@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { threadView, type ThreadEntry } from "../model/director.ts";
 import { useStudio } from "../store/react.tsx";
-import { NotesSlot } from "./NotesSlot.tsx";
+import { NoteCards } from "./NoteCards.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
 
 /** Within this many pixels of the bottom, new content keeps the thread scrolled to the bottom. */
@@ -14,7 +14,8 @@ export function Thread() {
   const snapshot = useStudio((s) => s.snapshot);
   const overview = useStudio((s) => s.overview);
   const director = useStudio((s) => s.director);
-  const view = useMemo(() => threadView(snapshot, overview, director, locale, new Date()), [snapshot, overview, director, locale]);
+  const proposals = useStudio((s) => s.proposals);
+  const view = useMemo(() => threadView(snapshot, overview, director, locale, new Date(), proposals), [snapshot, overview, director, locale, proposals]);
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const last = view.entries.at(-1);
@@ -74,7 +75,7 @@ function Entry({ entry }: { entry: ThreadEntry }) {
       <Byline who="director" time={entry.time} />
       <div className="dir-text">{entry.paragraphs.map((text, index) => <p key={index}>{text}</p>)}</div>
       {entry.scripted && <div className="scripted">{t("director.scripted_reply")}</div>}
-      <NotesSlot requestId={entry.requestId} />
+      <NoteCards notes={entry.notes} />
     </div>
   );
 }

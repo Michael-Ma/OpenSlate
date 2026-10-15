@@ -63,13 +63,25 @@ export const scenarios = [
       near("bottom row top", row.top, 686); near("bottom row bottom", row.bottom, 882);
       near("card width", (await box(page, ".card")).width, 246);
       near("panel width", (await box(page, ".vpanel")).width, 230);
-      near("banner top", (await box(page, ".banner")).top, 112);
+      const banner = await box(page, ".banner");
+      near("banner top", banner.top, 112); near("banner bottom", banner.bottom, 266);
       await noPageScroll(page, 1440);
-      // The golden state: Scene 2, one check drawn neutral, 2.1 opened, confirm disabled with its reason.
+      // The golden state: Scene 2, the Director's blocking note b first and in amber (as the design's banner),
+      // 2.1 opened, the confirm disabled with its reason. The app's own check on 2.3 waits behind the note.
       await expectText(page, ".scene-head", /Harbour at dawn[\s\S]*Scene 2 · 3 shots · keyframes back, no video yet/);
-      const banner = await page.locator(".banner.check").evaluate((el) => ({ border: getComputedStyle(el).borderColor, eyebrow: getComputedStyle(el.querySelector(".eyebrow")).color }));
-      if (/240, 178, 74|137, 106, 52/.test(`${banner.border} ${banner.eyebrow}`)) throw new Error(`The app check is drawn in the Director's amber: ${JSON.stringify(banner)}`);
-      await expectText(page, ".banner.check h2", /^Narration 7\.4 s, shot 6 s$/);
+      const amber = await page.locator('.banner[data-note="note-b"]').evaluate((el) => ({ border: getComputedStyle(el).borderColor, eyebrow: getComputedStyle(el.querySelector(".eyebrow")).color }));
+      if (!/137, 106, 52/.test(amber.border) || !/240, 178, 74/.test(amber.eyebrow)) throw new Error(`The Director's note is not amber: ${JSON.stringify(amber)}`);
+      await expectText(page, ".banner .eyebrow", /^b\s*Director recommends$/i);
+      await expectText(page, ".banner h2", /^The 2\.3 line runs 7\.4 s but the shot is 6 s\.$/);
+      await expectText(page, ".banner .sub", /2\.3 · Settle before making video · Film 48 s → 50 s · Keeps the keyframe/);
+      await expectText(page, ".banner .tl", /Now[\s\S]*2\.3 · 6 s[\s\S]*After[\s\S]*2\.3 · 8 s[\s\S]*Scene 3 · 2 s later/);
+      await expectText(page, '.banner [data-act="note-choice"][data-kind="proposal"]', /^Make 2\.3 8 s$/);
+      if (await page.locator(".banner.check").count()) throw new Error("The app check is shown while a Director note is open");
+      // Card callouts: amber chips with the note letters; the app check's chip on 2.3 gives way to note b.
+      await expectText(page, '[data-card="shot-2-2"] .anno[data-note="note-a"]', /a\s*Mara's coat came out maroon/);
+      await expectText(page, '[data-card="shot-2-2"] [data-act="note-regenerate"]', /Regenerate 2\.2/);
+      await expectText(page, '[data-card="shot-2-3"] .anno[data-note="note-b"]', /b\s*The 2\.3 line/);
+      if (await page.locator('[data-card="shot-2-3"] .anno.check').count()) throw new Error("The app check's chip repeats note b on 2.3");
       await expectText(page, '[data-card="shot-2-1"] .stl', /Opened/);
       await expectText(page, ".vpanel", /1 of 3\s*frames opened/);
       if (!(await page.locator('[data-act="confirm-video"]').isDisabled())) throw new Error("Confirm is enabled before the frames are opened");
@@ -78,7 +90,7 @@ export const scenarios = [
     },
   },
   {
-    name: "next-keyframes-open-extend-confirm",
+    name: "next-keyframes-note-make-8s-and-confirm",
     query,
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
@@ -86,41 +98,86 @@ export const scenarios = [
       await openCard(page, "2.2");
       await openCard(page, "2.3");
       await expectText(page, ".vpanel", /3 of 3\s*frames opened/);
-      await expectText(page, ".vpanel .why", /^Settle the narration in 2\.3 first$/);
-      await page.click('[data-act="make-fit"][data-shot="shot-2-3"]');
-      await page.waitForSelector('.banner[data-state="settled"] [data-act="undo"]');
-      await expectText(page, ".banner", /2\.3 is now 8 s; the line fits[\s\S]*The film is now 50 s/);
-      await expectText(page, '[data-card="shot-2-3"] .ttl', /8 s/);
+      // Every frame is opened, but the Director's blocking note b is still open: no video yet.
       const confirm = page.locator('[data-act="confirm-video"]');
+      if (!(await confirm.isDisabled())) throw new Error("Confirm is enabled while note b is open");
+      await expectText(page, ".vpanel .why", /^Settle the narration in 2\.3 first$/);
+      await page.click('.banner [data-act="note-choice"][data-note="note-b"][data-kind="proposal"]');
+      await page.waitForSelector('.banner[data-note="note-b"][data-state="settled"] [data-act="undo"]');
+      await expectText(page, ".banner .eyebrow", /Director recommends · done/i);
+      await expectText(page, ".banner .sub", /Settled: change applied/);
+      await expectText(page, ".banner .tl", /2\.3 · 8 s/);
+      await expectText(page, '[data-card="shot-2-3"] .ttl', /8 s/);
+      await expectText(page, '[data-card="shot-2-3"] .anno[data-note="note-b"]', /✓ Make 2\.3 8 s/);
+      // Note a is an observation: it does not gate the video.
       await expectText(page, '[data-act="confirm-video"]', /^Confirm frames & generate video · about \$1\.50$/);
-      if (await confirm.isDisabled()) throw new Error("Confirm is still disabled");
+      if (await confirm.isDisabled()) throw new Error("Confirm is still disabled after note b was settled");
       await expectText(page, ".vpanel .why", /^3 clips at about \$0\.50$/);
-      await screenshot(page, "extended-1440");
+      await expectText(page, '.banner [data-act="note-next"]', /Next: note a/);
+      await screenshot(page, "note-b-settled-1440");
       await confirm.click();
       await page.waitForSelector('[data-card="shot-2-1"] .vprog');
-      await expectText(page, ".vpanel", /Making video/);
-      await expectText(page, '[data-card="shot-2-2"] .stl', /Queued/);
-      // Paying used the edit: its Undo is gone from the banner.
+      // Paying used the change: its Undo is gone from the banner.
       if (await page.locator('.banner [data-act="undo"]').count()) throw new Error("Undo is still offered after paying for video");
       await expectText(page, ".vpanel", /Video saved/, 15000);
-      await expectText(page, ".scene-head .line", /video saved/);
       await expectText(page, '[data-act="scene"][data-scene="scene-2"]', /Harbour at dawn · video saved/);
-      await expectText(page, '[data-act="play-scene"]', /Play Scene 2/);
       await screenshot(page, "video-saved-1440");
     },
   },
   {
-    name: "next-keyframes-undo-extend",
+    name: "next-keyframes-note-undo",
     query,
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await page.click('[data-act="make-fit"]');
-      await page.waitForSelector('.banner[data-state="settled"]');
+      await page.click('.banner [data-act="note-choice"][data-kind="proposal"]');
+      await page.waitForSelector('.banner[data-state="settled"] [data-act="undo"]');
       await page.click('.banner [data-act="undo"]');
-      await page.waitForSelector('.banner[data-state="open"]');
+      await page.waitForSelector('.banner[data-note="note-b"][data-state="open"]');
       await expectText(page, '[data-card="shot-2-3"] .ttl', /6 s/);
-      await expectText(page, ".banner.check h2", /^Narration 7\.4 s, shot 6 s$/);
+      // An undone proposal cannot be accepted again; the note's other choice remains.
+      if (!(await page.locator('.banner [data-act="note-choice"][data-kind="proposal"]').isDisabled())) throw new Error("An undone proposal is offered again");
+      await expectText(page, '.banner [data-act="note-choice"][data-kind="edit"]', /Edit narration/);
+    },
+  },
+  {
+    name: "next-keyframes-note-keep-maroon",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await page.click('.banner [data-act="note-choice"][data-kind="proposal"]');
+      await page.click('.banner [data-act="note-next"]');
+      await page.waitForSelector('.banner[data-note="note-a"][data-state="open"]');
+      await expectText(page, ".banner .eyebrow", /Director's note/i);
+      await expectText(page, ".banner h2", /^Mara's coat came out maroon, not red\.$/);
+      await expectText(page, '.banner [data-act="note-choice"][data-kind="regenerate"]', /^Regenerate 2\.2 · about \$0\.04$/);
+      await screenshot(page, "note-a-1440");
+      await page.click('.banner [data-act="note-choice"][data-kind="accept"]');
+      await page.waitForSelector('.banner[data-note="note-a"][data-state="settled"]');
+      await expectText(page, ".banner .sub", /Settled: Keep maroon/);
+      await expectText(page, '[data-card="shot-2-2"] .anno[data-note="note-a"]', /✓ Keep maroon/);
+      if (await page.locator('.banner [data-act="undo"]').count()) throw new Error("Keep maroon offers an Undo the server does not have");
+      await page.click('.banner [data-act="note-next"]');
+      await expectText(page, '.quiet', /Every Director note in this scene is settled\./);
+    },
+  },
+  {
+    name: "next-keyframes-note-regenerate",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      // Regenerate 2.2 through note a, from the link under its chip on the card.
+      await page.click('[data-card="shot-2-2"] [data-act="note-regenerate"]');
+      await page.waitForSelector('[data-card="shot-2-2"] .making');
+      await expectText(page, '[data-card="shot-2-2"] .stl', /Making keyframe/);
+      await page.click('.card [data-act="open-shot"][data-shot="shot-2-2"]');
+      await page.waitForSelector('.insp [data-row="takes"]', { timeout: 10000 });
+      await expectText(page, '.insp [data-row="takes"]', /Takes\s*2/);
+      await expectText(page, '[data-card="shot-2-2"] .anno[data-note="note-a"]', /✓ Regenerate 2\.2/);
+      await expectText(page, '[data-card="shot-2-2"] .stl', /Opened|Not opened/);
+      await screenshot(page, "note-a-regenerated-1440");
     },
   },
   {
@@ -129,18 +186,26 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await openCard(page, "2.2");
-      await openCard(page, "2.3");
+      // Settle note b by editing the line (still too long) and note a with Keep maroon: once no Director note
+      // is open, the app's own check on 2.3 takes the banner.
+      await page.click('.banner [data-act="note-choice"][data-kind="edit"]');
+      await page.waitForSelector('.insp form[data-form="narration"]');
+      await page.fill(".insp textarea", "It was the very last boat of the whole season, and I so nearly missed it.");
+      await page.click('.insp [data-act="save-edit"]');
+      await page.waitForSelector('.banner[data-note="note-b"][data-state="settled"]');
+      await expectText(page, ".banner .sub", /Settled: 2\.3 edited/);
+      await page.click('.banner [data-act="note-next"]');
+      await page.click('.banner[data-note="note-a"] [data-act="note-choice"][data-kind="accept"]');
+      await page.click('.banner[data-note="note-a"][data-state="settled"] [data-act="note-next"]');
+      await page.waitForSelector('.banner.check[data-state="open"]');
+      await expectText(page, ".banner.check h2", /^Narration about [\d.]+ s, shot 6 s$/);
       await page.click('[data-act="keep-fit"][data-shot="shot-2-3"]');
-      await page.waitForSelector('.banner[data-state="settled"] [data-act="undo"]');
-      await expectText(page, ".banner", /2\.3 stays 6 s; the line is cut there[\s\S]*The last 1\.4 s of the line will not be heard/);
-      await expectText(page, '.insp [data-row="narration"]', /7\.4 s voiced · cut at 6 s/);
-      await expectText(page, '[data-card="shot-2-3"] .ttl', /6 s/);
-      await expectText(page, '[data-act="confirm-video"]', /about \$1\.50/);
+      await page.waitForSelector('.banner.check[data-state="settled"] [data-act="undo"]');
+      await expectText(page, ".banner", /2\.3 stays 6 s; the line is cut there/);
+      await expectText(page, '.insp [data-row="narration"]', /cut at 6 s/);
       await screenshot(page, "kept-1440");
       await page.click('.banner [data-act="undo"]');
-      await page.waitForSelector('.banner[data-state="open"]');
-      await expectText(page, ".vpanel .why", /^Settle the narration in 2\.3 first$/);
+      await page.waitForSelector('.banner.check[data-state="open"]');
     },
   },
   {
@@ -192,21 +257,25 @@ export const scenarios = [
     },
   },
   {
-    name: "next-keyframes-edit-narration",
+    name: "next-keyframes-note-edit-narration",
     query,
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await page.click('.banner [data-act="edit-narration"]');
+      await page.click('.banner [data-act="note-choice"][data-note="note-b"][data-kind="edit"]');
       await page.waitForSelector('.insp form[data-form="narration"]');
       await expectText(page, ".insp .est", /About 7\.4 s at the recorded voice's pace \(an estimate\) · still longer than 6 s/);
       await page.fill(".insp textarea", "The last boat, and I nearly missed it.");
       await expectText(page, ".insp .est", /About 4\.6 s .*an estimate.* · fits 6 s/);
       await expectText(page, '.insp form[data-form="narration"]', /Nothing visual changes/);
       await page.click('.insp [data-act="save-edit"]');
-      await page.waitForSelector('.banner[data-state="settled"]');
-      await expectText(page, ".banner", /New 2\.3 line, about 4\.6 s, fits 6 s/);
+      await page.waitForSelector('.banner[data-note="note-b"][data-state="settled"] [data-act="undo"]');
+      await expectText(page, ".banner .sub", /Settled: 2\.3 edited/);
       await expectText(page, '.insp [data-row="narration"]', /estimate/);
+      // Undoing the edit brings the line back and reopens the note.
+      await page.click('.banner [data-act="undo"]');
+      await page.waitForSelector('.banner[data-note="note-b"][data-state="open"]');
+      await expectText(page, '.insp [data-row="narration"]', /It was the last boat/);
     },
   },
   {
@@ -270,7 +339,7 @@ export const scenarios = [
       await page.locator(".cards").evaluate((el) => { el.scrollLeft = el.scrollWidth; });
       await openCard(page, "2.3");
       await noPageScroll(page, 390, { vertical: false });
-      await page.click('.banner [data-act="edit-narration"]');
+      await page.click('.banner [data-act="note-choice"][data-kind="edit"]');
       await page.waitForSelector('.insp form[data-form="narration"]');
       await noPageScroll(page, 390, { vertical: false });
       await page.click(`[data-act="scene"][data-scene="${scene(3)}"]`);
@@ -285,7 +354,8 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await expectText(page, ".banner.check .eyebrow", /检查/);
+      await expectText(page, ".banner .eyebrow", /导演建议/);
+      await expectText(page, '.banner [data-act="note-choice"][data-kind="proposal"]', /把 2\.3 改为 8 秒/);
       await expectText(page, '[data-card="shot-2-1"] .stl', /已查看/);
       await expectText(page, '[data-card="shot-2-2"] .stl', /未查看/);
       await expectText(page, ".insp", /重新生成关键帧/);
