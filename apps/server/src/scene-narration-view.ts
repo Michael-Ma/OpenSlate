@@ -25,6 +25,7 @@ export function sceneNarrationView(
   const canonical = canonicalHead
     ? production.store.get<{
         shotMappings: { shotId: string; segmentId: string | null }[];
+        segments?: { segmentId: string; audioPlacement: { durationSamples: number } }[];
       }>("narration_canonical", canonicalHead.canonicalId)
     : undefined;
   let options: ReturnType<typeof projectNarrationSpeechOptions> | null = null;
@@ -179,6 +180,10 @@ export function sceneNarrationView(
             ? (row?.audio?.media.sha256 ?? null)
             : null,
           recordingCurrent,
+          measuredSeconds: ready
+            ? (canonical?.segments?.find(segment => segment.segmentId === segmentId)?.audioPlacement.durationSamples ?? (acceptedCue ? acceptedCue.durationFrames * 1600 : 0)) / 48000
+            : durationSamples === null ? null : durationSamples / 48000,
+          fit: ready ? shot.narrationFit ?? null : null,
           timing: {
             startFrame: 0,
             startSample,

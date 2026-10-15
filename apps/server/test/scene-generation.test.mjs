@@ -1,3 +1,4 @@
+import { assertSceneRowParity } from "./helpers/scene-row-parity.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, randomBytes } from "node:crypto";
@@ -41,12 +42,14 @@ function fixture(t, { sharedScene = false } = {}) {
   const token = randomBytes(32).toString("base64url"),
     app = createApp({ service, localToken: token, logger: false });
   t.after(async () => {
+    assertSceneRowParity(service, project.id);
     await app.close();
     store.close();
     provider.close();
     rmSync(directory, { recursive: true, force: true });
   });
   const get = async (scene = "scene-0") => {
+    assertSceneRowParity(service, project.id);
     const response = await app.inject({
       method: "GET",
       url: `/api/projects/${project.id}/scenes/${scene}/generation`,

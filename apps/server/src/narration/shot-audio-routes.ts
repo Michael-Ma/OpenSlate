@@ -252,6 +252,7 @@ export function registerShotAudioRoutes(
               ?.script.id ||
           digest(shot.narration ?? null) !== digest(writing);
         if (changed) {
+          delete shot.narrationFit;
           shot.narration = writing;
           shot.narrationPending = true;
           const saved = store.saveProject(

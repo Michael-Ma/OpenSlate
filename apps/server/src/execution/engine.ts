@@ -37,7 +37,13 @@ export interface Candidate { id: string; projectId: string; nodeId: string; gran
 export interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 export interface NodeBinding {
   id: string; projectId: string; planId: string; node: PlanNode;
+  outdated?: { at: string; fields: string[]; previous: ArtifactRef };
   candidateId: string | null; state: "active" | "retired"; outputs: Record<string, ArtifactRef>;
+}
+/** A new current output resolves the edit metadata; historical artifacts stay immutable. */
+function bindingWithOutputs(binding: NodeBinding, outputs: NodeBinding["outputs"]): NodeBinding {
+  const { outdated: _outdated, ...current } = binding;
+  return { ...current, outputs };
 }
 export type AttemptPhase = "submitting" | "preparing" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
 export interface Attempt {
@@ -83,9 +89,11 @@ export interface ExternalExecutionAdmission {
 }
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
+const WAIT_CODES = new Set(["CAPACITY_EXCEEDED", "LOCAL_EXECUTION_BUSY", "EXECUTION_HELD", "HUMAN_REVIEW_REQUIRED", "INPUT_PENDING", "TIMING_REQUIRED"]);
 
 /** Durable executor over registered ports. The shipped launcher enables only fake execution. */
 export class Engine {
+  readonly startedAt = new Date(performance.timeOrigin).toISOString();
   readonly recovery: InstallationRecoveryGuard;
   readonly registry: ExecutionRegistry;
   private readonly externalAdmission: ExternalExecutionAdmission | undefined;
@@ -190,7 +198,7 @@ export class Engine {
         }
         const reuse = same && !grantId && !deferred.has(node.id) && !Object.hasOwn(node.args, "localExecution");
         if (!reuse) replaced.add(node.id);
-        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {} };
+        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {}, ...(old?.outdated && old.node.shotId === node.shotId && old.node.kind === node.kind && !(reuse && Object.keys(old.outputs).length) ? { outdated: old.outdated } : {}) };
         this.store.put("node_binding", node.id, projectId, binding); nodes.push(binding);
       }
       for (const binding of previous.values()) if (!seen.has(binding.id)) this.store.put("node_binding", binding.id, projectId, { ...binding, state: "retired" });
@@ -403,7 +411,7 @@ export class Engine {
         if (this.reuseLocal(binding, prepared.fingerprint)) { reused++; return; }
         attempt = this.admit(binding.projectId, binding.id, prepared.fingerprint);
       }
-      catch (error) { if (error instanceof DomainError) { blocked.push({ nodeId: binding.id, code: error.code }); return; } throw error; }
+      catch (error) { if (error instanceof DomainError) { this.recordNodeWait(binding, error.code); blocked.push({ nodeId: binding.id, code: error.code }); return; } throw error; }
       dispatched++;
       if (attempt.candidateId === null) {
         await this.handle(attempt, { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) }); return;
@@ -416,6 +424,22 @@ export class Engine {
     }));
     const rejected = settled.find(result => result.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;
     return { dispatched, reused, blocked };
+  }
+
+  private recordNodeWait(binding: NodeBinding, code: string): void {
+    // Invalid or unauthorized inputs fail without writes; they are not queueing conditions.
+    if (!WAIT_CODES.has(code)) return;
+    this.store.transaction(() => {
+      const previous = this.store.get<{ code: string }>("node_wait", binding.id);
+      if (previous?.code === code) return;
+      this.store.put("node_wait", binding.id, binding.projectId, { nodeId: binding.id, code, since: new Date().toISOString() });
+      this.store.appendEvent(binding.projectId, "node.wait_changed", { nodeId: binding.id, code });
+    });
+  }
+  private clearNodeWait(projectId: string, nodeId: string): void {
+    if (!this.store.get("node_wait", nodeId)) return;
+    this.store.db.prepare("DELETE FROM entities WHERE kind='node_wait' AND id=? AND project_id=?").run(nodeId, projectId);
+    this.store.appendEvent(projectId, "node.wait_changed", { nodeId, code: null });
   }
 
   async reconcile(): Promise<{ reconciled: number; blocked?: { attemptId: string; code: string }[] }> {
@@ -573,6 +597,7 @@ export class Engine {
           inputs: this.resolveInputs(project.id, binding.node).artifacts, execution: snapshotLocalExecution(binding.node.args.localExecution) },
         phase: "ingesting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId: null, failure: null, outputs: {}, createdAt: new Date().toISOString() };
+      this.clearNodeWait(project.id, binding.id);
       this.store.insert("attempt", id, project.id, admitted);
       const intent: LocalExecutionIntent = { id, projectId: project.id, version: 1, attemptId: id, requestDigest: digest(admitted.request),
         capabilityLockId: project.capabilityLockId, execution: snapshotLocalExecution(binding.node.args.localExecution), prepared,
@@ -656,7 +681,7 @@ export class Engine {
   private selectLocal(binding: NodeBinding, attemptId: string, prepared: PreparedLocalExecution, result: LocalExecutionResult): void {
     this.store.put<LocalExecutionBinding>("local_execution_binding", binding.id, binding.projectId,
       { id: binding.id, projectId: binding.projectId, attemptId, prepared });
-    this.store.put("node_binding", binding.id, binding.projectId, { ...binding, outputs: { [result.port]: result.artifact.artifact } });
+    this.store.put("node_binding", binding.id, binding.projectId, bindingWithOutputs(binding, { [result.port]: result.artifact.artifact }));
   }
   private async verifyLocalResult(intent: LocalExecutionIntent, result: LocalExecutionResult, signal: AbortSignal): Promise<void> {
     assertLocalExecutionResult(result, intent);
@@ -708,7 +733,7 @@ export class Engine {
       this.lockedProfiles(project);
       invariant(!this.held(project, binding.id), "EXECUTION_HELD", "Dispatch is paused or held");
       invariant(binding.candidateId === null && this.resolveInputs(project.id, binding.node).fingerprint === fingerprint, "REVISION_CONFLICT", "Local cache target changed during verification");
-      this.store.put("node_binding", binding.id, project.id, { ...binding, outputs: previous.outputs });
+      this.store.put("node_binding", binding.id, project.id, bindingWithOutputs(binding, previous.outputs));
       this.store.appendEvent(project.id, "execution.output_reused", { nodeId: binding.id, attemptId: previous.id }); return true;
     });
   }
@@ -856,6 +881,7 @@ export class Engine {
         ...(ownedInput ? { applicationInput: structuredClone(ownedInput.input) } : {}),
         ...(speechInput ? { narrationSpeech: structuredClone(speechInput.input) } : {}),
       };
+      this.clearNodeWait(projectId, nodeId);
       this.store.insert("attempt", id, projectId, attempt);
       if (reservationId) this.store.insert("reservation", reservationId, projectId, { attemptId: id, micros: cost.toString(), state: "reserved" });
       if (externalAllowanceId && this.externalAdmission?.recordAdmission) {
@@ -1098,7 +1124,7 @@ export class Engine {
               assertPersonalVoiceCurrent(this.store, current.projectId, String(binding.node.args.voice), String(binding.node.args.adapter));
             }
             if (this.resolveInputs(current.projectId, binding.node).fingerprint === current.fingerprint)
-              this.store.put("node_binding", binding.id, binding.projectId, { ...binding, outputs: mapped });
+              this.store.put("node_binding", binding.id, binding.projectId, bindingWithOutputs(binding, mapped));
           } catch (error) { if (!(error instanceof DomainError)) throw error; }
         }
       }

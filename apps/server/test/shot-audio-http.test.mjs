@@ -1,3 +1,4 @@
+import { GenerationOverviewReader } from "../dist/generation-overview.js";
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -92,6 +93,8 @@ test('one explicit shot acceptance installs measured canonical audio, preserves 
   const path = `/shots/${before.shots[0].id}/accept`, extras = { headers: { 'idempotency-key': 'accept-exact-take' } };
   const accepted = await f.request(path, body, extras); assert.equal(accepted.statusCode, 200, accepted.body);
   const current = f.store.getProject(f.project.id); assert.deepEqual(current.shots[1], before.shots[1]);
+  const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
+  assert.deepEqual(overview.shots[before.shots[0].id].narration, {state:'ready',text:'Made with care.',measuredSeconds:6,fits:true,fit:'cut_to_shot'});
   assert.equal(current.shots[0].desiredFrames, 180); assert.notEqual(current.shots[0].cueId, before.shots[0].cueId);
   assert.equal(f.store.list('narration_acceptance', f.project.id).length, 3);
   const replay = await f.request(path, body, extras); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), accepted.json());
@@ -116,6 +119,10 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   const f = await fixture(t), { audio, segment } = await f.ready(), body = { ...f.acceptBody(audio, segment), endSample: 288001, durationMode: 'match_audio' }, shotId = f.project.shots[0].id;
   const accepted = await f.request(`/shots/${shotId}/accept`, body); assert.equal(accepted.statusCode, 200, accepted.body);
   let project = f.store.getProject(f.project.id), cue = project.cues.find(cue => cue.id === project.shots[0].cueId);
+  const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
+  assert.equal(overview.shots[shotId].narration.measuredSeconds, 288001 / 48000);
+  assert.equal(overview.shots[shotId].narration.fit, 'extend_shot');
+  assert.equal(overview.shots[shotId].narration.fits, true);
   assert.equal(project.shots[0].desiredFrames, 181); assert.equal(cue.durationFrames, 181);
   assert.equal(f.canonical.workspaceCurrent(project.id).segments[0].placementMode, 'shot');
   const playback = async () => (await f.request('/playback')).json().placements[0];
@@ -277,4 +284,15 @@ test('uploaded recording setup creates a scoped draft automatically and stale wr
   assert.equal(f.store.list('narration_session',f.project.id).length,0);
   const saved=await f.request(`/shots/${shotId}/initialize`,body);assert.equal(saved.statusCode,200,saved.body);assert.equal(saved.json().segment.script.source.kind,'uploaded');
   assert.ok(saved.json().session.id);assert.equal(f.view().segments.length,1);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);
+});
+
+test('overview estimates an unmade voice and clears a previous fit decision when its script changes', async t => {
+  const f = await fixture(t), { audio, segment } = await f.ready(), shotId = f.project.shots[0].id;
+  const path = `/shots/${shotId}/accept`;
+  const accepted = await f.request(path, f.acceptBody(audio, segment)); assert.equal(accepted.statusCode, 200, accepted.body);
+  assert.equal(f.store.getProject(f.project.id).shots[0].narrationFit,'cut_to_shot');
+  editStoryboard(f.production,f.project.id,{kind:'narration',id:shotId,field:'text',value:'你好世界',expectedHeadVersion:f.store.getProject(f.project.id).headVersion},randomUUID());
+  const row = new GenerationOverviewReader(f.production,f.narration).read(f.project.id).shots[shotId].narration;
+  assert.equal(row.state,'text_only'); assert.equal(row.estimatedSeconds,1.2); assert.equal(row.measuredSeconds,undefined); assert.equal(row.fit,undefined);
+  assert.equal(f.provider.acceptedCount(),0);
 });

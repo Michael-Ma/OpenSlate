@@ -1,3 +1,4 @@
+import { registerGenerationOverview } from "./generation-overview.js";
 import { registerSceneGeneration } from './scene-generation.js';
 import { continueEditsSchema, type ContinueEdits } from './application/pending-edit-continuation.js';
 import { registerStoryboard } from "./storyboard.js";
@@ -56,11 +57,12 @@ export function createApp(options: AppOptions = {}) {
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   registerSceneGeneration(app, service, options.narrationRoutes?.narration);
+  registerGenerationOverview(app, service, options.narrationRoutes?.narration);
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403
         : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : error.code === "VALIDATION_ERROR" ? 400 : 409;
-      void reply.status(status).send({ error: { code: error.code, message: error.message } });
+      void reply.status(status).send({ error: { code: error.code, message: error.message, ...(error.code === "DIRECTION_REQUIRED" && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });

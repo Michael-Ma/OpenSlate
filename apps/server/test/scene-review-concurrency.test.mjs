@@ -1,3 +1,4 @@
+import { assertSceneRowParity } from "./helpers/scene-row-parity.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -48,8 +49,9 @@ function fixture(t) {
       uploadDirectory: join(directory, "uploads"),
     },
   });
-  const send = (path, body, key = randomUUID()) =>
-    app.inject({
+  const send = (path, body, key = randomUUID()) => {
+    assertSceneRowParity(production, project.id);
+    return app.inject({
       method: body ? "POST" : "GET",
       url: `/api/projects/${project.id}${path}`,
       headers: {
@@ -59,7 +61,9 @@ function fixture(t) {
       },
       ...(body ? { payload: body } : {}),
     });
+  };
   t.after(async () => {
+    assertSceneRowParity(production, project.id);
     await app.close();
     store.close();
     provider.close();
