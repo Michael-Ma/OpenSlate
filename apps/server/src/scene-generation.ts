@@ -1,3 +1,4 @@
+import { requiredCommandKey } from "./application/command-key.js";
 import type { FastifyInstance } from "fastify";
 import { requestScopesIntersect } from "./application/request-scopes.js";
 import { assertExpectedHumanRequest } from "./application/expected-human-request.js";
@@ -402,7 +403,7 @@ export function registerSceneGeneration(
         input = request.body,
         store = production.store;
       const key =
-          (request.headers["idempotency-key"] as string | undefined) ?? newId(),
+          requiredCommandKey(request),
         scope = `local-user:${projectId}:scene-generation`,
         commandDigest = digest({ sceneId, ...input });
       production.recovery.assertWritable(projectId);
@@ -419,13 +420,6 @@ export function registerSceneGeneration(
         "VALIDATION_ERROR",
         "Choose the exact shots whose keyframes should be replaced",
       );
-      if (input.targetShotIds || input.regenerate)
-        invariant(
-          typeof request.headers["idempotency-key"] === "string" &&
-            request.headers["idempotency-key"].trim().length > 0,
-          "VALIDATION_ERROR",
-          "A command identity is required for a shot keyframe action",
-        );
       const captured = sceneView(production, projectId, sceneId);
       invariant(
         !input.targetShotIds ||
@@ -666,6 +660,7 @@ export function registerSceneGeneration(
               scopeIds: input.targetShotIds
                 ? selected.map((row) => row.shotId)
                 : [sceneId],
+              source: "app",
               key: `scene-generation:${key}`,
             },
           );

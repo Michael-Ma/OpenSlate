@@ -58,7 +58,7 @@ export function registerAudioLibraryRoutes(app: FastifyInstance, options: { prod
         check(projectId);
         return store.command<AudioLibraryImport>(`local-user:${projectId}:audio-library-import`, key, inputDigest, () => {
           const actor = production.beginRequest(projectId, 'local-user', 'Import this recording into my owned audio library. No narration or music placement is selected.',
-            { editing: false, key: `audio-library:${key}`, scopeIds: [projectId], contextDigest: inputDigest });
+            { source: "app", editing: false, key: `audio-library:${key}`, scopeIds: [projectId], contextDigest: inputDigest });
           const value: AudioLibraryImport = { id: identity, projectId, audioId: newId(), requestId: actor.requestId,
             originalSha256: upload.sha256, originalByteLength: upload.byteLength, label };
           store.insert('audio_library_import', identity, projectId, value); return value;

@@ -381,20 +381,13 @@ export function editStoryboard(
         "local-user",
         `Storyboard edit: ${input.kind}${input.field ? ` ${input.field}` : ""}. Preserve unaffected work and replan only what this edit requires.`,
         {
+          source: "app",
           key: `storyboard:${key}`,
           editing: true,
           directEdit: true,
           scopeIds: scopes.length ? scopes : [projectId],
         },
       );
-      const request = s.store.get<Record<string, unknown>>(
-        "message",
-        actor.requestId,
-      )!;
-      s.store.put("message", actor.requestId, projectId, {
-        ...request,
-        source: "storyboard",
-      });
       const bindings = s.store
         .list<NodeBinding>("node_binding", projectId)
         .filter(

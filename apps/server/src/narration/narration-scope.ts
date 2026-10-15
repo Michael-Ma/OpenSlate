@@ -99,7 +99,7 @@ export function createShotNarrationSession(production: ProductionService, projec
     fail(!continuationSessionId || previous?.id === continuationSessionId && previous.projectId === projectId && previous.shotId === shotId && previous.principalId === 'local-user', 'The previous shot narration session changed');
     const segmentId = ownedSegment(store, projectId, shotId);
     const actor = production.beginRequest(projectId, 'local-user', 'Edit narration for this shot and review its exact recording and timing.',
-      { scopeIds: [shotId], editing: true, key: `shot-narration:${shotId}:${digest(key)}`, ...(previous ? { continuationRequestId: previous.requestId } : {}) });
+      { source: "app", scopeIds: [shotId], editing: true, key: `shot-narration:${shotId}:${digest(key)}`, ...(previous ? { continuationRequestId: previous.requestId } : {}) });
     const session: NarrationSession = { id: newId(), projectId, requestId: actor.requestId, principalId: 'local-user', shotId };
     store.insert('narration_session', session.id, projectId, session);
     const scope = store.insert('narration_shot_scope', actor.requestId, projectId, { version: 1, requestId: actor.requestId, sessionId: session.id, principalId: 'local-user', shotId }) as NarrationShotScope;

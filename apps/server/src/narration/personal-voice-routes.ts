@@ -23,7 +23,7 @@ export function registerPersonalVoiceRoutes(app: FastifyInstance, production: Pr
     const projectId = request.params.projectId, input = { ...request.body, key: key(request) };
     const voice = production.store.transaction(() => production.store.command(`local-user:${projectId}:personal-voice-register`, input.key, digest(input), () => {
       const actor = production.beginRequest(projectId, 'local-user', 'Register my own existing provider voice with explicit synthesis consent.',
-        { editing: false, key: `voice-register:${input.key}`, scopeIds: [projectId], contextDigest: digest(input) });
+        { source: "app", editing: false, key: `voice-register:${input.key}`, scopeIds: [projectId], contextDigest: digest(input) });
       return service.register(projectId, actor, input);
     }));
     return reply.header('Cache-Control', 'private, no-store').send({ voice });
@@ -34,7 +34,7 @@ export function registerPersonalVoiceRoutes(app: FastifyInstance, production: Pr
     const projectId = request.params.projectId, input = { key: key(request), identityId: request.params.identityId };
     const revocation = production.store.transaction(() => production.store.command(`local-user:${projectId}:personal-voice-revoke`, input.key, digest(input), () => {
       const actor = production.beginRequest(projectId, 'local-user', 'Revoke this personal voice for new speech generation.',
-        { editing: false, key: `voice-revoke:${input.key}`, scopeIds: [projectId], contextDigest: digest(input) });
+        { source: "app", editing: false, key: `voice-revoke:${input.key}`, scopeIds: [projectId], contextDigest: digest(input) });
       return service.revoke(projectId, actor, input);
     }));
     return reply.header('Cache-Control', 'private, no-store').send({ revocation });

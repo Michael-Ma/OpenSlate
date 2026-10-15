@@ -19,7 +19,7 @@ export function registerPlanImports(app: FastifyInstance, service: () => Product
       invariant(s.store.getProject(id).headVersion === input.expectedHeadVersion, 'REVISION_CONFLICT', 'The film plan changed before import. Refresh and try again.');
       invariant(!s.store.get<{ paused: boolean }>('execution_control', id)?.paused, 'IMPORT_STALE', 'Send a fresh direction to continue stopped work before importing.');
       invariant(!s.store.list<{ state: string }>('plan_import', id).some(row => row.state === 'pending'), 'IMPORT_PENDING', 'Confirm or discard the current import before adding another.');
-      const actor = s.beginRequest(id, 'local-user', `Interpret this supplied document as a proposed film plan. Preserve my material; show optional suggestions separately. Wait for my confirmation before applying anything.\n\nDocument: ${input.name}\n\n${input.text}`, { editing: true, key: `plan-import:${key}`, contextDigest: digest(input) });
+      const actor = s.beginRequest(id, 'local-user', `Interpret this supplied document as a proposed film plan. Preserve my material; show optional suggestions separately. Wait for my confirmation before applying anything.\n\nDocument: ${input.name}\n\n${input.text}`, { source: "app", editing: true, key: `plan-import:${key}`, contextDigest: digest(input) });
       s.store.insert('plan_import', actor.requestId, id, { id: actor.requestId, projectId: id, ...input, sourceDigest: digest({ name: input.name, text: input.text }), state: 'pending' });
       s.store.appendEvent(id, 'plan_import.created', { requestId: actor.requestId });
       director!.enqueue(id, actor);

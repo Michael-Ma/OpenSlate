@@ -33,7 +33,7 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
       invariant(found, "NOT_FOUND", "Render does not belong to this project"); return found;
     };
     const commandActor = (projectId: string, action: string, key: string, context: unknown): ActorContext =>
-      production.beginRequest(projectId, "local-user", action, { editing: false, key: `media:${key}`, contextDigest: digest(context) });
+      production.beginRequest(projectId, "local-user", action, { source: "app", editing: false, key: `media:${key}`, contextDigest: digest(context) });
     const launch = (job: MediaRenderJob, actor: ActorContext, action: "run" | "recover") => {
       invariant(!closing, "SERVICE_UNAVAILABLE", "Renderer is shutting down");
       if (tasks.has(job.id)) return;
@@ -76,7 +76,7 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
       const { projectId } = request.params, expectedHeadVersion = Number(request.query.expectedHeadVersion), key = idempotencyKey(request);
       invariant(!(request.query.requestId && request.query.continuationRequestId), "VALIDATION_ERROR", "Choose one existing import request or an explicit continuation");
       const actor: ActorContext = request.query.requestId ? { kind: "human", principalId: "local-user", requestId: request.query.requestId }
-        : production.beginRequest(projectId, "local-user", "Import supplied video", { key: `video-upload:${key}`, editing: true,
+        : production.beginRequest(projectId, "local-user", "Import supplied video", { source: "app", key: `video-upload:${key}`, editing: true,
           ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion }) });
       const assertCurrent = () => {
         production.assertActor(projectId, actor, true);

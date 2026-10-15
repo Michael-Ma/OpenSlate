@@ -41,7 +41,7 @@ export function registerGenerationPermission(app: FastifyInstance, service: () =
       const shotNames = body.shotIds.map(id => { const index = project.shots.findIndex(shot => shot.id === id); return `Shot ${index + 1}: ${project.shots[index]!.purpose}`; }).join("; ");
       const actor = production.beginRequest(projectId, "local-user",
         `Prepare generation for the reviewed saved shots (${shotNames}). I authorize one ${body.kinds.join(" and one ")} operation per selected shot, including a replacement only where needed. Keep other shots and completed results. This is creative permission only: spending allowance and video keyframe review remain separate.`,
-        { scopeIds: body.continuationRequestId || body.continuationScope === 'project' ? [projectId] : body.shotIds, editing: true, key: `generation-permission:${key}`,
+        { source: "app", scopeIds: body.continuationRequestId || body.continuationScope === 'project' ? [projectId] : body.shotIds, editing: true, key: `generation-permission:${key}`,
           ...(body.continueEdits ? { continueEdits: body.continueEdits } : {}),
           ...(body.continuationRequestId ? { continuationRequestId: body.continuationRequestId } : {}) });
       const grants = production.authorize(projectId, actor, body.shotIds.flatMap(scopeId => body.kinds.map(kind => ({ scopeId, kind }))), key, "user_change");
