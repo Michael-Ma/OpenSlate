@@ -309,6 +309,25 @@ export class StudioStore {
     return receipt;
   }
 
+  // ---- generic primitives for views (phase P5): views define their commands in their own model files ----
+
+  /** GET a project-relative path (e.g. "/assets") or an absolute /api path. */
+  read<T>(relativeOrApiPath: string, signal?: AbortSignal): Promise<T> {
+    const target = relativeOrApiPath.startsWith("/api/") ? relativeOrApiPath : path(this.#state.projectId ?? "", relativeOrApiPath);
+    return this.#deps.client.request<T>(target, signal ? { signal } : {});
+  }
+
+  /**
+   * POST with request identity (see #press): one press id per control, a logical identity for resends,
+   * and a builder for the path and body. Refreshes the studio afterwards. Errors become toasts.
+   */
+  command<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }> | { path: string; body: unknown }, toast?: Msg): Promise<T | undefined> {
+    return this.#press<T>(pressId, logical, async () => {
+      const request = await build();
+      return { path: request.path.startsWith("/api/") ? request.path : path(this.#state.projectId ?? "", request.path), body: request.body };
+    }, toast);
+  }
+
   // ---- plain UI state ----------------------------------------------------------
 
   setView = (view: ViewName) => this.dispatch({ type: "view", view });

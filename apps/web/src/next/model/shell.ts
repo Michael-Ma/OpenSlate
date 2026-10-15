@@ -26,6 +26,8 @@ const TAB_LABELS: Record<ViewName, MessageId> = {
   keyframes: "shell.tab.keyframes",
   assets: "shell.tab.assets",
   film: "shell.tab.film",
+  settings: "shell.tab.settings",
+  start: "shell.tab.start",
 };
 
 export function viewTabs(current: ViewName): ViewTab[] {
@@ -47,7 +49,7 @@ export function tabKeyTarget(key: string, index: number, count: number): number 
 }
 
 /** The classic studio names its views differently. */
-const CLASSIC_VIEW: Record<ViewName, string> = { plan: "plan", keyframes: "frames", assets: "assets", film: "cut" };
+const CLASSIC_VIEW: Record<ViewName, string> = { plan: "plan", keyframes: "frames", assets: "assets", film: "cut", settings: "plan", start: "plan" };
 
 /**
  * The same page in the classic studio at the matching view. Keeps the language; drops the sample-film
