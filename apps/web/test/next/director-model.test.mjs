@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   canStop, stopNotices, modeLine, scopeLabel, bylineTime, userText, paragraphs, threadView, pendingQuestions,
   composeAnswer, composerView, pickerItems, filterPicker, mentionAt, removeMention, MESSAGE_LIMIT,
+  threadNotes, noteOpens, byLetter,
 } from '../../src/next/model/director.ts';
+import { noteViews } from '../../src/next/model/notes.ts';
 import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, sceneId, shotId, PROJECT_ID } from '../../src/next/fixtures/last-ferry.ts';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { FIXTURE_REPLY_MS } from '../../src/next/fixtures/fixture-director.ts';
@@ -244,4 +246,65 @@ test('answering a question posts exactly { text, replyToQuestionId } and the fix
   assert.deepEqual(bodies, [{ text: 'Red', replyToQuestionId: 'q1' }]);
   assert.equal(port.world.snapshot.questions[0].state, 'answered');
   assert.equal(await store.answerQuestion('q1', '   '), false);
+});
+
+// ---- Director notes in the thread (DC-18) ----------------------------------------------
+
+const note = (letter, over = {}) => ({
+  noteId: `note-${letter}`, requestId: 'req-1', turnId: 'turn-1', letter, anchor: { shotIds: [shotId('2.2')] },
+  kind: 'recommendation', blocking: false, text: `Note ${letter}.`, choices: [{ kind: 'accept', label: 'Keep maroon' }, { kind: 'regenerate_keyframe', shotIds: [shotId('2.2')] }],
+  state: 'open', version: 1, createdAt: '2026-10-14T10:44:00', ...over,
+});
+const reply = (id, requestId, text = 'Reply.') => ({ id, role: 'assistant', text, ...(requestId ? { requestId } : {}) });
+const asked = (id, requestId) => ({ id, role: 'user', text: 'Ask.', ...(requestId ? { requestId } : {}) });
+
+test('notes sit under the last reply of their own request, in letter order', () => {
+  const conversation = [asked('u1', 'req-1'), reply('r1', 'req-1', 'Working on it.'), reply('r2', 'req-1', 'Done.'), asked('u2', 'req-2'), reply('r3', 'req-2')];
+  const placed = threadNotes(conversation, [note('b'), note('a'), note('a', { noteId: 'other-a', requestId: 'req-2', turnId: 'turn-2' })]);
+  assert.deepEqual([...placed.keys()].sort(), ['r2', 'r3']);
+  assert.deepEqual(placed.get('r2').map(n => n.letter), ['a', 'b']);
+  assert.deepEqual(placed.get('r3').map(n => n.noteId), ['other-a']);
+  assert.deepEqual(threadNotes(conversation, []).size, 0);
+  assert.deepEqual(['b', 'aa', 'z', 'a'].map(letter => ({ letter })).sort(byLetter).map(n => n.letter), ['a', 'b', 'z', 'aa']);
+});
+
+test('replies without a request id show the latest turn\'s unclaimed notes under the latest such reply', () => {
+  // The fixture film's 10:44 reply has no request id; a later scripted reply has one and must not take its notes.
+  const conversation = [asked('m1'), reply('m2'), asked('fx-3', 'fixture-request-3'), reply('fx-3-reply', 'fixture-request-3')];
+  const older = note('a', { noteId: 'old-a', requestId: 'req-0', turnId: 'turn-0', createdAt: '2026-10-14T09:00:00' });
+  const placed = threadNotes(conversation, [note('b'), older, note('a')]);
+  assert.deepEqual([...placed.keys()], ['m2']);
+  assert.deepEqual(placed.get('m2').map(n => n.noteId), ['note-a', 'note-b'], 'only the latest turn, in letter order');
+  // A server that gives every reply its request id never uses the fallback: unmatched notes stay out of the thread.
+  assert.equal(threadNotes([reply('r1', 'req-9')], [note('a')]).size, 0);
+});
+
+test('Open pills: one per anchored shot that still exists, else the scene; labels in both languages', () => {
+  const overview = lastFerryOverview();
+  const [two, scene, gone] = noteViews([
+    note('a', { anchor: { shotIds: [shotId('2.2'), shotId('2.3')] } }),
+    note('b', { anchor: { sceneId: sceneId(3) } }),
+    note('c', { anchor: { shotIds: ['shot-gone'] } }),
+  ], overview);
+  assert.deepEqual(noteOpens(two, overview).map(o => [o.kind, o.id, en(o.label)]), [['shot', shotId('2.2'), 'Open 2.2'], ['shot', shotId('2.3'), 'Open 2.3']]);
+  assert.deepEqual(noteOpens(scene, overview).map(o => [o.kind, o.id, en(o.label), zh(o.label)]), [['scene', sceneId(3), 'Open Scene 3', '查看第 3 场']]);
+  assert.deepEqual(noteOpens(gone, overview), [], 'a note on a removed shot offers nothing to open');
+});
+
+test('the thread shows notes under the Director\'s reply: open amber, settled neutral with how, stale says so', () => {
+  const snapshot = lastFerrySnapshot();
+  snapshot.notes = [
+    note('b', { anchor: { shotIds: [shotId('2.3')] }, blocking: true, state: 'stale' }),
+    note('a', { state: 'resolved', resolution: { choiceIndex: 0, at: '2026-10-14T10:50:00' } }),
+    note('c', { anchor: { shotIds: [shotId('2.1')] } }),
+  ];
+  const view = threadView(snapshot, lastFerryOverview(), idle, 'en', NOW);
+  const [you, director] = view.entries;
+  assert.deepEqual(you.notes, []);
+  assert.deepEqual(director.notes.map(n => [n.view.letter, n.tone, n.opens.map(o => en(o.label)), n.view.settled && en(n.view.settled)]), [
+    ['a', 'done', ['Open 2.2'], 'Settled: Keep maroon'],
+    ['b', 'stale', ['Open 2.3'], 'Out of date: the shot changed since'],
+    ['c', 'open', ['Open 2.1'], null],
+  ]);
+  assert.equal(threadView(snapshot, null, idle, 'en', NOW).entries[1].notes.length, 0, 'no overview, no labels: nothing to show yet');
 });

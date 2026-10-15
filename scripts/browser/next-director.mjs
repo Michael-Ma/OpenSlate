@@ -200,6 +200,56 @@ export const scenarios = [
     },
   },
   {
+    name: "next-director-notes",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      if (!(await page.locator(".thread .note").count())) {
+        console.log("     note: the fixture film has no Director notes yet; notes check skipped");
+        return;
+      }
+      // Notes a and b sit under the Director's 10:44 reply, in letter order, amber while open.
+      const reply = page.locator('.thread [data-who="director"]').filter({ hasText: "10:44" });
+      const letters = await reply.locator(".note").evaluateAll((nodes) => nodes.map((node) => [node.dataset.note, node.classList.contains("done")]));
+      if (JSON.stringify(letters) !== JSON.stringify([["a", false], ["b", false]])) fail(`Notes under the 10:44 reply: ${JSON.stringify(letters)}`);
+      const amber = await reply.locator(".note .letter").first().evaluate((node) => getComputedStyle(node).backgroundColor);
+      if (amber !== "rgb(240, 178, 74)") fail(`The open note's letter is ${amber}, not the Director's amber`);
+      // No choices in the thread: Open is the only action.
+      const acts = await reply.locator(".note button").evaluateAll((nodes) => [...new Set(nodes.map((node) => node.dataset.act))]);
+      if (acts.join() !== "note-open") fail(`Note cards offer ${acts}`);
+      await page.screenshot({ path: shot("notes-1440"), clip: { x: 0, y: 0, width: 400, height: 900 } });
+      // Open 2.2 selects the shot in the Keyframes view.
+      await reply.getByRole("button", { name: "Open 2.2" }).click();
+      await page.waitForSelector('.card.sel[data-card="shot-2-2"]');
+      // From another view, Open 2.3 comes back to Keyframes with 2.3 selected.
+      await page.locator('[data-act="tab"][data-view="plan"]').click();
+      await page.waitForSelector('[data-act="tab"][data-view="plan"][aria-selected="true"]');
+      await reply.getByRole("button", { name: "Open 2.3" }).click();
+      await page.waitForSelector('[data-act="tab"][data-view="keyframes"][aria-selected="true"]');
+      await page.waitForSelector('.card.sel[data-card="shot-2-3"]');
+    },
+  },
+  {
+    name: "next-director-notes-narrow",
+    query,
+    viewport: { width: 390, height: 844 },
+    async run({ page }) {
+      await page.waitForSelector(".director .thread [data-entry]", { state: "attached", timeout: 20000 });
+      const toggle = page.locator('[aria-controls="director"]');
+      if (!(await page.locator(".thread .note").count()) || !(await toggle.count())) {
+        console.log("     note: no fixture notes or no Director toggle yet; narrow notes check skipped");
+        return;
+      }
+      await toggle.click();
+      await page.waitForFunction(() => document.querySelector(".app").classList.contains("dir-open"));
+      await page.locator(".thread .note").getByRole("button", { name: "Open 2.2" }).click();
+      // Opening a shot from a note closes the drawer so the shot is seen.
+      await page.waitForFunction(() => !document.querySelector(".app").classList.contains("dir-open"), null, { timeout: 2000 }).catch(() => fail("Open 2.2 left the drawer open"));
+      await page.waitForSelector('.card.sel[data-card="shot-2-2"]', { state: "attached" });
+    },
+  },
+  {
     name: "next-director-chinese",
     query: `${query}&lang=zh`,
     viewport: { width: 1440, height: 900 },
