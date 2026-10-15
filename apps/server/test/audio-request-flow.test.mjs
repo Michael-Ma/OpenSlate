@@ -115,15 +115,15 @@ for(const kind of ['speech','transcription'])test(`${kind} original cancellation
  const pending=f.service.request(f.project.id,f.human,f.input(),options);await entered;options.signal=new AbortController().signal;controller.abort();release();
  await assert.rejects(pending,error=>error.code.endsWith('CANCELLED'));assert.equal(f.store.list(kind==='speech'?'narration_speech_application':'owned_transcription_application',f.project.id).length,0);
 });
-for(const scope of ['project','scene','shot'])test(`requested ${scope} narration dispatches through its exact scope without releasing an earlier picture hold or resubmitting unknown work`,async t=>{
+for(const scope of ['project','scene','shot'])test(`requested ${scope} narration dispatches alongside its exact scope without releasing an earlier picture hold or resubmitting unknown work`,async t=>{
  const f=await narrationSpeechFixture(t,{realSpeech:true,configuredAdmission:true,fetch:async()=>{throw Error('injected unconfirmed speech response');}}),saved=virtualShots(f),shot=saved.shots[0];
  const previous=rows(f,'hold').find(hold=>hold.active&&hold.ownerId===f.human.requestId);
- const human=f.production.beginRequest(saved.id,'human','Generate this saved shot narration',{scopeIds:[scope==='project'?saved.id:scope==='scene'?shot.sceneId:shot.id]}),actor=human;
+ const human=f.production.beginRequest(saved.id,'human','Generate this saved shot narration',{concurrency:'alongside',scopeIds:[scope==='project'?saved.id:scope==='scene'?shot.sceneId:shot.id]}),actor=human;
  const result=await f.service.request(saved.id,actor,{key:key(),expectedHeadVersion:saved.headVersion,segmentId:shot.id,
   segmentRevisionId:digest({shotId:shot.id,narration:shot.narration}),profileId:f.profile.id,voice:'cedar',instructions:''});
  const ready=await f.engine.runReady();assert.equal(ready.dispatched,1);assert.equal(f.calls.http,1);
  const attempt=rows(f,'attempt').find(attempt=>attempt.candidateId===result.receipt.candidateId);assert.equal(attempt.phase,'submission_unknown');assert.equal(attempt.request.providerUse.kind,'configured');
- assert.equal(attempt.request.externalAllowanceId,undefined);assert.equal(rows(f,'external_allowance').length,0);assert.deepEqual(f.store.get('hold',previous.id),previous);
+ assert.equal(attempt.request.externalAllowanceId,undefined);assert.equal(rows(f,'external_allowance').length,0);assert.deepEqual(f.store.get('hold',previous.id),previous);assert.equal(f.store.get('message',f.human.requestId).state,'active');
  await f.engine.reconcile();assert.equal(f.calls.http,1);assert.equal(rows(f,'attempt').filter(attempt=>attempt.candidateId===result.receipt.candidateId).length,1);
 });
 for(const change of ['new_pause','global_stop','text','voice','mode'])test(`requested speech cannot bypass ${change} after its input was captured`,async t=>{
@@ -146,13 +146,13 @@ for(const change of ['earlier_hold','new_pause','global_stop'])test(`configured 
  const bridge=new OpenAITranscriptionExecution({store:f.store,outputStore:outputs,preparation,credentials,fetch:async()=>{calls.http++;throw Error('injected unknown ASR outcome');}});
  const engine=new Engine(f.store,bridge,{artifactDir:f.artifactDir,profiles:f.profiles,outputStore:outputs,externalAdmission:{authorize:()=>({})},submissionPreparation:bridge});
  const production=new ProductionService(f.store,engine,f.profiles),narration=new NarrationService(production,f.media),service=new OwnedTranscriptionService(narration,f.artifactDir);
- const earlier=rows(f,'hold').find(hold=>hold.active&&hold.ownerId===f.human.requestId),human=production.beginRequest(f.project.id,'human','Transcribe this owned recording');
+ const earlier=rows(f,'hold').find(hold=>hold.active&&hold.ownerId===f.human.requestId),human=production.beginRequest(f.project.id,'human','Transcribe this owned recording',{concurrency:'alongside'});
  const result=await service.request(f.project.id,human,f.input());
  if(change==='new_pause')production.holdRequest(f.project.id,human,true);if(change==='global_stop')engine.setPaused(f.project.id,true,human.requestId);
  const ready=await engine.runReady();
- if(change!=='earlier_hold'){assert.equal(ready.dispatched,0);assert.equal(calls.http,0);assert.deepEqual(f.store.get('hold',earlier.id),earlier);return;}
+ if(change!=='earlier_hold'){assert.equal(ready.dispatched,0);assert.equal(calls.http,0);assert.deepEqual(f.store.get('hold',earlier.id),earlier);assert.equal(f.store.get('message',f.human.requestId).state,'active');return;}
  assert.equal(ready.dispatched,1);assert.equal(calls.http,1);
- assert.deepEqual(f.store.get('hold',earlier.id),earlier);assert.equal(rows(f,'external_allowance').length,0);
+ assert.deepEqual(f.store.get('hold',earlier.id),earlier);assert.equal(f.store.get('message',f.human.requestId).state,'active');assert.equal(rows(f,'external_allowance').length,0);
  const attempt=rows(f,'attempt').find(attempt=>attempt.candidateId===result.receipt.candidateId);assert.equal(attempt.phase,'submission_unknown');assert.equal(attempt.request.providerUse.kind,'configured');
  await engine.reconcile();assert.equal(calls.http,1);assert.equal(rows(f,'attempt').filter(attempt=>attempt.candidateId===result.receipt.candidateId).length,1);
 });

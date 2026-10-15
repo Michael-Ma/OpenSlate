@@ -5,7 +5,8 @@ import { assertPersonalVoiceCurrent, projectPersonalVoices } from "./personal-vo
 
 /** Resolve once when a new command is captured; never rewrite an existing take's voice. */
 export function defaultNarratorVoice(store: Store, project: ProjectRecord, shot: ProjectRecord["shots"][number], adapter = "openai-speech"): string {
-  let voice = project.narratorVoice ?? "cedar";
+  const selected = shot.narration?.voice;
+  let voice = selected && selected !== "stock" && selected !== "personal" ? selected : project.narratorVoice ?? "cedar";
   if (shot.narration?.voice === "personal" && !voice.startsWith("openai-custom:")) {
     const ready = projectPersonalVoices(store, project.id).find(x => x.ready);
     invariant(ready, "PERSONAL_VOICE_REQUIRED", "Choose a ready personal narration voice.");

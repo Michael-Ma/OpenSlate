@@ -35,7 +35,7 @@ export function sceneNarrationView(
     .map((shot) => {
       const ready = shotVideoTiming(project, shot).ready,
         mode = shot.narration?.mode ?? "undecided";
-      const draft = production.store.get<{ segmentId: string }>(
+      const draft = production.store.get<{ segmentId: string; intentDigest?: string }>(
         "narration_shot_draft",
         shotDraftId(project.id, shot.id),
       );
@@ -60,10 +60,13 @@ export function sceneNarrationView(
           options ??= projectNarrationSpeechOptions(production, project.id);
           const source = row?.script.source;
           const savedVoice = source?.kind === "generated" ? source.voice : null;
-          invariant(!savedVoice || !/^(openai-custom|elevenlabs-personal):/.test(savedVoice) || options.personalVoices.some(value => value.id === savedVoice && value.ready),
+          const writingCurrent = draft?.intentDigest === undefined || draft.intentDigest === digest(shot.narration ?? null);
+          const selectedVoice = shot.narration?.voice;
+          const voiceCurrent = selectedVoice === "stock" || selectedVoice === "personal" && savedVoice?.startsWith("openai-custom:") || savedVoice === selectedVoice;
+          invariant(!savedVoice || !writingCurrent || !voiceCurrent || !/^(openai-custom|elevenlabs-personal):/.test(savedVoice) || options.personalVoices.some(value => value.id === savedVoice && value.ready),
             "PERSONAL_VOICE_REQUIRED", "Choose a ready personal voice for this pinned line.");
           voice =
-            savedVoice && options.voices.includes(savedVoice)
+            savedVoice && writingCurrent && voiceCurrent && options.voices.includes(savedVoice)
               ? savedVoice
               : defaultNarratorVoice(production.store, project, shot);
           if (shot.narration?.voice === "personal") {

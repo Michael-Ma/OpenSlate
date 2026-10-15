@@ -37,7 +37,7 @@ test('repeated scoped pause and preparation retain one request-owned hold', asyn
   await f.tools.invoke(f.project.id,f.bridge.actor,'pause-2','control_execution',{action:'pause'});
   await f.tools.invoke(f.project.id,f.bridge.actor,'prepare-held','prepare_change',{variant:'project',expectedHeadVersion:0,creative:{brief:'A precise brief'}});
   assert.deepEqual(f.store.list('hold',f.project.id),first);
-  const other=f.service.beginRequest(f.project.id,'human','Another edit');
+  const other=f.service.beginRequest(f.project.id,'human','Another edit',{concurrency:'alongside'});
   f.service.holdRequest(f.project.id,other);
   assert.equal(f.store.list('hold',f.project.id).filter(h=>h.active).length,2,'a different request cannot borrow or release the earlier hold');
 });

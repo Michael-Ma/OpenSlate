@@ -3,22 +3,40 @@ import type { ProjectRecord, ProviderProfile } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NodeBinding } from "./execution/engine.js";
 import type { CanonicalNarration } from "./narration/canonical-types.js";
+import type { NarrationState } from "./narration/types.js";
+import { shotDraftId } from "./narration/narration-scope.js";
 
 export interface MediaUndo {
   bindings: NodeBinding[];
   /** Event cursor at which the command started, not a wall-clock comparison. */
   cursor: number;
   canonicalId?: string | null;
+  narrationWorkspace?: { shotId: string; state: NarrationState; draft: { segmentId: string; intentDigest?: string } | null; expectedVersion: number };
 }
 export function captureMediaUndo(s: ProductionService, projectId: string): MediaUndo {
   return { bindings: [], cursor: s.store.cursor(projectId) };
 }
 export function assertUndoUnused(s: ProductionService, projectId: string, undo?: MediaUndo): void {
   if (!undo) return; // Legacy records retain their original strict head-version fence.
+  if (undo.narrationWorkspace) invariant(s.store.get<NarrationState>("narration_state", projectId)?.version === undo.narrationWorkspace.expectedVersion,
+    "UNDO_UNAVAILABLE", "Narration changed after this recording command.");
   const attempts = new Map(s.engine.attempts(projectId).map(a => [a.id, a]));
   const used = s.store.readEvents(projectId).some(e => e.sequence > undo.cursor && e.kind === "attempt.state_changed" && e.payload.phase === "submitting" &&
     attempts.get(String(e.payload.attemptId))?.candidateId);
   invariant(!used, "UNDO_UNAVAILABLE", "Paid work has already used the state after this command.");
+}
+/** Restore the exact previous draft while keeping version identities monotonic. */
+export function restoreNarrationWorkspaceUndo(s: ProductionService, projectId: string, requestId: string, undo: MediaUndo): void {
+  const previous = undo.narrationWorkspace;
+  if (!previous) return;
+  const current = s.store.get<NarrationState>("narration_state", projectId)!;
+  const revisionId = newId(), state = { ...previous.state, version: current.version + 1, revisionId };
+  s.store.put("narration_state", projectId, projectId, state);
+  s.store.insert("narration_revision", revisionId, projectId, { state, requestId });
+  const id = shotDraftId(projectId, previous.shotId);
+  if (previous.draft) s.store.put("narration_shot_draft", id, projectId, { ...previous.draft, projectId, shotId: previous.shotId });
+  else s.store.db.prepare("DELETE FROM entities WHERE kind='narration_shot_draft' AND id=? AND project_id=?").run(id, projectId);
+  s.store.appendEvent(projectId, "narration.changed", { revisionId, version: state.version, action: "recording_undo" });
 }
 /** No authority is created. Only exact saved paid operations with verified owned bytes return. */
 export function restoreMediaUndo(s: ProductionService, project: ProjectRecord, undo?: MediaUndo): void {
@@ -39,6 +57,12 @@ export function restoreMediaUndo(s: ProductionService, project: ProjectRecord, u
       }
     } else continue; // Local assembly must be rebuilt against the restored canonical state.
     const outputs = old.retainedTake?.outputs ?? old.outputs;
+    // A previously submitted exact operation may finish during async verification.
+    // An empty historical snapshot must not erase its newly verified paid output.
+    if (!Object.keys(outputs).length && Object.keys(current.outputs).length && s.engine.outputsMatchOperation(current, current.outputs)) {
+      for (const artifact of Object.values(current.outputs)) s.engine.verifyArtifact(project.id, artifact);
+      continue;
+    }
     if (!s.engine.outputsMatchOperation(old, outputs)) continue;
     for (const artifact of Object.values(outputs)) s.engine.verifyArtifact(project.id, artifact);
     const { retainedTake: _retained, ...saved } = old;

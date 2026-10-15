@@ -34,7 +34,8 @@ export interface ShotRecord {
   narration?: {
     mode: "undecided" | "none" | "generated" | "uploaded";
     text: string;
-    voice: "stock" | "personal";
+    /** Legacy stock uses the film default; a stock selector pins this shot's voice. */
+    voice: "stock" | "personal" | "alloy" | "ash" | "ballad" | "coral" | "echo" | "fable" | "onyx" | "nova" | "sage" | "shimmer" | "verse" | "marin" | "cedar";
   };
   id: Id;
   revisionId: Id;

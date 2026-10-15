@@ -58,7 +58,7 @@ test('actual same-root restore preserves waiting proof/source but never resumes 
   // The summary does not confuse damaged protocol evidence with positive non-submission proof.
   f.store.db.prepare("UPDATE entities SET body=? WHERE kind='transcription_preparation_intent' AND id=?").run(canonical({ ...proof, sourceEndSample: 1 }), proof.id);
   const beforeSnapshot = f.store.db.prepare('SELECT kind,id,body,version FROM entities ORDER BY kind,id').all();
-  const damaged = guard.snapshot(); assert.equal(Object.hasOwn(damaged.counts, 'preparingJobs'), false); assert.equal(damaged.counts.unknownJobs, 1);
+  const damaged = guard.snapshot(); assert.equal(damaged.counts.preparingJobs, 0); assert.equal(damaged.counts.unknownJobs, 1);
   assert.deepEqual(f.store.db.prepare('SELECT kind,id,body,version FROM entities ORDER BY kind,id').all(), beforeSnapshot);
   f.store.db.prepare("UPDATE entities SET body=? WHERE kind='transcription_preparation_intent' AND id=?").run(canonical(proof), proof.id);
 });

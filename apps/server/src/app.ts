@@ -37,6 +37,7 @@ import type { ArtifactRecord, PlanRecord, ReviewSnapshot } from "./execution/eng
 import { seedFixture } from "./demo.js";
 import type { DemoCommand } from "./application/fake-director.js";
 import { registerNarrationRoutes } from "./narration/routes.js";
+import { registerStockVoices } from "./narration/shot-recording-routes.js";
 import { registerMediaRoutes } from "./media/routes.js";
 import { registerImageRoutes } from "./media/image-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
@@ -72,12 +73,18 @@ export function createApp(options: AppOptions = {}) {
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
+  registerStockVoices(app, service);
   registerDirectorNotes(app, service);
   registerDirectorProposals(app, service);
   const sceneCommands = options.sceneCommands ?? (options.service ? new SceneConfirmationRunner(options.service, options.narrationRoutes) : undefined);
   registerSceneGeneration(app, service, options.narrationRoutes?.narration, sceneCommands?.enqueueKeyframes);
   if (sceneCommands) { registerSceneConfirmations(app, sceneCommands); registerNarrationFit(app, sceneCommands); }
   registerGenerationOverview(app, service, options.narrationRoutes?.narration);
+  app.post<{ Params: { projectId: string; requestId: string } }>("/api/projects/:projectId/requests/:requestId/release-holds", async request => {
+    const key = requiredCommandKey(request);
+    invariant(request.body === undefined, "VALIDATION_ERROR", "Releasing edit holds takes no body");
+    return service().releaseRequestHolds(request.params.projectId, request.params.requestId, key);
+  });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403

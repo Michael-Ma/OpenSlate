@@ -1,5 +1,5 @@
 import { digest, DomainError, invariant } from '@openslate/core';
-import type { ActorContext } from '@openslate/core';
+import type { ActorContext, ShotRecord } from '@openslate/core';
 import type { ProductionService } from './service.js';
 import type { Store } from '../persistence/store.js';
 import { projectNarrationSpeechOptions, projectNarrationSpeechProposals } from '../narration/narration-speech-projection.js';
@@ -40,7 +40,7 @@ export interface AudioOperationsProjection {
   coverage: { offset: number; returned: number; total: number; nextOffset: number | null; sections: number; recordings: number;
     speechProposals: number; transcriptionProposals: number; pagination: string; hostReadiness: 'not_evaluated' };
   authority: string;
-  savedShotScripts?: Array<{ shotId: string; sceneId: string; segmentId: string; segmentRevisionId: string; text: string; language: 'en'; voice: 'stock' | 'personal' }>;
+  savedShotScripts?: Array<{ shotId: string; sceneId: string; segmentId: string; segmentRevisionId: string; text: string; language: 'en'; voice: NonNullable<ShotRecord['narration']>['voice'] }>;
 }
 /** Each collection uses the same consumed window, including unavailable proposal rows.
  * The caller can include its outer envelope in the byte check. Bounded pages are

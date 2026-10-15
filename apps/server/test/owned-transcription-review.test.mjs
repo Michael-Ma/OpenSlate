@@ -212,7 +212,7 @@ test(`review rejects ${kind} authority before media reads or mutations`, async t
   assert.equal(reads, 0); assert.deepEqual(data(f), before);
 });
 
-test('fresh explicit human review can approve a prior director proposal without rewriting its original authorship or holds', async t => {
+test('fresh explicit human review can approve a prior director proposal without rewriting its original authorship and retires the superseded holds', async t => {
   const f = await fixture(t), proposal = structuredClone(f.proposal), source = f.store.get('owned_transcription_source', proposal.sourceBinding.id), originalRequestId = f.human.requestId;
   f.human = f.production.beginRequest(f.project.id, 'human', 'I reviewed this exact recording and recognition plan.');
   assert.equal(f.store.get('message', originalRequestId).state, 'superseded');
@@ -220,7 +220,8 @@ test('fresh explicit human review can approve a prior director proposal without 
   const result = await f.review(); assertReceipt(f, result);
   assert.deepEqual(f.store.get('owned_transcription_proposal', proposal.id), proposal);
   assert.deepEqual(f.store.get('owned_transcription_source', source.id), source);
-  assert.ok(rows(f, 'hold').some(hold => hold.ownerId === originalRequestId && hold.active));
+  assert.ok(rows(f, 'hold').some(hold => hold.ownerId === originalRequestId));
+  assert.ok(rows(f, 'hold').filter(hold => hold.ownerId === originalRequestId).every(hold => !hold.active));
   assert.ok(rows(f, 'hold').filter(hold => hold.ownerId === f.human.requestId).every(hold => !hold.active));
   noSpending(f);
 });
@@ -338,7 +339,7 @@ test(`review rechecks ${change} after the actual isolated composition result arr
 for (const boundary of ['grant', 'owned_transcription_review', 'prepared', 'candidate', 'plan', 'owned_transcription_application', 'command'])
 test(`failure after ${boundary} publication rolls back all authority, holds, project and command state`, async t => {
   const f = await fixture(t), previousRequest = f.human.requestId;
-  f.human = f.production.beginRequest(f.project.id, 'human', 'Review the exact proposal with my new request.');
+  f.human = f.production.beginRequest(f.project.id, 'human', 'Review the exact proposal with my new request.',{concurrency:'alongside'});
   const before = data(f), insert = f.store.insert.bind(f.store), sql = f.store.db.prepare.bind(f.store.db), failure = Error(`injected ${boundary} failure`); let hits = 0;
   f.store.insert = (...args) => { const result = insert(...args); if (args[0] === boundary) { hits++; throw failure; } return result; };
   f.store.db.prepare = statement => {

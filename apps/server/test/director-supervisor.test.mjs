@@ -209,7 +209,7 @@ test('lost tool completion is reconciled from the domain receipt without invokin
 });
 
 
-test('chat stop aborts reasoning, fences read-only queued work, and fresh direction continues saved holds', async t => {
+test('chat stop aborts reasoning, fences read-only queued work, and fresh direction owns fresh holds', async t => {
   const ready=deferred(); let calls=0;
   const f=fixture(t,async(input,options)=>{
     calls++;
@@ -228,7 +228,8 @@ test('chat stop aborts reasoning, fences read-only queued work, and fresh direct
   assert.equal(f.store.get('director_turn',readOnly.id).state,'interrupted');
   assert.equal(f.service.snapshot(f.project.id).control.paused,false);
   assert.ok(f.store.list('hold',f.project.id).filter(h=>h.active).every(h=>h.ownerId===next.requestId));
-  assert.ok(f.store.list('request_continuation',f.project.id).some(c=>c.fromRequestId===first.requestId&&c.toRequestId===next.requestId));
+  assert.ok(f.store.list('hold',f.project.id).filter(h=>h.ownerId===first.requestId).every(h=>!h.active));
+  assert.ok(!f.store.list('request_continuation',f.project.id).some(c=>c.fromRequestId===first.requestId&&c.toRequestId===next.requestId), 'retired holds do not transfer old authority');
   f.supervisor.tick();await f.supervisor.settle();assert.equal(calls,2);
 });
 

@@ -86,7 +86,8 @@ export class DirectorSupervisor {
     this.service.recovery.assertFreshAuthority(projectId, "message", actor.requestId); return actor;
   }
   status(projectId: string) {
-    const turns = this.turns(projectId), current = turns.find(turn => turn.state === "running") ?? turns.find(turn => turn.state === "queued") ?? turns.at(-1);
+    const turns = this.turns(projectId).filter(turn => this.service.store.get<Request>("message", turn.requestId)?.state === "active");
+    const current = turns.find(turn => turn.state === "running") ?? turns.find(turn => turn.state === "queued") ?? turns.at(-1);
     const status = !current ? "idle" : ["running", "queued"].includes(current.state) ? "running"
       : current.state === "waiting_user" ? "waiting_user" : ["failed", "unknown"].includes(current.state) ? "error" : "idle";
     return { mode: this.options.mode, status, activeRequestId: current?.requestId ?? null, turn: current ?? null,
@@ -105,6 +106,7 @@ export class DirectorSupervisor {
     this.revoke(turn);
     this.save({ ...turn, state, errorCode, leaseExpiresAt: 0 });
     this.service.store.appendEvent(turn.projectId, "director.finished", { turnId: turn.id, requestId: turn.requestId, state, errorCode });
+    this.service.releaseFinishedRequestHolds(turn.projectId, turn.requestId);
   }
 
   /** Called on startup and periodically. A foreign owner retains its lease until expiry. */
@@ -117,7 +119,11 @@ export class DirectorSupervisor {
         for (const turn of this.turns(project.id)) {
           const request = this.service.store.get<Request>("message", turn.requestId)!;
           if (turn.state === "queued" && request.state === "superseded") this.terminal(turn, "interrupted", "REQUEST_SUPERSEDED");
-          if (turn.state !== "running") continue;
+          if (turn.state !== "running") {
+            // Reconcile saved terminal requests after restart or after a held proposal becomes stale.
+            this.service.releaseFinishedRequestHolds(project.id, turn.requestId);
+            continue;
+          }
           const local = this.active.get(project.id);
           const epoch = turn.epochId ? this.service.store.get<Epoch>("epoch", turn.epochId) : null;
           if (turn.owner === this.owner && local?.turnId === turn.id) {

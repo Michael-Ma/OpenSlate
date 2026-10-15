@@ -133,7 +133,7 @@ test("one scene check generates keyframes without any allowance, exact replay ad
   assert.equal(f.engine.attempts(f.project.id).length, 2);
   assert.equal((await f.get("scene-1")).rows[0].image, null);
 });
-test("scene approval resolves only its part of a whole-film planning hold", async (t) => {
+test("scene approval retires superseded film holds while preserving an unrelated active owner", async (t) => {
   const f = fixture(t),
     human = f.service.beginRequest(
       f.project.id,
@@ -141,13 +141,16 @@ test("scene approval resolves only its part of a whole-film planning hold", asyn
       "Plan whole film",
       { scopeIds: [f.project.id] },
     );
+  const unrelated = f.service.beginRequest(f.project.id, "local-user", "Keep editing scene two", { concurrency: "alongside", scopeIds: ["scene-1"] });
   const v = await f.get(),
     a = await f.post(v);
   assert.equal(a.statusCode, 200, a.body);
+  assert.equal(f.store.get("message", human.requestId).state, "superseded");
+  assert.ok(f.store.list("hold", f.project.id).filter(h => h.ownerId === human.requestId).every(h => !h.active));
   const active = f.store.list("hold", f.project.id).filter((h) => h.active);
   assert.deepEqual(
     active.map((h) => [h.scopeId, h.ownerId]),
-    [["scene-1", human.requestId]],
+    [["scene-1", unrelated.requestId]],
   );
   await f.finish();
   assert.ok((await f.get()).rows[0].image);
@@ -699,7 +702,7 @@ test("explicit shot regeneration retains siblings and old receipts, then needs t
   assert.ok(f.store.get("artifact", oldFrame.artifactId));
 });
 
-test("a shot keyframe action narrows a human film pause to untouched siblings without widening its generation scope", async (t) => {
+test("a shot keyframe action retires superseded film holds and preserves active sibling holds without widening generation scope", async (t) => {
   const f = fixture(t, { sharedScene: true }),
     human = f.service.beginRequest(
       f.project.id,
@@ -707,16 +710,19 @@ test("a shot keyframe action narrows a human film pause to untouched siblings wi
       "Plan this film",
       { scopeIds: [f.project.id] },
     );
+  const unrelated = f.service.beginRequest(f.project.id, "local-user", "Keep working on untouched siblings", { concurrency: "alongside", scopeIds: ["shot-1", "scene-2"] });
   const result = await f.post(await f.get(), "image", randomUUID(), {
     targetShotIds: ["shot-0"],
   });
   assert.equal(result.statusCode, 200, result.body);
   assert.deepEqual(result.json().shotIds, ["shot-0"]);
+  assert.equal(f.store.get("message", human.requestId).state, "superseded");
+  assert.ok(f.store.list("hold", f.project.id).filter(h => h.ownerId === human.requestId).every(h => !h.active));
   const request = f.store.list("message", f.project.id).at(-1);
   assert.deepEqual(request.scopeIds, ["shot-0"]);
   const retained = f.store
     .list("hold", f.project.id)
-    .filter((hold) => hold.active && hold.ownerId === human.requestId);
+    .filter((hold) => hold.active && hold.ownerId === unrelated.requestId);
   assert.deepEqual(retained.map((hold) => hold.scopeId).sort(), [
     "scene-2",
     "shot-1",

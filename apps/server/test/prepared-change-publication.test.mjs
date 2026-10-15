@@ -16,7 +16,8 @@ function fixture(t, { foreignHold = false } = {}) {
   const engine = new Engine(store, provider, { artifactDir: join(root, 'artifacts') });
   const service = new ProductionService(store, engine), project = service.createProject('Narration preparation');
   const prior = foreignHold ? service.beginRequest(project.id, 'human', 'A separate unfinished edit') : null;
-  const human = service.beginRequest(project.id, 'human', 'Prepare two narration takes'), actor = service.openEpoch(project.id, human).actor;
+  // The rollback cases retain a separate live owner; supersede behavior is covered by request-holds.
+  const human = service.beginRequest(project.id, 'human', 'Prepare two narration takes', foreignHold ? { concurrency: 'alongside' } : {}), actor = service.openEpoch(project.id, human).actor;
   t.after(() => { store.close(); provider.close(); rmSync(root, { recursive: true, force: true }); });
   const f = { root, store, provider, engine, service, project, human, actor, prior };
   f.authorize = count => service.authorize(project.id, human, Array.from({ length: count }, () => ({ scopeId: project.id, kind: 'speech' })), randomUUID());

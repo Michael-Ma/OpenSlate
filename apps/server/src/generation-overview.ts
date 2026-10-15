@@ -106,15 +106,16 @@ export class GenerationOverviewReader {
             if (previous && binding && Object.keys(binding.outputs).length) return { ...base, state: "outdated" };
             if (binding?.candidateId) {
               const wait = store.get<{ code: string; since: string }>("node_wait", binding.id);
-              const held = snapshot.holds.some(h => { const hold = h as { active: boolean; scopeId: string }; return hold.active && [projectId, scene.id, shot.id, binding.id].includes(hold.scopeId); });
-              const codes: Record<string, WaitingCode> = { CAPACITY_EXCEEDED: "capacity", LOCAL_EXECUTION_BUSY: "capacity", EXECUTION_HELD: "edit_pending", HUMAN_REVIEW_REQUIRED: "review", INPUT_PENDING: row.narrationPending && kind === "video" ? "voice" : "review", TIMING_REQUIRED: "timing" };
+              const held = snapshot.holds.find(h => { const hold = h as { active: boolean; scopeId: string }; return hold.active && [projectId, scene.id, shot.id, binding.id].includes(hold.scopeId); }) as { ownerId: string } | undefined;
+              const heldRequest = held && snapshot.messages.find(message => message.id === held.ownerId);
+              const codes: Record<string, WaitingCode> = { CAPACITY_EXCEEDED: "capacity", LOCAL_EXECUTION_BUSY: "capacity", HUMAN_REVIEW_REQUIRED: "review", INPUT_PENDING: row.narrationPending && kind === "video" ? "voice" : "review", TIMING_REQUIRED: "timing" };
               const code: WaitingCode = snapshot.control.paused ? "stopped" : held ? "edit_pending" : codes[wait?.code ?? ""] ?? (row.narrationPending && kind === "video" ? "voice" : "review");
               // Capacity is installation-wide, just like admission; count actual in-flight jobs on this lock profile.
               const capacityProfile = captured.lock.profiles.find(p => p.id === binding.node.profileId);
               const ahead = code === "capacity" ? capacityProfile ? store.listProjects().flatMap(p => this.production.engine.attempts(p.id)).filter(a =>
                 !["succeeded", "failed"].includes(a.phase) && a.request.args.profileIdentity === binding.node.profileId && a.request.args.profileRevision === binding.node.args.profileRevision &&
                 canonical(requestExecutionIdentity(a.request)) === canonical(profileExecutionIdentity(capacityProfile))).length : 0 : undefined;
-              return { ...base, state: "queued", waiting: { code, since: (snapshot.control.paused ? pauseEvent?.occurredAt : undefined) ?? wait?.since ?? events.find(e => e.payload.nodeId === binding.id)?.occurredAt ?? this.production.engine.startedAt, ...(ahead !== undefined ? { ahead } : {}) } };
+              return { ...base, state: "queued", waiting: { code, since: (snapshot.control.paused ? pauseEvent?.occurredAt : undefined) ?? wait?.since ?? events.find(e => e.payload.nodeId === binding.id)?.occurredAt ?? this.production.engine.startedAt, ...(ahead !== undefined ? { ahead } : {}), ...(code === "edit_pending" && heldRequest ? { requestId: heldRequest.id } : {}) } };
             }
             return { ...base, state: previous ? "outdated" : "none" };
           };

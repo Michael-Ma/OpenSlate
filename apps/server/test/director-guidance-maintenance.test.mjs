@@ -46,7 +46,7 @@ function fixture(t, start, overrides = {}) {
   return { root, store, provider, service, director, project, configuration, settings, prepareInput, calls, install, fresh };
 }
 
-for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0']) test(`next native ${version} request automatically loads V6 while historical evidence and all production authority stay unchanged`, async t => {
+for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0']) test(`next native ${version} request automatically loads V6 while historical evidence and generation authority stay unchanged`, async t => {
   const f = fixture(t); await f.director.configure(f.project.id, { mode: 'native', binaryPath: process.execPath, model: 'test-model' }, 'setup');
   const saved = f.install(version), oldHuman = f.service.beginRequest(f.project.id, 'local-user', 'Earlier unfinished request'), oldBridge = f.service.openEpoch(f.project.id, oldHuman);
   const captured = new DirectorContextService(f.service, saved.environment).capture(f.project.id, oldBridge.actor, { lockId: saved.lock.id, selectedSkillIds: ['production', 'plan-authoring'] });
@@ -71,7 +71,9 @@ for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0']) test(`next native ${
   assert.equal(f.store.get('director_epoch_lock', oldBridge.actor.epochId).lockId, saved.lock.id);
   assert.deepEqual(f.store.get('director_context', captured.activation.contextSnapshotId).snapshot, captured.snapshot);
   assert.deepEqual(f.store.getProject(f.project.id), canonical);
-  for (const kind of preservedKinds) assert.deepEqual(f.store.list(kind, f.project.id), preserved[kind], kind);
+  for (const kind of preservedKinds) assert.deepEqual(f.store.list(kind, f.project.id), kind === 'hold'
+    ? preserved[kind].map(hold => hold.ownerId === human.requestId ? { ...hold, active: false } : hold) : preserved[kind], kind);
+  assert.equal(f.store.get('message', human.requestId).state, 'active', 'terminal hold release does not replace its request');
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
   assert.throws(() => f.service.apply(f.project.id, human, oldPrepared.id), { code: 'ACTOR_DENIED' }, 'a later request cannot adopt an old prepared proposal');
   const next = f.service.beginRequest(f.project.id, 'local-user', 'Read the same project', { editing: false });
