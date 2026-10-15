@@ -28,6 +28,22 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   throw new Error(`${selector} never matched ${pattern}; last text: ${JSON.stringify(last)}`);
 }
 
+/** No error toast is showing (a refusal inside a modal dialog is said there; the toast would sit behind its backdrop). */
+async function noErrorToast(page, message) {
+  const text = await page.locator(".toast[data-tone='error']").allInnerTexts();
+  expect(text.length === 0, `${message}: ${JSON.stringify(text)}`);
+}
+
+/** The element is in front: what the pointer would hit at its centre is inside it (not under a backdrop). */
+async function inFront(page, selector, message) {
+  const hit = await page.locator(selector).first().evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return !!top && el.contains(top);
+  });
+  expect(hit, message);
+}
+
 async function noSidewaysScroll(page) {
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
   expect(scrollWidth <= innerWidth, `The page scrolls sideways: ${scrollWidth}px content in a ${innerWidth}px window`);
@@ -282,8 +298,14 @@ export const scenarios = [
       // No film is open on a first run, so whether this computer has Codex is only known once a film is made.
       await expectText(page, ".welcome [data-card='own'] .setup", /Codex\s+checked when you make a film/);
       await expectText(page, ".welcome [data-card='own'] .setup", /Keys for media models\s+none set/);
+      // The study always lists Codex, FFmpeg and keys.
+      await expectText(page, ".welcome [data-card='own'] .setup", /FFmpeg · ffprobe\s+✓ found/);
       expect(await page.locator(".welcome [data-card='demo'] [data-act='open-demo']").evaluate((el) => el.classList.contains("primary")), "Open the demo film is not the primary action without keys");
-      expect(!(await page.locator(".welcome [data-act='new-from-plan']").isDisabled()), "Bring a written plan is off although Codex is not known to be missing");
+      // A written plan waits for Codex to be found, so a pasted plan is never dropped; the button says why.
+      const fromPlan = page.locator(".welcome [data-act='new-from-plan']");
+      expect(await fromPlan.isDisabled(), "Bring a written plan is on although Codex is not known");
+      const why = await fromPlan.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
+      expect(why === "Needs the Codex Director, which is checked when you make a film", `Bring a written plan says ${JSON.stringify(why)}`);
       await noSidewaysScroll(page);
       await shot(page, "start-first-run-1440");
       // New film anyway: while Codex is unknown the empty outline is the default, the Codex steps stay possible
@@ -292,7 +314,10 @@ export const scenarios = [
       await page.waitForSelector("dialog.start-sheet[open]");
       expect((await page.locator("dialog.start-sheet [data-step='empty']").getAttribute("aria-checked")) === "true", "The empty outline is not the default while Codex is unknown");
       expect(!(await page.locator("dialog.start-sheet [data-step='director']").isDisabled()), "Talk to the Director is off although Codex is not known to be missing");
-      await expectText(page, "dialog.start-sheet [data-hint='codex-unknown']", /checked when the film is made/);
+      const planStep = page.locator("dialog.start-sheet [data-step='plan']");
+      expect(await planStep.isDisabled(), "Bring a written plan can be chosen although Codex is not known");
+      await expectText(page, "dialog.start-sheet [data-hint='codex-unknown']", /checked when the film is made\. A written plan can be brought from the film’s Plan once Codex is found/);
+      expect((await planStep.getAttribute("aria-describedby")) === (await page.locator("dialog.start-sheet [data-hint='codex-unknown']").getAttribute("id")), "The off step does not point at its reason");
       await expectText(page, "dialog.start-sheet .impact", /No keys are set, so this film starts with free stand-in models/);
       await page.click("dialog.start-sheet [data-act='see-models']");
       await expectText(page, "dialog.start-sheet .mrow[data-job='video']", /Stand-in\s+free stand-in\s+MiniMax H3: key not set/);
@@ -322,6 +347,7 @@ export const scenarios = [
       expect((await page.locator("dialog.start-sheet [data-step='director']").getAttribute("aria-checked")) === "true", "Talk to the Director could not be chosen");
       await page.click("dialog.start-sheet [data-act='create-film']");
       await expectText(page, "dialog.start-sheet .impact.cost", /Harbour was created, but Codex was not found on this computer, so the film starts with the stand-in Director\./);
+      await noErrorToast(page, "An error toast sits behind the sheet");
       expect(await page.locator("dialog.start-sheet [data-act='create-film']").count() === 0, "Try again is offered although it cannot find Codex");
       const open = page.locator("dialog.start-sheet [data-act='open-created']");
       expect(await open.evaluate((el) => el.classList.contains("primary") && el === document.activeElement), "Open the film is not the focused primary action");
@@ -338,8 +364,9 @@ export const scenarios = [
     },
   },
   {
-    // Codex is here, but each new film's first setup check answers "busy": Try again finishes the same
-    // film; a failed sheet that is closed leaves its film listed; an empty outline opens anyway.
+    // Codex is here, but each new film's first setup check answers "busy": the sheet says the check is
+    // still running, Try again finishes the same film, a failed sheet that is closed leaves its film
+    // listed; an empty outline opens at once and sets its Director up afterwards, quietly.
     name: "next-start-setup-retry",
     query: `${FIXTURE}&start=setup-busy`,
     viewport: { width: 1440, height: 900 },
@@ -350,8 +377,9 @@ export const scenarios = [
       expect((await page.locator("dialog.start-sheet [data-step='director']").getAttribute("aria-checked")) === "true", "Talk to the Director is not the default with Codex");
       await page.keyboard.type("Crossing");
       await page.keyboard.press("Enter");
-      await expectText(page, "dialog.start-sheet .impact.cost", /Crossing was created, but the Codex Director could not be set up\. Try again/);
-      await expectText(page, ".toast", /The Director is still being checked/);
+      await expectText(page, "dialog.start-sheet .impact.cost", /Crossing was created, and its Codex Director is still being checked\. Try again in a moment/);
+      await noErrorToast(page, "An error toast sits behind the sheet");
+      await inFront(page, "dialog.start-sheet .impact.cost", "The sheet's refusal is not in front");
       expect(await page.locator("dialog.start-sheet [data-act='create-film']").evaluate((el) => el === document.activeElement), "Try again does not have focus");
       await shot(page, "start-setup-failed-1440");
       // Esc closes it: the film is listed, not lost.
@@ -379,7 +407,95 @@ export const scenarios = [
       await page.click("dialog.start-sheet [data-step='empty']");
       await page.click("dialog.start-sheet [data-act='create-film']");
       await page.waitForSelector("main[data-view='plan']", { timeout: 10000 });
-      await expectText(page, ".toast", /Created Outline only\. Its Codex Director could not be set up, so it starts with the stand-in/);
+      await expectText(page, ".toast", /^Created Outline only\. Add its first scene in the Plan\./);
+      // Its Director setup ran after it opened and was refused (busy) without a word: the toast is still the Created one.
+      await page.waitForTimeout(400);
+      await expectText(page, ".toast", /^Created Outline only\./);
+      expect((await page.locator(".toast[data-tone='error']").count()) === 0, "The quiet Director setup left an error toast");
+    },
+  },
+  {
+    // Refusals while a modal dialog is open are said inside it, in front of the backdrop, not in the toast behind it.
+    name: "next-start-refusals",
+    query: `${FIXTURE}&start=refusals`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openStart(page);
+      const before = (await filmNames(page)).length;
+      await page.click("main[data-view='start'] [data-act='new-film']");
+      await page.waitForSelector("dialog.start-sheet[open]");
+      await page.fill("dialog.start-sheet [data-act='film-name']", "Ferry two");
+      await page.click("dialog.start-sheet [data-step='empty']");
+      await expectText(page, "dialog.start-sheet .impact", /all ready/);
+      await page.click("dialog.start-sheet [data-act='create-film']");
+      await expectText(page, "dialog.start-sheet [data-alert='create'] [role='alert']", /^!?\s*The film was not created\. This computer’s models changed while the sheet was open\. Check them and create the film again\.$/);
+      await noErrorToast(page, "An error toast sits behind the sheet");
+      await inFront(page, "dialog.start-sheet [data-alert='create']", "The sheet's refusal is not in front");
+      await shot(page, "start-refusal-create-1440");
+      // The models were read again; Create now makes the film.
+      await page.click("dialog.start-sheet [data-act='create-film']");
+      await page.waitForSelector("main[data-view='plan']", { timeout: 10000 });
+      await expectText(page, ".toast", /^Created Ferry two\./);
+      await openStart(page);
+      expect((await filmNames(page)).length === before + 1, "The refused Create made a film");
+      // Archiving a film whose jobs run is refused; the dialog says so and stays open.
+      await row(page, "night-bus").locator("[data-act='film-menu']").click();
+      await page.click(".start-menu [data-act='menu-archive']");
+      await page.click("dialog.start-dialog [data-act='archive-confirm']");
+      await expectText(page, "dialog.start-dialog [role='alert']", /It was not archived\. Jobs are still running in this film\. Wait for them to finish, then try again\./);
+      await noErrorToast(page, "An error toast sits behind the archive dialog");
+      await inFront(page, "dialog.start-dialog [role='alert']", "The dialog's refusal is not in front");
+      await shot(page, "start-refusal-archive-1440");
+      await page.click("dialog.start-dialog [data-act='archive-cancel']");
+      await page.waitForSelector("dialog.start-dialog", { state: "detached" });
+      await row(page, "night-bus").waitFor();
+    },
+  },
+  {
+    // Create waits for this computer's models, so a film never gets the stand-ins only because the list was still being read.
+    name: "next-start-models-loading",
+    query: `${FIXTURE}&start=slow-models`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openStart(page);
+      await page.click("main[data-view='start'] [data-act='new-film']");
+      await page.waitForSelector("dialog.start-sheet[open]");
+      const create = page.locator("dialog.start-sheet [data-act='create-film']");
+      // The sample answers the models 2.5 s after Start opened; the sheet opens well before that.
+      expect(await page.locator("dialog.start-sheet .impact").count() === 0, "The models were already read; the scenario cannot check the wait");
+      expect(await create.isDisabled(), "Create is on while this computer's models are read");
+      expect((await create.getAttribute("title")) === "Reading this computer’s models…", `Create's title is ${await create.getAttribute("title")}`);
+      // Enter in the name field does not create either.
+      await page.keyboard.type("Too soon");
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(150);
+      expect(await page.locator("dialog.start-sheet[open]").count() === 1, "Enter created a film before the models were read");
+      await expectText(page, "dialog.start-sheet .impact", /all ready/, 8000);
+      expect(!(await create.isDisabled()), "Create stays off after the models were read");
+    },
+  },
+  {
+    // A studio without the stand-in Director: the demo film is made but cannot be filled, so the demo
+    // button turns off with its reason (also after leaving Start) instead of making more empty films.
+    name: "next-start-demo-unavailable",
+    query: `${FIXTURE}&start=no-stand-in`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openStart(page);
+      const before = (await filmNames(page)).length;
+      const demo = page.locator("main[data-view='start'] .view-head [data-act='open-demo']");
+      await demo.click();
+      await expectText(page, ".toast", /The demo needs the stand-in Director, which this studio does not have\./);
+      await page.waitForFunction(() => document.querySelector("main[data-view='start'] .view-head [data-act='open-demo']")?.disabled === true);
+      expect((await demo.getAttribute("title")) === "The demo needs the stand-in Director, which this studio does not have.", `The demo button says ${await demo.getAttribute("title")}`);
+      expect((await filmNames(page)).length === before + 1, "The demo film was not listed");
+      // Leave Start and come back: still off, and no second film.
+      await page.click(".topbar [data-act='tab'][data-view='keyframes']");
+      await page.waitForSelector("main.work[data-view='keyframes']");
+      await openStart(page);
+      await page.waitForSelector("main[data-view='start'] .film-row");
+      expect(await page.locator("main[data-view='start'] .view-head [data-act='open-demo']").isDisabled(), "The demo button is on again after leaving Start");
+      expect((await filmNames(page)).length === before + 1, "A second demo film was made");
     },
   },
   {
