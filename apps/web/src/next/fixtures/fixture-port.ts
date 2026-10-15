@@ -4,6 +4,7 @@ import type { MediaSource } from "../media/media-source.ts";
 import type { ProjectSnapshot } from "../model/types.ts";
 import type { StudioPort } from "../store/store.ts";
 import { fixtureCommand } from "./fixture-commands.ts";
+import { extraRoutes } from "./routes/index.ts";
 import { fixtureMessage } from "./fixture-director.ts";
 import { lastFerryDirector, lastFerryOverview, lastFerryProposals, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
 
@@ -63,6 +64,11 @@ export class FixturePort implements StudioPort {
       if (path === `${base}/director/proposals`) return { proposals: structuredClone(this.world.proposals) } as T;
     }
     if (method === "POST" && path === `${base}/messages`) return fixtureMessage(this.world, options.body) as T;
+    const below = path.startsWith(base) ? path.slice(base.length) : path;
+    for (const route of extraRoutes) {
+      const match = route.method === method ? route.match.exec(below) : null;
+      if (match) return route.handle(this.world, match.slice(1), options.body) as T;
+    }
     if (path.startsWith(base)) return fixtureCommand(this.world, method, path.slice(base.length), options.body) as T;
     throw new ApiError("FIXTURE_UNSUPPORTED", 400);
   }

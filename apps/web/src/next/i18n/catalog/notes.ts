@@ -22,6 +22,8 @@ export const notes = {
   "note.choice.make_seconds": { en: "Make {shot} {seconds} s", zh: "把 {shot} 改为 {seconds} 秒" },
   "note.choice.apply": { en: "Apply the change", zh: "采用这个修改" },
   "note.choice.open": { en: "Open {shot}", zh: "查看 {shot}" },
+  "note.choice.open_scene": { en: "Open Scene {scene}", zh: "查看第 {scene} 场" },
+  "note.thread.label": { en: "Director's note {letter}:", zh: "导演备注 {letter}：" },
   "note.settled.accepted": { en: "Settled: {choice}", zh: "已处理：{choice}" },
   "note.settled.regenerated": { en: "Settled: {shots} regenerated", zh: "已处理：{shots} 已重新生成" },
   "note.settled.edited": { en: "Settled: {shot} edited", zh: "已处理：{shot} 已修改" },

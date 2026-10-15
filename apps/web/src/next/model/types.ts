@@ -72,7 +72,8 @@ export interface ProjectSummary {
   name: string;
 }
 
-export type ViewName = "plan" | "keyframes" | "assets" | "film";
+/** The four tabs, plus Settings (gear in the top bar) and Start (the film list). */
+export type ViewName = "plan" | "keyframes" | "assets" | "film" | "settings" | "start";
 
 /** What the composer points at. */
 export interface Target {

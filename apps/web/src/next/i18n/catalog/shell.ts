@@ -7,6 +7,8 @@ export const shell = {
   "shell.tab.keyframes": { en: "Keyframes", zh: "关键帧" },
   "shell.tab.assets": { en: "Assets", zh: "素材" },
   "shell.tab.film": { en: "Film", zh: "成片" },
+  "shell.tab.settings": { en: "Settings", zh: "设置" },
+  "shell.tab.start": { en: "All films", zh: "全部影片" },
   "shell.tab.classic": { en: "Opens in the classic studio", zh: "在经典界面中打开" },
   "shell.meta": { en: "{seconds} s · {fps} fps", zh: "{seconds} 秒 · {fps} 帧/秒" },
   "shell.counts": { en: "{scenes, plural, one {# scene} other {# scenes}} · {shots, plural, one {# shot} other {# shots}}", zh: "{scenes} 场 · {shots} 个镜头" },
