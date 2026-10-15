@@ -64,7 +64,7 @@ import {
 import type { FormEvent } from "react";
 import { APP_NAME } from "@openslate/core/public";
 import { ApiError, StudioApi } from "./api";
-import { takeStudioLaunchCode } from "./studio-launch";
+import { takeStudioLaunchCode } from "../shared/studio-launch.ts";
 import {
   Connect,
   Icon,

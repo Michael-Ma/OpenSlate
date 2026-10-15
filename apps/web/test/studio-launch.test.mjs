@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { takeStudioLaunchCode } from '../src/legacy/studio-launch.ts';
+import { takeStudioLaunchCode } from '../src/shared/studio-launch.ts';
 
 test('launch code is removed before it is returned and other page state is preserved', () => {
   const code = 'a'.repeat(43), calls = [];

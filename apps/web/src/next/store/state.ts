@@ -28,7 +28,7 @@ export interface StudioState {
   overview: GenerationOverview | null;
   director: DirectorStatus | null;
   /** Load failures by source, so one failed read does not blank the whole studio. */
-  loadErrors: Partial<Record<"snapshot" | "overview" | "director" | "projects", string>>;
+  loadErrors: Partial<Record<"snapshot" | "overview" | "director" | "projects", string | undefined>>;
   view: ViewName;
   sceneId: string | null;
   shotId: string | null;
