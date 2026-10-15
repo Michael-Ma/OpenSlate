@@ -17,3 +17,8 @@ Undo restoring media, keeping the current take until a new one succeeds, the use
 - Keyframes press on a scene with one generated line: one image attempt per shot plus one voice attempt; the overview's quote included the voice; the voice auto-accepts when it fits; a 7.4 s fake voice on a 6 s shot reports fits false with the measured seconds.
 - Confirm on fake providers for mixed none / uploaded / generated narration reaches video; kill the runner between speech and accept, restart, and it resumes with no second speech attempt; same key replays the receipt; a changed frame gives SCENE_REVIEW_STALE before any spend; Stop mid-chain leaves no new attempts; a stale `expectedEstimateMicros` gives ESTIMATE_CHANGED with no grants.
 - narration-fit: extend gives the right frame count and re-quotes; cut gives a cue ending at the shot end; both are undoable storyboard commands; the overview reflects `fit`.
+
+## Notes from the lead after merging B1 to B4
+- The overview's `narration_too_long` blocker must clear once a fit is chosen (`narration.fit` set), and `fits` should then be true for display purposes only if the chosen fit makes it fit (cut_to_shot: the line is cut to the shot; extend_shot: the shot was lengthened).
+- Every new route requires an Idempotency-Key via `requiredCommandKey` (apps/server/src/application/command-key.ts), and every `beginRequest` from a route passes `source: "app"` (card B1).
+- Stop's `detachUnsent` (card B4, engine.ts) must also cancel the unsent steps of open scene confirmations.
