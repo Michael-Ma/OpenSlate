@@ -20,3 +20,6 @@ Anything in apps/web.
 - Review trigger: runs once per batch, only when idle and allowed; ignored by press busy checks; never shows as a user message.
 - Turn endings: no-reply and failed endings are reported; structured answers keep the option index.
 - The Last Ferry seed starts in the prototype's state (Scene 1 saved, Scene 2 keyframes back with 2.2 and 2.3 not opened and 2.3's line 7.4 s on a 6 s shot, Scene 3 not started).
+
+## Added by the lead after the Director column landed
+6. **Conversation entries for the thread**: each entry of the snapshot's `conversation` carries `at` (ISO time the message or reply was recorded), the user's `scopeIds` (scene and shot ids it pointed at; omit for a whole-film scope) and, for assistant entries, `runtime: "scripted" | "live"` (DC-15). The web type is `ConversationEntry` in `apps/web/src/next/model/types.ts`; keep the server shape identical.
