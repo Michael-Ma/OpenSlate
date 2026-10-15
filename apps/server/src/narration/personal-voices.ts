@@ -46,8 +46,9 @@ export function projectPersonalVoices(reader: Reader, projectId: string) {
   return rows.map(row => {
     invariant(row.bytes <= 8192, 'PERSONAL_VOICE_INVALID', 'Registered voice metadata exceeds its bound');
     const voice = reader.get<PersonalVoiceIdentity>('personal_voice', row.id)!;
-    const revoked = !!reader.get('personal_voice_revocation', row.id);
-    return { id: voice.selector, identityId: voice.id, label: voice.label, provider: voice.provider,
+    const revocation = reader.get<VoiceRevocation>('personal_voice_revocation', row.id), revoked = !!revocation;
+    return { id: voice.selector, identityId: voice.id, providerVoiceId: voice.providerVoiceId, label: voice.label, provider: voice.provider,
+      consentGrantedAt: voice.consent.recordedAt, ...(revocation ? { consentRevokedAt: revocation.createdAt } : {}),
       ready: !revoked && voice.provider === 'openai', state: revoked ? 'revoked' as const : voice.provider === 'openai' ? 'registered' as const : 'provider_unavailable' as const,
       providerAccessVerified: false as const };
   });

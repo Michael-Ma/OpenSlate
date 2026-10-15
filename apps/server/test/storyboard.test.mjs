@@ -290,3 +290,43 @@ test('scene deletion and its restoring Undo fence older Director shot fields eve
  f.edit({kind:'undo',commandId:removed.commandId});assert.equal(f.store.getProject(p.id).shots[0].motion,p.shots[0].motion);
  await assert.rejects(prepare(),{code:'HUMAN_EDITED_FIELD'});assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');
 });
+
+test('HTTP shotFields saves one alongside command, computes combined direction and preserves request holds', async t => {
+ const f=fixture(t),before=f.store.getProject(f.projectId),id=before.shots[0].id;
+ const human=f.service.beginRequest(f.projectId,'local-user','Director direction',{editing:true,scopeIds:[before.shots[1].id]}),epoch=f.service.openEpoch(f.projectId,human);
+ const holds=f.store.list('hold',f.projectId).filter(h=>h.active),grants=f.store.list('grant',f.projectId);
+ const body={kind:'shotFields',id,fields:{purpose:'New purpose',action:'Walk',framing:'Close detail',motion:'Pan right',desiredFrames:240,imagePrompt:'Exact new image',videoPrompt:'Exact new video'},expectedHeadVersion:before.headVersion};
+ const headers={host:'127.0.0.1',authorization:`Bearer ${f.token}`,'idempotency-key':randomUUID()},url=`/api/projects/${f.projectId}/storyboard`;
+ const response=await f.app.inject({method:'POST',url,headers,payload:body});assert.equal(response.statusCode,200,response.body);
+ const receipt=response.json(),after=f.store.getProject(f.projectId);
+ for(const [field,value] of Object.entries(body.fields))assert.equal(after.shots[0][field],value);
+ assert.equal(after.headVersion,before.headVersion+1);assert.equal(f.store.list('storyboard_edit',f.projectId).length,1);
+ assert.deepEqual(f.store.list('hold',f.projectId).filter(h=>h.active),holds);assert.deepEqual(f.store.list('grant',f.projectId),grants);
+ assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'active');assert.equal(f.store.get('message',human.requestId).state,'active');
+ assert.equal(f.store.get('message',receipt.requestId).concurrency,'alongside');
+ assert.deepEqual((await f.app.inject({method:'POST',url,headers,payload:body})).json(),receipt);
+ const stale=await f.app.inject({method:'POST',url,headers:{...headers,'idempotency-key':randomUUID()},payload:body});assert.equal(stale.json().error.code,'REVISION_CONFLICT');
+ const undone=await f.app.inject({method:'POST',url,headers:{...headers,'idempotency-key':randomUUID()},payload:{kind:'undo',commandId:receipt.commandId,expectedHeadVersion:after.headVersion}});
+ assert.equal(undone.statusCode,200,undone.body);assert.deepEqual(f.store.getProject(f.projectId).shots,before.shots);
+});
+
+test('HTTP shotFields rejects invalid fields and accepted-line shortening with no partial edit or authority',async t=>{
+ const f=fixture(t),p=f.store.getProject(f.projectId),row=p.shots[0],cue={id:'accepted-line',meaning:'Line',durationFrames:210,placementFrames:0,accepted:true,measured:true};
+ row.cueId=cue.id;row.narrationTimingMode='within_shot';p.cues=[cue];f.store.saveProject(p,p.headVersion);
+ const before=f.store.getProject(f.projectId),cursor=f.store.cursor(f.projectId),headers={host:'127.0.0.1',authorization:`Bearer ${f.token}`};
+ for(const [fields,code] of [[{motion:'Must roll back',desiredFrames:180},'SHOT_SHORTER_THAN_NARRATION'],[{},'VALIDATION_ERROR'],[{unknown:'no'},'VALIDATION_ERROR'],[{motion:' '},'VALIDATION_ERROR'],[{desiredFrames:'240'},'VALIDATION_ERROR'],[{desiredFrames:89},'VALIDATION_ERROR']]){
+  const response=await f.app.inject({method:'POST',url:`/api/projects/${f.projectId}/storyboard`,headers:{...headers,'idempotency-key':randomUUID()},payload:{kind:'shotFields',id:row.id,fields,expectedHeadVersion:before.headVersion}});
+  assert.equal(response.json().error.code,code,response.body);assert.deepEqual(f.store.getProject(f.projectId),before);assert.equal(f.store.cursor(f.projectId),cursor);
+ }
+ assert.equal(f.store.list('storyboard_edit',f.projectId).length,0);
+});
+
+test('shotFields combines derived prompts once and video-only fields preserve the frame candidate',t=>{
+ const f=fixture(t),before=f.store.getProject(f.projectId),id=before.shots[0].id,bindings=f.store.list('node_binding',f.projectId);
+ f.edit({kind:'shotFields',id,fields:{motion:'Slow orbit',desiredFrames:240,videoPrompt:'Explicit motion recipe'}});
+ for(const b of bindings)assert.equal(f.store.get('node_binding',b.id).candidateId,b.node.shotId===id&&b.node.kind==='video'?null:b.candidateId);
+ const receipt=f.edit({kind:'shotFields',id,fields:{purpose:'Watch the water',framing:'Wide',action:'Walk to shore',motion:'Push in'}});
+ const after=f.store.getProject(f.projectId).shots[0];
+ assert.match(after.imagePrompt,/Watch the water\. Walk to shore\. Wide/);assert.match(after.videoPrompt,/Camera movement: Push in/);
+ assert.equal((after.videoPrompt.match(/OpenSlate current direction:/g)||[]).length,1);assert.ok(receipt.commandId);
+});

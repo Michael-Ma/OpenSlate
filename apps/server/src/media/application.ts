@@ -297,7 +297,9 @@ export class MediaApplicationService {
   }
 
   private assertUnpaused(job: Pick<MediaRenderJob, "projectId" | "target">): void {
-    invariant(!this.store.get<{ paused: boolean }>("execution_control", job.projectId)?.paused, "MEDIA_PAUSED", "Project execution is paused");
+    // Storyboard exports spend nothing and have no provider dispatch. Stop still fences generation.
+    const storyboard = "kind" in job.target && job.target.kind === "storyboard";
+    invariant(storyboard || !this.store.get<{ paused: boolean }>("execution_control", job.projectId)?.paused, "MEDIA_PAUSED", "Project execution is paused");
     const held = this.store.list<{ scopeId: string; active: boolean }>("hold", job.projectId)
       .some(hold => hold.active && (job.target.scopeIds.includes(hold.scopeId) || job.target.dependencyNodeIds.includes(hold.scopeId)));
     invariant(!held, "MEDIA_HELD", "A timeline dependency is held for editing");

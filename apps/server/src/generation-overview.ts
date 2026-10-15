@@ -82,12 +82,13 @@ export class GenerationOverviewReader {
             const current = kind === "image" ? row.imageComplete : row.videoComplete;
             const previous = binding?.outdated?.previous ?? artifacts.at(-1);
             const base: MediaSlot = { state: "none", takeCount: new Set(artifacts.map(a => a.artifactId).concat(output && current ? [output.artifactId] : [], previous ? [previous.artifactId] : [])).size,
+              ...(!binding?.candidateId && binding?.outdatedReason ? { takenOff: binding.outdatedReason } : {}),
               ...(!current && previous ? { previous: ref(previous), ...(binding?.outdated ? { outdatedFields: binding.outdated.fields } : {}) } : {}) };
             if (nodes.length > 1) return { ...base, state: "choose_take" };
             if (shot.promptState === "placeholder") return { ...base, state: "direction_required" };
             if (current && output) return { ...base, state: "ready", artifact: ref(output) };
             // Detached, still-live attempts are honest in-flight work; they must never look safe to resubmit.
-            const active = history.filter(a => !["failed", "succeeded"].includes(a.phase)).at(-1);
+            const active = history.filter(a => !a.released && !["failed", "succeeded"].includes(a.phase)).at(-1);
             if (active) return { ...base, state: active.phase === "submission_unknown" ? "no_answer" : "running", phase: active.phase, startedAt: active.createdAt, attemptId: active.id };
             const last = history.filter(a => a.candidateId === binding?.candidateId).at(-1);
             if (last?.phase === "failed") {

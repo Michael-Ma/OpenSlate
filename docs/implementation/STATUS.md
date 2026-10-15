@@ -1,6 +1,16 @@
 # Current implementation status
 
-Reconciled October 15, 2026 (B10 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 15, 2026 (B12 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 15 P5 server follow-ups — B12 component verified; full gate has unchanged web failures
+
+B12 implements the existing authenticated installation-status contract without requiring a film or returning paths/secrets. Version-only local probes report Codex and the server media tools; sign-in remains unknown without an account/model session. Director setup adds the detected version, and personal-voice lists expose complete IDs and consent dates. Generation overview now reports stopped/released taken-off slots until a new candidate is bound and excludes released attempts from live no-answer state.
+
+Storyboard exports can prepare, render and publish locally while stopped; paid generation remains fenced. The new `shotFields` storyboard command validates and applies multiple fields in one alongside request with one media-restoring Undo. It retains accepted-narration duration floors, stale-write refusal, field fencing, exact media intent checks and request-owned holds. Keyframe voice tests verify the captured project default across restart, ready pinned personal voices, and refusal to buy speech after consent revocation.
+
+Pinned toolchain setup/preflight and `pnpm build` passed. All **103 touched-file tests passed**, with zero failures/skips. Final `pnpm test` returned **2,961 passed, seven failed, one optional native-probe skip and one existing todo (2,970 total)**. All five package typechecks passed. The seven failures reproduce independently in four unchanged frontend test files: fixture soundtrack routing, duplicate message IDs, four new-film setup/catalog cases and sub-cent price formatting. The isolated reproduction returned 49 passed, seven failed and one todo. `apps/web` and `studio-api.ts` match HEAD; card rules leave frontend fixes to the lead.
+
+No web source, browser contract or DDL changed. Validation used disposable state, synthetic consent/credentials, stub executables and fake media transports. No live model/provider call, external network request, personal credential read, production-state access/restart or port 3001 listener occurred. Work remains uncommitted for lead review. [B12 scope, exact failing names, file inventory, decisions and proposed commits](../ai/uiux-plan/codex/reports/B12-followups.md).
 
 ## October 15 keyframe projection and automatic Director reviews — B10 worktree verified
 

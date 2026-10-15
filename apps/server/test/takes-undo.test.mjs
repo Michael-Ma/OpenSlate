@@ -163,3 +163,16 @@ test('released unknown regeneration can switch takes while its late result stays
   assert.equal(f.store.list('grant', f.project.id).length, grants);
   assert.equal((await f.call('GET', '/shots/shot-0/takes').then(f.ok)).keyframes.length, 3);
 });
+
+test('HTTP shotFields outdates both media slots and a single Undo restores every field and exact paid take', async t => {
+  const f = await completed(t), before = await shot(f), project = f.store.getProject(f.project.id), attempts = f.engine.attempts(f.project.id);
+  const body = { kind: 'shotFields', id: 'shot-0', fields: { imagePrompt: 'New frame', motion: 'Pan right', desiredFrames: 240, videoPrompt: 'New video recipe' }, expectedHeadVersion: project.headVersion };
+  const key = randomUUID(), receipt = await f.call('POST', '/storyboard', body, key).then(f.ok);
+  assert.deepEqual(await f.call('POST', '/storyboard', body, key).then(f.ok), receipt);
+  const edited = await shot(f); assert.equal(edited.keyframe.state, 'outdated'); assert.equal(edited.video.state, 'outdated');
+  assert.deepEqual(edited.keyframe.previous, before.keyframe.artifact); assert.deepEqual(edited.video.previous, before.video.artifact);
+  await undo(f, receipt.commandId).then(f.ok);
+  assert.deepEqual(f.store.getProject(f.project.id).shots, project.shots);
+  const restored = await shot(f); assert.deepEqual(restored.keyframe.artifact, before.keyframe.artifact); assert.deepEqual(restored.video.artifact, before.video.artifact);
+  assert.deepEqual(f.engine.attempts(f.project.id), attempts); await f.tick(2); assert.deepEqual(f.engine.attempts(f.project.id), attempts);
+});

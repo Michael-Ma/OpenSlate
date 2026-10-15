@@ -1,5 +1,5 @@
 import { defaultNarratorVoice } from "./narration/default-voice.js";
-import { digest, shotVideoTiming } from "@openslate/core";
+import { digest, invariant, shotVideoTiming } from "@openslate/core";
 import type { ProjectRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationService } from "./narration/service.js";
@@ -60,6 +60,8 @@ export function sceneNarrationView(
           options ??= projectNarrationSpeechOptions(production, project.id);
           const source = row?.script.source;
           const savedVoice = source?.kind === "generated" ? source.voice : null;
+          invariant(!savedVoice || !/^(openai-custom|elevenlabs-personal):/.test(savedVoice) || options.personalVoices.some(value => value.id === savedVoice && value.ready),
+            "PERSONAL_VOICE_REQUIRED", "Choose a ready personal voice for this pinned line.");
           voice =
             savedVoice && options.voices.includes(savedVoice)
               ? savedVoice

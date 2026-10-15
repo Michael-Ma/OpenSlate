@@ -37,7 +37,11 @@ function fixture(t, options = {}) {
   const release = (attempt, input = {}, key = randomUUID()) => post(`/attempts/${attempt.id}/release`, {
     expectedPhase: 'submission_unknown', acknowledgeDoubleCharge: true, ...input,
   }, key);
-  return { ...f, service, app, post, scene, generate, release };
+  const overview = async () => {
+    const response = await app.inject({ url: path + '/generation', headers: { host: '127.0.0.1', authorization: `Bearer ${token}` } });
+    assert.equal(response.statusCode, 200, response.body); return response.json();
+  };
+  return { ...f, service, app, post, scene, generate, release, overview };
 }
 const expectError = (response, code) => {
   assert.notEqual(response.statusCode, 200, response.body);
@@ -264,4 +268,25 @@ test('a submitted job failing after Stop cannot buy an automatic retry after Con
   assert.equal(fresh.statusCode, 200, fresh.body);
   assert.equal((await f.engine.runReady()).dispatched, 1);
   assert.equal(f.provider.acceptedCount(), 2);
+});
+
+
+test('HTTP overview keeps stopped taken-off slots through Continue until a new press binds them', async t => {
+  const f = fixture(t), stopped = (await f.post('/controls', { action: 'stop' })).json().stopped;
+  assert.equal((await f.overview()).shots['shot-0'].keyframe.takenOff, 'stopped');
+  await f.post('/controls', { action: 'resume', expectedAuthorityId: stopped.stopId });
+  assert.equal((await f.overview()).shots['shot-0'].keyframe.takenOff, 'stopped');
+  assert.equal((await f.engine.runReady()).dispatched, 0);
+  const response = await f.generate(); assert.equal(response.statusCode, 200, response.body);
+  assert.equal((await f.overview()).shots['shot-0'].keyframe.takenOff, undefined);
+});
+
+test('HTTP overview releases no-answer slots and preserves the reason through late historical completion', async t => {
+  const f = fixture(t); f.provider.setMode(f.plan.nodes[0].id, 'unknown_after_accept'); await f.engine.runReady();
+  const attempt = f.engine.attempts(f.projectId)[0]; assert.equal((await f.overview()).shots['shot-0'].keyframe.state, 'no_answer');
+  const response = await f.release(attempt); assert.equal(response.statusCode, 200, response.body);
+  let slot = (await f.overview()).shots['shot-0'].keyframe; assert.equal(slot.takenOff, 'released'); assert.notEqual(slot.state, 'no_answer');
+  await f.engine.reconcile(); slot = (await f.overview()).shots['shot-0'].keyframe;
+  assert.equal(slot.takenOff, 'released'); assert.equal(slot.artifact, undefined); assert.equal(slot.takeCount, 1);
+  assert.equal((await f.generate()).statusCode, 200); assert.equal((await f.overview()).shots['shot-0'].keyframe.takenOff, undefined);
 });

@@ -73,6 +73,7 @@ const studioSessions = new StudioSessions();
 const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
 const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });
 const app = createApp({ service, sceneCommands, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
+  mediaToolPaths: { ffmpeg: ffmpegPath, ffprobe: ffprobePath },
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },

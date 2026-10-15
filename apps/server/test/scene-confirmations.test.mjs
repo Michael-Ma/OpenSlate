@@ -278,3 +278,37 @@ test('a queued B7 voice line keeps the B11 default captured at its human press',
  assert.equal(f.calls.speech,1);assert.equal(f.store.list('narration_speech_proposal',f.project.id).at(-1).operation.voice,'coral');
  assert.equal(f.store.getProject(f.project.id).narratorVoice,'cedar');assert.equal(f.narration.workspaceSnapshot(f.project.id).segments[0].script.source.voice,'coral');
 });
+
+for (const revoked of [false, true]) test(`keyframes with a pinned personal voice ${revoked ? 'refuse revoked consent without buying speech' : 'keep the ready identity over the project default'}`, async t => {
+  const f = await confirmationFixture(t, { modes: ['generated'] });
+  const register = await f.call('POST', '/narration/personal-voices', { expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
+    label: 'Personal narrator', provider: 'openai', providerVoiceId: 'voice_b12_pin', ownVoice: true, permitSynthesis: true }).then(f.ok);
+  const personal = register.voice;
+  await f.call('POST', '/settings/voice', { narratorVoice: 'coral', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  await f.call('POST', '/narration/shots/shot-0/initialize', { mode: 'generated', expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
+    voice: personal.selector, profileId: 'offline-speech' }).then(f.ok);
+  if (revoked) await f.call('POST', `/narration/personal-voices/${personal.id}/revoke`, {}).then(f.ok);
+  await f.make(); await f.tick(12);
+  assert.equal(f.calls.speech, revoked ? 0 : 1);
+  const proposals = f.store.list('narration_speech_proposal', f.project.id);
+  if (revoked) {
+    assert.equal(proposals.length, 0); assert.ok(f.store.list('scene_confirmation', f.project.id).some(r => r.state === 'blocked'));
+  } else {
+    assert.equal(proposals.at(-1).operation.voice, personal.selector);
+    assert.equal(f.narration.workspaceSnapshot(f.project.id).segments[0].script.source.voice, personal.selector);
+  }
+  assert.equal(f.store.getProject(f.project.id).narratorVoice, 'coral');
+});
+
+test('personal voice consent revoked after a keyframe press fences its queued speech without substituting a default', async t => {
+  const f = await confirmationFixture(t, { modes: ['generated'] });
+  const { voice } = await f.call('POST', '/narration/personal-voices', { expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
+    label: 'Personal narrator', provider: 'openai', providerVoiceId: 'voice_b12_queued', ownVoice: true, permitSynthesis: true }).then(f.ok);
+  await f.call('POST', '/settings/voice', { narratorVoice: voice.selector, expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  await f.make();
+  assert.equal(f.store.list('scene_confirmation', f.project.id).at(-1).steps[0].voice, voice.selector);
+  await f.call('POST', `/narration/personal-voices/${voice.id}/revoke`, {}).then(f.ok);
+  await f.tick(12); assert.equal(f.calls.speech, 0);
+  assert.equal(f.store.list('narration_speech_proposal', f.project.id).length, 0);
+  assert.ok(f.store.list('scene_confirmation', f.project.id).some(r => r.state === 'blocked'));
+});

@@ -19,6 +19,7 @@ type Edit = {
     | "moveScene"
     | "addScene"
     | "shot"
+    | "shotFields"
     | "addShot"
     | "deleteShot"
     | "moveShot"
@@ -28,6 +29,7 @@ type Edit = {
   id?: string;
   sceneId?: string;
   beforeId?: string;
+  fields?: Partial<Pick<ShotRecord, "imagePrompt" | "motion" | "desiredFrames" | "videoPrompt" | "framing" | "purpose" | "action">>;
   field?: string;
   value?: string;
   commandId?: string;
@@ -89,7 +91,7 @@ export function editStoryboard(
         "The storyboard changed; reload before saving this edit.",
       );
       invariant(
-        ["treatment", "scene", "shot", "narration"].includes(input.kind) || !s.store
+        ["treatment", "scene", "shot", "shotFields", "narration"].includes(input.kind) || !s.store
           .list<{ state: string }>("plan_import", projectId)
           .some((x) => x.state === "pending"),
         "IMPORT_PENDING",
@@ -183,63 +185,43 @@ export function editStoryboard(
           cueId: null,
         });
         global = true;
-      } else if (input.kind === "shot") {
-        const row = shot(),
-          prior = structuredClone(row);
-        invariant(
-          [
-            "purpose",
-            "action",
-            "framing",
-            "motion",
-            "desiredFrames",
-            "imagePrompt",
-            "videoPrompt",
-          ].includes(input.field ?? ""),
-          "VALIDATION_ERROR",
-          "Unknown shot field.",
-        );
-        if (input.field === "desiredFrames") {
-          const frames = Number(value());
-          invariant(
-            Number.isSafeInteger(frames) && frames >= 90 && frames <= 450,
-            "VALIDATION_ERROR",
-            "Use 3–15 seconds per shot.",
-          );
-          const cue = next.cues.find(cue => cue.id === row.cueId);
-          if (row.narrationTimingMode === "within_shot" && cue?.accepted && cue.durationFrames > frames)
-            throw new DomainError("SHOT_SHORTER_THAN_NARRATION", "Make the shot longer or cut the accepted narration before shortening it.", {
-              shotId: row.id, narrationFrames: cue.durationFrames, requestedFrames: frames,
-            });
-          row.desiredFrames = frames;
-        } else
-          row[
-            input.field as
-              | "purpose"
-              | "action"
-              | "framing"
-              | "motion"
-              | "imagePrompt"
-              | "videoPrompt"
-          ] = value();
-        if (["action", "framing", "imagePrompt", "videoPrompt"].includes(input.field ?? "")) row.promptState = "ready";
+      } else if (input.kind === "shot" || input.kind === "shotFields") {
+        const row = shot(), prior = structuredClone(row);
+        const fields = input.kind === "shotFields" ? input.fields : { [input.field ?? ""]: input.field === "desiredFrames" ? Number(value()) : value() };
+        invariant(fields && typeof fields === "object" && !Array.isArray(fields) && Object.keys(fields).length > 0 &&
+          Object.keys(fields).every(field => ["purpose", "action", "framing", "motion", "desiredFrames", "imagePrompt", "videoPrompt"].includes(field)) &&
+          (input.kind !== "shotFields" || input.field === undefined && input.value === undefined),
+          "VALIDATION_ERROR", "Choose one or more supported shot fields.");
+        const names = Object.keys(fields);
+        for (const field of names) {
+          const entry = fields[field as keyof typeof fields];
+          if (field === "desiredFrames") {
+            invariant(typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 90 && entry <= 450,
+              "VALIDATION_ERROR", "Use 3–15 seconds per shot.");
+            const cue = next.cues.find(cue => cue.id === row.cueId);
+            if (row.narrationTimingMode === "within_shot" && cue?.accepted && cue.durationFrames > entry)
+              throw new DomainError("SHOT_SHORTER_THAN_NARRATION", "Make the shot longer or cut the accepted narration before shortening it.", {
+                shotId: row.id, narrationFrames: cue.durationFrames, requestedFrames: entry,
+              });
+            row.desiredFrames = entry;
+          } else {
+            invariant(typeof entry === "string" && entry.trim() && entry.length <= 16000,
+              "VALIDATION_ERROR", "Enter a nonempty value.");
+            row[field as "purpose" | "action" | "framing" | "motion" | "imagePrompt" | "videoPrompt"] = entry.trim();
+          }
+        }
+        if (names.some(field => ["action", "framing", "imagePrompt", "videoPrompt"].includes(field))) row.promptState = "ready";
         row.revisionId = newId();
         changed.add(row.id);
-        if (["purpose", "action", "framing"].includes(input.field ?? "")) {
+        // Build derived prompts from the complete new direction once. Explicit prompts win.
+        if (names.some(field => ["purpose", "action", "framing"].includes(field)) && !names.includes("imagePrompt"))
           row.imagePrompt = editedPrompt(prior.imagePrompt, row, "image");
+        if (names.some(field => ["purpose", "action", "framing", "motion"].includes(field)) && !names.includes("videoPrompt"))
           row.videoPrompt = editedPrompt(prior.videoPrompt, row, "video");
-        } else if (input.field === "motion")
-          row.videoPrompt = editedPrompt(prior.videoPrompt, row, "video");
-        const cue = next.cues.find((cue) => cue.id === row.cueId);
+        const cue = next.cues.find(cue => cue.id === row.cueId);
         row.promptIntent = {
-          image:
-            input.field === "videoPrompt"
-              ? prior.promptIntent.image
-              : shotIntentDigest(row, "image", cue),
-          video:
-            input.field === "imagePrompt"
-              ? prior.promptIntent.video
-              : shotIntentDigest(row, "video", cue),
+          image: names.every(field => field === "videoPrompt") ? prior.promptIntent.image : shotIntentDigest(row, "image", cue),
+          video: names.every(field => field === "imagePrompt") ? prior.promptIntent.video : shotIntentDigest(row, "video", cue),
         };
       } else if (input.kind === "deleteShot") {
         const row = shot();
@@ -445,6 +427,8 @@ export function editStoryboard(
       };
       const changedTiming = new Set(next.shots.filter(row => intentChanged(row.id, "video")).map(row => row.id));
       const effectiveInput = undoing?.input ?? input;
+      const shotFields = effectiveInput.kind === "shotFields" ? Object.keys(effectiveInput.fields ?? {}) :
+        effectiveInput.kind === "shot" ? [effectiveInput.field ?? ""] : null;
       const affected = new Set(
         bindings
           .filter(
@@ -463,17 +447,11 @@ export function editStoryboard(
                       !changedTiming.has(x.node.shotId ?? "")))
                 ) &&
                 !(
-                  effectiveInput.kind === "shot" &&
-                  ["motion", "desiredFrames", "videoPrompt"].includes(
-                    effectiveInput.field ?? "",
-                  ) &&
+                  shotFields?.every(field => ["motion", "desiredFrames", "videoPrompt"].includes(field)) &&
                   x.node.kind === "image"
                 ) &&
                 !(
-                  effectiveInput.kind === "shot" &&
-                  ["imagePrompt", "videoPrompt", "action"].includes(
-                    effectiveInput.field ?? "",
-                  ) &&
+                  shotFields?.every(field => ["imagePrompt", "videoPrompt", "action"].includes(field)) &&
                   !["image", "video"].includes(x.node.kind)
                 )),
           )
@@ -509,7 +487,7 @@ export function editStoryboard(
           outputs: {},
           ...(Object.values(b.outputs)[0] || b.outdated ? { outdated: {
             at: new Date().toISOString(),
-            fields: [...new Set([...(Object.keys(b.outputs).length ? [] : b.outdated?.fields ?? []), input.field ?? input.kind])],
+            fields: [...new Set([...(Object.keys(b.outputs).length ? [] : b.outdated?.fields ?? []), ...(input.kind === "shotFields" ? Object.keys(input.fields!) : [input.field ?? input.kind])])],
             previous: Object.values(b.outputs)[0] ?? b.outdated!.previous,
           } } : {}),
         });
@@ -575,6 +553,7 @@ export function registerStoryboard(
                 "moveScene",
                 "addScene",
                 "shot",
+                "shotFields",
                 "addShot",
                 "deleteShot",
                 "moveShot",
@@ -589,6 +568,10 @@ export function registerStoryboard(
             beforeId: text,
             commandId: text,
             withShots: { type: "boolean" },
+            fields: { type: "object", additionalProperties: false, minProperties: 1, properties: {
+              ...Object.fromEntries(["imagePrompt", "motion", "videoPrompt", "framing", "purpose", "action"].map(field => [field, { type: "string", minLength: 1, maxLength: 16000 }])),
+              desiredFrames: { type: "integer", minimum: 90, maximum: 450 },
+            } },
             field: text,
             value: { type: "string", maxLength: 16000 },
           },
