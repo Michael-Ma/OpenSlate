@@ -21,6 +21,19 @@
 .banner.check.done .letter { background: var(--raised-2); color: var(--text-2); }
 .banner.check .seg.hot { background: var(--select); color: var(--select-ink); }
 
+/* ---------- Director notes: banner options may wrap (a price makes them long) ---------- */
+.banner .banner-actions .pill { white-space: normal; text-align: center; line-height: 1.3; }
+.banner .tl .segs { min-width: 0; overflow: hidden; }
+.banner h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.callout .callout-note { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; max-width: 100%; }
+/* Chips never cover the shot badge: they take the room right of it and end with an ellipsis. */
+.card .callout { left: 44px; pointer-events: none; }
+/* A chip is a label: a click on it opens the card; only the regenerate link is its own control. */
+.card .callout .link { pointer-events: auto; }
+.card .callout .anno { max-width: 100%; min-width: 0; }
+.card .callout .anno-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.callout .link:disabled { opacity: .5; }
+
 /* ---------- neutral check chips on cards ---------- */
 .anno.check { background: var(--raised-2); color: var(--text); border: 1px solid var(--track); }
 .anno.check .letter { background: var(--track); color: var(--text); }

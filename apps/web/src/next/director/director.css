@@ -22,6 +22,11 @@
 .dir-text p{margin:0;white-space:pre-line}
 .dir-text p + p{margin-top:8px}
 
+/* the Director's lettered notes (studio.css has .note, .letter, .note.done, .handled) */
+.note-text{white-space:pre-line;overflow-wrap:anywhere}
+/* stale: a global .stale rule styles inspector lines, so key off the state attribute instead */
+.note[data-state="stale"] .handled{color:var(--text-2);font-weight:500}
+
 /* a pending Director question: amber like the Director's notes; the chosen option is white */
 .dir-question{border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:12px;padding:11px 13px 12px;margin-top:10px;line-height:1.5}
 .q-item{border:0;margin:0;padding:0;min-width:0}

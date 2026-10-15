@@ -71,3 +71,10 @@ test('opening a compact edit also holds its legacy project-authored speech while
  assert.equal(f.engine.held(f.store.getProject(f.project.id),firstNode),true);assert.equal(f.engine.held(f.store.getProject(f.project.id),secondNode),false);
  f.issue(two);const attempt=f.admit(two);assert.equal(attempt.nodeId,secondNode);assert.throws(()=>f.admit(one),{code:'EXECUTION_HELD'});assert.equal(f.calls.http,0);assert.equal(f.engine.attempts(f.project.id).length,1);
 });
+test('explicit narration continuation retires only the old session capability and preserves the Director request',async t=>{
+ const f=await fixture(t),human=f.production.beginRequest(f.project.id,'local-user','Discuss without interrupting narration',{editing:false}),bridge=f.production.openEpoch(f.project.id,human);
+ const next=createShotNarrationSession(f.production,f.project.id,f.project.shots[0].id,key(),f.session.id);
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'read_only');assert.equal(f.store.get('message',human.requestId).state,'active');assert.equal(f.store.get('message',f.session.requestId).state,'active');
+ assert.throws(()=>f.narration.accept(f.project.id,f.scoped,f.narration.workspaceSnapshot(f.project.id).state.version,key(),'script',[f.segment.script.id]),{code:'SCOPE_DENIED'});
+ const actor={kind:'human',principalId:'local-user',requestId:next.requestId};assert.doesNotThrow(()=>f.narration.accept(f.project.id,actor,f.narration.workspaceSnapshot(f.project.id).state.version,key(),'script',[f.segment.script.id]));
+});

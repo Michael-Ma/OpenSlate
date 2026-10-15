@@ -1,3 +1,4 @@
+import { registerDirectorProposals } from "./application/director-proposals.js";
 import { registerShotTakes } from "./shot-takes.js";
 import { registerDirectorNotes } from "./application/director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
@@ -67,6 +68,7 @@ export function createApp(options: AppOptions = {}) {
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   registerDirectorNotes(app, service);
+  registerDirectorProposals(app, service);
   const sceneCommands = options.sceneCommands ?? (options.service ? new SceneConfirmationRunner(options.service, options.narrationRoutes) : undefined);
   registerSceneGeneration(app, service, options.narrationRoutes?.narration, sceneCommands?.enqueueKeyframes);
   if (sceneCommands) { registerSceneConfirmations(app, sceneCommands); registerNarrationFit(app, sceneCommands); }

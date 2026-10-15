@@ -204,6 +204,8 @@ export const keyframes = {
   "check.tail.scene": { en: "Scene {scene}", zh: "第 {scene} 场" },
   "check.tail.scene_later": { en: "Scene {scene} · {seconds} s later", zh: "第 {scene} 场 · 推后 {seconds} 秒" },
   "check.tail.scene_from": { en: "Scene {scene} · from {time}", zh: "第 {scene} 场 · 从 {time} 开始" },
+  "check.tail.scene_earlier": { en: "Scene {scene} · {seconds} s earlier", zh: "第 {scene} 场 · 提前 {seconds} 秒" },
+  "check.tail.end_earlier": { en: "Ends {seconds} s earlier", zh: "片尾提前 {seconds} 秒" },
   "check.tail.end": { en: "End of film", zh: "片尾" },
   "check.tail.end_later": { en: "Ends {seconds} s later", zh: "片尾推后 {seconds} 秒" },
   "check.tail.end_from": { en: "Ends at {time}", zh: "在 {time} 结束" },

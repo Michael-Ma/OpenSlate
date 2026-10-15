@@ -99,6 +99,9 @@ export class GenerationOverviewReader {
                 charged: !last.reservationId || store.get<{ state: string }>("reservation", last.reservationId)?.state !== "released",
                 at: evidence?.recordedAt ?? last.createdAt } };
             }
+            // Proposal publication retains paid outputs. A stale completed recipe is
+            // outdated evidence, even while its historical candidate remains bound.
+            if (previous && binding && Object.keys(binding.outputs).length) return { ...base, state: "outdated" };
             if (binding?.candidateId) {
               const wait = store.get<{ code: string; since: string }>("node_wait", binding.id);
               const held = snapshot.holds.some(h => { const hold = h as { active: boolean; scopeId: string }; return hold.active && [projectId, scene.id, shot.id, binding.id].includes(hold.scopeId); });

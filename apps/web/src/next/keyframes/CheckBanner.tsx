@@ -3,6 +3,7 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { checkActions, checkTimeline, checkTitle, settledTimeline, type AppCheck } from "../model/checks.ts";
 import { filmMeta, seconds } from "../model/keyframes.ts";
 import { clock } from "../model/motion.ts";
+import type { Msg } from "../model/types.ts";
 import { BannerFrame } from "./BannerFrame.tsx";
 
 /** A check the person just settled from the banner; shown until they move on, with Undo while it is allowed. */
@@ -30,6 +31,8 @@ interface Props {
   checks: { letter: string; check: AppCheck }[];
   settled: SettledCheck | null;
   busy: boolean;
+  /** The quiet line when nothing is left to check (e.g. "Every Director note in this scene is settled."). */
+  quiet?: Msg | null;
   onExtend(check: AppCheck): void;
   onKeep(check: AppCheck): void;
   onEditNarration(check: AppCheck): void;
@@ -41,7 +44,7 @@ interface Props {
  * App-computed checks (plan decision D4), one at a time. Drawn neutral, never in the Director's amber:
  * the app found these, the Director did not recommend them. Each option is one free, undoable command.
  */
-export function CheckBanner({ overview, sceneId, checks, settled, busy, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
+export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
   const { t, tm } = useI18n();
 
   if (settled && settled.sceneId === sceneId) {
@@ -80,7 +83,7 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, onExtend
     return (
       <div className="quiet" role="status" data-check="none">
         <span className="ck" aria-hidden="true">✓</span>
-        <span>{t("check.all_handled")}</span>
+        <span>{quiet ? tm(quiet) : t("check.all_handled")}</span>
       </div>
     );
   }

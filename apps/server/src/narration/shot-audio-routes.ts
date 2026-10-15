@@ -1,3 +1,4 @@
+import { recordHumanFields } from "../application/human-fields.js";
 import { defaultNarratorVoice } from "./default-voice.js";
 import { assertExpectedHumanRequest } from "../application/expected-human-request.js";
 import { soundtrackPlacement } from "./soundtrack-placement.js";
@@ -256,14 +257,17 @@ export function createShotAudioWorkspace(options: ShotAudioOptions) {
           delete shot.narrationFit;
           shot.narration = writing;
           shot.narrationPending = true;
+          const beforeWriting = store.getProject(projectId);
           const saved = store.saveProject(
             { ...project, revisionId: newId() },
             project.headVersion,
           );
+          recordHumanFields(store, beforeWriting, saved, actor);
           store.insert("project_revision", saved.revisionId, projectId, {
             project: saved,
           });
         }
+        if (store.get<{ concurrency?: string }>("message", actor.requestId)?.concurrency === "alongside") production.releaseAlongsideHolds(projectId, actor);
         store.put(
           "narration_shot_draft",
           draftId(projectId, shotId),
