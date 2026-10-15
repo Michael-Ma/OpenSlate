@@ -16,7 +16,8 @@ interface Props {
   /** Phone width: 14 px a second, scrolling sideways inside the timeline. Otherwise the lanes fit the width. */
   pixelsPerSecond: number | null;
   writable: boolean;
-  muteBusy: boolean;
+  /** An edit is being saved: the tool row says so to assistive tech. */
+  saving: boolean;
   onSelectShot(shotId: string): void;
   onSelectMusic(): void;
   onToggleMute(): void;
@@ -47,7 +48,7 @@ const MuteIcon = ({ muted }: { muted: boolean }) => (
  * letter, the narration lane (a line too long for its shot is not placed), and the one music track. Selecting
  * a block or the music changes the tool row below.
  */
-export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: pps, writable, muteBusy, onSelectShot, onSelectMusic, onToggleMute, onChooseMusic, children }: Props) {
+export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: pps, writable, saving, onSelectShot, onSelectMusic, onToggleMute, onChooseMusic, children }: Props) {
   const { t, tm } = useI18n();
   const total = Math.max(timeline.total, 0.001);
   const head = useRef<HTMLSpanElement>(null);
@@ -156,7 +157,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
                 aria-pressed={music.muted}
                 aria-label={music.muted ? t("film.music.unmute") : t("film.music.mute")}
                 title={offline ?? (music.muted ? t("film.music.unmute") : t("film.music.mute"))}
-                disabled={!writable || muteBusy}
+                disabled={!writable}
                 onClick={onToggleMute}
               >
                 <MuteIcon muted={music.muted} />
@@ -186,7 +187,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
           </div>
         </div>
       </div>
-      <div className="tl-tools" data-act="tools">{children}</div>
+      <div className="tl-tools" data-act="tools" aria-busy={saving}>{children}</div>
     </section>
   );
 }

@@ -36,6 +36,7 @@ export const filmMessages = {
   "film.player.keyframe_only": { en: "Keyframe only · no clip yet", zh: "只有关键帧 · 还没有视频" },
   "film.player.nothing": { en: "Nothing made yet", zh: "还没有生成内容" },
   "film.player.no_keyframe": { en: "No keyframe yet", zh: "还没有关键帧" },
+  "film.player.alt": { en: "{shot}, {framing}: {prompt}", zh: "{shot}，{framing}：{prompt}" },
   "film.player.narration": { en: "Narration", zh: "旁白" },
   "film.player.quote": { en: "“{text}”", zh: "“{text}”" },
   "film.player.music": { en: "{name} · {gain} dB", zh: "{name} · {gain} dB" },

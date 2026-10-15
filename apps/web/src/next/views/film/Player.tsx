@@ -52,6 +52,8 @@ export function Player({ timeline, clock, music, demo, live }: Props) {
   const lastLabel = useRef("");
   const [clipFailed, setClipFailed] = useState<string | null>(null);
   const playClip = live && shot?.picture === "clip" && clipFailed !== shot.shotId;
+  // The next shot's clip loads while this one plays, so the cut does not wait for it.
+  const nextClip = index >= 0 ? timeline.shots[index + 1]?.clip ?? null : null;
 
   useClockPaint(clock, (time, isPlaying) => {
     const text = formatClock(time);
@@ -81,13 +83,14 @@ export function Player({ timeline, clock, music, demo, live }: Props) {
       {shot && shot.keyframe ? (
         <div className={`pic${shot.picture === "keyframe" ? " dim" : ""}`}>
           <div className="pv-anim" ref={anim}>
-            <Still key={shot.keyframe.artifactId + shot.keyframe.sha256} artifact={shot.keyframe} alt={`${shot.label}, ${shot.framing}: ${shot.prompt}`} />
+            <Still key={shot.keyframe.artifactId + shot.keyframe.sha256} artifact={shot.keyframe} alt={t("film.player.alt", { shot: shot.label, framing: shot.framing, prompt: shot.prompt })} />
           </div>
         </div>
       ) : shot ? (
         <div className="dashed-frame"><div><b>{t("film.player.no_keyframe")}</b>{shot.prompt}</div></div>
       ) : null}
       {shot && playClip && shot.clip ? <Clip key={shot.shotId} shot={shot} videoRef={video} onFailed={() => setClipFailed(shot.shotId)} /> : null}
+      {live && nextClip ? <Prefetch artifact={nextClip} /> : null}
       <div className="pv-top">
         {shot ? <span className="badge">{shot.label}</span> : null}
         {status}
@@ -107,7 +110,7 @@ export function Player({ timeline, clock, music, demo, live }: Props) {
         </p>
         <div className="scrub">
           <button type="button" className="skip" data-act="prev" aria-label={t("film.player.prev")} onClick={prev}><PrevIcon /></button>
-          <button type="button" className="play" data-act="play" aria-label={playing ? t("film.player.pause") : t("film.player.play")} aria-pressed={playing} onClick={() => clock.toggle()} disabled={!timeline.total}>
+          <button type="button" className="play" data-act="play" aria-label={playing ? t("film.player.pause") : t("film.player.play")} onClick={() => clock.toggle()} disabled={!timeline.total}>
             {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
           <button type="button" className="skip" data-act="next" aria-label={t("film.player.next")} onClick={next}><NextIcon /></button>
@@ -144,4 +147,10 @@ function Clip({ shot, videoRef, onFailed }: { shot: FilmShot; videoRef: RefObjec
   useEffect(() => { if (source.status === "failed") failed.current(); }, [source.status]);
   if (source.status !== "ready") return null;
   return <video ref={videoRef} className="fv-clip" src={source.url} muted playsInline preload="auto" aria-hidden="true" onError={onFailed} />;
+}
+
+/** Loads an artifact into the shared cache and shows nothing. */
+function Prefetch({ artifact }: { artifact: StudioArtifactRef }) {
+  useArtifactUrl(artifact);
+  return null;
 }

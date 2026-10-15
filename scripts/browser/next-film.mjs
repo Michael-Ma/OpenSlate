@@ -66,6 +66,13 @@ async function undo(page) {
   await toastSays(page, /^Undone\./, 15000);
 }
 
+/** Scene 2's picture blocks as "label:shot", once the studio has re-read the film. */
+async function sceneTwo(page, want, message) {
+  const read = () => [...document.querySelectorAll(".pics .blk")].slice(3, 6).map((el) => `${el.querySelector(".badge").textContent}:${el.dataset.shot}`).join();
+  await page.waitForFunction((expected) => [...document.querySelectorAll(".pics .blk")].slice(3, 6).map((el) => `${el.querySelector(".badge").textContent}:${el.dataset.shot}`).join() === expected, want, { timeout: 8000 })
+    .catch(async () => { throw new Error(`${message}: ${await page.evaluate(read)}`); });
+}
+
 export const scenarios = [
   {
     name: "next-film-golden-layout",
@@ -177,12 +184,10 @@ export const scenarios = [
       await page.click(`.blk[data-shot='${shot("2.2")}']`);
       await page.click("[data-act='move'][data-d='-1']");
       await toastSays(page, /^Moved 2\.2; it is now 2\.1\. Nothing made goes out of date\./);
-      const order = await page.locator(".pics .blk").evaluateAll((els) => els.map((el) => `${el.querySelector(".badge").textContent}:${el.dataset.shot}`));
-      expect(order.slice(3, 6).join() === `2.1:${shot("2.2")},2.2:${shot("2.1")},2.3:${shot("2.3")}`, `The scene did not reorder: ${order}`);
+      await sceneTwo(page, `2.1:${shot("2.2")},2.2:${shot("2.1")},2.3:${shot("2.3")}`, "The scene did not reorder");
       await expectText(page, "[data-act='tools-shot']", /^2\.1 Medium$/);
       await undo(page);
-      const back = await page.locator(".pics .blk").evaluateAll((els) => els.map((el) => el.dataset.shot));
-      expect(back.slice(3, 6).join() === [shot("2.1"), shot("2.2"), shot("2.3")].join(), `Undo did not restore the order: ${back}`);
+      await sceneTwo(page, `2.1:${shot("2.1")},2.2:${shot("2.2")},2.3:${shot("2.3")}`, "Undo did not restore the order");
       // 1.1 has a clip: its length note says a new length outdates it.
       await page.click(`.blk[data-shot='${shot("1.1")}']`);
       await expectText(page, ".tl-tools .hint", /^a new length outdates its clip$/);
@@ -411,13 +416,16 @@ export const scenarios = [
       await expectText(page, "[data-act='tools-shot']", /^1\.1 /);
       await page.click("[data-act='move'][data-d='1']");
       await toastSays(page, /^Moved 1\.1; it is now 1\.2\./, 15000);
-      expect((await page.locator(".pics .blk").nth(1).getAttribute("data-shot")) === id, "The server did not move the shot later");
+      // The toast comes with the receipt; the moved block follows once the studio has re-read the film.
+      await page.waitForFunction((shotId) => document.querySelectorAll(".pics .blk")[1]?.getAttribute("data-shot") === shotId, id, { timeout: 15000 })
+        .catch(() => { throw new Error("The server did not move the shot later"); });
       await undo(page);
       await page.waitForFunction((shotId) => document.querySelector(".pics .blk")?.getAttribute("data-shot") === shotId, id, { timeout: 15000 });
       const line = await page.locator("[data-act='film-line']").innerText();
       await page.click("[data-act='len'][data-d='1']");
       await toastSays(page, /^1\.1 is \d+ s\. The film is \d+ s/, 15000);
-      expect((await page.locator("[data-act='film-line']").innerText()) !== line, "The film length did not change");
+      await page.waitForFunction((before) => document.querySelector("[data-act='film-line']")?.textContent !== before, line, { timeout: 15000 })
+        .catch(() => { throw new Error("The film length did not change"); });
       await undo(page);
       if (await page.locator("[data-act='choose-music']").count()) {
         await page.click("[data-act='choose-music']");

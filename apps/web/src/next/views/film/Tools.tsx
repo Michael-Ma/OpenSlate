@@ -9,18 +9,18 @@ interface ShotToolsProps {
   overview: ShotOverview;
   fps: number;
   writable: boolean;
-  busy: boolean;
   onLength(step: -1 | 1): void;
   onMove(direction: -1 | 1): void;
   onOpen(): void;
 }
 
 /** A selected shot: its length (with the voice floor) and its place in the scene. Free, with Undo. */
-export function ShotTools({ shot, overview, fps, writable, busy, onLength, onMove, onOpen }: ShotToolsProps) {
+export function ShotTools({ shot, overview, fps, writable, onLength, onMove, onOpen }: ShotToolsProps) {
   const { t } = useI18n();
   const limits = lengthLimits(overview, fps);
   const seconds = shotSeconds(overview, fps);
-  const off = !writable || busy;
+  // Buttons stay enabled while an edit saves, so keyboard focus stays on them; a press during a save is ignored.
+  const off = !writable;
   const offline = writable ? undefined : t("film.offline");
   const notes = [
     limits.voiceFloor ? t("film.tools.voice_floor", { seconds: limits.voiceFloor }) : null,
@@ -59,7 +59,6 @@ interface MusicToolsProps {
   music: FilmMusic;
   total: number;
   writable: boolean;
-  busy: { start: boolean; gain: boolean; mute: boolean; choice: boolean };
   onStart(step: -1 | 1): void;
   onGain(db: number): void;
   onMute(): void;
@@ -67,7 +66,7 @@ interface MusicToolsProps {
 }
 
 /** The music track: start, volume (−60 to 0 dB), mute, and Change music (music-role audio only, SB-24). */
-export function MusicTools({ music, total, writable, busy, onStart, onGain, onMute, onChange }: MusicToolsProps) {
+export function MusicTools({ music, total, writable, onStart, onGain, onMute, onChange }: MusicToolsProps) {
   const { t } = useI18n();
   const [draft, setDraft] = useState(music.gainDb);
   const slider = useRef<HTMLInputElement>(null);
@@ -90,9 +89,9 @@ export function MusicTools({ music, total, writable, busy, onStart, onGain, onMu
       <span className="sep" aria-hidden="true" />
       <span>{t("film.tools.starts")}</span>
       <span className="stepper" role="group" aria-label={t("film.tools.start_group")}>
-        <button type="button" data-act="mstart" data-d="-1" aria-label={t("film.tools.start_earlier")} disabled={!writable || busy.start || music.start <= 0} title={offline} onClick={() => onStart(-1)}>−</button>
+        <button type="button" data-act="mstart" data-d="-1" aria-label={t("film.tools.start_earlier")} disabled={!writable || music.start <= 0} title={offline} onClick={() => onStart(-1)}>−</button>
         <output aria-live="polite">{formatClock(music.start)}</output>
-        <button type="button" data-act="mstart" data-d="1" aria-label={t("film.tools.start_later")} disabled={!writable || busy.start || music.start >= total - 1} title={offline} onClick={() => onStart(1)}>+</button>
+        <button type="button" data-act="mstart" data-d="1" aria-label={t("film.tools.start_later")} disabled={!writable || music.start >= total - 1} title={offline} onClick={() => onStart(1)}>+</button>
       </span>
       <label className="inline">
         {t("film.tools.volume")}
@@ -115,9 +114,9 @@ export function MusicTools({ music, total, writable, busy, onStart, onGain, onMu
       </label>
       <span className="inline">
         <span id="fv-mute-label">{t("film.tools.mute")}</span>
-        <button type="button" className="switch" role="switch" data-act="mute-switch" aria-checked={music.muted} aria-labelledby="fv-mute-label" disabled={!writable || busy.mute} title={offline} onClick={onMute} />
+        <button type="button" className="switch" role="switch" data-act="mute-switch" aria-checked={music.muted} aria-labelledby="fv-mute-label" disabled={!writable} title={offline} onClick={onMute} />
       </span>
-      <button type="button" className="pill sm" data-act="music-menu" aria-haspopup="menu" disabled={!writable || busy.choice} title={offline} onClick={(event) => onChange(event.currentTarget)}>{t("film.tools.change_music")}</button>
+      <button type="button" className="pill sm" data-act="music-menu" aria-haspopup="menu" disabled={!writable} title={offline} onClick={(event) => onChange(event.currentTarget)}>{t("film.tools.change_music")}</button>
     </>
   );
 }

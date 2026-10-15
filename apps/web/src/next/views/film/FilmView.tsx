@@ -264,7 +264,7 @@ function FilmWorkspace() {
         selection={selection}
         pixelsPerSecond={narrow ? PHONE_PIXELS_PER_SECOND : null}
         writable={writable}
-        muteBusy={editing === "edit:soundtrack:muted"}
+        saving={!!editing}
         onSelectShot={(id) => selectShot(id)}
         onSelectMusic={selectMusic}
         onToggleMute={toggleMute}
@@ -276,7 +276,6 @@ function FilmWorkspace() {
             overview={selectedOverview}
             fps={overview.fps}
             writable={writable}
-            busy={!!editing}
             onLength={changeLength}
             onMove={move}
             onOpen={openInKeyframes}
@@ -286,7 +285,6 @@ function FilmWorkspace() {
             music={music}
             total={timeline.total}
             writable={writable}
-            busy={{ start: !!editing, gain: !!editing, mute: !!editing, choice: !!editing }}
             onStart={musicStart}
             onGain={musicGain}
             onMute={toggleMute}
