@@ -31,20 +31,6 @@ export function canStop(overview: GenerationOverview | null, director: DirectorS
   return overview.scenes.some((scene) => scene.confirmation?.state === "running");
 }
 
-/** The stopped banner and the restart notice. Counts only; the view picks the words. */
-export interface StopNotices {
-  stopped: { sent: number; detached: number } | null;
-  restartCasualties: number;
-}
-
-export function stopNotices(overview: GenerationOverview | null): StopNotices {
-  if (!overview) return { stopped: null, restartCasualties: 0 };
-  return {
-    stopped: overview.stopped ? { sent: overview.stopped.sentJobs, detached: overview.stopped.detachedJobs } : null,
-    restartCasualties: overview.restartCasualties.length,
-  };
-}
-
 // ---- mode line -------------------------------------------------------------------
 
 export interface ModeLine {
@@ -313,20 +299,36 @@ export interface ComposerView {
   canSend: boolean;
   /** Why sending is not possible right now, when that is not obvious (empty is obvious). */
   problem: Msg | null;
+  /**
+   * The line beside @: what @ does, or why a message will wait (offline: the draft is kept; stopped: the Director
+   * waits for Continue, and a message sent then does not resume the film). Null with no film open.
+   */
+  hint: Msg | null;
+  /** The composer is off: no film is open, and the Director only works inside a film. */
+  off: boolean;
 }
 
 export const targetKey = (target: Target) => `${target.kind}:${target.id}`;
 
+/**
+ * `reachable` is the shell's write guard (writes reach the studio), not the event stream alone: a stream that is
+ * only reconnecting while reads still work leaves sending on. A stopped film keeps sending on and changes the hint.
+ */
 export function composerView(
   composer: { text: string; targets: readonly Target[]; sending: boolean },
-  connected: boolean,
+  reachable: boolean,
   overview: GenerationOverview | null,
+  film: { open: boolean; stopped: boolean } = { open: true, stopped: false },
 ): ComposerView {
   const chips = composer.targets.map((target) => ({ target, key: targetKey(target), label: scopeLabel(overview, target.id) ?? msg("director.target.gone") }));
   const text = composer.text.trim();
   const tooLong = text.length > MESSAGE_LIMIT;
-  const problem = tooLong ? msg("director.composer.too_long") : !connected ? msg("director.composer.offline") : null;
-  return { chips, canSend: !!text && !tooLong && connected && !composer.sending, problem };
+  const problem = tooLong ? msg("director.composer.too_long") : null;
+  const hint = !film.open ? null
+    : !reachable ? msg("director.composer.hint_offline")
+    : film.stopped ? msg("director.composer.hint_stopped")
+    : msg("director.composer.hint");
+  return { chips, canSend: film.open && !!text && !tooLong && reachable && !composer.sending, problem, hint, off: !film.open };
 }
 
 // ---- @ picker -------------------------------------------------------------------

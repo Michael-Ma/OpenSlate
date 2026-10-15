@@ -1,15 +1,18 @@
 import { useI18n } from "../i18n/I18n.tsx";
 import type { MessageId } from "../i18n/messages.ts";
-import { classicHref, hasNoFilms, viewLabel } from "../model/shell.ts";
+import { classicHref, hasNoFilms, shownView, viewLabel } from "../model/shell.ts";
+import type { ViewName } from "../model/types.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import "./classic.css";
 
-type ClassicViewName = "plan" | "assets" | "film";
+type ClassicViewName = Exclude<ViewName, "keyframes">;
 
 const ABOUT: Record<ClassicViewName, MessageId> = {
   plan: "classic.about.plan",
   assets: "classic.about.assets",
   film: "classic.about.film",
+  settings: "classic.about.settings",
+  start: "classic.about.start",
 };
 
 function ClassicMark() {
@@ -26,12 +29,16 @@ function ClassicMark() {
  * same view in the classic studio (plan decision D13); the top bar keeps its own link to the classic studio.
  * With no films at all the page is held on Start, so the panel says there is no film yet instead, without a way
  * back to Keyframes that would only land on Start again.
+ * The panel names the view that is shown, so a stub that passes another view's name (Settings and Start reuse
+ * Plan's) still reads as Settings or All films.
  */
-export function ClassicView({ view }: { view: ClassicViewName }) {
+export function ClassicView({ view: asked }: { view: ClassicViewName }) {
   const { t } = useI18n();
   const store = useStore();
   const mode = useMode();
   const noFilms = useStudio(hasNoFilms);
+  const shown = useStudio(shownView);
+  const view: ClassicViewName = shown === "keyframes" ? asked : shown;
   const name = t(viewLabel(view));
   if (noFilms) return <NoFilms />;
   return (

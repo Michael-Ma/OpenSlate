@@ -47,6 +47,15 @@ export function shownView(state: Pick<StudioState, "view" | "projectId" | "proje
 }
 
 /**
+ * Whether a film is open for the Director. Start (from the mark, or held there because there are no films) has
+ * no film open even while the store still remembers the last one, so the Director column shows its no-film state
+ * there and its composer is off: a message typed on Start must not go to a film the page says is not open.
+ */
+export function directorHasFilm(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection">): boolean {
+  return !!state.projectId && shownView(state) !== "start";
+}
+
+/**
  * The top bar in a film (title, tabs, counts, Stop) or on Start, where no film is open
  * (the films on this computer; no tabs, no counts, no Stop).
  */

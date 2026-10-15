@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Chan
 import { useI18n } from "../i18n/I18n.tsx";
 import { composerView, filterPicker, mentionAt, pickerItems, removeMention, type PickerItem } from "../model/director.ts";
 import { useStore, useStudio } from "../store/react.tsx";
+import { useGuarded } from "../app/useWriteGuard.ts";
 import { AtPicker, pickerOptionId } from "./AtPicker.tsx";
 
 /** About six lines; past that the textarea scrolls. */
@@ -10,19 +11,27 @@ const MAX_LINES = 6;
 /**
  * The reply box. One explicit target model: the chips are what the message points at, added only
  * with @ (typed, the @ button, or "@ 2.1" in the inspector). Selecting a shot never changes them.
+ * Sending follows the shell's write guard (offline or expired turns it off, the draft stays); while the film is
+ * stopped Send stays on and the hint says the Director waits for Continue. With no film open (Start) it is off.
  */
-export function Composer() {
+export function Composer({ hasFilm }: { hasFilm: boolean }) {
   const { t, tm } = useI18n();
   const store = useStore();
   const composer = useStudio((s) => s.composer);
-  const connected = useStudio((s) => s.connection === "connected");
+  const sendGuard = useGuarded("server");
+  const reachable = !sendGuard.disabled;
+  const stopped = useStudio((s) => !!s.overview?.stopped);
   const overview = useStudio((s) => s.overview);
-  const view = useMemo(() => composerView(composer, connected, overview), [composer, connected, overview]);
+  const view = useMemo(() => composerView(composer, reachable, overview, { open: hasFilm, stopped }), [composer, reachable, overview, hasFilm, stopped]);
   const items = useMemo(() => pickerItems(overview), [overview]);
 
   const id = useId();
   const listId = `${id}-picker`;
   const noteId = `${id}-note`;
+  const hintId = `${id}-hint`;
+  // The hint describes the textarea when it says why a message waits (offline, stopped), not when it explains @.
+  const hintDescribes = !!view.hint && view.hint.id !== "director.composer.hint";
+  const describedBy = [view.problem ? noteId : null, hintDescribes ? hintId : null].filter(Boolean).join(" ") || undefined;
   const textarea = useRef<HTMLTextAreaElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const caretAfterRender = useRef<number | null>(null);
@@ -61,6 +70,9 @@ export function Composer() {
   }, [picker.open]);
 
   const closePicker = () => setPicker({ open: false, active: 0 });
+
+  // Start has no film to point at: an open picker closes with the composer.
+  useEffect(() => { if (view.off) setPicker({ open: false, active: 0 }); }, [view.off]);
 
   const pick = (item: PickerItem) => {
     const typed = mentionAt(composer.text, caret);
@@ -146,21 +158,22 @@ export function Composer() {
           ref={textarea}
           data-field="message"
           rows={1}
-          placeholder={t("director.composer.placeholder")}
+          placeholder={t(view.off ? "director.composer.no_film" : "director.composer.placeholder")}
           value={composer.text}
+          disabled={view.off}
           readOnly={composer.sending}
           aria-autocomplete="list"
           aria-controls={picker.open && shown.length ? listId : undefined}
           aria-activedescendant={activeItem ? pickerOptionId(listId, activeItem) : undefined}
-          aria-describedby={view.problem ? noteId : undefined}
+          aria-describedby={describedBy}
           onChange={onChange}
           onKeyDown={onKeyDown}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
         />
         <div className="composer-foot">
-          <button type="button" className="at-btn" data-act="at" aria-label={t("director.composer.pick")} aria-haspopup="listbox" aria-expanded={picker.open} aria-controls={picker.open && shown.length ? listId : undefined} onClick={toggleFromButton}>@</button>
-          <span>{t("director.composer.hint")}</span>
-          <button type="button" className="send" data-act="send" aria-label={t("director.composer.send")} disabled={!view.canSend} onClick={send}>
+          <button type="button" className="at-btn" data-act="at" aria-label={t("director.composer.pick")} aria-haspopup="listbox" aria-expanded={picker.open} aria-controls={picker.open && shown.length ? listId : undefined} disabled={view.off} onClick={toggleFromButton}>@</button>
+          <span id={hintId} data-hint={view.hint?.id ?? "none"}>{view.hint ? tm(view.hint) : ""}</span>
+          <button type="button" className="send" data-act="send" aria-label={t("director.composer.send")} {...sendGuard} disabled={!view.canSend} onClick={send}>
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 12V2M2.5 6.5 7 2l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
         </div>

@@ -63,6 +63,8 @@ export const shell = {
   "classic.about.plan": { en: "Scenes and shots in order, with their directions.", zh: "按顺序排列的分场和镜头，以及它们的画面描述。" },
   "classic.about.assets": { en: "Pictures, clips and recordings made for the film or added to it.", zh: "为影片生成或添加的图片、视频和录音。" },
   "classic.about.film": { en: "The finished film's timeline, music and export.", zh: "成片的时间线、音乐和导出。" },
+  "classic.about.settings": { en: "Models, keys, language and this computer’s setup.", zh: "模型、密钥、语言和本机设置。" },
+  "classic.about.start": { en: "The films on this computer: open one, or start a new one.", zh: "本机上的影片：打开一部，或新建一部。" },
   "classic.open": { en: "Open {view} in the classic studio", zh: "在经典界面中打开{view}" },
   "classic.back": { en: "Back to Keyframes", zh: "返回关键帧" },
   "classic.fixture_note": { en: "This sample film lives only here; the classic studio shows your own films.", zh: "这部示例影片只在这里；经典界面显示的是你自己的影片。" },
@@ -82,8 +84,5 @@ export const shell = {
   "toast.video_started": { en: "Making Scene {scene}'s video. You can keep working.", zh: "正在生成第 {scene} 场的视频，你可以继续做别的。" },
   "toast.frame_opened": { en: "Opened {shot}.", zh: "已查看 {shot}。" },
   "stop.button": { en: "Stop", zh: "停止" },
-  "stop.banner": { en: "Stopped. Nothing new will be sent. {sent, plural, =0 {} one {# job already sent will finish and be charged.} other {# jobs already sent will finish and be charged.}}", zh: "已停止，不会再发送新任务。{sent, plural, =0 {} other {已发送的 # 个任务会完成并计费。}}" },
-  "stop.detached": { en: "{count, plural, one {# queued job} other {# queued jobs}} will need a new confirm.", zh: "{count} 个排队中的任务需要重新确认。" },
   "stop.continue": { en: "Continue", zh: "继续" },
-  "restart.casualties": { en: "{count, plural, one {# job was} other {# jobs were}} being sent when OpenSlate restarted.", zh: "OpenSlate 重启时有 {count} 个任务正在发送。" },
 } satisfies Record<string, Entry>;

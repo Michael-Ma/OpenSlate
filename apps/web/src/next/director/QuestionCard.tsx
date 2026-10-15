@@ -2,21 +2,23 @@ import { useId, useState, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { composeAnswer, MESSAGE_LIMIT, structuredAnswers, type QuestionView } from "../model/director.ts";
 import { useStore, useStudio } from "../store/react.tsx";
+import { useGuarded } from "../app/useWriteGuard.ts";
 
 /**
  * A pending Director question: each item's options as choices (the chosen one white) plus a free-text
  * answer. One Answer press sends everything as one message (the server takes a single string, DC-17).
+ * Answering writes, so it follows the shell's write guard (off while offline or expired, with the reason).
  */
 export function QuestionCard({ question }: { question: QuestionView }) {
   const { t } = useI18n();
   const store = useStore();
   const pending = useStudio((s) => !!s.pending[`answer:${question.id}`]);
-  const connected = useStudio((s) => s.connection === "connected");
+  const guard = useGuarded("server");
   const [choices, setChoices] = useState<Record<string, string>>({});
   const [free, setFree] = useState("");
   const id = useId();
   const answer = composeAnswer(question, choices, free);
-  const ready = !!answer && answer.length <= MESSAGE_LIMIT && connected && !pending;
+  const ready = !!answer && answer.length <= MESSAGE_LIMIT && !guard.disabled && !pending;
 
   const choose = (itemId: string, label: string) =>
     setChoices((current) => {
@@ -59,7 +61,7 @@ export function QuestionCard({ question }: { question: QuestionView }) {
       <label className="sr" htmlFor={`${id}-free`}>{t("director.question.other")}</label>
       <textarea id={`${id}-free`} className="q-free" rows={2} placeholder={t("director.question.other")} value={free} onChange={(event) => setFree(event.target.value)} onKeyDown={onKeyDown} />
       <div className="row">
-        <button type="button" className="pill sm" data-act="answer" disabled={!ready} onClick={() => void submit()}>{t("director.question.answer")}</button>
+        <button type="button" className="pill sm" data-act="answer" {...guard} disabled={!ready} onClick={() => void submit()}>{t("director.question.answer")}</button>
       </div>
     </section>
   );

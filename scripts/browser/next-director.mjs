@@ -99,13 +99,15 @@ export const scenarios = [
       if (mine.at(-1) !== "@2.2Make the coat brighter") fail(`The sent bubble reads ${JSON.stringify(mine.at(-1))}`);
       if ((await chipTexts(page)).length) fail("Chips stayed in the composer after sending");
       if (await box.inputValue() !== "") fail("The composer kept the sent text");
-      if (!(await page.locator('[data-act="stop"]').isVisible())) fail("Stop is missing while the Director works");
+      // Stop is the shell's (top bar, with its confirm); the Director column does not repeat it.
+      if (!(await page.locator('.topbar [data-act="stop-film"]').isVisible())) fail("Stop is missing while the Director works");
+      if (await page.locator('#director [data-act="stop"], #director [data-act="stop-film"]').count()) fail("The Director column repeats Stop");
       await page.screenshot({ path: shot("working-1440"), clip: { x: 0, y: 0, width: 400, height: 900 } });
       await page.waitForSelector('.thread [data-entry="working"]', { state: "detached", timeout: 5000 });
       const reply = await texts(page, '.thread [data-who="director"]');
       if (!/^Director · \d\d:\d\d ?Noted for 2\.2\./.test(reply.at(-1) ?? "")) fail(`The reply reads ${JSON.stringify(reply.at(-1))}`);
       if (!reply.at(-1).endsWith("Scripted reply; nothing in the film was changed.")) fail("The scripted reply is not marked");
-      if (await page.locator('[data-act="stop"]').count()) fail("Stop stayed after the Director finished");
+      if (await page.locator('[data-act="stop-film"]').count()) fail("Stop stayed after the Director finished");
       await page.screenshot({ path: shot("replied-1440"), clip: { x: 0, y: 0, width: 400, height: 900 } });
     },
   },
@@ -159,8 +161,8 @@ export const scenarios = [
       await ready(page);
       // Scene 3 has unmade shots, but nothing is running or queued: there is nothing to stop.
       await page.waitForTimeout(500);
-      if (await page.locator('[data-act="stop"]').count()) fail("Stop is offered while nothing is running");
-      if (await page.locator('[data-act="continue"]').count()) fail("Continue is offered while the film is not stopped");
+      if (await page.locator('[data-act="stop-film"]').count()) fail("Stop is offered while nothing is running");
+      if (await page.locator('[data-act="continue-film"]').count()) fail("Continue is offered while the film is not stopped");
     },
   },
   {

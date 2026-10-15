@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classicHref, codeSegments, connectionPill, connectScreen, escClosesDrawer, filmHeading, hasNoFilms, otherLocale,
+  classicHref, codeSegments, connectionPill, connectScreen, directorHasFilm, escClosesDrawer, filmHeading, hasNoFilms, otherLocale,
   pauseCountdown, resumeCountdown, searchWithLocale, shownView, showProjectPicker, startCountdown, tabKeyTarget,
   toastLifetime, topBarMode, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS, VIEWS,
 } from '../../src/next/model/shell.ts';
@@ -27,6 +27,14 @@ test('with Settings open no tab is selected and the row keeps one tab in the foc
 test('the top bar names the films on this computer on Start and the film everywhere else', () => {
   assert.equal(topBarMode('start'), 'films');
   for (const view of [...VIEWS, 'settings']) assert.equal(topBarMode(view), 'film', view);
+});
+
+test('the Director has no film on Start, even while the store remembers the last one', () => {
+  const open = { view: 'keyframes', projectId: 'a', projects: [{ id: 'a', name: 'A' }], connection: 'connected' };
+  for (const view of [...VIEWS, 'settings']) assert.equal(directorHasFilm({ ...open, view }), true, view);
+  assert.equal(directorHasFilm({ ...open, view: 'start' }), false, 'the mark opened Start');
+  assert.equal(directorHasFilm({ ...open, projectId: null }), false, 'no film chosen yet');
+  assert.equal(directorHasFilm({ view: 'keyframes', projectId: null, projects: [], connection: 'connected' }), false, 'held on Start with no films');
 });
 
 test('a studio with no films opens on Start whatever view was asked for', () => {
