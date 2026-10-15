@@ -442,7 +442,7 @@ export const scenarios = [
       await row(page, "night-bus").locator("[data-act='film-menu']").click();
       await page.click(".start-menu [data-act='menu-archive']");
       await page.click("dialog.start-dialog [data-act='archive-confirm']");
-      await expectText(page, "dialog.start-dialog [role='alert']", /It was not archived\. Jobs are still running in this film\. Wait for them to finish, then try again\./);
+      await expectText(page, "dialog.start-dialog [role='alert']", /It was not archived\. Jobs are still running here\. Wait for them to finish, then try again\./);
       await noErrorToast(page, "An error toast sits behind the archive dialog");
       await inFront(page, "dialog.start-dialog [role='alert']", "The dialog's refusal is not in front");
       await shot(page, "start-refusal-archive-1440");

@@ -65,7 +65,7 @@ test('archive is refused while a job runs in the film; the dialog gets the words
   const quiet = await setArchived(store, { id: 'last-ferry', name: 'The Last Ferry' }, true, true);
   assert.equal(quiet.ok, false);
   assert.equal(quiet.code, 'ATTEMPTS_RUNNING');
-  assert.match(en(quiet.message), /^Jobs are still running in this film/);
+  assert.match(en(quiet.message), /^Jobs are still running here\. Wait for them to finish/);
   assert.equal(store.getState().toast, null);
   assert.equal(byId(await readFilms(store), 'last-ferry').archived, false);
   // Outside a dialog (Restore) the toast says it, as for every other command.

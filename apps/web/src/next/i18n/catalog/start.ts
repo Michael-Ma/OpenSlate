@@ -177,19 +177,4 @@ export const startMessages = {
   // ---- reconnect after a restart (for the shell's Connect screen: ReconnectNote.tsx) ----
   "start.reconnect.saved": { en: "Your films are saved on this computer.", zh: "你的影片都保存在本机。" },
   "start.reconnect.no_answer": { en: "Jobs that were being sent when the studio restarted show as “no answer” once you are back. You decide whether to send them again; nothing is resent by itself.", zh: "重启时正在发送的任务，重新连接后会显示为“服务没有回应”。是否重新发送由你决定，不会自动重发。" },
-
-  // ---- server and client codes the Start view can meet (general wording: other views meet some of them too) ----
-  "error.ATTEMPTS_RUNNING": { en: "Jobs are still running in this film. Wait for them to finish, then try again.", zh: "这部影片还有任务在运行，请等它们完成后再试。" },
-  "error.DEMO_PROVIDER_MISMATCH": { en: "The demo needs a film that uses the stand-in models. Open the demo film again to make a new one.", zh: "示例需要使用替身模型的影片。请重新打开示例影片来新建一部。" },
-  "error.DEMO_REQUIRES_EMPTY_PROJECT": { en: "The demo can only fill an empty film.", zh: "示例只能填充空白影片。" },
-  "error.DEMO_PROJECT_REQUIRED": { en: "This film is not the demo film.", zh: "这部影片不是示例影片。" },
-  "error.ACTOR_DENIED": { en: "The studio did not allow this request from here.", zh: "工作室不允许从这里发出这个请求。" },
-  "error.PROVIDER_CATALOG_CHANGED": { en: "This computer’s models changed. Check them and try again.", zh: "本机的模型有变化，请确认后重试。" },
-  "error.PROVIDER_SELECTION_INVALID": { en: "One of the chosen models is no longer available. Check them and try again.", zh: "所选的某个模型已不可用，请确认后重试。" },
-  "error.CODEX_NOT_FOUND": { en: "Codex was not found on this computer, so the Director could not be set up.", zh: "本机没有找到 Codex，无法设置导演。" },
-  "error.DIRECTOR_SETUP_BUSY": { en: "The Director is still being checked. Try again in a moment.", zh: "导演还在检查中，请稍后再试。" },
-  "error.DIRECTOR_SETUP_REQUIRED": { en: "Codex did not pass its setup check. Make sure Codex is signed in on this computer and up to date, then try again.", zh: "Codex 没有通过设置检查。请确认本机的 Codex 已登录并且是最新版本，然后重试。" },
-  "error.DIRECTOR_SELECTION_LOCKED": { en: "This film’s Director was chosen at its first conversation and cannot change.", zh: "这部影片的导演在第一次对话时已确定，无法更改。" },
-  "error.DIRECTOR_REQUIRED": { en: "Reading a written plan needs the Codex Director. Set it up in Settings.", zh: "解读书面计划需要 Codex 导演，请在设置里设置。" },
-  "error.IMPORT_PENDING": { en: "A written plan is already waiting. Confirm or discard it in the Plan first.", zh: "已有一份书面计划在等待处理，请先在计划里确认或放弃。" },
 } satisfies Record<string, Entry>;

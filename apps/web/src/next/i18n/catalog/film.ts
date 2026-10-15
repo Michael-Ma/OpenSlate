@@ -195,12 +195,4 @@ export const filmMessages = {
   "film.toast.music_on": { en: "Music on.", zh: "音乐已打开。" },
   "film.toast.music_changed": { en: "Music is {name}.", zh: "音乐换成 {name}。" },
   "film.toast.music_removed": { en: "No music.", zh: "已去掉音乐。" },
-
-  // ---- export refusals (server codes the Film view can meet)
-  "error.EXPORT_BLOCKED": { en: "The film is not ready to export. Settle the shots in the Export panel first.", zh: "影片还不能导出，请先处理导出面板里的镜头。" },
-  "error.MEDIA_RENDER_BUSY": { en: "This export is still rendering. Check again once it stops.", zh: "这次导出还在渲染，停下来后再检查。" },
-  "error.MEDIA_RENDER_NOT_STARTED": { en: "This export never started, so there is no file to find. Export again.", zh: "这次导出没有开始，没有可查找的文件。请重新导出。" },
-  "error.MEDIA_HELD": { en: "An edit is still being applied. Export again in a moment.", zh: "还有修改正在生效，请稍后再导出。" },
-  "error.MEDIA_PAUSED": { en: "The film is stopped. Continue, then export.", zh: "影片已停止。请先继续，再导出。" },
-  "error.MEDIA_STALE_TARGET": { en: "The film changed while the export was prepared. Export again.", zh: "准备导出时影片有改动，请重新导出。" },
 } satisfies Record<string, Entry>;

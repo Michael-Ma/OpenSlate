@@ -228,15 +228,4 @@ export const keyframes = {
   "check.done.next": { en: "Next check", zh: "下一个检查" },
   "check.done.done": { en: "Done", zh: "完成" },
   "check.undo": { en: "Undo", zh: "撤销" },
-
-  // ---- error codes this view introduces (the shared map lives in errors.ts)
-  "error.FRAME_NOT_OPENED": { en: "Open every frame before making video.", zh: "生成视频前请先查看每张画面。" },
-  "error.ALREADY_COMPLETE": { en: "This is already made.", zh: "这已经生成过了。" },
-  "error.ATTEMPT_EXISTS": { en: "This is already being made. Wait for it to finish.", zh: "这已经在生成中，请等它完成。" },
-  "error.UNDO_UNAVAILABLE": { en: "That change can no longer be undone.", zh: "这次修改已无法撤销。" },
-  "error.SCENE_NOT_READY": { en: "This scene is not ready for video yet.", zh: "这一场还不能生成视频。" },
-  "error.NARRATION_TOO_LONG": { en: "A narration line is longer than its shot. Settle it first.", zh: "有旁白比镜头长，请先处理。" },
-  "error.CONTROL_STALE": { en: "Stop changed in the meantime. Look again, then continue.", zh: "停止状态已经变化，请再看一下后继续。" },
-  "error.DOUBLE_CHARGE_NOT_ACKNOWLEDGED": { en: "Confirm that you understand you may pay twice.", zh: "请确认你知道可能要付两次钱。" },
-  "error.SCOPE_DENIED": { en: "That shot is not in this scene.", zh: "这个镜头不在这一场里。" },
 } satisfies Record<string, Entry>;

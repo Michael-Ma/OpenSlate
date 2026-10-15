@@ -6,12 +6,6 @@ import { isMessageId } from '../../src/next/i18n/messages.ts';
 
 const dir = fileURLToPath(new URL('../../src/next/i18n/catalog/', import.meta.url));
 
-/**
- * Duplicates that predate this check, outside the Settings files (keyframes.ts repeats three error.* ids from
- * errors.ts). Listed so they are visible; the lead removes them. Nothing may be added here.
- */
-const KNOWN = new Set(['error.FRAME_NOT_OPENED', 'error.ALREADY_COMPLETE', 'error.UNDO_UNAVAILABLE']);
-
 test('no message id is defined in two catalog files (the catalog spreads them, so a copy silently wins or loses)', async () => {
   const owner = new Map();
   const duplicates = [];
@@ -20,12 +14,23 @@ test('no message id is defined in two catalog files (the catalog spreads them, s
     for (const table of Object.values(module)) {
       if (!table || typeof table !== 'object') continue;
       for (const id of Object.keys(table)) {
-        if (owner.has(id) && !KNOWN.has(id)) duplicates.push(`${id}: ${owner.get(id)} and ${file}`);
+        if (owner.has(id)) duplicates.push(`${id}: ${owner.get(id)} and ${file}`);
         if (!owner.has(id)) owner.set(id, file);
       }
     }
   }
   assert.deepEqual(duplicates, []);
+});
+
+test('every error id is worded in errors.ts, once for every view', async () => {
+  const outside = [];
+  for (const file of readdirSync(dir).filter((name) => name.endsWith('.ts') && name !== 'entry.ts' && name !== 'errors.ts')) {
+    const module = await import(new URL(file, `file://${dir}`).href);
+    for (const table of Object.values(module)) {
+      if (table && typeof table === 'object') outside.push(...Object.keys(table).filter((id) => id.startsWith('error.')).map((id) => `${id} in ${file}`));
+    }
+  }
+  assert.deepEqual(outside, []);
 });
 
 test('every code the Settings routes refuse with has its own words', () => {

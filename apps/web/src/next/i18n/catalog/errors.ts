@@ -1,6 +1,11 @@
 import type { Entry } from "./entry.ts";
 
-/** Server and client error codes. Unknown codes fall back to error.unknown with the code shown. */
+/**
+ * Server and client error codes, for every view: each code is worded once, here. The catalog spreads its files into
+ * one object, so a copy in a view's file would silently replace (or be replaced by) another's; settings-catalog.test
+ * refuses one. Unknown codes fall back to error.unknown with the code shown. A view that needs its own words for a
+ * code in one place restates it there with its own message id (e.g. Start's start.new.models_changed).
+ */
 export const errors = {
   "error.unknown": { en: "Something went wrong ({code}).", zh: "出错了（{code}）。" },
   "error.NETWORK_ERROR": { en: "The studio did not answer. Check that it is still running.", zh: "工作室没有响应，请确认它仍在运行。" },
@@ -21,7 +26,7 @@ export const errors = {
   "error.HUMAN_EDITED_FIELD": { en: "You changed this after the Director started; your edit was kept.", zh: "导演开始后你改过这里，已保留你的修改。" },
   "error.RECOMMENDATION_OPEN": { en: "Settle the Director's blocking note first.", zh: "请先处理导演标为必须处理的建议。" },
   "error.CONFIRMATION_RUNNING": { en: "This scene's video is already being made.", zh: "这一场的视频已经在生成。" },
-  "error.FRAME_NOT_OPENED": { en: "Open every frame before confirming.", zh: "确认前请先查看每一张画面。" },
+  "error.FRAME_NOT_OPENED": { en: "Open every frame before making video.", zh: "生成视频前请先查看每张画面。" },
   "error.STOP_CHANGED": { en: "The film was stopped or continued elsewhere. Check and try again.", zh: "影片已在别处停止或继续，请确认后再试。" },
   "error.NARRATION_SPEECH_FAILED": { en: "The voice line failed. Check it before making another.", zh: "配音生成失败，请检查后再生成。" },
   "error.SUBMISSION_UNKNOWN": { en: "A service did not confirm a job. Give it up before sending a new one.", zh: "有服务没有确认任务。请先放弃它再重新发送。" },
@@ -29,9 +34,35 @@ export const errors = {
   "error.RETRY_NOT_AUTHORIZED": { en: "This job needs a new press after the stop.", zh: "停止之后，这个任务需要重新确认。" },
   "error.EXECUTION_HELD": { en: "An edit is still being saved. Try again in a moment.", zh: "还有修改正在保存，请稍后再试。" },
   "error.NARRATION_CUE_OUT_OF_RANGE": { en: "The voice line is longer than the shot. Choose how to fit it.", zh: "配音比镜头长，请选择处理方式。" },
-  "error.UNDO_UNAVAILABLE": { en: "This can no longer be undone.", zh: "这一步已无法撤销。" },
-  // Settings and Start (model and Director setup, personal voices). Defined once here: the catalog spreads its
-  // files into one object, so a copy in a view's file would silently replace (or be replaced by) another's.
+  "error.UNDO_UNAVAILABLE": { en: "That change can no longer be undone.", zh: "这次修改已无法撤销。" },
+  "error.ATTEMPT_EXISTS": { en: "This is already being made. Wait for it to finish.", zh: "这已经在生成中，请等它完成。" },
+  "error.ATTEMPTS_RUNNING": { en: "Jobs are still running here. Wait for them to finish, then try again.", zh: "这里还有任务在进行，请等它们结束后再试。" },
+  "error.SCENE_NOT_READY": { en: "This scene is not ready for video yet.", zh: "这一场还不能生成视频。" },
+  "error.NARRATION_TOO_LONG": { en: "A narration line is longer than its shot. Settle it first.", zh: "有旁白比镜头长，请先处理。" },
+  "error.CONTROL_STALE": { en: "Stop changed in the meantime. Look again, then continue.", zh: "停止状态已经变化，请再看一下后继续。" },
+  "error.DOUBLE_CHARGE_NOT_ACKNOWLEDGED": { en: "Confirm that you understand you may pay twice.", zh: "请确认你知道可能要付两次钱。" },
+  "error.SCOPE_DENIED": { en: "That shot is not in this scene.", zh: "这个镜头不在这一场里。" },
+  "error.NOT_FOUND": { en: "That is no longer here. Look again, then try again.", zh: "它已经不在了，请再看一下后重试。" },
+  // The outline and written plans.
+  "error.SCENE_HAS_SHOTS": { en: "Confirm deleting this scene together with its shots.", zh: "请确认连同镜头一起删除这一场。" },
+  "error.IMPORT_PENDING": { en: "A written plan is waiting for review. Confirm or discard it in the Plan first.", zh: "有一份书面计划在等审阅，请先在计划里确认或放弃它。" },
+  "error.IMPORT_STALE": { en: "This written plan no longer applies. Discard it and bring it again.", zh: "这份书面计划已不适用，请放弃后重新导入。" },
+  "error.IMPORT_NOT_READY": { en: "The Director has not finished reading the written plan yet.", zh: "导演还没有读完这份书面计划。" },
+  "error.DIRECTOR_REQUIRED": { en: "Reading a written plan needs the Codex Director. Set it up in Settings.", zh: "解读书面计划需要 Codex 导演，请在设置里设置导演。" },
+  // Exports.
+  "error.EXPORT_BLOCKED": { en: "The film is not ready to export. Settle the shots in the Export panel first.", zh: "影片还不能导出，请先处理导出面板里的镜头。" },
+  "error.MEDIA_RENDER_BUSY": { en: "This export is still rendering. Check again once it stops.", zh: "这次导出还在渲染，停下来后再检查。" },
+  "error.MEDIA_RENDER_NOT_STARTED": { en: "This export never started, so there is no file to find. Export again.", zh: "这次导出没有开始，没有可查找的文件。请重新导出。" },
+  "error.MEDIA_HELD": { en: "An edit is still being applied. Export again in a moment.", zh: "还有修改正在生效，请稍后再导出。" },
+  "error.MEDIA_PAUSED": { en: "The film is stopped. Continue, then export.", zh: "影片已停止。请先继续，再导出。" },
+  "error.MEDIA_STALE_TARGET": { en: "The film changed while the export was prepared. Export again.", zh: "准备导出时影片有改动，请重新导出。" },
+  // Films, the demo and Codex.
+  "error.DEMO_PROVIDER_MISMATCH": { en: "The demo needs a film that uses the stand-in models. Open the demo film again to make a new one.", zh: "示例需要使用替身模型的影片。请重新打开示例影片来新建一部。" },
+  "error.DEMO_REQUIRES_EMPTY_PROJECT": { en: "The demo can only fill an empty film.", zh: "示例只能填充空白影片。" },
+  "error.DEMO_PROJECT_REQUIRED": { en: "This film is not the demo film.", zh: "这部影片不是示例影片。" },
+  "error.ACTOR_DENIED": { en: "The studio did not allow this request from here.", zh: "工作室不允许从这里发出这个请求。" },
+  "error.CODEX_NOT_FOUND": { en: "Codex was not found on this computer, so the Director could not be set up.", zh: "本机没有找到 Codex，无法设置导演。" },
+  // Settings (model and Director setup, personal voices).
   "error.MODEL_SETTINGS_STALE": { en: "The model settings changed. Check the switch again.", zh: "模型设置已变化，请重新检查这次切换。" },
   "error.MODEL_SETTINGS_LIMIT": { en: "This film has too much planned work to switch models here.", zh: "这部影片计划中的工作太多，不能在这里切换模型。" },
   "error.MODEL_SETTINGS_CANCELLED": { en: "The model switch was cancelled. Nothing changed.", zh: "模型切换已取消，没有任何改动。" },

@@ -274,14 +274,4 @@ export const planMessages = {
   "plan.import.detail.prompt": { en: "Picture prompt changed", zh: "画面描述有改动" },
   "plan.import.detail.new_line": { en: "{framing} · {seconds} s · “{text}”", zh: "{framing} · {seconds} 秒 · “{text}”" },
   "plan.import.detail.new_silent": { en: "{framing} · {seconds} s · no narration", zh: "{framing} · {seconds} 秒 · 无旁白" },
-
-  // ---- server refusals the Plan view meets. Not in errors.ts yet (the lead's file), so they are worded for any view
-  // that meets them; codes another catalog already words (ATTEMPT_EXISTS in keyframes.ts) are not repeated here.
-  "error.IMPORT_PENDING": { en: "A written plan is waiting for review. Confirm or discard it in the Plan first.", zh: "有一份书面计划在等审阅，请先在计划里确认或放弃它。" },
-  "error.IMPORT_STALE": { en: "This written plan no longer applies. Discard it and bring it again.", zh: "这份书面计划已不适用，请放弃后重新导入。" },
-  "error.IMPORT_NOT_READY": { en: "The Director has not finished reading the written plan yet.", zh: "导演还没有读完这份书面计划。" },
-  "error.DIRECTOR_REQUIRED": { en: "Reading a written plan needs the Codex Director. Connect it in Settings.", zh: "解读书面计划需要 Codex 导演，请在设置里连接。" },
-  "error.SCENE_HAS_SHOTS": { en: "Confirm deleting this scene together with its shots.", zh: "请确认连同镜头一起删除这一场。" },
-  "error.ATTEMPTS_RUNNING": { en: "Jobs are still running here. Wait for them to finish, then try again.", zh: "这里还有任务在进行，请等它们结束后再试。" },
-  "error.NOT_FOUND": { en: "That is no longer here. Look again, then try again.", zh: "它已经不在了，请再看一下后重试。" },
 } satisfies Record<string, Entry>;
