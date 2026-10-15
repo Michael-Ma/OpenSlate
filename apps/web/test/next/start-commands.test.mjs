@@ -99,6 +99,10 @@ test('Try again after a failed step finishes the same film instead of making a s
   assert.equal(second.failedAt, null);
   assert.equal(second.film.id, first.film.id);
   assert.equal((await readFilms(store)).length, before);
+  // Clearing the plan before Try again finishes without sending it, and still makes no second film.
+  const third = await runCreation(store, { ...input, steps: creationSteps('plan', codex, '') }, () => {}, { film: first.film, from: 'import' });
+  assert.equal(third.failedAt, null);
+  assert.equal((await readFilms(store)).length, before);
 });
 
 test('without Codex the Director steps stop with a reason; an empty outline skips the setup', async t => {

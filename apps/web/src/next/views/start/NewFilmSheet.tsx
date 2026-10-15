@@ -5,8 +5,8 @@ import { numberLocale } from "../../i18n/translate.ts";
 import { FILM_NAME_MAX } from "../../model/start.ts";
 import { runCreation, type Film } from "../../model/start-commands.ts";
 import {
-  createBody, creationSteps, defaultStep, isPlanFileName, modelPlan, modelSummary, planFileName, planTextProblem, stepAvailable, stepNeedsCodex,
-  PLAN_TEXT_MAX, type Codex, type CreationStep, type FirstStep, type Job, type ProviderCatalog,
+  createBody, createdOutcome, creationSteps, defaultStep, sheetFootMsg, isPlanFileName, modelPlan, modelSummary, planFileName, planTextProblem, stepAvailable, stepNeedsCodex,
+  PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep, type Job, type ProviderCatalog,
 } from "../../model/start-new.ts";
 import { useStore } from "../../store/react.tsx";
 import { Dialog } from "./Dialog.tsx";
@@ -36,7 +36,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   providers: ProviderCatalog | null | "failed";
   offline: string | null;
   onClose(): void;
-  onCreated(film: Film, step: FirstStep, complete: boolean): void;
+  onCreated(film: Film, outcome: CreatedOutcome): void;
 }) {
   const { t, tm, locale } = useI18n();
   const store = useStore();
@@ -77,7 +77,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
     const resume = failed ? { film: failed.film, from: failed.step } : undefined;
     setPhase({ kind: "running", step: resume?.from ?? "create" });
     const result = await runCreation(store, input, (current) => setPhase({ kind: "running", step: current }), resume);
-    if (result.film && result.failedAt === null) { onCreated(result.film, step, true); return; }
+    if (result.film && result.failedAt === null) { onCreated(result.film, createdOutcome(step, planText, true)); return; }
     // Creating failed: the toast says why, and nothing was made. A later step failed: the film exists.
     if (!result.film || result.failedAt === null || result.failedAt === "create") { setPhase({ kind: "idle" }); return; }
     setPhase({ kind: "failed", step: result.failedAt, film: result.film });
@@ -222,10 +222,10 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
         )}
       </form>
       <div className="sheet-foot">
-        <span className="grow" role="status">{running ? t(PROGRESS[phase.step]) : t("start.new.free")}</span>
+        <span className="grow" role="status">{running ? t(PROGRESS[phase.step]) : tm(sheetFootMsg(step, planText))}</span>
         {failed ? (
           <>
-            <button type="button" className="pill" data-act="open-created" onClick={() => onCreated(failed.film, step, false)}>{t("start.new.open_anyway")}</button>
+            <button type="button" className="pill" data-act="open-created" onClick={() => onCreated(failed.film, createdOutcome(step, planText, false))}>{t("start.new.open_anyway")}</button>
             <button type="submit" form={formId} className="pill primary" data-act="create-film" disabled={!!offline || !!problem} title={offline ?? undefined}>{t("start.new.try_again")}</button>
           </>
         ) : (

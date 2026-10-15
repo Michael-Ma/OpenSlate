@@ -253,3 +253,25 @@ export function planFileName(filmName: string, chosen: string | null): string {
   const slug = filmName.trim().toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "");
   return `${slug || "plan"}.txt`;
 }
+
+// ---- after Create ----
+
+export type CreatedOutcome = "director" | "plan" | "plan_later" | "empty";
+
+/** What the toast says once the film opens: a step that did not finish falls back to working in the Plan. */
+export function createdOutcome(step: FirstStep, planText: string, complete: boolean): CreatedOutcome {
+  if (step === "plan") return complete && planText.trim() ? "plan" : "plan_later";
+  return complete ? step : "empty";
+}
+
+const CREATED: Record<CreatedOutcome, MessageId> = {
+  director: "start.created.director",
+  plan: "start.created.plan",
+  plan_later: "start.created.plan_later",
+  empty: "start.created.empty",
+};
+
+export const createdMsg = (outcome: CreatedOutcome, name: string): Msg => msg(CREATED[outcome], { name });
+
+/** The sheet's foot: creating is free; reading a written plan uses the Codex plan and makes no media. */
+export const sheetFootMsg = (step: FirstStep, planText: string): Msg => msg(step === "plan" && planText.trim() ? "start.new.free_plan" : "start.new.free");

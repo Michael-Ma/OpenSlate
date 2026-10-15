@@ -3,7 +3,7 @@ import { useNarrow } from "../../app/useNarrow.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { filmsView, pickerProjects, runningJobs, sameProjects, type FilmRow as Row, type OpenView } from "../../model/start.ts";
 import { openDemo, renameFilm, setArchived, type Film } from "../../model/start-commands.ts";
-import { setupStatus, stepAvailable, type FirstStep } from "../../model/start-new.ts";
+import { createdMsg, setupStatus, stepAvailable, type CreatedOutcome, type FirstStep } from "../../model/start-new.ts";
 import { msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { StudioStore } from "../../store/store.ts";
@@ -80,13 +80,13 @@ export function StartView() {
     if (!projects.some((project) => project.id === film.id)) store.dispatch({ type: "projects", projects: [{ id: film.id, name: film.name }, ...projects] });
   };
 
-  const onCreated = (film: Film, step: FirstStep, complete: boolean) => {
+  const onCreated = (film: Film, outcome: CreatedOutcome) => {
     setSheet(null);
     void films.reload();
     remember(film);
     openFilm(film.id, "plan");
-    store.dispatch({ type: "toast", message: msg(complete ? (step === "director" ? "start.created.director" : step === "plan" ? "start.created.plan" : "start.created.empty") : "start.created.empty", { name: film.name }), tone: "info" });
-    if (complete && step === "director") {
+    store.dispatch({ type: "toast", message: createdMsg(outcome, film.name), tone: "info" });
+    if (outcome === "director") {
       if (narrow) store.setDirectorOpen(true);
       focusComposerWhenReady(store, film.id);
     }

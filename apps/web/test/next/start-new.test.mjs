@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  codexFrom, createBody, creationSteps, defaultStep, directorSetupBody, keysMsg, modelPlan, modelSummary, notReadyReason,
+  codexFrom, createBody, createdMsg, createdOutcome, creationSteps, sheetFootMsg, defaultStep, directorSetupBody, keysMsg, modelPlan, modelSummary, notReadyReason,
   planFileName, planTextProblem, setupStatus, stepAvailable, PLAN_TEXT_MAX,
 } from '../../src/next/model/start-new.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
@@ -148,4 +148,18 @@ test('a written plan is text up to 12,000 characters, named .txt or .md', () => 
   assert.equal(planFileName('末班渡轮', null), '末班渡轮.txt');
   assert.equal(planFileName('', null), 'plan.txt');
   assert.match(planFileName('x'.repeat(300), null), /^x{60}\.txt$/);
+});
+
+test('after Create the toast names what happens next; a step that did not finish falls back to the Plan', () => {
+  assert.equal(createdOutcome('director', '', true), 'director');
+  assert.equal(createdOutcome('plan', 'Scene 1', true), 'plan');
+  assert.equal(createdOutcome('plan', '  ', true), 'plan_later');
+  assert.equal(createdOutcome('plan', 'Scene 1', false), 'plan_later');
+  assert.equal(createdOutcome('director', '', false), 'empty');
+  assert.equal(createdOutcome('empty', '', true), 'empty');
+  assert.equal(en(createdMsg('plan', 'Night bus')), 'Created Night bus. The Director is reading the plan; nothing changes until you confirm.');
+  assert.equal(zh(createdMsg('director', 'Night bus')), '已新建《Night bus》。告诉导演这部影片讲什么。');
+  assert.equal(en(sheetFootMsg('plan', 'x')), 'Creating a film is free. Reading the plan uses your Codex plan; no media is made.');
+  assert.equal(en(sheetFootMsg('plan', '')), 'Creating a film is free.');
+  assert.equal(en(sheetFootMsg('director', 'x')), 'Creating a film is free.');
 });

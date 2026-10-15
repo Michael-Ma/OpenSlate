@@ -130,6 +130,7 @@ export const startMessages = {
   "start.ready.waiting_off": { en: "{model}: not turned on here", zh: "{model}：本机未启用" },
   "start.ready.waiting_setup": { en: "{model}: setup incomplete", zh: "{model}：设置未完成" },
   "start.new.free": { en: "Creating a film is free.", zh: "新建影片免费。" },
+  "start.new.free_plan": { en: "Creating a film is free. Reading the plan uses your Codex plan; no media is made.", zh: "新建影片免费。读计划使用你的 Codex 套餐，不会生成任何素材。" },
   "start.new.cancel": { en: "Cancel", zh: "取消" },
   "start.new.create": { en: "Create film", zh: "新建影片" },
   "start.new.step.create": { en: "Creating the film…", zh: "正在新建影片…" },
@@ -141,6 +142,7 @@ export const startMessages = {
   "start.new.open_anyway": { en: "Open the film", zh: "打开影片" },
   "start.created.director": { en: "Created {name}. Tell the Director what the film is about.", zh: "已新建《{name}》。告诉导演这部影片讲什么。" },
   "start.created.plan": { en: "Created {name}. The Director is reading the plan; nothing changes until you confirm.", zh: "已新建《{name}》。导演正在读计划，确认前不会改动。" },
+  "start.created.plan_later": { en: "Created {name}. Bring the written plan from the Plan when it is ready.", zh: "已新建《{name}》。计划准备好后，可以在计划里导入。" },
   "start.created.empty": { en: "Created {name}. Add its first scene in the Plan.", zh: "已新建《{name}》。在计划里添加第一场。" },
 
   // ---- server and client codes the Start view can meet ----
