@@ -149,13 +149,14 @@ test('a shot cannot be shorter than its accepted voice line (SB-8)', () => {
   assert.ok(fit.commandId);
 });
 
-test("Undo is refused once paid work used the change, and the narration fit's Undo still works", () => {
+test("Undo is refused once paid work used the change, and the narration fit's Undo still works", async () => {
   const w = world();
   const { commandId } = edit(w, { kind: 'sceneTitle', id: sceneId(3), value: 'Leaving' });
   w.update((x) => { x.overview = { ...x.overview, shots: { ...x.overview.shots, [shotId('3.1')]: { ...x.overview.shots[shotId('3.1')], keyframe: { state: 'running', takeCount: 0, opened: false } } } }; });
   assert.throws(() => edit(w, { kind: 'undo', commandId }), refused('UNDO_UNAVAILABLE'));
   const fit = call(w, 'POST', `/shots/${shotId('2.3')}/narration-fit`, { fit: 'extend_shot', expectedHeadVersion: w.snapshot.project.headVersion });
-  edit(w, { kind: 'undo', commandId: fit.commandId });
+  // Not this route's command: it goes on to the Keyframes commands.
+  await edit(w, { kind: 'undo', commandId: fit.commandId });
   assert.equal(shot(w, shotId('2.3')).durationFrames, 180);
 });
 
@@ -176,7 +177,7 @@ test('a written plan: the Director reads it, edits wait, then confirm replaces t
   let read = call(w, 'GET', '/plan-imports').pending;
   assert.deepEqual([read.id, read.running, read.draft, read.stale], [requestId, true, null, false]);
   assert.equal(w.overview.director.state, 'working');
-  assert.throws(() => edit(w, { kind: 'treatment', field: 'brief', value: 'New' }), refused('IMPORT_PENDING'));
+  assert.throws(() => edit(w, { kind: 'sceneTitle', id: sceneId(1), value: 'New' }), refused('IMPORT_PENDING'));
   assert.throws(() => call(w, 'POST', '/plan-imports', { name: 'b.md', text: 'x', expectedHeadVersion: 12 }), refused('IMPORT_PENDING'));
   w.advance(IMPORT_READ_MS);
   read = call(w, 'GET', '/plan-imports').pending;
@@ -203,6 +204,56 @@ test('discarding a written plan leaves the outline as it was', () => {
   assert.equal(w.overview.director.state, 'idle');
   assert.equal(Object.keys(w.overview.shots).length, 8);
   assert.throws(() => call(w, 'POST', `/plan-imports/${requestId}/discard`, {}), refused('IMPORT_STALE'));
+});
+
+test('while a written plan waits, only treatment, scene, shot and narration edits are taken, as on the server', () => {
+  const w = world();
+  const receipt = edit(w, { kind: 'shot', id: shotId('1.1'), field: 'motion', value: 'Slow pan left' });
+  const { requestId } = call(w, 'POST', '/plan-imports', { name: 'a.md', text: 'Plan.', expectedHeadVersion: 13 });
+  for (const body of [
+    { kind: 'sceneTitle', id: sceneId(1), value: 'Last call' }, { kind: 'moveScene', id: sceneId(3), beforeId: sceneId(2) },
+    { kind: 'addShot', sceneId: sceneId(3) }, { kind: 'deleteShot', id: shotId('3.2') }, { kind: 'undo', commandId: receipt.commandId },
+  ]) assert.throws(() => edit(w, body), refused('IMPORT_PENDING'), body.kind);
+  // The Keyframes view's edits still save while the plan waits.
+  edit(w, { kind: 'shot', id: shotId('2.1'), field: 'imagePrompt', value: 'Thick fog over the harbour.' });
+  edit(w, { kind: 'narration', id: shotId('1.2'), field: 'text', value: 'One, please.' });
+  edit(w, { kind: 'shot', id: shotId('2.2'), field: 'purpose', value: 'Mara waits.' });
+  edit(w, { kind: 'treatment', field: 'brief', value: 'A new brief.' });
+  edit(w, { kind: 'scene', id: sceneId(2), value: 'Cold light.' });
+  w.advance(IMPORT_READ_MS);
+  assert.equal(call(w, 'GET', '/plan-imports').pending.stale, true, 'the outline changed under the review');
+  call(w, 'POST', `/plan-imports/${requestId}/discard`, {});
+});
+
+test('unknown kinds are refused; kinds other views own go on to the next storyboard route', async () => {
+  const w = world();
+  assert.throws(() => edit(w, { kind: 'music', field: 'audioId', value: 'x' }), refused('VALIDATION_ERROR'));
+  const { extraRoutes } = await import('../../src/next/fixtures/routes/index.ts');
+  const seen = [];
+  const film = { method: 'POST', match: /^\/storyboard$/, handle: (_world, _params, body) => { seen.push(body.kind); return { commandId: 'film-1', headVersion: 13 }; } };
+  extraRoutes.push(film);
+  try {
+    assert.deepEqual(await edit(w, { kind: 'soundtrack', field: 'audioId', value: 'harbour-theme' }), { commandId: 'film-1', headVersion: 13 });
+    // Its Undo is not this route's command either, so it goes the same way.
+    await edit(w, { kind: 'undo', commandId: 'film-1' });
+    assert.deepEqual(seen, ['soundtrack', 'undo']);
+  } finally {
+    extraRoutes.splice(extraRoutes.indexOf(film), 1);
+  }
+});
+
+test('purpose and framing are written into the prompts in front of the words, and are not refused while a clip is made', () => {
+  const w = world();
+  w.update((x) => { x.overview = { ...x.overview, shots: { ...x.overview.shots, [shotId('1.1')]: { ...x.overview.shots[shotId('1.1')], video: { state: 'running', takeCount: 1 } } } }; });
+  const words = shot(w, shotId('1.1')).imagePrompt;
+  edit(w, { kind: 'shot', id: shotId('1.1'), field: 'purpose', value: 'The ticket office, closing.' });
+  const prompt = shot(w, shotId('1.1')).imagePrompt;
+  assert.ok(prompt.startsWith('OpenSlate current direction:\nThe ticket office, closing.'), prompt);
+  assert.ok(prompt.endsWith(`\nReference details (retain only where consistent):\n${words}`), prompt);
+  assert.equal(w.snapshot.project.shots[0].imagePrompt, prompt);
+  edit(w, { kind: 'shot', id: shotId('1.1'), field: 'framing', value: 'Wide' });
+  assert.ok(shot(w, shotId('1.1')).imagePrompt.endsWith(`\n${words}`), 'a second edit keeps the words once');
+  assert.equal(shot(w, shotId('1.1')).video.state, 'running');
 });
 
 test('the fixture port serves the Plan routes before the Keyframes commands', async () => {

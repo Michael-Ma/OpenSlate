@@ -11,11 +11,13 @@ import type { FixtureRoute } from "./types.ts";
  * Simulated routes for the Plan view in the sample film (?ui=next&fixture=last-ferry). Nothing is generated,
  * charged or saved.
  *
- * - POST /storyboard handles every storyboard kind the server has (treatment, scene, sceneTitle, addScene,
+ * - POST /storyboard handles the storyboard kinds the Plan view makes (treatment, scene, sceneTitle, addScene,
  *   deleteScene, moveScene, shot, addShot, deleteShot, moveShot, narration, undo). Shot fields the Keyframes view
  *   edits (prompt, motion, length, narration text) and their undo go to the shared Keyframes fixture so both views
  *   behave the same; the rest is simulated here, with one-step undo that restores the outline and its media.
- *   While a written plan is pending every edit is refused (IMPORT_PENDING), as on the server.
+ *   Kinds other views own (soundtrack) and the undo of commands this route never answered go on to the next
+ *   /storyboard route, or to the Keyframes commands when there is none. While a written plan is pending, only
+ *   treatment, scene, shot and narration edits are taken (IMPORT_PENDING), as on the server.
  * - /plan-imports: create, read, confirm and discard a written plan. The Director "reads" it for 2.6 s and proposes
  *   the sample outline (2.3 gets a shorter line, a new 2.4). The fixture stands in for a Codex Director.
  */
@@ -130,6 +132,34 @@ interface Body {
 
 /** Shot fields whose behaviour the Keyframes fixture already simulates. */
 const KEYFRAMES_FIELDS = new Set(["imagePrompt", "motion", "desiredFrames", "videoPrompt"]);
+/** Shot fields the server writes into both prompts (storyboard.ts editedPrompt). */
+const DIRECTION_FIELDS = new Set(["purpose", "action", "framing"]);
+
+/** The storyboard kinds the server has (its body schema); the Plan view makes all of them but soundtrack. */
+const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack"]);
+const OTHER_VIEWS_KINDS = new Set(["soundtrack"]);
+/** What the server still takes while a written plan is pending (storyboard.ts, IMPORT_PENDING). */
+const DURING_IMPORT = new Set(["treatment", "scene", "shot", "narration"]);
+
+/**
+ * A storyboard command this route does not answer: the next /storyboard route (another view's, e.g. the Film
+ * view's music), else the Keyframes commands. The route list is imported when needed, because it lists this file.
+ */
+async function passOn(world: FixtureWorld, body: unknown): Promise<unknown> {
+  const { extraRoutes } = await import("./index.ts");
+  const next = extraRoutes.find((route) => !planRoutes.includes(route) && route.method === "POST" && route.match.test("/storyboard"));
+  return next ? next.handle(world, [], body) : fixtureCommand(world, "POST", "/storyboard", body);
+}
+
+const DIRECTION_HEADER = "OpenSlate current direction:\n";
+const DIRECTION_SEPARATOR = "\nReference details (retain only where consistent):\n";
+
+/** The server's rewrite of a prompt after a purpose or framing edit: its direction in front, the words kept. */
+function directedPrompt(previous: string, direction: string): string {
+  const split = previous.startsWith(DIRECTION_HEADER) ? previous.indexOf(DIRECTION_SEPARATOR) : -1;
+  const original = split >= 0 ? previous.slice(split + DIRECTION_SEPARATOR.length) : previous;
+  return `${DIRECTION_HEADER}${direction}${DIRECTION_SEPARATOR}${original}`;
+}
 
 /** The server refuses a shot shorter than its accepted voice line (SB-8). */
 function assertLength(shot: ShotOverview, frames: number, fps: number): void {
@@ -162,9 +192,11 @@ function change(world: FixtureWorld, edit: (overview: GenerationOverview, projec
 function storyboard(world: FixtureWorld, raw: unknown): unknown {
   if (!raw || typeof raw !== "object") throw new ApiError("VALIDATION_ERROR", 400);
   const body = raw as Body;
+  if (!SERVER_KINDS.has(body.kind ?? "")) throw new ApiError("VALIDATION_ERROR", 400);
   if (body.expectedHeadVersion !== undefined && body.expectedHeadVersion !== head(world)) throw new ApiError("REVISION_CONFLICT", 409);
   const plan = state(world);
-  if (plan.pending) throw new ApiError("IMPORT_PENDING", 409);
+  if (plan.pending && !DURING_IMPORT.has(body.kind ?? "")) throw new ApiError("IMPORT_PENDING", 409);
+  if (OTHER_VIEWS_KINDS.has(body.kind ?? "")) return passOn(world, raw);
   if (body.kind === "undo") return undo(world, body);
 
   const fps = world.overview.fps;
@@ -305,18 +337,27 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
       break;
     }
     case "shot": {
-      // Purpose and framing are written into both prompts on the server, so they outdate the keyframe and the clip.
-      if (body.field !== "purpose" && body.field !== "framing") throw new ApiError("VALIDATION_ERROR", 400);
+      // Purpose, action and framing are written into both prompts on the server (a "current direction" header in
+      // front of the words), so they outdate the keyframe and the clip. Work in flight is not refused: what it
+      // makes is out of date, as on the server.
+      if (!DIRECTION_FIELDS.has(body.field ?? "")) throw new ApiError("VALIDATION_ERROR", 400);
       const shot = world.overview.shots[body.id ?? ""];
       if (!shot) throw new ApiError("NOT_FOUND", 404);
-      if (isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
       const value = text(body.value);
-      const field = body.field;
+      const field = body.field as "purpose" | "action" | "framing";
       change(world, (overview, project) => {
-        const edited: ShotOverview = { ...shot, [field]: value, keyframe: outdateKeyframe(shot.keyframe, field), video: outdateClip(shot.video, field) };
+        const row = project.shots.find((s) => s.id === shot.shotId);
+        const purpose = field === "purpose" ? value : shot.purpose;
+        const framing = field === "framing" ? value : shot.framing;
+        const direction = [purpose, framing].filter(Boolean).join(". ");
+        const imagePrompt = directedPrompt(shot.imagePrompt, direction);
+        const videoPrompt = directedPrompt(row?.videoPrompt ?? shot.imagePrompt, `${direction}. Camera movement: ${shot.motion}`);
+        const content = field === "action" ? {} : { [field]: value };
+        const edited: ShotOverview = { ...shot, ...content, imagePrompt, keyframe: outdateKeyframe(shot.keyframe, field), video: outdateClip(shot.video, field) };
         return {
-          overview: { ...overview, shots: { ...overview.shots, [shot.shotId]: field === "framing" ? directed(edited) : edited } },
-          project: { ...project, shots: project.shots.map((row) => (row.id === shot.shotId ? { ...row, [field]: value } : row)) },
+          // As on the server (promptState "ready"), a written action or framing lifts "needs direction"; a purpose does not.
+          overview: { ...overview, shots: { ...overview.shots, [shot.shotId]: field === "purpose" ? edited : directed(edited) } },
+          project: { ...project, shots: project.shots.map((s) => (s.id === shot.shotId ? { ...s, ...content, imagePrompt, videoPrompt } : s)) },
         };
       });
       break;
@@ -349,8 +390,8 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
 function undo(world: FixtureWorld, body: Body): unknown {
   const plan = state(world);
   const commandId = body.commandId ?? "";
-  // Commands this route never saw (the Keyframes narration fit) are the Keyframes fixture's own.
-  if (!plan.known.has(commandId)) return fixtureCommand(world, "POST", "/storyboard", body);
+  // Commands this route never answered (the Keyframes narration fit, another view's music) are undone where they were made.
+  if (!plan.known.has(commandId)) return passOn(world, body);
   const latest = plan.latest;
   if (!latest || latest.commandId !== commandId || latest.headAfter !== head(world) || latest.media !== mediaSignature(world.overview)) throw new ApiError("UNDO_UNAVAILABLE", 409);
   plan.latest = null;
