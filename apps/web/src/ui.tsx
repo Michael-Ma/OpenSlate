@@ -255,7 +255,10 @@ export function AppDialog({
     const launcher = document.activeElement;
     if (launcher instanceof HTMLElement && !content.current?.contains(launcher))
       returnFocus.current = launcher;
-    content.current?.scrollIntoView({ block: "start" });
+    // Scroll only the conversation region: scrollIntoView would also scroll the clipped shell.
+    const region = content.current?.closest<HTMLElement>(".conversation-stream");
+    if (region && content.current)
+      region.scrollTop += content.current.getBoundingClientRect().top - region.getBoundingClientRect().top;
     (initialFocusRef?.current ?? content.current)?.focus({
       preventScroll: true,
     });
