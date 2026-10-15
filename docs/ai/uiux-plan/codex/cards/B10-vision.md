@@ -23,3 +23,4 @@ Anything in apps/web.
 
 ## Added by the lead after the Director column landed
 6. **Conversation entries for the thread**: each entry of the snapshot's `conversation` carries `at` (ISO time the message or reply was recorded), the user's `scopeIds` (scene and shot ids it pointed at; omit for a whole-film scope) and, for assistant entries, `runtime: "scripted" | "live"` (DC-15). The web type is `ConversationEntry` in `apps/web/src/next/model/types.ts`; keep the server shape identical.
+7. **Settings route for the review toggle** (the web Settings view calls it): `GET /api/projects/:projectId/settings/director-review` returns `{ enabled: boolean }`; `POST` the same path with `{ enabled: boolean, expectedHeadVersion: number }` and an Idempotency-Key sets it (no hold, no Director revocation).
