@@ -22,7 +22,7 @@ export type Action =
   | { type: "composerSent" }
   | { type: "edit"; edit: EditDraft | null }
   | { type: "pending"; pressId: string; pending: boolean }
-  | { type: "toast"; message: Msg; tone: "info" | "error"; undoCommandId?: string }
+  | { type: "toast"; message: Msg; tone: "info" | "error"; undoCommandId?: string; undoKey?: number }
   | { type: "toastDismiss" };
 
 const sameTarget = (a: Target, b: Target) => a.kind === b.kind && a.id === b.id;
@@ -95,7 +95,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, pending };
     }
     case "toast":
-      return { ...state, toast: { id: (state.toast?.id ?? 0) + 1, message: action.message, tone: action.tone, ...(action.undoCommandId ? { undoCommandId: action.undoCommandId } : {}) } };
+      return { ...state, toast: { id: (state.toast?.id ?? 0) + 1, message: action.message, tone: action.tone, ...(action.undoCommandId ? { undoCommandId: action.undoCommandId } : {}), ...(action.undoKey ? { undoKey: action.undoKey } : {}) } };
     case "toastDismiss":
       return { ...state, toast: null };
   }

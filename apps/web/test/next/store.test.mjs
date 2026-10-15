@@ -45,3 +45,19 @@ test('with no film open, presses are kept under the library namespace; a film ke
   assert.equal(await store.command('start:create', { name: 'X' }, () => ({ path: '/api/projects', body: { name: 'X' } })), undefined);
   assert.deepEqual(Object.keys(JSON.parse(storage.items.get(LIBRARY_KEY))), ['start:create']);
 });
+
+test('a toast can carry an Undo callback; only the latest one runs, once', async (t) => {
+  const { store } = await studio(t);
+  const ran = [];
+  store.toastUndo({ id: 'toast.saved' }, () => ran.push('first'));
+  const first = store.getState().toast;
+  store.toastUndo({ id: 'toast.saved' }, () => ran.push('second'));
+  const second = store.getState().toast;
+  assert.ok(second.undoKey && second.undoKey !== first.undoKey);
+  store.undoToast(first);
+  assert.deepEqual(ran, [], 'a replaced toast\'s Undo is gone');
+  store.undoToast(second);
+  store.undoToast(second);
+  assert.deepEqual(ran, ['second']);
+  assert.equal(store.getState().toast, null);
+});

@@ -29,7 +29,6 @@ export const settingsMessages = {
   "set.save": { en: "Save", zh: "保存" },
   "set.saving": { en: "Saving…", zh: "正在保存…" },
   "set.ready": { en: "Ready", zh: "就绪" },
-  "set.undo": { en: "Undo", zh: "撤销" },
 
   // ---- models ------------------------------------------------------------------------
   "set.models.group": { en: "Model per job", zh: "每项工作的模型" },
@@ -165,7 +164,6 @@ export const settingsMessages = {
   "set.voice.default_suffix": { en: "{name} (default)", zh: "{name}（默认）" },
   "set.voice.unavailable_option": { en: "{name} (can't be used)", zh: "{name}（不可用）" },
   "set.voice.unavailable_hint": { en: "The saved voice can't be used for new lines any more. Choose another.", zh: "保存的声音已不能用于新的配音，请另选一个。" },
-  "set.voice.was": { en: "Was {name}", zh: "原来是 {name}" },
   "set.toast.narrator": { en: "New voice lines use {name}.", zh: "新的配音会使用 {name}。" },
   "set.voice.personal": { en: "Personal voices", zh: "个人声音" },
   "set.voice.personal_hint": { en: "A voice you made in your own provider account. OpenSlate does not make voices from a recording; it only uses one you already have, with your consent.", zh: "你在自己的服务商账号里创建的声音。OpenSlate 不会从录音生成声音，只会在你同意后使用你已有的声音。" },

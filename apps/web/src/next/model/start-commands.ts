@@ -94,7 +94,7 @@ async function press<T>(
  */
 function takeBack(store: Pick<StartStore, "dispatch">, shown: Toast, before: Toast | null) {
   if (before && shown.id === before.id + 1) {
-    store.dispatch({ type: "toast", message: before.message, tone: before.tone, ...(before.undoCommandId ? { undoCommandId: before.undoCommandId } : {}) });
+    store.dispatch({ type: "toast", message: before.message, tone: before.tone, ...(before.undoCommandId ? { undoCommandId: before.undoCommandId } : {}), ...(before.undoKey ? { undoKey: before.undoKey } : {}) });
   } else store.dispatch({ type: "toastDismiss" });
 }
 

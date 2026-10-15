@@ -6,7 +6,7 @@ import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, t
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
 import { reducer, type Action } from "./reducer.ts";
-import { initialState, type EditDraft, type StudioState } from "./state.ts";
+import { initialState, type EditDraft, type StudioState, type Toast } from "./state.ts";
 
 /** The parts of StudioClient the store uses; tests and fixture mode inject their own. */
 export interface StudioPort {
@@ -38,6 +38,9 @@ export class StudioStore {
   #subscription: ProjectSubscription | null = null;
   #unsubscribe: (() => void) | null = null;
   #refreshing: Promise<void> | null = null;
+  /** The Undo of the latest toastUndo, by its key (callbacks never go into state). */
+  #toastUndo: { key: number; run: () => unknown } | null = null;
+  #toastUndoKey = 0;
   #refreshAgain = false;
 
   constructor(deps: StoreDeps) {
@@ -240,6 +243,26 @@ export class StudioStore {
   undo(commandId: string): Promise<string | null> {
     this.dispatch({ type: "toastDismiss" });
     return this.edit({ kind: "undo", commandId }, msg("toast.undone"));
+  }
+
+  /**
+   * An info toast whose Undo runs `run`, for changes that are not storyboard commands (the narrator voice in
+   * Settings). Only the latest such toast's Undo is kept; storyboard commands use their command id instead.
+   */
+  toastUndo(message: Msg, run: () => unknown): void {
+    const key = ++this.#toastUndoKey;
+    this.#toastUndo = { key, run };
+    this.dispatch({ type: "toast", message, tone: "info", undoKey: key });
+  }
+
+  /** The toast's Undo: its storyboard command, or the callback it carries. The toast goes away first. */
+  undoToast(toast: Pick<Toast, "undoCommandId" | "undoKey">): void {
+    if (toast.undoCommandId) { void this.undo(toast.undoCommandId); return; }
+    const held = this.#toastUndo;
+    this.dispatch({ type: "toastDismiss" });
+    if (!held || held.key !== toast.undoKey) return;
+    this.#toastUndo = null;
+    void held.run();
   }
 
   async saveEdit(draft: EditDraft): Promise<string | null> {

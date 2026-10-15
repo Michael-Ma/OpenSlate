@@ -18,6 +18,8 @@ export interface Toast {
   tone: "info" | "error";
   /** The storyboard command to undo, when the action can be undone. */
   undoCommandId?: string;
+  /** An Undo that is not a storyboard command (e.g. the narrator voice): the store runs the callback it holds under this key. */
+  undoKey?: number;
 }
 
 /**

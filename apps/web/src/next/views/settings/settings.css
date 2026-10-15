@@ -116,7 +116,6 @@
 .set-view .inline-form{display:flex;flex-direction:column;gap:10px;margin-top:10px}
 .set-view .narrator-ctl{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
 .set-view .select.narrator{width:auto;min-width:200px}
-.set-view .undo-line{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
 .set-view .voice-card{display:flex;gap:12px;align-items:center;border:1px solid var(--hairline);background:var(--bar);border-radius:12px;padding:10px 12px;margin-top:8px}
 .set-view .srow.stack > .txt + .voice-card,.set-view .srow.stack > .txt + .lead{margin-top:14px}
 .set-view .voice-card .vtxt{flex:1;min-width:0}
@@ -183,14 +182,6 @@
   .set-view .voice-card .vtxt{flex:1 1 100%}
   .set-view .kv{grid-template-columns:minmax(0,96px) minmax(0,1fr)}
   .set-dialog{padding:18px 16px 14px}
-}
-
-/*
- * Toast placement while Settings is open: at the foot of the workspace, as in the study's system.css, so it
- * never covers the row that just changed. A stopgap in this view until the shell places toasts per view.
- */
-@media (min-width:900px){
-  body:has(main[data-view="settings"]) .toast{top:auto;bottom:22px;left:calc(392px + (100vw - 392px) / 2);max-width:min(640px,calc(100vw - 424px))}
 }
 
 @media (prefers-reduced-motion: reduce){

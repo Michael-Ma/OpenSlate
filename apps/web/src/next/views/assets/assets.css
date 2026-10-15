@@ -141,18 +141,6 @@
   .assets-work .shotset{grid-template-columns:1fr}
 }
 
-/*
- * The shell's toast, while this view is open, sits at the bottom of the workspace as in the study, not over
- * the tiles. A workaround in this view's file until the shell moves it (see the lead's list); the shell's
- * own phone placement is already at the bottom.
- */
-@media (min-width: 900px){
-  .app:has(main[data-view="assets"]) ~ .toast-live .toast{top:auto;bottom:22px}
-}
-@media (min-width: 1280px){
-  .app:has(main[data-view="assets"]) ~ .toast-live .toast{left:calc(392px + (100vw - 392px) / 2);max-width:min(640px,calc(100vw - 424px))}
-}
-
 /* ---------- phone: one column, two tiles a row, the detail is a sheet ---------- */
 @media (max-width: 899px){
   .work.assets-work{overflow:visible;padding:14px 16px 28px;min-height:auto}

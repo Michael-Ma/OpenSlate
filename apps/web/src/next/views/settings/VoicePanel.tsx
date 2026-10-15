@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { draftProblems, emptyDraft, narratorChoices, narratorName, narratorRequest, PROVIDER_NAME, registerRequest, revokeRequest, UNDO_MS, undoTarget, voiceCards, type NarratorUndo, type PersonalProvider, type PersonalVoice, type PersonalVoices, type VoiceCard, type VoiceDraft, type VoiceSetting } from "../../model/settings-voice.ts";
+import { draftProblems, emptyDraft, narratorChoices, narratorName, narratorRequest, PROVIDER_NAME, registerRequest, revokeRequest, undoTarget, voiceCards, type PersonalProvider, type PersonalVoice, type PersonalVoices, type VoiceCard, type VoiceDraft, type VoiceSetting } from "../../model/settings-voice.ts";
 import { msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
@@ -12,7 +12,8 @@ const REVOKE_PRESS = (identityId: string) => `settings:voice-revoke:${identityId
 
 /**
  * Voice: the film's default narrator voice (new lines only) and personal voices. A personal voice needs both
- * consents; revoking it is per film and keeps lines already made.
+ * consents; revoking it is per film and keeps lines already made. A narrator change's toast offers Undo (as in
+ * the study), while that voice is still the narrator and the earlier one can still be used.
  */
 export function VoicePanel({ voice, personal, film, offline }: { voice: Resource<VoiceSetting>; personal: Resource<PersonalVoices>; film: string; offline: string | null }) {
   const store = useStore();
@@ -23,18 +24,9 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
   const current = voice.data?.narratorVoice ?? null;
   const choices = useMemo(() => (current ? narratorChoices(current, voices) : null), [current, voices]);
   const cards = useMemo(() => voiceCards(voices), [voices]);
-  /** The last narrator change here, for the inline Undo (8 s, like the study's toast Undo). */
-  const [undo, setUndo] = useState<NarratorUndo | null>(null);
-  const previous = undoTarget(undo, current, voices);
-  useEffect(() => {
-    if (!undo) return;
-    const timer = window.setTimeout(() => {
-      // Undo is going away: keep a keyboard user's place on the narrator select.
-      if (document.activeElement?.getAttribute("data-act") === "narrator-undo") document.getElementById(`${ids}-narrator`)?.focus();
-      setUndo(null);
-    }, UNDO_MS);
-    return () => window.clearTimeout(timer);
-  }, [undo, ids]);
+  /** What the toast's Undo reads when it is pressed, which may be after more changes here. */
+  const latest = useRef({ current, voices });
+  latest.current = { current, voices };
   const [adding, setAdding] = useState<VoiceDraft | null>(null);
   const [revoking, setRevoking] = useState<VoiceCard | null>(null);
   const head = () => store.getState().snapshot?.project.headVersion ?? voice.data?.headVersion ?? 0;
@@ -50,12 +42,21 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
   }, [personal.data]);
 
   const setNarrator = async (next: string, undoing: boolean) => {
-    if (!current || next === current) return;
+    const before = latest.current.current;
+    if (!before || next === before) return;
     const request = narratorRequest(next, head());
-    const result = await store.command(NARRATOR_PRESS, request.body, () => request, msg("set.toast.narrator", { name: narratorName(next, voices) }));
+    const result = await store.command(NARRATOR_PRESS, request.body, () => request);
     if (!result) return;
-    setUndo(undoing ? null : { previous: current, set: next });
-    if (undoing) document.getElementById(`${ids}-narrator`)?.focus();
+    const toast = msg("set.toast.narrator", { name: narratorName(next, latest.current.voices) });
+    if (undoing) {
+      store.dispatch({ type: "toast", message: toast, tone: "info" });
+      document.getElementById(`${ids}-narrator`)?.focus();
+    } else {
+      store.toastUndo(toast, () => {
+        const target = undoTarget({ previous: before, set: next }, latest.current.current, latest.current.voices);
+        if (target) void setNarrator(target, true);
+      });
+    }
     voice.reload();
   };
 
@@ -75,7 +76,6 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
     const request = registerRequest(adding, head());
     const result = await store.command<{ voice: { label: string } }>(REGISTER_PRESS, request.body, () => request, msg("set.toast.voice_added", { name: adding.label.trim() }));
     if (!result) return;
-    setUndo(null);
     closeAdd();
     personal.reload();
   };
@@ -85,7 +85,6 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
     const result = await store.command(REVOKE_PRESS(card.identityId), { identityId: card.identityId }, () => request, msg("set.toast.voice_revoked", { name: card.label }));
     setRevoking(null);
     if (!result) return;
-    setUndo(null);
     refocus.current = true;
     personal.reload();
   };
@@ -105,12 +104,6 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
             </optgroup>
           )}
         </select>
-        {previous && (
-          <span className="undo-line">
-            <span>{t("set.voice.was", { name: narratorName(previous, voices) })}</span>
-            <button type="button" className="pill sm ghost" data-act="narrator-undo" disabled={!!offline} onClick={() => void setNarrator(previous, true)}>{t("set.undo")}</button>
-          </span>
-        )}
       </>
     );
   };

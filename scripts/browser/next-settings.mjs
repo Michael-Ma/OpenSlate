@@ -277,9 +277,11 @@ export const scenarios = [
       await expectText(page, ".toast", /New voice lines use Marin\./);
       const toast = await box(page, ".toast");
       expect(toast.bottom > 900 - 40, `The toast sits at ${Math.round(toast.top)}-${Math.round(toast.bottom)}, not at the foot of the workspace`);
-      await expectText(page, "#set-voice .undo-line", /Was Cedar/);
-      await page.click("#set-voice [data-act='narrator-undo']");
+      // The toast carries the Undo, as in the study.
+      await page.click(".toast [data-act='undo']");
       await page.waitForFunction(() => document.querySelector("#set-voice [data-act='narrator']")?.value === "cedar");
+      await expectText(page, ".toast", /New voice lines use Cedar\./);
+      expect(await page.locator(".toast [data-act='undo']").count() === 0, "Undoing the narrator offers another Undo");
       // Adding a personal voice needs a name, an id and both consents.
       await page.click("#set-voice [data-act='voice-open']");
       // The section index follows the scroll, not only the last link pressed.

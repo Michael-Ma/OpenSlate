@@ -93,8 +93,8 @@ export function Toast() {
       onKeyDown={onKeyDown}
     >
       <span>{tm(toast.message)}</span>
-      {toast.undoCommandId && (
-        <button type="button" className="pill" data-act="undo" {...undoGuard} onClick={() => { const commandId = toast.undoCommandId!; close(() => void store.undo(commandId)); }}>
+      {(toast.undoCommandId || toast.undoKey) && (
+        <button type="button" className="pill" data-act="undo" {...undoGuard} onClick={() => { const shown = toast; close(() => store.undoToast(shown)); }}>
           {t("shell.undo")}
         </button>
       )}

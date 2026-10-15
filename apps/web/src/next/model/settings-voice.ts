@@ -74,9 +74,6 @@ export function usableNarrator(value: string, voices: readonly PersonalVoice[]):
   return isStock(value) || voices.some((voice) => voice.id === value && voice.ready && voice.id.startsWith("openai-custom:"));
 }
 
-/** How long "Was Cedar · Undo" stays after a narrator change, like the study's toast Undo. */
-export const UNDO_MS = 8000;
-
 export interface NarratorUndo {
   /** The voice before the change. */
   previous: string;
