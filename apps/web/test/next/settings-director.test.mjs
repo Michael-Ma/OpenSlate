@@ -63,15 +63,37 @@ test('the Codex form refuses what the server would refuse', () => {
   assert.equal(en(draftProblems({ ...draft, model: '' })[0].problem), 'Choose a Codex model.');
 });
 
-test('the review switch (D4) is off with a reason until its route exists and the Codex Director is set', () => {
-  const on = reviewSwitch({ data: { enabled: true }, status: null, error: null }, setup());
-  assert.deepEqual(on, { on: true, disabled: false, reason: null });
-  const missing = reviewSwitch({ data: null, status: 404, error: 'REQUEST_FAILED' }, setup());
-  assert.equal(missing.disabled, true);
-  assert.equal(en(missing.reason), "This studio can't do this yet; it arrives with a later update.");
-  const demo = reviewSwitch({ data: { enabled: true }, status: null, error: null }, setup({ selection: { mode: 'fake' } }));
-  assert.deepEqual([demo.on, demo.disabled, en(demo.reason)], [false, true, 'Needs the Codex Director.']);
-  assert.equal(en(reviewSwitch({ data: null, status: 500, error: 'INTERNAL_ERROR' }, setup()).reason), "Couldn't read this setting.");
-  assert.deepEqual(reviewSwitch({ data: null, status: null, error: null }, null), { on: false, disabled: true, reason: null });
+test('the review switch (D4) always shows the saved setting and can always be turned off', () => {
+  const read = (enabled) => ({ data: { enabled }, status: null, error: null });
+  const view = (v) => [v.on, v.disabled, v.reason && en(v.reason), en(v.note)];
+  const codexNote = 'When keyframes come back, the Director looks at them and leaves notes, like “the coat came out maroon”. Each batch uses more of your Codex plan.';
+  const demoNote = "With the Demo Director, reviews are scripted notes: free, and it doesn't look at the pictures.";
+  assert.deepEqual(view(reviewSwitch(read(true), setup())), [true, false, null, codexNote]);
+  assert.deepEqual(view(reviewSwitch(read(false), setup())), [false, false, null, codexNote]);
+  // The server reviews every film's batches, the Demo Director's too (scripted, free): show it and let it be changed.
+  assert.deepEqual(view(reviewSwitch(read(true), setup({ selection: { mode: 'fake' } }))), [true, false, null, demoNote]);
+  assert.deepEqual(view(reviewSwitch(read(false), setup({ selection: { mode: 'fake' } }))), [false, false, null, demoNote]);
   assert.deepEqual(reviewRequest(false, 12), { path: '/settings/director-review', body: { enabled: false, expectedHeadVersion: 12 } });
+});
+
+test('Codex missing or failing its check: the switch says it needs the Codex Director; off it stays off, on it can be turned off', () => {
+  const read = (enabled) => ({ data: { enabled }, status: null, error: null });
+  const missing = setup({ selection: { mode: 'native', model: 'gpt-6-astra' }, defaults: { binaryPath: '', model: 'gpt-6-astra' }, modelCatalogStatus: 'unchecked' });
+  const blocked = setup({ modelCatalogStatus: 'blocked' });
+  for (const state of [missing, blocked]) {
+    const on = reviewSwitch(read(true), state);
+    assert.deepEqual([on.on, on.disabled, en(on.reason)], [true, false, 'Needs the Codex Director.']);
+    const off = reviewSwitch(read(false), state);
+    assert.deepEqual([off.on, off.disabled, en(off.reason)], [false, true, 'Needs the Codex Director.']);
+  }
+  // Not checked yet is not a failure.
+  assert.deepEqual([reviewSwitch(read(false), setup({ modelCatalogStatus: 'unchecked' })).disabled], [false]);
+});
+
+test('the review switch before its read, after a failed read, and on a server without the route', () => {
+  assert.equal(en(reviewSwitch({ data: null, status: 500, error: 'INTERNAL_ERROR' }, setup()).reason), "Couldn't read this setting.");
+  const older = reviewSwitch({ data: null, status: 404, error: 'REQUEST_FAILED' }, setup());
+  assert.deepEqual([older.on, older.disabled, en(older.reason)], [false, true, "This studio can't do this yet; it arrives with a later update."]);
+  const loading = reviewSwitch({ data: null, status: null, error: null }, null);
+  assert.deepEqual([loading.on, loading.disabled, loading.reason], [false, true, null]);
 });

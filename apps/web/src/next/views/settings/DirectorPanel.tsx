@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { codexProgram, directorRequest, draftFrom, draftProblems, reviewRequest, reviewSwitch, type DirectorDraft, type DirectorReview, type DirectorSetup } from "../../model/settings-director.ts";
+import { CODEX_CHECK_TIMEOUT_MS, codexProgram, directorRequest, draftFrom, draftProblems, reviewRequest, reviewSwitch, type DirectorDraft, type DirectorReview, type DirectorSetup } from "../../model/settings-director.ts";
 import { msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
@@ -39,7 +39,8 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
   const save = async () => {
     if (!data || !draft || problems.length) return;
     const request = directorRequest(data, { mode: "native", binaryPath: draft.binaryPath, model: draft.model, codexHome: draft.codexHome });
-    const result = await store.command<DirectorSetup>(DIRECTOR_PRESS, request.body, () => request, msg("set.toast.director_saved"));
+    // Saving runs Codex's setup check on this computer, which can take a while the first time.
+    const result = await store.command<DirectorSetup>(DIRECTOR_PRESS, request.body, () => request, msg("set.toast.director_saved"), { timeoutMs: CODEX_CHECK_TIMEOUT_MS });
     if (!result) return;
     setDraft(null);
     setup.reload();
@@ -126,8 +127,8 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
       <div className="srow review-row">
         <div className="txt">
           <b id={`${ids}-rv`}>{t("set.review.title")}</b>
-          <span id={`${ids}-rv-d`}>{t("set.review.body")}</span>
-          {toggle.reason && <span className="why" data-review-reason>{tm(toggle.reason)}</span>}
+          <span id={`${ids}-rv-d`} data-review-note>{tm(toggle.note)}</span>
+          {toggle.reason && <span className="why" id={`${ids}-rv-why`} data-review-reason>{tm(toggle.reason)}</span>}
         </div>
         <button
           type="button"
@@ -136,7 +137,7 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
           data-act="review-toggle"
           aria-checked={toggle.on}
           aria-labelledby={`${ids}-rv`}
-          aria-describedby={`${ids}-rv-d`}
+          aria-describedby={toggle.reason ? `${ids}-rv-d ${ids}-rv-why` : `${ids}-rv-d`}
           disabled={toggle.disabled || !!offline || !!presses[REVIEW_PRESS]}
           title={offline ?? (toggle.reason ? tm(toggle.reason) : undefined)}
           onClick={() => void flip()}

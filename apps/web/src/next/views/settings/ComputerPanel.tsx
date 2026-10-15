@@ -3,7 +3,7 @@ import { ApiError } from "../../api/client.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { errorMsg } from "../../i18n/translate.ts";
 import { checkOutcome, computerView } from "../../model/settings-computer.ts";
-import type { DirectorSetup } from "../../model/settings-director.ts";
+import { CODEX_CHECK_TIMEOUT_MS, type DirectorSetup } from "../../model/settings-director.ts";
 import { joinList, type ProviderCatalogView } from "../../model/settings.ts";
 import { msg } from "../../model/types.ts";
 import { useStore } from "../../store/react.tsx";
@@ -32,10 +32,10 @@ export function ComputerPanel({ providers, setup, hasFilm, offline }: { provider
     setChecking(true);
     setCheckFailed(null);
     try {
-      // The Codex check needs a film; it can be slow, busy or refused (no Codex Director on this server).
+      // The Codex check needs a film; it can be slow (up to 90 s the first time), busy or refused (no Codex Director on this server).
       const [codex, catalog] = await Promise.all([
         hasFilm
-          ? store.read<DirectorSetup>("/director/models").then((result) => ({ ok: true as const, busy: result.busy }), (error: unknown) => ({ ok: false as const, code: codeOf(error) }))
+          ? store.read<DirectorSetup>("/director/models", { timeoutMs: CODEX_CHECK_TIMEOUT_MS }).then((result) => ({ ok: true as const, busy: result.busy }), (error: unknown) => ({ ok: false as const, code: codeOf(error) }))
           : Promise.resolve(null),
         store.read<ProviderCatalogView>("/api/providers").then(() => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, code: codeOf(error) })),
       ]);

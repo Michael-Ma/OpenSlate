@@ -32,7 +32,7 @@ export interface DirectorSetup {
   readiness?: { status: "ready" | "blocked"; checks?: Record<string, string> } | null;
 }
 
-/** GET /settings/director-review (server card B10). */
+/** GET /settings/director-review (server card B10, apps/server/src/application/keyframe-review.ts). */
 export interface DirectorReview {
   enabled: boolean;
 }
@@ -138,24 +138,37 @@ export function draftProblems(draft: DirectorDraft): { field: keyof DirectorDraf
 }
 
 export interface ReviewSwitch {
-  /** What the switch shows. */
+  /** What the switch shows: always the server's saved value once it is read. */
   on: boolean;
   disabled: boolean;
-  /** Why it is off, when it is. */
+  /** Why it cannot be turned on (or why reviews will not work while it is on). */
   reason: Msg | null;
+  /** What a review is with this Director: Codex use, or the scripted demo's free notes. */
+  note: Msg;
 }
 
 /**
- * The "Director reviews new keyframes" switch (D4). The route arrives with server card B10: until then the
- * read answers 404 and the switch is off with a short reason. It also needs the Codex Director.
+ * The "Director reviews new keyframes" switch (D4, server card B10). The server keeps the setting per film,
+ * on by default, and starts a review turn after each finished keyframe batch whatever the Director is:
+ * Codex reviews use the Codex plan; the Demo Director's are scripted notes, free, without looking at the
+ * pictures. So the switch always shows the saved value and can always be turned off. Turning it on is
+ * blocked only while the Director is Codex and Codex is missing or failed its check on this computer.
+ * A 404 (a server older than B10) is kept as a fallback.
  */
 export function reviewSwitch(read: { data: DirectorReview | null; status: number | null; error: string | null }, setup: DirectorSetup | null): ReviewSwitch {
-  const off = (id: MessageId): ReviewSwitch => ({ on: false, disabled: true, reason: msg(id) });
+  const native = setup?.selection.mode !== "fake";
+  const note = msg(native ? "set.review.body" : "set.review.body_demo");
+  const off = (id: MessageId): ReviewSwitch => ({ on: false, disabled: true, reason: msg(id), note });
   if (read.status === 404 || read.error === "NOT_FOUND") return off("set.review.unavailable");
-  if (setup && setup.selection.mode !== "native") return off("set.review.needs_codex");
   if (read.error) return off("set.review.read_failed");
-  if (!read.data || !setup) return { on: false, disabled: true, reason: null };
-  return { on: read.data.enabled, disabled: false, reason: null };
+  if (!read.data || !setup) return { on: false, disabled: true, reason: null, note };
+  const on = read.data.enabled;
+  const state = codexState(setup);
+  if (native && (state === "missing" || state === "blocked")) return { on, disabled: !on, reason: msg("set.review.needs_codex"), note };
+  return { on, disabled: false, reason: null, note };
 }
 
 export const reviewRequest = (enabled: boolean, headVersion: number): Request => ({ path: "/settings/director-review", body: { enabled, expectedHeadVersion: headVersion } });
+
+/** The local Codex setup check can take well over the client's default 15 s the first time (lead: up to 90 s). */
+export const CODEX_CHECK_TIMEOUT_MS = 120_000;

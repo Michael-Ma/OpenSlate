@@ -8,7 +8,7 @@ import type { FixtureRoute } from "./types.ts";
 
 /**
  * Simulated server routes the Settings view needs in the sample film: models with preview and apply,
- * the provider catalog, Director setup, the review switch (server card B10), the narrator voice and
+ * the provider catalog, Director setup, the review setting (server card B10), the narrator voice and
  * personal voices. Nothing is checked on this computer and nothing is saved.
  */
 
@@ -274,12 +274,15 @@ function revoke(world: FixtureWorld, identityId: string) {
   return { revocation: { id: identityId, voiceId: identityId, createdAt: "2026-10-15T10:50:00.000Z" } };
 }
 
+/**
+ * Like the server (keyframe-review.ts): any Director, on by default, bound to the head version, and it does not
+ * change the head (the server appends a director.review_setting event only).
+ */
 function setReview(world: FixtureWorld, body: unknown) {
   const s = state(world);
   const input = body as { enabled?: unknown; expectedHeadVersion?: number } | null;
   if (typeof input?.enabled !== "boolean") throw new ApiError("VALIDATION_ERROR", 400);
   headCheck(world, input.expectedHeadVersion);
-  if (input.enabled && s.director.mode !== "native") throw new ApiError("DIRECTOR_SETUP_REQUIRED", 409);
   world.update(() => { s.review = input.enabled as boolean; });
   return { enabled: s.review };
 }

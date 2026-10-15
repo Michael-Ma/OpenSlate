@@ -68,9 +68,9 @@ test('a switch checked before a job started or finished is refused as stale, lik
     // Shot 3.1's keyframe starts: the settings are unchanged, the pending work is not.
     const shot = Object.values(port.world.overview.shots).find((s) => s.label === '3.1');
     port.world.update((w) => { w.overview = { ...w.overview, shots: { ...w.overview.shots, [shot.shotId]: { ...shot, keyframe: { ...shot.keyframe, state: 'running', phase: 'running', startedAt: '2026-10-15T10:00:00.000Z', attemptId: 'attempt-x' } } } }; });
-    assert.ok(port.world.overview.cursor > cursor, 'the change moves the event cursor, so the view marks the check stale');
+    assert.ok(port.world.overview.cursor > cursor, 'the change is an event');
     const after = await store.read('/settings/models');
-    assert.equal(previewCurrent(preview, after), true, 'the settings status alone cannot show it');
+    assert.equal(previewCurrent(preview, after), true, 'the settings are unchanged, so the row keeps Switch; the server judges the work on apply');
     const apply = applyRequest(preview);
     assert.equal(await store.command('a', apply.body, () => apply), undefined);
     assert.equal(store.getState().toast?.message.id, 'error.MODEL_SETTINGS_STALE');
@@ -97,7 +97,7 @@ test('keyframe and narration impacts match the design', async () => {
   } finally { close(); }
 });
 
-test('the Director switches for its next turn; the review switch follows it', async () => {
+test('the Director switches for its next turn; the review setting stays and can be changed with any Director, like the server', async () => {
   const { store, close } = await studio();
   try {
     const setup = await store.read('/director/setup');
@@ -105,9 +105,16 @@ test('the Director switches for its next turn; the review switch follows it', as
     assert.equal(request.path, '/director/change');
     const after = await store.command('d', request.body, () => request);
     assert.equal(after.selection.mode, 'fake');
+    assert.deepEqual(await store.read('/settings/director-review'), { enabled: true });
     const head = store.getState().snapshot.project.headVersion;
+    const disable = reviewRequest(false, head);
+    assert.deepEqual(await store.command('r', disable.body, () => disable), { enabled: false });
+    assert.equal(store.getState().snapshot.project.headVersion, head, 'the setting does not move the head version');
     const enable = reviewRequest(true, head);
-    assert.equal(await store.command('r', enable.body, () => enable), undefined, 'review needs the Codex Director');
+    assert.deepEqual(await store.command('r2', enable.body, () => enable), { enabled: true });
+    const old = reviewRequest(false, head - 1);
+    assert.equal(await store.command('r3', old.body, () => old), undefined);
+    assert.equal(store.getState().toast?.message.id, 'error.REVISION_CONFLICT');
     const stale = directorRequest(setup, selectionFor(setup, 'native:gpt-6-astra'));
     assert.equal(await store.command('d2', stale.body, () => stale), undefined, 'a change bound to an old selection is refused');
     assert.equal(store.getState().toast?.message.id, 'error.DIRECTOR_SELECTION_STALE');
