@@ -12,8 +12,12 @@ import type { FixtureRoute } from "./types.ts";
  * catalog. Other films are small simulated films that open in the studio; nothing is generated,
  * charged or saved.
  *
- * `?start=no-keys` simulates a computer without keys or Codex; `?start=first-run` also leaves the
- * list empty (The Last Ferry archived), which shows the welcome and the demo path.
+ * `?start=no-keys` simulates a computer without keys or Codex. `?start=first-run` also leaves the
+ * list empty (The Last Ferry archived), which shows the welcome and the demo path; as on a real first
+ * run, where no film is open, the view cannot read whether this computer has Codex (the open Last
+ * Ferry's Director setup is not answered), so a new film's Director step is where it finds out.
+ * `?start=setup-busy` has keys and Codex, but each new film's first Codex setup answers
+ * DIRECTOR_SETUP_BUSY (the check is still running), so Try again and the empty outline's fallback show.
  */
 
 interface Film {
@@ -31,6 +35,10 @@ interface StartWorld {
   films: Film[];
   codex: boolean;
   keys: boolean;
+  /** First run: the open film's Director setup is not answered (no film is open on a real first run). */
+  hideCodex: boolean;
+  /** Films whose next Codex setup answers DIRECTOR_SETUP_BUSY (setup-busy). */
+  busyOnce: Set<string> | null;
   next: number;
   /** The world cursor last seen, so The Last Ferry's "changed" follows its edits. */
   seenCursor: number;
@@ -127,7 +135,8 @@ function initial(world: FixtureWorld): StartWorld {
     { id: "lighthouse-test", name: "Lighthouse test", archived: true, updatedAt: daysAgo(now, 13, 16, 30), director: "fake", planImport: null,
       data: draftFilm("lighthouse-test", "Lighthouse test", "Beam", [{ framing: "Wide", prompt: "A lighthouse beam sweeping over a calm sea.", motion: "Static", seconds: 5 }]) },
   ];
-  return { films: [ferry, ...others], codex: !start, keys: !start, next: 1, seenCursor: world.overview.cursor };
+  const bare = start === "no-keys" || firstRun;
+  return { films: [ferry, ...others], codex: !bare, keys: !bare, hideCodex: firstRun, busyOnce: start === "setup-busy" ? new Set() : null, next: 1, seenCursor: world.overview.cursor };
 }
 
 function state(world: FixtureWorld): StartWorld {
@@ -271,6 +280,7 @@ export const startRoutes: FixtureRoute[] = [
       const id = `film-${start.next++}`;
       const data = emptyFilm(id, name);
       start.films.push({ id, name, archived: false, updatedAt: new Date().toISOString(), director: "fake", data, planImport: null });
+      start.busyOnce?.add(id);
       return { ...data.snapshot.project };
     },
   },
@@ -312,13 +322,23 @@ export const startRoutes: FixtureRoute[] = [
       return { requestId: `${item.id}-demo`, turnId: `${item.id}-turn`, status: "queued", director: "fake" };
     },
   },
-  { method: "GET", match: own("/director/setup"), handle: (world, [id]) => setupRead(world, film(world, id)) },
+  {
+    method: "GET",
+    match: own("/director/setup"),
+    handle(world, [id]) {
+      const item = film(world, id);
+      if (item.id === PROJECT_ID && state(world).hideCodex) throw new ApiError("NOT_FOUND", 404);
+      return setupRead(world, item);
+    },
+  },
   {
     method: "POST",
     match: own("/director/setup"),
     handle(world, [id], body) {
       const item = film(world, id);
       const input = asObject(body);
+      const busy = state(world).busyOnce;
+      if (busy?.delete(item.id)) throw new ApiError("DIRECTOR_SETUP_BUSY", 409);
       if (input.mode === "native") {
         if (!state(world).codex || typeof input.binaryPath !== "string" || !input.binaryPath) throw new ApiError("VALIDATION_ERROR", 400);
         item.director = "native";

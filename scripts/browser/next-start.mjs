@@ -80,6 +80,12 @@ async function filmNames(page) {
   return page.locator("main[data-view='start'] .film-row h2").allInnerTexts();
 }
 
+/** The row's ••• has focus (where a closed inline rename puts it back). */
+async function focusOnMenu(page, id, message) {
+  await page.waitForFunction((film) => document.activeElement?.matches(`.film-row[data-film='${film}'] [data-act='film-menu']`), id, { timeout: 3000 })
+    .catch(async () => { throw new Error(`${message}; focus is on ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`); });
+}
+
 export const scenarios = [
   {
     name: "next-start-films",
@@ -122,12 +128,14 @@ export const scenarios = [
       await input.press("Enter");
       await expectText(page, ".film-row[data-film='night-bus'] h2", /^Night bus, take two$/);
       await expectText(page, ".toast", /Renamed to Night bus, take two\./);
-      // Esc leaves a rename without saving.
+      await focusOnMenu(page, "night-bus", "Saving a rename did not put focus back on •••");
+      // Esc leaves a rename without saving, and focus goes back to •••.
       await row(page, "night-bus").locator("[data-act='film-menu']").click();
       await page.click(".start-menu [data-act='menu-rename']");
       await row(page, "night-bus").locator("[data-act='rename-input']").fill("Never saved");
       await row(page, "night-bus").locator("[data-act='rename-input']").press("Escape");
       await expectText(page, ".film-row[data-film='night-bus'] h2", /^Night bus, take two$/);
+      await focusOnMenu(page, "night-bus", "Esc in a rename did not put focus back on •••");
       // The menu works from the keyboard: Enter opens it on its first item, arrows move, Esc returns to •••.
       const more = row(page, "demo-ferry").locator("[data-act='film-menu']");
       await more.focus();
@@ -208,7 +216,8 @@ export const scenarios = [
       await page.fill("dialog.start-sheet [data-act='film-name']", "Harbour lights");
       await page.fill("dialog.start-sheet [data-act='plan-text']", "Scene 1: the harbour at night. Scene 2: the ferry's lights in the fog.");
       await expectText(page, "dialog.start-sheet .plan-row .count", /^70 of 12,000 characters$/);
-      await expectText(page, "dialog.start-sheet .impact", /all ready/);
+      // The collapsed line names each paid default with its price.
+      await expectText(page, "dialog.start-sheet .impact", /all ready: Codex · gpt-6-astra Director \(uses your Codex plan\), OpenAI gpt-image-2 keyframes \(about \$0\.04 a keyframe\), MiniMax H3 video \(about \$0\.50 a clip\),/);
       await page.click("dialog.start-sheet [data-act='see-models']");
       await expectText(page, "dialog.start-sheet .mrow[data-job='keyframes']", /OpenAI gpt-image-2\s+about \$0\.04 a keyframe\s+✓ ready/);
       await expectText(page, "dialog.start-sheet .mrow[data-job='director']", /Codex · gpt-6-astra/);
@@ -270,17 +279,20 @@ export const scenarios = [
       await openStart(page);
       await page.waitForSelector("main[data-view='start'] .welcome");
       await expectText(page, "main[data-view='start'] .view-head", /Welcome to OpenSlate/);
-      await expectText(page, ".welcome [data-card='own'] .setup", /Codex\s+not found/);
-      await expectText(page, ".welcome [data-card='own'] .setup", /Keys for keyframes, video, narration\s+none set/);
+      // No film is open on a first run, so whether this computer has Codex is only known once a film is made.
+      await expectText(page, ".welcome [data-card='own'] .setup", /Codex\s+checked when you make a film/);
+      await expectText(page, ".welcome [data-card='own'] .setup", /Keys for media models\s+none set/);
       expect(await page.locator(".welcome [data-card='demo'] [data-act='open-demo']").evaluate((el) => el.classList.contains("primary")), "Open the demo film is not the primary action without keys");
-      expect(await page.locator(".welcome [data-act='new-from-plan']").isDisabled(), "Bring a written plan is on without Codex");
+      expect(!(await page.locator(".welcome [data-act='new-from-plan']").isDisabled()), "Bring a written plan is off although Codex is not known to be missing");
       await noSidewaysScroll(page);
       await shot(page, "start-first-run-1440");
-      // New film anyway: only the empty outline is possible, and the models say they start as stand-ins.
+      // New film anyway: while Codex is unknown the empty outline is the default, the Codex steps stay possible
+      // and say when Codex is checked; the models say they start as stand-ins.
       await page.click(".welcome [data-act='new-film']");
       await page.waitForSelector("dialog.start-sheet[open]");
-      expect((await page.locator("dialog.start-sheet [data-step='empty']").getAttribute("aria-checked")) === "true", "The empty outline is not chosen without Codex");
-      expect(await page.locator("dialog.start-sheet [data-step='director']").isDisabled(), "Talk to the Director is on without Codex");
+      expect((await page.locator("dialog.start-sheet [data-step='empty']").getAttribute("aria-checked")) === "true", "The empty outline is not the default while Codex is unknown");
+      expect(!(await page.locator("dialog.start-sheet [data-step='director']").isDisabled()), "Talk to the Director is off although Codex is not known to be missing");
+      await expectText(page, "dialog.start-sheet [data-hint='codex-unknown']", /checked when the film is made/);
       await expectText(page, "dialog.start-sheet .impact", /No keys are set, so this film starts with free stand-in models/);
       await page.click("dialog.start-sheet [data-act='see-models']");
       await expectText(page, "dialog.start-sheet .mrow[data-job='video']", /Stand-in\s+free stand-in\s+MiniMax H3: key not set/);
@@ -292,6 +304,82 @@ export const scenarios = [
       await page.waitForSelector("main.work[data-view='keyframes'] .preview .pic-img", { timeout: 15000 });
       await topFilm(page, "Demo film");
       await expectText(page, ".toast", /Made Demo film\. The stand-in Director is filling it in; nothing is charged\./);
+    },
+  },
+  {
+    // A real first run on a computer without Codex: the film is made, its Director step finds no Codex,
+    // and that is final (no Try again); closing the sheet leaves the film in the list.
+    name: "next-start-first-run-no-codex",
+    query: `${FIXTURE}&start=first-run`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openStart(page);
+      await page.waitForSelector("main[data-view='start'] .welcome");
+      await page.click(".welcome [data-act='new-film']");
+      await page.waitForSelector("dialog.start-sheet[open]");
+      await page.fill("dialog.start-sheet [data-act='film-name']", "Harbour");
+      await page.click("dialog.start-sheet [data-step='director']");
+      expect((await page.locator("dialog.start-sheet [data-step='director']").getAttribute("aria-checked")) === "true", "Talk to the Director could not be chosen");
+      await page.click("dialog.start-sheet [data-act='create-film']");
+      await expectText(page, "dialog.start-sheet .impact.cost", /Harbour was created, but Codex was not found on this computer, so the film starts with the stand-in Director\./);
+      expect(await page.locator("dialog.start-sheet [data-act='create-film']").count() === 0, "Try again is offered although it cannot find Codex");
+      const open = page.locator("dialog.start-sheet [data-act='open-created']");
+      expect(await open.evaluate((el) => el.classList.contains("primary") && el === document.activeElement), "Open the film is not the focused primary action");
+      await shot(page, "start-first-run-no-codex-1440");
+      // Close: the film made before the Director step is in the list (and the first run is over).
+      await page.click("dialog.start-sheet [data-act='sheet-close']");
+      await page.waitForSelector("dialog.start-sheet", { state: "detached" });
+      await page.waitForSelector("main[data-view='start'] .film-row h2");
+      expect(JSON.stringify(await filmNames(page)) === JSON.stringify(["Harbour"]), `Films are ${JSON.stringify(await filmNames(page))}`);
+      expect(await page.locator("main[data-view='start'] .welcome").count() === 0, "The welcome still shows with a film in the list");
+      await row(page, "film-1").locator("[data-act='open-film']").click();
+      await page.waitForSelector("main[data-view='plan']", { timeout: 10000 });
+      await topFilm(page, "Harbour");
+    },
+  },
+  {
+    // Codex is here, but each new film's first setup check answers "busy": Try again finishes the same
+    // film; a failed sheet that is closed leaves its film listed; an empty outline opens anyway.
+    name: "next-start-setup-retry",
+    query: `${FIXTURE}&start=setup-busy`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openStart(page);
+      await page.click("main[data-view='start'] [data-act='new-film']");
+      await page.waitForSelector("dialog.start-sheet[open]");
+      expect((await page.locator("dialog.start-sheet [data-step='director']").getAttribute("aria-checked")) === "true", "Talk to the Director is not the default with Codex");
+      await page.keyboard.type("Crossing");
+      await page.keyboard.press("Enter");
+      await expectText(page, "dialog.start-sheet .impact.cost", /Crossing was created, but the Codex Director could not be set up\. Try again/);
+      await expectText(page, ".toast", /The Director is still being checked/);
+      expect(await page.locator("dialog.start-sheet [data-act='create-film']").evaluate((el) => el === document.activeElement), "Try again does not have focus");
+      await shot(page, "start-setup-failed-1440");
+      // Esc closes it: the film is listed, not lost.
+      await page.keyboard.press("Escape");
+      await page.waitForSelector("dialog.start-sheet", { state: "detached" });
+      await expectText(page, "main[data-view='start'] .film-row:first-child h2", /^Crossing$/);
+      const count = (await filmNames(page)).length;
+      // Try again finishes the same film: one film, opened in Plan with the Director ready.
+      await page.click("main[data-view='start'] [data-act='new-film']");
+      await page.waitForSelector("dialog.start-sheet[open]");
+      await page.keyboard.type("Second crossing");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector("dialog.start-sheet [data-act='open-created']");
+      await page.click("dialog.start-sheet [data-act='create-film']");
+      await page.waitForSelector("main[data-view='plan']", { timeout: 10000 });
+      await expectText(page, ".toast", /Created Second crossing\. Tell the Director what the film is about\./);
+      await topFilm(page, "Second crossing");
+      await openStart(page);
+      const names = await filmNames(page);
+      expect(names.filter((name) => name === "Second crossing").length === 1 && names.length === count + 1, `Try again made a second film: ${JSON.stringify(names)}`);
+      // An empty outline does not need the Director: a failed setup only means it starts with the stand-in.
+      await page.click("main[data-view='start'] [data-act='new-film']");
+      await page.waitForSelector("dialog.start-sheet[open]");
+      await page.fill("dialog.start-sheet [data-act='film-name']", "Outline only");
+      await page.click("dialog.start-sheet [data-step='empty']");
+      await page.click("dialog.start-sheet [data-act='create-film']");
+      await page.waitForSelector("main[data-view='plan']", { timeout: 10000 });
+      await expectText(page, ".toast", /Created Outline only\. Its Codex Director could not be set up, so it starts with the stand-in/);
     },
   },
   {

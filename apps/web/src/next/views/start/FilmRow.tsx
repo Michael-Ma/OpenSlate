@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { FILM_NAME_MAX, renameValue, type FilmRow as Row } from "../../model/start.ts";
 
@@ -21,6 +21,17 @@ export function FilmRow({ row, renaming, busy, guard, onOpen, onStartRename, onR
 }) {
   const { t, tm } = useI18n();
   const nameId = useId();
+  const more = useRef<HTMLButtonElement>(null);
+  // When the inline rename closes (saved, cancelled or Esc) its field is gone: put focus back on •••,
+  // unless it already moved somewhere else (another row's rename).
+  const wasRenaming = useRef(renaming);
+  useEffect(() => {
+    if (wasRenaming.current && !renaming) {
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) more.current?.focus({ preventScroll: true });
+    }
+    wasRenaming.current = renaming;
+  }, [renaming]);
   return (
     <section className="panel film-row" aria-labelledby={nameId} data-film={row.id} aria-current={row.current ? "true" : undefined}>
       <div className="film-main">
@@ -41,7 +52,7 @@ export function FilmRow({ row, renaming, busy, guard, onOpen, onStartRename, onR
         <button type="button" className={`pill${row.current ? " primary" : ""}`} data-act="open-film" aria-label={t("start.film.open_label", { name: row.name })} onClick={onOpen}>
           {t("start.film.open")}
         </button>
-        <MoreMenu name={row.name} guard={guard} onRename={onStartRename} onArchive={onArchive} />
+        <MoreMenu buttonRef={more} name={row.name} guard={guard} onRename={onStartRename} onArchive={onArchive} />
       </div>
     </section>
   );
@@ -85,11 +96,16 @@ function RenameForm({ labelId, name, busy, guard, onSave, onCancel }: {
 }
 
 /** The ••• menu: Rename, Archive…. Arrow keys move, Esc or a click outside closes it and focus returns. */
-function MoreMenu({ name, guard, onRename, onArchive }: { name: string; guard: Guard; onRename(): void; onArchive(): void }) {
+function MoreMenu({ buttonRef: button, name, guard, onRename, onArchive }: {
+  buttonRef: RefObject<HTMLButtonElement | null>;
+  name: string;
+  guard: Guard;
+  onRename(): void;
+  onArchive(): void;
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
-  const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const menuId = useId();
 

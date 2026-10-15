@@ -47,10 +47,17 @@ export function useFilms(): Films {
   return { ...state, reload };
 }
 
-/** This computer's model catalog (GET /api/providers); "failed" when it could not be read. */
-export function useProviders(): ProviderCatalog | null | "failed" {
+export interface Providers {
+  /** This computer's model catalog (GET /api/providers); null while it is read, "failed" when it could not be. */
+  catalog: ProviderCatalog | null | "failed";
+  /** Read it again (the models changed under the New film sheet). */
+  reload(): void;
+}
+
+export function useProviders(): Providers {
   const store = useStore();
   const [catalog, setCatalog] = useState<ProviderCatalog | null | "failed">(null);
+  const [round, setRound] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     store.read<ProviderCatalog>(PROVIDERS_PATH, controller.signal).then(
@@ -58,13 +65,15 @@ export function useProviders(): ProviderCatalog | null | "failed" {
       (error: unknown) => { if (!controller.signal.aborted && !aborted(error)) setCatalog("failed"); },
     );
     return () => controller.abort();
-  }, [store]);
-  return catalog;
+  }, [store, round]);
+  const reload = useCallback(() => setRound((n) => n + 1), []);
+  return { catalog, reload };
 }
 
 /**
- * Whether this computer has Codex. The server keeps the Director per film, so this reads the open
- * film's Director setup (its host defaults are the same for every film); with no film open it is unknown.
+ * Whether this computer has Codex. The server keeps the Director per film and has no library-level
+ * read, so this reads the open film's Director setup (its host defaults are the same for every film).
+ * With no film open (a first run) it stays unknown, and a new film's Director step finds out.
  */
 export function useCodex(): Codex {
   const store = useStore();

@@ -58,7 +58,8 @@ export function StartView() {
 
   const offline = connected ? null : t("start.offline");
   const view = useMemo(() => (films.data ? filmsView(films.data, projectId, new Date(), locale) : null), [films.data, projectId, locale]);
-  const setup = useMemo(() => setupStatus(providers && providers !== "failed" ? providers : null, codex), [providers, codex]);
+  const catalog = providers.catalog;
+  const setup = useMemo(() => setupStatus(catalog && catalog !== "failed" ? catalog : null, codex), [catalog, codex]);
   const running = useMemo(() => runningJobs(overview), [overview]);
   const planOff = !stepAvailable("plan", codex);
 
@@ -80,10 +81,19 @@ export function StartView() {
     if (!projects.some((project) => project.id === film.id)) store.dispatch({ type: "projects", projects: [{ id: film.id, name: film.name }, ...projects] });
   };
 
-  const onCreated = (film: Film, outcome: CreatedOutcome) => {
-    setSheet(null);
+  /**
+   * The film exists as soon as Create answers, even if its Director setup or plan send then fails: list
+   * it now (nothing else moves the list's cursor when another film is made), so closing the sheet never
+   * hides it and invites a second one.
+   */
+  const onMade = (film: Film) => {
     void films.reload();
     remember(film);
+  };
+
+  const onCreated = (film: Film, outcome: CreatedOutcome) => {
+    setSheet(null);
+    onMade(film);
     openFilm(film.id, "plan");
     store.dispatch({ type: "toast", message: createdMsg(outcome, film.name), tone: "info" });
     if (outcome === "director") {
@@ -221,7 +231,16 @@ export function StartView() {
         />
       )}
       {sheet && (
-        <NewFilmSheet initialStep={sheet.step} codex={codex} providers={providers} offline={offline} onClose={() => setSheet(null)} onCreated={onCreated} />
+        <NewFilmSheet
+          initialStep={sheet.step}
+          codex={codex}
+          providers={catalog}
+          offline={offline}
+          onClose={() => setSheet(null)}
+          onMade={onMade}
+          onCreated={onCreated}
+          onModelsChanged={providers.reload}
+        />
       )}
     </main>
   );
