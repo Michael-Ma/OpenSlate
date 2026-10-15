@@ -15,7 +15,8 @@ import type { FixtureRoute } from "./types.ts";
  * fixture. Nothing is rendered, saved or downloaded.
  *
  * Presets for reviewing states the sample film cannot reach by itself (its 3.2 never gets a voice line here):
- * `&film=ready` (every clip made, the last export changed since), `&film=demo`, `&film=interrupted`, `&film=failed`.
+ * `&film=ready` (every clip made, the last export changed since), `&film=demo`, `&film=interrupted`, `&film=failed`,
+ * `&film=long` (20 shots).
  */
 
 /** Simulated render time; Check again finds the finished file after a short look. */
@@ -102,7 +103,7 @@ function everyClipMade(world: FixtureWorld): void {
     if (shot.label === "3.2") next = { ...next, narration: { state: "ready", text: shot.narration.text, measuredSeconds: 1.6, fits: true } };
     shots[id] = next;
   }
-  world.overview = recompute({ ...world.overview, shots });
+  world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? []);
   world.snapshot = {
     ...world.snapshot,
     project: { ...world.snapshot.project, shots: world.snapshot.project.shots.map((row) => ({ ...row, desiredFrames: world.overview.shots[row.id]?.durationFrames ?? row.desiredFrames })) },
@@ -128,7 +129,36 @@ function earlierExports(world: FixtureWorld, fixture: FilmFixture): ExportEntry[
   ];
 }
 
+/** A longer film: three more scenes of four 5 s shots with nothing made yet, so the readiness table has 20 rows. */
+function longFilm(world: FixtureWorld): void {
+  const { fps } = world.overview;
+  const template = world.overview.shots[world.overview.scenes.find((scene) => scene.ordinal === 3)?.shotIds[0] ?? ""];
+  const sceneTemplate = world.overview.scenes.find((scene) => scene.ordinal === 3);
+  const rowTemplate = world.snapshot.project.shots.find((row) => row.id === template?.shotId);
+  if (!template || !sceneTemplate || !rowTemplate) return;
+  const shots = { ...world.overview.shots };
+  const scenes = [...world.overview.scenes];
+  const rows = [...world.snapshot.project.shots];
+  const sceneRows = [...world.snapshot.project.scenes];
+  const titles = ["The crossing", "Island pier", "Morning"];
+  titles.forEach((title, index) => {
+    const ordinal = 4 + index;
+    const id = `scene-${ordinal}`;
+    const shotIds = [1, 2, 3, 4].map((n) => `shot-${ordinal}-${n}`);
+    shotIds.forEach((shotId, n) => {
+      shots[shotId] = { ...template, shotId, sceneId: id, label: `${ordinal}.${n + 1}`, durationFrames: 5 * fps, narration: { state: "none", text: "", fits: true } };
+      const { narration: _none, ...row } = rowTemplate;
+      rows.push({ ...row, id: shotId, sceneId: id, desiredFrames: 5 * fps });
+    });
+    scenes.push({ ...sceneTemplate, sceneId: id, ordinal, title, purpose: title, shotIds, keyframeTargets: shotIds, counts: { shots: 4, keyframesReady: 0, opened: 0, videosReady: 0 } });
+    sceneRows.push({ id, revisionId: `scene-rev-${ordinal}`, purpose: title, title });
+  });
+  world.overview = recompute({ ...world.overview, scenes, shots }, world.snapshot.notes ?? []);
+  world.snapshot = { ...world.snapshot, project: { ...world.snapshot.project, shots: rows, scenes: sceneRows } };
+}
+
 function applyPreset(world: FixtureWorld, fixture: FilmFixture, name: string): void {
+  if (name === "long") { longFilm(world); return; }
   if (!["ready", "demo", "interrupted", "failed"].includes(name)) return;
   everyClipMade(world);
   if (name === "demo") { fixture.demo = true; return; }
@@ -265,7 +295,7 @@ function moveShot(world: FixtureWorld, body: EditBody): { commandId: string; hea
       const at = body.beforeId ? without.indexOf(body.beforeId) : without.length;
       return { ...scene, shotIds: [...without.slice(0, at), shot.shotId, ...without.slice(at)] };
     });
-    w.overview = recompute(relabel({ ...w.overview, scenes }));
+    w.overview = recompute(relabel({ ...w.overview, scenes }), w.snapshot.notes ?? []);
     orderSnapshot(w);
     bump(w, fixture);
     fixture.undo = before;
@@ -316,7 +346,7 @@ function undo(world: FixtureWorld, entry: Undo): { commandId: string; headVersio
       const scenes = w.overview.scenes.map((scene) => ({ ...scene, shotIds: entry.scenes[scene.sceneId] ?? scene.shotIds }));
       const shots = { ...w.overview.shots };
       for (const [id, label] of Object.entries(entry.labels)) { const shot = shots[id]; if (shot) shots[id] = { ...shot, label }; }
-      w.overview = recompute(relabel({ ...w.overview, scenes, shots }));
+      w.overview = recompute(relabel({ ...w.overview, scenes, shots }), w.snapshot.notes ?? []);
       const rows = new Map(w.snapshot.project.shots.map((row) => [row.id, row]));
       w.snapshot = { ...w.snapshot, project: { ...w.snapshot.project, shots: entry.shots.map((row) => ({ ...(rows.get(row.id) ?? row), sceneId: row.sceneId })) } };
     }

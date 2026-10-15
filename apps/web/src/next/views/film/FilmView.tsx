@@ -101,6 +101,17 @@ function FilmWorkspace() {
     if (selection?.kind === "shot" && !overview.shots[selection.id]) setSelection(null);
     if (selection?.kind === "music" && !soundtrack) setSelection(null);
   }, [selection, overview, soundtrack]);
+  // On a short screen the workspace scrolls: a new selection brings its tool row into view.
+  const main = useRef<HTMLElement>(null);
+  const selectionKey = selection ? (selection.kind === "shot" ? selection.id : "music") : null;
+  useEffect(() => {
+    const work = main.current;
+    const tools = work?.querySelector<HTMLElement>(".tl-tools");
+    if (!selectionKey || !work || !tools) return;
+    const box = tools.getBoundingClientRect();
+    const view = work.getBoundingClientRect();
+    if (box.bottom > view.bottom + 1 || box.top < view.top - 1) tools.scrollIntoView({ block: "nearest" });
+  }, [selectionKey]);
   // "Open 2.2" from elsewhere (the Director, a note) selects and seeks the shot here.
   const seenStoreShot = useRef(storeShot);
   useEffect(() => {
@@ -230,7 +241,7 @@ function FilmWorkspace() {
   const when = last ? whenMsg(last.at, new Date(), locale) : null;
 
   return (
-    <main className="work film-work" data-view="film" onKeyDown={onKeyDown}>
+    <main ref={main} className="work film-work" data-view="film" onKeyDown={onKeyDown}>
       <div className="view-head">
         <h1>{t("film.title")}</h1>
         <span className="line" data-act="film-line">{t("film.line", { seconds: timeline.total, shots: timeline.shots.length, clips: timeline.clipsReady, total: timeline.shots.length })}</span>

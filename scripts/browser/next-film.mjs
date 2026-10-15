@@ -53,6 +53,29 @@ async function noSidewaysScroll(page, width) {
   expect(size <= width, `The page scrolls sideways: ${size}px wide at ${width}px`);
 }
 
+/** The readiness table keeps readable rows and scrolls inside itself; Export and its size line stay in the panel. */
+async function readableChecks(page, { scrolls }) {
+  const table = await page.locator(".export .checks").evaluate((el) => ({
+    rows: [...el.querySelectorAll("[role='rowheader']")].map((b) => b.getBoundingClientRect().height),
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+  }));
+  const short = table.rows.filter((height) => height < 16);
+  expect(!short.length, `Readiness rows are squeezed to ${short.map(Math.round).join(", ")} px`);
+  if (scrolls) expect(table.scroll > table.client + 4, `The readiness table does not scroll: ${table.scroll} in ${table.client}`);
+  expect(table.client >= 80, `The readiness table shows fewer than three rows: ${table.client} px`);
+  const panel = await box(page, ".export");
+  const go = await box(page, ".export [data-act='export']");
+  expect(go.top >= panel.top && go.bottom <= panel.bottom, `Export is outside its panel: ${go.top}-${go.bottom} in ${panel.top}-${panel.bottom}`);
+}
+
+/** The element is inside the viewport (after any scrolling the view did by itself). */
+async function inView(page, selector) {
+  const value = await box(page, selector);
+  const viewport = page.viewportSize();
+  expect(value.top >= 0 && value.bottom <= viewport.height, `${selector} is off screen: ${Math.round(value.top)}-${Math.round(value.bottom)} in ${viewport.height}`);
+}
+
 async function time(page) {
   return page.locator(".player .scrub .num").first().innerText();
 }
@@ -299,6 +322,61 @@ export const scenarios = [
       await toastSays(page, /^Found the finished export\. Nothing was rendered again\./);
       await page.waitForSelector(".export[data-state='idle']");
       await expectText(page, "[data-act='last-export']", /matches the film/);
+    },
+  },
+  {
+    name: "next-film-failed-and-long",
+    query: `${query}&film=failed`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openFilm(page);
+      await expectText(page, "[data-act='export-failed']", /The last export stopped \(RENDER_FAILED\)\./);
+      await readableChecks(page, { scrolls: true });
+      expect(!(await page.locator("[data-act='export']").isDisabled()), "Export is off after a failed export");
+      await screenshot(page, "failed-1440");
+      // A 20-shot film: the table scrolls and the page does not.
+      await page.goto(page.url().replace("film=failed", "film=long"));
+      await openFilm(page);
+      await expectText(page, "[data-act='film-line']", /^108 s · 20 shots · 3 of 20 clips made$/);
+      await readableChecks(page, { scrolls: true });
+      const size = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, viewport: innerHeight }));
+      expect(size.height <= size.viewport, `The page scrolls: ${size.height}px tall in ${size.viewport}px`);
+      await page.locator(".export .checks").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await expectText(page, `.checks [data-shot='shot-6-4']`, /6\.4\s+no clip\s+no line/);
+      await screenshot(page, "long-1440");
+    },
+  },
+  {
+    name: "next-film-short-screens",
+    query,
+    viewport: { width: 1280, height: 720 },
+    async run({ page }) {
+      await openFilm(page);
+      await readableChecks(page, { scrolls: true });
+      await noSidewaysScroll(page, 1280);
+      // The workspace scrolls when it is taller than the screen, and a selection brings its tools into view.
+      const work = await page.locator(".film-work").evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, overflow: getComputedStyle(el).overflowY }));
+      expect(work.overflow === "auto", `The workspace cannot scroll: ${JSON.stringify(work)}`);
+      await page.click(`.blk[data-shot='${shot("2.1")}']`);
+      await expectText(page, "[data-act='tools-shot']", /^2\.1 Wide$/);
+      await inView(page, ".tl-tools");
+      await inView(page, "[data-act='move'][data-d='1']");
+      await page.click("[data-act='len'][data-d='1']");
+      await toastSays(page, /^2\.1 is 6 s\./);
+      await undo(page);
+      await page.click(".mblk");
+      await expectText(page, "[data-act='tools-music']", /^Music · low-tide\.mp3$/);
+      await inView(page, "[data-act='music-menu']");
+      await inView(page, ".musicl");
+      await screenshot(page, "short-1280x720");
+      // 1366 x 768: readable rows, nothing cut off below the timeline.
+      await page.setViewportSize({ width: 1366, height: 768 });
+      await page.waitForTimeout(300);
+      await readableChecks(page, { scrolls: true });
+      await page.locator(".film-work").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await inView(page, ".tl-tools");
+      await noSidewaysScroll(page, 1366);
+      await screenshot(page, "short-1366x768");
     },
   },
   {
