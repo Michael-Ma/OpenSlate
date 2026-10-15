@@ -10,13 +10,14 @@ import { translateMsg } from '../../src/next/i18n/translate.ts';
 
 const en = m => translateMsg('en', m), zh = m => translateMsg('zh-CN', m);
 
-test('the tab row lists the four views in order and only Keyframes is designed', () => {
+test('the tab row lists the four views in order; Plan and Keyframes are designed', () => {
   const tabs = viewTabs('keyframes');
   assert.deepEqual(tabs.map(t => [t.view, t.selected, t.classic]),
-    [['plan', false, true], ['keyframes', true, false], ['assets', false, true], ['film', false, true]]);
+    [['plan', false, false], ['keyframes', true, false], ['assets', false, true], ['film', false, true]]);
   assert.deepEqual(viewTabs('film').filter(t => t.selected).map(t => t.view), ['film']);
   assert.equal(isDesignedView('keyframes'), true);
-  assert.equal(isDesignedView('plan'), false);
+  assert.equal(isDesignedView('plan'), true);
+  assert.equal(isDesignedView('film'), false);
 });
 
 test('arrow keys move focus around the tab row and wrap', () => {
