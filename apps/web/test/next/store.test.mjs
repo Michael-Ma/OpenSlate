@@ -61,3 +61,11 @@ test('a toast can carry an Undo callback; only the latest one runs, once', async
   assert.deepEqual(ran, ['second']);
   assert.equal(store.getState().toast, null);
 });
+
+test('another view can open Assets on one kind of file', async (t) => {
+  const { store } = await studio(t);
+  store.openAssets('export');
+  assert.deepEqual([store.getState().view, store.getState().assetsFilter], ['assets', { role: 'export' }]);
+  store.dispatch({ type: 'assetsFilter', role: null });
+  assert.equal(store.getState().assetsFilter, null);
+});

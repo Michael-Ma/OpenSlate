@@ -77,3 +77,17 @@ test('music imported in Assets joins the music the Film view can choose', async 
     port.close();
   }
 });
+
+test('the Film view\'s finished exports are in the asset library, the latest one current', async () => {
+  const { applyFilmPreset } = await import('../../src/next/fixtures/routes/film.ts');
+  const port = new FixturePort();
+  try {
+    applyFilmPreset(port.world, 'ready');
+    const view = await port.request('/api/projects/last-ferry/exports');
+    const { assets } = await port.request('/api/projects/last-ferry/assets?role=export');
+    assert.deepEqual(assets.map((a) => a.artifact.artifactId), [view.current, ...view.history].map((r) => r.artifact.artifactId));
+    assert.deepEqual(assets.map((a) => a.current), [true, false, false]);
+  } finally {
+    port.close();
+  }
+});

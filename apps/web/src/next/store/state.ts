@@ -1,4 +1,5 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
+import type { RoleFilter } from "../model/assets.ts";
 import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 
 export type Connection = "connecting" | "connected" | "reconnecting" | "expired" | "failed";
@@ -48,6 +49,11 @@ export interface StudioState {
   shotId: string | null;
   /** The last shot or scene opened from elsewhere; it is selected too. */
   focus: Focus | null;
+  /**
+   * The kind of file another view asked Assets to show (Film's "2 earlier in Assets" asks for exports). Assets applies
+   * it when it opens and clears it, so the tab alone opens on everything.
+   */
+  assetsFilter: { role: RoleFilter } | null;
   /** Narrow layouts show the Director as a drawer. */
   directorOpen: boolean;
   composer: { text: string; targets: Target[]; sending: boolean };
@@ -70,6 +76,7 @@ export const initialState: StudioState = {
   sceneId: null,
   shotId: null,
   focus: null,
+  assetsFilter: null,
   directorOpen: false,
   composer: { text: "", targets: [], sending: false },
   edit: null,

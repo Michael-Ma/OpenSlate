@@ -2,7 +2,7 @@ import type { AssetItem, AssetRole, StudioArtifactRef } from "@openslate/core/pu
 import { ApiError } from "../../api/client.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { artifactFor, pictureKey } from "../last-ferry.ts";
-import { addMusicRecording } from "./film.ts";
+import { addMusicRecording, finishedExports } from "./film.ts";
 import type { FixtureRoute } from "./types.ts";
 
 /**
@@ -14,7 +14,8 @@ import type { FixtureRoute } from "./types.ts";
  * route exists only here: the picture of a PNG imported into this sample film (FIXTURE_PICTURE_ROUTE).
  *
  * Shot assets follow the fixture overview, so a keyframe or clip made in the Keyframes view shows up
- * here, and the take it replaced stays as an earlier take (once the library has seen it).
+ * here, and the take it replaced stays as an earlier take (once the library has seen it). The Film view's
+ * finished exports are listed too (the latest is current), so its "earlier in Assets" finds them.
  */
 
 const MIB = 1024 * 1024;
@@ -149,7 +150,11 @@ export function fixtureAssets(world: FixtureWorld): AssetItem[] {
     fixture.seen.set(key, { ...item, createdAt: known?.createdAt ?? made });
   }
   const shots = [...fixture.seen.entries()].map(([key, item]) => ({ ...item, current: current.has(key) }));
-  return [...shots, ...fixture.extras].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const exports = finishedExports(world).map((record, index): AssetItem => ({
+    artifact: record.artifact!, role: "export", current: index === 0, source: record.demo ? "demo" : "generated",
+    label: "Export", createdAt: localTime(new Date(record.finishedAt ?? record.startedAt)),
+  }));
+  return [...shots, ...fixture.extras, ...exports].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
 
 function query(raw: string | undefined): URLSearchParams {

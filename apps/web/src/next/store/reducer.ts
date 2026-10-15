@@ -1,4 +1,5 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
+import type { RoleFilter } from "../model/assets.ts";
 import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 import type { Connection, EditDraft, StudioState } from "./state.ts";
 
@@ -15,6 +16,7 @@ export type Action =
   | { type: "scene"; sceneId: string }
   | { type: "shot"; shotId: string }
   | { type: "focus"; kind: "shot" | "scene"; id: string }
+  | { type: "assetsFilter"; role: RoleFilter | null }
   | { type: "directorOpen"; open: boolean }
   | { type: "composerText"; text: string }
   | { type: "composerTarget"; target: Target; add: boolean }
@@ -74,6 +76,8 @@ export function reducer(state: StudioState, action: Action): StudioState {
       const selected = reducer(state, action.kind === "shot" ? { type: "shot", shotId: action.id } : { type: "scene", sceneId: action.id });
       return { ...selected, focus: { kind: action.kind, id: action.id, nonce: (state.focus?.nonce ?? 0) + 1 } };
     }
+    case "assetsFilter":
+      return { ...state, assetsFilter: action.role ? { role: action.role } : null };
     case "directorOpen":
       return { ...state, directorOpen: action.open };
     case "composerText":

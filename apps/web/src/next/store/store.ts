@@ -2,6 +2,7 @@ import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, Contr
 import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import { errorMsg } from "../i18n/translate.ts";
+import type { RoleFilter } from "../model/assets.ts";
 import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
@@ -373,6 +374,8 @@ export class StudioStore {
   /** Open a shot from elsewhere (a Director note): selected, and the view on screen brings it into view, even again. */
   focusShot = (shotId: string) => this.dispatch({ type: "focus", kind: "shot", id: shotId });
   focusScene = (sceneId: string) => this.dispatch({ type: "focus", kind: "scene", id: sceneId });
+  /** Open Assets showing one kind of file (e.g. Film's earlier exports). */
+  openAssets = (role: RoleFilter) => { this.dispatch({ type: "assetsFilter", role }); this.setView("assets"); };
   setDirectorOpen = (open: boolean) => this.dispatch({ type: "directorOpen", open });
   setComposerText = (text: string) => this.dispatch({ type: "composerText", text });
   pointAt = (target: Target, add = true) => this.dispatch({ type: "composerTarget", target, add });

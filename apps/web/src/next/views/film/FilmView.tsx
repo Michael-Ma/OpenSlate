@@ -271,7 +271,7 @@ function FilmWorkspace() {
               ) : (
                 <button type="button" className="pill sm" data-act="download" onClick={() => store.dispatch({ type: "toast", message: msg("film.download.fixture"), tone: "info" })}>{t("film.last.download")}</button>
               )}
-              {last.earlier > 0 ? <button type="button" className="pill sm ghost" data-act="earlier-exports" onClick={() => store.setView("assets")}>{t("film.last.earlier", { count: last.earlier })}</button> : null}
+              {last.earlier > 0 ? <button type="button" className="pill sm ghost" data-act="earlier-exports" onClick={() => store.openAssets("export")}>{t("film.last.earlier", { count: last.earlier })}</button> : null}
             </>
           ) : (
             <span className="last-line dim">{t("film.last.none")}</span>
@@ -338,7 +338,7 @@ function FilmWorkspace() {
           recordings={recordings}
           current={music?.audioId ?? null}
           onPick={pickMusic}
-          onImport={() => store.setView("assets")}
+          onImport={() => store.openAssets("music")}
           onClose={() => setMenuAnchor(null)}
         />
       ) : null}

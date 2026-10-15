@@ -364,6 +364,11 @@ function storyboard(world: FixtureWorld, body: unknown): unknown {
   return DECLINE;
 }
 
+/** The finished exports, newest first: the Assets view lists them (the latest is current). */
+export function finishedExports(world: FixtureWorld): ExportRecord[] {
+  return state(world).exports.map((entry) => entry.record).filter((record) => record.state === "done" && !!record.artifact);
+}
+
 /** Music imported in the Assets view joins the film's library, so Change music lists it. */
 export function addMusicRecording(world: FixtureWorld, recording: MusicRecording): void {
   const fixture = state(world);

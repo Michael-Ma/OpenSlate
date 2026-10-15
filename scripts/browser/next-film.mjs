@@ -336,6 +336,16 @@ export const scenarios = [
       await expectText(page, "[data-act='changed-since']", /^changed since: shot order$/);
       expect(await page.locator("[data-act='download']").count() === 1, "The last export is no longer downloadable after an edit");
       await screenshot(page, "export-done-1440");
+      // "3 earlier in Assets" opens Assets on the exports: the latest and the three before it.
+      await page.click("[data-act='earlier-exports']");
+      await page.waitForSelector("main.work[data-view='assets'] .tile");
+      expect((await page.locator("[data-act='role-filter'][data-role='export']").getAttribute("aria-pressed")) === "true", "Assets did not open on the exports");
+      await page.waitForFunction(() => document.querySelectorAll("main.work[data-view='assets'] .tile").length === 4, null, { timeout: 5000 })
+        .catch(async () => { throw new Error(`Assets shows ${await page.locator("main.work[data-view='assets'] .tile").count()} tiles, not the 4 exports`); });
+      // The tab alone opens on everything again.
+      await page.click(".topbar [data-act='tab'][data-view='film']");
+      await page.click(".topbar [data-act='tab'][data-view='assets']");
+      await page.waitForSelector("main.work[data-view='assets'] [data-act='role-filter'][data-role='all'][aria-pressed='true']");
     },
   },
   {

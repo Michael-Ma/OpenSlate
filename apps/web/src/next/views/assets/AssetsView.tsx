@@ -70,7 +70,14 @@ function Library() {
   const list = useAssetList();
   const items = list.items ?? EMPTY;
 
-  const [filters, setFilters] = useState<AssetFilters>(ALL_ASSETS);
+  // Another view may have asked for one kind of file (Film's earlier exports); it applies once, then the tab opens on all.
+  const asked = useStudio((s) => s.assetsFilter);
+  const [filters, setFilters] = useState<AssetFilters>(() => (asked ? { ...ALL_ASSETS, role: asked.role } : ALL_ASSETS));
+  useEffect(() => {
+    if (!asked) return;
+    setFilters({ ...ALL_ASSETS, role: asked.role });
+    store.dispatch({ type: "assetsFilter", role: null });
+  }, [asked, store]);
   const [selected, setSelected] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
   const [importing, setImporting] = useState(false);
