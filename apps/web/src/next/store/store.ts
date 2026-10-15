@@ -1,8 +1,8 @@
-import type { AcceptProposalInput, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput } from "@openslate/core/public";
+import type { AcceptProposalInput, NarrationFitInput, NarrationFitReceipt, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput } from "@openslate/core/public";
 import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import { errorMsg } from "../i18n/translate.ts";
-import { CommandRefused, keyframesBody, videoBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
+import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
 import { reducer, type Action } from "./reducer.ts";
@@ -202,11 +202,22 @@ export class StudioStore {
     const scene = overview?.scenes.find((s) => s.sceneId === sceneId);
     if (!overview || !scene) return Promise.resolve(undefined);
     const frames = scene.videoTargets.map((id) => ({ shotId: id, artifactId: overview.shots[id]?.keyframe.artifact?.artifactId ?? null }));
-    return this.#press(`confirm:${sceneId}`, { kind: "video", sceneId, frames }, async () => {
-      const read = await this.#sceneRead(sceneId);
-      const body = { ...videoBody(read, overview), ...(scene.quotes.confirmVideo && !scene.quotes.confirmVideo.priceUnknown ? { expectedEstimateMicros: scene.quotes.confirmVideo.micros } : {}) };
-      return { path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(sceneId)}/generate`), body };
-    });
+    // One durable server command (P3): it survives a closed tab or a restart and never buys a step twice.
+    return this.#press(`confirm:${sceneId}`, { kind: "confirm", sceneId, frames }, async () => ({
+      path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(sceneId)}/confirm`),
+      body: confirmBody(overview, scene),
+    }));
+  }
+
+  /** Settle a too-long voice line (SB-2, SB-3): lengthen the shot, or keep its length and cut the line with a fade. Free and undoable. */
+  async narrationFit(shotId: string, fit: NarrationFitInput["fit"], toast?: Msg): Promise<boolean> {
+    const snapshot = this.#state.snapshot;
+    if (!snapshot) return false;
+    const body: NarrationFitInput = { fit, expectedHeadVersion: snapshot.project.headVersion };
+    const receipt = await this.#press<NarrationFitReceipt>(`fit:${shotId}`, { shotId, ...body }, async () => ({ path: path(snapshot.project.id, `/shots/${encodeURIComponent(shotId)}/narration-fit`), body }));
+    if (!receipt) return false;
+    if (toast) this.dispatch({ type: "toast", message: toast, tone: "info", undoCommandId: receipt.commandId });
+    return true;
   }
 
   /** Storyboard edits are free. The toast offers Undo with the returned command id. */
