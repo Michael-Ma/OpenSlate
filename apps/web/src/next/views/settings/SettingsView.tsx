@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import type { Locale } from "../../../shared/locale-preference.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
@@ -11,7 +11,7 @@ import { useResource } from "../../store/useResource.ts";
 import { ComputerPanel } from "./ComputerPanel.tsx";
 import { DirectorPanel } from "./DirectorPanel.tsx";
 import { ModelsPanel } from "./ModelsPanel.tsx";
-import { onRadioKeys, Panel } from "./parts.tsx";
+import { NoFilmPanel, onRadioKeys, Panel, radioTab } from "./parts.tsx";
 import { useRead } from "./useRead.ts";
 import { VoicePanel } from "./VoicePanel.tsx";
 import "./settings.css";
@@ -29,9 +29,11 @@ const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia
 /**
  * Settings (SB-23, SB-24, D4, D15), reached from the gear in the top bar. One page, not a chat card: the film's
  * models, Director and voice first, then this computer and the language, with a section index on the left.
+ * With no film open (the gear on Start) the film sections say so, and the page opens at This computer.
  */
 export function SettingsView() {
   const { t } = useI18n();
+  const hasFilm = useStudio((s) => !!s.projectId);
   const film = useStudio((s) => s.snapshot?.project.name ?? s.projects.find((p) => p.id === s.projectId)?.name ?? "");
   const connection = useStudio((s) => s.connection);
   const offline = connection === "connected" ? null : t("set.offline");
@@ -40,8 +42,16 @@ export function SettingsView() {
   const review = useRead<DirectorReview>("/settings/director-review");
   const voice = useResource<VoiceSetting>("/settings/voice");
   const personal = useResource<PersonalVoices>("/narration/personal-voices");
-  const providers = useResource<ProviderCatalogView>("/api/providers");
-  const [section, setSection] = useState("set-models");
+  // The installed catalog belongs to this computer, not to a film.
+  const providers = useRead<ProviderCatalogView>("/api/providers", { film: false });
+  const [section, setSection] = useState(hasFilm ? "set-models" : "set-computer");
+
+  // Without a film, open at This computer, as the study's gear on Start does (settings.html#computer).
+  useEffect(() => {
+    if (hasFilm) return;
+    setSection("set-computer");
+    document.getElementById("set-computer")?.scrollIntoView({ block: "start" });
+  }, [hasFilm]);
 
   const go = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -62,7 +72,7 @@ export function SettingsView() {
     <main className="work set-view" data-view="settings">
       <div className="view-head">
         <h1 tabIndex={-1}>{t("set.title")}</h1>
-        <span className="line">{t("set.scope_line", { film })}</span>
+        <span className="line">{hasFilm ? t("set.scope_line", { film }) : t("set.scope_line_no_film")}</span>
       </div>
       <div className="set-grid">
         <nav className="set-index" aria-label={t("set.index")}>
@@ -72,10 +82,20 @@ export function SettingsView() {
           {SECTIONS.filter((s) => s.group === "everywhere").map(link)}
         </nav>
         <div className="set-sections">
-          <ModelsPanel models={models} setup={setup} film={film} offline={offline} />
-          <DirectorPanel setup={setup} review={review} film={film} offline={offline} />
-          <VoicePanel voice={voice} personal={personal} film={film} offline={offline} />
-          <ComputerPanel providers={providers} setup={setup} offline={offline} />
+          {hasFilm ? (
+            <>
+              <ModelsPanel models={models} setup={setup} film={film} offline={offline} />
+              <DirectorPanel setup={setup} review={review} film={film} offline={offline} />
+              <VoicePanel voice={voice} personal={personal} film={film} offline={offline} />
+            </>
+          ) : (
+            <>
+              <NoFilmPanel id="set-models" title="set.section.models" lead="set.no_film.models" />
+              <NoFilmPanel id="set-director" title="set.section.director" lead="set.no_film.director" />
+              <NoFilmPanel id="set-voice" title="set.section.voice" lead="set.no_film.voice" />
+            </>
+          )}
+          <ComputerPanel providers={providers} setup={setup} hasFilm={hasFilm} offline={offline} />
           <LanguagePanel />
         </div>
       </div>
@@ -102,8 +122,8 @@ function LanguagePanel() {
           <span>{t("set.lang.hint")}</span>
         </div>
         <span className="segctl" role="radiogroup" aria-labelledby="set-lang-l" onKeyDown={onRadioKeys}>
-          <button type="button" role="radio" lang="en" aria-checked={locale === "en"} data-act="set-language" data-v="en" onClick={() => choose("en")}>{t("set.lang.en")}</button>
-          <button type="button" role="radio" lang="zh-CN" aria-checked={locale === "zh-CN"} data-act="set-language" data-v="zh-CN" onClick={() => choose("zh-CN")}>{t("set.lang.zh")}</button>
+          <button type="button" role="radio" lang="en" aria-checked={locale === "en"} tabIndex={radioTab(locale === "en")} data-act="set-language" data-v="en" onClick={() => choose("en")}>{t("set.lang.en")}</button>
+          <button type="button" role="radio" lang="zh-CN" aria-checked={locale === "zh-CN"} tabIndex={radioTab(locale === "zh-CN")} data-act="set-language" data-v="zh-CN" onClick={() => choose("zh-CN")}>{t("set.lang.zh")}</button>
         </span>
       </div>
     </Panel>

@@ -4,7 +4,7 @@ import { draftProblems, emptyDraft, narratorChoices, narratorName, narratorReque
 import { msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
-import { Dialog, onRadioKeys, Panel, ReadState } from "./parts.tsx";
+import { Dialog, onRadioKeys, Panel, radioTab, ReadState } from "./parts.tsx";
 
 const NARRATOR_PRESS = "settings:narrator";
 const REGISTER_PRESS = "settings:voice-register";
@@ -115,7 +115,7 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
             <span className="label" id={`${ids}-prov`}>{t("set.voice.provider")}</span>
             <span className="segctl" role="radiogroup" aria-labelledby={`${ids}-prov`} onKeyDown={onRadioKeys}>
               {(["openai", "elevenlabs"] as const).map((provider) => (
-                <button key={provider} type="button" role="radio" aria-checked={draft.provider === provider} data-act="voice-provider" data-v={provider} onClick={() => setProvider(provider)}>{PROVIDER_NAME[provider]}</button>
+                <button key={provider} type="button" role="radio" aria-checked={draft.provider === provider} tabIndex={radioTab(draft.provider === provider)} data-act="voice-provider" data-v={provider} onClick={() => setProvider(provider)}>{PROVIDER_NAME[provider]}</button>
               ))}
             </span>
           </div>

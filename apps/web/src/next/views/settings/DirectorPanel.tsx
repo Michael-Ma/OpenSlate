@@ -63,19 +63,23 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
 
   const body = () => {
     if (!data) {
-      if (setup.error) return <p className="lead">{t("set.director.unavailable", { code: setup.error })}</p>;
-      return <ReadState error={null} onRetry={setup.reload} />;
+      // An answered "no Director setup here" is a fact; any other failed read can be tried again.
+      if (setup.error === "SERVICE_UNAVAILABLE" || setup.error === "NOT_FOUND") return <p className="lead">{t("set.director.unavailable")}</p>;
+      return <ReadState error={setup.error} onRetry={setup.reload} />;
     }
     if (draft) {
       const fieldProblem = (field: keyof DirectorDraft) => problems.find((p) => p.field === field)?.problem;
+      const hint = (field: keyof DirectorDraft) => `${ids}-${field}-why`;
+      // Save names every reason it is off.
+      const reasons = problems.map((p) => hint(p.field)).join(" ") || undefined;
       const choices = data.modelChoices.map((choice) => choice.id);
       if (draft.model && !choices.includes(draft.model)) choices.unshift(draft.model);
       return (
         <form className="inline-form" data-form="director" aria-label={t("set.director.form")} onSubmit={(event) => { event.preventDefault(); void save(); }}>
           <label className="field">
             <span className="label">{t("set.director.field.program")}</span>
-            <input id={`${ids}-bin`} className="input mono" value={draft.binaryPath} spellCheck={false} autoComplete="off" aria-invalid={!!fieldProblem("binaryPath")} onChange={(e) => setDraft({ ...draft, binaryPath: e.target.value })} />
-            {fieldProblem("binaryPath") && draft.binaryPath && <span className="hint">{tm(fieldProblem("binaryPath")!)}</span>}
+            <input id={`${ids}-bin`} className="input mono" value={draft.binaryPath} spellCheck={false} autoComplete="off" aria-invalid={!!fieldProblem("binaryPath")} aria-describedby={fieldProblem("binaryPath") ? hint("binaryPath") : undefined} onChange={(e) => setDraft({ ...draft, binaryPath: e.target.value })} />
+            {fieldProblem("binaryPath") && <span className="hint" id={hint("binaryPath")}>{tm(fieldProblem("binaryPath")!)}</span>}
           </label>
           <label className="field">
             <span className="label">{t("set.director.field.model")}</span>
@@ -84,17 +88,18 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
                 {choices.map((id) => <option key={id} value={id}>{id}</option>)}
               </select>
             ) : (
-              <input className="input mono" value={draft.model} spellCheck={false} autoComplete="off" onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
+              <input className="input mono" value={draft.model} spellCheck={false} autoComplete="off" aria-invalid={!!fieldProblem("model")} aria-describedby={fieldProblem("model") ? hint("model") : undefined} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
             )}
+            {fieldProblem("model") && <span className="hint" id={hint("model")}>{tm(fieldProblem("model")!)}</span>}
           </label>
           <label className="field">
             <span className="label">{t("set.director.field.home")}</span>
-            <input className="input mono" value={draft.codexHome} placeholder={t("set.director.home_placeholder")} spellCheck={false} autoComplete="off" aria-invalid={!!fieldProblem("codexHome")} onChange={(e) => setDraft({ ...draft, codexHome: e.target.value })} />
-            {fieldProblem("codexHome") && <span className="hint">{tm(fieldProblem("codexHome")!)}</span>}
+            <input className="input mono" value={draft.codexHome} placeholder={t("set.director.home_placeholder")} spellCheck={false} autoComplete="off" aria-invalid={!!fieldProblem("codexHome")} aria-describedby={fieldProblem("codexHome") ? hint("codexHome") : undefined} onChange={(e) => setDraft({ ...draft, codexHome: e.target.value })} />
+            {fieldProblem("codexHome") && <span className="hint" id={hint("codexHome")}>{tm(fieldProblem("codexHome")!)}</span>}
           </label>
           <div className="impact"><span className="ic" aria-hidden="true">i</span><span>{t("set.director.save_note")}</span></div>
           <div className="form-acts">
-            <button type="submit" className="pill primary" data-act="director-save" disabled={!!offline || saving || problems.length > 0} title={offline ?? undefined}>{saving ? t("set.saving") : t("set.save")}</button>
+            <button type="submit" className="pill primary" data-act="director-save" disabled={!!offline || saving || problems.length > 0} aria-describedby={reasons} title={offline ?? undefined}>{saving ? t("set.saving") : t("set.save")}</button>
             <button type="button" className="pill" data-act="director-cancel" onClick={cancel}>{t("set.cancel")}</button>
           </div>
         </form>

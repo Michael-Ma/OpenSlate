@@ -1,16 +1,29 @@
-import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { ApiError } from "../../api/client.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
-import { applyRequest, choiceFor, impactOf, modelRows, previewCurrent, previewRequest, type MediaKind, type ModelApplyResult, type ModelPreview, type ModelRow, type ModelSettingsStatus } from "../../model/settings.ts";
+import { errorMsg } from "../../i18n/translate.ts";
+import { applyRequest, choiceFor, impactOf, modelRows, previewRequest, previewUsable, sharedRequest, type MediaKind, type ModelApplyResult, type ModelPreview, type ModelRow, type ModelSettingsStatus } from "../../model/settings.ts";
 import { DEMO_VALUE, codexState, directorRequest, directorRow, selectionFor, type DirectorChoice, type DirectorSetup } from "../../model/settings-director.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
 import { Panel, ReadState, ReadyMark } from "./parts.tsx";
 
-type Pending =
-  | { job: "director"; value: string }
-  | { job: MediaKind; value: string; phase: "checking" | "ready" | "failed"; preview: ModelPreview | null };
+/**
+ * A media switch in progress: checking → ready → applying. It fails (no preview: try again) or goes stale
+ * (the server refused the apply, or the film moved on since the check: check again).
+ */
+interface MediaPending {
+  job: MediaKind;
+  value: string;
+  phase: "checking" | "ready" | "applying" | "failed" | "stale";
+  preview: ModelPreview | null;
+  /** The studio's event cursor when the check was sent; any later event may change the work it covers. */
+  checkedAt: number;
+}
+
+type Pending = { job: "director"; value: string } | MediaPending;
 
 /** One press per job and choice, so picking another model while one is being checked is never blocked. */
 const PREVIEW_PRESS = (kind: MediaKind, value: string) => `settings:preview:${kind}:${value}`;
@@ -30,25 +43,54 @@ export function ModelsPanel({ models, setup, film, offline }: {
   const store = useStore();
   const { t, tm, locale } = useI18n();
   const overview = useStudio((s) => s.overview);
+  const cursor = useStudio((s) => s.overview?.cursor ?? s.snapshot?.cursor ?? 0);
   const presses = useStudio((s) => s.pending);
   const labels = useMemo(() => Object.fromEntries(Object.values(overview?.shots ?? {}).map((shot) => [shot.shotId, shot.label])), [overview]);
   const rows = useMemo(() => (models.data ? modelRows(models.data, locale) : null), [models.data, locale]);
   const director = useMemo(() => (setup.data ? directorRow(setup.data) : null), [setup.data]);
   const [pending, setPending] = useState<Pending | null>(null);
   const token = useRef(0);
+  /** Previews on their way, by press: choosing A, then B, then A again waits for A's first check instead of failing. */
+  const inflight = useRef(new Map<string, { promise: Promise<ModelPreview | undefined>; checkedAt: number }>());
   const applying = !!presses[APPLY_PRESS] || !!presses[DIRECTOR_PRESS];
 
-  const focusSelect = (job: string) => requestAnimationFrame(() => document.getElementById(`set-m-${job}`)?.focus());
+  // Once the saved choice is the pending one (a reply that was lost, another tab), the switch is done.
+  useEffect(() => {
+    if (!pending) return;
+    const saved = pending.job === "director" ? director?.selected : models.data?.selected[pending.job];
+    if (saved === pending.value) { token.current++; setPending(null); }
+  }, [pending, director, models.data]);
 
-  const check = async (kind: MediaKind, value: string) => {
-    const status = models.data;
-    if (!status) return;
+  const focusSelect = (job: string) => requestAnimationFrame(() => document.getElementById(`set-m-${job}`)?.focus());
+  const cursorNow = () => { const s = store.getState(); return s.overview?.cursor ?? s.snapshot?.cursor ?? 0; };
+
+  const sendPreview = (status: ModelSettingsStatus, kind: MediaKind, value: string) => {
+    const id = PREVIEW_PRESS(kind, value);
+    return sharedRequest(inflight.current, id, () => {
+      const request = previewRequest(status, kind, value);
+      return { checkedAt: cursorNow(), promise: store.command<ModelPreview>(id, request.body, () => request) };
+    });
+  };
+
+  /** What switching `kind` to `value` affects. `fresh` re-reads the settings first (Try again, Check again). */
+  const check = async (kind: MediaKind, value: string, fresh = false) => {
     const mine = ++token.current;
-    setPending({ job: kind, value, phase: "checking", preview: null });
-    const request = previewRequest(status, kind, value);
-    const preview = await store.command<ModelPreview>(PREVIEW_PRESS(kind, value), request.body, () => request);
+    setPending({ job: kind, value, phase: "checking", preview: null, checkedAt: cursorNow() });
+    let status = models.data;
+    if (fresh) {
+      status = await store.read<ModelSettingsStatus>("/settings/models").catch((error: unknown) => {
+        store.dispatch({ type: "toast", message: errorMsg(error instanceof ApiError ? error.code : "NETWORK_ERROR"), tone: "error" });
+        return null;
+      });
+      models.reload();
+      if (token.current !== mine) return;
+    }
+    if (!status) { setPending({ job: kind, value, phase: "failed", preview: null, checkedAt: cursorNow() }); return; }
+    if (status.selected[kind] === value) { setPending(null); return; }
+    const { promise, checkedAt } = sendPreview(status, kind, value);
+    const preview = await promise;
     if (token.current !== mine) return;
-    setPending({ job: kind, value, phase: preview ? "ready" : "failed", preview: preview ?? null });
+    setPending({ job: kind, value, phase: preview ? "ready" : "failed", preview: preview ?? null, checkedAt });
   };
 
   const choose = (job: "director" | MediaKind, current: string | null) => (event: ChangeEvent<HTMLSelectElement>) => {
@@ -66,13 +108,21 @@ export function ModelsPanel({ models, setup, film, offline }: {
     if (job) focusSelect(job);
   };
 
-  const applyMedia = async (row: ModelRow, preview: ModelPreview) => {
+  const applyMedia = async (row: ModelRow, shown: MediaPending, preview: ModelPreview) => {
     const choice = choiceFor(row, preview.selected[row.kind]);
     const toast = choice ? msg("set.toast.model_switched", { job: t(row.job), model: tm(choice.name) }) : undefined;
     const request = applyRequest(preview);
+    const mine = ++token.current;
+    setPending({ ...shown, phase: "applying" });
     const result = await store.command<ModelApplyResult>(APPLY_PRESS, request.body, () => request, toast);
-    if (!result) return;
-    setPending(null);
+    if (!result) {
+      // Refused (the film or its settings moved on) or unanswered: the same Switch would fail the same way,
+      // so the row asks for a fresh check instead. The toast says why.
+      if (token.current === mine) setPending({ ...shown, phase: "stale" });
+      return;
+    }
+    // The saved choice may already have cleared the row (its event can arrive before this reply).
+    if (token.current === mine) { token.current++; setPending(null); }
     models.reload();
     focusSelect(row.kind);
   };
@@ -97,7 +147,9 @@ export function ModelsPanel({ models, setup, film, offline }: {
       return (
         <div className="mrow" data-job="director">
           <span className="c job">{t("set.job.director")}</span>
-          <span className="c model dim">{setup.error ? t("set.models.director_unavailable") : t("set.loading")}</span>
+          <span className="c model dim" title={setup.error ?? undefined}>
+            {!setup.error ? t("set.loading") : setup.error === "SERVICE_UNAVAILABLE" || setup.error === "NOT_FOUND" ? t("set.models.director_unavailable") : t("set.models.director_read_failed")}
+          </span>
           <span className="c price" />
           <span className="c ready-c" />
         </div>
@@ -145,16 +197,25 @@ export function ModelsPanel({ models, setup, film, offline }: {
             <>
               <label className="sr" htmlFor={`set-m-${row.kind}`}>{t("set.models.select", { job: t(row.job) })}</label>
               <select id={`set-m-${row.kind}`} className="select" data-act="model" data-job={row.kind} value={value} disabled={!!disabledWhy || applying} title={disabledWhy ?? undefined} onChange={choose(row.kind, row.selected)}>
+                {/* No saved choice: a placeholder, so choosing the first model is a real change. */}
+                {row.selected === null && <option value="" disabled>{t("set.models.choose")}</option>}
                 {row.choices.map((choice) => (
-                  <option key={choice.value} value={choice.value} disabled={!choice.ready && choice.value !== row.selected}>{optionText(tm(choice.name), choice.ready, choice.reason)}</option>
+                  <option key={choice.value} value={choice.value} disabled={!!choice.missing || (!choice.ready && choice.value !== row.selected)}>
+                    {choice.missing ? tm(choice.name) : optionText(tm(choice.name), choice.ready, choice.reason)}
+                  </option>
                 ))}
               </select>
             </>
           ) : <span className="dim">{t("set.models.none")}</span>}
         </span>
         <span className="c price">{shown ? tm(shown.estimate) : null}</span>
-        <span className="c ready-c">{shown && <ReadyMark ready={shown.ready} reason={shown.reason} />}</span>
-        {mine && shown && models.data && <MediaImpact row={row} pending={mine} status={models.data} model={tm(shown.name)} labels={labels} locale={locale} offline={offline} applying={applying} onApply={(preview) => void applyMedia(row, preview)} onRetry={() => void check(row.kind, mine.value)} onCancel={cancel} />}
+        <span className="c ready-c">{shown ? <ReadyMark ready={shown.ready} reason={shown.reason} /> : row.selected === null && row.choices.length > 0 && <span className="ready n">{t("set.models.not_chosen")}</span>}</span>
+        {mine && shown && models.data && (
+          <MediaImpact
+            row={row} pending={mine} status={models.data} cursor={cursor} model={tm(shown.name)} labels={labels} locale={locale} offline={offline} applying={applying}
+            onApply={(preview) => void applyMedia(row, mine, preview)} onRetry={() => void check(row.kind, mine.value, true)} onCancel={cancel}
+          />
+        )}
       </div>
     );
   };
@@ -178,10 +239,12 @@ export function ModelsPanel({ models, setup, film, offline }: {
   );
 }
 
-function MediaImpact({ row, pending, status, model, labels, locale, offline, applying, onApply, onRetry, onCancel }: {
+function MediaImpact({ row, pending, status, cursor, model, labels, locale, offline, applying, onApply, onRetry, onCancel }: {
   row: ModelRow;
-  pending: Extract<Pending, { phase: string }>;
+  pending: MediaPending;
   status: ModelSettingsStatus;
+  /** The studio's event cursor now. */
+  cursor: number;
   model: string;
   labels: Record<string, string>;
   locale: string;
@@ -194,7 +257,7 @@ function MediaImpact({ row, pending, status, model, labels, locale, offline, app
   const { t } = useI18n();
   const titleFor = (id: MessageId) => t(id, { model });
   if (pending.phase === "checking" || !pending.preview) {
-    const failed = pending.phase === "failed";
+    const failed = pending.phase !== "checking";
     return (
       <ImpactRow
         title={failed ? t("set.impact.failed") : t("set.impact.checking")}
@@ -208,12 +271,15 @@ function MediaImpact({ row, pending, status, model, labels, locale, offline, app
     );
   }
   const preview = pending.preview;
-  if (!previewCurrent(preview, status)) {
+  // While Switch runs, its own event must not turn the row stale under the person's press.
+  const sending = pending.phase === "applying";
+  if (pending.phase === "stale" || (!sending && !previewUsable(preview, status, pending.checkedAt, cursor))) {
     return (
       <ImpactRow
         title={t("set.impact.stale")}
         lines={[]}
         tone="info"
+        stale
         actions={<><button type="button" className="pill" data-act="model-recheck" disabled={!!offline} onClick={onRetry}>{t("set.impact.check_again")}</button><button type="button" className="pill" data-act="model-cancel" onClick={onCancel}>{t("set.cancel")}</button></>}
       />
     );
@@ -224,15 +290,15 @@ function MediaImpact({ row, pending, status, model, labels, locale, offline, app
       title={titleFor(impact.titleId)}
       lines={impact.lines}
       tone={impact.changes ? "cost" : "none"}
-      actions={<SwitchActions disabled={!!offline || applying} busy={applying} why={offline} onSwitch={() => onApply(preview)} onCancel={onCancel} />}
+      actions={<SwitchActions disabled={!!offline || applying} busy={sending} why={offline} onSwitch={() => onApply(preview)} onCancel={onCancel} />}
     />
   );
 }
 
-function ImpactRow({ title, lines, tone, busy, actions }: { title: string; lines: Msg[]; tone: "cost" | "none" | "info"; busy?: boolean; actions: ReactNode }) {
+function ImpactRow({ title, lines, tone, busy, stale, actions }: { title: string; lines: Msg[]; tone: "cost" | "none" | "info"; busy?: boolean; stale?: boolean; actions: ReactNode }) {
   const { tm } = useI18n();
   return (
-    <div className="impact-row" data-impact={tone}>
+    <div className="impact-row" data-impact={tone} data-stale={stale || undefined}>
       <div className={`impact${tone === "cost" ? " cost" : tone === "none" ? " none" : ""}`} role="status" aria-busy={busy || undefined}>
         <span className="ic" aria-hidden="true">{tone === "cost" ? "!" : tone === "none" ? "✓" : "i"}</span>
         <span><b>{title}</b>{lines.length ? " " : ""}{lines.map((line) => tm(line)).join(" ")}</span>

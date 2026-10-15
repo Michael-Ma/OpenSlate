@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
+import { errorMsg } from "../../i18n/translate.ts";
 import { codeSegments } from "../../model/shell.ts";
 import type { Msg } from "../../model/types.ts";
 
@@ -19,6 +20,9 @@ export function Panel({ id, title, scope, end, children }: { id: string; title: 
   );
 }
 
+/** Like a native radio group, only the checked option of a group of radio buttons is in the tab order. */
+export const radioTab = (checked: boolean): 0 | -1 => (checked ? 0 : -1);
+
 /** Arrow keys move the choice inside a radio group of buttons (language, provider). */
 export function onRadioKeys(event: KeyboardEvent<HTMLElement>) {
   const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
@@ -32,15 +36,25 @@ export function onRadioKeys(event: KeyboardEvent<HTMLElement>) {
   next?.click();
 }
 
-/** A section that has not been read yet, or whose read failed. */
+/** A section that has not been read yet, or whose read failed: the reason in words, the code only as a detail. */
 export function ReadState({ error, onRetry }: { error: string | null; onRetry(): void }) {
-  const { t } = useI18n();
+  const { t, tm } = useI18n();
   if (!error) return <p className="lead" role="status">{t("set.loading")}</p>;
   return (
     <div className="set-readfail" role="alert">
-      <span className="status fail"><i className="ic" aria-hidden="true">!</i>{t("set.read_failed", { code: error })}</span>
+      <span className="status fail" title={error} data-code={error}><i className="ic" aria-hidden="true">!</i>{t("set.read_failed", { reason: tm(errorMsg(error)) })}</span>
       <button type="button" className="pill sm" data-act="retry-read" onClick={onRetry}>{t("set.retry")}</button>
     </div>
+  );
+}
+
+/** A film section while no film is open (Settings opened from Start): what it holds and how to change it. */
+export function NoFilmPanel({ id, title, lead }: { id: string; title: MessageId; lead: MessageId }) {
+  const { t } = useI18n();
+  return (
+    <Panel id={id} title={title} scope={t("set.scope.each_film")}>
+      <p className="lead" data-no-film>{t(lead)}</p>
+    </Panel>
   );
 }
 
