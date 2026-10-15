@@ -22,12 +22,16 @@ export function clockText(totalSeconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-/** Values the server writes into a new shot (storyboard.ts addShot); the outline shows them as not written yet. */
-const PLACEHOLDERS: Record<"purpose" | "framing" | "motion" | "imagePrompt", readonly string[]> = {
+/**
+ * Values the server writes into a new shot or scene (storyboard.ts addShot, addScene); the outline shows them as
+ * not written yet. A new scene's direction is "New scene" until the person writes one.
+ */
+const PLACEHOLDERS: Record<"purpose" | "framing" | "motion" | "imagePrompt" | "sceneDirection", readonly string[]> = {
   purpose: ["New shot"],
   framing: ["Describe the visual direction"],
   motion: ["Describe the camera movement"],
   imagePrompt: ["Pending direction"],
+  sceneDirection: ["New scene"],
 };
 
 /** The written value of a shot field, or "" when it is blank or still the server's placeholder. */
@@ -44,11 +48,25 @@ const DIRECTION_SEPARATOR = "\nReference details (retain only where consistent):
  * "current direction" header (storyboard.ts editedPrompt); the outline shows purpose and framing already.
  */
 export function promptText(imagePrompt: string): string {
-  if (imagePrompt.startsWith(DIRECTION_HEADER)) {
-    const split = imagePrompt.indexOf(DIRECTION_SEPARATOR);
-    if (split >= 0) return written("imagePrompt", imagePrompt.slice(split + DIRECTION_SEPARATOR.length));
-  }
-  return written("imagePrompt", imagePrompt);
+  const split = directionEnd(imagePrompt);
+  return written("imagePrompt", split === null ? imagePrompt : imagePrompt.slice(split));
+}
+
+/** Where the person's own words start after the server's direction header, or null when there is none. */
+function directionEnd(imagePrompt: string): number | null {
+  if (!imagePrompt.startsWith(DIRECTION_HEADER)) return null;
+  const split = imagePrompt.indexOf(DIRECTION_SEPARATOR);
+  return split < 0 ? null : split + DIRECTION_SEPARATOR.length;
+}
+
+/**
+ * The picture prompt to save when the person rewrote their words: the server's direction header (purpose and
+ * framing, written there by an earlier edit) stays in front, so generation keeps using it. Without a header the
+ * words are the whole prompt.
+ */
+export function promptToSave(currentImagePrompt: string, text: string): string {
+  const split = directionEnd(currentImagePrompt);
+  return split === null ? text : `${currentImagePrompt.slice(0, split)}${text}`;
 }
 
 // ---- status pills (neutral unless done; failures carry an icon and words) --------------------------
@@ -229,7 +247,7 @@ export function planOutline(snapshot: ProjectSnapshot, overview: GenerationOverv
       sceneId: scene.sceneId,
       ordinal: scene.ordinal,
       title: scene.title,
-      direction: scene.purpose.trim(),
+      direction: written("sceneDirection", scene.purpose),
       seconds,
       state: sceneState(scene, list.length),
       shots,

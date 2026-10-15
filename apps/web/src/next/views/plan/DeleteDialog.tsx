@@ -1,7 +1,9 @@
 import { useI18n } from "../../i18n/I18n.tsx";
 import { listLabels } from "../../model/keyframes.ts";
 import type { DeleteFacts } from "../../model/plan.ts";
+import type { Msg } from "../../model/types.ts";
 import { Modal } from "./Modal.tsx";
+import { SaveError } from "./TextPanel.tsx";
 
 interface Props {
   kind: "scene" | "shot";
@@ -11,6 +13,8 @@ interface Props {
   facts: DeleteFacts;
   busy: boolean;
   guard: string | undefined;
+  /** Why the server refused the delete (the confirm stays open to say so). */
+  error: Msg | null;
   onCancel(): void;
   onConfirm(): void;
 }
@@ -19,7 +23,7 @@ interface Props {
  * Delete a scene with its shots, or one shot, after a confirm that lists what stays in Assets, the film's new
  * length and the renumbering. The action is white even though it deletes; the title and the list say what happens.
  */
-export function DeleteDialog({ kind, name, title, facts, busy, guard, onCancel, onConfirm }: Props) {
+export function DeleteDialog({ kind, name, title, facts, busy, guard, error, onCancel, onConfirm }: Props) {
   const { t, tm, locale } = useI18n();
   const media = facts.media.map((item) => tm(item));
   const heading = kind === "scene"
@@ -35,6 +39,7 @@ export function DeleteDialog({ kind, name, title, facts, busy, guard, onCancel, 
           : t(facts.renumbers ? "plan.delete.length_shot" : "plan.delete.length_shot_last", { seconds: facts.seconds })}</li>
         <li>{t("plan.delete.undo_note")}</li>
       </ul>
+      <SaveError error={error} lead="plan.delete.not_deleted" />
       <div className="foot">
         <button type="button" className="pill" data-act="delete-cancel" data-autofocus onClick={onCancel}>{t("plan.cancel")}</button>
         <button type="button" className="pill primary" data-act={kind === "scene" ? "delete-scene-confirm" : "delete-shot-confirm"} disabled={busy || !!guard} title={guard} onClick={onConfirm}>

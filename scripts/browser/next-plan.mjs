@@ -108,7 +108,7 @@ export const scenarios = [
       await page.fill('[data-field="line"]', "One for the morning boat, please.");
       await expectText(page, '[data-note="line"]', /About 1\.8 s \(estimate, 0\.3 s a word; measured once the voice line is made\) · fits 5 s/);
       await expectText(page, '[data-impact="cost"] .txt', /The voice line needs making again; until then its length is an estimate\./);
-      await expectText(page, '[data-hint="multi"]', /Saved as 2 changes; Undo reverts the last one\./);
+      await expectText(page, '[data-hint="multi"]', /^Saves as 2 changes; Undo reverts only the last one \(1\.2 line\)\.$/);
       await page.fill('[data-field="line"]', "One for the morning boat.");
       await screenshot(page, "editing-1440");
       await page.click('[data-act="save-shot"]');
@@ -145,19 +145,48 @@ export const scenarios = [
       await expectText(page, '[data-field="length"]', /^3 s$/);
       expect(await page.locator('[data-act="len-shorter"]').isDisabled(), "The stepper goes below 3 s");
       await page.click('[data-act="cancel-edit"]');
-      // 2.3 after Make 8 s: its 7.4 s line is accepted, so the shot cannot go below it (SB-8).
+      // 2.3 after Make 8 s (the Director's note b, settled in Keyframes): its 7.4 s line is accepted, so the shot
+      // cannot go below the whole second that holds it (SB-8).
       await page.click('.topbar [data-act="tab"][data-view="keyframes"]');
-      await page.waitForSelector('[data-act="make-fit"]', { timeout: 20000 });
-      await page.click('[data-act="make-fit"]');
-      await page.waitForSelector('.banner[data-state="settled"]');
+      await page.click('.banner [data-act="note-choice"][data-note="note-b"][data-kind="proposal"]', { timeout: 20000 });
+      await page.waitForSelector('.banner[data-note="note-b"][data-state="settled"]');
       await openPlan(page);
       await page.click(`[data-act="edit-shot"][data-shot="${shot("2.3")}"]`);
       await expectText(page, '[data-field="length"]', /^8 s$/);
-      await page.click('[data-act="len-shorter"]');
-      await expectText(page, '[data-field="length"]', /^7\.4 s$/);
       expect(await page.locator('[data-act="len-shorter"]').isDisabled(), "The stepper goes below the accepted voice line");
-      await expectText(page, '.len-hint', /^No shorter than its 7\.4 s voice line\.$/);
+      await expectText(page, '.len-hint', /^At least 8 s: the voice line is 7\.4 s\.$/);
+      await page.click('[data-act="len-longer"]');
+      await expectText(page, '[data-field="length"]', /^9 s$/);
+      await page.click('[data-act="len-shorter"]');
+      await expectText(page, '[data-field="length"]', /^8 s$/);
+      expect(await page.locator('[data-act="len-shorter"]').isDisabled(), "The stepper goes below 8 s");
       await screenshot(page, "length-floor-1440");
+    },
+  },
+  {
+    name: "next-plan-multi-field-undo",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openPlan(page);
+      // Two fields are two commands, and the server undoes only its latest: the hint, the toast and the header say so.
+      await page.click(`[data-act="edit-shot"][data-shot="${shot("3.1")}"]`);
+      await page.fill('[data-field="purpose"]', "The ferry leaves the pier.");
+      await page.fill('[data-field="motion"]', "Slow pan left");
+      await expectText(page, '[data-hint="multi"]', /^Saves as 2 changes; Undo reverts only the last one \(3\.1 purpose\)\.$/);
+      await page.click('[data-act="save-shot"]');
+      await expectText(page, ".toast", /^Saved 3\.1\. Undo reverts only the last change: 3\.1 purpose\./);
+      await expectText(page, '[data-act="plan-undo"]', /^Undo: 3\.1 purpose$/);
+      await expectText(page, `[data-shot="${shot("3.1")}"]`, /The ferry leaves the pier\.[\s\S]*slow pan left/);
+      await page.click('[data-act="plan-undo"]');
+      await expectText(page, ".toast", /Undone: 3\.1 purpose\./);
+      const row = await rowText(page, "3.1");
+      expect(!/The ferry leaves the pier\./.test(row) && /slow pan left/.test(row), `Undo did not revert only the purpose: ${JSON.stringify(row)}`);
+      // A quick second edit right after a save does not trip over the head version the studio has not re-read yet.
+      await page.click(`[data-act="scene-down"][data-scene="${scene(1)}"]`);
+      await page.click(`[data-act="scene-down"][data-scene="${scene(1)}"]`);
+      await expectText(page, `[data-shot="${shot("1.1")}"] .badge`, /^3\.1$/);
+      expect(!(await page.locator(".toast.error, .toast[data-tone='error']").count()), "A quick second move was refused");
     },
   },
   {
@@ -192,6 +221,28 @@ export const scenarios = [
       await page.click('.toast [data-act="undo"]');
       await expectText(page, ".view-head .line", /^3 scenes · 8 shots · 48 s of a 6:00 maximum$/);
       await expectText(page, `[data-shot="${shot("1.2")}"]`, /Opened[\s\S]*Clip/);
+    },
+  },
+  {
+    name: "next-plan-delete-refused",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      // A keyframe being made in Scene 2: the server refuses to delete the scene, and the confirm says why, once.
+      await page.waitForSelector('[data-card="shot-2-2"] [data-act="note-regenerate"]', { timeout: 20000 });
+      await page.click('[data-card="shot-2-2"] [data-act="note-regenerate"]');
+      await page.waitForSelector('[data-card="shot-2-2"] .making');
+      await openPlan(page);
+      await page.click(`[data-act="scene-menu"][data-scene="${scene(2)}"]`);
+      await page.click('[role="menu"] [data-act="delete-scene"]');
+      await page.waitForSelector("dialog[open]");
+      await page.click('[data-act="delete-scene-confirm"]');
+      await expectText(page, "dialog[open] .edit-error", /Not deleted: Jobs are still running here\. Wait for them to finish, then try again\.$/);
+      expect(!(await page.locator(".toast.error").count()), "The refusal is also a toast");
+      await screenshot(page, "delete-refused-1440");
+      await page.click('[data-act="delete-cancel"]');
+      await page.waitForSelector("dialog[open]", { state: "detached" });
+      await expectText(page, ".view-head .line", /^3 scenes · 8 shots/);
     },
   },
   {
@@ -234,6 +285,8 @@ export const scenarios = [
       await page.click('[data-act="save-title"]');
       await expectText(page, ".scenes > .scene:last-child h2", /^Epilogue$/);
       await expectText(page, ".scenes > .scene:last-child", /No shots yet\. Add one, or ask the Director to plan this scene\./);
+      // Nothing was written as its direction: the server's placeholder is not shown as one.
+      await expectText(page, ".scenes > .scene:last-child .direction", /^Direction: None yet$/);
       await screenshot(page, "added-1440");
     },
   },
@@ -246,6 +299,17 @@ export const scenarios = [
       await page.click(`[data-act="point-scene"][data-scene="${scene(2)}"]`);
       await expectText(page, ".composer", /@Scene 2|Scene 2/);
       await expectText(page, ".toast", /Pointing the Director at Scene 2\./);
+      // The Director's "Open 2.3" stays in Plan and brings the row into view (P5-DESIGN shell item 9).
+      await expectText(page, ".dir-head .scene", /^Whole film$/);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.locator('.thread [data-act="note-open"]').filter({ hasText: "Open 2.3" }).first().click();
+      await page.waitForSelector(`.shot-row.flash[data-shot="${shot("2.3")}"]`);
+      expect(await page.locator('main.work[data-view="plan"]').count() === 1, "Open 2.3 left Plan");
+      await page.waitForFunction((id) => {
+        const rect = document.querySelector(`.shot-row[data-shot="${id}"]`)?.getBoundingClientRect();
+        return !!rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
+      }, shot("2.3"), { timeout: 3000 });
+      // The row's own menu still opens it in Keyframes.
       await page.click(`[data-act="shot-menu"][data-shot="${shot("2.2")}"]`);
       await page.click('[role="menu"] [data-act="open-keyframes"]');
       await page.waitForSelector('main.work[data-view="keyframes"]', { timeout: 20000 });
@@ -260,6 +324,7 @@ export const scenarios = [
       await openPlan(page);
       await page.click('[data-act="import-open"]');
       await page.waitForSelector("dialog.sheet[open]");
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-field") === "import-text", null, { timeout: 3000 });
       expect(await page.locator('[data-act="import-send"]').isDisabled(), "Send is on with no text");
       await page.fill('[data-field="import-name"]', "draft.docx");
       await page.fill('[data-field="import-text"]', SAMPLE);
@@ -278,6 +343,8 @@ export const scenarios = [
       expect(await page.locator('[data-act="add-scene"]').isDisabled(), "Add scene is on while a written plan waits");
       await page.click('[data-act="import-review"]');
       await page.waitForSelector('[data-act="import-confirm"]', { timeout: 10000 });
+      // The review opens on the proposal itself, so Enter alone never replaces the outline.
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-review") === "body", null, { timeout: 3000 });
       await expectText(page, "dialog.sheet", /Now\s*3 scenes · 8 shots · 48 s[\s\S]*From last-ferry-draft\.md\s*3 scenes · 9 shots · 52 s/);
       await expectText(page, '[data-row="2.3"]', /Line: “It was the last boat of the season\.”[\s\S]*Changed/);
       await expectText(page, '[data-row="2.4"]', /The gangway is lowered; Mara steps aboard\.[\s\S]*Wide · 4 s · no narration[\s\S]*New/);
@@ -308,6 +375,22 @@ export const scenarios = [
       await expectText(page, ".toast", /Discarded the written plan\. The outline did not change\./);
       await expectText(page, ".view-head .line", /^3 scenes · 8 shots · 48 s/);
       expect(!(await page.locator(".pending").count()), "The pending strip stays after discarding");
+    },
+  },
+  {
+    name: "next-plan-stopped",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openPlan(page);
+      // Stop the film while the Director works: bringing a written plan starts work, so it waits for Continue.
+      await page.fill(".composer textarea", "Hold the last shot a little longer.");
+      await page.keyboard.press("Enter");
+      await page.click('[data-act="stop"]', { timeout: 10000 });
+      await page.waitForFunction(() => document.querySelector('[data-act="import-open"]')?.disabled === true, null, { timeout: 10000 });
+      expect((await page.locator('[data-act="import-open"]').getAttribute("title")) === "Stopped. Continue first.", "The import button does not say why it is off");
+      // Free edits still save while stopped.
+      expect(!(await page.locator(`[data-act="edit-shot"][data-shot="${shot("1.1")}"]`).isDisabled()), "Edit is off while stopped");
     },
   },
   {

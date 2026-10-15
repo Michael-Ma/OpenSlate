@@ -4,7 +4,7 @@ import { lastFerryOverview, sceneId, shotId } from '../../src/next/fixtures/last
 import { catalog } from '../../src/next/i18n/messages.ts';
 import { translate } from '../../src/next/i18n/translate.ts';
 import {
-  canStep, changedFields, draftEdits, draftOf, draftProblem, editChange, lengthFloor, lengthHint, lineNote, savedMessage, shotImpact, stepLength, unitPrices,
+  canStep, changedFields, draftEdits, draftOf, draftProblem, editChange, FRAMINGS, lengthFloor, lengthHint, lineNote, MOTIONS, savedMessage, shotImpact, stepLength, unitPrices,
 } from '../../src/next/model/plan-edit.ts';
 
 const overview = lastFerryOverview();
@@ -78,6 +78,18 @@ test('the commands are ordered so the server accepts them, one field each', () =
   assert.deepEqual(changedFields(base, { ...base, purpose: `${base.purpose}  ` }), [], 'surrounding spaces are not a change');
 });
 
+test('a prompt-only save keeps the purpose and framing the server wrote into the prompt', () => {
+  const header = 'OpenSlate current direction:\nMara buys the last ticket. Medium\nReference details (retain only where consistent):\n';
+  const edited = { ...shot('1.2'), imagePrompt: `${header}Mara at the counter, sliding coins across.` };
+  const base = draftOf(edited, 'generated', 30);
+  assert.equal(base.prompt, 'Mara at the counter, sliding coins across.', 'the editor shows only the words');
+  const [prompt] = draftEdits(base, { ...base, prompt: 'Coins on the counter.' }, 30, 'generated', edited.imagePrompt);
+  assert.deepEqual(prompt.edit, { kind: 'shot', field: 'imagePrompt', value: `${header}Coins on the counter.` });
+  // Without a header the words are the whole prompt.
+  const plain = draftOf(shot('1.2'), 'generated', 30);
+  assert.equal(draftEdits(plain, { ...plain, prompt: 'Coins.' }, 30, 'generated', shot('1.2').imagePrompt)[0].edit.value, 'Coins.');
+});
+
 test('a cleared field or an empty line cannot be saved', () => {
   const base = draftOf(shot('1.2'), 'generated', 30);
   assert.deepEqual(draftProblem(base, { ...base, purpose: ' ' }), { id: 'plan.edit.required_purpose' });
@@ -85,7 +97,7 @@ test('a cleared field or an empty line cannot be saved', () => {
   assert.equal(draftProblem(base, { ...base, purpose: 'New' }), null);
 });
 
-test('the length has a floor at an accepted voice line (SB-8)', () => {
+test('the length has a floor at an accepted voice line, in whole seconds (SB-8)', () => {
   // 1.2's 2.1 s line fits: the floor is the 3 s minimum.
   const floor12 = lengthFloor(shot('1.2'), 30, 'line');
   assert.deepEqual(floor12, { min: 3, reason: 'voice', lineSeconds: 2.1 });
@@ -94,15 +106,23 @@ test('the length has a floor at an accepted voice line (SB-8)', () => {
   const floor23 = lengthFloor(shot('2.3'), 30, 'line');
   assert.equal(floor23.reason, null);
   assert.deepEqual(lengthHint(shot('2.3'), floor23), { id: 'plan.len.line_long', values: { line: 7.4 } });
-  // Once 2.3 was lengthened to fit, it cannot go below the line.
+  // Once 2.3 was lengthened to fit (Make 8 s), it cannot go below the whole second that holds its 7.4 s line.
   const extended = { ...shot('2.3'), durationFrames: 240, narration: { ...shot('2.3').narration, fits: true, fit: 'extend_shot' } };
   const floor = lengthFloor(extended, 30, 'line');
-  assert.deepEqual(floor, { min: 7.4, reason: 'voice', lineSeconds: 7.4 });
-  assert.deepEqual(lengthHint(extended, floor), { id: 'plan.len.floor_voice', values: { line: 7.4 } });
-  assert.equal(stepLength(8, -1, floor), 7.4);
-  assert.equal(canStep(7.4, -1, floor), false);
+  assert.deepEqual(floor, { min: 8, reason: 'voice', lineSeconds: 7.4 });
+  assert.deepEqual(lengthHint(extended, floor), { id: 'plan.len.floor_voice', values: { min: 8, line: 7.4 } });
+  assert.equal(canStep(8, -1, floor), false);
+  assert.equal(stepLength(9, -1, floor), 8);
+  assert.equal(stepLength(8, 1, floor), 9);
   assert.equal(stepLength(14.5, 1, floor), 15);
   assert.equal(canStep(15, 1, floor), false);
+  // A length between whole seconds (written elsewhere) snaps onto the grid on its first step.
+  const free = { min: 3, reason: null, lineSeconds: null };
+  assert.equal(stepLength(7.4, 1, free), 8);
+  assert.equal(stepLength(7.4, -1, free), 7);
+  assert.equal(stepLength(3.5, -1, free), 3);
+  assert.equal(stepLength(7.4, -1, floor), 7.4, 'below the floor it does not go further down');
+  assert.equal(lengthFloor({ ...extended, narration: { ...extended.narration, measuredSeconds: 7 } }, 30, 'line').min, 7, 'a whole-second line needs no more');
   // Choosing no narration lifts the floor; a line cut at the shot's end holds the current length.
   assert.equal(lengthFloor(extended, 30, 'none').min, 3);
   const cut = { ...shot('2.3'), narration: { ...shot('2.3').narration, fit: 'cut_to_shot' } };
@@ -123,7 +143,15 @@ test('Undo names the whole edit, or the field its last command saved', () => {
   assert.deepEqual(editChange('1.2', ['length', 'prompt', 'purpose']), { id: 'plan.change.field.purpose', values: { shot: '1.2' } });
   for (const field of ['purpose', 'framing', 'prompt', 'motion', 'length', 'narration', 'line']) assert.ok(Object.hasOwn(catalog, `plan.change.field.${field}`));
   for (const field of ['purpose', 'framing', 'prompt', 'motion']) assert.ok(Object.hasOwn(catalog, `plan.edit.required_${field}`));
-  for (const key of ['wide', 'medium', 'close_up', 'extreme_close_up']) assert.ok(Object.hasOwn(catalog, `plan.framing.${key}`));
+  // Before saving, the hint says Undo will revert only the last field; after, the toast says the same.
+  assert.equal(translate('en', 'plan.edit.multi', { count: 2, change: '3.1 purpose' }), 'Saves as 2 changes; Undo reverts only the last one (3.1 purpose).');
+  assert.equal(translate('en', 'plan.toast.saved_undo_last', { saved: 'Saved 3.1.', change: '3.1 purpose' }), 'Saved 3.1. Undo reverts only the last change: 3.1 purpose.');
+});
+
+test('framings and motions are shot content in the film\'s words, not translated', () => {
+  assert.deepEqual(FRAMINGS, ['Wide', 'Medium', 'Close-up', 'Extreme close-up']);
+  assert.ok(MOTIONS.includes('Static'));
+  assert.ok(!Object.keys(catalog).some((id) => id.startsWith('plan.motion.') || /^plan\.framing\.(?!choose$)/.test(id)));
 });
 
 test('the Chinese impact line reads with the price in place', () => {

@@ -1,14 +1,11 @@
 import type { ShotOverview } from "@openslate/core/public";
 import { useId, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
-import type { MessageId } from "../../i18n/messages.ts";
-import { canStep, draftEdits, draftOf, draftProblem, FRAMINGS, lengthFloor, lengthHint, lineNote, shotImpact, stepLength, type ShotDraft, type UnitPrices } from "../../model/plan-edit.ts";
+import { canStep, draftEdits, draftOf, draftProblem, editChange, FRAMINGS, lengthFloor, lengthHint, lineNote, MOTIONS, shotImpact, stepLength, type ShotDraft, type UnitPrices } from "../../model/plan-edit.ts";
 import type { NarrationMode, ShotRowView } from "../../model/plan.ts";
 import type { Msg } from "../../model/types.ts";
 import { Rich } from "./Rich.tsx";
 import { rowId, Thumb } from "./ShotRow.tsx";
-
-const MOTIONS = ["static", "breath", "push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down"] as const;
 
 interface Props {
   shot: ShotOverview;
@@ -41,10 +38,11 @@ export function ShotEditor({ shot, row, mode, fps, prices, saving, guard, error,
   const floor = lengthFloor(shot, fps, draft.narration);
   const impact = shotImpact(shot, base, draft, prices, locale);
   const problem = draftProblem(base, draft);
-  const edits = draftEdits(base, draft, fps, mode);
+  const edits = draftEdits(base, draft, fps, mode, shot.imagePrompt);
   const line = lineNote(shot, draft);
-  const framings = FRAMINGS.map((key) => t(`plan.framing.${key}` as MessageId));
-  const framingOptions = draft.framing && !framings.includes(draft.framing) ? [draft.framing, ...framings] : framings;
+  // Framings are shot content in the film's own words; a framing written elsewhere is offered as it is.
+  const framingOptions = draft.framing && !FRAMINGS.includes(draft.framing) ? [draft.framing, ...FRAMINGS] : FRAMINGS;
+  const undoes = edits.length > 1 ? tm(editChange(row.label, edits.map((item) => item.field))) : "";
   const disabled = saving || !!guard || !!problem || edits.length === 0;
 
   const submit = (event: FormEvent) => {
@@ -88,7 +86,7 @@ export function ShotEditor({ shot, row, mode, fps, prices, saving, guard, error,
         <div className="field">
           <label htmlFor={field("motion")}>{t("plan.field.motion")}</label>
           <input id={field("motion")} className="input" data-field="motion" list={field("motions")} value={draft.motion} onChange={(event) => set("motion", event.target.value)} />
-          <datalist id={field("motions")}>{MOTIONS.map((key) => <option key={key} value={t(`plan.motion.${key}` as MessageId)} />)}</datalist>
+          <datalist id={field("motions")}>{MOTIONS.map((value) => <option key={value} value={value} />)}</datalist>
         </div>
         <div className="field narr">
           <span className="label" id={field("narr")}>{t("plan.field.narration")}</span>
@@ -114,7 +112,7 @@ export function ShotEditor({ shot, row, mode, fps, prices, saving, guard, error,
         <div className="edit-foot wide">
           <button type="submit" className="pill primary" data-act="save-shot" disabled={disabled} title={guard}>{t(saving ? "plan.saving" : "plan.save")}</button>
           <button type="button" className="pill" data-act="cancel-edit" onClick={onCancel}>{t("plan.cancel")}</button>
-          {problem ? <span className="hint">{tm(problem)}</span> : edits.length > 1 ? <span className="hint" data-hint="multi">{t("plan.edit.multi", { count: edits.length })}</span> : null}
+          {problem ? <span className="hint">{tm(problem)}</span> : edits.length > 1 ? <span className="hint" data-hint="multi">{t("plan.edit.multi", { count: edits.length, change: undoes })}</span> : null}
         </div>
       </form>
     </li>

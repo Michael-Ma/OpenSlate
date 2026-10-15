@@ -40,8 +40,8 @@ export function ImportSheet(props: Props) {
     : stage === "stale" ? t("plan.import.stale_title")
     : t("plan.import.title");
   return (
-    <Modal className="sheet plan-sheet" labelledBy="plan-import-title" onClose={onClose}>
-      <div className="sheet-head">
+    <Modal className="sheet plan-sheet" labelledBy="plan-import-title" step={stage} onClose={onClose}>
+      <div className="sheet-head" data-modal-chrome>
         <h2 id="plan-import-title">{title}</h2>
         <button type="button" className="pill sm" data-act="import-close" onClick={onClose}>{t("plan.import.close")}</button>
       </div>
@@ -96,7 +96,8 @@ function PasteStep({ busy, guard, runGuard, onClose, onSend }: Props) {
         </div>
         <div className="field">
           <label htmlFor="plan-import-text">{t("plan.import.text")}</label>
-          <textarea id="plan-import-text" className="textarea" data-field="import-text" rows={11} maxLength={IMPORT_MAX_CHARS} value={text} aria-describedby="plan-import-count" onChange={(event) => setText(event.target.value)} />
+          {/* Most plans are pasted, so the sheet opens with focus here. */}
+          <textarea id="plan-import-text" className="textarea" data-field="import-text" data-autofocus rows={11} maxLength={IMPORT_MAX_CHARS} value={text} aria-describedby="plan-import-count" onChange={(event) => setText(event.target.value)} />
           <span className="counter" id="plan-import-count">{t("plan.import.count", { count, max })}</span>
         </div>
       </div>
@@ -113,7 +114,7 @@ function NoCodexStep({ onClose, onSettings }: Props) {
   const { t } = useI18n();
   return (
     <>
-      <div className="sheet-body">
+      <div className="sheet-body" tabIndex={-1} data-autofocus>
         <div className="impact cost" role="status">
           <span className="ic" aria-hidden="true">!</span>
           <span><b>{t("plan.import.nocodex_title")}</b> {t("plan.import.nocodex")}</span>
@@ -133,7 +134,8 @@ function ReadingStep({ stage, pending, busy, guard, onClose, onDiscard }: Props)
   const { t } = useI18n();
   return (
     <>
-      <div className="sheet-body">
+      {/* Focus starts on what is happening; when the review arrives it moves there, unless a button was chosen. */}
+      <div className="sheet-body" tabIndex={-1} data-autofocus>
         {stage === "waiting" ? (
           <p className="hint" role="status">{t("plan.import.waiting", { name: pending?.name ?? DEFAULT_IMPORT_NAME })}</p>
         ) : (
@@ -155,7 +157,8 @@ function StaleStep({ busy, guard, onDiscard }: Props) {
   const { t } = useI18n();
   return (
     <>
-      <div className="sheet-body">
+      {/* Focus starts on the reason, not on Discard, so it is read before anything is pressed. */}
+      <div className="sheet-body" tabIndex={-1} data-autofocus>
         <div className="impact cost" role="status">
           <span className="ic" aria-hidden="true">!</span>
           <span>{t("plan.import.stale")}</span>
@@ -175,7 +178,9 @@ function ReviewStep({ pending, review, notes, busy, guard, onDiscard, onConfirm 
   const totals = (value: ImportReview["now"]) => t("plan.import.totals", { scenes: value.scenes, shots: value.shots, seconds: value.seconds });
   return (
     <>
-      <div className="sheet-body">
+      {/* Focus starts on the proposal itself (read from the top, scrolled with the arrow keys); Confirm and
+          Discard follow it, so Enter alone never replaces the outline. */}
+      <div className="sheet-body" tabIndex={-1} data-autofocus data-review="body">
         <div className="summary-row">
           <div><span className="muted">{t("plan.import.now")}</span><b>{totals(review.now)}</b></div>
           <div><span className="muted">{t("plan.import.from", { name: pending.name })}</span><b data-totals="proposed">{totals(review.proposed)}</b></div>

@@ -1,7 +1,7 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { clipUnit } from "./inspector.ts";
-import { promptText, secondsOf, written, type NarrationMode } from "./plan.ts";
+import { promptText, promptToSave, secondsOf, written, type NarrationMode } from "./plan.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -77,13 +77,15 @@ export function draftProblem(base: ShotDraft, draft: ShotDraft): Msg | null {
  * The commands that save a draft, in an order the server accepts: dropping the line first (so a shorter shot is
  * no longer held by its voice), then the length (refused before anything else is saved if it is too short), the
  * prompt before purpose and framing (which are written into it), and the line before choosing to narrate.
+ * `imagePrompt` is the shot's whole picture prompt as stored: a rewritten prompt keeps the server's direction
+ * header in front of the person's words (see promptToSave).
  */
-export function draftEdits(base: ShotDraft, draft: ShotDraft, fps: number, mode: NarrationMode | undefined): { field: DraftField; edit: ShotFieldEdit }[] {
+export function draftEdits(base: ShotDraft, draft: ShotDraft, fps: number, mode: NarrationMode | undefined, imagePrompt = ""): { field: DraftField; edit: ShotFieldEdit }[] {
   const fields = new Set(changedFields(base, draft));
   const out: { field: DraftField; edit: ShotFieldEdit }[] = [];
   if (fields.has("narration") && draft.narration === "none") out.push({ field: "narration", edit: { kind: "narration", field: "mode", value: "none" } });
   if (fields.has("length")) out.push({ field: "length", edit: { kind: "shot", field: "desiredFrames", value: String(Math.round(draft.seconds * fps)) } });
-  if (fields.has("prompt")) out.push({ field: "prompt", edit: { kind: "shot", field: "imagePrompt", value: draft.prompt.trim() } });
+  if (fields.has("prompt")) out.push({ field: "prompt", edit: { kind: "shot", field: "imagePrompt", value: promptToSave(imagePrompt, draft.prompt.trim()) } });
   if (fields.has("motion")) out.push({ field: "motion", edit: { kind: "shot", field: "motion", value: draft.motion.trim() } });
   if (fields.has("purpose")) out.push({ field: "purpose", edit: { kind: "shot", field: "purpose", value: draft.purpose.trim() } });
   if (fields.has("framing")) out.push({ field: "framing", edit: { kind: "shot", field: "framing", value: draft.framing.trim() } });
@@ -103,22 +105,35 @@ export interface LengthFloor {
   lineSeconds: number | null;
 }
 
-/** The voice-line floor (SB-8): the server refuses a shot shorter than its accepted line. */
+/**
+ * The voice-line floor (SB-8): the server refuses a shot shorter than its accepted line. Shot lengths are whole
+ * seconds (as Make 8 s and the Film view's tools write them), so the floor is the whole second that holds the
+ * line: a 7.4 s line needs at least 8 s.
+ */
 export function lengthFloor(shot: ShotOverview, fps: number, narration: NarrationChoice): LengthFloor {
   const line = shot.narration;
   const none: LengthFloor = { min: MIN_SHOT_SECONDS, reason: null, lineSeconds: null };
   if (narration === "none" || line.state !== "ready" || line.measuredSeconds === undefined) return none;
   const measured = line.measuredSeconds;
   if (line.fit === "cut_to_shot") return { min: Math.max(MIN_SHOT_SECONDS, secondsOf(shot.durationFrames, fps)), reason: "cut", lineSeconds: round1(measured) };
-  if (line.fits === true || line.fit === "extend_shot") return { min: Math.max(MIN_SHOT_SECONDS, Math.ceil(measured * 10 - 1e-6) / 10), reason: "voice", lineSeconds: round1(measured) };
+  if (line.fits === true || line.fit === "extend_shot") return { min: Math.max(MIN_SHOT_SECONDS, Math.ceil(measured - 1e-6)), reason: "voice", lineSeconds: round1(measured) };
   return none;
 }
 
-/** One step of the length stepper: a second at a time, never below the floor or outside 3–15 s. */
+const whole = (seconds: number) => Math.abs(seconds - Math.round(seconds)) < 1e-6;
+
+/**
+ * One step of the length stepper: a whole second at a time, never below the floor or outside 3–15 s. A length
+ * between whole seconds (written elsewhere) snaps onto the whole-second grid on its first step.
+ */
 export function stepLength(seconds: number, delta: 1 | -1, floor: LengthFloor): number {
   const low = Math.max(MIN_SHOT_SECONDS, floor.min);
-  if (delta > 0) return seconds >= MAX_SHOT_SECONDS - 1e-6 ? seconds : round1(Math.min(MAX_SHOT_SECONDS, seconds + 1));
-  return seconds <= low + 1e-6 ? seconds : round1(Math.max(low, seconds - 1));
+  if (delta > 0) {
+    if (seconds >= MAX_SHOT_SECONDS - 1e-6) return seconds;
+    return Math.min(MAX_SHOT_SECONDS, whole(seconds) ? Math.round(seconds) + 1 : Math.ceil(seconds));
+  }
+  if (seconds <= low + 1e-6) return seconds;
+  return round1(Math.max(low, whole(seconds) ? Math.round(seconds) - 1 : Math.floor(seconds)));
 }
 
 export const canStep = (seconds: number, delta: 1 | -1, floor: LengthFloor) => !same(stepLength(seconds, delta, floor), seconds);
@@ -128,7 +143,7 @@ export function lengthHint(shot: ShotOverview, floor: LengthFloor): Msg {
   const line = shot.narration;
   if (line.state === "ready" && line.measuredSeconds !== undefined && line.fits === false && !line.fit) return msg("plan.len.line_long", { line: round1(line.measuredSeconds) });
   if (floor.reason === "cut") return msg("plan.len.floor_cut");
-  if (floor.reason === "voice" && floor.min > MIN_SHOT_SECONDS) return msg("plan.len.floor_voice", { line: floor.lineSeconds ?? 0 });
+  if (floor.reason === "voice" && floor.min > MIN_SHOT_SECONDS) return msg("plan.len.floor_voice", { min: floor.min, line: floor.lineSeconds ?? 0 });
   return msg("plan.len.range", { min: MIN_SHOT_SECONDS, max: MAX_SHOT_SECONDS });
 }
 
@@ -244,12 +259,20 @@ export function savedMessage(shot: ShotOverview, base: ShotDraft, draft: ShotDra
   return msg("plan.toast.saved", values);
 }
 
-/** What the header's Undo names: the whole edit when it was one command, else the field the last command saved. */
+/**
+ * What Undo names (the header and the toast). The server takes one field per command and undoes only its latest
+ * command, so a save of several fields can be undone only for the field its last command saved; this names it.
+ */
 export function editChange(label: string, fields: readonly DraftField[]): Msg {
   const last = fields[fields.length - 1];
   if (fields.length <= 1 || !last) return msg("plan.change.edit_shot", { shot: label });
   return msg(`plan.change.field.${last}` as "plan.change.field.purpose", { shot: label });
 }
 
-/** Standard framings offered in the editor; content, so they are written in the interface language. */
-export const FRAMINGS = ["wide", "medium", "close_up", "extreme_close_up"] as const;
+/**
+ * Standard framings offered in the editor, and motion suggestions. They are shot content, which feeds the prompts,
+ * so they stay in the film's own words (as the shots of the sample film are) whatever the interface language;
+ * only the field labels are translated.
+ */
+export const FRAMINGS: readonly string[] = ["Wide", "Medium", "Close-up", "Extreme close-up"];
+export const MOTIONS: readonly string[] = ["Static", "Static, breath visible", "Slow push-in", "Slow pull-back", "Slow pan left", "Slow pan right", "Slow tilt up", "Slow tilt down"];

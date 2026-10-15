@@ -14,9 +14,10 @@ export function NoneImpact({ text }: { text: MessageId }) {
   );
 }
 
-export function SaveError({ error }: { error: Msg | null }) {
+/** The server's reason, said once where the edit (or delete) was made; neutral with an icon. */
+export function SaveError({ error, lead = "plan.edit.not_saved" }: { error: Msg | null; lead?: "plan.edit.not_saved" | "plan.delete.not_deleted" }) {
   const { t, tm } = useI18n();
-  return error ? <p className="edit-error" role="alert"><i className="ic" aria-hidden="true">!</i>{t("plan.edit.not_saved", { reason: tm(error) })}</p> : null;
+  return error ? <p className="edit-error" role="alert"><i className="ic" aria-hidden="true">!</i>{t(lead, { reason: tm(error) })}</p> : null;
 }
 
 interface Props {

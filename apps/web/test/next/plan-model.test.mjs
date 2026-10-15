@@ -4,7 +4,7 @@ import { lastFerryOverview, lastFerrySnapshot, sceneId, shotId } from '../../src
 import { catalog } from '../../src/next/i18n/messages.ts';
 import {
   addedScene, addedShot, clipPill, clockText, deleteSceneFacts, deleteShotFacts, keyframePill, locate, mediaCountMsgs, mediaCounts,
-  narrationView, planOutline, promptText, sceneMove, shotMove, written,
+  narrationView, planOutline, promptText, promptToSave, sceneMove, shotMove, written,
 } from '../../src/next/model/plan.ts';
 
 const golden = () => planOutline(lastFerrySnapshot(), lastFerryOverview());
@@ -35,10 +35,10 @@ test('rows say framing, length, narration and the media state in neutral pills (
   const r22 = row(outline, '2.2');
   assert.deepEqual(r22.pills.map((pill) => pill.text.id), ['plan.pill.not_opened', 'plan.pill.clip_none']);
   assert.deepEqual(r22.narration.kind, 'none');
-  // The too-long line is an app fact: a neutral check, never an amber note.
+  // The too-long line is an app fact: a neutral check. The Director's own note b about it is the amber chip (study).
   const r23 = row(outline, '2.3');
   assert.deepEqual(r23.check, { id: 'plan.check.narration', values: { line: 7.4, shot: 6 } });
-  assert.deepEqual(r23.notes, []);
+  assert.deepEqual(r23.notes, [{ noteId: 'note-b', letter: 'b', text: 'The 2.3 line runs 7.4 s but the shot is 6 s.', done: false }]);
   const r31 = row(outline, '3.1');
   assert.deepEqual(r31.pills.map((pill) => pill.text.id), ['plan.pill.kf_none'], 'no clip pill before a keyframe exists');
   assert.deepEqual([r31.picture, r31.emptyThumb], [null, { id: 'plan.thumb.none' }]);
@@ -61,12 +61,27 @@ test('failures and unanswered jobs are neutral with an icon; an earlier keyframe
 test('server placeholders and the direction header are not shown as written text', () => {
   assert.equal(written('purpose', 'New shot'), '');
   assert.equal(written('framing', 'Describe the visual direction'), '');
+  assert.equal(written('sceneDirection', 'New scene'), '');
   assert.equal(written('imagePrompt', '  A pier at dawn '), 'A pier at dawn');
   assert.equal(promptText('OpenSlate current direction:\nMara waits. Wide\nReference details (retain only where consistent):\nMara on the pier.'), 'Mara on the pier.');
   assert.equal(promptText('Pending direction'), '');
   const shot = lastFerryOverview().shots[shotId('2.1')];
   assert.deepEqual(narrationView(shot, 'undecided', 30), { kind: 'undecided', text: '', detail: null });
   assert.deepEqual(narrationView(shot, 'none', 30).kind, 'none');
+});
+
+test('a rewritten picture prompt keeps the direction header the server put in front of it', () => {
+  const header = 'OpenSlate current direction:\nMara waits. Wide\nReference details (retain only where consistent):\n';
+  assert.equal(promptToSave(`${header}Mara on the pier.`, 'Mara alone on the pier.'), `${header}Mara alone on the pier.`);
+  assert.equal(promptToSave('Mara on the pier.', 'Mara alone on the pier.'), 'Mara alone on the pier.');
+  // A header without its separator is not the server's: the words are the whole prompt.
+  assert.equal(promptToSave('OpenSlate current direction:\nMara waits.', 'Fog.'), 'Fog.');
+});
+
+test("a new scene's server placeholder is not shown as its direction", () => {
+  const overview = lastFerryOverview();
+  overview.scenes[2] = { ...overview.scenes[2], purpose: 'New scene' };
+  assert.equal(planOutline(lastFerrySnapshot(), overview).scenes[2].direction, '');
 });
 
 test("the Director's notes repeat on their rows and scenes; stale ones are left out", () => {

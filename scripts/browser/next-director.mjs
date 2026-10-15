@@ -222,9 +222,15 @@ export const scenarios = [
       // Open 2.2 selects the shot in the Keyframes view.
       await reply.getByRole("button", { name: "Open 2.2" }).click();
       await page.waitForSelector('.card.sel[data-card="shot-2-2"]');
-      // From another view, Open 2.3 comes back to Keyframes with 2.3 selected.
+      // In Plan, Open 2.3 stays in Plan and brings the row into view (P5-DESIGN shell item 9).
       await page.locator('[data-act="tab"][data-view="plan"]').click();
       await page.waitForSelector('[data-act="tab"][data-view="plan"][aria-selected="true"]');
+      await reply.getByRole("button", { name: "Open 2.3" }).click();
+      await page.waitForSelector('.shot-row.flash[data-shot="shot-2-3"]');
+      if (!(await page.locator('[data-act="tab"][data-view="plan"][aria-selected="true"]').count())) fail("Open 2.3 left Plan");
+      // From a view still in the classic studio, Open 2.3 comes back to Keyframes with 2.3 selected.
+      await page.locator('[data-act="tab"][data-view="film"]').click();
+      await page.waitForSelector('[data-act="tab"][data-view="film"][aria-selected="true"]');
       await reply.getByRole("button", { name: "Open 2.3" }).click();
       await page.waitForSelector('[data-act="tab"][data-view="keyframes"][aria-selected="true"]');
       await page.waitForSelector('.card.sel[data-card="shot-2-3"]');

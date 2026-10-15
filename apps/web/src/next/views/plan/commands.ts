@@ -18,12 +18,35 @@ export type StoryboardInput = { kind: string } & Record<string, string | boolean
 
 const clean = (input: StoryboardInput) => Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
 
+/**
+ * The head version the latest receipt produced, per film. The studio is read again after each command, but that
+ * read can land after the next press (a quick ↑ ↑ or Enter Enter); head versions only grow, so the next command
+ * expects the larger of this and the studio's head instead of a stale one.
+ */
+const receiptHeads = new Map<string, number>();
+
+/** The head version the next storyboard command expects. */
+export function expectedHead(store: StudioStore): number | undefined {
+  const project = store.getState().snapshot?.project;
+  if (!project) return undefined;
+  const receipt = receiptHeads.get(project.id);
+  // Once the studio's read has caught up, it is the authority again.
+  if (receipt === undefined || receipt <= project.headVersion) {
+    receiptHeads.delete(project.id);
+    return project.headVersion;
+  }
+  return receipt;
+}
+
 /** One storyboard command. Resolves undefined when it was refused; the store has already shown why. */
-export function storyboard(store: StudioStore, pressId: string, input: StoryboardInput, headVersion?: number): Promise<StoryboardReceipt | undefined> {
-  const snapshot = store.getState().snapshot;
-  if (!snapshot) return Promise.resolve(undefined);
-  const body = { ...clean(input), expectedHeadVersion: headVersion ?? snapshot.project.headVersion };
-  return store.command<StoryboardReceipt>(`plan:${pressId}`, body, () => ({ path: "/storyboard", body }));
+export async function storyboard(store: StudioStore, pressId: string, input: StoryboardInput, headVersion?: number): Promise<StoryboardReceipt | undefined> {
+  const project = store.getState().snapshot?.project;
+  const expected = headVersion ?? expectedHead(store);
+  if (!project || expected === undefined) return undefined;
+  const body = { ...clean(input), expectedHeadVersion: expected };
+  const receipt = await store.command<StoryboardReceipt>(`plan:${pressId}`, body, () => ({ path: "/storyboard", body }));
+  if (typeof receipt?.headVersion === "number") receiptHeads.set(project.id, Math.max(receipt.headVersion, receiptHeads.get(project.id) ?? -1));
+  return receipt;
 }
 
 /**
@@ -56,6 +79,16 @@ export function refusal(store: StudioStore): Msg | null {
   return toast?.tone === "error" ? toast.message : null;
 }
 
+/**
+ * The refusal, moved from the toast to the place that shows it inline (an open editor or dialog), so the reason
+ * is said once.
+ */
+export function takeRefusal(store: StudioStore): Msg | null {
+  const reason = refusal(store);
+  if (reason) store.dismissToast();
+  return reason;
+}
+
 /** An info toast that offers Undo for a storyboard command. */
 export function undoToast(store: StudioStore, message: Msg, commandId: string): void {
   store.dispatch({ type: "toast", message, tone: "info", undoCommandId: commandId });
@@ -68,9 +101,9 @@ export function infoToast(store: StudioStore, message: Msg): void {
 // ---- written plans ------------------------------------------------------------------------------------
 
 export function sendImport(store: StudioStore, name: string, text: string): Promise<{ requestId: string } | undefined> {
-  const snapshot = store.getState().snapshot;
-  if (!snapshot) return Promise.resolve(undefined);
-  const body = { name, text, expectedHeadVersion: snapshot.project.headVersion };
+  const expected = expectedHead(store);
+  if (expected === undefined) return Promise.resolve(undefined);
+  const body = { name, text, expectedHeadVersion: expected };
   return store.command<{ requestId: string }>("plan:import:send", body, () => ({ path: "/plan-imports", body }));
 }
 
