@@ -220,24 +220,27 @@ export class StudioStore {
     return true;
   }
 
-  /** Storyboard edits are free. The toast offers Undo with the returned command id. */
-  async edit(edit: StoryboardEdit, toast?: Msg): Promise<boolean> {
+  /**
+   * Storyboard edits are free. The toast offers Undo with the returned command id. Resolves to the command id
+   * (a Director note links its "edit" choice to it), or null when the edit was not saved.
+   */
+  async edit(edit: StoryboardEdit, toast?: Msg): Promise<string | null> {
     const snapshot = this.#state.snapshot;
-    if (!snapshot || !this.#keys) return false;
+    if (!snapshot || !this.#keys) return null;
     const body = { ...edit, expectedHeadVersion: snapshot.project.headVersion };
     const pressId = `edit:${edit.kind}:${"id" in edit ? edit.id : edit.commandId}`;
     const receipt = await this.#press<{ commandId: string }>(pressId, body, async () => ({ path: path(snapshot.project.id, "/storyboard"), body }));
-    if (!receipt) return false;
+    if (!receipt) return null;
     if (toast) this.dispatch({ type: "toast", message: toast, tone: "info", ...(edit.kind !== "undo" ? { undoCommandId: receipt.commandId } : {}) });
-    return true;
+    return receipt.commandId || null;
   }
 
-  undo(commandId: string): Promise<boolean> {
+  undo(commandId: string): Promise<string | null> {
     this.dispatch({ type: "toastDismiss" });
     return this.edit({ kind: "undo", commandId }, msg("toast.undone"));
   }
 
-  async saveEdit(draft: EditDraft): Promise<boolean> {
+  async saveEdit(draft: EditDraft): Promise<string | null> {
     this.dispatch({ type: "edit", edit: { ...draft, saving: true } });
     const ok = draft.field === "narration"
       ? await this.edit({ kind: "narration", id: draft.shotId, field: "text", value: draft.value }, msg("toast.saved"))

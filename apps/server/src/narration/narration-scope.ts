@@ -89,17 +89,17 @@ function ownedSegment(reader: Reader, projectId: string, shotId: string): string
   fail(reader.get<NarrationState>('narration_state', projectId)?.entries.some(entry => entry.segmentId === segmentId), 'The mapped shot narration section was removed');
   return segmentId;
 }
-export function createShotNarrationSession(production: ProductionService, projectId: string, shotId: string, key: string, continuationSessionId?: string, directEdit = false): NarrationSession {
+export function createShotNarrationSession(production: ProductionService, projectId: string, shotId: string, key: string, continuationSessionId?: string, options: { holdScopeIds?: string[] } = {}): NarrationSession {
   const store = production.store;
   fail(typeof key === 'string' && key.length > 0 && key.length <= 160 && (continuationSessionId === undefined || typeof continuationSessionId === 'string' && continuationSessionId.length > 0 && continuationSessionId.length <= 160), 'Use a bounded shot narration session identity');
-  return store.command(`local-user:${projectId}:${shotId}:shot-narration-session`, key, digest({ continuationSessionId: continuationSessionId ?? null, ...(directEdit ? { directEdit } : {}) }), () => {
+  return store.command(`local-user:${projectId}:${shotId}:shot-narration-session`, key, digest({ continuationSessionId: continuationSessionId ?? null, ...(options.holdScopeIds ? { holdScopeIds: options.holdScopeIds } : {}) }), () => {
     const project = store.getProject(projectId); fail(project.shots.some(shot => shot.id === shotId), 'Choose a current shot');
     const head = store.get<{ sessionId: string }>('narration_shot_session_head', shotSessionHeadId(projectId, shotId)), previous = head ? store.get<NarrationSession>('narration_session', head.sessionId) : undefined;
     fail(!previous || previous.id === continuationSessionId, 'Explicitly continue the displayed shot narration session');
     fail(!continuationSessionId || previous?.id === continuationSessionId && previous.projectId === projectId && previous.shotId === shotId && previous.principalId === 'local-user', 'The previous shot narration session changed');
     const segmentId = ownedSegment(store, projectId, shotId);
     const actor = production.beginRequest(projectId, 'local-user', 'Edit narration for this shot and review its exact recording and timing.',
-      { source: "app", ...(directEdit ? { directEdit } : {}), scopeIds: [shotId], editing: true, key: `shot-narration:${shotId}:${digest(key)}`, ...(previous ? { continuationRequestId: previous.requestId } : {}) });
+      { source: "app", concurrency: "alongside", ...options, scopeIds: [shotId], editing: true, key: `shot-narration:${shotId}:${digest(key)}`, ...(previous ? { continuationRequestId: previous.requestId } : {}) });
     const session: NarrationSession = { id: newId(), projectId, requestId: actor.requestId, principalId: 'local-user', shotId };
     store.insert('narration_session', session.id, projectId, session);
     const scope = store.insert('narration_shot_scope', actor.requestId, projectId, { version: 1, requestId: actor.requestId, sessionId: session.id, principalId: 'local-user', shotId }) as NarrationShotScope;
@@ -111,9 +111,14 @@ export function assertNarrationAuthority(production: ProductionService, projectI
   production.assertActor(projectId, actor, true);
   const scope = narrationAuthorScope(production.store, projectId, actor.requestId, actor.principalId, segmentId);
   if (scope) {
+    fail(production.store.get<{sessionId:string}>('narration_shot_session_head', shotSessionHeadId(projectId, scope.shotId))?.sessionId === scope.sessionId, 'This shot narration session was explicitly continued');
     fail(production.store.getProject(projectId).shots.some(shot => shot.id === scope.shotId), 'The scoped narration shot was removed');
     const target = narrationScopeTarget(production.store, scope);
     if (target) fail(ownedSegment(production.store, projectId, scope.shotId) === target.segmentId, 'The scoped narration mapping changed');
+  }
+  if (!scope && actor.kind === 'human') {
+    const session = production.store.list<NarrationSession>('narration_session', projectId).find(s => s.requestId === actor.requestId && !s.shotId);
+    if (session) fail(production.store.get<{sessionId:string}>('narration_session_head', projectId)?.sessionId === session.id, 'This narration session was explicitly continued');
   }
   return scope;
 }
