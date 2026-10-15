@@ -50,6 +50,19 @@ async function openSettings(page) {
   await page.waitForSelector("#set-computer [data-row='key-openai']", { timeout: 10000 });
 }
 
+/** The studio store from React's tree, as a handle: scenarios use it to make the film move on, or to close it. */
+async function studioStore(page) {
+  return page.evaluateHandle(() => {
+    const root = document.querySelector(".app");
+    const key = Object.keys(root).find((name) => name.startsWith("__reactFiber$"));
+    for (let fiber = root[key]; fiber; fiber = fiber.return) {
+      const store = fiber.memoizedProps?.value?.store;
+      if (store?.setView) return store;
+    }
+    throw new Error("No studio store in the React tree");
+  });
+}
+
 async function box(page, selector) {
   const value = await page.locator(selector).first().boundingBox();
   if (!value) throw new Error(`${selector} is not on screen`);
@@ -147,6 +160,43 @@ export const scenarios = [
     },
   },
   {
+    // The server refuses a switch when the film's pending work changed since the check; the row must not keep offering it.
+    name: "next-settings-stale-switch",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openSettings(page);
+      const video = row(page, "video");
+      await page.locator(`${video} select`).selectOption("fake-video-v1");
+      await expectText(page, `${video} .impact`, /5 clips not made yet/);
+      expect(await page.locator(`${video} [data-act='model-apply']`).isEnabled(), "Switch is off after the check");
+      // Scene 3's keyframes start (simulated): the settings look the same, the pending work does not.
+      const store = await studioStore(page);
+      await store.evaluate((s) => s.makeKeyframes(s.getState().overview.scenes[2].sceneId));
+      await expectText(page, `${video} .impact-row[data-stale]`, /The film or its settings changed since this check\./);
+      expect(await page.locator(`${video} [data-act='model-apply']`).count() === 0, "Switch is still offered on a stale check");
+      await shot(page, "settings-1440-stale");
+      // Once the keyframes are back, Check again reads the film as it is now, and Switch applies.
+      await store.evaluate((s) => new Promise((resolve) => {
+        const done = () => Object.values(s.getState().overview.shots).every((shot) => shot.keyframe.state !== "running");
+        if (done()) return resolve();
+        const stop = s.subscribe(() => { if (done()) { stop(); resolve(); } });
+      }));
+      await page.waitForTimeout(300);
+      await page.click(`${video} [data-act='model-recheck']`);
+      await expectText(page, `${video} .impact-row:not([data-stale]) .impact`, /Use Demo video for video\?/);
+      await page.click(`${video} [data-act='model-apply']`);
+      await expectText(page, ".toast", /Video now uses Demo video\./);
+      await page.waitForFunction(() => !document.querySelector("#set-models .mrow[data-job='video'] .impact"));
+      // Choosing A, then B, then A again while A is still being checked waits for A's check instead of failing.
+      const image = page.locator(`${row(page, "image")} select`);
+      await image.selectOption("codex-image");
+      await image.selectOption("fake-image-v1");
+      await image.selectOption("codex-image");
+      await expectText(page, `${row(page, "image")} .impact`, /Use Codex image · gpt-6-astra for keyframes\?/);
+    },
+  },
+  {
     name: "next-settings-director",
     query,
     viewport: { width: 1440, height: 900 },
@@ -165,8 +215,13 @@ export const scenarios = [
       await page.waitForFunction(() => document.activeElement?.value === "/usr/local/bin/codex", null, { timeout: 3000 }).catch(() => { throw new Error("Change… did not focus the program field"); });
       await shot(page, "settings-1440-director-form");
       const program = page.locator("#set-director form input").first();
+      const save = page.locator("#set-director [data-act='director-save']");
+      await program.fill("");
+      expect(await save.isDisabled(), "Save is on with no program");
+      const why = await save.evaluate((el) => (el.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent ?? "").join(" "));
+      expect(/No Codex program found\. Enter its full path, starting with \//.test(why), `Save is off without saying why: ${JSON.stringify(why)}`);
       await program.fill("codex");
-      expect(await page.locator("#set-director [data-act='director-save']").isDisabled(), "Save is on with a relative program path");
+      expect(await save.isDisabled(), "Save is on with a relative program path");
       await program.fill("/usr/local/bin/codex");
       await page.locator("#set-director form select").selectOption("gpt-6-astra-mini");
       await page.click("#set-director [data-act='director-save']");
@@ -193,6 +248,8 @@ export const scenarios = [
       expect((await narrator.inputValue()) === "cedar", "The narrator is not Cedar");
       await narrator.selectOption("marin");
       await expectText(page, ".toast", /New voice lines use Marin\./);
+      const toast = await box(page, ".toast");
+      expect(toast.bottom > 900 - 40, `The toast sits at ${Math.round(toast.top)}-${Math.round(toast.bottom)}, not at the foot of the workspace`);
       await expectText(page, "#set-voice .undo-line", /Was Cedar/);
       await page.click("#set-voice [data-act='narrator-undo']");
       await page.waitForFunction(() => document.querySelector("#set-voice [data-act='narrator']")?.value === "cedar");
@@ -238,9 +295,15 @@ export const scenarios = [
       await expectText(page, "#set-computer .keys-note", /\.\/start\.sh --restart/);
       await page.click("#set-computer [data-act='recheck']");
       await expectText(page, ".toast", /Checked this computer\./);
-      // The section index scrolls to a section and puts focus on its heading.
-      await page.click(".set-index [data-section='set-language']");
+      // The section index scrolls to a section and puts focus on its heading, with a visible ring for keyboard users.
+      await page.focus(".set-index [data-section='set-language']");
+      await page.keyboard.press("Enter");
       await page.waitForFunction(() => document.activeElement?.id === "set-language-h");
+      const ring = await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle);
+      expect(ring !== "none", "The section heading has no focus ring after a keyboard jump");
+      // Only the chosen language is in the tab order, like a native radio group.
+      const tabs = await page.locator("#set-language [role='radio']").evaluateAll((els) => els.map((el) => `${el.dataset.v}:${el.tabIndex}`));
+      expect(tabs.join("|") === "en:0|zh-CN:-1", `The language radios' tab order is ${tabs.join("|")}`);
       expect((await page.locator(".set-index [data-section='set-language']").getAttribute("aria-current")) === "true", "The index does not mark Language");
       // Language: 中文, then back with the arrow keys.
       await page.click("#set-language [data-act='set-language'][data-v='zh-CN']");
@@ -284,6 +347,8 @@ export const scenarios = [
       const display = await page.evaluate(() => getComputedStyle(document.querySelector("#set-models .mtable")).display);
       expect(display === "block", `The models table is ${display}, not stacked cards`);
       await shot(page, "settings-390", { fullPage: true });
+      const broken = await page.locator("#set-computer .keys-note code").evaluateAll((els) => els.filter((el) => el.getClientRects().length > 1).map((el) => el.textContent));
+      expect(!broken.length, `Commands break across lines: ${broken.join(", ")}`);
       await page.locator(`${row(page, "video")} select`).selectOption("fake-video-v1");
       await expectText(page, `${row(page, "video")} .impact`, /5 clips not made yet/);
       await page.click("#set-voice [data-act='voice-open']");
@@ -297,6 +362,30 @@ export const scenarios = [
     },
   },
   {
+    // Settings with no film open (the gear on Start): the film sections say so; This computer and Language work.
+    name: "next-settings-no-film",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openSettings(page);
+      const store = await studioStore(page);
+      await store.evaluate((s) => s.dispatch({ type: "project", projectId: null }));
+      await expectText(page, "main[data-view='settings'] .view-head .line", /^No film is open\. The first three are set for each film/);
+      for (const section of ["set-models", "set-director", "set-voice"]) await expectText(page, `#${section} [data-no-film]`, /Open a film to/);
+      expect(await page.locator("#set-models select, #set-voice select, #set-director form").count() === 0, "A film control shows with no film open");
+      expect((await page.locator(".set-index [data-section='set-computer']").getAttribute("aria-current")) === "true", "The index does not mark This computer");
+      await expectText(page, "#set-computer [data-row='codex']", /Codex is checked inside a film\..*Not checked/s);
+      await expectText(page, "#set-computer [data-row='key-openai']", /Used by Keyframes, Narration, Transcription/);
+      const computer = await box(page, "#set-computer");
+      expect(computer.top < 300, `This computer is at ${Math.round(computer.top)}, not scrolled into view`);
+      await shot(page, "settings-1440-no-film");
+      await page.click("#set-computer [data-act='recheck']");
+      await expectText(page, ".toast", /Checked this computer\./);
+      await page.click("#set-language [data-act='set-language'][data-v='zh-CN']");
+      await expectText(page, "main[data-view='settings'] .view-head .line", /^没有打开的影片。/);
+    },
+  },
+  {
     // The view against a real fixture studio (not the in-browser sample film), so the route shapes are the server's.
     // "Check again" is not pressed here: it would run the local Codex setup check.
     name: "next-settings-live",
@@ -307,6 +396,9 @@ export const scenarios = [
     async run({ page }) {
       await page.waitForSelector(".app[data-ui='next'] .topbar", { timeout: 20000 });
       await page.waitForFunction(() => /scenes? ·/.test(document.querySelector(".topbar")?.textContent ?? ""), null, { timeout: 15000 });
+      // A read cancelled by a newer one (the overview arriving) is not an answer; count the 404 answers.
+      let reviewMisses = 0;
+      page.on("response", (response) => { if (response.status() === 404 && new URL(response.url()).pathname.endsWith("/settings/director-review")) reviewMisses++; });
       await page.evaluate(() => {
         const root = document.querySelector(".app");
         const key = Object.keys(root).find((name) => name.startsWith("__reactFiber$"));
@@ -325,6 +417,8 @@ export const scenarios = [
       await expectText(page, "#set-director [data-review-reason]", /later update|Codex Director/);
       expect(await page.locator("#set-director [data-act='review-toggle']").isDisabled(), "The review switch is on without its route");
       await page.waitForSelector("#set-computer [data-row='codex']", { timeout: 10000 });
+      await page.waitForTimeout(500);
+      expect(reviewMisses === 1, `The missing review route answered 404 ${reviewMisses} times`);
       await shot(page, "settings-live-1440");
     },
   },
