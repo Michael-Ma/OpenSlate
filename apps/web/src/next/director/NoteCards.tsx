@@ -24,7 +24,7 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
   return (
     <div className="notes">
       {notes.map(({ view, tone, opens }) => (
-        <article key={view.noteId} className={`note${tone === "open" ? "" : " done"}${tone === "stale" ? " stale" : ""}`} data-note={view.letter} data-state={view.state}>
+        <article key={view.noteId} className={`note${tone === "open" ? "" : " done"}`} data-note={view.letter} data-state={view.state}>
           <span className="letter" aria-hidden="true">{view.letter}</span>
           <span className="sr">{t("note.thread.label", { letter: view.letter })}</span>
           <div className="note-text">{view.text}</div>
@@ -37,7 +37,7 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
               ))}
             </div>
           )}
-          {view.settled && <span className={`handled${tone === "stale" ? " stale" : ""}`}>{tone === "done" ? "✓ " : ""}{tm(view.settled)}</span>}
+          {view.settled && <span className="handled">{tone === "done" ? "✓ " : ""}{tm(view.settled)}</span>}
         </article>
       ))}
     </div>
