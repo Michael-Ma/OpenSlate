@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../../api/client.ts";
 import { artifactKey, cacheFor } from "../../media/artifact-cache.ts";
 import type { MediaSource } from "../../media/media-source.ts";
+import { fallbackSource } from "../../model/assets-media.ts";
 import type { ArtifactUrl } from "../../media/useArtifactUrl.ts";
 import { useMedia, useMode, useStore } from "../../store/react.tsx";
 import type { StudioStore } from "../../store/store.ts";
@@ -45,21 +46,6 @@ function narrationSource(media: MediaSource, projectId: () => string | null): Me
       return URL.createObjectURL(new Blob([bytes], { type: response.headers.get("content-type")?.split(";")[0] ?? "audio/wav" }));
     },
     revoke: (url) => media.revoke(url),
-  };
-}
-
-/** Asks `first`; when it does not have the file (NOT_FOUND), asks `second`. Both check the SHA-256. */
-function fallbackSource(first: MediaSource, second: MediaSource): MediaSource {
-  return {
-    async url(artifact, signal) {
-      try {
-        return await first.url(artifact, signal);
-      } catch (error) {
-        if (signal?.aborted || !(error instanceof ApiError) || error.code !== "NOT_FOUND") throw error;
-        return second.url(artifact, signal);
-      }
-    },
-    revoke: (url) => first.revoke(url),
   };
 }
 
