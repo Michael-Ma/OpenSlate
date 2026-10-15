@@ -262,18 +262,21 @@ export function pickerItems(overview: GenerationOverview | null): PickerItem[] {
   return [...sceneItems, ...shotItems];
 }
 
-/** Items whose label, keywords or detail contain the query (case-insensitive); label and keyword prefixes first. */
+/**
+ * Items whose label, keywords or detail contain the query (case-insensitive). Scenes stay before shots,
+ * so the listed order is the arrow-key order; within each group, label and keyword prefixes come first.
+ */
 export function filterPicker(items: readonly PickerItem[], query: string, label: (message: Msg) => string): PickerItem[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...items];
-  const strong: PickerItem[] = [];
-  const weak: PickerItem[] = [];
-  for (const item of items) {
+  const rank = (item: PickerItem): number => {
     const names = [label(item.label), ...item.keywords].map((name) => name.toLowerCase());
-    if (names.some((name) => name.startsWith(q))) strong.push(item);
-    else if (names.some((name) => name.includes(q)) || item.detail.toLowerCase().includes(q)) weak.push(item);
-  }
-  return [...strong, ...weak];
+    if (names.some((name) => name.startsWith(q))) return 0;
+    return names.some((name) => name.includes(q)) || item.detail.toLowerCase().includes(q) ? 1 : -1;
+  };
+  const ranked = items.map((item, index) => ({ item, index, rank: rank(item) })).filter((entry) => entry.rank >= 0);
+  const group = (item: PickerItem) => (item.group === "scene" ? 0 : 1);
+  return ranked.sort((a, b) => group(a.item) - group(b.item) || a.rank - b.rank || a.index - b.index).map((entry) => entry.item);
 }
 
 export interface Mention {

@@ -172,6 +172,9 @@ test('the picker lists scenes then shots with their own words, and filters by wh
   assert.deepEqual(names('scene 3'), ['Scene 3']);
   assert.ok(names('fog').includes('2.1'));
   assert.deepEqual(names('zzz'), []);
+  const one = filterPicker(items, '1', en);
+  assert.equal(en(one[0].label), 'Scene 1');
+  assert.ok(one.findIndex(i => i.group === 'shot') > one.findLastIndex(i => i.group === 'scene'), 'scenes stay before shots, so the list order is the arrow order');
   assert.equal(filterPicker(items, '', en).length, items.length);
   assert.deepEqual(filterPicker(items, '第 2', zh).map(i => zh(i.label)), ['第 2 场']);
 });
