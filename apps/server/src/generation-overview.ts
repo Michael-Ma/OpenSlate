@@ -1,3 +1,4 @@
+import { openBlockingNotes } from "./application/director-notes.js";
 import type { FastifyInstance } from "fastify";
 import { canonical, digest, invariant } from "@openslate/core";
 import type { ArtifactRef, FrameViewInput, FrameViewReceipt, GenerationOverview, MediaSlot, ShotNarration, StudioArtifactRef, WaitingCode } from "@openslate/core";
@@ -127,6 +128,7 @@ export class GenerationOverviewReader {
           if (audio.state === "making") blockers.push({ code: "narration_making", shotId: shot.id });
           if ([image.state, video.state].includes("no_answer")) blockers.push({ code: "no_answer_in_scene", shotId: shot.id });
         }
+        if (openBlockingNotes(store, projectId, scene.id).length) blockers.push({ code: "recommendation_open" });
         if (overview.stopped) blockers.push({ code: "stopped" });
         if (overview.director.state !== "idle" && (!scopeIds.length || scopeIds.includes(scene.id) || rows.some(r => scopeIds.includes(r.shotId)))) blockers.push({ code: "director_working" });
         const shots = rows.map(r => overview.shots[r.shotId]!);

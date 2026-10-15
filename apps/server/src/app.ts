@@ -1,3 +1,5 @@
+import { registerDirectorNotes } from "./application/director-notes.js";
+import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { requiredCommandKey } from "./application/command-key.js";
 import { registerGenerationOverview } from "./generation-overview.js";
 import { registerSceneGeneration } from './scene-generation.js';
@@ -60,6 +62,7 @@ export function createApp(options: AppOptions = {}) {
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
+  registerDirectorNotes(app, service);
   registerSceneGeneration(app, service, options.narrationRoutes?.narration);
   registerGenerationOverview(app, service, options.narrationRoutes?.narration);
   app.setErrorHandler((error, _request, reply) => {
@@ -176,8 +179,8 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.tools(request.params.projectId);
   });
-  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" | "3.0.0" | "4.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
-    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: ["2.0.0", "3.0.0", "4.0.0"] } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
+  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: Exclude<import("@openslate/core").ToolContractVersion, "1.0.0"> } }>("/api/projects/:projectId/director/tools/upgrade", {
+    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: SUPPORTED_TOOL_CONTRACTS.slice(1) } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
   }, async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.upgradeTools(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());

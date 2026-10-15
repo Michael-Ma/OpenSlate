@@ -1,3 +1,4 @@
+import { sceneNotes, openBlockingNotes } from "./application/director-notes.js";
 import { requiredCommandKey } from "./application/command-key.js";
 import type { FastifyInstance } from "fastify";
 import { requestScopesIntersect } from "./application/request-scopes.js";
@@ -31,6 +32,7 @@ type Input = {
   expectedRequestId?: string | null;
   kind: "image" | "video";
   reviewedFrames: { shotId: string; artifactId: string; sha256: string }[];
+  notesDigest?: string;
   reviewedHoldDigest: string;
   reviewedControlAuthorityId: string | null;
   /** A human keyframe action can address a subset without borrowing authority for its siblings. */
@@ -171,9 +173,12 @@ export function sceneGenerationView(production: ProductionService, projectId: st
       framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
       imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
         ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
+  const openNotes = sceneNotes(production.store, projectId, sceneId).filter(n => n.state === "open");
+  const blockingNotes = openNotes.filter(n => n.blocking);
+  const notesDigest = digest(openNotes);
   const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
-  return { ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error, narrationEvidence: audio.rows,
-    confirmationDigest: audio.error ? null : digest({ ...saved.view, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
+  return { ...saved.view, openNotes, blockingNotes, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version, confirmationError: audio.error, narrationEvidence: audio.rows,
+    confirmationDigest: audio.error ? null : digest({ ...saved.view, notesDigest, rows, sceneIntentDigest, currentRequestId, narrationVersion: audio.version }) };
 }
 export function registerSceneGeneration(
   app: FastifyInstance,
@@ -216,6 +221,7 @@ export function registerSceneGeneration(
             },
             regenerate: { type: "boolean" },
             expectedEstimateMicros: { type: "string", pattern: "^(0|[1-9][0-9]*)$", maxLength: 32 },
+            notesDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
             reviewedHoldDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
             reviewedControlAuthorityId: {
               type: ["string", "null"],
@@ -272,7 +278,12 @@ export function registerSceneGeneration(
         "SCOPE_DENIED",
         "Choose shots belonging to this scene",
       );
+      const notesDigest = digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open"));
       const fresh = () => {
+        if (input.kind === "video") {
+          invariant(openBlockingNotes(store, projectId, sceneId).length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before generating video");
+          invariant(digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open")) === (input.notesDigest ?? notesDigest), "SCENE_REVIEW_STALE", "Director notes changed during scene review");
+        }
         assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
         const now = sceneView(production, projectId, sceneId, undefined, input.targetShotIds).view;
         invariant(
@@ -588,8 +599,10 @@ export function registerSceneGeneration(
             );
             production.approve(projectId, actor, displayed.id, ids);
           }
+          store.insert("scene_generation_action", actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId) });
           return {
             ...applied,
+            requestId: actor.requestId,
             sceneId,
             kind: input.kind,
             shotIds: selected.map((r) => r.shotId),

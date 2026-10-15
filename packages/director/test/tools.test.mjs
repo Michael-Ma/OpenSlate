@@ -325,6 +325,7 @@ test("actual V4 stdio child advertises the saved catalog and forwards compact wr
 
 test("every shipped tool catalog has an immutable complete catalog and handler digest", () => {
   const hashes = {
+    "5.0.0": ["efcbc94108d5dd8544d72e310004e7bdf0b450f202d9d631b852c7cf70f10f58", "78fdd6f63dcd6c5392f8c5db8d397a772e47fde895debbcd257bcada77eb47d6"],
     "1.0.0": ["b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa", "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec"],
     "2.0.0": ["c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df", "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e"],
     "3.0.0": ["81199e4880e2e3e4412ae8828abfb9c6a3f7dbbce9f5434ac9d5c345bf716a4b", "f6ecf84a8d5cd48b8114b4055171fba9b21682deccd7adc45b09b7ab9e45789d"],
@@ -334,4 +335,19 @@ test("every shipped tool catalog has an immutable complete catalog and handler d
     assert.equal(digest(toolCatalog(version)), wholeCatalog, `${version} complete saved catalog`);
     assert.equal(toolCatalog(version).digest, handlerSchema, `${version} schema handler binding`);
   }
+});
+
+test('V5 stdio advertises notes and truthful audio suggestions, then forwards a note once', async t => {
+  const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: '5.0.0' });
+  assert.equal((await c.initialize()).result.serverInfo.version, '5.0.0');
+  const catalog = toolCatalog('5.0.0');
+  assert.deepEqual((await c.request('tools/list', {}).response).result.tools, catalog.descriptors);
+  for (const name of ['prepare_narration_speech', 'prepare_recording_transcription']) {
+    assert.match(catalog.descriptors.find(t => t.name === name).description, /person's press/);
+    assert.doesNotMatch(catalog.descriptors.find(t => t.name === name).description, /finite spending approval/);
+  }
+  const input = { notes: [{ anchor: { shotIds: ['shot'] }, kind: 'observation', blocking: false, text: 'Inspect the opening direction.', choices: [{ kind: 'accept', label: 'Keep it' }] }] };
+  const reply = await c.request('tools/call', { name: 'record_notes', arguments: input }).response;
+  assert.equal(reply.result.isError, false); assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, input);
+  assert.equal(toolHandlerId('5.0.0'), 'director-tools@5');
 });

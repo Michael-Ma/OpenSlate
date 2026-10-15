@@ -1,3 +1,5 @@
+import { recordNotes, type NoteInput } from "./director-notes.js";
+import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog, toolHandlerId } from "@openslate/core";
 import type { ActorContext, JsonValue, ToolName, ToolContractVersion } from "@openslate/core";
 import type { SkillCapabilityLock } from "@openslate/director";
@@ -182,6 +184,7 @@ export class ToolInvocationService {
       if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution"].includes(parsed.name),
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
+        case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {
           const prepared = await this.service.prepare(projectId, actor, parsed.arguments);
@@ -249,6 +252,10 @@ export class ToolInvocationService {
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
         let receipt: unknown = null;
+        if (call.tool === "record_notes" && call.toolContractVersion === "5.0.0" && call.catalogDigest === toolCatalog("5.0.0").digest) {
+          const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>("director_notes_receipt", call.id);
+          if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
+        }
         if (call.tool === "apply_change" && call.recovery?.preparedId) {
           const prepared = store.get<{ projectId: string; requestId: string; epochId: string; proposalDigest: string }>("prepared", call.recovery.preparedId);
           if (prepared?.projectId === projectId && prepared.requestId === call.requestId && prepared.epochId === epochId) {
@@ -262,7 +269,7 @@ export class ToolInvocationService {
             .find(row => row.requestId === call.requestId && row.epochId === epochId && row.proposalDigest === call.recovery!.proposalDigest);
           if (prepared) receipt = { preparedId: prepared.id, proposalDigest: prepared.proposalDigest };
         }
-        if (call.tool === "revise_narration_draft" && ["2.0.0", "3.0.0", "4.0.0"].includes(call.toolContractVersion ?? "1.0.0") && call.recovery?.narrationCommand) {
+        if (call.tool === "revise_narration_draft" && (SUPPORTED_TOOL_CONTRACTS.slice(1) as readonly string[]).includes(call.toolContractVersion ?? "1.0.0") && call.recovery?.narrationCommand) {
           const command = call.recovery.narrationCommand;
           if (command.key === `director-tool:${call.id}`) {
             const row = store.db.prepare("SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?")
@@ -273,7 +280,7 @@ export class ToolInvocationService {
             }
           }
         }
-        if ((call.toolContractVersion === "3.0.0" || call.toolContractVersion === "4.0.0") && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
+        if ((call.toolContractVersion && (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(call.toolContractVersion)) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
           const command = call.recovery.audioProposalCommand, kind = audioKind(call.tool);
           if (command.kind === kind && command.key === `director-tool:${call.id}`) {
             const suffix = kind === "recording_transcription" ? "owned-transcription" : "narration-speech";

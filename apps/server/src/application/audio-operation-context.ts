@@ -12,7 +12,7 @@ export function contextToolVersion(store: Store, projectId: string, actor: Actor
   if (actor.kind === 'director' && !epoch) return '1.0.0';
   invariant(!epoch || epoch.projectId === projectId && epoch.requestId === actor.requestId, 'CAPABILITY_MISMATCH', 'Context epoch lock differs');
   const id = epoch?.lockId ?? (store.db.prepare("SELECT id FROM entities WHERE kind='director_skill_lock' AND project_id=? ORDER BY rowid DESC LIMIT 1").get(projectId) as { id: string } | undefined)?.id;
-  if (!id) return '4.0.0';
+  if (!id) return '5.0.0';
   const record = store.get<{ projectId: string; lock: { id: string; lockDigest: string; compatibility: { toolContract: string } } }>('director_skill_lock', id);
   invariant(record?.projectId === projectId && record.lock.id === id, 'CAPABILITY_MISMATCH', 'Context skill lock is missing');
   const { lockDigest, ...body } = record.lock;

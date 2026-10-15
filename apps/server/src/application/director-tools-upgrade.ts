@@ -1,3 +1,4 @@
+import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant } from "@openslate/core";
 import type { ActorContext, ToolContractVersion } from "@openslate/core";
 import { verifySkillLock } from "@openslate/director";
@@ -9,11 +10,11 @@ import type { DirectorSkillConfiguration } from "./director-capabilities.js";
 export interface DirectorToolsUpgrade {
   expectedLockId: string;
   expectedLockDigest: string;
-  targetVersion: "2.0.0" | "3.0.0" | "4.0.0";
+  targetVersion: Exclude<ToolContractVersion, "1.0.0">;
 }
-interface UpgradeReceipt { lockId: string; previousLockId: string; toolContract: "2.0.0" | "3.0.0" | "4.0.0" }
+interface UpgradeReceipt { lockId: string; previousLockId: string; toolContract: Exclude<ToolContractVersion, "1.0.0"> }
 
-const upgradeTargets: Readonly<Record<string, readonly string[]>> = { "1.0.0": ["2.0.0", "3.0.0", "4.0.0"], "2.0.0": ["3.0.0", "4.0.0"], "3.0.0": ["4.0.0"], "4.0.0": [] };
+const upgradeTargets: Readonly<Record<string, readonly string[]>> = Object.fromEntries(SUPPORTED_TOOL_CONTRACTS.map((version, index) => [version, SUPPORTED_TOOL_CONTRACTS.slice(index + 1)]));
 
 /** Authenticated local configuration only; never registered as a model tool. */
 export class DirectorToolSettings {
@@ -31,9 +32,9 @@ export class DirectorToolSettings {
   }
   status(projectId: string) {
     const saved = this.latest(projectId);
-    return { currentVersion: saved?.lock.compatibility.toolContract ?? "4.0.0", lockId: saved?.id ?? null,
-      lockDigest: saved?.lock.lockDigest ?? null, availableVersion: "4.0.0" as const,
-      upgradeAvailable: !!saved && ["1.0.0", "2.0.0", "3.0.0"].includes(saved.lock.compatibility.toolContract), busy: this.busy(projectId) };
+    return { currentVersion: saved?.lock.compatibility.toolContract ?? "5.0.0", lockId: saved?.id ?? null,
+      lockDigest: saved?.lock.lockDigest ?? null, availableVersion: "5.0.0" as const,
+      upgradeAvailable: !!saved && saved.lock.compatibility.toolContract !== "5.0.0", busy: this.busy(projectId) };
   }
 
   /** Application maintenance at the first input of a new native turn, never a model tool. */
@@ -70,14 +71,14 @@ export class DirectorToolSettings {
     const configuration = this.configuration(projectId), configurationDigest = digest(configuration);
     let successor: SkillCapabilityLock;
     try {
-      invariant(["1.0.0", "2.0.0", "3.0.0", "4.0.0"].includes(saved.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported Director guidance");
+      invariant((SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(saved.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported Director guidance");
       const guidanceVersion = saved.lock.skills.find(skill => skill.id === "production")?.version.split(".")[0];
       const shipped = createDirectorSkillLock(configuration, saved.lock.compatibility.toolContract as ToolContractVersion, guidanceVersion);
       verifySkillLock(saved.lock, shipped.environment);
       // UUIDs differ per project. Every package, prompt and implementation binding must match the shipped predecessor.
       const content = ({ id: _id, lockDigest: _digest, ...body }: SkillCapabilityLock) => body;
       invariant(saved.id === saved.lock.id && canonical(content(saved.lock)) === canonical(content(shipped.lock)), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Customized Director guidance");
-      successor = saved.lock.compatibility.toolContract === "4.0.0" && guidanceVersion === "5" ? saved.lock : createDirectorSkillLock(configuration, "4.0.0").lock;
+      successor = saved.lock.compatibility.toolContract === "5.0.0" && guidanceVersion === "6" ? saved.lock : createDirectorSkillLock(configuration, "5.0.0").lock;
     } catch (error) {
       throw new DomainError("DIRECTOR_GUIDANCE_UNSUPPORTED", "OpenSlate cannot safely load this project's customized or unavailable Director guidance. Saved work is retained. Restore the matching application files, then send a new message.",
         { cause: error instanceof DomainError ? error.code : "GUIDANCE_VERIFICATION_FAILED" });
@@ -86,7 +87,7 @@ export class DirectorToolSettings {
     invariant(digest(this.configuration(projectId)) === configurationDigest, "DIRECTOR_TOOLS_STALE", "Director setup changed while the new conversation was being prepared. Send a new message.");
     if (successor === saved.lock) return successor;
     const input = { requestId: actor.requestId, epochId: actor.epochId, turnId, previousLockId: saved.id,
-      previousLockDigest: saved.lock.lockDigest, configurationDigest, targetVersion: "4.0.0" };
+      previousLockDigest: saved.lock.lockDigest, configurationDigest, targetVersion: "5.0.0" };
     const receipt = store.command(`application:${projectId}:director-guidance`, actor.epochId, digest(input), () => {
       fresh();
       invariant(digest(this.configuration(projectId)) === configurationDigest, "DIRECTOR_TOOLS_STALE", "Director setup changed while the new conversation was being prepared. Send a new message.");
@@ -103,7 +104,7 @@ export class DirectorToolSettings {
     invariant(input && Object.keys(input).every(field => ["expectedLockId", "expectedLockDigest", "targetVersion"].includes(field))
       && typeof input.expectedLockId === "string" && input.expectedLockId.length > 0 && input.expectedLockId.length <= 160
       && typeof input.expectedLockDigest === "string" && /^[a-f0-9]{64}$/.test(input.expectedLockDigest)
-      && ["2.0.0", "3.0.0", "4.0.0"].includes(input.targetVersion), "VALIDATION_ERROR", "Choose the displayed narration tools update");
+      && (SUPPORTED_TOOL_CONTRACTS.slice(1) as readonly string[]).includes(input.targetVersion), "VALIDATION_ERROR", "Choose the displayed narration tools update");
     invariant(typeof key === "string" && key.length > 0 && key.length <= 160, "VALIDATION_ERROR", "Use one update command identity");
     const payload = structuredClone(input), requestDigest = digest(payload), store = this.service.store;
     const scope = `local-user:${projectId}:director-tools-upgrade`;
