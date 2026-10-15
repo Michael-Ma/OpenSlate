@@ -119,12 +119,10 @@ export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
 
   const reconnect = useCallback(() => onReconnect(), [onReconnect]);
 
-  // The event stream reconnects on its own with a growing delay. A window focus is the only public way to ask
-  // the project subscription to try at once (store.ts has no reconnect, and the shell may not add one; see the
-  // hand-over notes), and a plain read asks whether the studio is there.
+  // The event stream reconnects on its own with a growing delay; Try now asks it to try at once, and a plain read
+  // asks whether the studio is there.
   const retryNow = useCallback(() => {
-    window.dispatchEvent(new Event("focus"));
-    void store.refresh();
+    store.reconnect();
     check();
   }, [store, check]);
 

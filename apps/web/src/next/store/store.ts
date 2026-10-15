@@ -95,6 +95,12 @@ export class StudioStore {
     await this.refresh();
   }
 
+  /** Try the event stream now (the offline strip's Try now) and read the film again. */
+  reconnect(): void {
+    this.#subscription?.connectNow();
+    void this.refresh();
+  }
+
   stop(): void {
     this.#unsubscribe?.();
     this.#unsubscribe = null;

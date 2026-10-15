@@ -33,6 +33,8 @@ export class ProjectSubscription {
     return () => { this.#listeners.delete(listener); if (!this.#listeners.size) this.#stop(); };
   };
   readonly refresh = (): void => this.#invalidate();
+  /** Try the stream at once instead of waiting for the next retry (a "Try now" button), and read again. */
+  readonly connectNow = (): void => { if (this.#hidden()) return; this.#invalidate(); if (!this.#controller) this.#connect(); };
   #hidden(): boolean { return this.#environment.visibility?.hidden === true; }
   #emit(): void { for (const listener of [...this.#listeners]) listener(); }
   #connection(connection: ProjectUpdateState["connection"]): void {
