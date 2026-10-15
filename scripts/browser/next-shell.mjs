@@ -1,9 +1,13 @@
-// Next studio shell checks: top bar, tabs, language, the classic-view panel, the narrow drawer and Connect.
+// Next studio shell checks: top bar, tabs, Settings and All films, language, the narrow drawer, Connect,
+// the film-wide strip (stopped, offline, restart casualties), Stop and its confirm, the session-expired dialog,
+// and no sideways scroll from 900 to 1366 px in every view.
 // Set BROWSER_CHECK_SHOTS=/some/dir to also save screenshots of each scenario.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const FIXTURE = "ui=next&fixture=last-ferry";
+const LIVE = "ui=next";
+const VIEWS = ["plan", "keyframes", "assets", "film"];
 
 async function shot(page, name) {
   const dir = process.env.BROWSER_CHECK_SHOTS;
@@ -12,21 +16,59 @@ async function shot(page, name) {
   await page.screenshot({ path: join(dir, `${name}.png`) });
 }
 
-/** The shell is up and the sample film's overview has been read (the counts come from it). */
+/** The shell is up and the film's overview has been read (the counts come from it). */
 async function ready(page) {
   await page.waitForSelector(".app[data-ui='next'] .topbar", { timeout: 20000 });
-  await page.waitForSelector(".topbar .film span", { timeout: 20000 });
+  await page.waitForSelector(".topbar .counts", { timeout: 20000, state: "attached" });
 }
 
 function expect(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function until(page, read, test, message, timeout = 8000) {
+  const deadline = Date.now() + timeout;
+  let last;
+  while (Date.now() < deadline) {
+    last = await read();
+    if (test(last)) return last;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`${message}; last: ${JSON.stringify(last)}`);
+}
+
 const tab = (page, view) => page.locator(`.topbar [data-act='tab'][data-view='${view}']`);
 
-async function noSidewaysScroll(page) {
+/** Open a view the way a person would: a tab, the gear, or the mark. Start has no tabs, so a tab is reached through Settings. */
+async function openView(page, view) {
+  if (view === "settings") await page.locator(".topbar [data-act='settings']").click();
+  else if (view === "start") await page.locator(".topbar [data-act='all-films']").click();
+  else {
+    if (!(await tab(page, view).count())) await page.locator(".topbar [data-act='settings']").click();
+    await tab(page, view).click();
+  }
+  await page.waitForSelector(`.app[data-view='${view}']`);
+}
+const text = (page, selector) => page.locator(selector).first().innerText().catch(() => "");
+const strip = (page) => page.locator(".film-strip-slot .film-strip");
+
+async function noSidewaysScroll(page, where = "") {
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
-  expect(scrollWidth <= innerWidth, `The page scrolls sideways: ${scrollWidth}px content in a ${innerWidth}px window`);
+  expect(scrollWidth <= innerWidth, `The page scrolls sideways${where ? ` (${where})` : ""}: ${scrollWidth}px content in a ${innerWidth}px window`);
+}
+
+/** Scene 2 of the sample film: open its frames, settle 2.3's line and make its three clips (one sent, two queued). */
+async function makeSceneTwoVideo(page) {
+  await page.waitForSelector("main.work[data-view='keyframes'] .preview .pic-img", { timeout: 20000 });
+  for (const label of ["2-2", "2-3"]) {
+    await page.click(`.card [data-act='open-shot'][data-shot='shot-${label}']`);
+    await until(page, () => text(page, `[data-card='shot-${label}'] .stl`), (value) => /Opened/.test(value), `${label} never opened`);
+  }
+  await page.click("[data-act='make-fit'][data-shot='shot-2-3']");
+  await page.waitForSelector(".banner[data-state='settled']");
+  await until(page, () => page.locator("[data-act='confirm-video']").isDisabled(), (disabled) => !disabled, "Confirm stayed disabled");
+  await page.click("[data-act='confirm-video']");
+  await page.locator(".topbar [data-act='stop-film']").waitFor({ timeout: 5000 });
 }
 
 export const scenarios = [
@@ -42,6 +84,7 @@ export const scenarios = [
         const bar = document.querySelector(".topbar").getBoundingClientRect();
         const column = director.getBoundingClientRect();
         const scroller = document.scrollingElement;
+        const settings = document.querySelector(".topbar [data-act='settings']").getBoundingClientRect();
         return {
           bar: { top: bar.top, height: bar.height, width: bar.width },
           column: { left: column.left, width: column.width, top: column.top },
@@ -52,6 +95,11 @@ export const scenarios = [
           saved: document.querySelector(".topbar .saved")?.textContent,
           toggleShown: getComputedStyle(document.querySelector(".topbar .dir-toggle")).display !== "none",
           documentTitle: document.title,
+          brand: document.querySelector(".topbar [data-act='all-films']")?.getAttribute("aria-label"),
+          settings: { label: document.querySelector(".topbar [data-act='settings']").getAttribute("aria-label"), width: settings.width, height: settings.height },
+          stop: document.querySelectorAll(".topbar [data-act='stop-film']").length,
+          strip: document.querySelector(".film-strip-slot")?.getAttribute("data-strip"),
+          described: document.querySelectorAll(".topbar [role='tab'][aria-describedby]").length,
         };
       });
       expect(layout.bar.top === 0 && layout.bar.height === 52 && layout.bar.width === 1440, `Top bar is ${JSON.stringify(layout.bar)}, expected 1440 × 52 at the top`);
@@ -63,6 +111,11 @@ export const scenarios = [
       expect(layout.saved === "Saved locally", `Connection pill reads "${layout.saved}"`);
       expect(!layout.toggleShown, "The Director toggle shows on a wide screen");
       expect(layout.documentTitle === "The Last Ferry · OpenSlate", `Document title is "${layout.documentTitle}"`);
+      expect(layout.brand === "OpenSlate, all films", `The mark is labelled "${layout.brand}"`);
+      expect(layout.settings.label === "Settings" && layout.settings.width === 30 && layout.settings.height === 30, `Settings is ${JSON.stringify(layout.settings)}, expected a 30 px round button`);
+      expect(layout.stop === 0, "Stop shows while nothing runs");
+      expect(layout.strip === "none", `A film-wide strip shows on a quiet film: ${layout.strip}`);
+      expect(layout.described === 0, "A tab still says it opens in the classic studio");
       expect((await tab(page, "keyframes").getAttribute("aria-selected")) === "true", "Keyframes is not the selected tab");
       expect((await page.locator(".topbar [data-act='classic']").getAttribute("href")) === "?ui=classic&view=frames", "The classic link does not open the classic Keyframes view");
       await shot(page, "next-shell-layout-1440");
@@ -79,10 +132,11 @@ export const scenarios = [
       await toggle.waitFor({ state: "visible" });
       const rows = await page.evaluate(() => {
         const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
-        return { film: top(".topbar .film"), toggle: top(".topbar .dir-toggle"), tabs: top(".topbar .tabs"), position: getComputedStyle(document.querySelector(".topbar")).position };
+        return { film: top(".topbar .film"), toggle: top(".topbar .dir-toggle"), settings: top(".topbar [data-act='settings']"), tabs: top(".topbar .tabs"), position: getComputedStyle(document.querySelector(".topbar")).position };
       });
       expect(rows.position === "sticky", `Top bar position is ${rows.position}`);
       expect(rows.tabs > rows.film && rows.tabs > rows.toggle, `The tabs are not on their own row: ${JSON.stringify(rows)}`);
+      expect(Math.abs(rows.settings - rows.toggle) < 8, `Settings is not on the first row with the Director toggle: ${JSON.stringify(rows)}`);
       await shot(page, "next-shell-narrow-390");
 
       await toggle.click();
@@ -121,11 +175,13 @@ export const scenarios = [
         saved: document.querySelector(".topbar .saved")?.textContent,
         counts: document.querySelector(".topbar .counts")?.textContent,
         language: document.querySelector(".topbar [data-act='language']")?.textContent,
+        settings: document.querySelector(".topbar [data-act='settings']")?.getAttribute("aria-label"),
       }));
       expect(zh.lang === "zh-CN", `html lang is ${zh.lang}`);
       expect(zh.saved === "已保存在本机", `Connection pill reads "${zh.saved}"`);
       expect(zh.counts === "3 场 · 8 个镜头", `Counts read "${zh.counts}"`);
       expect(zh.language === "English", `The language switch reads "${zh.language}"`);
+      expect(zh.settings === "设置", `Settings is labelled "${zh.settings}"`);
       await shot(page, "next-shell-language-zh");
 
       await page.reload();
@@ -138,42 +194,306 @@ export const scenarios = [
     },
   },
   {
-    name: "next-shell-classic",
+    name: "next-shell-views",
     query: FIXTURE,
+    viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await tab(page, "plan").click();
-      const panel = page.locator(".classic-view[data-view='plan']");
-      await panel.waitFor();
-      expect((await tab(page, "plan").getAttribute("aria-selected")) === "true", "Plan is not the selected tab");
-      expect((await panel.locator("h1").textContent()) === "Plan", "The panel does not name the view");
-      const link = panel.locator("[data-act='open-classic']");
-      expect((await link.getAttribute("href")) === "?ui=classic&view=plan", `The classic link is ${await link.getAttribute("href")}`);
-      expect((await link.textContent()) === "Open Plan in the classic studio", `The classic link reads "${await link.textContent()}"`);
-      const scroll = await page.evaluate(() => ({ height: document.scrollingElement.scrollHeight, inner: window.innerHeight }));
-      expect(scroll.height <= scroll.inner, "The classic panel makes the page scroll");
-      await shot(page, "next-shell-classic-plan");
+      const shown = () => page.evaluate(() => document.querySelector(".app")?.getAttribute("data-view"));
+      // Every tab opens its own view in the new studio; the classic studio stays one link away.
+      for (const view of VIEWS) {
+        await tab(page, view).click();
+        await until(page, shown, (value) => value === view, `The ${view} tab did not open its view`);
+        expect((await tab(page, view).getAttribute("aria-selected")) === "true", `${view} is not the selected tab`);
+      }
+      expect((await page.locator(".topbar [data-act='classic']").getAttribute("href")) === "?ui=classic&view=cut", "The classic link does not follow the view");
 
       // Keyboard: arrows move along the tabs, Enter opens one.
+      await tab(page, "plan").click();
       await tab(page, "plan").focus();
       await page.keyboard.press("ArrowRight");
       await page.keyboard.press("ArrowRight");
       expect((await page.evaluate(() => document.activeElement?.getAttribute("data-view"))) === "assets", "ArrowRight did not move focus to Assets");
       await page.keyboard.press("Enter");
-      await page.locator(".classic-view[data-view='assets']").waitFor();
-      expect((await page.locator(".classic-view [data-act='open-classic']").getAttribute("href")) === "?ui=classic&view=assets", "Assets links to the wrong classic view");
+      await until(page, shown, (value) => value === "assets", "Enter did not open Assets");
 
-      await page.locator(".classic-view [data-act='back-to-keyframes']").click();
-      await page.waitForFunction(() => document.querySelector(".topbar [data-view='keyframes']")?.getAttribute("aria-selected") === "true");
-      expect(await page.locator(".classic-view").count() === 0, "The classic panel stayed after going back to Keyframes");
+      // Settings: the gear opens it; no tab is selected, but the tab row stays reachable with Tab.
+      const gear = page.locator(".topbar [data-act='settings']");
+      await gear.click();
+      await until(page, shown, (value) => value === "settings", "The gear did not open Settings");
+      expect((await gear.getAttribute("aria-current")) === "page", "Settings is not marked as the current page");
+      expect(await page.locator(".topbar [role='tab'][aria-selected='true']").count() === 0, "A tab stays selected on Settings");
+      expect(await page.locator(".topbar [role='tab'][tabindex='0']").count() === 1, "The tab row is not in the focus order on Settings");
+      await shot(page, "next-shell-settings-1440");
+
+      // The mark opens the films on this computer: no film is open there, so no tabs, counts or Stop.
+      await page.locator(".topbar [data-act='all-films']").click();
+      await until(page, shown, (value) => value === "start", "The mark did not open the films list");
+      const start = await page.evaluate(() => ({
+        film: document.querySelector(".topbar .film")?.innerText.replace(/\s+/g, " "),
+        tabs: document.querySelectorAll(".topbar [role='tab']").length,
+        counts: document.querySelectorAll(".topbar .counts").length,
+        current: document.querySelector(".topbar [data-act='all-films']")?.getAttribute("aria-current"),
+        title: document.title,
+      }));
+      expect(start.film === "Films on this computer", `The bar reads "${start.film}" on Start`);
+      expect(start.tabs === 0 && start.counts === 0, `Start still shows ${start.tabs} tabs and ${start.counts} counts`);
+      expect(start.current === "page", "The mark is not marked as the current page on Start");
+      expect(start.title === "OpenSlate", `Document title on Start is "${start.title}"`);
+      await noSidewaysScroll(page, "start");
+      await shot(page, "next-shell-start-1440");
+    },
+  },
+  {
+    name: "next-shell-stop-continue",
+    query: FIXTURE,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await makeSceneTwoVideo(page);
+      await shot(page, "next-shell-running-1440");
+      const stop = page.locator(".topbar [data-act='stop-film']");
+      expect((await stop.innerText()).trim() === "Stop", `Stop reads "${await stop.innerText()}"`);
+      // At 900 px the bar still fits with Stop in it.
+      await page.setViewportSize({ width: 900, height: 900 });
+      const bar = await page.evaluate(() => { const node = document.querySelector(".topbar"); return [node.scrollWidth, node.clientWidth]; });
+      expect(bar[0] <= bar[1], `The top bar overflows at 900 px with Stop: ${bar}`);
+      await noSidewaysScroll(page, "running at 900");
+      await shot(page, "next-shell-running-900");
+      await page.setViewportSize({ width: 1440, height: 900 });
+
+      // The confirm says what finishes and is charged and what is taken off; Esc keeps going.
+      await stop.click();
+      const dialog = page.locator("dialog[data-dialog='stop']");
+      await dialog.waitFor();
+      expect(await dialog.evaluate((node) => node.open && node.matches(":modal")), "The Stop confirm is not a modal dialog");
+      expect((await dialog.locator("h2").innerText()) === "Stop the film?", "The confirm has the wrong title");
+      const lines = await dialog.locator("li").allInnerTexts();
+      expect(lines.some((line) => /^\d+ jobs? already sent will finish and be charged\.$/.test(line)), `The confirm does not say what finishes and is charged: ${JSON.stringify(lines)}`);
+      expect(lines.some((line) => /^\d+ queued jobs? will be taken off; (it needs|they need) a new confirm later\.$/.test(line)), `The confirm does not say what is taken off: ${JSON.stringify(lines)}`);
+      expect((await page.evaluate(() => document.activeElement?.getAttribute("data-act"))) === "keep-going", "Focus did not start on Keep going");
+      await shot(page, "next-shell-stop-dialog-1440");
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "detached" });
+      await until(page, () => page.evaluate(() => document.activeElement?.getAttribute("data-act")), (value) => value === "stop-film", "Focus did not return to Stop");
+
+      await stop.click();
+      await page.locator("dialog[data-dialog='stop'] [data-act='confirm-stop']").click();
+      await page.waitForSelector(".film-strip[data-strip='stopped']");
+      await stop.waitFor({ state: "detached", timeout: 5000 });
+      const stopped = await text(page, ".film-strip[data-strip='stopped'] .txt");
+      expect(/^Stopped\. Nothing new will be sent\. \d+ jobs? already sent will finish and be charged\. \d+ queued jobs? (was|were) taken off and will need a new confirm\.$/.test(stopped), `The stopped strip reads ${JSON.stringify(stopped)}`);
+      await until(page, () => page.evaluate(() => document.activeElement?.getAttribute("data-act")), (value) => value === "continue-film", "Focus did not move to Continue once Stop was gone");
+      const box = await strip(page).boundingBox();
+      expect(box && Math.abs(box.x - 414) < 2 && Math.abs(box.y - 62) < 2 && Math.abs(box.width - 1004) < 2, `The strip is not at the top of the workspace: ${JSON.stringify(box)}`);
+      const continueColour = await page.locator("[data-act='continue-film']").evaluate((node) => getComputedStyle(node).backgroundColor);
+      expect(continueColour === "rgb(236, 236, 238)", `Continue is not the white primary action: ${continueColour}`);
+      await noSidewaysScroll(page);
+      const height = await page.evaluate(() => document.documentElement.scrollHeight);
+      expect(height <= 900, `The stopped Keyframes view scrolls: ${height}px`);
+      await shot(page, "next-shell-stopped-1440");
+
+      // The same strip in every view.
+      for (const view of ["plan", "assets", "film"]) {
+        await tab(page, view).click();
+        await page.waitForSelector(`.app[data-view='${view}'] .film-strip[data-strip='stopped']`);
+      }
+      await page.locator(".topbar [data-act='settings']").click();
+      await page.waitForSelector(".app[data-view='settings'] .film-strip[data-strip='stopped']");
+      await tab(page, "keyframes").click();
+
+      await page.locator("[data-act='continue-film']").click();
+      await page.waitForSelector(".film-strip-slot[data-strip='none']", { state: "attached" });
+      await until(page, () => text(page, ".toast"), (value) => value.startsWith("Continued."), "No toast after Continue");
+    },
+  },
+  {
+    name: "next-shell-stop-narrow",
+    query: FIXTURE,
+    viewport: { width: 390, height: 844 },
+    async run({ page }) {
+      await ready(page);
+      await page.click("[data-act='scene'][data-scene='scene-3']");
+      await page.click("[data-act='make-keyframes']");
+      const stop = page.locator(".topbar [data-act='stop-film']");
+      await stop.waitFor({ timeout: 5000 });
+      const rows = await page.evaluate(() => {
+        const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
+        return { stop: top(".topbar [data-act='stop-film']"), toggle: top(".topbar .dir-toggle"), tabs: top(".topbar .tabs") };
+      });
+      expect(Math.abs(rows.stop - rows.toggle) < 8 && rows.tabs > rows.toggle, `Stop is not on the first row: ${JSON.stringify(rows)}`);
+      await noSidewaysScroll(page, "running");
+      await shot(page, "next-shell-running-390");
+      await stop.click();
+      await page.locator("dialog[data-dialog='stop'] [data-act='confirm-stop']").click();
+      await page.waitForSelector(".film-strip[data-strip='stopped']");
+      await noSidewaysScroll(page, "stopped");
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await shot(page, "next-shell-stopped-390");
+      // Chinese strings are the longest here; the strip wraps and nothing scrolls sideways.
+      await page.locator(".topbar [data-act='language']").click();
+      await until(page, () => text(page, ".film-strip[data-strip='stopped'] .txt"), (value) => value.startsWith("已停止，不会再发送新任务。"), "The strip did not switch to Chinese");
+      await noSidewaysScroll(page, "stopped in Chinese");
+      await shot(page, "next-shell-stopped-390-zh");
+      await page.locator(".topbar [data-act='language']").click();
+    },
+  },
+  {
+    name: "next-shell-no-sideways-scroll",
+    query: FIXTURE,
+    viewport: { width: 1366, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      for (const width of [1366, 1280, 1024, 900]) {
+        await page.setViewportSize({ width, height: 900 });
+        const column = width < 1280 ? 320 : 392;
+        for (const view of [...VIEWS, "settings", "start"]) {
+          await openView(page, view);
+          await page.waitForTimeout(150);
+          await noSidewaysScroll(page, `${view} at ${width}`);
+          const sizes = await page.evaluate(() => {
+            const bar = document.querySelector(".topbar");
+            const main = document.querySelector(".workspace-slot > main");
+            return { column: Math.round(document.getElementById("director").getBoundingClientRect().width), bar: [bar.scrollWidth, bar.clientWidth], main: main ? [main.scrollWidth, main.clientWidth] : null };
+          });
+          expect(sizes.column === column, `The Director column is ${sizes.column}px at ${width}, expected ${column}`);
+          expect(sizes.bar[0] <= sizes.bar[1], `The top bar overflows at ${width} on ${view}: ${sizes.bar}`);
+          expect(!sizes.main || sizes.main[0] <= sizes.main[1] + 1, `The ${view} workspace overflows sideways at ${width}: ${sizes.main}`);
+        }
+        await openView(page, "keyframes");
+        await page.waitForSelector("main.work[data-view='keyframes'] .preview");
+        const height = await page.evaluate(() => document.documentElement.scrollHeight);
+        expect(height <= 900, `Keyframes scrolls the page at ${width}: ${height}px`);
+        await shot(page, `next-shell-keyframes-${width}`);
+      }
+    },
+  },
+  {
+    name: "next-shell-restart-casualties",
+    query: LIVE,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      // The studio says which overview attempts were mid-send at its last start; give the first shot's clip that state.
+      let casualty = null;
+      await page.route(/\/api\/projects\/[^/]+\/generation$/, async (route) => {
+        const response = await route.fetch();
+        const overview = await response.json();
+        const first = overview.scenes?.[0]?.shotIds?.[0];
+        if (first && overview.shots[first]) {
+          casualty = overview.shots[first].label;
+          overview.shots[first].video = { state: "no_answer", phase: "submission_unknown", attemptId: "restart-casualty-1", startedAt: "2026-10-15T09:00:00.000Z", takeCount: 0 };
+          overview.restartCasualties = ["restart-casualty-1"];
+        }
+        await route.fulfill({ response, json: overview });
+      });
+      await page.reload();
+      await ready(page);
+      await page.waitForSelector(".film-strip[data-strip='restart']", { timeout: 10000 });
+      const title = await text(page, ".film-strip[data-strip='restart'] .txt b");
+      expect(title === `OpenSlate restarted while 1 clip was being sent (${casualty}).`, `The restart strip reads ${JSON.stringify(title)}`);
+      expect((await text(page, ".film-strip[data-strip='restart'] .txt span")) === "The service never confirmed it. It may still arrive and be charged; nothing is resent by itself.", "The restart strip does not say what may still happen");
+      await noSidewaysScroll(page);
+      await shot(page, "next-shell-restart-1440");
+
+      // Show takes the person to the shot in Keyframes, from any view.
+      await tab(page, "plan").click();
+      await page.waitForSelector(".app[data-view='plan'] .film-strip[data-strip='restart']");
+      await page.locator("[data-act='show-casualty']").click();
+      await page.waitForSelector(".app[data-view='keyframes']");
+      expect((await tab(page, "keyframes").getAttribute("aria-selected")) === "true", "Show did not open Keyframes");
+
+      await page.locator("[data-act='dismiss-restart']").click();
+      await page.waitForSelector(".film-strip-slot[data-strip='none']", { state: "attached" });
+    },
+  },
+  {
+    name: "next-shell-offline",
+    query: LIVE,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "The live shell never connected");
+      // The event stream fails from now on. Hiding and showing the tab drops the open stream and reconnects it.
+      await page.route(/\/api\/projects\/[^/]+\/events/, (route) => route.abort("internetdisconnected"));
+      const visibility = (hidden) => page.evaluate((value) => {
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (value ? "hidden" : "visible") });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, hidden);
+      await visibility(true);
+      await visibility(false);
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Reconnecting…", "The pill never said Reconnecting…");
+      // The strip waits a moment (a returning tab reconnects within it), then says what is off.
+      await page.waitForSelector(".film-strip[data-strip='offline']", { timeout: 6000 });
+      const offline = await text(page, ".film-strip[data-strip='offline'] .txt");
+      expect(offline === "Can’t reach the studio. Changes can’t be saved and nothing can be made until it’s back. OpenSlate keeps trying by itself.", `The offline strip reads ${JSON.stringify(offline)}`);
+      await noSidewaysScroll(page);
+      await shot(page, "next-shell-offline-1440");
+
+      await page.unroute(/\/api\/projects\/[^/]+\/events/);
+      // A retry already on its way may still meet the old route; press again until the studio answers.
+      await until(page, async () => {
+        const retry = page.locator("[data-act='retry-now']");
+        if (await retry.count()) await retry.click().catch(() => {});
+        await page.waitForTimeout(700);
+        return page.locator(".film-strip-slot").getAttribute("data-strip");
+      }, (value) => value === "none", "Try now did not bring the studio back", 12000);
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "Try now did not reconnect");
+      await until(page, () => text(page, ".toast"), (value) => value.startsWith("Connected again."), "No toast once the studio was back");
+    },
+  },
+  {
+    name: "next-shell-session-expired",
+    query: LIVE,
+    viewport: { width: 1440, height: 900 },
+    allowConsoleErrors: [
+      // The session is cleared on purpose: reads are refused until the window connects again.
+      /^HTTP 40[13] \/api\//,
+    ],
+    async run({ page }) {
+      await ready(page);
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "The live shell never connected");
+      const box = page.locator("[data-field='message']");
+      await box.fill("Keep the fog low over the water");
+
+      // The session ends (as after a restart or 12 hours); the next read finds out.
+      const cookies = await page.context().cookies();
+      await page.context().clearCookies();
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      const dialog = page.locator("dialog[data-dialog='expired']");
+      await dialog.waitFor({ timeout: 10000 });
+      expect(await dialog.evaluate((node) => node.open && node.matches(":modal")), "Session expired is not a modal dialog");
+      expect((await dialog.locator("h2").innerText()) === "This window is no longer connected", "The dialog has the wrong title");
+      expect((await dialog.locator("code").innerText()) === "pnpm studio", "The dialog does not show the command as code");
+      expect(await page.locator(".app[data-ui='next'] .topbar").isVisible(), "The page behind the dialog was replaced");
+      expect((await text(page, ".topbar .saved")) === "Not connected", "The pill does not say Not connected");
+      expect((await page.evaluate(() => document.activeElement?.getAttribute("data-act"))) === "reconnect", "Focus is not on Try again");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(200);
+      expect(await dialog.evaluate((node) => node.open), "Esc dismissed the session-expired dialog");
+      await shot(page, "next-shell-expired-1440");
+
+      // Without a session, Try again says it is still not connected.
+      await dialog.locator("[data-act='reconnect']").click();
+      await until(page, () => text(page, "dialog[data-dialog='expired'] .still"), (value) => value.startsWith("Still not connected."), "Try again without a session said nothing");
+
+      // With a session again (the person opened the new link), Try again reconnects and keeps the unsent message.
+      await page.context().addCookies(cookies);
+      await dialog.locator("[data-act='reconnect']").click();
+      await dialog.waitFor({ state: "detached", timeout: 10000 });
+      await ready(page);
+      await until(page, () => page.locator("[data-field='message']").inputValue().catch(() => ""), (value) => value === "Keep the fog low over the water", "The unsent message was lost");
+      await until(page, () => text(page, ".toast"), (value) => value === "Connected again. Your unsent message is still in the composer.", "No toast after reconnecting");
     },
   },
   {
     name: "next-shell-connect",
-    query: "ui=next",
+    query: LIVE,
     allowConsoleErrors: [
       // The second load has no session on purpose.
       /^HTTP 40[13] \/api\/session$/,
+      // The first page is still open when the cookies are cleared; a studio event can make it read once more, refused.
+      /^HTTP 403 \/api\/projects\//,
       // The server has no film overview route yet (plan item GR-1); the shell still loads without it.
       /^HTTP 404 \/api\/projects\/[^/]+\/generation$/,
     ],
