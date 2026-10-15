@@ -137,8 +137,8 @@ test('reply choices require a saved human reply and preserve it in the resolutio
 
 test('seen frame sha changes stale a note without a shot edit; identical bytes keep it current',async t=>{
  const f=fixture(t),seen={shotId:'shot-0',artifactId:'frame-1',sha256:'a'.repeat(64)};
- // Trusted projection fixture models the later vision card; no image provider or native model is called.
- const id=randomUUID();f.store.insert('director_context',id,f.project.id,{id,projectId:f.project.id,requestId:f.human.requestId,epochId:f.bridge.actor.epochId,snapshot:{attachedKeyframes:[seen]}});
+ // Trusted projection fixture models the frozen turn-start vision receipt; no image provider or native model is called.
+ const id=randomUUID();f.store.insert('request_keyframe_projection',f.human.requestId,f.project.id,{id:f.human.requestId,projectId:f.project.id,requestId:f.human.requestId,epochId:f.bridge.actor.epochId,images:[{...seen,nodeId:'frame-node',candidateId:null,thumbnailSha256:'c'.repeat(64),tile:0}]});
  const p=f.store.getProject(f.project.id);f.store.saveProject({...p,activePlanId:'frame-plan'},p.headVersion);
  const binding={id:'frame-node',state:'active',planId:'frame-plan',node:{shotId:'shot-0',kind:'image'},outputs:{image:{artifactId:'frame-1',sha256:seen.sha256}}};
  f.store.insert('node_binding',binding.id,f.project.id,binding);

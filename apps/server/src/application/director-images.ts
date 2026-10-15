@@ -40,8 +40,8 @@ export function imageMessageContext(images?: SelectedDirectorImage[], replyToRev
 
 /** Trusted host service: only immutable, explicitly selected supplied PNGs enter native input. */
 export class DirectorImageProjector {
-  private readonly artifactRoot: string;
-  private readonly ffmpeg: string;
+  protected readonly artifactRoot: string;
+  protected readonly ffmpeg: string;
   private readonly toolchainDigest: string;
   constructor(readonly production: ProductionService, options: { ffmpegPath: string }) {
     invariant(isAbsolute(options.ffmpegPath), "DIRECTOR_IMAGES_CONFIGURATION", "An absolute local image tool is required");
@@ -49,6 +49,7 @@ export class DirectorImageProjector {
     this.ffmpeg = realpathSync(options.ffmpegPath);
     this.toolchainDigest = hash(readFileSync(this.ffmpeg));
   }
+  protected hashBytes(bytes: Uint8Array) { return hash(bytes); }
   private get store() { return this.production.store; }
   private artifact(projectId: string, image: SelectedDirectorImage): SuppliedImageArtifact {
     const project = this.store.getProject(projectId), record = this.store.get<SuppliedImageArtifact>("artifact", image.artifactId);
@@ -73,7 +74,7 @@ export class DirectorImageProjector {
     images.forEach(image => this.artifact(projectId, image));
     return this.store.insert("request_image_selection", actor.requestId, projectId, { id: actor.requestId, projectId, requestId: actor.requestId, images, selectionDigest });
   }
-  private async bytes(path: string, root: string, sha256: string, byteLength: number, maximum: number): Promise<Buffer> {
+  protected async bytes(path: string, root: string, sha256: string, byteLength: number, maximum: number): Promise<Buffer> {
     try {
     invariant(Number.isSafeInteger(byteLength) && byteLength > 0 && byteLength <= maximum, "DIRECTOR_IMAGE_LIMIT", "Image exceeds its recorded size limit");
     const resolved = await realpath(path);

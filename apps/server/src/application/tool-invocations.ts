@@ -144,6 +144,8 @@ export class ToolInvocationService {
     invariant(actor.kind === "director", "ACTOR_DENIED", "Tool transport requires a director epoch");
     this.service.assertActor(projectId, actor);
     invariant(/^[A-Za-z0-9_-]{1,160}$/.test(callId), "VALIDATION_ERROR", "Invalid tool call identity");
+    invariant(!this.service.store.get("keyframe_review_request", actor.requestId) || ["read_context", "record_notes", "propose_change", "read_skill"].includes(tool),
+      "ACTOR_DENIED", "Keyframe reviews may only read context, record notes and propose changes");
     const selected = this.catalog(projectId, actor);
     const parsed = parseToolArguments(tool, input, selected.catalog.version);
     const argumentHash = digest(parsed.arguments);

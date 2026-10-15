@@ -1,3 +1,4 @@
+import { directorTurnViews } from "./director-turn-view.js";
 import { rebaseCreativeDraft } from "./creative-rebase.js";
 import { recordHumanFields, assertNoHumanFieldConflict } from "./human-fields.js";
 import { directorNotes } from "./director-notes.js";
@@ -136,6 +137,12 @@ export class ProductionService {
       if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
       const request: RequestRecord = { source: options.source ?? "user", ...(options.concurrency ? { concurrency: options.concurrency } : {}), id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
+      // A fresh user message also ends application-only reviews, including discuss-only messages.
+      if (request.source === "user") for (const review of this.store.list<RequestRecord>("message", projectId)) {
+        if (review.state !== "active" || !this.store.get("keyframe_review_request", review.id)) continue;
+        this.store.put("message", review.id, projectId, { ...review, state: "superseded" });
+        for (const epoch of this.store.list<Epoch>("epoch", projectId).filter(e => e.requestId === review.id && e.state !== "revoked")) this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+      }
       // Direct writes fence stale prepared changes by headVersion without ending a Director turn.
       // Scene presses only replace authority that intersects their own command scope.
       if (options.editing !== false) {
@@ -673,20 +680,20 @@ export class ProductionService {
       const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : undefined;
       const attempts = this.engine.attempts(projectId);
       const messages = this.store.list<RequestRecord>("message", projectId).map(message => projectRequest(this.store, message));
-      const outputs = this.store.list<{ id: string; requestId: string; text: string; phase: string }>("director_output", projectId);
+      const outputs = this.store.list<{ id: string; requestId: string; turnId: string; text: string; phase: string }>("director_output", projectId);
       const messageById = new Map(messages.map(message => [message.id, message])), outputById = new Map(outputs.map(output => [output.id, output]));
-      const conversation = this.store.readEvents(projectId).flatMap(event => {
+      const conversation = this.store.readEvents(projectId).flatMap<{ id: string; role: "user" | "assistant"; text: string; state: string; requestId: string; at: string; scopeIds?: string[]; runtime?: "scripted" | "live" }>(event => {
         if (event.kind === "message.recorded") {
           const message = messageById.get(String(event.payload.requestId));
-          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
+          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id, at: event.occurredAt, ...(!message.scopeIds.includes(projectId) ? { scopeIds: message.scopeIds } : {}) }] : [];
         }
         if (event.kind === "director.message") {
           const output = outputById.get(String(event.payload.outputId));
-          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId }] : [];
+          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId, at: event.occurredAt, runtime: this.store.get<{ runtimeId: string }>("director_turn", output.turnId)?.runtimeId === "codex-app-server" ? "live" : "scripted" }] : [];
         }
         return [];
       });
-      return { project, notes: directorNotes(this.store, projectId), latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
+      return { project, turns: directorTurnViews(this, projectId), notes: directorNotes(this.store, projectId), latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts,
       currentAttemptIds: this.engine.currentAttemptIds(projectId, attempts),
       assessments: this.store.list("stage_assessment", projectId),

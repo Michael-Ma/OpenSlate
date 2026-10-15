@@ -1,6 +1,18 @@
 # Current implementation status
 
-Reconciled October 15, 2026 (B9 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 15, 2026 (B10 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 15 keyframe projection and automatic Director reviews — B10 worktree verified
+
+Native scoped turns now receive frozen current keyframes after user references, as individual bounded JPEGs or a row-major contact sheet within the shared four-image/512 KiB budget. Request/epoch projection receipts govern seen-frame note evidence; fixture/SVG, stale, unsupported and unavailable images are explicitly described without visual claims. The exact locally archived Codex **0.153.4** schema confirms turn-start image input. No live model turn was needed; MCP image forwarding remains unverified and is not used.
+
+Terminal keyframe presses can start one durable, hold-free discuss-only application review when idle and enabled. The default-on review setting has keyed GET/POST routes. Reviews can read, record notes and hold proposals; they cannot edit, ask blocking questions or start media. Generation/confirmation busy checks ignore them, fresh user messages supersede them, and batch markers prevent replay after restart. Historical/imported presses without eligible pinned evidence never initiate retrospective model calls.
+
+Snapshots expose honest turn endings/progress and confirmed effect counts, including idempotent apply deduplication. Structured question answers preserve option indices/labels. Conversation entries include persisted timestamps, user scopes and each reply's original scripted/live runtime. The fake-only `node scripts/storyboard-review.mjs --fixtures --film last-ferry` seeds the three-scene/eight-shot prototype state, measured synthetic narration, two honest scripted notes and a held eight-second proposal.
+
+Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed preflight. Final `pnpm build` and **66 touched-file tests** passed; final `pnpm test` passed **2,721 tests, zero failures and one optional native-probe skip (2,722 total)**. All five package typechecks passed. The disposable Last Ferry CLI also launched and stopped successfully on loopback port 3187. No live provider/model call, credential read, external network request, production-state read/write/restart or port 3001 listener occurred.
+
+This is the B10 backend/script component for lead review and merge. No web source, `studio-api.ts`, frozen tool catalog/skill package or DDL changed. All changes remain uncommitted under the card rules; browser rendering and real visual-quality acceptance are separate. [B10 scope, schema evidence, full inventory, decisions and proposed commits](../ai/uiux-plan/codex/reports/B10-vision.md).
 
 ## October 15 B9 merge integration with B7/B8/B11/B6 — verified working tree
 
