@@ -2,13 +2,18 @@ import { useEffect } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { escClosesDrawer, NARROW_QUERY } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
-import { ClassicView, NoFilms } from "./ClassicView.tsx";
+import { NoFilms } from "./ClassicView.tsx";
 import { Connect } from "./Connect.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { Toast } from "./Toast.tsx";
 import { useNarrow } from "./useNarrow.ts";
 import { DirectorColumn } from "../director/DirectorColumn.tsx";
 import { KeyframesView } from "../keyframes/KeyframesView.tsx";
+import { AssetsView } from "../views/assets/AssetsView.tsx";
+import { FilmView } from "../views/film/FilmView.tsx";
+import { PlanView } from "../views/plan/PlanView.tsx";
+import { SettingsView } from "../views/settings/SettingsView.tsx";
+import { StartView } from "../views/start/StartView.tsx";
 import "./shell.css";
 
 /**
@@ -42,7 +47,13 @@ export function NextApp({ onReconnect }: { onReconnect(): void }) {
   if (connection === "expired" || connection === "failed" || (connection === "connecting" && !hasProject))
     return <Connect state={connection === "connecting" ? "connecting" : connection} onRetry={onReconnect} />;
 
-  const workspace = noFilms ? <NoFilms /> : view === "keyframes" ? <KeyframesView /> : <ClassicView view={view} />;
+  const workspace = noFilms ? <NoFilms />
+    : view === "keyframes" ? <KeyframesView />
+    : view === "plan" ? <PlanView />
+    : view === "film" ? <FilmView />
+    : view === "assets" ? <AssetsView />
+    : view === "settings" ? <SettingsView />
+    : <StartView />;
   return (
     <>
       <div className={`app${directorOpen ? " dir-open" : ""}`} data-ui="next">
