@@ -12,6 +12,7 @@ export interface DirectorTurn {
   epochId: string | null; nativeThreadId: string | null; nativeTurnId: string | null;
   dispatched: boolean; errorCode: string | null;
 }
+export interface StructuredAnswer { questionId: string; optionIndex?: number; optionLabel?: string; text?: string }
 interface Request { id: string; projectId: string; principalId: string; text: string; state: string; editing: boolean }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; state: string }
 export interface DirectorOutput { id: string; projectId: string; requestId: string; turnId: string; text: string; phase: string }
@@ -53,17 +54,31 @@ export class DirectorSupervisor {
   }
 
   turns(projectId: string): DirectorTurn[] { return this.service.store.list<DirectorTurn>("director_turn", projectId); }
-  answerQuestion(projectId: string, principalId: string, questionId: string, text: string, key: string): ActorContext {
+  answerQuestion(projectId: string, principalId: string, questionId: string, answer: string | { text?: string; answers: StructuredAnswer[] }, key: string): ActorContext {
     this.service.recovery.assertWritable(projectId);
-    const actor = this.service.store.command<ActorContext>(`${principalId}:${projectId}:question`, key, digest({ questionId, text }), () => {
-      const question = this.service.store.get<{ id: string; projectId: string; requestId: string; state: string }>("director_question", questionId);
+    const actor = this.service.store.command<ActorContext>(`${principalId}:${projectId}:question`, key, digest({ questionId, ...(typeof answer === "string" ? { text: answer } : { answer }) }), () => {
+      const question = this.service.store.get<{ id: string; projectId: string; requestId: string; state: string; questions: import("@openslate/director").DirectorQuestion[] }>("director_question", questionId);
       invariant(question?.projectId === projectId && question.state === "pending", "QUESTION_STALE", "This question is no longer waiting for a reply");
       this.service.recovery.assertFreshAuthority(projectId, "message", question.requestId);
       const original = this.service.store.get<Request & { scopeIds: string[] }>("message", question.requestId);
       invariant(original?.principalId === principalId && original.state === "active", "QUESTION_STALE", "A newer request has replaced this question");
+      invariant(typeof answer === "string" || answer && Array.isArray(answer.answers), "VALIDATION_ERROR", "Use a text answer or structured answers");
+      const answers = typeof answer === "string" ? undefined : answer.answers.map(item => {
+        invariant(Object.keys(item).every(k => ["questionId", "optionIndex", "optionLabel", "text"].includes(k)), "VALIDATION_ERROR", "Unknown answer fields");
+        const asked = question.questions.find(q => q.id === item.questionId);
+        invariant(asked, "VALIDATION_ERROR", "Answer a stored question");
+        const optionIndex = item.optionIndex ?? (item.optionLabel === undefined ? undefined : asked.options.findIndex(o => o.label === item.optionLabel));
+        invariant(optionIndex === undefined || Number.isSafeInteger(optionIndex) && optionIndex >= 0 && optionIndex < asked.options.length, "VALIDATION_ERROR", "Choose a stored option");
+        invariant(item.optionLabel === undefined || asked.options[optionIndex!]?.label === item.optionLabel, "VALIDATION_ERROR", "Option label does not match its index");
+        invariant(item.text === undefined || typeof item.text === "string" && item.text.trim().length > 0 && item.text.length <= 16000, "VALIDATION_ERROR", "Answer text is empty or too long");
+        invariant(optionIndex !== undefined || item.text, "VALIDATION_ERROR", "Select an option or write an answer");
+        return { questionId: item.questionId, ...(optionIndex !== undefined ? { optionIndex, optionLabel: asked.options[optionIndex]!.label } : {}), ...(item.text ? { text: item.text } : {}) };
+      });
+      invariant(!answers || answers.length > 0 && answers.length <= 8 && new Set(answers.map(a => a.questionId)).size === answers.length, "VALIDATION_ERROR", "Answer each question once");
+      const text = typeof answer === "string" ? answer : answer.text?.trim() || answers!.map(a => `${a.questionId}: ${a.optionLabel ?? a.text}`).join("\n");
       const actor = this.service.beginRequest(projectId, principalId, text, { scopeIds: original.scopeIds,
-        editing: original.editing, ...(original.editing ? { continuationRequestId: original.id } : {}), contextDigest: digest({ questionId }), key: `question:${key}` });
-      this.service.store.put("director_question", question.id, projectId, { ...question, state: "answered", answerRequestId: actor.requestId, answer: text });
+        editing: original.editing, ...(original.editing ? { continuationRequestId: original.id } : {}), contextDigest: digest({ questionId, ...(answers ? { answers } : {}) }), key: `question:${key}` });
+      this.service.store.put("director_question", question.id, projectId, { ...question, state: "answered", answerRequestId: actor.requestId, answer: text, ...(answers ? { answers } : {}) });
       this.service.store.appendEvent(projectId, "director.question_answered", { questionId, requestId: actor.requestId });
       this.enqueue(projectId, actor);
       return actor;
@@ -190,6 +205,7 @@ export class DirectorSupervisor {
           if (event.kind === "turn_started") this.save({ ...turn, nativeThreadId: event.nativeThreadId, nativeTurnId: event.nativeTurnId });
           if (event.kind === "assistant_message") this.output(turn, event.text.replaceAll(bridge.token, "[redacted]"), event.phase);
           if (event.kind === "pending_input") {
+            invariant(!service.store.get("keyframe_review_request", turn.requestId), "ACTOR_DENIED", "Application frame reviews cannot ask blocking questions");
             invariant(canonical(event.questions).length <= 32_000 && event.questions.length <= 8, "DIRECTOR_OUTPUT_LIMIT", "Too many pending questions");
             pending = true;
             const id = digest({ turnId: turn.id, nativeRequestId: event.nativeRequestId });
@@ -215,7 +231,7 @@ export class DirectorSupervisor {
           if (text !== assembled) this.output(turn, text, "final");
         }
         this.terminal({ ...turn, dispatched: result.dispatched, nativeThreadId: result.nativeThreadId ?? turn.nativeThreadId, nativeTurnId: result.nativeTurnId ?? turn.nativeTurnId },
-          result.status === "unknown" ? "unknown" : stale ? "interrupted" : pending ? "waiting_user" : result.status, result.error?.code ?? null);
+          result.status === "unknown" ? "unknown" : stale ? "interrupted" : pending ? "waiting_user" : result.status, result.error?.code ?? (stale ? "REQUEST_SUPERSEDED" : null));
         new ToolInvocationService(service).reconcileEpoch(claimed.projectId, turn.epochId!);
       });
     } catch (error) {
