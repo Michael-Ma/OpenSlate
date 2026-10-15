@@ -27,6 +27,15 @@ export interface MusicRecording {
 
 export interface AudioLibraryView {
   recordings: MusicRecording[];
+  /** The server pages by 40; nextOffset is null on the last page. */
+  coverage?: { offset: number; total: number; nextOffset: number | null };
+}
+
+/** The whole music library from its first page and the pages after it, without repeats. */
+export function libraryRecordings(first: AudioLibraryView, rest: readonly MusicRecording[]): MusicRecording[] {
+  const more = first.coverage?.nextOffset != null ? rest : [];
+  const seen = new Set<string>();
+  return [...first.recordings, ...more].filter((recording) => !seen.has(recording.id) && !!seen.add(recording.id));
 }
 
 /** What the picture lane and the player show for a shot. */

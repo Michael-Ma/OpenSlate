@@ -56,7 +56,8 @@
 /* menu (fixed popover) */
 .film-work .menu { z-index: 70; background: var(--raised); border: 1px solid var(--track); border-radius: 12px; padding: 6px; min-width: 220px; max-width: calc(100vw - 16px); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
 .film-work .menu button { display: flex; width: 100%; gap: 8px; align-items: center; border: 0; background: none; text-align: left; padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--text); }
-.film-work .menu button:hover:not(:disabled), .film-work .menu button:focus-visible { background: var(--raised-2); outline: none; }
+.film-work .menu button:hover:not(:disabled), .film-work .menu button:focus-visible { background: var(--raised-2); }
+.film-work .menu button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .film-work .menu button .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .film-work .menu hr { border: 0; border-top: 1px solid var(--hairline); margin: 5px 4px; }
 .film-work .menu h4 { margin: 6px 10px 3px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
@@ -108,6 +109,7 @@
 .film-work .checks .y { color: var(--green); }
 .film-work .checks .n { color: var(--text); }
 .film-work .export .go { justify-content: center; padding: 8px 12px; border-radius: 14px; white-space: normal; text-align: center; line-height: 1.3; flex: none; }
+.film-work .export [data-act="export-music"] { align-self: flex-start; }
 .film-work .export .why { font-size: 11.5px; color: var(--muted); text-align: center; margin-top: -3px; line-height: 1.35; }
 .film-work .rendering { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--track); background: var(--raised); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; color: var(--text-2); }
 .film-work .rendering b { color: var(--text); }

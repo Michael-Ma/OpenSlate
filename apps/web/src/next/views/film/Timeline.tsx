@@ -73,6 +73,13 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
     clock.seek(pps ? x / pps : (x / rect.width) * timeline.total);
   };
 
+  // The label replaces the block's contents for assistive tech, so it carries the Director's note letter too.
+  const blockLabel = (shot: FilmShot, lack: string | null) => {
+    const base = { shot: shot.label, framing: shot.framing, seconds: shot.seconds };
+    if (shot.letter) return lack ? t("film.block.label_lack_note", { ...base, lack, letter: shot.letter }) : t("film.block.label_note", { ...base, letter: shot.letter });
+    return lack ? t("film.block.label_lack", { ...base, lack }) : t("film.block.label", base);
+  };
+
   const block = (shot: FilmShot) => {
     const selected = selectedShot === shot.shotId;
     const lack = shot.lack ? tm(shot.lack) : null;
@@ -86,7 +93,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
         data-act="sel-shot"
         data-shot={shot.shotId}
         aria-pressed={selected}
-        aria-label={lack ? t("film.block.label_lack", { shot: shot.label, framing: shot.framing, seconds: shot.seconds, lack }) : t("film.block.label", { shot: shot.label, framing: shot.framing, seconds: shot.seconds })}
+        aria-label={blockLabel(shot, lack)}
         onClick={() => onSelectShot(shot.shotId)}
       >
         {shot.keyframe ? <span className="blk-pic"><Still artifact={shot.keyframe} alt="" /></span> : null}

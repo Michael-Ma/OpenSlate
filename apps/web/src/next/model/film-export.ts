@@ -18,7 +18,16 @@ export interface MediaJob {
   id: string;
   state: string;
   canRecover: boolean;
+  /** Prepared and never started (media/routes.ts summary). */
+  canRun?: boolean;
+  createdAt?: string;
 }
+
+/**
+ * A prepared export starts within milliseconds of the request that prepared it. One still prepared after this
+ * long lost its start to a restart: it never runs by itself, and Check again cannot recover it.
+ */
+export const STALLED_AFTER_SECONDS = 20;
 
 /** GET /api/projects/:projectId/media: the jobs (to tell an interrupted export) and the last export of any kind. */
 export interface MediaView {
@@ -40,8 +49,7 @@ export function clipCell(shot: ShotOverview, demo: boolean): ReadinessRow["clip"
   switch (shot.video.state) {
     case "ready": return shot.video.artifact ? { text: msg(demo ? "film.cell.demo_clip" : "film.cell.clip"), tone: "ok" } : { text: msg("film.cell.no_clip"), tone: "plain" };
     case "outdated": return { text: msg("film.cell.clip_outdated"), tone: "plain" };
-    case "failed": return { text: msg("film.cell.failed"), tone: "plain" };
-    case "no_answer": return { text: msg("film.cell.no_answer"), tone: "plain" };
+    // A failed or unanswered clip counts as no clip here (P5-DESIGN); the timeline block says which.
     default: return { text: msg("film.cell.no_clip"), tone: "plain" };
   }
 }
@@ -67,6 +75,12 @@ export function voiceCell(shot: ShotOverview): ReadinessRow["voice"] {
 /** Shots in storyboard order (scenes by ordinal). */
 export function orderedShots(overview: GenerationOverview): ShotOverview[] {
   return [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal).flatMap((scene) => scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot));
+}
+
+/** The film's length in seconds (one decimal), as the server's readiness reports it. */
+export function filmSeconds(overview: GenerationOverview): number {
+  const frames = orderedShots(overview).reduce((sum, shot) => sum + shot.durationFrames, 0);
+  return Math.round((frames / overview.fps) * 10) / 10;
 }
 
 export function readinessRows(overview: GenerationOverview, demo: boolean): ReadinessRow[] {
@@ -96,13 +110,18 @@ export type PanelState =
   | { kind: "rendering"; record: ExportRecord }
   | { kind: "interrupted"; record: ExportRecord };
 
-export function panelState(view: ExportView | null, media: MediaView | null): PanelState {
+export function panelState(view: ExportView | null, media: MediaView | null, nowMs = Date.now()): PanelState {
   const current = view?.current ?? null;
   if (!current) return { kind: "idle", failed: null, cancelled: false };
   if (current.state === "rendering") {
     // A render the server no longer owns (its lease ran out at a restart) can only be recovered, never re-run.
     const job = media?.jobs.find((j) => j.id === current.exportId);
-    return job?.canRecover ? { kind: "interrupted", record: current } : { kind: "rendering", record: current };
+    if (job?.canRecover) return { kind: "interrupted", record: current };
+    // Prepared but never started: nothing renders it and nothing can recover it, so offer Export again.
+    if (job?.state === "prepared" && job.canRun && elapsedSeconds(job.createdAt ?? current.startedAt, nowMs) >= STALLED_AFTER_SECONDS) {
+      return { kind: "idle", failed: msg("film.export.never_started"), cancelled: false };
+    }
+    return { kind: "rendering", record: current };
   }
   if (current.state === "failed") return { kind: "idle", failed: failureMsg(current.failure?.code), cancelled: false };
   if (current.state === "cancelled") return { kind: "idle", failed: null, cancelled: true };
@@ -111,7 +130,17 @@ export function panelState(view: ExportView | null, media: MediaView | null): Pa
 
 export function failureMsg(code: string | undefined): Msg {
   if (code === "MEDIA_NO_COMPLETION") return msg("film.export.failed_no_file");
+  if (code === "MEDIA_PAUSED") return msg("film.export.failed_paused");
   return msg("film.export.failed", { code: code ?? "RENDER_FAILED" });
+}
+
+/** Codes GET /exports fails with when the chosen music is missing or was never measured (storyboard-capture.ts). */
+const MUSIC_CODES = new Set(["MEDIA_ARTIFACT_UNAVAILABLE", "MEDIA_SOURCE_UNAVAILABLE"]);
+
+/** Why the panel has no readiness: the film's music, or a studio without storyboard export. */
+export function unavailableMsg(code: string): { text: Msg; music: boolean } {
+  if (MUSIC_CODES.has(code)) return { text: msg("film.export.music_unavailable"), music: true };
+  return { text: msg("film.export.unavailable", { code }), music: false };
 }
 
 export interface LastExport {
@@ -195,5 +224,5 @@ export function readinessOf(overview: GenerationOverview, demo: boolean): Export
   const frames = shots.reduce((sum, shot) => sum + shot.durationFrames, 0);
   if (!shots.length) blockers.push({ code: "empty_film" });
   if (frames > MAX_FILM_SECONDS * overview.fps || shots.length > 64) blockers.push({ code: "too_long" });
-  return { ready: !blockers.length, demo: demo && shots.length > 0 && shots.every((s) => s.video.state === "ready"), seconds: Math.round((frames / overview.fps) * 10) / 10, blockers };
+  return { ready: !blockers.length, demo: demo && shots.length > 0 && shots.every((s) => s.video.state === "ready"), seconds: filmSeconds(overview), blockers };
 }

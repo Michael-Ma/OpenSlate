@@ -7,7 +7,7 @@ import { FilmClock } from "../../model/film-clock.ts";
 import { changeMsg, lastExport, whenMsg, type MediaView } from "../../model/film-export.ts";
 import {
   editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicGainEdit, musicMuteEdit, musicStartEdit,
-  soundtrackOf, type AudioLibraryView, type FilmEdit,
+  soundtrackOf, type FilmEdit,
 } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { msg, type Msg } from "../../model/types.ts";
@@ -19,10 +19,13 @@ import { Player } from "./Player.tsx";
 import { Timeline, type Selection } from "./Timeline.tsx";
 import { MusicTools, ShotTools } from "./Tools.tsx";
 import { useLiveAudio } from "./useLiveAudio.ts";
+import { useMusicLibrary } from "./useMusicLibrary.ts";
 import "./film.css";
 
 /** Phone width: the timeline scrolls sideways inside itself at 14 px a second. */
 const PHONE_PIXELS_PER_SECOND = 14;
+/** Starting an export freezes every input first, and Check again looks for the finished file: both can take a while. */
+const EXPORT_COMMAND_TIMEOUT_MS = 60_000;
 
 /**
  * The Film view (docs/ai/prototypes/last-ferry/film.html): the whole film on one clock in storyboard order,
@@ -68,12 +71,11 @@ function FilmWorkspace() {
 
   const exportsRes = useResource<ExportView>("/exports");
   const mediaRes = useResource<MediaView>("/media");
-  const libraryRes = useResource<AudioLibraryView>("/audio-library?role=music");
   const playbackRes = useResource<PlaybackView>(live ? "/narration/playback" : null);
 
   const timeline = useMemo(() => filmTimeline(overview, snapshot?.notes), [overview, snapshot?.notes]);
   const soundtrack = soundtrackOf(snapshot);
-  const recordings = libraryRes.data?.recordings ?? null;
+  const recordings = useMusicLibrary();
   const music = useMemo(() => filmMusic(soundtrack, recordings ?? [], overview.fps), [soundtrack, recordings, overview.fps]);
   const demo = !!exportsRes.data?.readiness.demo;
 
@@ -169,8 +171,9 @@ function FilmWorkspace() {
     const edit = music && musicStartEdit(music, overview.fps, step, timeline.total);
     if (edit) void runEdit(edit, msg("film.toast.music_start", { time: formatClock(Number(edit.kind === "soundtrack" ? edit.value : 0) / overview.fps) }));
   };
-  const musicGain = (db: number) => {
-    if (music && Math.round(db) !== music.gainDb) void runEdit(musicGainEdit(db), msg("film.toast.music_volume", { db: Math.round(db) }));
+  const musicGain = async (db: number) => {
+    if (!music || Math.round(db) === music.gainDb) return true;
+    return runEdit(musicGainEdit(db), msg("film.toast.music_volume", { db: Math.round(db) }));
   };
   const toggleMute = () => {
     if (music) void runEdit(musicMuteEdit(!music.muted), msg(music.muted ? "film.toast.music_on" : "film.toast.music_muted"));
@@ -178,7 +181,14 @@ function FilmWorkspace() {
   const pickMusic = (audioId: string | null) => {
     if (audioId === (music?.audioId ?? null)) return;
     const name = recordings?.find((r) => r.id === audioId)?.label ?? t("film.music.unnamed");
-    void runEdit(musicChoiceEdit(audioId), audioId ? msg("film.toast.music_changed", { name }) : msg("film.toast.music_removed"));
+    void runEdit(musicChoiceEdit(audioId), audioId ? msg("film.toast.music_changed", { name }) : msg("film.toast.music_removed")).then(() => {
+      // The menu gave focus back to its button; adding or removing the music can remove that button.
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (active && active !== document.body && active.isConnected) return;
+        main.current?.querySelector<HTMLElement>("[data-act='sel-music'], [data-act='choose-music']")?.focus();
+      });
+    });
   };
   const openInKeyframes = () => {
     if (!selectedShot) return;
@@ -192,7 +202,7 @@ function FilmWorkspace() {
     const current = store.getState().snapshot;
     if (!current) return;
     const body = { expectedHeadVersion: current.project.headVersion };
-    const record = await store.command<ExportRecord>("export:start", body, () => ({ path: "/exports", body }), msg("film.toast.export_started"));
+    const record = await store.command<ExportRecord>("export:start", body, () => ({ path: "/exports", body }), msg("film.toast.export_started"), { timeoutMs: EXPORT_COMMAND_TIMEOUT_MS });
     if (record) { exportsRes.reload(); mediaRes.reload(); }
   };
   const cancelExport = async (exportId: string) => {
@@ -200,7 +210,7 @@ function FilmWorkspace() {
     if (record) { exportsRes.reload(); mediaRes.reload(); }
   };
   const recoverExport = async (exportId: string) => {
-    const record = await store.command<ExportRecord>(`export:recover:${exportId}`, { exportId }, () => ({ path: `/exports/${encodeURIComponent(exportId)}/recover`, body: {} }));
+    const record = await store.command<ExportRecord>(`export:recover:${exportId}`, { exportId }, () => ({ path: `/exports/${encodeURIComponent(exportId)}/recover`, body: {} }), undefined, { timeoutMs: EXPORT_COMMAND_TIMEOUT_MS });
     if (!record) return;
     seenDone.current.add(exportId);
     store.dispatch({ type: "toast", message: msg(record.state === "done" ? "film.toast.export_found" : "film.toast.export_missing"), tone: "info" });
@@ -274,10 +284,12 @@ function FilmWorkspace() {
           media={mediaRes.data}
           error={exportsRes.error}
           writable={writable}
+          stopped={!!overview.stopped}
           busy={{ start: !!pending["export:start"], cancel: Object.keys(pending).some((k) => k.startsWith("export:cancel:")), recover: Object.keys(pending).some((k) => k.startsWith("export:recover:")) }}
           onExport={() => void startExport()}
           onCancel={(id) => void cancelExport(id)}
           onRecover={(id) => void recoverExport(id)}
+          onChangeMusic={setMenuAnchor}
         />
       </div>
       <Timeline
@@ -308,6 +320,7 @@ function FilmWorkspace() {
             music={music}
             total={timeline.total}
             writable={writable}
+            saving={!!editing}
             onStart={musicStart}
             onGain={musicGain}
             onMute={toggleMute}

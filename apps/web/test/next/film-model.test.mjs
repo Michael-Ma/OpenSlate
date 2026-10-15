@@ -67,6 +67,16 @@ test('ruler marks stay readable on short and long films', () => {
   assert.deepEqual(rulerTicks(12, 14), [0, 5, 10]);
 });
 
+test('the music library reads every page without repeats', async () => {
+  const { libraryRecordings } = await import('../../src/next/model/film.ts');
+  const rec = id => ({ id, label: `${id}.wav`, sha256: 'a'.repeat(64), durationSeconds: 30, role: 'music' });
+  const first = { recordings: [rec('a'), rec('b')], coverage: { offset: 0, total: 4, nextOffset: 2 } };
+  assert.deepEqual(libraryRecordings(first, [rec('b'), rec('c'), rec('d')]).map(r => r.id), ['a', 'b', 'c', 'd']);
+  const shrunk = { recordings: [rec('a')], coverage: { offset: 0, total: 1, nextOffset: null } };
+  assert.deepEqual(libraryRecordings(shrunk, [rec('c')]).map(r => r.id), ['a'], 'pages read before a shrink are dropped');
+  assert.deepEqual(libraryRecordings({ recordings: [rec('a')] }, []).map(r => r.id), ['a'], 'an older server sends no coverage');
+});
+
 test('music: one track from the soundtrack and the music library', () => {
   const library = [{ id: 'a', label: 'low-tide.mp3', sha256: 'x', durationSeconds: 72 }];
   const music = filmMusic({ audioId: 'a', gainMilliDb: -18000, startFrame: 120 }, library, 30);

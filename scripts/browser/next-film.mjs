@@ -118,6 +118,9 @@ export const scenarios = [
       // Only Scene 1 has clips: Export is off and says why.
       expect(await page.locator("[data-act='export']").isDisabled(), "Export is enabled before every shot has a clip");
       await expectText(page, "[data-act='why-not']", /^5 shots need a clip and settle the voice in 2\.3 and 3\.2$/);
+      await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · 1280 × 720 · renders here, free$/);
+      const noted = await page.getAttribute(`.blk[data-shot='${shot("2.2")}']`, "aria-label");
+      expect(/^2\.2, Medium, \d+ s, .+, Director note a$/.test(noted ?? ""), `2.2's label leaves out its Director note: ${noted}`);
       await expectText(page, `.checks [data-shot='${shot("1.2")}']`, /1\.2\s+✓ clip\s+✓ 2\.1 s/);
       await expectText(page, `.checks [data-shot='${shot("3.2")}']`, /3\.2\s+no clip\s+no voice yet/);
       const done = await page.locator(`.checks [data-shot='${shot("1.1")}'] .y`).evaluate((el) => getComputedStyle(el).color);
@@ -245,6 +248,14 @@ export const scenarios = [
       });
       await toastSays(page, /^Music volume -12 dB\./);
       await expectText(page, ".mblk", /^low-tide\.mp3 · -12 dB$/);
+      // Arrow keys: a run of steps is saved once, after the keys rest, so one Undo takes it all back.
+      await page.focus("[data-act='gain']");
+      for (let n = 0; n < 3; n++) await page.keyboard.press("ArrowLeft");
+      await expectText(page, ".tl-tools output.num", /^-15 dB$/);
+      await toastSays(page, /^Music volume -15 dB\./);
+      await expectText(page, ".mblk", /^low-tide\.mp3 · -15 dB$/);
+      await undo(page);
+      await expectText(page, ".mblk", /^low-tide\.mp3 · -12 dB$/);
       // Mute: the indicator goes away and the block says so.
       await page.click("[data-act='mute-switch']");
       await toastSays(page, /^Music muted\./);
@@ -265,11 +276,28 @@ export const scenarios = [
       await page.click(".fv-menu [data-audio='audio-foghorn']");
       await toastSays(page, /^Music is foghorn-theme\.wav\./);
       await expectText(page, ".mblk", /^foghorn-theme\.wav · /);
-      await page.click("[data-act='music-menu']");
-      await page.click(".fv-menu [data-audio='']");
+      await page.focus("[data-act='music-menu']");
+      await page.keyboard.press("Enter");
+      await page.waitForSelector(".fv-menu[role='menu']");
+      await page.keyboard.press("End");
+      await page.keyboard.press("ArrowUp");
+      expect((await page.evaluate(() => document.activeElement?.dataset.audio)) === "", "ArrowUp from the end did not reach No music");
+      const ring = await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle);
+      expect(ring !== "none", "A focused music menu item shows no focus ring");
+      await page.keyboard.press("Enter");
       await toastSays(page, /^No music\./);
       await expectText(page, ".none-music", /^No music\.\s*Choose music$/);
       await expectText(page, ".tl-tools", /^Select a shot/);
+      // Change music went away with the music: focus moves to Choose music, not to the page.
+      await page.waitForFunction(() => document.activeElement?.dataset.act === "choose-music", null, { timeout: 4000 })
+        .catch(async () => { throw new Error(`Focus after No music: ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`); });
+      await page.keyboard.press("Enter");
+      await page.waitForSelector(".fv-menu[role='menu']");
+      await page.keyboard.press("Home");
+      await page.keyboard.press("Enter");
+      await toastSays(page, /^Music is low-tide\.mp3\./);
+      await page.waitForFunction(() => document.activeElement?.dataset.act === "sel-music", null, { timeout: 4000 })
+        .catch(async () => { throw new Error(`Focus after choosing music: ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`); });
       await screenshot(page, "music-1440");
     },
   },
@@ -282,12 +310,15 @@ export const scenarios = [
       await expectText(page, "[data-act='film-line']", /^50 s · 8 shots · 8 of 8 clips made$/);
       await expectText(page, "[data-act='last-export']", /^Last export Today \d\d:\d\d · changed since: shot order, music\s*Download MP4\s*2 earlier in Assets$/);
       await expectText(page, ".export .big", /^Ready to export\s*50 s · every clip current, every voice line settled$/);
-      await expectText(page, "#fv-export-why", /^1280 × 720 MP4 of the whole film$/);
+      await expectText(page, "#fv-export-why", /^MP4 of the whole film$/);
+      await expectText(page, "[data-act='export-size']", /^Length 50 s of 6:00 · 1280 × 720 · renders here, free$/);
       const why = await box(page, "#fv-export-why");
       expect(why.bottom <= (await box(page, ".export")).bottom, "The export size line is hidden below the panel");
       await page.click("[data-act='export']");
       await expectText(page, ".export .big", /^Exporting…\s*MP4 · 50 s · 1280 × 720$/);
       await expectText(page, "[data-act='elapsed']", /^0:0\d elapsed$/);
+      expect(await page.locator("[data-act='elapsed']").evaluate((el) => !el.closest("[role='status'], [aria-live]:not([aria-live='off'])")), "The elapsed time is inside a live region and is announced every second");
+      await expectText(page, ".export .rendering [role='status']", /^Rendering on this computer$/);
       expect(await page.locator(".export [role='progressbar']").count() === 1, "No progress bar while rendering");
       expect(!/%/.test(await page.locator(".export").innerText()), "The export shows a percentage it does not have");
       await screenshot(page, "rendering-1440");
@@ -380,6 +411,75 @@ export const scenarios = [
     },
   },
   {
+    // Stopped: the server refuses to start an export (MEDIA_PAUSED), so Export is off and says why until Continue.
+    name: "next-film-stopped",
+    query: `${query}&film=stopped`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openFilm(page);
+      await expectText(page, ".export .big", /^Ready to export/);
+      expect(await page.locator("[data-act='export']").isDisabled(), "Export is on while the film is stopped");
+      expect((await page.getAttribute("[data-act='export']", "title")) === "Stopped. Continue to export", "Export does not say why it is off");
+      await expectText(page, "#fv-export-why", /^Stopped\. Continue to export$/);
+      expect(!(await page.locator("[data-act='export']").evaluate((el) => el.classList.contains("primary"))), "A stopped Export is still the white primary action");
+      await screenshot(page, "stopped-1440");
+      await page.click("[data-act='continue']");
+      await page.waitForFunction(() => !document.querySelector("[data-act='export']")?.disabled, null, { timeout: 8000 })
+        .catch(() => { throw new Error("Export stayed off after Continue"); });
+      await expectText(page, "#fv-export-why", /^MP4 of the whole film$/);
+    },
+  },
+  {
+    // An export prepared and never started (a restart came first): nothing renders it, so Export again is offered.
+    name: "next-film-stalled",
+    query: `${query}&film=stalled`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openFilm(page);
+      await page.waitForSelector(".export[data-state='idle']", { timeout: 10000 });
+      await expectText(page, "[data-act='export-failed']", /The last export never started: OpenSlate restarted first\. Nothing was rendered; you can export again\.$/);
+      expect(!(await page.locator("[data-act='export']").isDisabled()), "Export is off after an export that never started");
+      await page.click("[data-act='export']");
+      await page.waitForSelector(".export[data-state='rendering']", { timeout: 8000 });
+    },
+  },
+  {
+    // The film's music is on the second page of the music library (the server pages by 40).
+    name: "next-film-music-library",
+    query: `${query}&film=library`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openFilm(page);
+      await expectText(page, ".mblk", /^foghorn-theme\.wav · -18 dB$/);
+      await page.click(".mblk");
+      await page.click("[data-act='music-menu']");
+      await page.waitForSelector(".fv-menu[role='menu']");
+      const items = await page.locator(".fv-menu [data-act='pick-music']").count();
+      expect(items === 46, `The music menu lists ${items} items, not 45 recordings and No music`);
+      expect((await page.evaluate(() => document.activeElement?.dataset.audio)) === "audio-foghorn", "The menu does not focus the film's music on page two");
+      await page.keyboard.press("Escape");
+    },
+  },
+  {
+    // The film's music is gone from its assets: the readiness read fails on it, and the panel offers Change music.
+    name: "next-film-music-missing",
+    query: `${query}&film=music-missing`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openFilm(page);
+      await expectText(page, "[data-act='export-unavailable']", /^The film's music is unavailable, so the film can't be checked for export\. Change music\.$/);
+      await expectText(page, ".mblk", /^Music · -18 dB$/);
+      await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · /);
+      await screenshot(page, "music-missing-1440");
+      await page.click("[data-act='export-music']");
+      await page.waitForSelector(".fv-menu[role='menu']");
+      await page.click(".fv-menu [data-audio='audio-low-tide']");
+      await toastSays(page, /^Music is low-tide\.mp3\./);
+      await expectText(page, "[data-act='why-not']", /^5 shots need a clip/);
+      expect(await page.locator("[data-act='export-music']").count() === 0, "Change music stays in the panel once the music is back");
+    },
+  },
+  {
     name: "next-film-demo",
     query: `${query}&film=demo`,
     viewport: { width: 1440, height: 900 },
@@ -389,7 +489,8 @@ export const scenarios = [
       await expectText(page, "[data-act='demo-mark']", /^DEMO$/);
       await expectText(page, ".player .pv-top", /✓\s*Demo clip/);
       await expectText(page, "[data-act='export']", /^Export demo MP4$/);
-      await expectText(page, "#fv-export-why", /^Stamped Demo on every frame · 1280 × 720$/);
+      await expectText(page, "#fv-export-why", /^Stamped Demo on every frame$/);
+      await expectText(page, "[data-act='export-size']", /· 1280 × 720 ·/);
       await expectText(page, `.checks [data-shot='${shot("2.2")}']`, /demo clip/);
       await screenshot(page, "demo-1440");
       await page.click("[data-act='export']");
@@ -428,7 +529,8 @@ export const scenarios = [
       await openFilm(page);
       await expectText(page, "[data-act='film-line']", /^50 秒 · 8 个镜头 · 已生成 8\/8 段视频$/);
       await expectText(page, "[data-act='last-export']", /^上次导出 今天 \d\d:\d\d · 之后有改动：镜头顺序、音乐\s*下载 MP4\s*素材里还有 2 个$/);
-      await expectText(page, "#fv-export-why", /^整部影片，1280 × 720 MP4$/);
+      await expectText(page, "#fv-export-why", /^整部影片的 MP4$/);
+      await expectText(page, "[data-act='export-size']", /^时长 50 秒，上限 6 分钟 · 1280 × 720 · 在本机渲染，免费$/);
       await page.click(`.blk[data-shot='${shot("2.3")}']`);
       await expectText(page, ".tl-tools", /至少 8 秒（配音） · 改时长会让视频过期/);
       const size = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, viewport: innerHeight }));
@@ -465,6 +567,13 @@ export const scenarios = [
       await page.focus("[data-act='len'][data-d='1']");
       await page.keyboard.press("Enter");
       await toastSays(page, /^2\.1 is 6 s\./);
+      // A keyboard move that makes 2.2 last turns Move later off: focus goes to Move earlier, not to the page.
+      await page.click(`.blk[data-shot='${shot("2.2")}']`);
+      await page.focus("[data-act='move'][data-d='1']");
+      await page.keyboard.press("Enter");
+      await toastSays(page, /^Moved 2\.2; it is now 2\.3\./);
+      await page.waitForFunction(() => document.activeElement?.matches("[data-act='move'][data-d='-1']"), null, { timeout: 4000 })
+        .catch(async () => { throw new Error(`Focus after the move: ${await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))}`); });
       // Under reduced motion the picture stays still while the film plays, and the music meter does not move.
       await page.locator("[data-act='scrub']").fill("5");
       await page.focus("[data-act='play']");

@@ -16,7 +16,9 @@ import type { FixtureRoute } from "./types.ts";
  *
  * Presets for reviewing states the sample film cannot reach by itself (its 3.2 never gets a voice line here):
  * `&film=ready` (every clip made, the last export changed since), `&film=demo`, `&film=interrupted`, `&film=failed`,
- * `&film=long` (20 shots).
+ * `&film=long` (20 shots), `&film=stopped` (ready, but stopped), `&film=stalled` (an export prepared and never started
+ * because of a restart), `&film=library` (45 music recordings, the film's music on the second page) and
+ * `&film=music-missing` (the film's music is gone from its assets).
  */
 
 /** Simulated render time; Check again finds the finished file after a short look. */
@@ -33,6 +35,8 @@ interface ExportEntry {
   film: FilmFingerprint;
   /** A restart left it without an owner: only Check again (recover) can finish it. */
   interrupted: boolean;
+  /** Prepared, and a restart came before it started: it never runs and cannot be recovered. */
+  stalled?: boolean;
 }
 
 type Undo =
@@ -44,7 +48,11 @@ interface FilmFixture {
   demo: boolean;
   exports: ExportEntry[];
   undo: Undo | null;
+  /** The film's music-role recordings (the server pages them by 40). */
+  library: MusicRecording[];
 }
+
+const LIBRARY_PAGE = 40;
 
 const states = new WeakMap<FixtureWorld, FilmFixture>();
 
@@ -64,7 +72,7 @@ function presetName(): string | null {
 function state(world: FixtureWorld): FilmFixture {
   let value = states.get(world);
   if (!value) {
-    value = { serial: 0, demo: false, exports: [], undo: null };
+    value = { serial: 0, demo: false, exports: [], undo: null, library: [...FIXTURE_MUSIC] };
     states.set(world, value);
     const created = value;
     const preset = presetName();
@@ -157,18 +165,43 @@ function longFilm(world: FixtureWorld): void {
   world.snapshot = { ...world.snapshot, project: { ...world.snapshot.project, shots: rows, scenes: sceneRows } };
 }
 
+/** 43 more music recordings after the sample's two; the film's music is the last one, on the second page. */
+function bigLibrary(world: FixtureWorld, fixture: FilmFixture): void {
+  const more = Array.from({ length: 43 }, (_, index): MusicRecording => {
+    const n = String(index + 1).padStart(2, "0");
+    return { id: `audio-cue-${n}`, label: `harbour-cue-${n}.wav`, sha256: hex(`cue-${n}`), durationSeconds: 30 + index, role: "music" };
+  });
+  // The server lists the newest first; the film's music is the oldest.
+  fixture.library = [...more.reverse(), ...FIXTURE_MUSIC];
+  const oldest = fixture.library[fixture.library.length - 1]!;
+  const current = soundtrackOf(world);
+  setSoundtrack(world, { audioId: oldest.id, gainMilliDb: current?.gainMilliDb ?? -18000, startFrame: current?.startFrame ?? 4 * world.overview.fps, muted: false });
+}
+
 function applyPreset(world: FixtureWorld, fixture: FilmFixture, name: string): void {
   if (name === "long") { longFilm(world); return; }
-  if (!["ready", "demo", "interrupted", "failed"].includes(name)) return;
+  if (name === "library") { bigLibrary(world, fixture); return; }
+  if (name === "music-missing") { setSoundtrack(world, { audioId: "audio-deleted", gainMilliDb: -18000, startFrame: 0, muted: false }); return; }
+  if (!["ready", "demo", "interrupted", "failed", "stopped", "stalled"].includes(name)) return;
   everyClipMade(world);
   if (name === "demo") { fixture.demo = true; return; }
   const earlier = earlierExports(world, fixture);
   if (name === "ready") { fixture.exports = earlier; return; }
+  if (name === "stopped") {
+    fixture.exports = earlier;
+    world.overview = { ...world.overview, stopped: { stopId: "stop-film", at: nowIso(-60_000), sentJobs: 0, detachedJobs: 0 } };
+    world.snapshot = { ...world.snapshot, control: { paused: true } };
+    return;
+  }
   const exportId = nextId(fixture, "export");
   const startedAt = nowIso(-4 * 60_000);
+  const film = filmFingerprint(world.overview, soundtrackOf(world));
+  const head = world.snapshot.project.headVersion;
   const current: ExportEntry = name === "interrupted"
-    ? { film: filmFingerprint(world.overview, soundtrackOf(world)), interrupted: true, record: { exportId, state: "rendering", headVersion: world.snapshot.project.headVersion, demo: false, startedAt, outdatedBy: [] } }
-    : { film: filmFingerprint(world.overview, soundtrackOf(world)), interrupted: false, record: { exportId, state: "failed", headVersion: world.snapshot.project.headVersion, demo: false, startedAt, finishedAt: nowIso(-3 * 60_000), failure: { code: "RENDER_FAILED" }, outdatedBy: [] } };
+    ? { film, interrupted: true, record: { exportId, state: "rendering", headVersion: head, demo: false, startedAt, outdatedBy: [] } }
+    : name === "stalled"
+      ? { film, interrupted: false, stalled: true, record: { exportId, state: "rendering", headVersion: head, demo: false, startedAt, outdatedBy: [] } }
+      : { film, interrupted: false, record: { exportId, state: "failed", headVersion: head, demo: false, startedAt, finishedAt: nowIso(-3 * 60_000), failure: { code: "RENDER_FAILED" }, outdatedBy: [] } };
   fixture.exports = [current, ...earlier];
 }
 
@@ -187,6 +220,9 @@ function withChanges(world: FixtureWorld, entry: ExportEntry): ExportRecord {
 
 function exportView(world: FixtureWorld): ExportView {
   const fixture = state(world);
+  // As the server's capture: music that is gone (or never measured) stops the readiness read.
+  const music = soundtrackOf(world);
+  if (music && !fixture.library.some((r) => r.id === music.audioId)) throw new ApiError("MEDIA_ARTIFACT_UNAVAILABLE", 409);
   const records = fixture.exports.map((entry) => withChanges(world, entry));
   return { readiness: readinessOf(world.overview, fixture.demo), current: records[0] ?? null, history: records.slice(1) };
 }
@@ -194,7 +230,10 @@ function exportView(world: FixtureWorld): ExportView {
 function mediaView(world: FixtureWorld): MediaView & { preview: null; sources: [] } {
   const fixture = state(world);
   return {
-    jobs: fixture.exports.map(({ record, interrupted }) => ({ id: record.exportId, state: record.state === "rendering" ? "running" : record.state, canRecover: interrupted && record.state === "rendering" })),
+    jobs: fixture.exports.map(({ record, interrupted, stalled }) => {
+      const prepared = !!stalled && record.state === "rendering";
+      return { id: record.exportId, state: prepared ? "prepared" : record.state === "rendering" ? "running" : record.state, canRecover: interrupted && record.state === "rendering", canRun: prepared, createdAt: record.startedAt };
+    }),
     preview: null,
     lastExport: null,
     sources: [],
@@ -212,6 +251,8 @@ function startExport(world: FixtureWorld, body: { expectedHeadVersion?: unknown 
   assertHead(world, body);
   const readiness = readinessOf(world.overview, fixture.demo);
   if (!readiness.ready) throw new ApiError("EXPORT_BLOCKED", 409, { ...readiness });
+  // The server refuses to start a render while the film is stopped (media/application.ts assertUnpaused).
+  if (world.overview.stopped) throw new ApiError("MEDIA_PAUSED", 409);
   const entry: ExportEntry = {
     film: filmFingerprint(world.overview, soundtrackOf(world)),
     interrupted: false,
@@ -235,6 +276,7 @@ function cancelExport(world: FixtureWorld, exportId: string): ExportRecord {
 function recoverExport(world: FixtureWorld, exportId: string): Promise<ExportRecord> | ExportRecord {
   const entry = findExport(world, exportId);
   if (entry.record.state !== "rendering") return withChanges(world, entry);
+  if (entry.stalled) throw new ApiError("MEDIA_RENDER_NOT_STARTED", 409);
   if (!entry.interrupted) throw new ApiError("MEDIA_RENDER_BUSY", 409);
   return new Promise((resolve) => setTimeout(() => {
     world.update(() => {
@@ -312,7 +354,7 @@ function soundtrackEdit(world: FixtureWorld, body: EditBody): { commandId: strin
   if (body.field === "audioId") {
     if (!value) next = null;
     else {
-      if (!FIXTURE_MUSIC.some((r) => r.id === value)) throw new ApiError("NOT_FOUND", 404);
+      if (!fixture.library.some((r) => r.id === value)) throw new ApiError("NOT_FOUND", 404);
       next = { audioId: value, gainMilliDb: current?.gainMilliDb ?? -18000, ...(current?.startFrame !== undefined ? { startFrame: current.startFrame } : {}), ...(current?.muted !== undefined ? { muted: current.muted } : {}) };
     }
   } else {
@@ -378,10 +420,15 @@ export const filmRoutes: FixtureRoute[] = [
   { method: "POST", match: /^\/exports\/([^/]+)\/recover$/, handle: (world, [id]) => recoverExport(world, decodeURIComponent(id ?? "")) },
   { method: "GET", match: /^\/media$/, handle: (world) => mediaView(world) },
   { method: "GET", match: /^\/audio-library(?:\?(.*))?$/, handle: (world, [query]) => {
-    state(world);
-    const role = new URLSearchParams(query ?? "").get("role");
-    const recordings = FIXTURE_MUSIC.filter((r) => !role || r.role === role);
-    return { recordings, coverage: { offset: 0, total: recordings.length, nextOffset: null }, capabilities: { import: false, maxBytes: 0, maxSeconds: 360 } };
+    const fixture = state(world);
+    const params = new URLSearchParams(query ?? "");
+    const role = params.get("role");
+    const offset = Number(params.get("offset") ?? 0);
+    const all = fixture.library.filter((r) => !role || r.role === role);
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new ApiError("VALIDATION_ERROR", 400);
+    const recordings = all.slice(offset, offset + LIBRARY_PAGE);
+    const next = offset + recordings.length;
+    return { recordings, coverage: { offset, total: all.length, nextOffset: next < all.length ? next : null }, capabilities: { import: false, maxBytes: 0, maxSeconds: 360 } };
   } },
   { method: "POST", match: /^\/storyboard$/, handle: (world, _params, body) => storyboard(world, body) },
 ];

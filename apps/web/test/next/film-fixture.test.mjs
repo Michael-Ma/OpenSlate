@@ -124,7 +124,7 @@ test('export: start, render with no percentage, finish, then say what changed si
   assert.equal(started.state, 'rendering');
   view = call(w, 'GET', '/exports');
   assert.equal(view.current.exportId, started.exportId);
-  assert.deepEqual(call(w, 'GET', '/media').jobs[0], { id: started.exportId, state: 'running', canRecover: false });
+  assert.deepEqual(call(w, 'GET', '/media').jobs[0], { id: started.exportId, state: 'running', canRecover: false, canRun: false, createdAt: started.startedAt });
   w.advance(FILM_FIXTURE_TIMING.exportMs);
   view = call(w, 'GET', '/exports');
   assert.equal(view.current.state, 'done');
@@ -174,4 +174,37 @@ test('presets: a demo film is stamped Demo; a failed export says so', () => {
   assert.deepEqual(call(failed, 'GET', '/exports').current.failure, { code: 'RENDER_FAILED' });
   assert.equal(failed.overview.scenes.every(s => s.state === 'video_saved'), true);
   assert.equal(sceneId(3), failed.overview.scenes[2].sceneId);
+});
+
+test('presets: stopped refuses to start an export; a stalled export cannot be recovered', () => {
+  const stopped = world();
+  applyFilmPreset(stopped, 'stopped');
+  assert.ok(stopped.overview.stopped);
+  assert.equal(call(stopped, 'GET', '/exports').readiness.ready, true);
+  assert.throws(() => call(stopped, 'POST', '/exports', { expectedHeadVersion: head(stopped) }), refused('MEDIA_PAUSED'));
+  const stalled = world();
+  applyFilmPreset(stalled, 'stalled');
+  const view = call(stalled, 'GET', '/exports');
+  assert.equal(view.current.state, 'rendering');
+  const job = call(stalled, 'GET', '/media').jobs.find(j => j.id === view.current.exportId);
+  assert.deepEqual([job.state, job.canRun, job.canRecover], ['prepared', true, false]);
+  assert.throws(() => call(stalled, 'POST', `/exports/${view.current.exportId}/recover`, {}), refused('MEDIA_RENDER_NOT_STARTED'));
+  const again = call(stalled, 'POST', '/exports', { expectedHeadVersion: head(stalled) });
+  assert.equal(call(stalled, 'GET', '/exports').current.exportId, again.exportId, 'Export again makes a new current export');
+});
+
+test('the music library pages by 40, and music that is gone stops the readiness read', () => {
+  const w = world();
+  applyFilmPreset(w, 'library');
+  const first = call(w, 'GET', '/audio-library?role=music');
+  assert.deepEqual([first.recordings.length, first.coverage.total, first.coverage.nextOffset], [40, 45, 40]);
+  const second = call(w, 'GET', '/audio-library?role=music&offset=40');
+  assert.deepEqual([second.recordings.length, second.coverage.nextOffset], [5, null]);
+  assert.equal(second.recordings.at(-1).id, w.snapshot.project.soundtrack.audioId, 'the film\'s music is on the second page');
+  assert.throws(() => call(w, 'GET', '/audio-library?role=music&offset=46'), refused('VALIDATION_ERROR'));
+  const gone = world();
+  applyFilmPreset(gone, 'music-missing');
+  assert.throws(() => call(gone, 'GET', '/exports'), refused('MEDIA_ARTIFACT_UNAVAILABLE'));
+  edit(gone, { kind: 'soundtrack', field: 'audioId', value: 'audio-low-tide' });
+  assert.equal(call(gone, 'GET', '/exports').readiness.ready, false, 'with music chosen again, readiness reads');
 });

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readinessOf, readinessRows, whyNotReady, panelState, lastExport, failureMsg, changeMsg, whenMsg, elapsedSeconds,
-  filmFingerprint, changedSince, EXPORT_SIZE,
+  filmFingerprint, changedSince, unavailableMsg, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
 } from '../../src/next/model/film-export.ts';
 import { lastFerryOverview, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
@@ -36,6 +36,7 @@ test('readiness follows the server rule: a current clip and a settled voice for 
   outdated.shots[shotId('1.1')].video = { state: 'outdated', previous: outdated.shots[shotId('1.1')].video.artifact, takeCount: 1 };
   assert.deepEqual(readinessOf(outdated, false).blockers, [{ code: 'clip_outdated', shotId: shotId('1.1') }]);
   assert.deepEqual(readinessOf({ ...lastFerryOverview(), scenes: [], shots: {} }, false).blockers, [{ code: 'empty_film' }]);
+  assert.equal(filmSeconds(lastFerryOverview()), 48, 'the length without a readiness read');
   const long = finished();
   for (const shot of Object.values(long.shots)) shot.durationFrames = 15 * 30 * 4;
   assert.ok(readinessOf(long, false).blockers.some(b => b.code === 'too_long'));
@@ -74,7 +75,8 @@ test('per-shot rows: Clip and Voice columns, green only when done', () => {
   assert.equal(en(readinessRows(cut, false)[5].voice.text), '7.4 s, cut');
   const failing = lastFerryOverview();
   failing.shots[shotId('2.1')].video = { state: 'failed', takeCount: 1, failure: { code: 'X', technical: true, retryAllowed: true, autoRetriesLeft: 0, charged: true, at: '' } };
-  assert.equal(en(readinessRows(failing, false)[3].clip.text), 'failed');
+  failing.shots[shotId('2.2')].video = { state: 'no_answer', takeCount: 1 };
+  assert.deepEqual(readinessRows(failing, false).slice(3, 5).map(r => en(r.clip.text)), ['no clip', 'no clip'], 'a failed or unanswered clip counts as no clip in readiness');
 });
 
 const record = (over = {}) => ({ exportId: 'e1', state: 'done', headVersion: 3, demo: false, startedAt: '2026-10-15T14:00:00', finishedAt: '2026-10-15T14:02:00', artifact: { artifactId: 'mp4', sha256: 'a'.repeat(64), kind: 'video' }, outdatedBy: [], ...over });
@@ -90,6 +92,30 @@ test('panel state: rendering, interrupted by a restart, failed, cancelled', () =
   assert.equal(en(failed.failed), 'The last export stopped (RENDER_FAILED). Exports render on this computer and cost nothing; you can export again.');
   assert.equal(en(failureMsg('MEDIA_NO_COMPLETION')), 'Check again found no finished file. Export again to render the film.');
   assert.equal(panelState({ ...view, current: record({ state: 'cancelled' }) }, null).cancelled, true);
+  assert.equal(en(failureMsg('MEDIA_PAUSED')), 'The film was stopped before this export began. Continue, then export again.');
+});
+
+test('an export prepared and never started (a restart came first) offers Export again once it is clearly stuck', () => {
+  const started = Date.parse('2026-10-15T14:00:00Z');
+  const view = { readiness: readinessOf(finished(), false), current: record({ state: 'rendering', startedAt: '2026-10-15T14:00:00Z', finishedAt: undefined, artifact: undefined }), history: [] };
+  const media = { jobs: [{ id: 'e1', state: 'prepared', canRecover: false, canRun: true, createdAt: '2026-10-15T14:00:00Z' }], lastExport: null };
+  assert.equal(panelState(view, media, started + 2000).kind, 'rendering', 'just prepared: it is about to start');
+  const stuck = panelState(view, media, started + STALLED_AFTER_SECONDS * 1000);
+  assert.equal(stuck.kind, 'idle');
+  assert.equal(en(stuck.failed), 'The last export never started: OpenSlate restarted first. Nothing was rendered; you can export again.');
+  assert.equal(zh(stuck.failed), '上次导出还没开始 OpenSlate 就重启了，没有渲染任何内容，可以重新导出。');
+  const running = { jobs: [{ id: 'e1', state: 'running', canRecover: false, canRun: false, createdAt: '2026-10-15T14:00:00Z' }], lastExport: null };
+  assert.equal(panelState(view, running, started + 600_000).kind, 'rendering', 'a long render that is running is not stuck');
+});
+
+test('a readiness read that fails on the film\'s music says so and offers Change music', () => {
+  for (const code of ['MEDIA_ARTIFACT_UNAVAILABLE', 'MEDIA_SOURCE_UNAVAILABLE']) {
+    const value = unavailableMsg(code);
+    assert.equal(value.music, true);
+    assert.equal(en(value.text), 'The film\'s music is unavailable, so the film can\'t be checked for export. Change music.');
+  }
+  const older = unavailableMsg('NOT_FOUND');
+  assert.deepEqual([older.music, en(older.text)], [false, 'This studio can\'t export from the storyboard yet (NOT_FOUND).']);
 });
 
 test('the last export stays downloadable and says what changed since', () => {
