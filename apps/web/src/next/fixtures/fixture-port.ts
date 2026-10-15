@@ -1,4 +1,4 @@
-import type { GenerationOverview } from "@openslate/core/public";
+import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import type { MediaSource } from "../media/media-source.ts";
 import type { ProjectSnapshot } from "../model/types.ts";
@@ -6,13 +6,15 @@ import type { StudioPort } from "../store/store.ts";
 import { fixtureCommand } from "./fixture-commands.ts";
 import { extraRoutes } from "./routes/index.ts";
 import { fixtureMessage } from "./fixture-director.ts";
-import { lastFerryDirector, lastFerryOverview, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
+import { lastFerryDirector, lastFerryOverview, lastFerryProposals, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
 
 /** Mutable fixture state that simulated commands change. */
 export interface FixtureWorld {
   overview: GenerationOverview;
   snapshot: ProjectSnapshot;
   director: typeof lastFerryDirector;
+  /** Held and settled Director proposals (GET /director/proposals). */
+  proposals: DirectorProposal[];
   /** Apply a change, bump the cursor and notify the open event stream, like a server event would. */
   update(change: (world: FixtureWorld) => void): void;
   /** Run a change later (simulated provider time). Cancelled when the port closes. */
@@ -36,6 +38,7 @@ export class FixturePort implements StudioPort {
       overview: lastFerryOverview(),
       snapshot: lastFerrySnapshot(),
       director: { ...lastFerryDirector },
+      proposals: lastFerryProposals(),
       update(change) {
         change(port.world);
         const cursor = port.world.overview.cursor + 1;
@@ -58,7 +61,7 @@ export class FixturePort implements StudioPort {
       if (path === base) return structuredClone(this.world.snapshot) as T;
       if (path === `${base}/generation`) return structuredClone(this.world.overview) as T;
       if (path === `${base}/director`) return { ...this.world.director } as T;
-      if (path === `${base}/director/proposals`) return { proposals: [] } as T;
+      if (path === `${base}/director/proposals`) return { proposals: structuredClone(this.world.proposals) } as T;
     }
     if (method === "POST" && path === `${base}/messages`) return fixtureMessage(this.world, options.body) as T;
     const below = path.startsWith(base) ? path.slice(base.length) : path;

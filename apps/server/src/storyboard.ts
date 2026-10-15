@@ -1,3 +1,4 @@
+import { recordHumanFields } from "./application/human-fields.js";
 import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, type MediaUndo } from "./storyboard-history.js";
 import type { FastifyInstance } from "fastify";
 import { digest, DomainError, invariant, newId, shotIntentDigest } from "@openslate/core";
@@ -88,7 +89,7 @@ export function editStoryboard(
         "The storyboard changed; reload before saving this edit.",
       );
       invariant(
-        !s.store
+        ["treatment", "scene", "shot", "narration"].includes(input.kind) || !s.store
           .list<{ state: string }>("plan_import", projectId)
           .some((x) => x.state === "pending"),
         "IMPORT_PENDING",
@@ -425,7 +426,8 @@ export function editStoryboard(
           source: "app",
           key: `storyboard:${key}`,
           editing: true,
-          directEdit: true,
+          concurrency: "alongside",
+          holdScopeIds: [], // Detached media below determines the exact transient holds.
           scopeIds: scopes.length ? scopes : [projectId],
         },
       );
@@ -520,6 +522,7 @@ export function editStoryboard(
       s.store.insert("project_revision", next.revisionId, projectId, {
         project: next,
       });
+      recordHumanFields(s.store, before, next, actor);
       if (undoing) {
         restoreMediaUndo(s, next, undoing.undo);
         if (undoing.undo) restoreCanonicalUndo(s, next, actor.requestId, undoing.undo);

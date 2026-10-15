@@ -1,6 +1,38 @@
 # Current implementation status
 
-Reconciled October 9, 2026. OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 15, 2026 (B10 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 15 keyframe projection and automatic Director reviews — B10 worktree verified
+
+Native scoped turns now receive frozen current keyframes after user references, as individual bounded JPEGs or a row-major contact sheet within the shared four-image/512 KiB budget. Request/epoch projection receipts govern seen-frame note evidence; fixture/SVG, stale, unsupported and unavailable images are explicitly described without visual claims. The exact locally archived Codex **0.153.4** schema confirms turn-start image input. No live model turn was needed; MCP image forwarding remains unverified and is not used.
+
+Terminal keyframe presses can start one durable, hold-free discuss-only application review when idle and enabled. The default-on review setting has keyed GET/POST routes. Reviews can read, record notes and hold proposals; they cannot edit, ask blocking questions or start media. Generation/confirmation busy checks ignore them, fresh user messages supersede them, and batch markers prevent replay after restart. Historical/imported presses without eligible pinned evidence never initiate retrospective model calls.
+
+Snapshots expose honest turn endings/progress and confirmed effect counts, including idempotent apply deduplication. Structured question answers preserve option indices/labels. Conversation entries include persisted timestamps, user scopes and each reply's original scripted/live runtime. The fake-only `node scripts/storyboard-review.mjs --fixtures --film last-ferry` seeds the three-scene/eight-shot prototype state, measured synthetic narration, two honest scripted notes and a held eight-second proposal.
+
+Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed preflight. Final `pnpm build` and **66 touched-file tests** passed; final `pnpm test` passed **2,721 tests, zero failures and one optional native-probe skip (2,722 total)**. All five package typechecks passed. The disposable Last Ferry CLI also launched and stopped successfully on loopback port 3187. No live provider/model call, credential read, external network request, production-state read/write/restart or port 3001 listener occurred.
+
+This is the B10 backend/script component for lead review and merge. No web source, `studio-api.ts`, frozen tool catalog/skill package or DDL changed. All changes remain uncommitted under the card rules; browser rendering and real visual-quality acceptance are separate. [B10 scope, schema evidence, full inventory, decisions and proposed commits](../ai/uiux-plan/codex/reports/B10-vision.md).
+
+## October 15 B9 merge integration with B7/B8/B11/B6 — verified working tree
+
+The in-progress feature merge has six resolved working-tree conflicts. The app retains proposals, notes, take selection, durable scene confirmation/fit, library and export routes. The extracted `generateScene` is shared by HTTP and the confirmation runner, including B5's blocking-note/digest checks and B8's retained-take behavior. B7/B8 application calls now use B9's single alongside mode with explicit hold selection; internal runner/fit sessions remain hold-free while confirmations retain their own scene hold. B11's title/delete/reorder commands also run alongside the Director. Media/canonical Undo snapshots and human-field auditing publish together, and structural deletion/restoration cannot erase an older turn's human-edit fence.
+
+Proposal-note resolution can only be created by accepting its exact preview. The note route acknowledges an already saved matching acceptance through `resultRef`; an accepted proposal ID alone cannot resolve another open note. Previews account for paid takes retained during replacement. New queued B7 voice lines freeze the B11 effective narrator voice at the human press, preserving it across default changes and restart.
+
+Pinned toolchain preflight and `pnpm build` passed. Targeted integration/regression files passed **169 tests, zero failures/skips**. Final `pnpm test` passed **2,678 tests, zero failures and one optional native-probe skip (2,679 total)**; all five package typechecks passed. Nine new cases cover the cross-card boundaries. Existing tests and both sides of the conflicted shot-audio test tail remain. Validation is offline with disposable state and fake/synthetic media; no live provider/model call, production edit/restart, credential read, external network request or port 3001 listener occurred.
+
+Only `git diff` and `git status` were used. The six paths still have unmerged index entries because staging was explicitly reserved for the lead. The lead must stage those resolutions **and the additional integration edits**, then complete the existing merge. No new browser contract change or web edit was introduced by this resolution. [Per-conflict decisions, file inventory and exact checks](../ai/uiux-plan/codex/reports/B9-merge-integration.md).
+
+## October 15 held Director proposals and alongside edits — B9 worktree verified
+
+The B9 backend component adds `propose_change` to the explicitly unreleased 5.0.0 catalog and updates V6 guidance. Discuss-only turns can hold creative suggestions without holds, grants or generation. App-computed Now/After previews show field changes, timeline/film seconds and actual media effects. Owned keyed accept/reject/undo commands recheck the live preview, rebase unrelated changes, expire touched revisions/data and restored origins, and preserve human field edits. Selective undo leaves newer fields alone, returns its inverse preview and reopens the proposal note. Duration-only changes preserve exact keyframes; obsolete retained clips read as outdated.
+
+Storyboard, proposal/note decisions and narration editing/fit now share alongside request ownership without revoking the running Director. The earliest captured turn cursor fences later human field changes, including ABA edits and narration drafts/canonical changes, with `HUMAN_EDITED_FIELD`; typed new direction still interrupts. Session continuation invalidates the old narration session capability through its head rather than superseding the Director. Imports preserve reviewed IDs across unrelated alongside field edits and refuse overlap. Existing request-owned holds, immutable receipts and uncertain paid-outcome rules remain authoritative.
+
+This entry supersedes B5's pending held-proposal/alongside boundary. The component remains in this worktree for the lead's review/commit/merge, per the card rules. Generated-keyframe projection/review turns and web rendering remain later cards. No browser-facing type in `studio-api.ts`, web source or schema migration changed; V1–V4 tool digests and historical skill packages remain unchanged.
+
+Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed preflight. `pnpm build` passed; targeted and compatibility verification passed **149 tests**. Final `pnpm test` passed **2,560 tests, zero failures and one optional native-probe skip (2,561 total)**; all five package typechecks passed. Tests used disposable fixtures, synthetic audio and fake adapters, including a running fake Director that completes through alongside actions and actual fake keyframe/video output checks. No live model/provider call, production-data edit/restart, port 3001 listener, external network request or credential read occurred. [B9 scope, file lists, decisions and verification](../ai/uiux-plan/codex/reports/B9-proposals.md).
 
 ## October 15 current takes and media-restoring Undo — B8 worktree verified
 

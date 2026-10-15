@@ -1,3 +1,6 @@
+import { directorTurnViews } from "./director-turn-view.js";
+import { rebaseCreativeDraft } from "./creative-rebase.js";
+import { recordHumanFields, assertNoHumanFieldConflict } from "./human-fields.js";
 import { directorNotes } from "./director-notes.js";
 import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -29,7 +32,7 @@ import type { ContinueEdits } from './pending-edit-continuation.js';
 import { isScopedAssemblyRebuild } from './scoped-assembly.js';
 import { assertNarrationAuthority } from '../narration/narration-scope.js';
 
-export interface RequestRecord { source?: RequestSource | "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
+export interface RequestRecord { source?: RequestSource | "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; concurrency?: "alongside"; state: "active" | "superseded"; contextDigest: string | null }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
 interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 interface Grant { id: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
@@ -108,12 +111,14 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; directEdit?: boolean; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; concurrency?: "alongside"; holdScopeIds?: string[]; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
     invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
     invariant(options.source === undefined || ["user", "app", "director"].includes(options.source), "VALIDATION_ERROR", "Use a supported request source");
+    invariant(options.concurrency !== "alongside" || !options.resumeFromStopId && !options.continueEdits, "VALIDATION_ERROR", "Alongside work cannot replace stopped or continued conversation authority");
+    invariant(options.concurrency === undefined || options.concurrency === "alongside", "VALIDATION_ERROR", "Unsupported request concurrency");
     const key = options.key ?? newId();
-    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ ...(options.directEdit ? { directEdit: true } : {}), ...(options.supersede ? { supersede: options.supersede } : {}), text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
+    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ ...(options.concurrency ? { concurrency: options.concurrency } : {}), ...(options.holdScopeIds ? { holdScopeIds: options.holdScopeIds } : {}), ...(options.supersede ? { supersede: options.supersede } : {}), text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
       const project = this.store.getProject(projectId);
       if (options.resumeFromStopId) {
         const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
@@ -127,20 +132,29 @@ export class ProductionService {
       const scopeIds = [...new Set(options.scopeIds ?? [projectId])];
       invariant(scopeIds.length > 0 && scopeIds.length <= 400, "VALIDATION_ERROR", "A request requires a bounded scope");
       scopeIds.forEach(scopeId => validateStageScope(project, scopeId));
+      invariant(!options.holdScopeIds || options.concurrency === "alongside" && options.holdScopeIds.every(id => scopeIds.includes(id) || project.shots.some(s => s.id === id && scopeIds.includes(s.sceneId))), "SCOPE_DENIED", "Holds must belong to this alongside scope");
       invariant(!options.continueEdits || (options.editing !== false && !options.continuationRequestId && !options.resumeFromStopId), 'VALIDATION_ERROR', 'Continue selected edits using one fresh editable conversation.');
       if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
-      const request: RequestRecord = { source: options.source ?? "user", id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
+      const request: RequestRecord = { source: options.source ?? "user", ...(options.concurrency ? { concurrency: options.concurrency } : {}), id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
+      // A fresh user message also ends application-only reviews, including discuss-only messages.
+      if (request.source === "user") for (const review of this.store.list<RequestRecord>("message", projectId)) {
+        if (review.state !== "active" || !this.store.get("keyframe_review_request", review.id)) continue;
+        this.store.put("message", review.id, projectId, { ...review, state: "superseded" });
+        for (const epoch of this.store.list<Epoch>("epoch", projectId).filter(e => e.requestId === review.id && e.state !== "revoked")) this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+      }
       // Direct writes fence stale prepared changes by headVersion without ending a Director turn.
       // Scene presses only replace authority that intersects their own command scope.
-      if (options.editing !== false && !options.directEdit) {
-        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active"
-          && (!options.supersede || requestScopesIntersect(project, scopeIds, prior.scopeIds)))
-          this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
-        for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked"
-          && (!options.supersede || requestScopesIntersect(project, scopeIds, epoch.scopeIds)))
-          this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
-        for (const scopeId of scopeIds) this.engine.setHold(projectId, { scopeId, ownerId: request.id });
+      if (options.editing !== false) {
+        if (options.concurrency !== "alongside") {
+          for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active"
+            && (!options.supersede || requestScopesIntersect(project, scopeIds, prior.scopeIds)))
+            this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
+          for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked"
+            && (!options.supersede || requestScopesIntersect(project, scopeIds, epoch.scopeIds)))
+            this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
+        }
+        for (const scopeId of options.holdScopeIds ?? scopeIds) this.engine.setHold(projectId, { scopeId, ownerId: request.id });
         const continuedIds = options.continueEdits?.requestIds ?? (options.continuationRequestId ? [options.continuationRequestId] : []);
         for (const priorId of continuedIds) {
           const prior = this.store.get<RequestRecord>("message", priorId);
@@ -266,6 +280,7 @@ export class ProductionService {
   async prepare(projectId: string, actor: ActorContext, input: unknown): Promise<Prepared> {
     this.assertActor(projectId, actor, true);
     const proposal = parseChangeProposal(input);
+    assertNoHumanFieldConflict(this.store, projectId, actor, proposal.creative);
     if (actor.kind === "director" && this.store.get("plan_import", actor.requestId)) {
       invariant(!proposal.source && !proposal.requestNewTakes?.length && !!proposal.creative, "IMPORT_REVIEW_REQUIRED", "Prepare only a creative interpretation of the supplied material. No executable plan or generation; the human confirms the exact draft in Film plan.");
     }
@@ -327,6 +342,7 @@ export class ProductionService {
     const { impact, stages, extraTakeIds: extra } = assessment;
     // Parsing and provider completion may interleave. Authority and project version are rechecked here.
     this.assertActor(projectId, actor, true);
+    assertNoHumanFieldConflict(this.store, projectId, actor, proposal.creative);
     invariant(this.store.getProject(projectId).headVersion === before.headVersion, "REVISION_CONFLICT", "Project changed during preparation");
     const duplicate = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
     if (duplicate) return duplicate;
@@ -516,6 +532,14 @@ export class ProductionService {
     });
   }
 
+  planImportDraft(projectId: string, preparedId: string): ProjectRecord | null {
+    const prepared = this.store.get<Prepared>("prepared", preparedId), current = this.store.getProject(projectId);
+    if (!prepared || prepared.projectId !== projectId || prepared.compiled || prepared.proposal.source) return null;
+    if (prepared.baseVersion === current.headVersion) return prepared.next;
+    const base = this.store.list<{ project: ProjectRecord }>("project_revision", projectId).find(r => r.project.headVersion === prepared.baseVersion)?.project;
+    return base ? rebaseCreativeDraft(base, prepared.next, current) : null;
+  }
+
   /** Human-only import acceptance: retain the exact reviewed draft and recheck all publication predicates. */
   confirmPlanImport(projectId: string, requestId: string, preparedId: string, proposalDigest: string, key: string): ApplyReceipt {
     this.recovery.assertWritable(projectId);
@@ -524,7 +548,7 @@ export class ProductionService {
       invariant(material?.projectId === projectId && material.state === "pending", "IMPORT_STALE", "This import is no longer pending.");
       this.recovery.assertFreshAuthority(projectId, "message", requestId);
       const request = this.store.get<RequestRecord>("message", requestId);
-      invariant(request?.principalId === "local-user" && request.state === "active" && this.store.list<RequestRecord>("message", projectId).filter(row => row.editing).at(-1)?.id === requestId,
+      invariant(request?.principalId === "local-user" && request.state === "active" && this.store.list<RequestRecord>("message", projectId).filter(row => row.editing && row.concurrency !== "alongside").at(-1)?.id === requestId,
         "IMPORT_STALE", "Newer direction superseded this import. Re-import against the current film plan.");
       invariant(!this.store.get<{ paused: boolean }>("execution_control", projectId)?.paused, "IMPORT_STALE", "The conversation is stopped. Resume with a fresh request before importing again.");
       invariant(!this.store.list<{ requestId: string; state: string }>("director_turn", projectId).some(turn => turn.requestId === requestId && ["queued", "running"].includes(turn.state)), "IMPORT_NOT_READY", "Wait for the director to finish interpreting the source.");
@@ -532,10 +556,12 @@ export class ProductionService {
       const latest = this.store.list<Prepared>("prepared", projectId).filter(row => row.requestId === requestId).at(-1);
       invariant(prepared?.projectId === projectId && prepared.requestId === requestId && latest?.id === preparedId && prepared.proposalDigest === proposalDigest && !prepared.compiled && !prepared.proposal.source,
         "IMPORT_STALE", "Review the current import draft before confirming.");
-      invariant(prepared.baseVersion === this.store.getProject(projectId).headVersion, "REVISION_CONFLICT", "The film plan changed. Re-import against its current version.");
+      const next = this.planImportDraft(projectId, prepared.id);
+      invariant(next, "REVISION_CONFLICT", "The imported fields changed. Re-import against the current film plan.");
       const human = this.beginRequest(projectId, "local-user", "Confirm the reviewed supplied-material plan. No generation is authorized.", { source: "app", editing: true, continuationRequestId: requestId, key: `confirm-import:${key}`, contextDigest: digest({ preparedId, proposalDigest }) });
-      const reviewed: Prepared = { ...prepared, id: newId(), requestId: human.requestId, principalId: human.principalId, epochId: null };
-      this.store.insert("prepared", reviewed.id, projectId, reviewed);
+      const before = this.store.getProject(projectId), lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId)!;
+      const capture: PreparedChangeCapture = { before, next, lock, proposal: prepared.proposal, proposalDigest: prepared.proposalDigest, compiled: null, logicalIds: prepared.logicalIds };
+      const reviewed = this.recordPreparedChange(projectId, human, capture, this.assessCompiledChange(capture, human), {});
       const result = this.apply(projectId, human, reviewed.id);
       this.store.put("plan_import", requestId, projectId, { ...material, state: "confirmed", preparedId, confirmation: result });
       this.store.appendEvent(projectId, "plan_import.confirmed", { requestId, preparedId });
@@ -543,10 +569,50 @@ export class ProductionService {
     });
   }
 
+  validateHeldCreativePatch(projectId: string, actor: ActorContext, patch: import('@openslate/core').CreativePatch): void {
+    this.assertActor(projectId, actor);
+    assertNoHumanFieldConflict(this.store, projectId, actor, patch);
+    const before = this.store.getProject(projectId);
+    const next = applyCreativePatch(before, patch, shot => shot);
+    this.checkFootprint(before, next, actor, null, []);
+    validateStageRequirements(next, requiredStages(before, next, null));
+  }
+
+  /** Held creative changes use the same validated Prepared/publication kernel, without generation authority. */
+  publishHumanCreativePatch(projectId: string, actor: ActorContext, creative: import('@openslate/core').CreativePatch, clearNarrationShotIds: string[] = []): ApplyReceipt {
+    return this.store.transaction(() => {
+      this.assertActor(projectId, actor, true);
+      invariant(actor.kind === "human" && this.request(projectId, actor).concurrency === "alongside", "ACTOR_DENIED", "Use an alongside human request");
+      const before = this.store.getProject(projectId);
+      const proposal = parseChangeProposal({ variant: "project", expectedHeadVersion: before.headVersion, creative });
+      const next = applyCreativePatch(before, creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } }));
+      for (const id of clearNarrationShotIds) {
+        const shot = next.shots.find(s => s.id === id);
+        invariant(shot && creative.updateShots?.some(s => s.id === id), "SCOPE_DENIED", "Inverse narration targets must be in the reviewed patch");
+        delete shot.narration;
+        delete shot.narrationFit;
+        delete shot.narrationPending;
+        shot.revisionId = newId();
+      }
+      const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
+      invariant(lock?.projectId === projectId && lock.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Project workflow lock is unsupported");
+      const capture: PreparedChangeCapture = { before, next, lock, proposal, proposalDigest: digest(proposal), compiled: null, logicalIds: {} };
+      const prepared = this.finalizePreparedChange(projectId, actor, capture, this.assessCompiledChange(capture, actor));
+      return this.apply(projectId, actor, prepared.id);
+    });
+  }
+
+  releaseAlongsideHolds(projectId: string, actor: ActorContext): void {
+    this.assertActor(projectId, actor, true);
+    invariant(this.request(projectId, actor).concurrency === "alongside", "ACTOR_DENIED", "Only release this alongside request's holds");
+    for (const hold of this.store.list<Hold>("hold", projectId)) if (hold.active && hold.ownerId === actor.requestId) this.engine.releaseHold(projectId, hold.id, actor.requestId);
+  }
+
   /** Shared synchronous publication kernel; callers retain exact actor ownership and command authority. */
   private publishPreparedChange(projectId: string, actor: ActorContext, prepared: Prepared, retainHolds = false): ApplyReceipt {
     const preparedId = prepared.id;
     const before = this.store.getProject(projectId);
+    assertNoHumanFieldConflict(this.store, projectId, actor, prepared.proposal.creative);
     invariant(digest(this.store.get("capability_lock", before.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Project capability lock changed");
     validateStageRequirements(prepared.next, prepared.stages);
     invariant(before.headVersion === prepared.baseVersion, "REVISION_CONFLICT", "Prepared change is stale");
@@ -559,7 +625,10 @@ export class ProductionService {
       this.engine.installPlan(projectId, planId!, prepared.compiled, prepared.grantBindings, prepared.deferredNodeIds);
       this.store.put("logical_ids", projectId, projectId, { aliases: prepared.logicalIds });
     }
-    if (changed) this.store.insert("project_revision", next.revisionId, projectId, { project: next });
+    if (changed) {
+      this.store.insert("project_revision", next.revisionId, projectId, { project: next });
+      recordHumanFields(this.store, before, next, actor);
+    }
     for (const stage of prepared.stages) {
       const id = this.stageId(projectId, stage);
       const previous = this.store.get<StageBinding>("stage", id);
@@ -571,7 +640,7 @@ export class ProductionService {
       if (bindingVersion !== previous?.bindingVersion) this.store.insert("stage_revision", newId(), projectId, { binding, preparedId });
     }
     for (const proposal of prepared.proposal.stages ?? []) this.store.insert("stage_assessment", newId(), projectId, { ...proposal, preparedId, advisory: true });
-    if (prepared.compiled && !retainHolds) this.releaseResolvedHolds(projectId, actor, prepared);
+    if ((prepared.compiled || this.request(projectId, actor).concurrency === "alongside") && !retainHolds) this.releaseResolvedHolds(projectId, actor, prepared);
     this.store.appendEvent(projectId, "change.applied", { preparedId, revisionId: next.revisionId, planId, headVersion: next.headVersion });
     return { preparedId, projectId, revisionId: next.revisionId, headVersion: next.headVersion, activePlanId: next.activePlanId, cursor: this.store.cursor(projectId) };
   }
@@ -611,20 +680,20 @@ export class ProductionService {
       const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : undefined;
       const attempts = this.engine.attempts(projectId);
       const messages = this.store.list<RequestRecord>("message", projectId).map(message => projectRequest(this.store, message));
-      const outputs = this.store.list<{ id: string; requestId: string; text: string; phase: string }>("director_output", projectId);
+      const outputs = this.store.list<{ id: string; requestId: string; turnId: string; text: string; phase: string }>("director_output", projectId);
       const messageById = new Map(messages.map(message => [message.id, message])), outputById = new Map(outputs.map(output => [output.id, output]));
-      const conversation = this.store.readEvents(projectId).flatMap(event => {
+      const conversation = this.store.readEvents(projectId).flatMap<{ id: string; role: "user" | "assistant"; text: string; state: string; requestId: string; at: string; scopeIds?: string[]; runtime?: "scripted" | "live" }>(event => {
         if (event.kind === "message.recorded") {
           const message = messageById.get(String(event.payload.requestId));
-          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
+          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id, at: event.occurredAt, ...(!message.scopeIds.includes(projectId) ? { scopeIds: message.scopeIds } : {}) }] : [];
         }
         if (event.kind === "director.message") {
           const output = outputById.get(String(event.payload.outputId));
-          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId }] : [];
+          return output ? [{ id: output.id, role: "assistant", text: output.text, state: output.phase, requestId: output.requestId, at: event.occurredAt, runtime: this.store.get<{ runtimeId: string }>("director_turn", output.turnId)?.runtimeId === "codex-app-server" ? "live" : "scripted" }] : [];
         }
         return [];
       });
-      return { project, notes: directorNotes(this.store, projectId), latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
+      return { project, turns: directorTurnViews(this, projectId), notes: directorNotes(this.store, projectId), latestStoryboardEdit: this.store.list<{ id: string; headVersion: number; requestId: string }>("storyboard_edit", projectId).map(({ id, headVersion, requestId }) => ({ id, headVersion, requestId })).at(-1) ?? null, workflow: workflowReadiness(project),
       stages: this.store.list<StageBinding>("stage", projectId), outputs: this.engine.outputs(projectId), attempts,
       currentAttemptIds: this.engine.currentAttemptIds(projectId, attempts),
       assessments: this.store.list("stage_assessment", projectId),

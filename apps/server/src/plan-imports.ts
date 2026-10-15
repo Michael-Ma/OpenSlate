@@ -32,11 +32,12 @@ export function registerPlanImports(app: FastifyInstance, service: () => Product
     const material = s.store.list<{ id: string; name: string; text: string; sourceDigest: string; state: string }>('plan_import', id).filter(row => row.state === 'pending').at(-1);
     if (!material) return { pending: null };
     const prepared = s.store.list<{ id: string; requestId: string; proposalDigest: string; baseVersion: number; next: ProjectRecord; compiled: unknown; proposal: { source?: string } }>('prepared', id).filter(row => row.requestId === material.id && !row.compiled && !row.proposal.source).at(-1);
-    const latest = s.store.list<{ id: string; editing: boolean }>('message', id).filter(row => row.editing).at(-1);
-    const stale = s.recovery.isImported(id, 'message', material.id) || latest?.id !== material.id || !!s.store.get<{ paused: boolean }>('execution_control', id)?.paused || !!prepared && prepared.baseVersion !== project.headVersion;
+    const latest = s.store.list<{ id: string; editing: boolean; concurrency?: string }>('message', id).filter(row => row.editing && row.concurrency !== "alongside").at(-1);
+    const rebased = prepared ? s.planImportDraft(id, prepared.id) : null;
+    const stale = s.recovery.isImported(id, 'message', material.id) || latest?.id !== material.id || !!s.store.get<{ paused: boolean }>('execution_control', id)?.paused || !!prepared && !rebased;
     const running = s.store.list<{ requestId: string; state: string }>('director_turn', id).some(turn => turn.requestId === material.id && ['queued', 'running'].includes(turn.state));
     return { pending: { id: material.id, name: material.name, text: material.text, sourceDigest: material.sourceDigest, stale, running,
-      draft: prepared ? { preparedId: prepared.id, proposalDigest: prepared.proposalDigest, project: prepared.next } : null } };
+      draft: prepared ? { preparedId: prepared.id, proposalDigest: prepared.proposalDigest, project: rebased ?? prepared.next } : null } };
   });
   app.post<{ Params: { projectId: string; requestId: string }; Body: { preparedId: string; proposalDigest: string } }>(`${base}/:requestId/confirm`, {
     schema: { body: { type: 'object', additionalProperties: false, required: ['preparedId', 'proposalDigest'], properties: { preparedId: { type: 'string', minLength: 1, maxLength: 160 }, proposalDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } },

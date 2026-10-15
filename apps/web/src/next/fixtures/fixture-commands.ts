@@ -1,6 +1,9 @@
 import type {
+  AcceptProposalInput,
   ConfirmSceneInput,
   ControlInput,
+  DirectorNote,
+  DirectorProposal,
   ControlReceipt,
   FrameViewInput,
   FrameViewReceipt,
@@ -10,8 +13,10 @@ import type {
   NarrationFitInput,
   NarrationFitReceipt,
   PriceQuote,
+  ProposalReceipt,
   ReleaseAttemptInput,
   ReleaseAttemptReceipt,
+  ResolveNoteInput,
   SceneBlocker,
   SceneConfirmationView,
   SceneOverview,
@@ -28,8 +33,8 @@ import { artifactFor } from "./last-ferry.ts";
 
 /**
  * Simulated commands for the fixture film: frame views, scene generation reads and presses, the
- * durable scene confirm, narration fit, storyboard edits with single-step undo, Stop / Continue and
- * giving up on a job.
+ * durable scene confirm, narration fit, storyboard edits with single-step undo, Stop / Continue,
+ * giving up on a job, and the Director's notes and held proposals (resolve, accept, reject, undo).
  * Nothing is generated, charged or saved. Every change goes through `recompute`, so blockers,
  * counts, targets and quotes always agree with the shots.
  */
@@ -68,7 +73,13 @@ function directorCovers(overview: GenerationOverview, scene: SceneOverview): boo
   return director.scopeIds.length === 0 || director.scopeIds.some((id) => id === scene.sceneId || scene.shotIds.includes(id));
 }
 
-function recomputeScene(overview: GenerationOverview, scene: SceneOverview): SceneOverview {
+/** Open blocking Director notes anchored to this scene (DC-9): each gates the scene's video confirm. */
+function blockingNotes(notes: readonly DirectorNote[], scene: SceneOverview): DirectorNote[] {
+  return notes.filter((note) => note.state === "open" && note.blocking
+    && (note.anchor.sceneId === scene.sceneId || (note.anchor.shotIds ?? []).some((id) => scene.shotIds.includes(id))));
+}
+
+function recomputeScene(overview: GenerationOverview, scene: SceneOverview, notes: readonly DirectorNote[]): SceneOverview {
   const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
   const state = sceneState(scene, shots);
   const keyframesReady = shots.filter((shot) => shot.keyframe.state === "ready").length;
@@ -86,6 +97,10 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview): Sce
     for (const shot of targets) {
       if (shot.narration.fits === false && !shot.narration.fit) blockers.push({ code: "narration_too_long", shotId: shot.shotId });
       if (shot.narration.state === "making") blockers.push({ code: "narration_making", shotId: shot.shotId });
+    }
+    for (const note of blockingNotes(notes, scene)) {
+      const shotId = note.anchor.shotIds?.[0];
+      blockers.push({ code: "recommendation_open", ...(shotId ? { shotId } : {}) });
     }
     if (shots.some((shot) => shot.keyframe.state === "no_answer" || shot.video.state === "no_answer")) blockers.push({ code: "no_answer_in_scene" });
     if (overview.stopped) blockers.push({ code: "stopped" });
@@ -118,16 +133,16 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview): Sce
 
 /**
  * Pure. Derives every roll-up (narration fit, scene state, counts, targets, quotes, blockers) from the shots,
- * the stop state and the Director's activity, the way the server's overview read does.
+ * the stop state, the Director's activity and its open blocking notes, the way the server's overview read does.
  */
-export function recompute(overview: GenerationOverview): GenerationOverview {
+export function recompute(overview: GenerationOverview, notes: readonly DirectorNote[] = []): GenerationOverview {
   const shots: Record<string, ShotOverview> = {};
   for (const [id, shot] of Object.entries(overview.shots)) {
     const keyframe: KeyframeSlot = shot.keyframe.state === "ready" ? shot.keyframe : { ...shot.keyframe, opened: false };
     shots[id] = { ...shot, keyframe, narration: narrationFits(shot.narration, shot.durationFrames, overview.fps) };
   }
   const withShots = { ...overview, shots };
-  return { ...withShots, scenes: overview.scenes.map((scene) => recomputeScene(withShots, scene)) };
+  return { ...withShots, scenes: overview.scenes.map((scene) => recomputeScene(withShots, scene, notes)) };
 }
 
 // ---- world helpers -----------------------------------------------------------------
@@ -144,12 +159,18 @@ interface Extra {
   serial: number;
   undo: UndoEntry | null;
   takes: Record<string, number>;
+  /** Keyframe presses by request id, so a note's regenerate choice can be linked to the press that did it. */
+  requests: Record<string, { regenerate: boolean; shotIds: string[] }>;
+  /** Storyboard edits by command id, so a note's edit choice can be linked to the edit that did it. */
+  edits: Record<string, { shotId: string; field: string }>;
+  /** What an accepted proposal changed, for its undo. */
+  accepted: Record<string, { shotId: string; before: ShotOverview; after: number }>;
 }
 
 const extras = new WeakMap<FixtureWorld, Extra>();
 function extra(world: FixtureWorld): Extra {
   let value = extras.get(world);
-  if (!value) { value = { serial: 0, undo: null, takes: {} }; extras.set(world, value); }
+  if (!value) { value = { serial: 0, undo: null, takes: {}, requests: {}, edits: {}, accepted: {} }; extras.set(world, value); }
   return value;
 }
 const nextId = (world: FixtureWorld, prefix: string) => `${prefix}-${++extra(world).serial}`;
@@ -170,13 +191,52 @@ function takeArtifact(label: string, take: number): StudioArtifactRef {
 
 const clipArtifact = (label: string, take: number): StudioArtifactRef => ({ artifactId: `art-${label}-clip`, sha256: hexDigest(`${label}-clip#${take}`), kind: "video" });
 
+/**
+ * Notes and proposals follow the shots: an open note whose seen keyframe was replaced goes stale, and so does a
+ * held proposal whose shot no longer has the value it was written against.
+ */
+function staleNotes(notes: readonly DirectorNote[], overview: GenerationOverview): DirectorNote[] | null {
+  let changed = false;
+  const next = notes.map((note) => {
+    const seen = note.seenKeyframe;
+    const current = seen ? overview.shots[seen.shotId]?.keyframe : undefined;
+    if (note.state !== "open" || !seen || current?.state !== "ready" || !current.artifact) return note;
+    if (current.artifact.artifactId === seen.artifactId && current.artifact.sha256 === seen.sha256) return note;
+    changed = true;
+    return { ...note, state: "stale" as const };
+  });
+  return changed ? next : null;
+}
+
+/** Staleness is derived, as the server's rebase does on every read: a shot that changes back makes the proposal held again. */
+function staleProposals(proposals: readonly DirectorProposal[], overview: GenerationOverview): DirectorProposal[] {
+  return proposals.map((proposal) => {
+    if (proposal.state !== "held" && !(proposal.state === "stale" && proposal.staleReason === "SHOT_CHANGED")) return proposal;
+    const moved = proposal.preview.changes.some((change) => change.field === "desiredFrames" && change.shotId && String(overview.shots[change.shotId]?.durationFrames) !== change.before);
+    if (moved) return { ...proposal, state: "stale", staleReason: "SHOT_CHANGED" };
+    const { staleReason: _reason, ...held } = proposal;
+    return { ...held, state: "held" };
+  });
+}
+
+/** Every change ends here: notes and proposals follow the shots, then the roll-ups are derived again. */
+function settle(w: FixtureWorld, overview: GenerationOverview): void {
+  const notes = staleNotes(w.snapshot.notes ?? [], overview);
+  if (notes) w.snapshot = { ...w.snapshot, notes };
+  w.proposals = staleProposals(w.proposals ?? [], overview);
+  w.overview = recompute(overview, w.snapshot.notes ?? []);
+}
+
 function commit(world: FixtureWorld, change: (overview: GenerationOverview, snapshot: ProjectSnapshot) => { overview: GenerationOverview; snapshot?: ProjectSnapshot }): void {
   world.update((w) => {
     const next = change(w.overview, w.snapshot);
-    w.overview = recompute(next.overview);
     if (next.snapshot) w.snapshot = next.snapshot;
+    settle(w, next.overview);
   });
 }
+
+const withNote = (snapshot: ProjectSnapshot, noteId: string, change: (note: DirectorNote) => DirectorNote): ProjectSnapshot =>
+  ({ ...snapshot, notes: (snapshot.notes ?? []).map((note) => (note.noteId === noteId ? change(note) : note)) });
 
 const withShot = (overview: GenerationOverview, shotId: string, change: (shot: ShotOverview) => ShotOverview): GenerationOverview => {
   const shot = overview.shots[shotId];
@@ -244,13 +304,15 @@ function assertEstimate(body: GenerateInput, units: number, unit: number): void 
   if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== String(units * unit)) throw new ApiError("ESTIMATE_CHANGED", 409);
 }
 
-function generate(world: FixtureWorld, sceneId: string, body: GenerateInput): { accepted: true; targetShotIds: string[] } {
+function generate(world: FixtureWorld, sceneId: string, body: GenerateInput): GenerateReceipt {
   const scene = findScene(world, sceneId);
   assertFresh(world, body);
   return body.kind === "video" ? generateVideo(world, scene, body) : generateKeyframes(world, scene, body);
 }
 
-function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: GenerateInput): { accepted: true; targetShotIds: string[] } {
+interface GenerateReceipt { accepted: true; requestId?: string; sceneId?: string; kind?: "image"; shotIds?: string[]; targetShotIds: string[] }
+
+function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: GenerateInput): GenerateReceipt {
   if (body.regenerate && !body.targetShotIds?.length) throw new ApiError("VALIDATION_ERROR", 400);
   if (body.targetShotIds?.some((id) => !scene.shotIds.includes(id))) throw new ApiError("SCOPE_DENIED", 403);
   const candidates = body.targetShotIds ?? scene.shotIds;
@@ -284,9 +346,11 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
         const take = shot.keyframe.takeCount + 1;
         return { ...shot, keyframe: { state: "ready", artifact: takeArtifact(shot.label, take), takeCount: take, opened: false } };
       });
-    w.overview = recompute(next);
+    settle(w, next);
   });
-  return { accepted: true, targetShotIds: targets };
+  const requestId = nextId(world, "request");
+  extra(world).requests[requestId] = { regenerate: !!body.regenerate, shotIds: targets };
+  return { accepted: true, requestId, sceneId: scene.sceneId, kind: "image", shotIds: targets, targetShotIds: targets };
 }
 
 /** The browser-run video press (before phase P3). Kept for older clients; new ones confirm through /confirm. */
@@ -376,7 +440,7 @@ function scheduleClip(world: FixtureWorld, sceneId: string, confirmationId: stri
     next = startNextClip(next, sceneId, world);
     const still = scene.shotIds.some((id) => isWorking(next.shots[id]!.video));
     if (!still) next = withScene(next, sceneId, (s) => (s.confirmation ? { ...s, confirmation: { confirmationId, state: next.stopped ? "cancelled" : "done" } } : s));
-    w.overview = recompute(next);
+    settle(w, next);
     if (still) scheduleClip(w, sceneId, confirmationId);
   });
 }
@@ -472,6 +536,9 @@ function storyboard(world: FixtureWorld, body: StoryboardBody): { commandId: str
     if (!entry || entry.commandId !== body.commandId) throw new ApiError("UNDO_UNAVAILABLE", 409);
     state.undo = null;
     commit(world, (overview, snapshot) => {
+      // A note settled by this edit is open again once the edit is undone.
+      const reopened = { ...snapshot, notes: (snapshot.notes ?? []).map((note) => (note.state === "resolved" && note.resolution?.resultRef === entry.commandId ? reopen(note) : note)) };
+      snapshot = reopened;
       const restored = withShot(overview, entry.shotId, (shot) => {
         const back: ShotOverview = { ...shot };
         for (const field of entry.fields) (back as unknown as Record<string, unknown>)[field] = entry.before[field];
@@ -492,8 +559,14 @@ function storyboard(world: FixtureWorld, body: StoryboardBody): { commandId: str
     before: shot,
     beforeSnapshotShot: world.snapshot.project.shots.find((row) => row.id === shot.shotId),
   };
+  state.edits[commandId] = { shotId: shot.shotId, field: body.kind === "narration" ? "narration" : body.field };
   commit(world, (overview, snapshot) => bumpRevision(snapshotShot(snapshot, edited, body), withShot(overview, shot.shotId, () => edited), world));
   return { commandId };
+}
+
+function reopen(note: DirectorNote): DirectorNote {
+  const { resolution: _resolution, ...rest } = note;
+  return { ...rest, state: "open", version: note.version + 1 };
 }
 
 /**
@@ -525,6 +598,106 @@ function narrationFit(world: FixtureWorld, shotId: string, body: NarrationFitInp
     world,
   ));
   return { shotId, fit: body.fit, durationFrames: edited.durationFrames, commandId };
+}
+
+// ---- Director notes and proposals (phase P4: DC-2, DC-4, DC-10) ----------------------------------
+
+/**
+ * Settle a note with one of its choices. A paid or edit choice must name the press or edit that carried it
+ * out; a proposal choice is carried out by accepting the proposal, and this route only acknowledges it.
+ */
+function resolveNote(world: FixtureWorld, noteId: string, body: ResolveNoteInput): DirectorNote {
+  const note = (world.snapshot.notes ?? []).find((n) => n.noteId === noteId);
+  if (!note) throw new ApiError("NOT_FOUND", 404);
+  const choice = note.choices[body?.choiceIndex];
+  if (note.state === "resolved" && choice?.kind === "proposal" && note.resolution?.choiceIndex === body.choiceIndex
+    && note.resolution.resultRef === body.resultRef && note.version === body.expectedVersion + 1) return note;
+  if (note.version !== body?.expectedVersion || note.state === "resolved") throw new ApiError("REVISION_CONFLICT", 409);
+  if (!choice) throw new ApiError("VALIDATION_ERROR", 400);
+  const state = extra(world);
+  switch (choice.kind) {
+    case "proposal": {
+      const proposal = world.proposals.find((p) => p.proposalId === choice.proposalId);
+      if (proposal?.state !== "accepted" || body.resultRef !== choice.proposalId) throw new ApiError("NOTE_RESULT_INVALID", 409);
+      break;
+    }
+    case "accept":
+    case "reply":
+      if (note.state !== "open") throw new ApiError("NOTE_STALE", 409);
+      if (choice.kind === "reply" && !body.resultRef) throw new ApiError("NOTE_RESULT_INVALID", 409);
+      break;
+    case "regenerate_keyframe": {
+      const request = body.resultRef ? state.requests[body.resultRef] : undefined;
+      if (!request?.regenerate || !choice.shotIds.every((id) => request.shotIds.includes(id))) throw new ApiError("NOTE_RESULT_INVALID", 409);
+      break;
+    }
+    case "edit_field": {
+      const edit = body.resultRef ? state.edits[body.resultRef] : undefined;
+      if (edit?.shotId !== choice.shotId || edit.field !== choice.field) throw new ApiError("NOTE_RESULT_INVALID", 409);
+      break;
+    }
+  }
+  const resolution = { choiceIndex: body.choiceIndex, at: now(), ...(body.resultRef ? { resultRef: body.resultRef } : {}) };
+  commit(world, (overview, snapshot) => ({ overview, snapshot: withNote(snapshot, noteId, (n) => ({ ...n, state: "resolved", version: n.version + 1, resolution })) }));
+  return (world.snapshot.notes ?? []).find((n) => n.noteId === noteId)!;
+}
+
+/**
+ * Accept a held proposal exactly as previewed: apply it and, atomically, resolve the note choice that carries it.
+ * Reject sets it aside (its note stays open). Undo reverts the fields still at the accepted value and reopens the note.
+ */
+function proposalAction(world: FixtureWorld, proposalId: string, action: "accept" | "reject" | "undo", body: AcceptProposalInput | undefined): ProposalReceipt {
+  const proposal = world.proposals.find((p) => p.proposalId === proposalId);
+  if (!proposal) throw new ApiError("NOT_FOUND", 404);
+  const state = extra(world);
+  if (action === "undo" && proposal.state === "undone") return { proposal, leftAlone: [] };
+  if (action === "undo" ? proposal.state !== "accepted" : proposal.state !== "held") throw new ApiError("PROPOSAL_STALE", 409);
+  if (action === "accept" && body?.previewDigest !== proposal.previewDigest) throw new ApiError("PROPOSAL_PREVIEW_CHANGED", 409);
+  const setState = (next: DirectorProposal["state"], extraFields: Partial<DirectorProposal> = {}) =>
+    world.proposals.map((p) => (p.proposalId === proposalId ? { ...p, ...extraFields, state: next } : p));
+  if (action === "reject") {
+    world.update((w) => { w.proposals = setState("rejected"); });
+    return { proposal: world.proposals.find((p) => p.proposalId === proposalId)! };
+  }
+  const change = proposal.preview.changes.find((c) => c.field === "desiredFrames" && c.shotId);
+  if (action === "accept") {
+    const shot = change?.shotId ? findShot(world, change.shotId) : undefined;
+    if (!change || !shot) throw new ApiError("PROPOSAL_STALE", 409);
+    const frames = Number(change.after);
+    const edited = editShot(shot, { kind: "shot", id: shot.shotId, field: "desiredFrames", value: String(frames) }, world.overview.fps);
+    state.accepted[proposalId] = { shotId: shot.shotId, before: shot, after: frames };
+    state.undo = null;
+    const accepted = { at: now(), touchedFields: [{ shotId: shot.shotId, field: "desiredFrames" }] };
+    commit(world, (overview, snapshot) => {
+      world.proposals = setState("accepted", { accepted });
+      const notes = (snapshot.notes ?? []).map((note) => {
+        const index = note.choices.findIndex((c) => c.kind === "proposal" && c.proposalId === proposalId);
+        if (index < 0 || note.state === "resolved") return note;
+        return { ...note, state: "resolved" as const, version: note.version + 1, resolution: { choiceIndex: index, at: now(), resultRef: proposalId } };
+      });
+      return bumpRevision(
+        { ...snapshot, notes, project: { ...snapshot.project, shots: snapshot.project.shots.map((row) => (row.id === shot.shotId ? { ...row, desiredFrames: frames } : row)) } },
+        withShot(overview, shot.shotId, () => edited),
+        world,
+      );
+    });
+    return { proposal: world.proposals.find((p) => p.proposalId === proposalId)! };
+  }
+  // undo
+  const record = state.accepted[proposalId];
+  const shot = record ? world.overview.shots[record.shotId] : undefined;
+  const untouched = !!record && !!shot && shot.durationFrames === record.after;
+  commit(world, (overview, snapshot) => {
+    world.proposals = setState("undone");
+    const notes = (snapshot.notes ?? []).map((note) => (note.state === "resolved" && note.resolution?.resultRef === proposalId ? reopen(note) : note));
+    const restored = untouched ? withShot(overview, record!.shotId, (s) => ({ ...s, durationFrames: record!.before.durationFrames, narration: record!.before.narration, video: record!.before.video })) : overview;
+    return bumpRevision(
+      { ...snapshot, notes, project: { ...snapshot.project, shots: snapshot.project.shots.map((row) => (untouched && row.id === record!.shotId ? { ...row, desiredFrames: record!.before.durationFrames } : row)) } },
+      restored,
+      world,
+    );
+  });
+  return { proposal: world.proposals.find((p) => p.proposalId === proposalId)!, leftAlone: untouched || !record ? [] : [{ shotId: record.shotId, field: "desiredFrames" }] };
 }
 
 // ---- controls and give-up -----------------------------------------------------------------
@@ -594,6 +767,9 @@ export function fixtureCommand(world: FixtureWorld, method: "GET" | "POST", path
     if (path === "/storyboard") return storyboard(world, body as StoryboardBody);
     if (path === "/controls") return control(world, body as ControlInput);
     if ((id = match(/^\/attempts\/([^/]+)\/release$/))) return release(world, id, body as ReleaseAttemptInput);
+    if ((id = match(/^\/director\/notes\/([^/]+)\/resolve$/))) return resolveNote(world, id, body as ResolveNoteInput);
+    const proposal = path.match(/^\/director\/proposals\/([^/]+)\/(accept|reject|undo)$/);
+    if (proposal) return proposalAction(world, decodeURIComponent(proposal[1]!), proposal[2] as "accept" | "reject" | "undo", body as AcceptProposalInput | undefined);
   }
   throw new ApiError("FIXTURE_UNSUPPORTED", 400, { path });
 }

@@ -1,6 +1,7 @@
-import type { GenerationOverview, MediaSlot } from "@openslate/core/public";
+import type { DirectorNote, DirectorProposal, GenerationOverview, MediaSlot } from "@openslate/core/public";
 import type { Locale } from "../../shared/locale-preference.ts";
-import { msg, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target } from "./types.ts";
+import { noteViews, type NoteView } from "./notes.ts";
+import { msg, type ConversationEntry, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target } from "./types.ts";
 
 /**
  * The Director column's view models (thread, questions, composer, picker, Stop). Pure: no React,
@@ -115,6 +116,21 @@ export function paragraphs(text: string): string[] {
 
 // ---- thread -------------------------------------------------------------------
 
+/** Where a note's Open pill goes: the anchored shot, or the scene when the note has no shot. */
+export interface NoteOpen {
+  kind: "shot" | "scene";
+  id: string;
+  label: Msg;
+}
+
+/** A lettered Director note under the reply that wrote it (DC-18). Choices live in the banner, not here. */
+export interface ThreadNote {
+  view: NoteView;
+  /** open: amber; done: settled, neutral with a green line; stale: neutral, says it is out of date. */
+  tone: "open" | "done" | "stale";
+  opens: NoteOpen[];
+}
+
 export interface ThreadEntry {
   id: string;
   who: "you" | "director";
@@ -126,6 +142,8 @@ export interface ThreadEntry {
   /** A reply from the scripted Director (fixture or fake mode). */
   scripted: boolean;
   requestId: string | null;
+  /** Director replies: the notes their turn wrote, in letter order. */
+  notes: ThreadNote[];
 }
 
 export interface QuestionItemView {
@@ -157,21 +175,75 @@ export function pendingQuestions(questions: readonly PendingQuestion[] | undefin
     }));
 }
 
+// ---- notes in the thread -------------------------------------------------------------
+
+/** "a" < "b" < … < "z" < "aa": shorter letters first, then alphabetical. */
+export const byLetter = (a: { letter: string }, b: { letter: string }) => a.letter.length - b.letter.length || a.letter.localeCompare(b.letter);
+
+/**
+ * Which Director reply each note sits under, by entry id. A note goes under the last reply of its own
+ * request. Replies without a request id (older servers, the fixture film) fall back: the latest such
+ * reply shows the latest Director turn's notes that no reply claimed. Lists are in letter order.
+ */
+export function threadNotes(conversation: readonly ConversationEntry[], notes: readonly DirectorNote[]): Map<string, DirectorNote[]> {
+  const out = new Map<string, DirectorNote[]>();
+  if (!notes.length) return out;
+  const replies = conversation.filter((entry) => entry.role === "assistant");
+  const lastReply = new Map<string, string>();
+  for (const reply of replies) if (reply.requestId) lastReply.set(reply.requestId, reply.id);
+  const add = (entryId: string, note: DirectorNote) => out.set(entryId, [...(out.get(entryId) ?? []), note]);
+  const unclaimed: DirectorNote[] = [];
+  for (const note of notes) {
+    const entryId = lastReply.get(note.requestId);
+    if (entryId) add(entryId, note);
+    else unclaimed.push(note);
+  }
+  const bare = replies.filter((reply) => !reply.requestId).at(-1);
+  if (bare && unclaimed.length) {
+    // The latest turn: the newest note's turn (ISO times compare as strings; a tie goes to the later note).
+    const newest = unclaimed.reduce((latest, note) => (note.createdAt >= latest.createdAt ? note : latest));
+    for (const note of unclaimed) if (note.turnId === newest.turnId) add(bare.id, note);
+  }
+  for (const [entryId, list] of out) out.set(entryId, [...list].sort(byLetter));
+  return out;
+}
+
+/** Open pills for a note: one per anchored shot that still exists, or its scene when it names no shot. */
+export function noteOpens(view: NoteView, overview: GenerationOverview): NoteOpen[] {
+  const shots = view.shotIds.flatMap((id) => {
+    const shot = overview.shots[id];
+    return shot ? [{ kind: "shot" as const, id, label: msg("note.choice.open", { shot: shot.label }) }] : [];
+  });
+  if (shots.length || view.shotIds.length) return shots;
+  const scene = overview.scenes.find((s) => s.sceneId === view.sceneId);
+  return scene ? [{ kind: "scene", id: scene.sceneId, label: msg("note.choice.open_scene", { scene: scene.ordinal }) }] : [];
+}
+
+const noteTone = (state: NoteView["state"]): ThreadNote["tone"] => (state === "resolved" ? "done" : state === "stale" ? "stale" : "open");
+
 export function threadView(
   snapshot: ProjectSnapshot | null,
   overview: GenerationOverview | null,
   director: DirectorStatus | null,
   locale: Locale,
   now: Date,
+  proposals: readonly DirectorProposal[] = [],
 ): ThreadView {
-  const entries: ThreadEntry[] = (snapshot?.conversation ?? []).map((entry) => {
+  const conversation = snapshot?.conversation ?? [];
+  const placed = overview ? threadNotes(conversation, snapshot?.notes ?? []) : new Map<string, DirectorNote[]>();
+  const notesFor = (entryId: string): ThreadNote[] => {
+    const list = placed.get(entryId);
+    if (!list || !overview) return [];
+    return noteViews(list, overview, proposals).map((view) => ({ view, tone: noteTone(view.state), opens: noteOpens(view, overview) }));
+  };
+  const entries: ThreadEntry[] = conversation.map((entry) => {
     const time = bylineTime(entry.at, locale, now);
     if (entry.role === "user") {
       const chips = [...new Set(entry.scopeIds ?? [])].map((id) => scopeLabel(overview, id)).filter((label): label is Msg => label !== null);
       const text = userText(entry.text, chips.length > 0);
-      return { id: entry.id, who: "you", time, chips, paragraphs: text ? [text] : [], scripted: false, requestId: entry.requestId ?? null };
+      return { id: entry.id, who: "you", time, chips, paragraphs: text ? [text] : [], scripted: false, requestId: entry.requestId ?? null, notes: [] };
     }
-    return { id: entry.id, who: "director", time, chips: [], paragraphs: paragraphs(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null };
+    return { id: entry.id, who: "director", time, chips: [], paragraphs: paragraphs(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id) };
   });
   const working = director?.status === "running" || overview?.director.state === "working";
   return { entries, questions: pendingQuestions(snapshot?.questions), working };

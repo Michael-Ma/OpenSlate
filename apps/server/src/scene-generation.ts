@@ -1,3 +1,4 @@
+import { isKeyframeReview } from "./application/keyframe-review.js";
 import { requiredCommandKey } from "./application/command-key.js";
 import { sceneNotes, openBlockingNotes } from "./application/director-notes.js";
 import type { FastifyInstance } from "fastify";
@@ -116,7 +117,7 @@ export function sceneView(
     const request = requestId
       ? store.get<{ scopeIds?: string[] }>("message", requestId)
       : null;
-    return requestScopesIntersect(project, commandScopes, request?.scopeIds);
+    return !isKeyframeReview(service, requestId) && requestScopesIntersect(project, commandScopes, request?.scopeIds);
   };
   const busy =
     store
@@ -173,7 +174,7 @@ export function sceneGenerationView(production: ProductionService, projectId: st
       framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
       imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
         ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
-  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.state === "active").at(-1)?.id ?? null;
+  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.concurrency !== "alongside" && message.state === "active").at(-1)?.id ?? null;
   const openNotes = sceneNotes(production.store, projectId, sceneId).filter(n => n.state === "open");
   const blockingNotes = openNotes.filter(n => n.blocking);
   const notesDigest = digest(openNotes);
@@ -407,7 +408,7 @@ export async function generateScene(production: ProductionService, projectId: st
     return store.command(scope, key, commandDigest, () => {
       fresh();
       const actor = production.beginRequest(projectId, "local-user", "Make the missing voice lines for this scene's current keyframes.",
-        { source: "app", directEdit: true, scopeIds: targets.map(r => r.shotId), key: `scene-generation:${key}` });
+        { source: "app", concurrency: "alongside", holdScopeIds: [], scopeIds: targets.map(r => r.shotId), key: `scene-generation:${key}` });
       invariant(options.enqueueVoice, "NARRATION_SPEECH_UNAVAILABLE", "Configure narration before making voice lines");
       options.enqueueVoice(projectId, sceneId, targets.map(r => r.shotId), actor);
       const project = store.getProject(projectId);
@@ -536,7 +537,7 @@ export async function generateScene(production: ProductionService, projectId: st
         `${input.regenerate ? "Regenerate" : "Generate"} ${input.kind === "image" ? "keyframes" : "video"} for ${input.targetShotIds ? "the selected shots in" : ""} this reviewed scene.`,
         {
           editing: true,
-          supersede: "intersecting",
+          ...(input.regenerate ? { concurrency: "alongside" as const } : { supersede: "intersecting" as const }),
           scopeIds: input.targetShotIds
             ? selected.map((row) => row.shotId)
             : [sceneId],
@@ -646,7 +647,7 @@ export async function generateScene(production: ProductionService, projectId: st
         );
         production.approve(projectId, actor, displayed.id, ids);
       }
-      store.insert("scene_generation_action", actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId) });
+      store.insert("scene_generation_action", actor.requestId, projectId, { requestId: actor.requestId, sceneId, kind: input.kind, regenerate: input.regenerate === true, shotIds: selected.map(r => r.shotId), ...(input.kind === "image" ? { imageNodes: store.list<NodeBinding>("node_binding", projectId).filter(b => b.state === "active" && b.planId === applied.activePlanId && b.node.kind === "image" && selected.some(r => r.shotId === b.node.shotId)).map(b => ({ nodeId: b.id, candidateId: b.candidateId })) } : {}) });
       if (input.kind === "image") options.enqueueVoice?.(projectId, sceneId, targets.map(row => row.shotId), actor);
       return {
         ...applied,

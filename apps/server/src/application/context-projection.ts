@@ -46,6 +46,7 @@ export interface DirectorContextProjection {
   directorActions?: Message[];
   assistantMessages?: { id: string; requestId: string; turnId: string; text: string; phase: string }[];
   questions?: unknown[];
+  attachedKeyframes?: unknown;
   holds: Hold[];
   execution: { globallyPaused: boolean; scopedHoldSemantics: string };
   toolCalls: ToolSummary[];
@@ -175,6 +176,7 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       request: { source: request.source, id: request.id, scopeIds: request.scopeIds, editing: request.editing, state: request.state }, plan, profiles: lock.profiles,
       ...(lock.preferredProfileIds ? { preferredProfileIds: lock.preferredProfileIds } : {}),
       applicationCapabilities,
+      ...(service.store.get("request_keyframe_projection", actor.requestId) ? { attachedKeyframes: service.store.get("request_keyframe_projection", actor.requestId) } : {}),
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
       execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,
         scopedHoldSemantics: "Director pause creates a request-owned scope hold. Applying a matching plan releases that request's hold. This is separate from the human global pause. Read current context after mutations before describing execution state." },
