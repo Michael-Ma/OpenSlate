@@ -1,0 +1,105 @@
+/*
+ * Keyframes view: additions to ui/studio.css (which holds the prototype's components verbatim).
+ * Only :root tokens. Amber stays the Director's: app-computed checks are drawn neutral (plan decision D4).
+ */
+
+/* The workspace always takes the shell's second column and row on wide screens. */
+@media (min-width: 900px) {
+  .app > .work { grid-column: 2; grid-row: 2; }
+}
+
+/* ---------- loading, missing overview, empty film ---------- */
+.kf-state { display: grid; place-items: center; grid-template-rows: none; }
+.kf-message { display: flex; flex-direction: column; gap: 6px; max-width: 440px; text-align: center; color: var(--text-2); font-size: 13.5px; line-height: 1.5; border: 1px dashed var(--track); border-radius: var(--r-big); padding: 22px 26px; }
+.kf-message b { color: var(--text); font-size: 15px; }
+.preview.kf-empty-stage { grid-column: 1 / -1; }
+
+/* ---------- check banner: neutral ---------- */
+.banner.check { border-color: var(--hairline); background: var(--bar); }
+.banner.check .eyebrow { color: var(--text-2); }
+.banner.check .eyebrow .of { color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+.banner.check .letter { background: var(--track); color: var(--text); }
+.banner.check.done .letter { background: var(--raised-2); color: var(--text-2); }
+.banner.check .seg.hot { background: var(--select); color: var(--select-ink); }
+.banner.check .banner-actions { gap: 6px; }
+.banner.check .banner-actions .pill { padding: 5px 12px; }
+/* The reason sits right under the unavailable option it explains. */
+.banner.check .banner-actions .why { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.3; margin-top: -3px; }
+
+/* ---------- neutral check chips on cards ---------- */
+.anno.check { background: var(--raised-2); color: var(--text); border: 1px solid var(--track); }
+.anno.check .letter { background: var(--track); color: var(--text); }
+
+/* ---------- status tones ---------- */
+.status.attn { color: var(--text); border-color: var(--track); background: var(--raised); }
+
+/* ---------- pictures ---------- */
+.pic-img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; }
+.pv-anim { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: transform; }
+.card .pic .pic-img, .card .pic .pic-note { position: absolute; inset: 0; }
+.pic.dim .pic-img { opacity: .42; filter: grayscale(.35); }
+.pic-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 10px; text-align: center; color: var(--muted); font-size: 12px; }
+.pic-loading { background: var(--surface-stripe); }
+.pv-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--ground); z-index: 1; }
+.preview .pv-top .pill.sm { padding: 2px 10px; font-size: 12px; }
+
+/* Making: stripes alone, or over the dimmed earlier take. */
+.making.over { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--surface) 70%, transparent) 0 14px, color-mix(in srgb, var(--surface-stripe) 70%, transparent) 14px 28px); color: var(--text); }
+.card .making { font-size: 12px; border-radius: 10px; }
+
+/* Indeterminate progress: providers report no percentage (plan item GR-17). */
+.bar.indeterminate i, .vprog.indeterminate i { width: 38%; border-radius: 2px; animation: kf-slide 1.3s ease-in-out infinite; }
+@keyframes kf-slide { from { transform: translateX(-100%); } to { transform: translateX(270%); } }
+@media (prefers-reduced-motion: reduce) {
+  .bar.indeterminate i, .vprog.indeterminate i { width: 100%; opacity: .5; animation: none; transform: none; }
+}
+
+/* ---------- shot cards: any number, scrolling inside the row ---------- */
+.card .hit:focus-visible { outline-offset: -2px; }
+.card.empty { text-align: center; padding: 12px; }
+@media (min-width: 900px) {
+  .row.kf-row { grid-template-columns: minmax(0, 1fr) 230px; }
+  .kf-row .cards {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: calc((100% - 24px) / 3);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+    scrollbar-color: var(--track) transparent;
+  }
+  .kf-row .cards > .card { scroll-snap-align: start; }
+  /* With more than three shots a scrollbar shares the row: the pictures give up the room. */
+  .kf-row .cards.scrolls .card .pic { height: 106px; }
+}
+
+/* ---------- inspector ---------- */
+/* The rows scroll when they run long; the stacked actions always stay in view. */
+.insp { overflow: hidden; }
+.insp-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 2px; }
+.insp-body > form { margin-top: 10px; }
+.insp .rows .row-pair { display: contents; }
+.insp .rows dd { min-width: 0; overflow-wrap: anywhere; }
+.insp .rows dd small.warn, .insp .stale.warn, .insp .est.warn { color: var(--text); font-weight: 600; }
+.insp .est { font-size: 12.5px; color: var(--text-2); }
+.insp-notes { margin-top: 8px; }
+.insp-notes .stale { margin: 0 0 4px; }
+.insp-alert { margin-top: 10px; border: 1px solid var(--track); background: var(--raised); border-radius: 10px; padding: 9px 10px; font-size: 12.5px; color: var(--text-2); display: flex; flex-direction: column; gap: 8px; line-height: 1.4; }
+.insp-alert p { margin: 0; }
+.insp-alert .pill { align-self: flex-start; }
+.insp .ack { display: flex; gap: 8px; align-items: flex-start; color: var(--text-2); font-size: 12px; line-height: 1.4; }
+.insp .ack input { width: auto; margin: 2px 0 0; padding: 0; flex: none; accent-color: var(--select); }
+.insp-note { margin: 0; font-size: 11.5px; color: var(--muted); text-align: center; line-height: 1.35; }
+.insp .pill:disabled { cursor: not-allowed; }
+
+@media (max-width: 899px) {
+  .insp-note { flex: 1 1 100%; }
+  .banner.check .banner-actions .why { flex: 1 1 100%; order: 10; margin-top: 0; }
+  .kf-state { min-height: 60vh; }
+}
