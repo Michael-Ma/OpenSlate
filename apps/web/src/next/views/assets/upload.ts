@@ -1,5 +1,5 @@
 import { ApiError } from "../../api/client.ts";
-import type { ImportKind } from "../../model/assets-import.ts";
+import { checkLength, checkPngHeader, PNG_HEADER_BYTES, type FileCheck, type ImportKind } from "../../model/assets-import.ts";
 import type { StudioStore } from "../../store/store.ts";
 
 export interface UploadRequest {
@@ -9,6 +9,8 @@ export interface UploadRequest {
   kind: ImportKind;
   /** Idempotency-Key: the same key resends the same import after a lost reply. */
   key: string;
+  /** The length the browser read before sending (video and audio), or null. */
+  durationSeconds: number | null;
   signal: AbortSignal;
 }
 
@@ -24,6 +26,9 @@ export interface Uploader {
 }
 
 const abortError = () => new DOMException("Upload cancelled", "AbortError");
+
+/** A check of a long video can take a while, but not forever: past this the answer counts as lost (same key next time). */
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * The studio's upload routes take raw bytes (application/octet-stream), which the JSON client does not
@@ -54,6 +59,7 @@ export function liveUploader(store: StudioStore): Uploader {
         xhr.setRequestHeader("x-openslate-csrf", value);
         xhr.setRequestHeader("idempotency-key", request.key);
         xhr.responseType = "text";
+        xhr.timeout = UPLOAD_TIMEOUT_MS;
         xhr.upload.onprogress = (event) => progress.sending(event.loaded, event.lengthComputable ? event.total : request.file.size);
         xhr.upload.onload = () => progress.checking();
         xhr.onload = () => {
@@ -67,6 +73,7 @@ export function liveUploader(store: StudioStore): Uploader {
           reject(new ApiError(code, xhr.status));
         };
         xhr.onerror = () => { request.signal.removeEventListener("abort", onAbort); reject(new ApiError("NETWORK_ERROR")); };
+        xhr.ontimeout = () => { request.signal.removeEventListener("abort", onAbort); reject(new ApiError("TIMEOUT")); };
         xhr.onabort = () => { request.signal.removeEventListener("abort", onAbort); reject(abortError()); };
         request.signal.addEventListener("abort", onAbort, { once: true });
         progress.sending(0, request.file.size);
@@ -83,15 +90,39 @@ const wait = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, re
   signal.addEventListener("abort", stop, { once: true });
 });
 
-/** The file's length, read by the browser, so the sample library can show it. Null when it cannot tell. */
+/** What the browser can tell about a chosen file before anything is sent. */
+export interface Inspection {
+  check: FileCheck;
+  /** Video and audio length in seconds, or null when the browser cannot tell. */
+  seconds: number | null;
+}
+
+/**
+ * Read what the studio would refuse, before sending: a PNG's signature and size in pixels (its first bytes), or
+ * the length of video and audio (their metadata). Anything the browser cannot read is left to the studio.
+ */
+export async function inspectFile(file: File, kind: ImportKind): Promise<Inspection> {
+  if (kind === "image") {
+    const header = await file.slice(0, PNG_HEADER_BYTES).arrayBuffer().then((bytes) => new Uint8Array(bytes), () => null);
+    return { check: checkPngHeader(header), seconds: null };
+  }
+  const seconds = await probeLength(file, kind);
+  return { check: checkLength(kind, seconds), seconds };
+}
+
+/**
+ * The file's length, read by the browser from its metadata, so a file over the studio's limit is refused before
+ * it is sent. Null when the browser cannot tell (the studio then decides).
+ */
 function probeLength(file: File, kind: ImportKind): Promise<number | null> {
   if (kind === "image") return Promise.resolve(null);
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const element = document.createElement(kind === "video" ? "video" : "audio");
-    const done = (value: number | null) => { clearTimeout(timer); URL.revokeObjectURL(url); element.removeAttribute("src"); resolve(value); };
-    const timer = setTimeout(() => done(null), 2000);
+    const done = (value: number | null) => { clearTimeout(timer); URL.revokeObjectURL(url); element.removeAttribute("src"); element.load(); resolve(value); };
+    const timer = setTimeout(() => done(null), 3000);
     element.preload = "metadata";
+    element.muted = true;
     element.onloadedmetadata = () => done(Number.isFinite(element.duration) && element.duration > 0 ? element.duration : null);
     element.onerror = () => done(null);
     element.src = url;
@@ -109,8 +140,10 @@ function dataUrl(file: File): Promise<string | null> {
 }
 
 /**
- * The sample film: nothing leaves the page. Sending is simulated on a clock; the import itself goes
- * through the store to the fixture's simulated route, which refuses the way the studio would.
+ * The sample film: nothing leaves the page. Sending is simulated on a clock; the import itself goes through
+ * the store to the fixture's simulated route, which replays a known key and refuses the way the studio would.
+ * It answers refusals in its reply (the store would show a thrown one as a toast), and the picture of an
+ * imported PNG is staged beside the request so the request the store remembers stays small.
  */
 export function fixtureUploader(store: StudioStore): Uploader {
   return {
@@ -121,20 +154,16 @@ export function fixtureUploader(store: StudioStore): Uploader {
         if (step < 6) await wait(110, request.signal);
       }
       progress.checking();
-      const [durationSeconds, preview] = await Promise.all([probeLength(request.file, request.kind), dataUrl(request.file), wait(450, request.signal)]);
+      const [{ stageFixturePreview }, preview] = await Promise.all([import("../../fixtures/routes/assets.ts"), dataUrl(request.file), wait(450, request.signal)]);
       if (request.signal.aborted) throw abortError();
-      const body = { name: request.file.name, size: total, type: request.file.type, ...(durationSeconds ? { durationSeconds } : {}), ...(preview ? { preview } : {}) };
-      const receipt = await store.command<unknown>(`assets-import:${request.key}`, { key: request.key, path: request.path, size: total }, () => ({ path: request.path, body }));
-      if (receipt !== undefined) return receipt;
-      // The store reports a refusal as an error toast; the import sheet says it in place instead.
-      const toast = store.getState().toast;
-      let code = "REQUEST_FAILED";
-      if (toast?.tone === "error") {
-        const id = toast.message.id as string;
-        code = id === "error.unknown" ? String(toast.message.values?.code ?? code) : id.startsWith("error.") ? id.slice("error.".length) : code;
-        store.dismissToast();
-      }
-      throw new ApiError(code);
+      if (preview) stageFixturePreview(request.key, preview);
+      const body = { name: request.file.name, size: total, type: request.file.type, key: request.key, refusalInBody: true, ...(request.durationSeconds ? { durationSeconds: request.durationSeconds } : {}) };
+      const receipt = await store.command<unknown>(`assets-import:${request.key}`, { key: request.key, path: request.path }, () => ({ path: request.path, body }));
+      const refused = (receipt as { refused?: { code?: unknown } } | undefined)?.refused;
+      if (refused) throw new ApiError(typeof refused.code === "string" ? refused.code : "REQUEST_FAILED", 409);
+      // Undefined: the store could not send it and has said why in a toast.
+      if (receipt === undefined) throw new ApiError("REQUEST_FAILED");
+      return receipt;
     },
   };
 }

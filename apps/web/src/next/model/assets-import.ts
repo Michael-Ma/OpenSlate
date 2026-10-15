@@ -1,10 +1,12 @@
+import { clock } from "./motion.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
  * Importing a file into the film's assets through the existing upload routes:
  *   image  POST /images/uploads?expectedHeadVersion=N        (PNG only, up to 32 MiB)
  *   video  POST /media/uploads?expectedHeadVersion=N         (up to 128 MiB)
- *   audio  POST /audio-library/uploads?role=music|upload&name= (up to 128 MiB and 6 minutes)
+ *   audio  POST /audio-library/uploads?role=music|upload&name= (up to 128 MiB)
+ * Video and audio are taken up to 6 minutes long.
  * Each takes the raw bytes as application/octet-stream with an Idempotency-Key. Imports are free and
  * are not put on a shot. Voice lines are made or uploaded on a shot, in Keyframes.
  */
@@ -24,7 +26,7 @@ export interface ChosenFile {
 
 export type FileCheck = { ok: true; kind: ImportKind } | { ok: false; refusal: Msg };
 
-/** What this studio can import, from GET /images and GET /audio-library (video has no capability read). */
+/** What this studio can import, from GET /images and GET /audio-library. */
 export interface ImportCapabilities {
   available: Record<ImportKind, boolean>;
   limits: Record<ImportKind, number>;
@@ -36,13 +38,18 @@ interface CapabilityRead {
   capabilities?: { import?: boolean; maxBytes?: number };
 }
 
+/**
+ * Video has no capability read of its own. It needs the same local FFmpeg and ffprobe as PNG images (without
+ * them the studio does not offer the video upload route at all), so GET /images answers for it too.
+ */
 export function capabilitiesFrom(images: CapabilityRead | null, audio: CapabilityRead | null): ImportCapabilities {
   const limit = (read: CapabilityRead | null, kind: ImportKind) => {
     const max = read?.capabilities?.maxBytes;
     return typeof max === "number" && max > 0 ? Math.min(max, IMPORT_LIMITS[kind]) : IMPORT_LIMITS[kind];
   };
+  const toolchain = images?.capabilities?.import !== false;
   return {
-    available: { image: images?.capabilities?.import !== false, video: true, audio: audio?.capabilities?.import !== false },
+    available: { image: toolchain, video: toolchain, audio: audio?.capabilities?.import !== false },
     limits: { image: limit(images, "image"), video: IMPORT_LIMITS.video, audio: limit(audio, "audio") },
   };
 }
@@ -110,41 +117,206 @@ export function importedArtifactId(kind: ImportKind, receipt: unknown): string |
 }
 
 /**
- * A lost reply is resent with the same key, so the server finds the same import instead of making a
- * second one. A refusal is final for that key; the next try is a new import.
+ * What happens to a saved request after a failure.
+ *   keep:   the answer is unknown (a lost reply, a timeout, a session that ended); the next try resends the same
+ *           request with the same key, so the studio finds the import it may already have made.
+ *   fresh:  a resend was refused as out of date, so the first try never arrived; a new request may be made.
+ *   settle: the studio answered and refused; the next try is a new import.
  */
-export const resendsSameKey = (code: string): boolean => code === "NETWORK_ERROR";
+export type AfterFailure = "keep" | "fresh" | "settle";
 
-/** Server and client codes, said in the interface language. Neutral: an icon and words, never red. */
-export function refusalMsg(code: string): Msg {
+const UNCERTAIN = new Set(["NETWORK_ERROR", "TIMEOUT", "REQUEST_FAILED", "INTERNAL_ERROR", "AUTH_REQUIRED", "CSRF_DENIED", "SESSION_CLOSED"]);
+
+export function afterFailure(code: string, resent: boolean): AfterFailure {
+  if (UNCERTAIN.has(code)) return "keep";
+  if (code === "REVISION_CONFLICT" && resent) return "fresh";
+  return "settle";
+}
+
+/** Failures where the same file can work on another try: unknown answers, a film that moved, a file that changed in transit, a slow check. */
+const RETRYABLE = new Set([...UNCERTAIN, "REVISION_CONFLICT", "UPLOAD_CORRUPT", "IMAGE_DIGEST_MISMATCH", "MEDIA_TIMEOUT", "MEDIA_CANCELLED"]);
+
+/**
+ * Whether the import sheet offers Try again. Any other refusal is final for this file (not a PNG, too long, too
+ * large, unreadable, not available here): Import stays off until another file is chosen.
+ */
+export const retryable = (code: string): boolean => RETRYABLE.has(code);
+
+/** Which file and which use an import is for: the same file chosen again (even after a reload) resends its saved request. */
+export interface FileIdentity {
+  name: string;
+  size: number;
+  lastModified: number;
+}
+
+export function importIdentity(file: FileIdentity, kind: ImportKind, use: AudioUse): string {
+  return [kind, kind === "audio" ? use : "-", file.size, file.lastModified, file.name].join(":");
+}
+
+export interface SavedImport {
+  key: string;
+  /** The exact path sent first, with its film version: a resend must match it to be found again. */
+  path: string;
+  /** When it was first sent (ms). Old entries are dropped. */
+  at: number;
+}
+
+export interface ImportRequest {
+  key: string;
+  path: string;
+  /** True when this resends a saved request whose reply was lost. */
+  resent: boolean;
+}
+
+type KeyStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** A saved request older than this is forgotten; the studio keeps its receipts longer, but a day is plenty to retry. */
+export const IMPORT_KEY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const IMPORT_KEY_LIMIT = 20;
+
+/**
+ * Import requests whose answer is not known yet, by file identity, kept like the store's press keys (and in
+ * storage, so they survive closing the sheet or reloading). `begin` returns the saved request exactly as it was
+ * first sent, including its film version, or makes a new one from `path`.
+ */
+export class ImportKeys {
+  readonly #storage: KeyStorage | null;
+  readonly #storageKey: string;
+  readonly #newKey: () => string;
+  readonly #now: () => number;
+  #memory: Record<string, SavedImport>;
+
+  constructor(projectId: string, storage: KeyStorage | null, newKey: () => string, now: () => number = Date.now) {
+    this.#storage = storage;
+    this.#storageKey = `openslate.next.asset-imports.${projectId}`;
+    this.#newKey = newKey;
+    this.#now = now;
+    this.#memory = this.#read();
+  }
+
+  #read(): Record<string, SavedImport> {
+    try {
+      const raw = this.#storage?.getItem(this.#storageKey);
+      const value: unknown = raw ? JSON.parse(raw) : {};
+      if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+      const fresh: Record<string, SavedImport> = {};
+      for (const [identity, entry] of Object.entries(value as Record<string, Partial<SavedImport>>))
+        if (typeof entry?.key === "string" && typeof entry.path === "string" && typeof entry.at === "number" && this.#now() - entry.at < IMPORT_KEY_MAX_AGE_MS)
+          fresh[identity] = { key: entry.key, path: entry.path, at: entry.at };
+      return fresh;
+    } catch {
+      return {};
+    }
+  }
+
+  #write(): void {
+    try {
+      if (Object.keys(this.#memory).length) this.#storage?.setItem(this.#storageKey, JSON.stringify(this.#memory));
+      else this.#storage?.removeItem(this.#storageKey);
+    } catch { /* storage unavailable: memory still protects this tab */ }
+  }
+
+  saved(identity: string): SavedImport | undefined {
+    const entry = this.#memory[identity];
+    return entry && this.#now() - entry.at < IMPORT_KEY_MAX_AGE_MS ? entry : undefined;
+  }
+
+  begin(identity: string, path: string): ImportRequest {
+    const saved = this.saved(identity);
+    if (saved) return { key: saved.key, path: saved.path, resent: true };
+    const entry: SavedImport = { key: this.#newKey(), path, at: this.#now() };
+    // Newest last; only the most recent few are kept.
+    const kept = Object.entries(this.#memory).filter(([id]) => id !== identity).slice(-(IMPORT_KEY_LIMIT - 1));
+    this.#memory = { ...Object.fromEntries(kept), [identity]: entry };
+    this.#write();
+    return { key: entry.key, path: entry.path, resent: false };
+  }
+
+  /** The studio answered definitely (imported, or refused); the next try is a new import. */
+  settle(identity: string): void {
+    if (!(identity in this.#memory)) return;
+    const { [identity]: _dropped, ...rest } = this.#memory;
+    this.#memory = rest;
+    this.#write();
+  }
+}
+
+/** The studio takes video and audio up to 6 minutes (10 800 frames at 30 fps). */
+export const IMPORT_MAX_SECONDS = 360;
+
+/** Refused before sending when the browser can read the length and it is over the limit; unknown lengths are left to the studio. */
+export function checkLength(kind: ImportKind, seconds: number | null): FileCheck {
+  if (kind === "image" || seconds === null || !Number.isFinite(seconds) || seconds <= IMPORT_MAX_SECONDS + 0.05) return { ok: true, kind };
+  return { ok: false, refusal: msg("assets.refusal.too_long_length", { length: clock(seconds) }) };
+}
+
+/** The studio takes PNG images of at most 4096 pixels on a side and 8 294 400 pixels in all (3840 × 2160). */
+export const PNG_MAX_SIDE = 4096;
+export const PNG_MAX_PIXELS = 8_294_400;
+/** How many bytes from the start of a PNG hold its signature and size. */
+export const PNG_HEADER_BYTES = 24;
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+
+const u32 = (bytes: Uint8Array, at: number) => ((bytes[at]! << 24) >>> 0) + (bytes[at + 1]! << 16) + (bytes[at + 2]! << 8) + bytes[at + 3]!;
+
+/**
+ * Checked before sending, from the first bytes of a chosen PNG: a real PNG signature and header, and a size in
+ * pixels the studio takes. A file whose start cannot be read (null) is left to the studio.
+ */
+export function checkPngHeader(header: Uint8Array | null): FileCheck {
+  if (!header) return { ok: true, kind: "image" };
+  const signed = header.length >= PNG_HEADER_BYTES && PNG_SIGNATURE.every((byte, index) => header[index] === byte)
+    && u32(header, 8) === 13 && String.fromCharCode(header[12]!, header[13]!, header[14]!, header[15]!) === "IHDR";
+  if (!signed) return { ok: false, refusal: msg("assets.refusal.not_png") };
+  const width = u32(header, 16), height = u32(header, 20);
+  if (width <= 0 || height <= 0) return { ok: false, refusal: msg("assets.refusal.not_png") };
+  if (width > PNG_MAX_SIDE || height > PNG_MAX_SIDE || width * height > PNG_MAX_PIXELS)
+    return { ok: false, refusal: msg("assets.refusal.png_pixels", { width, height }) };
+  return { ok: true, kind: "image" };
+}
+
+/**
+ * Server and client codes, said in the interface language. Neutral: an icon and words, never red. `kind` tells
+ * a missing route apart: without local FFmpeg the studio does not offer the video upload route at all.
+ */
+export function refusalMsg(code: string, kind?: ImportKind): Msg {
+  if (code.startsWith("AUDIO_PCM_")) return msg(code === "AUDIO_PCM_DURATION_LIMIT" ? "assets.refusal.too_long" : "assets.refusal.unreadable");
+  if (code.startsWith("MEDIA_TOOL_")) return msg(code === "MEDIA_TOOL_UNAVAILABLE" ? "assets.refusal.unavailable" : "assets.refusal.unreadable");
   switch (code) {
     case "UPLOAD_TOO_LARGE":
-    case "PAYLOAD_TOO_LARGE":
-    case "FST_ERR_CTP_BODY_TOO_LARGE":
+    case "MEDIA_INPUT_LIMIT":
+    case "AUDIO_NORMALIZATION_INPUT_LIMIT":
       return msg("assets.refusal.too_large_server");
     case "IMAGE_INPUT_INVALID":
+    case "IMAGE_VALIDATION_FAILED":
+    case "IMAGE_EXECUTION_INPUT_INVALID":
+      // The studio says the same for a damaged PNG and one too large in pixels.
+      return msg("assets.refusal.png_refused");
     case "IMAGE_DIGEST_MISMATCH":
-      return msg("assets.refusal.not_png");
+      return msg("assets.refusal.corrupt");
     case "SERVICE_UNAVAILABLE":
     case "NARRATION_MEDIA_UNAVAILABLE":
-    case "MEDIA_UNAVAILABLE":
       return msg("assets.refusal.unavailable");
     case "NOT_FOUND":
+      return msg(kind === "video" ? "assets.refusal.unavailable" : "assets.refusal.not_supported");
+    case "MEDIA_UNSUPPORTED":
       return msg("assets.refusal.not_supported");
     case "MEDIA_INVALID_INPUT":
-    case "MEDIA_PROBE_FAILED":
-    case "MEDIA_UNSUPPORTED":
+    case "MEDIA_STREAM_MISSING":
+    case "MEDIA_VALIDATION_FAILED":
     case "MEDIA_INTEGRITY_ERROR":
     case "IMAGE_INTEGRITY_ERROR":
       return msg("assets.refusal.unreadable");
-    case "MEDIA_TOO_LONG":
-    case "AUDIO_TOO_LONG":
+    case "MEDIA_DURATION_LIMIT":
       return msg("assets.refusal.too_long");
+    case "MEDIA_TIMEOUT":
+      return msg("assets.refusal.slow");
     case "REVISION_CONFLICT":
       return msg("assets.refusal.changed");
     case "UPLOAD_CORRUPT":
       return msg("assets.refusal.corrupt");
     case "NETWORK_ERROR":
+    case "TIMEOUT":
       return msg("assets.refusal.network");
     case "AUTH_REQUIRED":
     case "CSRF_DENIED":

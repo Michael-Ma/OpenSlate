@@ -1,22 +1,21 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 /**
- * A right-hand sheet on a native modal <dialog>: focus stays inside, Esc closes it (unless `holdOpen`),
- * and focus returns to whatever opened it. The parent shows it by rendering it and closes it by
- * unmounting it from `onClose`.
+ * A right-hand sheet on a native modal <dialog>: focus stays inside, Esc closes it, and focus returns
+ * to whatever opened it. The parent shows it by rendering it and closes it by unmounting it from `onClose`.
+ *
+ * The browser can close the dialog on its own (a second Esc without a click in between cannot be held), so
+ * its `close` event also calls `onClose`: a closed dialog never stays mounted behind React's back. `onClose`
+ * is called once.
  */
-export function Sheet({ labelledBy, onClose, holdOpen = false, className = "", act, children }: {
+export function Sheet({ labelledBy, onClose, className = "", act, children }: {
   labelledBy: string;
   onClose(): void;
-  /** While true, Esc does nothing (e.g. while the studio is storing an import). */
-  holdOpen?: boolean;
   className?: string;
   act?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const hold = useRef(holdOpen);
-  hold.current = holdOpen;
   const close = useRef(onClose);
   close.current = onClose;
 
@@ -25,13 +24,21 @@ export function Sheet({ labelledBy, onClose, holdOpen = false, className = "", a
     if (!dialog) return;
     const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     if (!dialog.open) dialog.showModal();
+    let closing = false;
+    const closeOnce = () => {
+      if (closing) return;
+      closing = true;
+      close.current();
+    };
     const onCancel = (event: Event) => {
       event.preventDefault();
-      if (!hold.current) close.current();
+      closeOnce();
     };
     dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("close", closeOnce);
     return () => {
       dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("close", closeOnce);
       if (dialog.open) dialog.close();
       if (opener?.isConnected) opener.focus({ preventScroll: true });
       else document.querySelector<HTMLElement>("main[data-view='assets'] h1")?.focus({ preventScroll: true });
