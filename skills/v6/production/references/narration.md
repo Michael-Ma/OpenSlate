@@ -8,7 +8,7 @@ Ask the smallest useful question: for example, whether a missing passage should 
 
 Read the `narration` context section to distinguish saved notes/outlines/drafts, script acceptance, bound audio, measured cues and independent human audio/timing acceptance. Include unbound recordings in the inventory. A mentioned upload or a measured recording descriptor is not a known transcript. If recognition is requested and an owned recording is available, read audio_operations and prepare its exact transcription proposal. An independent recording needs no script or section. Otherwise ask for missing words or draft a separate script; never claim to have heard an uninspected file.
 
-For narration changes, record a note with an edit_field narration choice until held proposals exist. Do not apply narration changes directly. Preserve settled fields and IDs. A source preference does not attach audio, buy speech, or mark anything accepted.
+For narration changes, use propose_change and link its returned proposalId in a note choice. Do not apply narration changes directly. Preserve settled fields and IDs. A source preference does not attach audio, buy speech, or mark anything accepted.
 
 A changed section clears its script/audio/timing acceptance and selected cue; changing source also detaches its recording candidate. Unchanged sections and history survive. Tell the user which sections need exact review. The human uses narration controls to upload/attach recordings, set trims/placement, accept script/audio/timing and review/apply the canonical change. Agent tools do not perform those actions. Ask the smallest useful question about a genuine missing choice and keep independent story work moving.
 
@@ -18,4 +18,4 @@ Pure placement changes may preserve visual media when consumed meaning and relat
 
 Use the existing audio tools for explicitly requested recognition or speech. See [audio operations](audio-proposals.md). Audio tools save pending suggestions; only an explicit human press starts paid work; returned media or words do not attach, adopt or accept themselves.
 
-Current V6 policy: read references/notes.md. Record one point per note and respect resolved decisions. Until held proposals exist, do not apply duration, narration or paid-media-invalidating changes; offer typed human edit/regenerate choices. Never judge unseen pictures. Audio tools save pending suggestions; only a human press starts paid work.
+Current V6 policy: read references/notes.md. Record one point per note and respect resolved decisions. Use propose_change for duration, narration or changes that outdate paid media; link its returned proposalId in a typed note. Apply harmless text directly with its receipt. Never judge unseen pictures. Audio tools save pending suggestions; only a human press starts paid work.

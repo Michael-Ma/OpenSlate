@@ -273,3 +273,20 @@ test('personal narration is refused without a ready owned voice',t=>{
  assert.throws(()=>f.edit({kind:'narration',id:before.shots[0].id,field:'voice',value:'personal'}),e=>e.code==='PERSONAL_VOICE_REQUIRED');
  assert.deepEqual(f.store.getProject(f.projectId),before);
 });
+for(const kind of ['sceneTitle','moveScene','deleteScene']) test(`${kind} is an alongside hand edit and preserves a running Director's authority and holds`,t=>{
+ const f=fixture(t),p=f.store.getProject(f.projectId),human=f.service.beginRequest(p.id,'local-user','Keep planning this film'),bridge=f.service.openEpoch(p.id,human),holds=f.store.list('hold',p.id);
+ const edits={sceneTitle:{id:p.scenes[0].id,value:'Human title'},moveScene:{id:p.scenes[1].id,beforeId:p.scenes[0].id},deleteScene:{id:p.scenes[0].id,withShots:true}};
+ const receipt=f.edit({kind,...edits[kind]});
+ assert.equal(f.store.get('message',receipt.requestId).concurrency,'alongside');assert.equal(f.store.get('message',human.requestId).state,'active');assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');
+ assert.deepEqual(f.store.list('hold',p.id),holds);
+ const row=f.store.get('storyboard_edit',receipt.commandId);assert.ok(row.undo);assert.equal(row.input.kind,kind);
+});
+test('scene deletion and its restoring Undo fence older Director shot fields even when the old values return',async t=>{
+ const f=fixture(t),p=f.store.getProject(f.projectId),human=f.service.beginRequest(p.id,'local-user','Keep planning'),bridge=f.service.openEpoch(p.id,human);
+ f.store.insert('director_context','before-scene-delete',p.id,{requestId:human.requestId,epochId:bridge.actor.epochId,snapshot:{cursor:f.store.cursor(p.id)}});
+ const removed=f.edit({kind:'deleteScene',id:p.scenes[0].id,withShots:true});
+ const prepare=()=>f.service.prepare(p.id,bridge.actor,{variant:'project',expectedHeadVersion:f.store.getProject(p.id).headVersion,creative:{updateShots:[{id:p.shots[0].id,motion:'Old Director plan',reauthorPrompts:true}]}});
+ await assert.rejects(prepare(),{code:'HUMAN_EDITED_FIELD'});
+ f.edit({kind:'undo',commandId:removed.commandId});assert.equal(f.store.getProject(p.id).shots[0].motion,p.shots[0].motion);
+ await assert.rejects(prepare(),{code:'HUMAN_EDITED_FIELD'});assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');
+});

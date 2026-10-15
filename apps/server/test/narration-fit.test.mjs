@@ -68,3 +68,15 @@ test('undo a second fit re-commits the previous accepted cue and exact canonical
   assert.deepEqual(restored.shotMappings, canonical.shotMappings); assert.notEqual(restored.id, canonical.id);
   assert.equal(restored.headVersion, after.headVersion); assert.equal(f.calls.speech, 1);
 });
+test('fit and media-restoring Undo preserve Director authority while fencing the older duration field',async t=>{
+ const f=await confirmationFixture(t,{seconds:7.4});await f.make();await f.tick(12);
+ const p=f.store.getProject(f.project.id),before=await f.overview(),human=f.production.beginRequest(p.id,'local-user','Keep planning the film'),bridge=f.production.openEpoch(p.id,human);
+ f.store.insert('director_context','fit-captured',p.id,{requestId:human.requestId,epochId:bridge.actor.epochId,snapshot:f.production.readContext(p.id,bridge.actor)});
+ const holds=f.store.list('hold',p.id).filter(h=>h.active&&h.ownerId===human.requestId);
+ const receipt=await f.call('POST','/shots/shot-0/narration-fit',{fit:'extend_shot',expectedHeadVersion:p.headVersion}).then(f.ok);
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.deepEqual(f.store.list('hold',p.id).filter(h=>h.active&&h.ownerId===human.requestId),holds);
+ await assert.rejects(f.production.prepare(p.id,bridge.actor,{variant:'project',expectedHeadVersion:f.store.getProject(p.id).headVersion,creative:{updateShots:[{id:'shot-0',desiredFrames:180,reauthorPrompts:true}]}}),{code:'HUMAN_EDITED_FIELD'});
+ const record=f.store.get('storyboard_edit',receipt.commandId);assert.ok(record.undo.bindings.length);assert.equal(f.store.get('message',record.requestId).concurrency,'alongside');
+ await f.call('POST','/storyboard',{kind:'undo',commandId:receipt.commandId,expectedHeadVersion:f.store.getProject(p.id).headVersion}).then(f.ok);
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.deepEqual((await f.overview()).shots['shot-0'].keyframe.artifact,before.shots['shot-0'].keyframe.artifact);assert.equal(f.calls.speech,1);
+});

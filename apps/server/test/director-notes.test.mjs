@@ -70,14 +70,14 @@ test('a lost note receipt reconciles exact committed effect without invoking aga
  f.tools.reconcileEpoch(f.project.id,epoch.id);f.tools.reconcileEpoch(f.project.id,epoch.id);
  const result=f.store.get('tool_reconciliation',call.id);assert.equal(result.state,'effect_confirmed');assert.equal(result.receipt.notes[0].letter,'a');
 });
-test('accept is keyed, preserves resolution in context, proposals unavailable and stale accepts refused',async t=>{
+test('accept is keyed, preserves resolution in context, unaccepted proposals refused and stale accepts refused',async t=>{
  const f=fixture(t),a=(await f.record()).notes[0],input={choiceIndex:0,expectedVersion:1};
  assert.equal((await f.resolve(a.noteId,input,null)).json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
  const accepted=await f.resolve(a.noteId,input);assert.equal(accepted.statusCode,200,accepted.body);assert.equal(accepted.json().state,'resolved');
  assert.deepEqual((await f.resolve(a.noteId,input)).json(),accepted.json());
  assert.equal((await f.resolve(a.noteId,{...input,choiceIndex:1})).json().error.code,'IDEMPOTENCY_CONFLICT');
  assert.deepEqual(f.service.readContext(f.project.id,f.bridge.actor,{section:'notes'}).items[0].resolution,accepted.json().resolution);
- const proposal=(await f.record([f.note({choices:[{kind:'proposal',proposalId:'future'}]})])).notes[0];assert.equal((await f.resolve(proposal.noteId,input,'proposal')).json().error.code,'PROPOSAL_UNAVAILABLE');
+ await assert.rejects(f.record([f.note({choices:[{kind:'proposal',proposalId:'future'}]})]),{code:'SCOPE_DENIED'});
  const stale=(await f.record()).notes[0],p=f.store.getProject(f.project.id);f.store.saveProject({...p,shots:p.shots.map(s=>s.id==='shot-0'?{...s,revisionId:randomUUID()}:s)},p.headVersion);
  assert.equal(f.service.snapshot(f.project.id).notes.find(n=>n.noteId===stale.noteId).state,'stale');assert.equal((await f.resolve(stale.noteId,input,'stale')).json().error.code,'NOTE_STALE');
 });

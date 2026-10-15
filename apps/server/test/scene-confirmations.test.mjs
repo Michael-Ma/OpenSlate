@@ -260,3 +260,21 @@ test('server-owned voice writing derives Chinese language from CJK text', async 
   assert.equal(segment.script.language, 'zh'); assert.equal(segment.script.text, '最后一班渡轮驶向灯火。');
   assert.equal(f.calls.speech, 1); assert.equal(f.store.getProject(f.project.id).shots[0].narrationPending, false);
 });
+test('durable runner sessions run alongside an independent Director and retain its holds across restart',async t=>{
+ const f=await confirmationFixture(t);await f.call('POST','/storyboard',{kind:'addScene',value:'Independent scene',expectedHeadVersion:f.store.getProject(f.project.id).headVersion}).then(f.ok);
+ const scene=f.store.getProject(f.project.id).scenes.at(-1),human=f.production.beginRequest(f.project.id,'local-user','Work on the independent scene',{scopeIds:[scene.id]}),bridge=f.production.openEpoch(f.project.id,human);
+ f.store.insert('director_turn','independent-running',f.project.id,{requestId:human.requestId,epochId:bridge.actor.epochId,runtimeId:'fixture',createdAt:'2026-10-15T00:00:00Z',state:'running'});
+ const holds=f.store.list('hold',f.project.id).filter(h=>h.active&&h.ownerId===human.requestId);
+ await f.make();await f.tick(12);await f.openFrames();await f.call('POST','/scenes/scene-0/confirm',await f.confirmBody()).then(f.ok);await f.restart();await f.tick(10);
+ assert.equal((await f.overview()).scenes[0].confirmation.state,'done');assert.equal(f.calls.speech,1);
+ assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.equal(f.store.get('message',human.requestId).state,'active');assert.deepEqual(f.store.list('hold',f.project.id).filter(h=>h.active&&h.ownerId===human.requestId),holds);
+ const sessions=f.store.list('scene_confirmation_request',f.project.id);assert.ok(sessions.length);
+ for(const row of sessions) {assert.equal(f.store.get('message',row.id).concurrency,'alongside');assert.ok(!f.store.list('hold',f.project.id).some(h=>h.active&&h.ownerId===row.id));}
+});
+test('a queued B7 voice line keeps the B11 default captured at its human press',async t=>{
+ const f=await confirmationFixture(t);
+ const setVoice=voice=>f.call('POST','/settings/voice',{narratorVoice:voice,expectedHeadVersion:f.store.getProject(f.project.id).headVersion}).then(f.ok);
+ await setVoice('coral');await f.make();await setVoice('cedar');await f.restart();await f.tick(12);
+ assert.equal(f.calls.speech,1);assert.equal(f.store.list('narration_speech_proposal',f.project.id).at(-1).operation.voice,'coral');
+ assert.equal(f.store.getProject(f.project.id).narratorVoice,'cedar');assert.equal(f.narration.workspaceSnapshot(f.project.id).segments[0].script.source.voice,'coral');
+});

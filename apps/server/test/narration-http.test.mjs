@@ -79,7 +79,7 @@ test('one persisted human session spans edits; stale sessions require explicit c
   assert.equal(f.store.list('grant', f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
 });
 
-test('uploaded audio can be heard before acceptance; exact human decisions then commit without generation', async t => {
+test('uploaded audio can be heard before acceptance; exact human decisions commit and release their own alongside hold without generation', async t => {
   const f = await fixture(t); await f.start();
   assert.equal((await f.edit('/segments', { patch: { add: [draft] } })).statusCode, 200);
   const upload = await f.upload(); assert.equal(upload.statusCode, 200, upload.body); const audio = upload.json();
@@ -97,7 +97,7 @@ test('uploaded audio can be heard before acceptance; exact human decisions then 
   assert.deepEqual((await f.request('/apply', { sessionId: f.session.id, preparedId: prepared.json().id })).json(), applied.json());
   const conflictingApply = await f.request('/apply', { sessionId: f.session.id, preparedId: randomUUID() }, { headers: { 'idempotency-key': 'apply-once' } }); assert.equal(conflictingApply.json().error.code, 'IDEMPOTENCY_CONFLICT');
   const current = (await f.request()).json(); assert.equal(current.canonical.id, applied.json().canonicalId); assert.equal(current.headVersion, 1);
-  assert.equal(current.canonical.source, 'uploaded'); assert.ok(f.store.list('hold', f.project.id).some(hold => hold.active));
+  assert.equal(current.canonical.source, 'uploaded'); assert.ok(!f.store.list('hold', f.project.id).some(hold => hold.active && hold.ownerId === f.session.requestId));
   assert.equal(f.store.list('grant', f.project.id).length, 0); assert.equal(f.store.list('attempt', f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
   assert.deepEqual(await readdir(f.uploadDirectory), []);
 });

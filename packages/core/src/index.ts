@@ -15,3 +15,5 @@ export * from "./planning/model-profile-composition.js";
 export * from "./planning/narration-rebase.js";
 
 export * from './planning/scene-composition.js';
+
+export * from "./proposal-preview.js";
