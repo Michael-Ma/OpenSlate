@@ -239,6 +239,7 @@ export function continueStoppedWork(
     },
   };
 }
+/** Stop is offered only for work that is actually running; plan nodes without output (e.g. videos awaiting review) are not. */
 export function canStopWork(
   snapshot: ProjectSnapshot | null,
   director: DirectorStatus,
@@ -256,9 +257,6 @@ export function canStopWork(
         ["preparing", "submitting", "remote_pending", "ingesting"].includes(
           attempt.phase,
         ),
-      ) ||
-      !!snapshot.plan?.nodes?.some(
-        (node) => !snapshot.outputs.some((output) => output.nodeId === node.id),
       ))
   );
 }

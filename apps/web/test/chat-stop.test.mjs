@@ -10,11 +10,11 @@ test('follow-up carries the observed stop identity with safe project scope and r
  assert.throws(()=>continueStoppedWork(command,{paused:true}),/Refresh/);
  assert.throws(()=>continueStoppedWork({body:{text:'Answer',replyToQuestionId:'q'}},{paused:true,authorityId:'stop'}),/new direction/);
 });
-test('composer Stop is available for reasoning, provider jobs and pending plan work, but not stopped or completed work',()=>{
+test('composer Stop is available for reasoning and provider jobs, but not for idle plans, stopped or completed work',()=>{
  const s={control:{paused:false},attempts:[],outputs:[],plan:null};const idle={status:'idle'};
  assert.equal(canStopWork(s,idle),false);assert.equal(canStopWork(s,{status:'running'}),true);
  s.attempts=[{phase:'remote_pending'}];assert.equal(canStopWork(s,idle),true);
  s.control.paused=true;assert.equal(canStopWork(s,{status:'running'}),false);
- s.control.paused=false;s.attempts=[];s.plan={nodes:[{id:'v'}]};assert.equal(canStopWork(s,idle),true);
+ s.control.paused=false;s.attempts=[];s.plan={nodes:[{id:'v'}]};assert.equal(canStopWork(s,idle),false);
  s.outputs=[{nodeId:'v'}];assert.equal(canStopWork(s,idle),false);
 });
