@@ -28,7 +28,7 @@ export function registerRecoveryRoutes(app: FastifyInstance, service: Production
 }
 
 const INSPECTION_ROUTES = new Set([
-  RECOVERY_STATUS_PATH, "/api/projects", "/api/providers", "/api/projects/:projectId",
+  RECOVERY_STATUS_PATH, "/api/installation/status", "/api/projects", "/api/providers", "/api/projects/:projectId",
   "/api/projects/:projectId/providers", "/api/projects/:projectId/director",
   "/api/projects/:projectId/director/setup", "/api/projects/:projectId/director/tools",
   "/api/projects/:projectId/review", "/api/projects/:projectId/events",

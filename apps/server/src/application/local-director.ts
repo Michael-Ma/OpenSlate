@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { digest, invariant, newId } from "@openslate/core";
-import { CodexDirectorRuntime, setupLocalCodex, verifySkillLock } from "@openslate/director";
+import { CODEX_PROTOCOL_VERSION, CodexDirectorRuntime, setupLocalCodex, verifySkillLock } from "@openslate/director";
+import { toolVersion } from "../installation-status.js";
 import type { DirectorRunInput, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorSupervisor } from "./director-supervisor.js";
 import { FakeWorkflowDirector } from "./fake-director.js";
@@ -80,6 +81,12 @@ export class LocalDirectorController {
     return "";
   }
   mode(projectId: string): "fake" | "native" { return this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection.mode ?? "fake"; }
+  /** No account discovery or model call; sign-in remains unknown on this version-only read. */
+  async codexStatus(projectId?: string) {
+    const binary = projectId ? this.modelSelection(projectId).binaryPath : this.defaults.binaryPath;
+    const version = await toolVersion(binary, "codex");
+    return { found: version !== null, version, pinnedVersion: CODEX_PROTOCOL_VERSION, signedIn: null };
+  }
   private controller(projectId: string) { return this.mode(projectId) === "native" ? this.native : this.fake; }
   status(projectId: string) {
     const status = this.controller(projectId).status(projectId);

@@ -1,4 +1,6 @@
 import { registerDirectorReviewSetting } from "./application/keyframe-review.js";
+import { CODEX_PROTOCOL_VERSION } from "@openslate/director";
+import { toolVersion } from "./installation-status.js";
 import { registerDirectorProposals } from "./application/director-proposals.js";
 import { registerShotTakes } from "./shot-takes.js";
 import { registerDirectorNotes } from "./application/director-notes.js";
@@ -24,7 +26,7 @@ import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync }
 import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
-import type { ControlInput, ReleaseAttemptInput } from "@openslate/core/public";
+import type { ControlInput, InstallationStatus, ReleaseAttemptInput } from "@openslate/core/public";
 import { ToolInvocationService } from "./application/tool-invocations.js";
 import { imageMessageContext, selectedDirectorImages } from "./application/director-images.js";
 import type { SelectedDirectorImage } from "./application/director-images.js";
@@ -43,6 +45,8 @@ import { InstallationRecoveryGuard } from "./application/installation-recovery.j
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
 
 interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string; logger?: boolean;
+  /** Host-selected tools, also available when the complete media service could not be installed. */
+  mediaToolPaths?: { ffmpeg: string | null; ffprobe: string | null };
   /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
   allowedOrigins?: readonly string[];
   studioSessions?: StudioSessions;
@@ -134,6 +138,17 @@ export function createApp(options: AppOptions = {}) {
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
   registerProjectLibrary(app, service);
   app.get("/api/providers", async () => providerCatalog().view());
+  app.get<{ Reply: InstallationStatus }>("/api/installation/status", async (_request, reply) => {
+    const [codex, mediaTools] = await Promise.all([
+      options.runtimeSettings?.codexStatus() ?? { found: false, version: null, pinnedVersion: CODEX_PROTOCOL_VERSION, signedIn: null },
+      options.mediaRoutes ? options.mediaRoutes.media.media.toolStatus() : Promise.all([
+        toolVersion(options.mediaToolPaths?.ffmpeg, "ffmpeg"), toolVersion(options.mediaToolPaths?.ffprobe, "ffprobe"),
+      ]).then(([ffmpeg, ffprobe]) => ({ ffmpeg: { available: ffmpeg !== null, version: ffmpeg }, ffprobe: { available: ffprobe !== null, version: ffprobe } })),
+    ]);
+    const providersConfigured = providerCatalog().view().profiles.some(p => p.readiness.enabledByHost &&
+      (p.readiness.credential.present === true || ("nativeAccess" in p.readiness && p.readiness.nativeAccess?.configured === true)));
+    return reply.header("Cache-Control", "no-store").send({ codex, mediaTools, providersConfigured });
+  });
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
     const project = service().store.getProject(request.params.projectId);
     const lock = service().store.get<{ projectId: string; profiles: unknown; providerSelection?: unknown; localExecution?: unknown }>("capability_lock", project.capabilityLockId);
@@ -179,7 +194,7 @@ export function createApp(options: AppOptions = {}) {
   });
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/setup", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
-    return options.runtimeSettings.settings(request.params.projectId);
+    return { ...options.runtimeSettings.settings(request.params.projectId), codexVersion: (await options.runtimeSettings.codexStatus(request.params.projectId)).version };
   });
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/models", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");

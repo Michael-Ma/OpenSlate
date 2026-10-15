@@ -1,4 +1,5 @@
 import { constants, mkdirSync, realpathSync } from "node:fs";
+import { toolVersion } from "../installation-status.js";
 import { chmod, copyFile, link, lstat, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, sep } from "node:path";
@@ -72,6 +73,12 @@ export class LocalMediaService {
     integer(this.limits.maxAudioSources, 0, 65, "audio source limit");
     integer(this.limits.maxAudioPlacements, 0, 65, "audio placement limit");
     integer(this.limits.timeoutMs, 50, 600000, "tool time limit");
+  }
+
+  /** Inspect exactly the configured media tools, without decoding or changing state. */
+  async toolStatus() {
+    const [ffmpeg, ffprobe] = await Promise.all([toolVersion(this.ffmpeg, "ffmpeg"), toolVersion(this.ffprobe, "ffprobe")]);
+    return { ffmpeg: { available: ffmpeg !== null, version: ffmpeg }, ffprobe: { available: ffprobe !== null, version: ffprobe } };
   }
 
   /** Version probes only; no source decoding/transcoding or application-state mutation. */

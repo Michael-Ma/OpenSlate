@@ -23,8 +23,15 @@ test('authenticated consent configuration is idempotent and creates no creative 
   const replay = await app.inject({ method: 'POST', url, payload, headers }); assert.equal(replay.statusCode, 200, replay.body);
   assert.deepEqual(replay.json(), first.json()); assert.equal(f.store.list('message', f.project.id).length, messages.length);
   const read = await app.inject({ method: 'GET', url, headers }); assert.equal(read.json().voices[0].ready, true);
+  const listed = read.json().voices[0], identity = first.json().voice;
+  assert.equal(listed.id, identity.selector); assert.equal(listed.identityId, identity.id);
+  assert.equal(listed.providerVoiceId, payload.providerVoiceId); assert.equal(listed.consentGrantedAt, identity.consent.recordedAt);
+  assert.equal(listed.consentRevokedAt, undefined);
   const revoke = await app.inject({ method: 'POST', url: `${url}/${first.json().voice.id}/revoke`, payload: {}, headers: { ...headers, 'idempotency-key': key() } });
   assert.equal(revoke.statusCode, 200, revoke.body); assert.deepEqual(frozen(), before);
+  const revoked = (await app.inject({ method: 'GET', url, headers })).json().voices[0];
+  assert.equal(revoked.ready, false); assert.equal(revoked.id, identity.selector);
+  assert.equal(revoked.consentGrantedAt, identity.consent.recordedAt); assert.equal(revoked.consentRevokedAt, revoke.json().revocation.createdAt);
   assert.doesNotThrow(() => f.production.assertActor(f.project.id, f.actor, true));
   assert.deepEqual(f.calls, { http: 0, credentials: 0 });
 });

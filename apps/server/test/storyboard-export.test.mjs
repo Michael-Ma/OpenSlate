@@ -208,10 +208,8 @@ test('cancel aborts a running export; recover only checks receipts, replay never
   assert.equal((await f.request('POST', `/exports/${job.id}/recover`, {})).json().state, 'done');
 });
 
-test('stale-version, pause, holds, foreign export IDs and edits during freeze/publication remain fenced', async t => {
+test('stale-version, holds, foreign export IDs and edits during freeze/publication remain fenced', async t => {
   const f = await fixture(t);
-  f.production.control(f.project.id, f.actor, 'pause'); await assert.rejects(f.prepare(), code('MEDIA_PAUSED'));
-  f.production.control(f.project.id, f.actor, 'resume');
   const hold = f.engine.setHold(f.project.id, { scopeId: f.shots[0].id, ownerId: 'other' }); await assert.rejects(f.prepare(), code('MEDIA_HELD')); f.engine.releaseHold(f.project.id, hold.id, 'other');
   assert.equal((await f.request('POST', '/exports/not-owned/cancel', {})).statusCode, 404);
   const original = f.media.freezeManifest.bind(f.media);
@@ -260,4 +258,23 @@ test('legacy absolute narration shared by two shots is mixed once while shot-rel
   const f = await fixture(t, { absoluteSharedCue: true }), job = await f.prepare();
   assert.equal(job.manifest.audio.length, 2, 'one narration placement and one soundtrack');
   assert.deepEqual(job.manifest.audio.map(a => a.atSample), [48000, 0]);
+});
+
+
+test('HTTP storyboard export prepares, renders and publishes while stopped without enabling paid generation', async t => {
+  const f = await fixture(t, { narration: false });
+  const stopped = await f.request('POST', '/controls', { action: 'stop' }); assert.equal(stopped.statusCode, 200, stopped.body);
+  const before = f.provider.acceptedCount(), attempts = f.engine.attempts(f.project.id), grants = f.store.list('grant', f.project.id);
+  const stopState = f.production.stopView(f.project.id);
+  const key = newId(), body = { expectedHeadVersion: f.head().headVersion };
+  const started = await f.request('POST', '/exports', body, key); assert.equal(started.statusCode, 202, started.body);
+  const done = await waitExport(f, started.json().exportId); assert.equal(done.state, 'done'); assert.ok(done.artifact);
+  assert.equal(f.store.get('media_render', done.exportId).state, 'published');
+  assert.equal((await f.request('POST', '/exports', body, key)).json().exportId, done.exportId);
+  const view = (await f.request('GET', `/scenes/${f.shots[0].sceneId}/generation`)).json();
+  const paid = await f.request('POST', `/scenes/${f.shots[0].sceneId}/generate`, { kind: 'image', headVersion: view.headVersion, revisionId: view.revisionId,
+    reviewedFrames: [], reviewedHoldDigest: view.reviewedHoldDigest, reviewedControlAuthorityId: view.reviewedControlAuthorityId });
+  assert.equal(paid.json().error.code, 'EXECUTION_PAUSED', paid.body);
+  assert.deepEqual(f.engine.attempts(f.project.id), attempts); assert.deepEqual(f.store.list('grant', f.project.id), grants);
+  assert.equal(f.provider.acceptedCount(), before); assert.deepEqual(f.production.stopView(f.project.id), stopState);
 });
