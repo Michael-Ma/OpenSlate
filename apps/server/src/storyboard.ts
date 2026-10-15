@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { digest, invariant, newId, shotIntentDigest } from "@openslate/core";
+import { digest, DomainError, invariant, newId, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationAudio } from "./narration/types.js";
@@ -171,6 +171,11 @@ export function editStoryboard(
             "VALIDATION_ERROR",
             "Use 3–15 seconds per shot.",
           );
+          const cue = next.cues.find(cue => cue.id === row.cueId);
+          if (row.narrationTimingMode === "within_shot" && cue?.accepted && cue.durationFrames > frames)
+            throw new DomainError("SHOT_SHORTER_THAN_NARRATION", "Make the shot longer or cut the accepted narration before shortening it.", {
+              shotId: row.id, narrationFrames: cue.durationFrames, requestedFrames: frames,
+            });
           row.desiredFrames = frames;
         } else
           row[
@@ -370,26 +375,7 @@ export function editStoryboard(
         "VALIDATION_ERROR",
         "Keep the film within 64 shots and six minutes.",
       );
-      const previous = s.store
-        .list<SavedEdit>("storyboard_edit", projectId)
-        .at(-1);
-      const inherited = previous
-        ? s.store
-            .list<{ ownerId: string; scopeId: string; active: boolean }>(
-              "hold",
-              projectId,
-            )
-            .filter((x) => x.active && x.ownerId === previous.requestId)
-            .map((x) => x.scopeId)
-        : [];
-      const scopes =
-        global || inherited.includes(projectId)
-          ? [projectId]
-          : [...new Set([...changed, ...inherited])].filter(
-              (id) =>
-                before.shots.some((x) => x.id === id) ||
-                before.scenes.some((x) => x.id === id),
-            );
+      const scopes = global ? [projectId] : [...changed];
       const actor = s.beginRequest(
         projectId,
         "local-user",
@@ -397,10 +383,8 @@ export function editStoryboard(
         {
           key: `storyboard:${key}`,
           editing: true,
+          directEdit: true,
           scopeIds: scopes.length ? scopes : [projectId],
-          ...(inherited.length
-            ? { continuationRequestId: previous!.requestId }
-            : {}),
         },
       );
       const request = s.store.get<Record<string, unknown>>(
@@ -416,35 +400,25 @@ export function editStoryboard(
         .filter(
           (x) => x.state === "active" && x.planId === before.activePlanId,
         );
-      const changedTiming = new Set(
-        next.shots
-          .filter((row) => {
-            const previous = before.shots.find((old) => old.id === row.id);
-            return (
-              previous &&
-              shotIntentDigest(
-                previous,
-                "video",
-                before.cues.find((cue) => cue.id === previous.cueId),
-              ) !==
-                shotIntentDigest(
-                  row,
-                  "video",
-                  next.cues.find((cue) => cue.id === row.cueId),
-                )
-            );
-          })
-          .map((row) => row.id),
-      );
+      const intentChanged = (shotId: string | null | undefined, kind: "image" | "video") => {
+        const old = before.shots.find(shot => shot.id === shotId);
+        const current = next.shots.find(shot => shot.id === shotId);
+        return !!old && !!current &&
+          shotIntentDigest(old, kind, before.cues.find(cue => cue.id === old.cueId)) !==
+          shotIntentDigest(current, kind, next.cues.find(cue => cue.id === current.cueId));
+      };
+      const changedTiming = new Set(next.shots.filter(row => intentChanged(row.id, "video")).map(row => row.id));
       const affected = new Set(
         bindings
           .filter(
             (x) =>
               ["timeline", "render"].includes(x.node.kind) ||
-              input.kind === "treatment" ||
+              ((input.kind === "treatment" || input.kind === "scene") &&
+                (x.node.kind === "image" || x.node.kind === "video") &&
+                intentChanged(x.node.shotId, x.node.kind)) ||
               (input.kind === "undo" &&
                 (next.brief !== before.brief || next.story !== before.story)) ||
-              (changed.has(x.node.shotId ?? "") &&
+              (input.kind !== "treatment" && input.kind !== "scene" && changed.has(x.node.shotId ?? "") &&
                 !(
                   input.kind === "narration" &&
                   (x.node.kind === "image" ||
@@ -483,6 +457,12 @@ export function editStoryboard(
             grew = true;
           }
       }
+      // Hold only shots whose queued media is detached, never music/order/add operations.
+      // The surrounding command transaction rolls back these holds on failure.
+      const holdFree = ["soundtrack", "moveShot", "addScene", "addShot"].includes(input.kind);
+      if (!holdFree)
+        for (const scopeId of new Set(bindings.filter(b => affected.has(b.id) && before.shots.some(shot => shot.id === b.node.shotId)).map(b => b.node.shotId!)))
+          s.engine.setHold(projectId, { scopeId, ownerId: actor.requestId });
       for (const b of bindings.filter((x) => affected.has(x.id)))
         s.store.put("node_binding", b.id, projectId, {
           ...b,
@@ -504,6 +484,9 @@ export function editStoryboard(
         headVersion: next.headVersion,
         requestId: actor.requestId,
       });
+      for (const hold of s.store.list<{ id: string; ownerId: string; active: boolean }>("hold", projectId))
+        if (hold.active && hold.ownerId === actor.requestId)
+          s.engine.releaseHold(projectId, hold.id, actor.requestId);
       s.store.appendEvent(projectId, "storyboard.edited", {
         commandId: id,
         kind: input.kind,

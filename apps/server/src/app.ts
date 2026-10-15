@@ -60,7 +60,7 @@ export function createApp(options: AppOptions = {}) {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403
         : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : error.code === "VALIDATION_ERROR" ? 400 : 409;
-      void reply.status(status).send({ error: { code: error.code, message: error.message } });
+      void reply.status(status).send({ error: { code: error.code, message: error.message, ...(error.code === "SHOT_SHORTER_THAN_NARRATION" ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });

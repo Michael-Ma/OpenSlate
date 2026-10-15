@@ -1,3 +1,4 @@
+import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   applyCreativePatch, compilePlanIsolated, DEFAULT_PROFILES, digest, diffPlans, invariant, newId,
@@ -102,11 +103,11 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { directEdit?: boolean; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
     invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
     const key = options.key ?? newId();
-    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
+    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ ...(options.directEdit ? { directEdit: true } : {}), ...(options.supersede ? { supersede: options.supersede } : {}), text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
       const project = this.store.getProject(projectId);
       if (options.resumeFromStopId) {
         const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
@@ -124,10 +125,14 @@ export class ProductionService {
       if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
       const request: RequestRecord = { id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
-      if (options.editing !== false) {
-        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active")
+      // Direct writes fence stale prepared changes by headVersion without ending a Director turn.
+      // Scene presses only replace authority that intersects their own command scope.
+      if (options.editing !== false && !options.directEdit) {
+        for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active"
+          && (!options.supersede || requestScopesIntersect(project, scopeIds, prior.scopeIds)))
           this.store.put("message", prior.id, projectId, { ...prior, state: "superseded" });
-        for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked")
+        for (const epoch of this.store.list<Epoch>("epoch", projectId)) if (epoch.state !== "revoked"
+          && (!options.supersede || requestScopesIntersect(project, scopeIds, epoch.scopeIds)))
           this.store.put("epoch", epoch.id, projectId, { ...epoch, state: "revoked" });
         for (const scopeId of scopeIds) this.engine.setHold(projectId, { scopeId, ownerId: request.id });
         const continuedIds = options.continueEdits?.requestIds ?? (options.continuationRequestId ? [options.continuationRequestId] : []);

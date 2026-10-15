@@ -1079,81 +1079,57 @@ for (const conditioning of ["owned", "shared"]) {
   });
 }
 
-test("prompt writing after partial film generation retains inherited scene pauses and saves without widening generation", async (t) => {
-  const f = fixture(t),
-    { editStoryboard } = await import("../dist/storyboard.js");
-  const first = f.store.getProject(f.project.id);
-  const treatment = editStoryboard(
-    f.service,
-    first.id,
-    {
-      kind: "treatment",
-      field: "brief",
-      value: "A revised whole-film direction",
-      expectedHeadVersion: first.headVersion,
-    },
-    randomUUID(),
-  );
-  assert.equal((await f.post(await f.get())).statusCode, 200);
-  await f.finish();
-  const pending = f.store
-    .list("hold", first.id)
-    .filter((hold) => hold.active && hold.ownerId === treatment.requestId);
-  assert.deepEqual(
-    pending.map((hold) => hold.scopeId),
-    ["scene-1"],
-  );
-  const before = f.store.getProject(first.id),
-    other = structuredClone(before.shots[1]),
-    grants = f.store.list("grant", first.id).length,
-    attempts = f.engine.attempts(first.id).length;
-  const writing = editStoryboard(
-    f.service,
-    first.id,
-    {
-      kind: "shot",
-      id: "shot-0",
-      field: "imagePrompt",
-      value: "A new explicit leather close-up",
-      expectedHeadVersion: before.headVersion,
-    },
-    randomUUID(),
-  );
-  const saved = f.store.getProject(first.id);
-  assert.equal(saved.shots[0].imagePrompt, "A new explicit leather close-up");
-  assert.deepEqual(saved.shots[1], other);
-  const request = f.store.get("message", writing.requestId);
-  assert.deepEqual(request.scopeIds.sort(), ["scene-1", "shot-0"]);
-  const retained = f.store.list("hold", first.id).filter((hold) => hold.active);
-  assert.ok(
-    retained.some(
-      (hold) =>
-        hold.scopeId === "scene-1" && hold.ownerId === writing.requestId,
-    ),
-  );
-  assert.ok(
-    retained.some(
-      (hold) => hold.scopeId === "shot-0" && hold.ownerId === writing.requestId,
-    ),
-  );
-  assert.equal(f.store.list("grant", first.id).length, grants);
-  assert.equal(f.engine.attempts(first.id).length, attempts);
-  assert.equal((await f.get("scene-1")).rows[0].image, null);
-  const generated = await f.post(await f.get(), "image", randomUUID(), {
-    targetShotIds: ["shot-0"],
-  });
-  assert.equal(generated.statusCode, 200, generated.body);
-  await f.finish();
-  assert.equal(f.engine.attempts(first.id).length, attempts + 1);
-  assert.equal((await f.get("scene-1")).rows[0].image, null);
-  assert.ok(
-    f.store
-      .list("hold", first.id)
-      .some(
-        (hold) =>
-          hold.active &&
-          hold.scopeId === "scene-1" &&
-          hold.ownerId === writing.requestId,
-      ),
-  );
+test("prompt writing leaves unrelated scene pauses with their original request and does not widen generation", async t => {
+ const f=fixture(t), {editStoryboard}=await import('../dist/storyboard.js');
+ const unrelated=f.service.beginRequest(f.project.id,'local-user','Edit scene 1',{scopeIds:['scene-1']});
+ assert.equal((await f.post(await f.get())).statusCode,200);await f.finish();
+ const before=f.store.getProject(f.project.id),other=structuredClone(before.shots[1]),attempts=f.engine.attempts(f.project.id).length;
+ const receipt=editStoryboard(f.service,f.project.id,{kind:'shot',id:'shot-0',field:'imagePrompt',value:'A new explicit leather close-up',expectedHeadVersion:before.headVersion},randomUUID());
+ assert.deepEqual(f.store.getProject(f.project.id).shots[1],other);
+ assert.deepEqual(f.store.get('message',receipt.requestId).scopeIds,['shot-0']);
+ assert.deepEqual(f.store.list('hold',f.project.id).filter(h=>h.active).map(h=>[h.scopeId,h.ownerId]),[['scene-1',unrelated.requestId]]);
+ assert.equal(f.store.get('message',unrelated.requestId).state,'active');
+ assert.equal((await f.post(await f.get(),'image',randomUUID(),{targetShotIds:['shot-0']})).statusCode,200);await f.finish();
+ assert.equal(f.engine.attempts(f.project.id).length,attempts+1);assert.equal((await f.get('scene-1')).rows[0].image,null);
+ assert.equal(f.store.get('message',unrelated.requestId).state,'active');
+});
+
+for(const activity of ['question','queued','running']) test(`scene press preserves an unrelated ${activity} and its request, epoch and hold`, async t=>{
+ const f=fixture(t,{sharedScene:true}),human=f.service.beginRequest(f.project.id,'local-user','Work on scene 3',{scopeIds:['scene-2']}),epoch=f.service.openEpoch(f.project.id,human);
+ if(activity==='question') f.store.insert('director_question','question',f.project.id,{id:'question',requestId:human.requestId,turnId:'turn',state:'pending',questions:['Which mood?']});
+ else f.store.insert('director_turn','turn',f.project.id,{id:'turn',requestId:human.requestId,epochId:epoch.actor.epochId,state:activity});
+ const holds=f.store.list('hold',f.project.id),view=await f.get();assert.equal(view.busy,false);
+ const key=randomUUID(),response=await f.post(view,'image',key);assert.equal(response.statusCode,200,response.body);
+ assert.equal(f.store.get('message',human.requestId).state,'active');assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'active');
+ for(const hold of holds) assert.deepEqual(f.store.get('hold',hold.id),hold);
+ await f.finish();assert.equal(f.provider.acceptedCount(),2);
+ assert.deepEqual((await f.post(view,'image',key)).json(),response.json());assert.equal(f.provider.acceptedCount(),2);
+});
+
+for(const scope of ['shot-1','scene-0','film']) for(const activity of ['question','running']) test(`scene press refuses intersecting ${scope} ${activity} without new authority`,async t=>{
+ const f=fixture(t,{sharedScene:true}),human=f.service.beginRequest(f.project.id,'local-user','Current direction',{scopeIds:[scope==='film'?f.project.id:scope]});
+ if(activity==='question') f.store.insert('director_question','question',f.project.id,{id:'question',requestId:human.requestId,turnId:'turn',state:'pending',questions:['Which mood?']});
+ else {const epoch=f.service.openEpoch(f.project.id,human);f.store.insert('director_turn','turn',f.project.id,{id:'turn',requestId:human.requestId,epochId:epoch.actor.epochId,state:'running'});}
+ const view=await f.get(),cursor=f.store.cursor(f.project.id);assert.equal(view.busy,true);
+ const response=await f.post(view);assert.equal(response.json().error.code,'WAITING_USER');assert.equal(f.store.cursor(f.project.id),cursor);assert.equal(f.store.list('grant',f.project.id).length,0);
+});
+
+test('a shot press does not block on or supersede a sibling shot question inside the same scene',async t=>{
+ const f=fixture(t,{sharedScene:true}),human=f.service.beginRequest(f.project.id,'local-user','Work on sibling',{scopeIds:['shot-1']}),epoch=f.service.openEpoch(f.project.id,human);
+ f.store.insert('director_question','question',f.project.id,{id:'question',requestId:human.requestId,turnId:'turn',state:'pending',questions:['Which mood?']});
+ const view=await f.get();assert.equal(view.busy,true);
+ const response=await f.post(view,'image',randomUUID(),{targetShotIds:['shot-0']});assert.equal(response.statusCode,200,response.body);
+ assert.equal(f.store.get('message',human.requestId).state,'active');assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'active');
+ await f.finish();assert.equal(f.provider.acceptedCount(),1);
+});
+
+test('a question arriving during scene compilation is rechecked before publication without releasing holds',async t=>{
+ const f=fixture(t),human=f.service.beginRequest(f.project.id,'local-user','Work here',{scopeIds:['shot-0']}),view=await f.get(),snapshot=f.service.snapshot.bind(f.service);
+ let calls=0;
+ f.service.snapshot=id=>{
+   if(++calls===3) f.store.insert('director_question','late-question',id,{id:'late-question',requestId:human.requestId,turnId:'turn',state:'pending',questions:['Wait?']});
+   return snapshot(id);
+ };
+ const holds=f.store.list('hold',f.project.id),response=await f.post(view);
+ assert.equal(response.json().error.code,'WAITING_USER',response.body);assert.deepEqual(f.store.list('hold',f.project.id),holds);assert.equal(f.store.list('grant',f.project.id).length,0);assert.equal(f.store.list('candidate',f.project.id).length,0);
 });

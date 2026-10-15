@@ -12,11 +12,11 @@ function fixture(t) {
  const edit=(body,key=randomUUID())=>editStoryboard(service,f.projectId,{expectedHeadVersion:f.store.getProject(f.projectId).headVersion,...body},key);
  return {...f,service,app,edit,token};
 }
-test('direct edit is durable, idempotent, revokes old epochs and never mints grants', async t=>{
+test('direct edit is durable, idempotent, preserves old epochs and never mints grants', async t=>{
  const f=fixture(t),p=f.store.getProject(f.projectId),actor=f.service.beginRequest(f.projectId,'local-user','old direction',{editing:true}),epoch=f.service.openEpoch(f.projectId,actor), grants=f.store.list('grant',f.projectId).length;
  const body={kind:'shot',id:p.shots[0].id,field:'framing',value:'Close detail',expectedHeadVersion:p.headVersion},key=randomUUID();
  const receipt=f.edit(body,key);assert.equal(f.store.getProject(f.projectId).shots[0].framing,'Close detail');assert.deepEqual(f.edit(body,key),receipt);
- assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'revoked');assert.equal(f.store.list('grant',f.projectId).length,grants);assert.equal(f.engine.attempts(f.projectId).length,0);
+ assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'active');assert.equal(f.store.get('message',actor.requestId).state,'active');assert.equal(f.store.list('grant',f.projectId).length,grants);assert.equal(f.engine.attempts(f.projectId).length,0);
  assert.throws(()=>f.edit({...body,value:'stale'}),e=>e.code==='REVISION_CONFLICT');
 });
 test('reorder and delete/undo retain stable identities and narration, protect newer changes',t=>{
@@ -50,7 +50,7 @@ test('direct edits retain their own scope without claiming unrelated conversatio
  const first=f.edit({kind:'shot',id:p.shots[0].id,field:'purpose',value:'First change'});
  const second=f.edit({kind:'shot',id:p.shots[0].id,field:'motion',value:'Second change'});
  const holds=f.store.list('hold',f.projectId).filter(x=>x.active);
- assert.ok(holds.some(x=>x.ownerId===unrelated.requestId));assert.ok(holds.some(x=>x.ownerId===second.requestId));assert.ok(!holds.some(x=>x.ownerId===first.requestId));
+ assert.ok(holds.some(x=>x.ownerId===unrelated.requestId));assert.ok(!holds.some(x=>x.ownerId===second.requestId));assert.equal(f.store.get('message',unrelated.requestId).state,'active');assert.ok(!holds.some(x=>x.ownerId===first.requestId));
  const view=f.service.snapshot(f.projectId);assert.equal(view.latestStoryboardEdit.requestId,second.requestId);
  assert.ok(!view.conversation.some(x=>x.requestId===second.requestId));assert.ok(view.conversation.some(x=>x.requestId===unrelated.requestId));
 });
@@ -147,4 +147,77 @@ test('prompt writing through HTTP uses exact command identity, rejects stale or 
  const blank=await f.app.inject({method:'POST',url,headers:{...headers,'idempotency-key':randomUUID()},payload:{...body,expectedHeadVersion:current.headVersion,value:'   '}});
  assert.equal(blank.json().error.code,'VALIDATION_ERROR');assert.equal(f.store.cursor(f.projectId),cursor);
  assert.equal(f.store.list('grant',f.projectId).length,grants);assert.equal(f.engine.attempts(f.projectId).length,0);
+});
+
+
+test('duration edit holds only its detached shot during commit, keeps a running turn and permits another shot to dispatch', async t => {
+ const f=fixture(t), p=f.store.getProject(f.projectId);
+ const actor=f.service.beginRequest(f.projectId,'local-user','Work on shot 0',{scopeIds:['shot-0']});
+ const epoch=f.service.openEpoch(f.projectId,actor);
+ f.store.insert('director_turn','running-turn',f.projectId,{id:'running-turn',requestId:actor.requestId,epochId:epoch.actor.epochId,state:'running'});
+ const save=f.store.saveProject.bind(f.store);let captured;
+ f.store.saveProject=(project,version)=>{
+   captured=f.store.list('hold',f.projectId).filter(h=>h.active && h.ownerId!==actor.requestId);
+   assert.deepEqual(captured.map(h=>h.scopeId),['shot-0']);
+   return save(project,version);
+ };
+ const receipt=f.edit({kind:'shot',id:p.shots[0].id,field:'desiredFrames',value:'240'});
+ assert.equal(captured[0].ownerId,receipt.requestId);
+ assert.equal(f.store.get('hold',captured[0].id).active,false);
+ assert.equal(f.store.get('director_turn','running-turn').state,'running');
+ assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'active');
+ assert.equal(f.store.get('message',actor.requestId).state,'active');
+ assert.ok(!f.store.list('hold',f.projectId).some(h=>h.scopeId===f.projectId));
+ assert.equal((await f.engine.runReady()).dispatched,1);
+ assert.equal(f.engine.attempts(f.projectId)[0].nodeId,f.plan.nodes.find(n=>n.shotId==='shot-1'&&n.kind==='image').id);
+});
+
+for(const kind of ['soundtrack','moveShot','addScene','addShot']) test(`${kind} places no hold and leaves Director authority alone`,t=>{
+ const f=fixture(t), p=f.store.getProject(f.projectId),actor=f.service.beginRequest(f.projectId,'local-user','Keep working',{editing:false}),epoch=f.service.openEpoch(f.projectId,actor);
+ const edits={soundtrack:{field:'audioId',value:''},moveShot:{id:'shot-0',sceneId:'scene-1'},addScene:{value:'New scene'},addShot:{sceneId:'scene-0'}};
+ f.edit({kind,...edits[kind]});
+ assert.deepEqual(f.store.list('hold',f.projectId),[]);
+ assert.equal(f.store.get('epoch',epoch.actor.epochId).state,'read_only');
+ assert.equal(f.store.get('message',actor.requestId).state,'active');
+});
+
+for(const kind of ['treatment:brief','treatment:story','scene']) test(`${kind} preserves paid shot outputs whose intent did not change and detaches assembly`,async t=>{
+ const f=fixture(t);await f.engine.runReady();await f.engine.reconcile();
+ const review=f.engine.reviewSnapshot(f.projectId);f.engine.approve(f.projectId,review.id,review.members.map(m=>m.videoNodeId),'test');await f.engine.runReady();await f.engine.reconcile();
+ const p=f.store.getProject(f.projectId), bindings=f.store.list('node_binding',f.projectId), outputs=f.engine.outputs(f.projectId);
+ // Include assembly bindings without paying for another operation.
+ for(const nodeKind of ['timeline','render']) f.store.insert('node_binding',nodeKind,f.projectId,{...bindings[0],id:nodeKind,node:{...bindings[0].node,id:nodeKind,kind:nodeKind,shotId:null}});
+ const [command,field]=kind.split(':');
+ f.edit({kind:command,...(field?{field}:{}),id:'scene-0',value:'New wording, same picture intent'});
+ for(const b of bindings) assert.deepEqual(f.store.get('node_binding',b.id),b);
+ assert.deepEqual(f.engine.outputs(f.projectId),outputs);
+ for(const nodeKind of ['timeline','render']) {const b=f.store.get('node_binding',nodeKind);assert.equal(b.candidateId,null);assert.deepEqual(b.outputs,{});}
+ assert.deepEqual(f.store.getProject(f.projectId).shots,p.shots);
+ assert.ok(!f.store.list('hold',f.projectId).some(h=>h.active));
+});
+
+test('shot hold and binding detachment roll back when commit fails, and the same identity can retry',t=>{
+ const f=fixture(t),p=f.store.getProject(f.projectId),records=f.store.list('node_binding',f.projectId),cursor=f.store.cursor(f.projectId),save=f.store.saveProject.bind(f.store),key=randomUUID();
+ const body={kind:'shot',id:'shot-0',field:'motion',value:'Pan',expectedHeadVersion:p.headVersion};
+ f.store.saveProject=()=>{throw new Error('write failed');};
+ assert.throws(()=>f.edit(body,key),/write failed/);
+ assert.equal(f.store.cursor(f.projectId),cursor);assert.deepEqual(f.store.list('hold',f.projectId),[]);assert.deepEqual(f.store.list('node_binding',f.projectId),records);
+ f.store.saveProject=save;f.edit(body,key);assert.ok(!f.store.list('hold',f.projectId).some(h=>h.active));
+});
+
+test('duration below accepted within-shot narration returns 409 with exact frame details and makes no writes',async t=>{
+ const f=fixture(t),p=f.store.getProject(f.projectId),cue={id:'accepted-voice',meaning:'Voice',durationFrames:210,placementFrames:0,accepted:true,measured:true};
+ p.cues=[cue];p.shots[0].cueId=cue.id;p.shots[0].narrationTimingMode='within_shot';p.shots[0].desiredFrames=240;f.store.saveProject(p,p.headVersion);
+ const head=f.store.getProject(f.projectId).headVersion,cursor=f.store.cursor(f.projectId),body={kind:'shot',id:'shot-0',field:'desiredFrames',value:'180',expectedHeadVersion:head};
+ const response=await f.app.inject({method:'POST',url:`/api/projects/${f.projectId}/storyboard`,headers:{host:'127.0.0.1',authorization:`Bearer ${f.token}`,'idempotency-key':randomUUID()},payload:body});
+ assert.equal(response.statusCode,409,response.body);assert.equal(response.json().error.code,'SHOT_SHORTER_THAN_NARRATION');assert.deepEqual(response.json().error.details,{shotId:'shot-0',narrationFrames:210,requestedFrames:180});
+ assert.equal(f.store.cursor(f.projectId),cursor);assert.equal(f.store.getProject(f.projectId).headVersion,head);
+ f.edit({...body,value:'210'});assert.equal(f.store.getProject(f.projectId).shots[0].desiredFrames,210);
+});
+
+test('duration floor ignores unaccepted or other-shot cues',t=>{
+ const f=fixture(t),p=f.store.getProject(f.projectId);
+ p.cues=[{id:'draft',meaning:'Draft',durationFrames:300,accepted:false},{id:'other',meaning:'Other line',durationFrames:400,accepted:true}];
+ p.shots[0].cueId='draft';p.shots[0].narrationTimingMode='within_shot';p.shots[1].cueId='other';f.store.saveProject(p,p.headVersion);
+ f.edit({kind:'shot',id:'shot-0',field:'desiredFrames',value:'120'});assert.equal(f.store.getProject(f.projectId).shots[0].desiredFrames,120);
 });
