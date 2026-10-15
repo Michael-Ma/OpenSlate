@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtureCommand, recompute, FIXTURE_TIMING } from '../../src/next/fixtures/fixture-commands.ts';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
-import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
+import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, lastFerryNotes, lastFerryProposals, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { confirmBody, keyframesBody, videoBody } from '../../src/next/model/commands.ts';
 import { StudioStore } from '../../src/next/store/store.ts';
 
@@ -11,7 +11,7 @@ function world() {
   const timers = [];
   let now = 0;
   const w = {
-    overview: lastFerryOverview(), snapshot: lastFerrySnapshot(), director: { ...lastFerryDirector },
+    overview: lastFerryOverview(), snapshot: lastFerrySnapshot(), director: { ...lastFerryDirector }, proposals: lastFerryProposals(),
     update(change) { change(w); const cursor = w.overview.cursor + 1; w.overview = { ...w.overview, cursor }; w.snapshot = { ...w.snapshot, cursor }; },
     later(ms, change) { timers.push({ at: now + ms, change }); },
     advance(ms) {
@@ -36,9 +36,13 @@ const scene = (w, ordinal) => w.overview.scenes[ordinal - 1];
 const open = (w, label) => { const { artifactId, sha256 } = shot(w, label).keyframe.artifact; return post(w, `/shots/${shotId(label)}/frame-views`, { artifactId, sha256 }); };
 const edit = (w, body) => post(w, '/storyboard', { ...body, expectedHeadVersion: w.snapshot.project.headVersion });
 const refused = code => error => error.code === code;
+/** The Director's note b is carried out by accepting its proposal p1: 2.3 becomes 8 s and the note resolves. */
+const acceptP1 = (w) => post(w, '/director/proposals/p1/accept', { previewDigest: w.proposals.find(p => p.proposalId === 'p1').previewDigest });
 
-test('recompute leaves the golden Last Ferry state exactly as it is', () => {
-  assert.deepEqual(recompute(lastFerryOverview()), lastFerryOverview());
+test('recompute leaves the golden Last Ferry state exactly as it is, the open blocking note included', () => {
+  assert.deepEqual(recompute(lastFerryOverview(), lastFerryNotes()), lastFerryOverview());
+  const withoutNotes = recompute(lastFerryOverview(), []);
+  assert.ok(!withoutNotes.scenes[1].blockers.some(b => b.code === 'recommendation_open'));
 });
 
 test('opening a frame records it against the exact picture; a stale picture is refused', () => {
@@ -47,7 +51,7 @@ test('opening a frame records it against the exact picture; a stale picture is r
   assert.equal(receipt.shotId, shotId('2.2'));
   assert.equal(shot(w, '2.2').keyframe.opened, true);
   assert.equal(scene(w, 2).counts.opened, 2);
-  assert.deepEqual(scene(w, 2).blockers.map(b => b.code), ['frame_not_opened', 'narration_too_long']);
+  assert.deepEqual(scene(w, 2).blockers.map(b => b.code), ['frame_not_opened', 'narration_too_long', 'recommendation_open']);
   assert.throws(() => post(w, `/shots/${shotId('2.3')}/frame-views`, { artifactId: 'art-2.3', sha256: 'f'.repeat(64) }), refused('FRAME_STALE'));
 });
 
@@ -95,7 +99,7 @@ test('regenerating 2.2 makes a red-coat second take that is not opened', () => {
 test('confirming Scene 2 makes one clip after another, then the scene reads video saved', () => {
   const w = world();
   open(w, '2.2'); open(w, '2.3');
-  edit(w, { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '240' });
+  acceptP1(w);
   assert.deepEqual(scene(w, 2).blockers, []);
   assert.equal(scene(w, 2).quotes.confirmVideo.micros, '1500000');
   const body = { ...videoBody(read(w, sceneId(2)), w.overview), expectedEstimateMicros: '1500000' };
@@ -104,7 +108,6 @@ test('confirming Scene 2 makes one clip after another, then the scene reads vide
   assert.equal(scene(w, 2).confirmation.state, 'running');
   assert.deepEqual(['2.1', '2.2', '2.3'].map(l => shot(w, l).video.state), ['running', 'queued', 'queued']);
   assert.deepEqual(['2.2', '2.3'].map(l => shot(w, l).video.waiting.ahead), [0, 1]);
-  assert.throws(() => edit(w, { kind: 'undo', commandId: 'command-1' }), refused('UNDO_UNAVAILABLE'), 'a paid press used the edit');
   w.advance(FIXTURE_TIMING.clipMs);
   assert.deepEqual(['2.1', '2.2', '2.3'].map(l => shot(w, l).video.state), ['ready', 'running', 'queued']);
   w.advance(FIXTURE_TIMING.clipMs * 2);
@@ -117,7 +120,7 @@ test('confirming Scene 2 makes one clip after another, then the scene reads vide
 test('the durable confirm binds the opened frames and the digest, then makes the clips', () => {
   const w = world();
   open(w, '2.2'); open(w, '2.3');
-  edit(w, { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '240' });
+  acceptP1(w);
   const body = confirmBody(w.overview, scene(w, 2));
   assert.throws(() => post(w, `/scenes/${sceneId(2)}/confirm`, { ...body, confirmationDigest: 'old' }), refused('SCENE_REVIEW_STALE'));
   assert.throws(() => post(w, `/scenes/${sceneId(2)}/confirm`, { ...body, expectedEstimateMicros: '1000000' }), refused('ESTIMATE_CHANGED'));
@@ -209,10 +212,99 @@ test('a new narration line is estimated at the recorded pace and stops blocking 
   assert.equal(w.snapshot.project.shots.find(s => s.id === shotId('2.3')).narration.text, 'It was the last boat, and I nearly missed it.');
 });
 
+const note = (w, id) => w.snapshot.notes.find(n => n.noteId === id);
+const proposal = (w, id) => w.proposals.find(p => p.proposalId === id);
+const resolve = (w, id, choiceIndex, resultRef) => post(w, `/director/notes/${id}/resolve`, { choiceIndex, expectedVersion: note(w, id).version, ...(resultRef ? { resultRef } : {}) });
+
+test('the golden snapshot carries the two notes of the design and the held proposal behind b', () => {
+  const w = world();
+  assert.deepEqual(w.snapshot.notes.map(n => [n.letter, n.kind, n.blocking, n.state, n.choices.map(c => c.kind)]),
+    [['a', 'observation', false, 'open', ['accept', 'regenerate_keyframe']], ['b', 'recommendation', true, 'open', ['proposal', 'edit_field']]]);
+  assert.deepEqual([proposal(w, 'p1').state, proposal(w, 'p1').preview.filmSecondsNow, proposal(w, 'p1').preview.filmSecondsAfter], ['held', 48, 50]);
+});
+
+test('Keep maroon resolves note a; a non-blocking note never gated the confirm', () => {
+  const w = world();
+  assert.ok(!scene(w, 2).blockers.some(b => b.code === 'recommendation_open' && b.shotId === shotId('2.2')));
+  const resolved = resolve(w, 'note-a', 0);
+  assert.deepEqual([resolved.state, resolved.version, resolved.resolution.choiceIndex], ['resolved', 2, 0]);
+  assert.throws(() => resolve(w, 'note-a', 0), refused('REVISION_CONFLICT'));
+});
+
+test('accepting p1 applies it and resolves note b atomically; the note route only acknowledges; undo reopens', () => {
+  const w = world();
+  assert.throws(() => resolve(w, 'note-b', 0, 'p1'), refused('NOTE_RESULT_INVALID'), 'the note cannot carry out a proposal');
+  assert.throws(() => post(w, '/director/proposals/p1/accept', { previewDigest: 'old' }), refused('PROPOSAL_PREVIEW_CHANGED'));
+  const { proposal: accepted } = acceptP1(w);
+  assert.equal(accepted.state, 'accepted');
+  assert.equal(shot(w, '2.3').durationFrames, 240);
+  assert.deepEqual([note(w, 'note-b').state, note(w, 'note-b').resolution.resultRef, note(w, 'note-b').version], ['resolved', 'p1', 2]);
+  assert.ok(!scene(w, 2).blockers.some(b => b.code === 'recommendation_open' || b.code === 'narration_too_long'));
+  // Acknowledging the already accepted proposal through the note is idempotent.
+  assert.equal(post(w, '/director/notes/note-b/resolve', { choiceIndex: 0, expectedVersion: 1, resultRef: 'p1' }).state, 'resolved');
+  assert.throws(() => acceptP1(w), refused('PROPOSAL_STALE'));
+  const undone = post(w, '/director/proposals/p1/undo');
+  assert.deepEqual([undone.proposal.state, undone.leftAlone], ['undone', []]);
+  assert.equal(shot(w, '2.3').durationFrames, 180);
+  assert.deepEqual([note(w, 'note-b').state, note(w, 'note-b').resolution, note(w, 'note-b').version], ['open', undefined, 3]);
+  assert.ok(scene(w, 2).blockers.some(b => b.code === 'recommendation_open'));
+});
+
+test('undo leaves a field the person changed since as it is', () => {
+  const w = world();
+  acceptP1(w);
+  edit(w, { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '270' });
+  const undone = post(w, '/director/proposals/p1/undo');
+  assert.deepEqual(undone.leftAlone, [{ shotId: shotId('2.3'), field: 'desiredFrames' }]);
+  assert.equal(shot(w, '2.3').durationFrames, 270);
+});
+
+test('a held proposal goes stale while its shot differs and is held again when it changes back; reject keeps the note open', () => {
+  const w = world();
+  const { commandId } = edit(w, { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '210' });
+  assert.deepEqual([proposal(w, 'p1').state, proposal(w, 'p1').staleReason], ['stale', 'SHOT_CHANGED']);
+  assert.throws(() => acceptP1(w), refused('PROPOSAL_STALE'));
+  edit(w, { kind: 'undo', commandId });
+  assert.equal(proposal(w, 'p1').state, 'held');
+  post(w, '/director/proposals/p1/reject');
+  assert.deepEqual([proposal(w, 'p1').state, note(w, 'note-b').state], ['rejected', 'open']);
+});
+
+test('a regenerate choice names the press that carried it out', () => {
+  const w = world();
+  assert.throws(() => resolve(w, 'note-a', 1, 'request-unknown'), refused('NOTE_RESULT_INVALID'));
+  const receipt = post(w, `/scenes/${sceneId(2)}/generate`, { ...keyframesBody(read(w, sceneId(2)), [shotId('2.2')], true), expectedEstimateMicros: '40000' });
+  assert.ok(receipt.requestId);
+  assert.deepEqual(receipt.shotIds, [shotId('2.2')]);
+  assert.equal(resolve(w, 'note-a', 1, receipt.requestId).state, 'resolved');
+  w.advance(FIXTURE_TIMING.keyframeMs);
+  assert.equal(note(w, 'note-a').state, 'resolved', 'a settled note does not go stale when its new take lands');
+});
+
+test('a note whose seen keyframe is replaced some other way goes stale and leaves the banner', () => {
+  const w = world();
+  post(w, `/scenes/${sceneId(2)}/generate`, { ...keyframesBody(read(w, sceneId(2)), [shotId('2.2')], true), expectedEstimateMicros: '40000' });
+  assert.equal(note(w, 'note-a').state, 'open', 'still open while the new take is being made');
+  w.advance(FIXTURE_TIMING.keyframeMs);
+  assert.equal(note(w, 'note-a').state, 'stale');
+  assert.throws(() => resolve(w, 'note-a', 0), refused('NOTE_STALE'));
+});
+
+test('an edit choice names the edit that carried it out, and undoing that edit reopens the note', () => {
+  const w = world();
+  const wrong = edit(w, { kind: 'shot', id: shotId('2.3'), field: 'motion', value: 'Static' });
+  assert.throws(() => resolve(w, 'note-b', 1, wrong.commandId), refused('NOTE_RESULT_INVALID'));
+  const { commandId } = edit(w, { kind: 'narration', id: shotId('2.3'), field: 'text', value: 'The last boat, and I nearly missed it.' });
+  assert.equal(resolve(w, 'note-b', 1, commandId).state, 'resolved');
+  assert.deepEqual(scene(w, 2).blockers.filter(b => b.shotId === shotId('2.3')).map(b => b.code), ['frame_not_opened']);
+  edit(w, { kind: 'undo', commandId });
+  assert.deepEqual([note(w, 'note-b').state, shot(w, '2.3').narration.text], ['open', 'It was the last boat of the season, and I nearly missed it.']);
+});
+
 test('Stop detaches queued clips and keeps sent ones; Continue needs the current authority', () => {
   const w = world();
   open(w, '2.2'); open(w, '2.3');
-  edit(w, { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '240' });
+  acceptP1(w);
   post(w, `/scenes/${sceneId(2)}/generate`, videoBody(read(w, sceneId(2)), w.overview));
   const { stopped } = post(w, '/controls', { action: 'stop' });
   assert.deepEqual([stopped.sentJobs, stopped.detachedJobs], [1, 2]);
@@ -264,7 +356,11 @@ test('the store and the fixture agree on the whole Scene 2 path', async (t) => {
     assert.ok(await store.undo(undo));
     await settle();
     assert.equal(state().overview.shots[shotId('2.3')].durationFrames, 180);
-    assert.ok(await store.narrationFit(shotId('2.3'), 'cut_to_shot', { id: 'toast.saved' }));
+    // The Director's note b is carried out by accepting its proposal, which resolves the note.
+    await settle();
+    assert.equal(state().proposals[0].state, 'held');
+    const accepted = await store.acceptProposal(state().proposals[0]);
+    assert.equal(accepted?.proposal.state, 'accepted');
     await settle();
     assert.deepEqual(state().overview.scenes[1].blockers, []);
     await store.confirmVideo(sceneId(2));

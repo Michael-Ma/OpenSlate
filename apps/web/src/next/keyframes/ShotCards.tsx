@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { checkCallout } from "../model/checks.ts";
 import type { ShotCard } from "../model/keyframes.ts";
+import type { Label, NoteCallout } from "../model/note-banner.ts";
 import { Picture, StatusPill } from "./parts.tsx";
 
 /** Columns the wide layout shows at once; more cards scroll inside the row, fewer leave a dashed placeholder. */
@@ -12,8 +13,19 @@ const VISIBLE = 3;
  * status pill and motion. Checks attach as neutral chips. Work in progress shows an indeterminate bar
  * (plan item GR-17: providers report no percentage).
  */
-export function ShotCards({ cards, sceneOrdinal, onOpen }: { cards: ShotCard[]; sceneOrdinal: number; onOpen(shotId: string): void }) {
+interface Props {
+  cards: ShotCard[];
+  /** The Director's notes on each shot (amber chips), by shot id. */
+  notes: Record<string, NoteCallout[]>;
+  sceneOrdinal: number;
+  busy: boolean;
+  onOpen(shotId: string): void;
+  onNoteChoice(noteId: string, choiceIndex: number): void;
+}
+
+export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoice }: Props) {
   const { t, tm, locale } = useI18n();
+  const label = (value: Label) => ("text" in value ? value.text : tm(value));
   const row = useRef<HTMLDivElement>(null);
   const selectedId = cards.find((card) => card.selected)?.shotId;
 
@@ -59,12 +71,25 @@ export function ShotCards({ cards, sceneOrdinal, onOpen }: { cards: ShotCard[]; 
               <span className="badge">{card.label}</span>
               {card.workingOn === "video" ? <div className="vprog indeterminate" role="progressbar" aria-label={t("card.progress", { shot: card.label })}><i /></div> : null}
             </div>
-            {card.callouts.length ? (
+            {notes[card.shotId]?.length || card.callouts.length ? (
               <div className="callout">
+                {(notes[card.shotId] ?? []).map((note) => (
+                  <span key={note.noteId} className="callout-note">
+                    <span className={`anno${note.done ? " done" : ""}`} data-note={note.noteId} data-state={note.done ? "settled" : "open"}>
+                      <span className="letter">{note.letter}</span>
+                      <span className="anno-text">{note.done && note.doneLabel ? t("note.callout.done", { choice: label(note.doneLabel) }) : note.text}</span>
+                    </span>
+                    {note.regenerate ? (
+                      <button type="button" className="link" data-act="note-regenerate" data-note={note.noteId} data-shot={card.shotId} disabled={busy} onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}>
+                        {label(note.regenerate.label)}
+                      </button>
+                    ) : null}
+                  </span>
+                ))}
                 {card.callouts.map(({ letter, check }) => (
                   <span key={letter} className="anno check" data-check={check.shotId}>
                     <span className="letter">{letter}</span>
-                    {tm(checkCallout(check))}
+                    <span className="anno-text">{tm(checkCallout(check))}</span>
                   </span>
                 ))}
               </div>

@@ -410,6 +410,18 @@ export class NarrationService {
         const changed = fn(state);
         assertNarrationMutation(this.store, scope, before, state, action, argumentsValue);
         if (changed === false) return this.read(projectId);
+        if (actor.kind === "human" && action === "revise") {
+          const changedSegments = new Set([...before.entries, ...state.entries].filter(entry => {
+            const previous = before.entries.find(e => e.segmentId === entry.segmentId), next = state.entries.find(e => e.segmentId === entry.segmentId);
+            return previous?.segmentRevisionId !== next?.segmentRevisionId;
+          }).map(e => e.segmentId));
+          const mappings = this.store.list<{ shotId: string; segmentId: string }>("narration_shot_draft", projectId);
+          const head = this.store.get<{ canonicalId: string }>("narration_canonical_head", projectId);
+          if (head) mappings.push(...(this.store.get<{ shotMappings: { shotId: string; segmentId: string | null }[] }>("narration_canonical", head.canonicalId)?.shotMappings ?? []).filter((m): m is { shotId: string; segmentId: string } => m.segmentId !== null));
+          const ids = new Set(mappings.filter(m => changedSegments.has(m.segmentId)).map(m => m.shotId));
+          if (scope) ids.add(scope.shotId);
+          if (changedSegments.size && ids.size) this.store.appendEvent(projectId, "human.fields_changed", { requestId: actor.requestId, fields: [...ids].map(shotId => ({ shotId, field: "narration" })) });
+        }
         this.persistState(projectId, actor, state, action);
         return this.read(projectId);
       });

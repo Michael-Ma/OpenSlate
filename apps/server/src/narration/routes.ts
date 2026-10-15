@@ -19,7 +19,7 @@ import { registerOwnedTranscriptionRoutes } from "./owned-transcription-routes.j
 import type { NarrationSpeechService } from "./narration-speech-service.js";
 import { registerShotAudioRoutes } from "./shot-audio-routes.js";
 import { registerNarrationSpeechRoutes } from "./narration-speech-routes.js";
-import { assertNarrationAuthority } from './narration-scope.js';
+import { assertNarrationAuthority, shotSessionHeadId } from './narration-scope.js';
 import type { NarrationSession } from './narration-scope.js';
 import { registerAudioLibraryRoutes } from './audio-library-routes.js';
 
@@ -46,6 +46,9 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
   const actorFor = (projectId: string, sessionId: string): ActorContext => {
     const session = store.get<Session>("narration_session", sessionId);
     invariant(session?.projectId === projectId && session.principalId === "local-user", "NARRATION_SESSION_STALE", "Open or explicitly continue this project's narration session");
+    const head = session.shotId ? store.get<{ sessionId: string }>("narration_shot_session_head", shotSessionHeadId(projectId, session.shotId))
+      : store.get<{ sessionId: string }>("narration_session_head", projectId);
+    invariant(head?.sessionId === session.id, "NARRATION_SESSION_STALE", "This narration session was explicitly continued; use its current session identity");
     const actor: ActorContext = { kind: "human", principalId: "local-user", requestId: session.requestId };
     try { production.assertActor(projectId, actor, true); } catch { invariant(false, "NARRATION_SESSION_STALE", "Narration session was superseded; explicitly continue it before editing"); }
     const scope = assertNarrationAuthority(production, projectId, actor);
@@ -122,7 +125,7 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
         "NARRATION_SESSION_STALE", "The displayed conversation request changed; refresh before explicitly continuing it");
         const continuationRequestId = request.body.continuationRequestId ?? previous?.requestId;
         const actor = production.beginRequest(projectId, "local-user", request.body.text ?? "Edit narration and review its recording and timing", {
-          source: "app", scopeIds: [projectId], editing: true, key: `narration:${digest(key(request))}`,
+          source: "app", concurrency: "alongside", scopeIds: [projectId], editing: true, key: `narration:${digest(key(request))}`,
           ...(continuationRequestId ? { continuationRequestId } : {}),
         });
         const session: Session = { id: newId(), projectId, requestId: actor.requestId, principalId: "local-user" };

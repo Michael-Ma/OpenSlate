@@ -108,3 +108,19 @@ test('Stop after preparation prevents confirmation',async t=>{
   assert.notEqual((await f.call(`/${actor.requestId}/confirm`,{preparedId:prepared.id,proposalDigest:prepared.proposalDigest})).statusCode,200);
   assert.equal(f.store.getProject(f.project.id).headVersion,0);
 });
+test('alongside field edit preserves import authority and rebases exact reviewed IDs onto unrelated changes',async t=>{
+  const f=fixture(t),{actor,bridge,prepared}=await f.draft();
+  const {editStoryboard}=await import('../dist/storyboard.js');
+  editStoryboard(f.service,f.project.id,{kind:'treatment',field:'story',value:'Human story alongside interpretation',expectedHeadVersion:0},randomUUID());
+  assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.equal(f.store.get('message',actor.requestId).state,'active');
+  const view=(await f.call()).json().pending;assert.equal(view.stale,false);assert.equal(view.draft.project.story,'Human story alongside interpretation');
+  const response=await f.call(`/${actor.requestId}/confirm`,{preparedId:prepared.id,proposalDigest:prepared.proposalDigest});assert.equal(response.statusCode,200,response.body);
+  const project=f.store.getProject(f.project.id);assert.equal(project.story,'Human story alongside interpretation');assert.deepEqual(project.scenes,prepared.next.scenes);
+});
+test('an alongside edit to an imported field makes its draft stale without revoking the turn',async t=>{
+  const f=fixture(t),{actor,bridge,prepared}=await f.draft();const {editStoryboard}=await import('../dist/storyboard.js');
+  editStoryboard(f.service,f.project.id,{kind:'treatment',field:'brief',value:'Human brief wins',expectedHeadVersion:0},randomUUID());
+  assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');assert.equal((await f.call()).json().pending.stale,true);
+  assert.notEqual((await f.call(`/${actor.requestId}/confirm`,{preparedId:prepared.id,proposalDigest:prepared.proposalDigest})).statusCode,200);
+  assert.equal(f.store.getProject(f.project.id).brief,'Human brief wins');
+});

@@ -4,7 +4,7 @@ import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorStar
 import type { ProductionService } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
 
-export interface DemoCommand { action: "create" | "close_up" | "wide"; shotId?: string }
+export interface DemoCommand { action: "create" | "close_up" | "wide" | "review"; shotId?: string; sceneId?: string }
 
 function source(project: ProjectRecord) {
   const q = JSON.stringify;
@@ -39,21 +39,23 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     let text = "Your message is saved. This offline director is a scripted demonstration, so it cannot interpret arbitrary creative requests yet. Use Create a 2-shot demo, then review its frames or try a scoped close-up/wide edit. Real conversation requires the Codex runtime connection.";
     const projectForNotes = this.service.store.getProject(input.projectId);
     const request = this.service.store.get<{ scopeIds: string[] }>("message", input.requestId)!;
-    const scene = projectForNotes.scenes.find(scene => request.scopeIds.includes(scene.id));
-    const shots = projectForNotes.shots.filter(shot => shot.sceneId === scene?.id);
-    if (!command && scene && shots.length && input.bridge.toolContractVersion === "5.0.0") {
+    const scene = projectForNotes.scenes.find(scene => request.scopeIds.includes(scene.id) || projectForNotes.shots.some(s => s.sceneId === scene.id && request.scopeIds.includes(s.id)));
+    const shots = projectForNotes.shots.filter(shot => shot.sceneId === scene?.id && (request.scopeIds.includes(scene!.id) || request.scopeIds.includes(shot.id)));
+    if ((!command || command.action === "review") && scene && shots.length && input.bridge.toolContractVersion === "5.0.0") {
       const first = shots[0]!, last = shots.at(-1)!;
+      const review = this.service.store.get("keyframe_review_request", input.requestId) || command?.action === "review";
+      const proposal = review && last.desiredFrames < 240 ? await invoke("propose_change", { patch: { updateShots: [{ id: last.id, desiredFrames: 240 }] } }) as { proposalId: string } : null;
       await invoke("record_notes", { notes: [
         { anchor: { shotIds: [first.id] }, kind: "observation", blocking: false,
           text: "Scripted demo note: a live Director would compare this frame with the brief. This offline Director has not seen the picture.",
           choices: [{ kind: "accept", label: "Keep this frame" }, { kind: "regenerate_keyframe", shotIds: [first.id] }] },
         { anchor: { shotIds: [last.id] }, kind: "recommendation", blocking: true,
-          text: "Scripted demo recommendation: check whether the closing narration expresses the scene's intent.",
-          choices: [{ kind: "accept", label: "Keep narration" }, { kind: "edit_field", shotId: last.id, field: "narration" }] },
+          text: review ? "Scripted demo recommendation: the closing line needs timing review; consider an eight-second shot." : "Scripted demo recommendation: check whether the closing narration expresses the scene's intent.",
+          choices: [...(proposal ? [{ kind: "proposal", proposalId: proposal.proposalId }] : []), { kind: "accept", label: review ? `Keep ${last.desiredFrames / 30} s` : "Keep narration" }, { kind: "edit_field", shotId: last.id, field: "narration" }] },
       ] });
       text = "Scripted demo review: two notes are saved for this scene. Keep the current choices, edit the narration, or use the human keyframe generation action. No picture was visually inspected.";
     }
-    if (command) {
+    if (command && command.action !== "review") {
       const project = this.service.store.getProject(input.projectId);
       let proposed = project;
       const proposal: ChangeProposal = { variant: "workflow", expectedHeadVersion: project.headVersion };

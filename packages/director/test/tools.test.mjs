@@ -325,7 +325,7 @@ test("actual V4 stdio child advertises the saved catalog and forwards compact wr
 
 test("every shipped tool catalog has an immutable complete catalog and handler digest", () => {
   const hashes = {
-    "5.0.0": ["efcbc94108d5dd8544d72e310004e7bdf0b450f202d9d631b852c7cf70f10f58", "78fdd6f63dcd6c5392f8c5db8d397a772e47fde895debbcd257bcada77eb47d6"],
+    "5.0.0": ["271ad801bf43075bcb1ed0188fd8ca5822f3845f903a9ee2d4cca92fb910530c", "e696fa1999ff0d088ba7ef9a6b64d42af111fb0e5af7a927973999e843f8914e"],
     "1.0.0": ["b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa", "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec"],
     "2.0.0": ["c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df", "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e"],
     "3.0.0": ["81199e4880e2e3e4412ae8828abfb9c6a3f7dbbce9f5434ac9d5c345bf716a4b", "f6ecf84a8d5cd48b8114b4055171fba9b21682deccd7adc45b09b7ab9e45789d"],
@@ -337,7 +337,7 @@ test("every shipped tool catalog has an immutable complete catalog and handler d
   }
 });
 
-test('V5 stdio advertises notes and truthful audio suggestions, then forwards a note once', async t => {
+test('V5 stdio advertises notes/proposals and truthful audio suggestions, forwarding each once', async t => {
   const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: '5.0.0' });
   assert.equal((await c.initialize()).result.serverInfo.version, '5.0.0');
   const catalog = toolCatalog('5.0.0');
@@ -349,5 +349,8 @@ test('V5 stdio advertises notes and truthful audio suggestions, then forwards a 
   const input = { notes: [{ anchor: { shotIds: ['shot'] }, kind: 'observation', blocking: false, text: 'Inspect the opening direction.', choices: [{ kind: 'accept', label: 'Keep it' }] }] };
   const reply = await c.request('tools/call', { name: 'record_notes', arguments: input }).response;
   assert.equal(reply.result.isError, false); assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, input);
+  const proposal = { patch: { updateShots: [{ id: 'shot', desiredFrames: 240 }] } };
+  const held = await c.request('tools/call', { name: 'propose_change', arguments: proposal }).response;
+  assert.equal(held.result.isError, false); assert.equal(f.calls.length, 2); assert.deepEqual(f.calls[1].body, proposal);
   assert.equal(toolHandlerId('5.0.0'), 'director-tools@5');
 });
