@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { artifactFixture, makeImageDiscussion, makeMessageCommand, makeQuestionReply, reviewIdentity, reviewMatchesProject, approvalPayload, previewOutput, conversation, pollingDelay, durationLabel, errorMessage } from '../src/model.ts';
+import { artifactFixture, makeImageDiscussion, makeMessageCommand, makeQuestionReply, reviewIdentity, reviewMatchesProject, approvalPayload, previewOutput, conversation, pollingDelay, durationLabel, errorMessage } from '../src/legacy/model.ts';
 
 const artifact = (id = 'frame-1', sha = 'a'.repeat(64)) => ({ artifactId: id, sha256: sha, kind: 'image' });
 const project = () => ({ id: 'project', name: 'Boots', activePlanId: 'plan', headVersion: 3, revisionId: 'revision', shots: [{ id: 'shot-1' }, { id: 'shot-2' }] });

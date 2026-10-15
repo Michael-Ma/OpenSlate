@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DirectorSettingsReadGate } from '../src/director-settings-read.ts';
-import { directorChangeCommand, restoredDirectorDraft } from '../src/project-settings-model.ts';
-import { pendingCommandsFor } from '../src/pending-command.ts';
+import { DirectorSettingsReadGate } from '../src/legacy/director-settings-read.ts';
+import { directorChangeCommand, restoredDirectorDraft } from '../src/legacy/project-settings-model.ts';
+import { pendingCommandsFor } from '../src/legacy/pending-command.ts';
 
 function deferred() {
   let resolve, reject;

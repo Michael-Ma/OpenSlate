@@ -9,10 +9,10 @@ import {
   LOCALE_STORAGE_KEY,
   translate,
   translateUiText,
-} from "../src/locale-model.ts";
-import { commonUiTranslations } from "../src/locale-ui-messages.ts";
-import { mediaUiCopy } from "../src/media-ui-copy.ts";
-import { errorMessage } from "../src/model.ts";
+} from "../src/legacy/locale-model.ts";
+import { commonUiTranslations } from "../src/legacy/locale-ui-messages.ts";
+import { mediaUiCopy } from "../src/legacy/media-ui-copy.ts";
+import { errorMessage } from "../src/legacy/model.ts";
 
 test("language priority is explicit URL, saved choice, supported browser preference then English", () => {
   assert.equal(resolveLocale("?mode=night&lang=zh", "en", ["en-US"]), "zh-CN");

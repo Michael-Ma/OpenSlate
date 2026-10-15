@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ChatMarkdown } from '../src/ChatMarkdown.ts';
+import { ChatMarkdown } from '../src/legacy/ChatMarkdown.ts';
 const render = (text, messageId = 'test') => renderToStaticMarkup(createElement(ChatMarkdown, { text, messageId }));
 test('chat renders actual blocker Markdown as paragraphs, bold labels and a list', () => {
   const html = render('Two blockers remain:\n\n- **Storyboard generation:** review the plan.\n- **Shot narration:** save `shot.narration`.');
@@ -25,7 +25,7 @@ test('footnote identities belong to their message and cannot jump into another m
 });
 
 test('Chinese UI localizes only an absent image label while original message and explicit alternative text stay intact', async () => {
- const {LocaleContext}=await import('../src/locale-context.ts');
+ const {LocaleContext}=await import('../src/legacy/locale-context.ts');
  const content='Original English story.\n\n![](https://example.com/reference.png)\n\n![Image reference](https://example.com/original.png)';
  const html=renderToStaticMarkup(createElement(LocaleContext.Provider,{value:{locale:'zh-CN',setLocale:()=>{}}},createElement(ChatMarkdown,{text:content,messageId:'zh'})));
  assert.match(html,/Original English story/);assert.match(html,/>参考图像<\/a>/);assert.match(html,/>Image reference<\/a>/);assert.doesNotMatch(html,/<img/);

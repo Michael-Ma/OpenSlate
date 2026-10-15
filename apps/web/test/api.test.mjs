@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 const hooks = registerHooks({ resolve(specifier, context, next) {
   return next(['./model', './event-stream'].includes(specifier) && context.parentURL?.endsWith('/src/api.ts') ? specifier + '.ts' : specifier, context);
 } });
-const { StudioApi, ApiError } = await import('../src/api.ts'); hooks.deregister();
+const { StudioApi, ApiError } = await import('../src/legacy/api.ts'); hooks.deregister();
 const nativeFetch = globalThis.fetch;
 test.afterEach(() => { globalThis.fetch = nativeFetch; });
 

@@ -1,17 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { translate, translateUiText } from "../src/locale-model.ts";
+import { translate, translateUiText } from "../src/legacy/locale-model.ts";
 import {
   mediaControlledMessage,
   mediaHierarchyLabel,
   mediaRecordingLabel,
   mediaUiCopy,
-} from "../src/media-ui-copy.ts";
+} from "../src/legacy/media-ui-copy.ts";
 import {
   recordingLabel,
   narrationTimingIssues,
-} from "../src/narration-model.ts";
-import { PendingCommandRegistry } from "../src/pending-command.ts";
+} from "../src/legacy/narration-model.ts";
+import { PendingCommandRegistry } from "../src/legacy/pending-command.ts";
 
 const translation = (locale) => ({
   t: (english, chinese, values) => translate(locale, english, chinese, values),

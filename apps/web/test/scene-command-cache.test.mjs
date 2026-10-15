@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { startSceneCommand } from "../src/scene-command.ts";
-import { pendingCommandsFor } from "../src/pending-command.ts";
-import { ApiError } from "../src/api.ts";
+import { startSceneCommand } from "../src/legacy/scene-command.ts";
+import { pendingCommandsFor } from "../src/legacy/pending-command.ts";
+import { ApiError } from "../src/legacy/api.ts";
 
 function deferred() {
   let resolve;

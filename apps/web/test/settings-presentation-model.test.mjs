@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectedSettingsAccounts, settingsModelAccountLine, settingsModelLabel, settingsSetupIssue } from '../src/settings-presentation-model.ts';
+import { selectedSettingsAccounts, settingsModelAccountLine, settingsModelLabel, settingsSetupIssue } from '../src/legacy/settings-presentation-model.ts';
 function provider(id, kind, adapter) {
   return { id, label: id, installedDefinition: true, profile: { kind, adapter, configuration: { model: id } }, estimatedCost: null,
     readiness: { configurationValid: true, registered: true, mediaTools: { required: false, available: true }, credential: { required: adapter !== 'fake' && adapter !== 'codex-image', present: true, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: true, enabledByHost: true, realExecutionEnabled: true } };

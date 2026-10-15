@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import {
   SceneConfirmationRunner,
   SceneConfirmationPending,
-} from "../src/scene-confirmation-model.ts";
-import { SceneContinuationCache } from "../src/scene-continuation-cache.ts";
-import { PendingCommandRegistry } from "../src/pending-command.ts";
+} from "../src/legacy/scene-confirmation-model.ts";
+import { SceneContinuationCache } from "../src/legacy/scene-continuation-cache.ts";
+import { PendingCommandRegistry } from "../src/legacy/pending-command.ts";
 
 function fixture({
   count = 2,

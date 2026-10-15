@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { composerEnterAction } from "../src/reference-model.ts";
-import { makeQuestionReply } from "../src/model.ts";
+import { composerEnterAction } from "../src/legacy/reference-model.ts";
+import { makeQuestionReply } from "../src/legacy/model.ts";
 
 const input = {
   disabled: false,

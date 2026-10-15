@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { translate, translateUiText } from "../src/locale-model.ts";
-import { hierarchyUiLabel, workbenchCopy } from "../src/workbench-copy.ts";
-import { makeReferencedMessage, referenceKey } from "../src/reference-model.ts";
+import { translate, translateUiText } from "../src/legacy/locale-model.ts";
+import { hierarchyUiLabel, workbenchCopy } from "../src/legacy/workbench-copy.ts";
+import { makeReferencedMessage, referenceKey } from "../src/legacy/reference-model.ts";
 
 const translator = (locale) => (english, chinese, values) =>
   translate(locale, english, chinese, values);

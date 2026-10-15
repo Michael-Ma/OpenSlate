@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PendingCommandRegistry, pendingCommandsFor, activeProjectEdit } from '../src/pending-command.ts';
+import { PendingCommandRegistry, pendingCommandsFor, activeProjectEdit } from '../src/legacy/pending-command.ts';
 const uncertain = error => error.code === 'NETWORK_ERROR';
 const network = () => Object.assign(new Error('response lost'), { code: 'NETWORK_ERROR' });
 function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }

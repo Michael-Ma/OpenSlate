@@ -6,8 +6,8 @@ import {
   makeConversationSceneCommand,
   sceneGenerationLabels,
   sceneShotMediaStatus,
-} from "../src/conversation-actions-model.ts";
-import { PendingCommandRegistry } from "../src/pending-command.ts";
+} from "../src/legacy/conversation-actions-model.ts";
+import { PendingCommandRegistry } from "../src/legacy/pending-command.ts";
 
 const hash = "a".repeat(64),
   director = { mode: "native", status: "idle" };

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canStopWork, continueStoppedWork, makeMessageCommand } from '../src/model.ts';
+import { canStopWork, continueStoppedWork, makeMessageCommand } from '../src/legacy/model.ts';
 const project={id:'p',shots:[{id:'s'}]};
 test('follow-up carries the observed stop identity with safe project scope and retains retry identity',()=>{
  const command=makeMessageCommand(project,'Change this shot',['s'],'same-key');

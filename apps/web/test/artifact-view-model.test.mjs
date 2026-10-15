@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { artifactIdentity, artifactView } from "../src/artifact-view-model.ts";
+import { artifactIdentity, artifactView } from "../src/legacy/artifact-view-model.ts";
 const a = { artifactId: "a", sha256: "a".repeat(64), kind: "image" };
 test("same node receiving a different hash cannot display old bytes under the new review", () => {
   const api = {},

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectCreationCommand, providerEstimate, canUseDemo, providerExecutionStatus, PROVIDER_KIND_CHOICES, providerSelectionForKind, selectedProviderForKind } from '../src/provider-model.ts';
+import { projectCreationCommand, providerEstimate, canUseDemo, providerExecutionStatus, PROVIDER_KIND_CHOICES, providerSelectionForKind, selectedProviderForKind } from '../src/legacy/provider-model.ts';
 
 test('project creation preserves old default payload and detaches exact catalog choices for retry', () => {
   assert.deepEqual(projectCreationCommand('  Boots  ', 'key', null), { key: 'key', body: { name: 'Boots' } });

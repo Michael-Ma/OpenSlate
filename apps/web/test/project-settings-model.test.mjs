@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MODEL_KINDS, directorChangeCommand, directorDraftIdentity, directorSetupSummary, restoredDirectorDraft, modelAutomaticApplyCommand, modelApplyCommand, modelAppliedCurrent, modelContinuationSent, modelDraftIdentity, modelPreviewCommand, modelPreviewCurrent, modelSettingsContinuation, restoredModelDraft } from '../src/project-settings-model.ts';
-import { activeProjectEdit, pendingCommandsFor } from '../src/pending-command.ts';
+import { MODEL_KINDS, directorChangeCommand, directorDraftIdentity, directorSetupSummary, restoredDirectorDraft, modelAutomaticApplyCommand, modelApplyCommand, modelAppliedCurrent, modelContinuationSent, modelDraftIdentity, modelPreviewCommand, modelPreviewCurrent, modelSettingsContinuation, restoredModelDraft } from '../src/legacy/project-settings-model.ts';
+import { activeProjectEdit, pendingCommandsFor } from '../src/legacy/pending-command.ts';
 const hash = char => char.repeat(64);
 function status() {
   return { version: 1, projectId: 'project', headVersion: 4, revisionId: 'revision4', capabilityLockId: 'lock4', selectionDigest: hash('a'), catalogDigest: hash('b'),

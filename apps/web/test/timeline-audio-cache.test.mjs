@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TimelineAudioCache, audioWindow } from '../src/timeline-audio-cache.ts';
+import { TimelineAudioCache, audioWindow } from '../src/legacy/timeline-audio-cache.ts';
 const placement = (id, atSample = 0, durationSamples = 48000) => ({ id, audioId: id, sha256: 'a'.repeat(64), startSample: 0, atSample, durationSamples, gainMilliDb: 0, shotIds: [] });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 test('audio audition cache keeps a bounded window and releases unused sources on seek and teardown', async () => {

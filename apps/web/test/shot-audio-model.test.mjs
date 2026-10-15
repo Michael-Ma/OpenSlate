@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shotAudioReview } from "../src/shot-audio-model.ts";
+import { shotAudioReview } from "../src/legacy/shot-audio-model.ts";
 const recording = {
   id: "upload",
   media: { sha256: "a".repeat(64), probe: { audio: { samples: 288000 } } },

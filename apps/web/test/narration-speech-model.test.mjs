@@ -6,7 +6,7 @@ import {
   speechReviewCommand,
   speechRequestCommand,
   speechStatus,
-} from "../src/narration-speech-model.ts";
+} from "../src/legacy/narration-speech-model.ts";
 const fixture = () => {
   const view = {
     headVersion: 2,

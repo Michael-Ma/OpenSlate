@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pendingCommandsFor } from '../src/pending-command.ts';
-import { appendGeneratedRecordings, isGeneratedRecording, recordingBinding, recordingLabel, secondsToSamples, sampleSeconds, draftOf, preparationCurrent, narrationReviewState, narrationError, narrationTimingIssues } from '../src/narration-model.ts';
+import { pendingCommandsFor } from '../src/legacy/pending-command.ts';
+import { appendGeneratedRecordings, isGeneratedRecording, recordingBinding, recordingLabel, secondsToSamples, sampleSeconds, draftOf, preparationCurrent, narrationReviewState, narrationError, narrationTimingIssues } from '../src/legacy/narration-model.ts';
 
 test('decimal timing round-trips exact 48 kHz samples without accumulating floating point drift', () => {
   for (const sample of [0, 1, 799, 800, 801, 1599, 1600, 1601, 288799, 333333, 17279999, 17280000]) assert.equal(secondsToSamples(sampleSeconds(sample)), sample);

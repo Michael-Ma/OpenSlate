@@ -7,11 +7,11 @@ import {
   frameHistory,
   frameSelection,
   revokedFrameExposures,
-} from "../src/frame-workspace-model.ts";
+} from "../src/legacy/frame-workspace-model.ts";
 import {
   frameExposureIdentity,
   projectResults,
-} from "../src/project-results-model.ts";
+} from "../src/legacy/project-results-model.ts";
 
 const artifact = (id, sha = "a", kind = "image") => ({
   artifactId: id,

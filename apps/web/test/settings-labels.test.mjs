@@ -5,10 +5,10 @@ import {
   settingsEstimate,
   settingsScopeLabel,
   settingsPlanCopy,
-} from "../src/settings-labels.ts";
-import { settingsUiTranslations } from "../src/settings-ui-translations.ts";
-import { translateUiText } from "../src/locale-model.ts";
-import { directorPlan } from "../src/director-plan-model.ts";
+} from "../src/legacy/settings-labels.ts";
+import { settingsUiTranslations } from "../src/legacy/settings-ui-translations.ts";
+import { translateUiText } from "../src/legacy/locale-model.ts";
+import { directorPlan } from "../src/legacy/director-plan-model.ts";
 const shot = (id, sceneId = "scene") => ({
   id,
   sceneId,
@@ -277,7 +277,7 @@ test("exact whitelist switches controlled copy in both directions while preservi
 });
 
 test("account summaries have correct English plurals and no untranslated placeholder in either language", async () => {
- const { settingsMediaAccountCount } = await import("../src/settings-labels.ts");
+ const { settingsMediaAccountCount } = await import("../src/legacy/settings-labels.ts");
  assert.equal(settingsMediaAccountCount(1,"en"),"1 media account");
  assert.equal(settingsMediaAccountCount(2,"en"),"2 media accounts");
  assert.equal(settingsMediaAccountCount(1,"zh-CN"),"1 个媒体账号");

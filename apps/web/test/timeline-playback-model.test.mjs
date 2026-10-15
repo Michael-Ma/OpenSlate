@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { audioAt, currentPlayback, scheduleAudioStart, syncAudio, timelineMediaIndex, upcomingAudioDelay } from '../src/timeline-playback-model.ts';
+import { audioAt, currentPlayback, scheduleAudioStart, syncAudio, timelineMediaIndex, upcomingAudioDelay } from '../src/legacy/timeline-playback-model.ts';
 const voice = { id: 'cue', audioId: 'audio', sha256: 'a'.repeat(64), startSample: 48000, durationSamples: 96000, atSample: 144000, gainMilliDb: 0, shotIds: ['shot'] };
 function media() { return { currentTime: 0, volume: 1, paused: true, plays: 0, pauses: 0, pause() { this.paused = true; this.pauses++; }, async play() { this.paused = false; this.plays++; } }; }
 test('timeline audio uses absolute placement and source-local trims with strict end boundary', () => {

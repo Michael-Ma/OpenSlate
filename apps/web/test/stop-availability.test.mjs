@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canStopWork } from '../src/model.ts';
+import { canStopWork } from '../src/legacy/model.ts';
 test('waiting conversations can be stopped before any plan exists; historical questions do not create active work',()=>{
  const s={attempts:[],questions:[],control:{paused:false},plan:null};
  assert.equal(canStopWork(s,{mode:'native',status:'waiting_user'}),true);

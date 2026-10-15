@@ -9,7 +9,7 @@ import {
   timelineMusicStart,
   timelineMusicCommand,
   timelineMusicSpan,
-} from "../src/timeline-editor-model.ts";
+} from "../src/legacy/timeline-editor-model.ts";
 
 const shot = (id, sceneId = "scene-a") => ({
   id,

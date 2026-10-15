@@ -7,7 +7,7 @@ import {
   persistAppearancePreference,
   appearanceHref,
   APPEARANCE_STORAGE_KEY,
-} from "../src/appearance-model.ts";
+} from "../src/legacy/appearance-model.ts";
 
 test("direct review mode wins over saved preference without treating arbitrary values as modes", () => {
   assert.equal(resolveAppearance("?mode=night&view=frames", "day"), "night");
@@ -79,7 +79,7 @@ test("blocked or invalid browser storage never prevents selecting a mode", () =>
 test("Day and Night text, links and primary actions retain readable contrast", async () => {
   const { readFile } = await import("node:fs/promises");
   const css = await readFile(
-    new URL("../src/frame-theme.css", import.meta.url),
+    new URL("../src/legacy/frame-theme.css", import.meta.url),
     "utf8",
   );
   const luminance = (hex) => {

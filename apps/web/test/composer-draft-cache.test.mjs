@@ -5,8 +5,8 @@ import {
   composerContextIssues,
   emptyComposerDraft,
   isComposerDraft,
-} from '../src/composer-draft-cache.ts';
-import { readLocalDraft, writeLocalDraft } from '../src/local-draft-cache.ts';
+} from '../src/legacy/composer-draft-cache.ts';
+import { readLocalDraft, writeLocalDraft } from '../src/legacy/local-draft-cache.ts';
 
 class MemoryStorage {
   values = new Map();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { providerEstimate, providerExecutionStatus, providerSelectionForKind, projectCreationCommand } from '../src/provider-model.ts';
+import { providerEstimate, providerExecutionStatus, providerSelectionForKind, projectCreationCommand } from '../src/legacy/provider-model.ts';
 const hash = letter => letter.repeat(64);
 const usage = () => ({ kind:'codex_subscription',unit:'native_turn',quotaEstimateAvailable:false });
 const display = () => ({ id:'codex-image-v1',revision:'v1',adapter:'codex-image',model:'codex-image-generation',definitionDigest:hash('c'),

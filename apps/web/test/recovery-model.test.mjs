@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { recoveryReleaseCommand, recoveryReviewCurrent } from "../src/recovery-model.ts";
-import { makeQuestionReply } from "../src/model.ts";
-import { pendingCommandsFor } from "../src/pending-command.ts";
+import { recoveryReleaseCommand, recoveryReviewCurrent } from "../src/legacy/recovery-model.ts";
+import { makeQuestionReply } from "../src/legacy/model.ts";
+import { pendingCommandsFor } from "../src/legacy/pending-command.ts";
 const state = () => ({ state: "quarantined", receipt: { restoreId: "restore-1", backupCreatedAt: "2026-09-11T00:00:00.000Z", restoredAt: "2026-09-12T00:00:00.000Z", generation: 1 },
   receiptDigest: "a".repeat(64), summaryDigest: "b".repeat(64), counts: { projects: 2, knownJobs: 1, unknownJobs: 1, nativeRequests: 3, unusedAllowances: 2 } });
 test("recovery review captures exact receipt and liabilities, never body-provided authority", () => {

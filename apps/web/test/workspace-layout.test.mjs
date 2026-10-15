@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clampDirectorWidth, directorWidthForKey, DEFAULT_DIRECTOR_WIDTH } from '../src/workspace-layout-model.ts';
-import { visibleProjectConnection } from '../src/project-view-model.ts';
+import { clampDirectorWidth, directorWidthForKey, DEFAULT_DIRECTOR_WIDTH } from '../src/legacy/workspace-layout-model.ts';
+import { visibleProjectConnection } from '../src/legacy/project-view-model.ts';
 test('Director sizing keeps a usable workspace on smaller desktops and rejects invalid stored widths', () => {
   assert.equal(clampDirectorWidth(600, 820), 455);
   assert.equal(clampDirectorWidth(-1, 1440), 260); assert.equal(clampDirectorWidth(Infinity, 1440), DEFAULT_DIRECTOR_WIDTH);

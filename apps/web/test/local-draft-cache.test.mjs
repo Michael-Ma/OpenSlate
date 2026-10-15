@@ -7,7 +7,7 @@ import {
   localDraftNotice,
   readLocalDraft,
   writeLocalDraft,
-} from '../src/local-draft-cache.ts';
+} from '../src/legacy/local-draft-cache.ts';
 
 class MemoryStorage {
   values = new Map();

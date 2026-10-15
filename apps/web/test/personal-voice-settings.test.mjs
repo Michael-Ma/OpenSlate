@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pendingCommandsFor } from "../src/pending-command.ts";
+import { pendingCommandsFor } from "../src/legacy/pending-command.ts";
 
 test("dismissed voice settings preserve exact unresolved registration and never resubmit on reopening", async () => {
   const api = {},

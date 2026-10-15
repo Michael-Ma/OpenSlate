@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearLocalDraft, readLocalDraft, writeLocalDraft } from '../src/local-draft-cache.ts';
-import { musicDraftBase, musicDraftStale, validMusicGain, validMusicStart } from '../src/timeline-music-draft.ts';
-import { timelineMusicCommand } from '../src/timeline-editor-model.ts';
+import { clearLocalDraft, readLocalDraft, writeLocalDraft } from '../src/legacy/local-draft-cache.ts';
+import { musicDraftBase, musicDraftStale, validMusicGain, validMusicStart } from '../src/legacy/timeline-music-draft.ts';
+import { timelineMusicCommand } from '../src/legacy/timeline-editor-model.ts';
 
 class MemoryStorage {
   values = new Map();

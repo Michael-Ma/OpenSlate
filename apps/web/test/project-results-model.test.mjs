@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { frameExposureIdentity, projectResults } from '../src/project-results-model.ts';
+import { frameExposureIdentity, projectResults } from '../src/legacy/project-results-model.ts';
 
 const artifact = (id, kind = 'image', sha = 'a') => ({ artifactId: id, kind, sha256: sha.repeat(64) });
 function snapshot() {

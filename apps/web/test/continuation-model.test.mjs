@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { coveredPendingEdits, makeEditContinuation } from '../src/continuation-model.ts';
+import { coveredPendingEdits, makeEditContinuation } from '../src/legacy/continuation-model.ts';
 
 const snapshot = () => ({ project: { id: 'project', headVersion: 7, shots: [{ id: 'shot-a', sceneId: 'scene-a' }, { id: 'shot-b', sceneId: 'scene-b' }] }, pendingEditContinuations: [
  { requestId: 'request-z', scopeIds: ['shot-a'], holdsDigest: 'a'.repeat(64) },

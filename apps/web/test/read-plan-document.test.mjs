@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readPlanDocument } from "../src/read-plan-document.ts";
+import { readPlanDocument } from "../src/legacy/read-plan-document.ts";
 
 test("document ingestion supports UTF-8 text and Markdown; rejects unsupported and oversized input", async () => {
   assert.deepEqual(

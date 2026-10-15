@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PlanImportCommand } from "../src/plan-import-command.ts";
+import { PlanImportCommand } from "../src/legacy/plan-import-command.ts";
 test("unconfirmed import keeps exact request, saved lifecycle permits the same document again", () => {
   const commands = new PlanImportCommand();
   let id = 0;

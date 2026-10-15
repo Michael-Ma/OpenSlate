@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectKeyframe, inspectedApproval, inspectionMatches } from '../src/keyframe-review-model.ts';
+import { inspectKeyframe, inspectedApproval, inspectionMatches } from '../src/legacy/keyframe-review-model.ts';
 
 function fixture() {
   const shot = { id: 'shot', revisionId:'shot-r', motion: 'Draft movement', desiredFrames: 90, framing:'Side view' };

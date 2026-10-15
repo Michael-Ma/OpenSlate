@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { directorPlan, planScopeLabel } from '../src/director-plan-model.ts';
+import { directorPlan, planScopeLabel } from '../src/legacy/director-plan-model.ts';
 
 const director = {mode:'native',status:'idle'};
 const state=()=>({project:{id:'p',headVersion:2,revisionId:'r',activePlanId:'plan',brief:'Boot film',scenes:[{id:'scene'}],shots:[{id:'a',sceneId:'scene'},{id:'b',sceneId:'scene'}]},
