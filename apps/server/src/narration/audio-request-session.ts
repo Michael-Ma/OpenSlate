@@ -14,7 +14,7 @@ export function audioRequestActor(production: ProductionService, projectId: stri
     const previous = head ? store.get<NarrationSession>('narration_session', head.sessionId) : undefined;
     invariant(!previous || previous.projectId === projectId && previous.principalId === 'local-user' && !previous.shotId,
       'NARRATION_SESSION_STALE', 'Saved narration session does not belong to this project.');
-    const actor = production.beginRequest(projectId, 'local-user', text, { scopeIds: [projectId], editing: true,
+    const actor = production.beginRequest(projectId, 'local-user', text, { source: "app", scopeIds: [projectId], editing: true,
       key: digest({ key: commandKey, action: 'audio-request' }), ...(previous ? { continuationRequestId: previous.requestId } : {}) });
     const next: NarrationSession = { id: newId(), projectId, requestId: actor.requestId, principalId: 'local-user' };
     store.insert('narration_session', next.id, projectId, next);

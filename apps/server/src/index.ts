@@ -70,7 +70,6 @@ const narration = new NarrationService(service, localMedia ?? undefined);
 const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
 const studioSessions = new StudioSessions();
 const app = createApp({ service, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
-  allowanceRoutes: { service, allowances: runtime.allowances },
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },

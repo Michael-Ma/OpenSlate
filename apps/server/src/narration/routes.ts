@@ -122,7 +122,7 @@ export function registerNarrationRoutes(app: FastifyInstance, options: { product
         "NARRATION_SESSION_STALE", "The displayed conversation request changed; refresh before explicitly continuing it");
         const continuationRequestId = request.body.continuationRequestId ?? previous?.requestId;
         const actor = production.beginRequest(projectId, "local-user", request.body.text ?? "Edit narration and review its recording and timing", {
-          scopeIds: [projectId], editing: true, key: `narration:${digest(key(request))}`,
+          source: "app", scopeIds: [projectId], editing: true, key: `narration:${digest(key(request))}`,
           ...(continuationRequestId ? { continuationRequestId } : {}),
         });
         const session: Session = { id: newId(), projectId, requestId: actor.requestId, principalId: "local-user" };

@@ -9,6 +9,8 @@ import type {
   ActorContext, ArtifactRef, ChangeProposal, CompiledPlan, NodeImpact, OperationKind, ProjectRecord,
   LocalExecutionIdentity, ProviderProfile, ShotRecord, StageRequirement,
 } from "@openslate/core";
+import type { RequestSource } from "@openslate/core/public";
+import { projectRequest, migrateLegacyRequestSources } from "./request-source.js";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
 import type { ArtifactRecord, NodeBinding } from "../execution/engine.js";
@@ -24,7 +26,7 @@ import type { ContinueEdits } from './pending-edit-continuation.js';
 import { isScopedAssemblyRebuild } from './scoped-assembly.js';
 import { assertNarrationAuthority } from '../narration/narration-scope.js';
 
-interface RequestRecord { source?: "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
+export interface RequestRecord { source?: RequestSource | "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; state: "active" | "superseded"; contextDigest: string | null }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
 interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 interface Grant { id: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
@@ -75,6 +77,7 @@ export class ProductionService {
     invariant(scope === "all" || scope === "external-video", "LOCAL_EXECUTION_UNSUPPORTED", "Unsupported new-project local execution scope");
     invariant(scope !== "external-video" || this.newProjectLocalExecution, "LOCAL_EXECUTION_UNSUPPORTED", "External-video scope requires an exact local execution identity");
     this.newProjectLocalExecutionFor = scope;
+    migrateLegacyRequestSources(this.store);
   }
 
   createProject(name: string, selection?: InstalledProviderSelection): ProjectRecord {
@@ -102,9 +105,10 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
     invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
+    invariant(options.source === undefined || ["user", "app", "director"].includes(options.source), "VALIDATION_ERROR", "Use a supported request source");
     const key = options.key ?? newId();
     const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
       const project = this.store.getProject(projectId);
@@ -122,7 +126,7 @@ export class ProductionService {
       scopeIds.forEach(scopeId => validateStageScope(project, scopeId));
       invariant(!options.continueEdits || (options.editing !== false && !options.continuationRequestId && !options.resumeFromStopId), 'VALIDATION_ERROR', 'Continue selected edits using one fresh editable conversation.');
       if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
-      const request: RequestRecord = { id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
+      const request: RequestRecord = { source: options.source ?? "user", id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
       if (options.editing !== false) {
         for (const prior of this.store.list<RequestRecord>("message", projectId)) if (prior.id !== request.id && prior.editing && prior.state === "active")
@@ -158,6 +162,7 @@ export class ProductionService {
       this.store.appendEvent(projectId, "message.recorded", { requestId: request.id, text, editing: options.editing ?? true });
       return { kind: "human", principalId, requestId: request.id };
     });
+    invariant(projectRequest(this.store, this.request(projectId, actor)).source === (options.source ?? "user"), "IDEMPOTENCY_CONFLICT", "This request identity has a different source");
     this.recovery.assertFreshAuthority(projectId, "message", actor.requestId); return actor;
   }
 
@@ -332,7 +337,7 @@ export class ProductionService {
       if (deferredNodeIds.includes(node.id)) { invariant(node.kind === "video", "VALIDATION_ERROR", "Only video work may wait for scene review"); continue; }
       const sceneId = next.shots.find(s => s.id === node.shotId)?.sceneId;
       const grant = grants.find(g => !used.has(g.id) && g.kind === node.kind && (!extra.has(node.id) || g.origin === "user_change") && (g.scopeId === node.shotId || g.scopeId === sceneId || g.scopeId === projectId))
-        ?? (["speech", "transcription"].includes(node.kind) ? this.engine.createGrant(projectId, node.shotId ?? projectId, node.kind, actor.requestId, "user_change") : undefined);
+        ?? (actor.kind === "human" && ["speech", "transcription"].includes(node.kind) ? this.engine.createGrant(projectId, node.shotId ?? projectId, node.kind, actor.requestId, "user_change") : undefined);
       invariant(grant, "ORIGIN_NOT_AUTHORIZED", `Human generation authorization is required for ${node.alias}`);
       used.add(grant.id); grantBindings[node.id] = grant.id;
     }
@@ -399,6 +404,7 @@ export class ProductionService {
     stopped();
     human = snapshotOwnedTranscriptionData(human, 16384); input = captureOwnedTranscriptionReviewInput(input);
     const authority = (): void => {
+      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human press may publish paid transcription");
       this.assertActor(projectId, human, true);
       invariant(this.request(projectId, human).scopeIds.includes(projectId), "SCOPE_DENIED", "Recording review requires editable project scope");
       this.recovery.assertFreshAuthority(projectId, "owned_transcription_proposal", input.proposalId);
@@ -448,6 +454,7 @@ export class ProductionService {
     human = snapshotOwnedTranscriptionData(human, 16384); input = captureNarrationSpeechReviewInput(input);
     const authority = (): void => {
       this.assertActor(projectId, human, true);
+      invariant(human.kind === "human", "ACTOR_DENIED", "Only a human press may publish paid narration");
       const selected = this.store.get<NarrationSpeechProposal>('narration_speech_proposal', input.proposalId);
       invariant(selected?.projectId === projectId, 'SCOPE_DENIED', 'Narration speech proposal belongs to this film');
       assertNarrationAuthority(this, projectId, human, selected.section.segmentId);
@@ -519,7 +526,7 @@ export class ProductionService {
       invariant(prepared?.projectId === projectId && prepared.requestId === requestId && latest?.id === preparedId && prepared.proposalDigest === proposalDigest && !prepared.compiled && !prepared.proposal.source,
         "IMPORT_STALE", "Review the current import draft before confirming.");
       invariant(prepared.baseVersion === this.store.getProject(projectId).headVersion, "REVISION_CONFLICT", "The film plan changed. Re-import against its current version.");
-      const human = this.beginRequest(projectId, "local-user", "Confirm the reviewed supplied-material plan. No generation is authorized.", { editing: true, continuationRequestId: requestId, key: `confirm-import:${key}`, contextDigest: digest({ preparedId, proposalDigest }) });
+      const human = this.beginRequest(projectId, "local-user", "Confirm the reviewed supplied-material plan. No generation is authorized.", { source: "app", editing: true, continuationRequestId: requestId, key: `confirm-import:${key}`, contextDigest: digest({ preparedId, proposalDigest }) });
       const reviewed: Prepared = { ...prepared, id: newId(), requestId: human.requestId, principalId: human.principalId, epochId: null };
       this.store.insert("prepared", reviewed.id, projectId, reviewed);
       const result = this.apply(projectId, human, reviewed.id);
@@ -596,13 +603,13 @@ export class ProductionService {
       const project = this.store.getProject(projectId);
       const plan = project.activePlanId ? this.store.get<PlanRecord>("plan", project.activePlanId) : undefined;
       const attempts = this.engine.attempts(projectId);
-      const messages = this.store.list<RequestRecord>("message", projectId);
+      const messages = this.store.list<RequestRecord>("message", projectId).map(message => projectRequest(this.store, message));
       const outputs = this.store.list<{ id: string; requestId: string; text: string; phase: string }>("director_output", projectId);
       const messageById = new Map(messages.map(message => [message.id, message])), outputById = new Map(outputs.map(output => [output.id, output]));
       const conversation = this.store.readEvents(projectId).flatMap(event => {
         if (event.kind === "message.recorded") {
           const message = messageById.get(String(event.payload.requestId));
-          return message && message.source !== "storyboard" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
+          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id }] : [];
         }
         if (event.kind === "director.message") {
           const output = outputById.get(String(event.payload.outputId));
@@ -622,6 +629,7 @@ export class ProductionService {
           || this.recovery.isImported(projectId, "director_turn", question.turnId) || this.store.get<RequestRecord>("message", question.requestId)?.state === "superseded" ? { ...question, canAnswer: false } : question),
       previousPreviews: this.engine.attempts(projectId).filter(attempt => attempt.request.kind === "render" && attempt.phase === "succeeded")
         .reverse().flatMap(attempt => Object.values(attempt.outputs).map(artifact => ({ artifact, nodeId: attempt.nodeId, fixture: this.artifactFixture(projectId, artifact) }))).slice(0, 3),
+      pendingAudioRequests: this.store.list("director_audio_request", projectId),
       reconciliations: this.store.list("tool_reconciliation", projectId),
       toolCalls: this.store.list<{ id: string; requestId: string; epochId: string; callId: string; tool: string; state: string; resultDigest: string | null }>("tool_invocation", projectId).slice(-20)
         .map(({ id, requestId, epochId, callId, tool, state, resultDigest }) => ({ id, requestId, epochId, callId, tool, state, resultDigest })),

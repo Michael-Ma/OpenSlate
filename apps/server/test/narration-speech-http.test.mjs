@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { digest } from '@openslate/core';
-import { projectSpendingProjection } from '../dist/application/allowance-projection.js';
 import { createApp } from '../dist/app.js';
 import { registerNarrationRoutes } from '../dist/narration/routes.js';
 import { NarrationCanonicalService } from '../dist/narration/canonical.js';
@@ -49,13 +48,4 @@ test('speech HTTP rejects stale section approval without modifying another secti
  const before=snapshot(f),r=await f.request('/speech-reviews',{sessionId:f.session.id,proposalId:proposal.id,proposalDigest:proposal.proposalDigest});
  assert.equal(r.statusCode,409,r.body);assert.deepEqual(snapshot(f),before);assert.deepEqual(f.narration.workspaceSnapshot(f.project.id).segments[1],unrelated);
  const detail=await f.request(`/speech-proposals/${proposal.id}`);assert.equal(detail.statusCode,200,detail.body);assert.equal(detail.json().eligibility.current,false);
-});
-
-test('spending view excludes stale reviewed speech while unrelated section edits remain eligible',async t=>{
- const f=await narrationSpeechFixture(t),proposal=await f.prepare(),applied=await f.review(proposal);
- const selected=()=>projectSpendingProjection(f.production,f.project.id,{focusCandidateId:applied.candidateId}).candidates.find(row=>row.candidateId===applied.candidateId);
- assert.equal(selected().selectionCurrent,true);
- f.revise({update:[{segmentId:f.view().segments[1].entry.segmentId,draft:draft('Unrelated change.')}]});assert.equal(selected().selectionCurrent,true);
- f.revise({update:[{segmentId:f.view().segments[0].entry.segmentId,draft:draft('Changed selected words.')}]});
- assert.equal(selected().selectionCurrent,false);assert.equal(selected().unavailableCode,'NARRATION_SPEECH_STALE');assert.equal(selected().suggestedForIssue,false);
 });

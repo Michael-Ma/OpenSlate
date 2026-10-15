@@ -1,4 +1,3 @@
-import { ExternalAllowanceService } from '../apps/server/dist/application/external-allowances.js';
 // Disposable integration studio. Uses only FakeProvider; --native uses existing Codex sign-in for one read-only turn.
 // No production database, paid media adapter or provider credentials are loaded.
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -53,7 +52,7 @@ if (uiReplay) {
 }
 const visibleDirector=uiReplay?{enqueue(){},tick(){},status(){return{mode:'native',status:'running',activeRequestId:replayActor.requestId,imageAttachmentsAvailable:false};}}:director;
 const sessions=new StudioSessions();
-const app=createApp({service,allowanceRoutes:{service,allowances:new ExternalAllowanceService(store)},director:visibleDirector,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
+const app=createApp({service,director:visibleDirector,runtimeSettings:director,localToken:randomBytes(32).toString('base64url'),studioSessions:sessions,webAssets:loadWebAssets(join(repo,'apps/web/dist')),
  narrationRoutes:{production:service,narration,canonical,uploadDirectory:join(root,'uploads','audio')},
  mediaRoutes:{production:service,media:mediaApp,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','video')})},
  imageRoutes:{production:service,images,uploads:new ManagedUploadStore({rootDir:join(root,'uploads','image'),maxBytes:PNG_IMPORT_MAX_BYTES})}});

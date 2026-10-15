@@ -53,7 +53,7 @@ export function registerImageRoutes(app: FastifyInstance, options: ImageRouteOpt
       const projectId = request.params.projectId, key = commandKey(request), expectedHeadVersion = Number(request.query.expectedHeadVersion);
       invariant(!(request.query.requestId && request.query.continuationRequestId), "VALIDATION_ERROR", "Choose an existing request or an explicit continuation");
       const actor: ActorContext = request.query.requestId ? { kind: "human", principalId: "local-user", requestId: request.query.requestId }
-        : production.beginRequest(projectId, "local-user", "Import a supplied PNG reference", { key: `image-upload:${key}`, editing: true,
+        : production.beginRequest(projectId, "local-user", "Import a supplied PNG reference", { source: "app", key: `image-upload:${key}`, editing: true,
           ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion }) });
       const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
       const assertCurrent = () => {

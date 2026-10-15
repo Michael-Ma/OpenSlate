@@ -62,7 +62,7 @@ function fixture(t, { sharedScene = false } = {}) {
       headers: {
         host: "127.0.0.1",
         authorization: `Bearer ${token}`,
-        "idempotency-key": key,
+        ...(key === null ? {} : {"idempotency-key": key}),
       },
       payload: {
         headVersion: view.headVersion,
@@ -1156,4 +1156,15 @@ test("prompt writing after partial film generation retains inherited scene pause
           hold.ownerId === writing.requestId,
       ),
   );
+});
+
+test('scene image/video generation requires identity before any work and stays out of user conversation',async t=>{
+ const f=fixture(t),view=await f.get();
+ for(const kind of ['image','video']) {
+  const r=await f.post(view,kind,null,{reviewedFrames:[]});
+  assert.equal(r.statusCode,400,r.body);assert.equal(r.json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
+ }
+ const r=await f.post(view,'image',randomUUID());assert.equal(r.statusCode,200,r.body);
+ assert.deepEqual(f.service.snapshot(f.project.id).conversation,[]);
+ assert.equal(f.store.list('message',f.project.id).at(-1).source,'app');
 });

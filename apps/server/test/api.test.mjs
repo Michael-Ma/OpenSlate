@@ -364,7 +364,7 @@ test('chat stop and continuation retries never override newer human intent or mu
 });
 
 test('stopped continuation is project-wide and cannot be smuggled through a review reply',async t=>{
-  const f=fixture(t);await f.request('POST',`${f.path}/controls`,{action:'stop'});
+  const f=fixture(t);const stopped=await f.request('POST',`${f.path}/controls`,{action:'stop'},{'idempotency-key':randomUUID()});assert.equal(stopped.statusCode,200,stopped.body);
   const resumeFromStopId=f.service.snapshot(f.project.id).control.authorityId;
   const before=f.store.list('message',f.project.id).length;
   const readOnly=await f.request('POST',`${f.path}/messages`,{text:'Continue',editing:false,resumeFromStopId});
