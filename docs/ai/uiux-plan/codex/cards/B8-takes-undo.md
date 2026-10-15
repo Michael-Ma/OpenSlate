@@ -17,3 +17,7 @@ Director proposals and their undo (P4). Anything in apps/web.
 - Regenerate a shot that has a clip: until the new take lands, the overview still shows the current keyframe and clip; after it lands, the clip is outdated and takeCount is 2; a failed regenerate changes nothing.
 - Use an earlier take: bytes verified; clip outdated; no grant minted; undo switches back.
 - Undo after a prompt edit restores the keyframe and clip bindings; undo after an edit that a paid job already used is refused; undo after narration-fit restores the duration and the cue.
+
+## Added by the lead after merging B5 and B7
+- In the merge, the lead added an upfront check to `SceneConfirmationRunner.confirm` (apps/server/src/scene-confirmations.ts): an open blocking Director note refuses the confirm with RECOMMENDATION_OPEN before any voice line is bought. Add a test for it (combine the notes fixture in apps/server/test/director-notes.test.mjs with the confirmation fixture in apps/server/test/helpers/confirmation-fixture.mjs): no speech attempt, no grant, no record.
+- The confirm runner saves voice lines with `language: "en"` hard-coded (scene-confirmations.ts, saveWriting). Derive the language from the line's text (CJK characters → "zh", else "en") or from the project, and test a Chinese line.
