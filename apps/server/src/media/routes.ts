@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { digest, DomainError, invariant } from "@openslate/core";
+import type { StartExportInput } from "@openslate/core/public";
 import type { ActorContext } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
 import type { ManagedUploadStore } from "../narration/managed-upload.js";
@@ -17,8 +18,8 @@ const idempotencyKey = (request: FastifyRequest): string => {
 };
 const summary = (job: MediaRenderJob) => ({ id: job.id, state: job.state, artifact: job.artifact, errorCode: job.errorCode,
   cancelRequested: job.cancelRequested, totalFrames: job.manifest.totalFrames, manifestDigest: job.manifest.digest,
-  revisionId: job.target.revisionId, headVersion: job.target.headVersion, planId: job.target.planId, renderNodeId: job.target.renderNodeId,
-  createdAt: job.createdAt, finishedAt: job.finishedAt, fixture: false as const,
+  revisionId: job.target.revisionId, headVersion: job.target.headVersion, ...("planId" in job.target ? { planId: job.target.planId, renderNodeId: job.target.renderNodeId } : { targetKind: "storyboard" }),
+  createdAt: job.createdAt, finishedAt: job.finishedAt, fixture: "kind" in job.target && job.target.demo,
   canRun: job.state === "prepared" && !job.cancelRequested,
   canRecover: !["prepared", "published", "historical"].includes(job.state) && (!job.ownerToken || (job.leaseUntil ?? 0) <= Date.now()) });
 
@@ -64,10 +65,36 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
     scope.addContentTypeParser("application/octet-stream", (_request, payload, done) => { done(null, payload); });
     scope.get<{ Params: ProjectParams }>("/api/projects/:projectId/media", async request => {
       const { projectId } = request.params, state = media.workspaceSnapshot(projectId);
-      return { jobs: state.jobs.slice(-40).reverse().map(summary), preview: state.preview,
+      return { jobs: state.jobs.slice(-40).reverse().map(summary), preview: state.preview, lastExport: state.lastExport,
         sources: production.store.list<OwnedMediaSource>("media_source", projectId).filter(record => record.source.kind === "video").map(record => ({ artifactId: record.source.artifactId, sha256: record.source.sha256,
           kind: record.source.kind, frames: record.source.probe.video?.frames ?? null, byteLength: record.source.byteLength, fixture: false })) };
     });
+    scope.get<{ Params: ProjectParams }>("/api/projects/:projectId/exports", async request => media.exportView(request.params.projectId));
+    scope.post<{ Params: ProjectParams; Body: StartExportInput }>("/api/projects/:projectId/exports", {
+      schema: { body: object({ expectedHeadVersion: { type: "integer", minimum: 0 } }, ["expectedHeadVersion"]) },
+    }, async (request, reply) => {
+      const { projectId } = request.params, key = idempotencyKey(request);
+      const actor = commandActor(projectId, "Export the storyboard film", `export:${key}`, request.body);
+      const job = await media.prepareExport(projectId, actor, { ...request.body, key });
+      if (job.state === "prepared" && !job.errorCode && !job.cancelRequested) launch(job, actor, "run");
+      return reply.code(202).send(media.exportRecord(projectId, job.id));
+    });
+    for (const action of ["cancel", "recover"] as const) {
+      scope.post<{ Params: ProjectParams & { exportId: string }; Body: Record<string, never> }>(`/api/projects/:projectId/exports/:exportId/${action}`, {
+        schema: { body: object({}) },
+      }, async (request, reply) => {
+        const { projectId, exportId } = request.params, key = idempotencyKey(request);
+        media.exportRecord(projectId, exportId);
+        const actor = commandActor(projectId, `${action} storyboard export`, `export-${action}:${key}`, { exportId });
+        if (action === "cancel") media.cancel(projectId, actor, exportId);
+        else {
+          invariant(!tasks.has(exportId), "MEDIA_RENDER_BUSY", "This server is still processing the export");
+          // Await receipt reconciliation, which never dispatches a renderer.
+          await media.recover(projectId, actor, exportId);
+        }
+        return reply.code(200).send(media.exportRecord(projectId, exportId));
+      });
+    }
     scope.post<{ Params: ProjectParams; Querystring: { expectedHeadVersion: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/media/uploads", {
       bodyLimit: uploads.maxBytes,
       schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },

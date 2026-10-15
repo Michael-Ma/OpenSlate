@@ -1,4 +1,5 @@
 import type { ActorContext, ArtifactRef } from "@openslate/core";
+import type { StoryboardRenderTarget } from "./storyboard-capture.js";
 import type { FrozenRenderManifest, RenderedMedia, SuppliedMedia } from "./types.js";
 
 /** Internal records. Host paths never enter a model tool or browser request. */
@@ -13,7 +14,7 @@ export interface GeneratedAudioMediaSource {
 export type OwnedMediaSource = { id: string; projectId: string; source: SuppliedMedia; requestId: string } | GeneratedMediaSource | GeneratedAudioMediaSource;
 export interface RealVideoArtifact {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: "video/mp4";
-  fixture: false; attemptId: null; origin: "supplied_video" | "local_render";
+  fixture: boolean; attemptId: null; origin: "supplied_video" | "local_render";
   byteLength: number; physicalDurationSeconds: number;
   sourceDescriptorId?: string; manifestDigest?: string; renderJobId?: string;
 }
@@ -24,7 +25,7 @@ export interface RenderTarget {
   dependencyNodeIds: string[]; scopeIds: string[];
 }
 export interface MediaRenderJob {
-  id: string; projectId: string; actor: ActorContext; target: RenderTarget;
+  id: string; projectId: string; actor: ActorContext; target: RenderTarget | StoryboardRenderTarget;
   manifest: FrozenRenderManifest; outputArtifactId: string;
   state: "prepared" | "running" | "published" | "historical" | "cancelled" | "interrupted" | "failed";
   ownerToken: string | null; leaseUntil: number | null;
@@ -33,8 +34,8 @@ export interface MediaRenderJob {
 }
 export interface MediaPreview {
   id: string; projectId: string; renderJobId: string; artifact: ArtifactRef;
-  revisionId: string; headVersion: number; planId: string; manifestDigest: string;
-  fixture: false;
+  revisionId: string; headVersion: number; planId: string | null; manifestDigest: string;
+  fixture: boolean;
 }
 export interface PrepareMediaRender { expectedHeadVersion: number; renderNodeId: string; key: string }
 export interface ImportVideoInput { expectedHeadVersion: number; path: string; key: string }

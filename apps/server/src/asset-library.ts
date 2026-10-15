@@ -12,7 +12,7 @@ export function registerAssetLibrary(app: FastifyInstance, service: () => Produc
     const production = service(), project = production.store.getProject(request.params.projectId), query = request.query, offset = Number(query.offset ?? 0);
     const items = production.store.list<ArtifactRecord>("artifact", project.id).filter(record => ["image", "video"].includes(record.artifact.kind)).reverse().map(record => {
       const source = record.origin === "supplied_image" || record.origin === "supplied_video" ? "uploaded" : record.origin === "local_render" ? "export" : "generated";
-      const label = `${source === "uploaded" ? "Uploaded" : source === "export" ? "Exported" : record.fixture ? "Demo" : "Generated"} ${record.artifact.kind} · ${record.id.slice(0, 8)}`;
+      const label = `${source === "uploaded" ? "Uploaded" : source === "export" ? (record.fixture ? "Demo export" : "Exported") : record.fixture ? "Demo" : "Generated"} ${record.artifact.kind} · ${record.id.slice(0, 8)}`;
       return { artifact: record.artifact, label, source, fixture: record.fixture, width: record.width ?? null, height: record.height ?? null, durationSeconds: record.physicalDurationSeconds, byteLength: record.byteLength ?? null };
     }).filter(item => (!query.kind || query.kind === "all" || item.artifact.kind === query.kind) && (!query.source || query.source === "all" || item.source === query.source) && (!query.search || `${item.label} ${item.artifact.artifactId}`.toLowerCase().includes(query.search.toLowerCase())));
     const assets = items.slice(offset, offset + 40);
