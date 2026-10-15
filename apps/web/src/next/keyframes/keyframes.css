@@ -87,6 +87,48 @@
   .kf-row .cards.scrolls .card .pic { height: 106px; }
 }
 
+/* ---------- 900–1365 px: the view shrinks with the workspace instead of scrolling sideways (lead decision 8) ---------- */
+/* Keyed on the new studio's app so the classic studio's .work is untouched. */
+@property --kf-fade-l { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --kf-fade-r { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes kf-row-edges {
+  0% { --kf-fade-l: 0px; --kf-fade-r: 36px; }
+  12%, 88% { --kf-fade-l: 36px; --kf-fade-r: 36px; }
+  100% { --kf-fade-l: 36px; --kf-fade-r: 0px; }
+}
+@media (min-width: 900px) {
+  /* One column that never grows past the workspace. */
+  .app[data-ui="next"] .work.kf { grid-template-columns: minmax(0, 1fr); }
+  /* The scene's status line keeps its length and the scene pills wrap below it first; only the title, or a line
+     wider than the whole row, ends with an ellipsis. */
+  .app[data-ui="next"] .work.kf .scene-head { flex-wrap: wrap; row-gap: 6px; }
+  .app[data-ui="next"] .work.kf .scene-head h1 { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .app[data-ui="next"] .work.kf .scene-head .line { flex: 1 0 auto; max-width: 100%; }
+  .app[data-ui="next"] .work.kf .scene-pills { margin-left: 0; min-width: 0; max-width: 100%; flex: 0 1 auto; flex-wrap: wrap; row-gap: 6px; }
+  .app[data-ui="next"] .work.kf .scene-pills .pill { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app[data-ui="next"] .work.kf .tl { grid-template-columns: 54px minmax(0, 1fr); }
+  .app[data-ui="next"] .work.kf .tl .segs { min-width: 0; overflow: hidden; }
+  /* Shots keep their length-true widths; the dashed tail gives way first, with an ellipsis (a block, since a
+     flex container never shows one). */
+  .app[data-ui="next"] .work.kf .tl .seg:not(.dash) { flex-shrink: 0; }
+  .app[data-ui="next"] .work.kf .tl .seg.dash { display: block; min-width: 0; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* A note's regenerate link stays one line above the picture. It sits below the shot badge, so on a narrow card
+     it may reach left past the chip column (44 px) to the picture's 8 px inset before it ends with an ellipsis. */
+  .app[data-ui="next"] .work.kf .card .callout .link { white-space: nowrap; max-width: calc(100% + 36px); overflow: hidden; text-overflow: ellipsis; }
+}
+@media (min-width: 900px) and (max-width: 1099px) {
+  /* Two shot cards at a time; the rest scroll into view inside the row. The edge that has more cards behind it
+     fades, so the row says it goes on (the fade follows the scroll where the browser can). */
+  .app[data-ui="next"] .work.kf .kf-row .cards { grid-auto-columns: calc((100% - 12px) / 2); --kf-fade-r: 36px; mask-image: linear-gradient(to right, transparent, #000 var(--kf-fade-l), #000 calc(100% - var(--kf-fade-r)), transparent); }
+  .app[data-ui="next"] .work.kf .kf-row .cards[data-count="1"], .app[data-ui="next"] .work.kf .kf-row .cards[data-count="2"] { --kf-fade-r: 0px; mask-image: none; }
+  .app[data-ui="next"] .work.kf .kf-row .card .pic { height: 106px; }
+}
+@supports (animation-timeline: scroll()) {
+  @media (min-width: 900px) and (max-width: 1099px) {
+    .app[data-ui="next"] .work.kf .kf-row .cards { animation: kf-row-edges linear both; animation-timeline: scroll(self inline); }
+  }
+}
+
 /* ---------- video panel: one segment per shot, however many ---------- */
 .vpanel .vsegs i { flex: 0 1 22px; min-width: 4px; }
 

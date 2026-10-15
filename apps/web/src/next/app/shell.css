@@ -44,11 +44,16 @@
   .topbar .top-right{gap:10px}
 }
 
+/* ---------- the Director column's width and the workspace gutter, shared with the toast (toast.css) ---------- */
+:root{--shell-director-w:392px;--shell-gutter:22px}
+/* 900–1279 px: a narrower Director column (lead decision 8). */
+@media (min-width:900px) and (max-width:1279px){:root{--shell-director-w:320px}}
+
 /* ---------- workspace: the strip row above the view ---------- */
 .workspace-slot{display:contents}
 @media (min-width:900px){
   /* The workspace column shrinks with the window instead of pushing the page sideways. */
-  .app[data-ui="next"]{grid-template-columns:392px minmax(0,1fr);grid-template-rows:52px auto minmax(0,1fr)}
+  .app[data-ui="next"]{grid-template-columns:var(--shell-director-w) minmax(0,1fr);grid-template-rows:52px auto minmax(0,1fr)}
   .app[data-ui="next"] > .director{grid-row:2 / -1}
   .app[data-ui="next"] > .workspace-slot > .film-strip-slot{grid-column:2;grid-row:2;min-width:0}
   .app[data-ui="next"] > .workspace-slot > :not(.film-strip-slot){grid-column:2;grid-row:3}
@@ -75,32 +80,11 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
 .shell-dialog .foot .pill{padding:7px 14px}
 .shell-dialog .pill[aria-disabled="true"]{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted);cursor:progress}
 
-/* ---------- 900–1365 px: a narrower Director column and a Keyframes view that shrinks (lead decision 8) ----------
- * These key on the Keyframes view's own classes and belong in keyframes/keyframes.css; they stay here only until
- * the Keyframes owner takes them over (see the shell's hand-over notes). */
-@media (min-width:900px){
-  /* One column that never grows past the workspace: long lines ellipsize, the scene pills wrap below the title. */
-  .app[data-ui="next"] .work.kf{grid-template-columns:minmax(0,1fr)}
-  .app[data-ui="next"] .work.kf .scene-head{flex-wrap:wrap;row-gap:6px}
-  .app[data-ui="next"] .work.kf .scene-head .line{flex:1 1 120px}
-  .app[data-ui="next"] .work.kf .scene-pills{margin-left:0;min-width:0;max-width:100%;flex:0 1 auto;flex-wrap:wrap;row-gap:6px}
-  .app[data-ui="next"] .work.kf .scene-pills .pill{max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .app[data-ui="next"] .work.kf .tl{grid-template-columns:54px minmax(0,1fr)}
-  .app[data-ui="next"] .work.kf .tl .segs{min-width:0;overflow:hidden}
-  /* Shots keep their length-true widths; the dashed tail gives way first, with an ellipsis (a block, since a
-     flex container never shows one). */
-  .app[data-ui="next"] .work.kf .tl .seg:not(.dash){flex-shrink:0}
-  .app[data-ui="next"] .work.kf .tl .seg.dash{display:block;min-width:0;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-}
+/* ---------- 900–1279 px: the narrower Director column (lead decision 8); the Keyframes view's own
+   in-between rules live in keyframes/keyframes.css ---------- */
 @media (min-width:900px) and (max-width:1279px){
-  .app[data-ui="next"]{grid-template-columns:320px minmax(0,1fr)}
   /* The header's indent lines the Director up with the 392 px column's film title; the narrow column starts flush. */
   .app[data-ui="next"] > .director .dir-head{padding-left:18px}
-}
-@media (min-width:900px) and (max-width:1099px){
-  /* Two shot cards at a time; the third scrolls into view inside the row. */
-  .app[data-ui="next"] .work.kf .kf-row .cards{grid-auto-columns:calc((100% - 12px) / 2)}
-  .app[data-ui="next"] .work.kf .kf-row .card .pic{height:106px}
 }
 
 /* ---------- narrow ---------- */
