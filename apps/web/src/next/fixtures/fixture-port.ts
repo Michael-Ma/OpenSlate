@@ -4,7 +4,8 @@ import type { MediaSource } from "../media/media-source.ts";
 import type { ProjectSnapshot } from "../model/types.ts";
 import type { StudioPort } from "../store/store.ts";
 import { fixtureCommand } from "./fixture-commands.ts";
-import { extraRoutes } from "./routes/index.ts";
+import { fixtureRoute } from "./routes/index.ts";
+import { DECLINE } from "./routes/types.ts";
 import { fixtureMessage } from "./fixture-director.ts";
 import { lastFerryDirector, lastFerryOverview, lastFerryProposals, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
 
@@ -57,19 +58,17 @@ export class FixturePort implements StudioPort {
     const method = options.method ?? "GET";
     const base = `/api/projects/${PROJECT_ID}`;
     if (method === "GET") {
-      if (path === "/api/projects") return { projects: [{ id: PROJECT_ID, name: this.world.snapshot.project.name }] } as T;
       if (path === base) return structuredClone(this.world.snapshot) as T;
       if (path === `${base}/generation`) return structuredClone(this.world.overview) as T;
       if (path === `${base}/director`) return { ...this.world.director } as T;
       if (path === `${base}/director/proposals`) return { proposals: structuredClone(this.world.proposals) } as T;
     }
     if (method === "POST" && path === `${base}/messages`) return fixtureMessage(this.world, options.body) as T;
+    // The views' routes first (a route may decline: the next one gets the request), then the Keyframes commands.
     const below = path.startsWith(base) ? path.slice(base.length) : path;
-    for (const route of extraRoutes) {
-      const match = route.method === method ? route.match.exec(below) : null;
-      if (match) return route.handle(this.world, match.slice(1), options.body) as T;
-    }
-    if (path.startsWith(base)) return fixtureCommand(this.world, method, path.slice(base.length), options.body) as T;
+    const answer = fixtureRoute(this.world, method, below, options.body);
+    if (answer !== DECLINE) return answer as T;
+    if (path.startsWith(base)) return fixtureCommand(this.world, method, below, options.body) as T;
     throw new ApiError("FIXTURE_UNSUPPORTED", 400);
   }
 

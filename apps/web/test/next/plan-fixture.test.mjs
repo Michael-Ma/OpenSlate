@@ -4,6 +4,8 @@ import { fixtureCommand } from '../../src/next/fixtures/fixture-commands.ts';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { lastFerryDirector, lastFerryOverview, lastFerrySnapshot, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { IMPORT_READ_MS, planRoutes } from '../../src/next/fixtures/routes/plan.ts';
+import { fixtureRoute } from '../../src/next/fixtures/routes/index.ts';
+import { DECLINE } from '../../src/next/fixtures/routes/types.ts';
 
 /** A fixture world with a manual clock (as in keyframes-fixture.test.mjs). */
 function world() {
@@ -29,13 +31,10 @@ function world() {
   return w;
 }
 
-/** Plan routes first, then the Keyframes commands: the order the fixture port uses. */
+/** The views' routes (Plan's first; a route may decline), then the Keyframes commands: the order the fixture port uses. */
 function call(w, method, path, body) {
-  for (const route of planRoutes) {
-    const match = route.method === method ? route.match.exec(path) : null;
-    if (match) return route.handle(w, match.slice(1), body);
-  }
-  return fixtureCommand(w, method, path, body);
+  const answer = fixtureRoute(w, method, path, body);
+  return answer === DECLINE ? fixtureCommand(w, method, path, body) : answer;
 }
 const edit = (w, body) => call(w, 'POST', '/storyboard', { ...body, expectedHeadVersion: w.snapshot.project.headVersion });
 const refused = (code) => (error) => error.code === code;
@@ -225,21 +224,19 @@ test('while a written plan waits, only treatment, scene, shot and narration edit
   call(w, 'POST', `/plan-imports/${requestId}/discard`, {});
 });
 
-test('unknown kinds are refused; kinds other views own go on to the next storyboard route', async () => {
+test('unknown kinds are refused; kinds other views own go on to the next storyboard route', () => {
   const w = world();
   assert.throws(() => edit(w, { kind: 'music', field: 'audioId', value: 'x' }), refused('VALIDATION_ERROR'));
-  const { extraRoutes } = await import('../../src/next/fixtures/routes/index.ts');
-  const seen = [];
-  const film = { method: 'POST', match: /^\/storyboard$/, handle: (_world, _params, body) => { seen.push(body.kind); return { commandId: 'film-1', headVersion: 13 }; } };
-  extraRoutes.push(film);
-  try {
-    assert.deepEqual(await edit(w, { kind: 'soundtrack', field: 'audioId', value: 'harbour-theme' }), { commandId: 'film-1', headVersion: 13 });
-    // Its Undo is not this route's command either, so it goes the same way.
-    await edit(w, { kind: 'undo', commandId: 'film-1' });
-    assert.deepEqual(seen, ['soundtrack', 'undo']);
-  } finally {
-    extraRoutes.splice(extraRoutes.indexOf(film), 1);
-  }
+  const [storyboardRoute] = planRoutes;
+  const music = { kind: 'soundtrack', field: 'audioId', value: 'audio-foghorn', expectedHeadVersion: w.snapshot.project.headVersion };
+  // Plan declines the Film view's music edit; the Film route (next in line) answers it.
+  assert.equal(storyboardRoute.handle(w, [], music), DECLINE);
+  const receipt = edit(w, { kind: 'soundtrack', field: 'audioId', value: 'audio-foghorn' });
+  assert.equal(w.snapshot.project.soundtrack.audioId, 'audio-foghorn');
+  // Its Undo is not this route's command either, so it goes the same way.
+  assert.equal(storyboardRoute.handle(w, [], { kind: 'undo', commandId: receipt.commandId, expectedHeadVersion: w.snapshot.project.headVersion }), DECLINE);
+  edit(w, { kind: 'undo', commandId: receipt.commandId });
+  assert.equal(w.snapshot.project.soundtrack.audioId, 'audio-low-tide');
 });
 
 test('purpose and framing are written into the prompts in front of the words, and are not refused while a clip is made', () => {

@@ -2,12 +2,14 @@ import type { AssetItem, AssetRole, StudioArtifactRef } from "@openslate/core/pu
 import { ApiError } from "../../api/client.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { artifactFor, pictureKey } from "../last-ferry.ts";
+import { addMusicRecording } from "./film.ts";
 import type { FixtureRoute } from "./types.ts";
 
 /**
  * Simulated routes for the Assets view in the sample film: the asset library (GET /assets with its
- * filters and 40-item pages), the import capabilities (GET /images, GET /audio-library) and the three
- * upload routes. Nothing is stored or sent; an import adds a library entry in this tab only. Like the studio,
+ * filters and 40-item pages), the picture import capabilities (GET /images; the audio ones come with the
+ * film's music library, GET /audio-library in film.ts) and the three upload routes. Imported music joins
+ * that library, so the Film view's Change music lists it. Nothing is stored or sent; an import adds a library entry in this tab only. Like the studio,
  * a request sent again with the same Idempotency-Key (here `key` in the body) replays its receipt. One more
  * route exists only here: the picture of a PNG imported into this sample film (FIXTURE_PICTURE_ROUTE).
  *
@@ -292,6 +294,7 @@ function importAudio(world: FixtureWorld, raw: string | undefined, body: UploadB
   const artifact = ref(id, "audio");
   const label = q.get("name")?.trim() || "Uploaded recording";
   add(world, { artifact, role, current: false, source: "imported", label, createdAt: localNow(), ...(seconds ? { durationSeconds: seconds } : {}) }, false);
+  if (role === "music") addMusicRecording(world, { id, label, sha256: artifact.sha256, durationSeconds: seconds, role: "music" });
   return { recording: { id, label, sha256: artifact.sha256, durationSeconds: seconds, samples: 0, byteLength: size, origin: "uploaded", role } };
 }
 
@@ -316,13 +319,6 @@ export const assetsRoutes: FixtureRoute[] = [
     match: /^\/images(?:\?.*)?$/,
     handle(world) {
       return { headVersion: world.snapshot.project.headVersion, revisionId: world.snapshot.project.revisionId, capabilities: { import: true, format: "image/png", maxBytes: 32 * MIB, unavailableReason: null }, images: [], coverage: { offset: 0, returned: 0, total: 0, nextOffset: null } };
-    },
-  },
-  {
-    method: "GET",
-    match: /^\/audio-library(?:\?.*)?$/,
-    handle() {
-      return { recordings: [], coverage: { offset: 0, total: 0, nextOffset: null }, capabilities: { import: true, maxBytes: 128 * MIB, maxSeconds: 360 } };
     },
   },
   { method: "POST", match: /^\/images\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importImage(world, raw, input)) },

@@ -5,7 +5,7 @@ import type { PendingImport } from "../../model/plan-import.ts";
 import type { ConversationEntry, ProjectSnapshot } from "../../model/types.ts";
 import { fixtureCommand, recompute } from "../fixture-commands.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
-import type { FixtureRoute } from "./types.ts";
+import { DECLINE, type FixtureRoute } from "./types.ts";
 
 /**
  * Simulated routes for the Plan view in the sample film (?ui=next&fixture=last-ferry). Nothing is generated,
@@ -15,9 +15,11 @@ import type { FixtureRoute } from "./types.ts";
  *   deleteScene, moveScene, shot, addShot, deleteShot, moveShot, narration, undo). Shot fields the Keyframes view
  *   edits (prompt, motion, length, narration text) and their undo go to the shared Keyframes fixture so both views
  *   behave the same; the rest is simulated here, with one-step undo that restores the outline and its media.
- *   Kinds other views own (soundtrack) and the undo of commands this route never answered go on to the next
- *   /storyboard route, or to the Keyframes commands when there is none. While a written plan is pending, only
- *   treatment, scene, shot and narration edits are taken (IMPORT_PENDING), as on the server.
+ *   This route owns the endpoint: it checks what every storyboard command must pass (a known kind, the head
+ *   version, a pending written plan) and declines what other views own (the Film view's soundtrack) and the Undo
+ *   of commands it never answered, which go to the next /storyboard route, then the Keyframes commands. While a
+ *   written plan is pending, only treatment, scene, shot and narration edits are taken (IMPORT_PENDING), as on
+ *   the server.
  * - /plan-imports: create, read, confirm and discard a written plan. The Director "reads" it for 2.6 s and proposes
  *   the sample outline (2.3 gets a shorter line, a new 2.4). The fixture stands in for a Codex Director.
  */
@@ -68,7 +70,7 @@ function mediaSignature(overview: GenerationOverview): string {
 }
 
 /** Scene ordinals, shot labels and the snapshot's shot order follow the outline's order. */
-function relabel(overview: GenerationOverview): GenerationOverview {
+function relabel(overview: GenerationOverview, notes: Parameters<typeof recompute>[1]): GenerationOverview {
   const shots: Record<string, ShotOverview> = {};
   const scenes = overview.scenes.map((scene, index) => {
     scene.shotIds.forEach((id, position) => {
@@ -77,7 +79,8 @@ function relabel(overview: GenerationOverview): GenerationOverview {
     });
     return { ...scene, ordinal: index + 1 };
   });
-  return recompute({ ...overview, scenes, shots });
+  // The Director's open notes still gate their scenes' video (DC-9).
+  return recompute({ ...overview, scenes, shots }, notes);
 }
 
 function orderedShots(overview: GenerationOverview, project: Project): ProjectShot[] {
@@ -141,16 +144,6 @@ const OTHER_VIEWS_KINDS = new Set(["soundtrack"]);
 /** What the server still takes while a written plan is pending (storyboard.ts, IMPORT_PENDING). */
 const DURING_IMPORT = new Set(["treatment", "scene", "shot", "narration"]);
 
-/**
- * A storyboard command this route does not answer: the next /storyboard route (another view's, e.g. the Film
- * view's music), else the Keyframes commands. The route list is imported when needed, because it lists this file.
- */
-async function passOn(world: FixtureWorld, body: unknown): Promise<unknown> {
-  const { extraRoutes } = await import("./index.ts");
-  const next = extraRoutes.find((route) => !planRoutes.includes(route) && route.method === "POST" && route.match.test("/storyboard"));
-  return next ? next.handle(world, [], body) : fixtureCommand(world, "POST", "/storyboard", body);
-}
-
 const DIRECTION_HEADER = "OpenSlate current direction:\n";
 const DIRECTION_SEPARATOR = "\nReference details (retain only where consistent):\n";
 
@@ -183,7 +176,7 @@ function change(world: FixtureWorld, edit: (overview: GenerationOverview, projec
     const next = edit(w.overview, w.snapshot.project);
     const headVersion = w.snapshot.project.headVersion + 1;
     const revisionId = `rev-plan-${headVersion}`;
-    const overview = relabel(next.overview);
+    const overview = relabel(next.overview, w.snapshot.notes ?? []);
     w.overview = { ...overview, headVersion, revisionId };
     w.snapshot = { ...w.snapshot, project: { ...next.project, shots: orderedShots(overview, next.project), headVersion, revisionId } };
   });
@@ -196,7 +189,8 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
   if (body.expectedHeadVersion !== undefined && body.expectedHeadVersion !== head(world)) throw new ApiError("REVISION_CONFLICT", 409);
   const plan = state(world);
   if (plan.pending && !DURING_IMPORT.has(body.kind ?? "")) throw new ApiError("IMPORT_PENDING", 409);
-  if (OTHER_VIEWS_KINDS.has(body.kind ?? "")) return passOn(world, raw);
+  // Another view's command (the Film view's music): the next /storyboard route answers it.
+  if (OTHER_VIEWS_KINDS.has(body.kind ?? "")) return DECLINE;
   if (body.kind === "undo") return undo(world, body);
 
   const fps = world.overview.fps;
@@ -391,7 +385,7 @@ function undo(world: FixtureWorld, body: Body): unknown {
   const plan = state(world);
   const commandId = body.commandId ?? "";
   // Commands this route never answered (the Keyframes narration fit, another view's music) are undone where they were made.
-  if (!plan.known.has(commandId)) return passOn(world, body);
+  if (!plan.known.has(commandId)) return DECLINE;
   const latest = plan.latest;
   if (!latest || latest.commandId !== commandId || latest.headAfter !== head(world) || latest.media !== mediaSignature(world.overview)) throw new ApiError("UNDO_UNAVAILABLE", 409);
   plan.latest = null;

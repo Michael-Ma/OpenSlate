@@ -2,14 +2,16 @@ import { ApiError } from "../../api/client.ts";
 import type { DirectorSelection, DirectorSetup } from "../../model/settings-director.ts";
 import type { PersonalVoice } from "../../model/settings-voice.ts";
 import { STOCK_VOICES } from "../../model/settings-voice.ts";
-import { MEDIA_KINDS, type MediaKind, type ModelPreview, type ModelSelection, type ModelSettingsStatus, type ProviderCatalogView, type ProviderOption } from "../../model/settings.ts";
+import { MEDIA_KINDS, type MediaKind, type ModelPreview, type ModelSelection, type ModelSettingsStatus } from "../../model/settings.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
+import { catalogDigest, catalogProfiles, CODEX_DEFAULTS, computer } from "./computer.ts";
 import type { FixtureRoute } from "./types.ts";
 
 /**
- * Simulated server routes the Settings view needs in the sample film: models with preview and apply,
- * the provider catalog, Director setup, the review setting (server card B10), the narrator voice and
- * personal voices. Nothing is checked on this computer and nothing is saved.
+ * Simulated server routes the Settings view needs in the sample film: models with preview and apply, the
+ * film's Director setup (GET and POST /director/setup of the sample film are answered here; Start's routes
+ * answer the other films'), the review setting (server card B10), the narrator voice and personal voices.
+ * This computer (its Codex, keys and provider catalog) is computer.ts. Nothing is checked and nothing is saved.
  */
 
 interface SettingsState {
@@ -37,7 +39,8 @@ function state(world: FixtureWorld): SettingsState {
       lock: 1,
       previews: new Map(),
       previewWork: new Map(),
-      director: { mode: "native", binaryPath: "/usr/local/bin/codex", model: "gpt-6-astra" },
+      // A computer without Codex (the no-keys presets) runs the sample film with the stand-in Director.
+      director: computer(world).codex ? { mode: "native", ...CODEX_DEFAULTS } : { mode: "fake" },
       directorRevision: 1,
       catalogStatus: "ready",
       review: true,
@@ -57,54 +60,13 @@ function hex(seed: string, n: number): string {
   return out.padEnd(64, "0").slice(0, 64);
 }
 
-// ---- the installed catalog -----------------------------------------------------------------
-
-const READY = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: true, realExecutionEnabled: true };
-const DEMO_READY = { configurationValid: true, registered: true, mediaTools: { required: false, available: true }, credential: { required: false, present: null, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: false, realExecutionEnabled: false };
-
-function option(id: string, label: string, kind: MediaKind, adapter: string, micros: string, extra: Partial<ProviderOption> = {}): ProviderOption {
-  const demo = adapter === "fake";
-  return {
-    id, label,
-    profile: { id, kind, adapter, unitCostMicros: micros },
-    estimatedCost: { currency: "USD", unitMicros: micros, basis: demo ? "fixture" : "host_configured", actualVendorPriceVerified: false },
-    readiness: structuredClone(demo ? DEMO_READY : READY),
-    ...extra,
-  };
-}
-
-function catalog(): ProviderOption[] {
-  const viggle = option("viggle-h3", "MiniMax H3 via Viggle", "video", "viggle-h3", "450000");
-  viggle.readiness = { ...viggle.readiness, realExecutionEnabled: false, credential: { required: true, present: false, backendUnavailable: false, apiValidated: false } };
-  const codexImage = option("codex-image", "Codex image · gpt-6-astra", "image", "codex-image", "0", { usage: { kind: "codex_subscription", unit: "native_turn", quotaEstimateAvailable: false } });
-  codexImage.readiness = { ...codexImage.readiness, mediaTools: { required: true, available: true }, credential: { required: false, present: null, backendUnavailable: false, apiValidated: false }, nativeAccess: { configured: true, authentication: "checked_before_dispatch", quota: "unverified" } };
-  return [
-    option("fake-image-v1", "Demo image", "image", "fake", "100"),
-    option("fake-video-v1", "Demo video", "video", "fake", "100"),
-    option("fake-speech-v1", "Demo speech", "speech", "fake", "100"),
-    option("fake-transcription-v1", "Demo transcription", "transcription", "fake", "100"),
-    option("openai-image-2", "OpenAI gpt-image-2", "image", "openai-image", "40000"),
-    codexImage,
-    option("minimax-h3", "MiniMax H3", "video", "minimax-h3", "500000"),
-    viggle,
-    option("openai-tts", "OpenAI gpt-4o-mini-tts", "speech", "openai-speech", "10000"),
-    option("openai-whisper", "OpenAI whisper-1", "transcription", "openai-transcription", "10000"),
-  ];
-}
-
-const CATALOG_DIGEST = hex("catalog", 1);
-
-function providers(): ProviderCatalogView {
-  return { catalogDigest: CATALOG_DIGEST, defaults: ["fake-image-v1", "fake-video-v1"], profiles: catalog(), realExecutionEnabled: true };
-}
-
 function modelStatus(world: FixtureWorld): ModelSettingsStatus {
   const s = state(world);
   const project = world.snapshot.project;
   return {
     version: 1, projectId: project.id, headVersion: project.headVersion, revisionId: project.revisionId,
-    capabilityLockId: `lock-${s.lock}`, selectionDigest: hex("selection", s.lock), catalogDigest: CATALOG_DIGEST,
-    selected: { ...s.selected }, options: catalog(),
+    capabilityLockId: `lock-${s.lock}`, selectionDigest: hex("selection", s.lock), catalogDigest: catalogDigest(world),
+    selected: { ...s.selected }, options: catalogProfiles(world),
   };
 }
 
@@ -137,7 +99,7 @@ function preview(world: FixtureWorld, body: unknown): ModelPreview {
   const status = modelStatus(world);
   if (!input || !Array.isArray(input.profileIds) || input.scope?.kind !== "unfinished") throw new ApiError("VALIDATION_ERROR", 400);
   if (input.expectedHeadVersion !== status.headVersion || input.expectedSelectionDigest !== status.selectionDigest || input.expectedCatalogDigest !== status.catalogDigest) throw new ApiError("MODEL_SETTINGS_STALE", 409);
-  const options = catalog();
+  const options = catalogProfiles(world);
   const selected = { ...s.selected };
   for (const id of input.profileIds) {
     const found = options.find((o) => o.id === id);
@@ -194,14 +156,24 @@ function apply(world: FixtureWorld, body: unknown) {
 
 function directorSetup(world: FixtureWorld): DirectorSetup {
   const s = state(world);
+  // On a first run no film is open; the archived sample film stands in for none, so its setup is not answered.
+  if (computer(world).firstRun) throw new ApiError("NOT_FOUND", 404);
   return {
     selection: structuredClone(s.director), selectionDigest: hex("director", s.directorRevision),
     busy: world.director.status === "running", changeAvailable: world.director.status !== "running", changeAppliesTo: "next_turn",
-    defaults: { binaryPath: "/usr/local/bin/codex", model: "gpt-6-astra" },
+    // The host's suggestion for this computer: no path when it has no Codex.
+    defaults: { binaryPath: computer(world).codex ? CODEX_DEFAULTS.binaryPath : "", model: CODEX_DEFAULTS.model },
     locked: true, modelCalls: 4,
     modelChoices: s.catalogStatus === "ready" ? [{ id: "gpt-6-astra", label: "gpt-6-astra" }, { id: "gpt-6-astra-mini", label: "gpt-6-astra-mini" }] : [],
     modelCatalogStatus: s.catalogStatus, modelCatalogCheckedAt: s.catalogStatus === "unchecked" ? null : "2026-10-15T10:40:00.000Z",
   };
+}
+
+/** GET /director/models: Codex's read-only setup check, which fills the model list (blocked on a computer without Codex). */
+function checkCodex(world: FixtureWorld): DirectorSetup {
+  directorSetup(world);
+  state(world).catalogStatus = computer(world).codex ? "ready" : "blocked";
+  return directorSetup(world);
 }
 
 function changeDirector(world: FixtureWorld, body: unknown) {
@@ -288,12 +260,11 @@ function setReview(world: FixtureWorld, body: unknown) {
 }
 
 export const settingsRoutes: FixtureRoute[] = [
-  { method: "GET", match: /^\/api\/providers$/, handle: () => providers() },
   { method: "GET", match: /^\/settings\/models$/, handle: (world) => modelStatus(world) },
   { method: "POST", match: /^\/settings\/models\/preview$/, handle: (world, _params, body) => preview(world, body) },
   { method: "POST", match: /^\/settings\/models\/apply$/, handle: (world, _params, body) => apply(world, body) },
   { method: "GET", match: /^\/director\/setup$/, handle: (world) => directorSetup(world) },
-  { method: "GET", match: /^\/director\/models$/, handle: (world) => { state(world).catalogStatus = "ready"; return directorSetup(world); } },
+  { method: "GET", match: /^\/director\/models$/, handle: (world) => checkCodex(world) },
   { method: "POST", match: /^\/director\/change$/, handle: (world, _params, body) => changeDirector(world, body) },
   // The sample film already had conversations, so its Director is chosen: a first setup is refused like the server does.
   { method: "POST", match: /^\/director\/setup$/, handle: () => { throw new ApiError("DIRECTOR_SELECTION_LOCKED", 409); } },

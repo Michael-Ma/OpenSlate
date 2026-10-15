@@ -4,18 +4,20 @@ import type { ConversationEntry, DirectorStatus, ProjectSnapshot } from "../../m
 import { FIXTURE_REPLY_MS } from "../fixture-director.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { FPS, lastFerryOverview, lastFerrySnapshot, PROJECT_ID, sceneId } from "../last-ferry.ts";
+import { catalogDigest, changeCatalogOnce, CODEX_DEFAULTS, computer, startPreset } from "./computer.ts";
 import type { FixtureRoute } from "./types.ts";
 
 /**
  * The Start view's routes in the sample film: the films list (with archived films), rename, archive
- * and restore, creating a film, the demo, the Codex Director setup, the plan import and the provider
- * catalog. Other films are small simulated films that open in the studio; nothing is generated,
- * charged or saved.
+ * and restore, creating a film, the demo, and the other films' Director setup, reads and plan import.
+ * Other films are small simulated films that open in the studio; nothing is generated, charged or
+ * saved. This computer (Codex, keys, the provider catalog) is computer.ts; the sample film's own
+ * Director setup is answered by settings.ts.
  *
- * `?start=no-keys` simulates a computer without keys or Codex. `?start=first-run` also leaves the
- * list empty (The Last Ferry archived), which shows the welcome and the demo path; as on a real first
- * run, where no film is open, the view cannot read whether this computer has Codex (the open Last
- * Ferry's Director setup is not answered), so a new film's Director step is where it finds out.
+ * `?start=no-keys` simulates a computer without keys or Codex. `?start=first-run` also archives The
+ * Last Ferry, so the studio opens with no film (GET /api/projects is empty) and shows the welcome and
+ * the demo path; with no film open the view cannot read whether this computer has Codex, so a new
+ * film's Director step is where it finds out.
  * `?start=setup-busy` has keys and Codex, but each new film's first Codex setup answers
  * DIRECTOR_SETUP_BUSY (the check is still running), so Try again shows.
  * `?start=refusals` shows refusals inside the modal dialogs: this computer's models change once, just
@@ -38,27 +40,14 @@ interface Film {
 
 interface StartWorld {
   films: Film[];
-  codex: boolean;
-  keys: boolean;
-  /** First run: the open film's Director setup is not answered (no film is open on a real first run). */
-  hideCodex: boolean;
   /** Films whose next Codex setup answers DIRECTOR_SETUP_BUSY (setup-busy). */
   busyOnce: Set<string> | null;
-  /** The provider catalog's digest; `changesOnce` replaces it just before the first Create that names models (refusals). */
-  catalog: { digest: string; changesOnce: boolean };
   next: number;
   /** The world cursor last seen, so The Last Ferry's "changed" follows its edits. */
   seenCursor: number;
 }
 
 const worlds = new WeakMap<FixtureWorld, StartWorld>();
-const DIGEST = "c".repeat(64);
-const SLOW_MODELS_MS = 2500;
-const CODEX = { binaryPath: "/usr/local/bin/codex", model: "gpt-6-astra" };
-
-function mode(): string | null {
-  try { return new URLSearchParams(globalThis.location?.search ?? "").get("start"); } catch { return null; }
-}
 
 /** A local time `days` before today, never later than a few minutes ago (early in the morning "today 10:44" has not happened yet). */
 function daysAgo(now: Date, days: number, hours: number, minutes: number): string {
@@ -130,7 +119,7 @@ function draftFilm(id: string, name: string, title: string, rows: { framing: str
 
 function initial(world: FixtureWorld): StartWorld {
   const now = new Date();
-  const start = mode();
+  const start = startPreset();
   const firstRun = start === "first-run";
   const ferry: Film = { id: PROJECT_ID, name: world.snapshot.project.name, archived: firstRun, updatedAt: daysAgo(now, 0, 10, 44), director: "fake", data: null, planImport: null };
   const others: Film[] = firstRun ? [] : [
@@ -148,11 +137,7 @@ function initial(world: FixtureWorld): StartWorld {
     const [first] = Object.keys(bus.overview.shots);
     bus.overview.shots[first!] = { ...bus.overview.shots[first!]!, keyframe: { state: "running", takeCount: 0, opened: false } };
   }
-  const bare = start === "no-keys" || firstRun;
-  return {
-    films: [ferry, ...others], codex: !bare, keys: !bare, hideCodex: firstRun, busyOnce: start === "setup-busy" ? new Set() : null,
-    catalog: { digest: DIGEST, changesOnce: start === "refusals" }, next: 1, seenCursor: world.overview.cursor,
-  };
+  return { films: [ferry, ...others], busyOnce: start === "setup-busy" ? new Set() : null, next: 1, seenCursor: world.overview.cursor };
 }
 
 function state(world: FixtureWorld): StartWorld {
@@ -223,44 +208,6 @@ function asObject(body: unknown): Record<string, unknown> {
   return body && typeof body === "object" ? (body as Record<string, unknown>) : {};
 }
 
-// ---- GET /api/providers ----
-
-function provider(id: string, label: string, kind: string, adapter: string, unitMicros: string, ready: boolean, credential: boolean) {
-  const fake = adapter === "fake";
-  return {
-    id, label, installedDefinition: true,
-    profile: { kind, adapter, configuration: { model: id } },
-    estimatedCost: { currency: "USD", unitMicros, basis: fake ? "fixture" : "host_configured", actualVendorPriceVerified: false },
-    readiness: {
-      configurationValid: true, registered: true,
-      mediaTools: { required: !fake, available: true },
-      credential: { required: credential, present: credential ? ready : null, backendUnavailable: false, apiValidated: false },
-      spendingPermissionRequired: false, enabledByHost: !fake, realExecutionEnabled: !fake && ready,
-    },
-  };
-}
-
-function providers(world: FixtureWorld) {
-  const { keys, catalog } = state(world);
-  const profiles = [
-    provider("fake-image-v1", "Demo image", "image", "fake", "100", true, false),
-    provider("fake-video-v1", "Demo video", "video", "fake", "1000", true, false),
-    provider("fake-speech-v1", "Demo speech", "speech", "fake", "100", true, false),
-    provider("fake-transcription-v1", "Demo transcription", "transcription", "fake", "100", true, false),
-    provider("openai-gpt-image-2", "OpenAI gpt-image-2", "image", "openai-image", "40000", keys, true),
-    provider("minimax-h3", "MiniMax H3", "video", "minimax-h3", "500000", keys, true),
-    provider("openai-tts", "OpenAI gpt-4o-mini-tts", "speech", "openai-speech", "10000", keys, true),
-    provider("openai-whisper", "OpenAI whisper-1", "transcription", "openai-transcription", "10000", keys, true),
-  ];
-  return {
-    catalogDigest: catalog.digest,
-    defaults: ["fake-image-v1", "fake-video-v1", "fake-speech-v1", "fake-transcription-v1"],
-    profiles,
-    realExecutionEnabled: profiles.some((row) => row.readiness.realExecutionEnabled),
-    notice: "",
-  };
-}
-
 // ---- routes ----
 
 /** A film's own path: relative for The Last Ferry (below its base), absolute for the others. */
@@ -268,27 +215,29 @@ const own = (rest: string) => new RegExp(`^(?:/api/projects/([^/?]+))?${rest}$`)
 const other = (rest: string) => new RegExp(`^/api/projects/([^/?]+)${rest}$`);
 
 function setupRead(world: FixtureWorld, item: Film) {
-  const { codex } = state(world);
-  const defaults = codex ? CODEX : { binaryPath: "", model: CODEX.model };
-  const selection = item.director === "native" ? { mode: "native" as const, ...CODEX } : { mode: "fake" as const };
+  const { codex } = computer(world);
+  const defaults = codex ? { ...CODEX_DEFAULTS } : { binaryPath: "", model: CODEX_DEFAULTS.model };
+  const selection = item.director === "native" ? { mode: "native" as const, ...CODEX_DEFAULTS } : { mode: "fake" as const };
   return { selection, selectionDigest: "d".repeat(64), busy: false, changeAvailable: true, changeAppliesTo: "next_turn", defaults, locked: false, modelCalls: 0, modelChoices: [], modelCatalogStatus: "unchecked", modelCatalogCheckedAt: null };
 }
 
 export const startRoutes: FixtureRoute[] = [
+  {
+    // What the studio opens with: the sample film, or no film on a first run (it is archived). Only the films
+    // list (below) names the other films, so the top bar shows the sample film's title until Start is opened.
+    method: "GET",
+    match: /^\/api\/projects$/,
+    handle(world) {
+      const ferry = film(world, PROJECT_ID);
+      return { projects: ferry.archived ? [] : [{ id: ferry.id, name: world.snapshot.project.name }] };
+    },
+  },
   {
     method: "GET",
     match: /^\/api\/projects\?includeArchived=(true|false)$/,
     handle(world, [include]) {
       const all = state(world).films.filter((item) => include === "true" || !item.archived);
       return { projects: all.map((item) => listItem(world, item)) };
-    },
-  },
-  {
-    method: "GET",
-    match: /^\/api\/providers$/,
-    handle(world) {
-      if (mode() !== "slow-models") return providers(world);
-      return new Promise((resolve) => setTimeout(() => resolve(providers(world)), SLOW_MODELS_MS));
     },
   },
   {
@@ -299,8 +248,10 @@ export const startRoutes: FixtureRoute[] = [
       const name = typeof input.name === "string" ? input.name.trim() : "";
       if (!name || name.length > 160) throw new ApiError("VALIDATION_ERROR", 400);
       const start = state(world);
-      if (input.expectedCatalogDigest !== undefined && start.catalog.changesOnce) start.catalog = { digest: "b".repeat(64), changesOnce: false };
-      if (input.expectedCatalogDigest !== undefined && input.expectedCatalogDigest !== start.catalog.digest) throw new ApiError("PROVIDER_CATALOG_CHANGED", 409);
+      if (input.expectedCatalogDigest !== undefined) {
+        changeCatalogOnce(world);
+        if (input.expectedCatalogDigest !== catalogDigest(world)) throw new ApiError("PROVIDER_CATALOG_CHANGED", 409);
+      }
       const id = `film-${start.next++}`;
       const data = emptyFilm(id, name);
       start.films.push({ id, name, archived: false, updatedAt: new Date().toISOString(), director: "fake", data, planImport: null });
@@ -339,32 +290,25 @@ export const startRoutes: FixtureRoute[] = [
     handle(world, [id], body) {
       const item = film(world, id);
       if (asObject(body).action !== "create") throw new ApiError("VALIDATION_ERROR", 400);
-      if (item.director !== "fake" || mode() === "no-stand-in") throw new ApiError("ACTOR_DENIED", 409);
+      if (item.director !== "fake" || startPreset() === "no-stand-in") throw new ApiError("ACTOR_DENIED", 409);
       if (!item.data || item.data.snapshot.project.shots.length) throw new ApiError("DEMO_REQUIRES_EMPTY_PROJECT", 409);
       const seeded = demoFilm(item.id, item.name);
       change(world, item, () => seeded);
       return { requestId: `${item.id}-demo`, turnId: `${item.id}-turn`, status: "queued", director: "fake" };
     },
   },
-  {
-    method: "GET",
-    match: own("/director/setup"),
-    handle(world, [id]) {
-      const item = film(world, id);
-      if (item.id === PROJECT_ID && state(world).hideCodex) throw new ApiError("NOT_FOUND", 404);
-      return setupRead(world, item);
-    },
-  },
+  // The other films' Director setup (the sample film's is settings.ts).
+  { method: "GET", match: other("/director/setup"), handle: (world, [id]) => setupRead(world, film(world, id)) },
   {
     method: "POST",
-    match: own("/director/setup"),
+    match: other("/director/setup"),
     handle(world, [id], body) {
       const item = film(world, id);
       const input = asObject(body);
       const busy = state(world).busyOnce;
       if (busy?.delete(item.id)) throw new ApiError("DIRECTOR_SETUP_BUSY", 409);
       if (input.mode === "native") {
-        if (!state(world).codex || typeof input.binaryPath !== "string" || !input.binaryPath) throw new ApiError("VALIDATION_ERROR", 400);
+        if (!computer(world).codex || typeof input.binaryPath !== "string" || !input.binaryPath) throw new ApiError("VALIDATION_ERROR", 400);
         item.director = "native";
       } else item.director = "fake";
       return { ...setupRead(world, item), readiness: null, readinessSelectionDigest: "d".repeat(64), selectionMatchesCommand: true };

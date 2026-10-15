@@ -1,18 +1,19 @@
-import type { ExportRecord, ExportView, GenerationOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import type { ExportRecord, ExportView, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { ApiError } from "../../api/client.ts";
 import { changedSince, filmFingerprint, readinessOf, type FilmFingerprint, type MediaView } from "../../model/film-export.ts";
 import type { MusicRecording, Soundtrack } from "../../model/film.ts";
 import type { ProjectSnapshot } from "../../model/types.ts";
-import { fixtureCommand, recompute } from "../fixture-commands.ts";
+import { recompute } from "../fixture-commands.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { artifactFor } from "../last-ferry.ts";
-import type { FixtureRoute } from "./types.ts";
+import { DECLINE, type FixtureRoute } from "./types.ts";
 
 /**
  * Simulated routes for the Film view on the sample film: storyboard-order exports (start, cancel, Check again),
- * the media jobs that tell an interrupted export, the music library, and the hold-free storyboard edits the
- * Film view makes (moveShot, soundtrack) with single-step Undo. Other storyboard edits go to the Keyframes
- * fixture. Nothing is rendered, saved or downloaded.
+ * the media jobs that tell an interrupted export, the music library (GET /audio-library; music imported in the
+ * Assets view joins it through addMusicRecording), and the music edits (soundtrack) with single-step Undo.
+ * Plan's /storyboard route owns the endpoint and hands the music edits here; shot order is Plan's (moveShot).
+ * Nothing is rendered, saved or downloaded.
  *
  * Presets for reviewing states the sample film cannot reach by itself (its 3.2 never gets a voice line here):
  * `&film=ready` (every clip made, the last export changed since), `&film=demo`, `&film=interrupted`, `&film=failed`,
@@ -39,9 +40,12 @@ interface ExportEntry {
   stalled?: boolean;
 }
 
-type Undo =
-  | { commandId: string; kind: "order"; scenes: Record<string, string[]>; labels: Record<string, string>; shots: ProjectSnapshot["project"]["shots"] }
-  | { commandId: string; kind: "music"; soundtrack: Soundtrack | null };
+/** The latest music edit, undoable while nothing changed since (the head version is the one it produced). */
+interface Undo {
+  commandId: string;
+  headAfter: number;
+  soundtrack: Soundtrack | null;
+}
 
 interface FilmFixture {
   serial: number;
@@ -53,6 +57,7 @@ interface FilmFixture {
 }
 
 const LIBRARY_PAGE = 40;
+const MIB = 1024 * 1024;
 
 const states = new WeakMap<FixtureWorld, FilmFixture>();
 
@@ -287,62 +292,14 @@ function recoverExport(world: FixtureWorld, exportId: string): Promise<ExportRec
   }, FILM_FIXTURE_TIMING.recoverMs));
 }
 
-// ---- hold-free storyboard edits: order within a scene and the music --------------------------
+// ---- hold-free storyboard edits: the music ---------------------------------------------------
 
 interface EditBody {
   kind?: string;
   expectedHeadVersion?: unknown;
-  id?: string;
-  sceneId?: string;
-  beforeId?: string;
   field?: string;
   value?: string;
   commandId?: string;
-}
-
-function relabel(overview: GenerationOverview): GenerationOverview {
-  const shots = { ...overview.shots };
-  for (const scene of overview.scenes) scene.shotIds.forEach((id, index) => { const shot = shots[id]; if (shot) shots[id] = { ...shot, sceneId: scene.sceneId, label: `${scene.ordinal}.${index + 1}` }; });
-  return { ...overview, shots };
-}
-
-/** The snapshot's shot rows follow the overview's storyboard order. */
-function orderSnapshot(world: FixtureWorld): void {
-  const order = [...world.overview.scenes].sort((a, b) => a.ordinal - b.ordinal).flatMap((scene) => scene.shotIds.map((id) => ({ id, sceneId: scene.sceneId })));
-  const rows = new Map(world.snapshot.project.shots.map((row) => [row.id, row]));
-  const shots = order.map(({ id, sceneId }) => { const row = rows.get(id); return row ? { ...row, sceneId } : null; }).filter((row): row is NonNullable<typeof row> => !!row);
-  world.snapshot = { ...world.snapshot, project: { ...world.snapshot.project, shots } };
-}
-
-function moveShot(world: FixtureWorld, body: EditBody): { commandId: string; headVersion: number } {
-  const fixture = state(world);
-  assertHead(world, body);
-  const shot = body.id ? world.overview.shots[body.id] : undefined;
-  if (!shot) throw new ApiError("NOT_FOUND", 404);
-  const target = world.overview.scenes.find((scene) => scene.sceneId === body.sceneId);
-  if (!target) throw new ApiError("NOT_FOUND", 404);
-  if (body.beforeId !== undefined && (body.beforeId === shot.shotId || !target.shotIds.includes(body.beforeId))) throw new ApiError("VALIDATION_ERROR", 400);
-  const commandId = nextId(fixture, "film-command");
-  const before: Undo = {
-    commandId,
-    kind: "order",
-    scenes: Object.fromEntries(world.overview.scenes.map((scene) => [scene.sceneId, [...scene.shotIds]])),
-    labels: Object.fromEntries(Object.values(world.overview.shots).map((s) => [s.shotId, s.label])),
-    shots: world.snapshot.project.shots,
-  };
-  world.update((w) => {
-    const scenes = w.overview.scenes.map((scene) => {
-      const without = scene.shotIds.filter((id) => id !== shot.shotId);
-      if (scene.sceneId !== target.sceneId) return { ...scene, shotIds: without };
-      const at = body.beforeId ? without.indexOf(body.beforeId) : without.length;
-      return { ...scene, shotIds: [...without.slice(0, at), shot.shotId, ...without.slice(at)] };
-    });
-    w.overview = recompute(relabel({ ...w.overview, scenes }), w.snapshot.notes ?? []);
-    orderSnapshot(w);
-    bump(w, fixture);
-    fixture.undo = before;
-  });
-  return { commandId, headVersion: world.snapshot.project.headVersion };
 }
 
 function soundtrackEdit(world: FixtureWorld, body: EditBody): { commandId: string; headVersion: number } {
@@ -375,41 +332,42 @@ function soundtrackEdit(world: FixtureWorld, body: EditBody): { commandId: strin
   world.update((w) => {
     setSoundtrack(w, next);
     bump(w, fixture);
-    fixture.undo = { commandId, kind: "music", soundtrack: current };
+    fixture.undo = { commandId, headAfter: w.snapshot.project.headVersion, soundtrack: current };
   });
   return { commandId, headVersion: world.snapshot.project.headVersion };
 }
 
 function undo(world: FixtureWorld, entry: Undo): { commandId: string; headVersion: number } {
   const fixture = state(world);
+  // Only the latest edit can be undone: any change since (an edit in another view, an import) ends it.
+  if (entry.headAfter !== world.snapshot.project.headVersion) {
+    fixture.undo = null;
+    throw new ApiError("UNDO_UNAVAILABLE", 409);
+  }
   world.update((w) => {
-    if (entry.kind === "music") setSoundtrack(w, entry.soundtrack);
-    else {
-      const scenes = w.overview.scenes.map((scene) => ({ ...scene, shotIds: entry.scenes[scene.sceneId] ?? scene.shotIds }));
-      const shots = { ...w.overview.shots };
-      for (const [id, label] of Object.entries(entry.labels)) { const shot = shots[id]; if (shot) shots[id] = { ...shot, label }; }
-      w.overview = recompute(relabel({ ...w.overview, scenes, shots }), w.snapshot.notes ?? []);
-      const rows = new Map(w.snapshot.project.shots.map((row) => [row.id, row]));
-      w.snapshot = { ...w.snapshot, project: { ...w.snapshot.project, shots: entry.shots.map((row) => ({ ...(rows.get(row.id) ?? row), sceneId: row.sceneId })) } };
-    }
+    setSoundtrack(w, entry.soundtrack);
     bump(w, fixture);
     fixture.undo = null;
   });
   return { commandId: nextId(fixture, "film-command"), headVersion: world.snapshot.project.headVersion };
 }
 
+/** The music edits and their Undo; Plan's route has already checked the kind, the head version and a pending plan. */
 function storyboard(world: FixtureWorld, body: unknown): unknown {
   const fixture = state(world);
   const edit = (body ?? {}) as EditBody;
-  if (edit.kind === "moveShot") return moveShot(world, edit);
   if (edit.kind === "soundtrack") return soundtrackEdit(world, edit);
   if (edit.kind === "undo" && fixture.undo && fixture.undo.commandId === edit.commandId) {
     assertHead(world, edit);
     return undo(world, fixture.undo);
   }
-  // Only the latest edit can be undone: a new edit elsewhere ends this view's pending Undo.
-  if (edit.kind !== "undo") fixture.undo = null;
-  return fixtureCommand(world, "POST", "/storyboard", body);
+  return DECLINE;
+}
+
+/** Music imported in the Assets view joins the film's library, so Change music lists it. */
+export function addMusicRecording(world: FixtureWorld, recording: MusicRecording): void {
+  const fixture = state(world);
+  if (!fixture.library.some((r) => r.id === recording.id)) fixture.library = [recording, ...fixture.library];
 }
 
 /** Simulated server routes the Film view needs in the sample film. */
@@ -428,7 +386,8 @@ export const filmRoutes: FixtureRoute[] = [
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new ApiError("VALIDATION_ERROR", 400);
     const recordings = all.slice(offset, offset + LIBRARY_PAGE);
     const next = offset + recordings.length;
-    return { recordings, coverage: { offset, total: all.length, nextOffset: next < all.length ? next : null }, capabilities: { import: false, maxBytes: 0, maxSeconds: 360 } };
+    // The sample studio imports audio (the Assets view's import), up to 128 MiB and 6 minutes like the studio.
+    return { recordings, coverage: { offset, total: all.length, nextOffset: next < all.length ? next : null }, capabilities: { import: true, maxBytes: 128 * MIB, maxSeconds: 360 } };
   } },
   { method: "POST", match: /^\/storyboard$/, handle: (world, _params, body) => storyboard(world, body) },
 ];

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { filmRoutes, applyFilmPreset, FILM_FIXTURE_TIMING, FIXTURE_MUSIC } from '../../src/next/fixtures/routes/film.ts';
-import { extraRoutes } from '../../src/next/fixtures/routes/index.ts';
+import { extraRoutes, fixtureRoute } from '../../src/next/fixtures/routes/index.ts';
+import { DECLINE } from '../../src/next/fixtures/routes/types.ts';
+import { fixtureCommand } from '../../src/next/fixtures/fixture-commands.ts';
 import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { filmTimeline, moveEdit } from '../../src/next/model/film.ts';
 
@@ -29,12 +31,13 @@ function world() {
   return w;
 }
 
+/**
+ * As the fixture port answers: the views' routes in order (Plan's /storyboard route owns the endpoint and hands the
+ * music edits to the Film route; shot order is Plan's), then the Keyframes commands.
+ */
 function call(w, method, path, body) {
-  for (const route of filmRoutes) {
-    const match = route.method === method ? route.match.exec(path) : null;
-    if (match) return route.handle(w, match.slice(1), body);
-  }
-  throw new Error(`no film route for ${method} ${path}`);
+  const answer = fixtureRoute(w, method, path, body);
+  return answer === DECLINE ? fixtureCommand(w, method, path, body) : answer;
 }
 const head = w => w.snapshot.project.headVersion;
 const edit = (w, body) => call(w, 'POST', '/storyboard', { ...body, expectedHeadVersion: head(w) });
@@ -103,6 +106,8 @@ test('music edits: start, volume, mute, change and remove, each undoable', () =>
 });
 
 test('other storyboard edits go to the Keyframes fixture, and end this view\'s pending Undo', () => {
+  const [musicRoute] = filmRoutes.filter((route) => route.match.test('/storyboard'));
+  assert.equal(musicRoute.handle(world(), [], { kind: 'moveShot', id: shotId('2.2') }), DECLINE, 'the Film route answers only the music');
   const w = world();
   const music = edit(w, { kind: 'soundtrack', field: 'muted', value: 'true' });
   const length = edit(w, { kind: 'shot', id: shotId('2.1'), field: 'desiredFrames', value: '210' });
