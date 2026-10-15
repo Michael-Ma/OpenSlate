@@ -1,0 +1,26 @@
+import type { ProductionService } from './service.js';
+import type { DirectorTurn } from './director-supervisor.js';
+
+const reasons: Record<string, string> = { RUNTIME_RUN_TIMEOUT: 'timeout', REQUEST_SUPERSEDED: 'superseded', OWNER_LOST: 'owner_lost' };
+/** Public progress has names/counts only, never tool arguments or native diagnostics. */
+export function directorTurnViews(service: ProductionService, projectId: string) {
+  const store = service.store, outputs = store.list<{ turnId: string; text: string; phase: string }>('director_output', projectId);
+  const calls = store.list<{ id: string; epochId: string; tool: string; state: string; result?: { preparedId?: string } | null }>('tool_invocation', projectId);
+  return store.list<DirectorTurn>('director_turn', projectId).map(turn => {
+    const tools = calls.filter(c => c.epochId === turn.epochId), replied = outputs.some(o => o.turnId === turn.id && o.text.trim());
+    const notes = store.list<{ turnId: string }>('director_note', projectId).filter(n => n.turnId === turn.id).length;
+    const proposals = store.list<{ requestId: string; epochId: string }>('director_proposal', projectId).filter(p => p.epochId === turn.epochId).length;
+    const changes = new Set(tools.flatMap(call => {
+      if (call.tool !== 'apply_change') return [];
+      const reconciled = store.get<{ state: string; receipt?: { preparedId?: string } }>('tool_reconciliation', call.id);
+      const receipt = call.state === 'succeeded' ? call.result : reconciled?.state === 'effect_confirmed' ? reconciled.receipt : null;
+      return receipt?.preparedId ? [receipt.preparedId] : [];
+    })).size;
+    return { id: turn.id, requestId: turn.requestId, state: turn.state, at: turn.createdAt, updatedAt: turn.updatedAt,
+      runtime: turn.runtimeId === 'codex-app-server' ? 'live' : 'scripted',
+      action: store.get('keyframe_review_request', turn.requestId) ? 'keyframe_review' : 'conversation',
+      reason: turn.errorCode ? reasons[turn.errorCode] ?? (turn.state === 'failed' ? 'failed' : 'unknown') : turn.state === 'completed' && !replied ? 'no_reply' : turn.state === 'interrupted' ? 'interrupted' : turn.state === 'failed' ? 'failed' : turn.state === 'unknown' ? 'unknown' : null,
+      effects: { notesCreated: notes, proposalsHeld: proposals, changesApplied: changes },
+      progress: tools.at(-1) ? { tool: tools.at(-1)!.tool, state: tools.at(-1)!.state } : null };
+  });
+}

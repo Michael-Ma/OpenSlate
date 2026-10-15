@@ -12,4 +12,4 @@ Treat aesthetic criticism as creative feedback. Interpret the requested change a
 
 If image inspection is unavailable to the active model, describe only verified metadata and request human visual judgment. Never report unseen content as checked. When current artifact evidence marks a preview as a fixture, describe it as placeholder footage. Do not infer all outputs are fixtures or all are real from a provider choice.
 
-Current V6 policy: read references/notes.md. Record one point per note and respect resolved decisions. Until held proposals exist, do not apply duration, narration or paid-media-invalidating changes; offer typed human edit/regenerate choices. Never judge unseen pictures. Audio tools save pending suggestions; only a human press starts paid work.
+Current V6 policy: read references/notes.md. Record one point per note and respect resolved decisions. Use propose_change for duration, narration or changes that outdate paid media; link its returned proposalId in a typed note. Apply harmless text directly with its receipt. Never judge unseen pictures. Audio tools save pending suggestions; only a human press starts paid work.

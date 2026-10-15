@@ -240,3 +240,65 @@ test('stop between claim and runtime dispatch prevents read-only model calls',as
   const restarted=f.make();restarted.tick();await restarted.settle();assert.equal(calls,0);
   assert.equal(f.service.snapshot(f.project.id).control.authorityId,stop.requestId);
 });
+
+test('terminal snapshot reports no reply, failed, timeout, owner lost and superseded honestly', async t => {
+  for (const [status, code, reason] of [['completed', null, 'no_reply'], ['failed', 'TEST_FAILURE', 'failed'], ['unknown', 'RUNTIME_RUN_TIMEOUT', 'timeout'], ['unknown', 'OWNER_LOST', 'owner_lost'], ['interrupted', 'REQUEST_SUPERSEDED', 'superseded']]) {
+    const f = fixture(t, async input => ({ ...completed(input, ''), status, ...(code ? { error: { code, message: 'test' } } : {}) }));
+    f.enqueue('Discuss only', { editing: false }); f.supervisor.tick(); await f.supervisor.settle();
+    const turn = f.service.snapshot(f.project.id).turns[0];
+    assert.equal(turn.reason, reason); assert.deepEqual(turn.effects, { notesCreated: 0, proposalsHeld: 0, changesApplied: 0 });
+    assert.equal(f.service.snapshot(f.project.id).conversation.filter(m => m.role === 'assistant').length, 0);
+  }
+});
+test('structured question answers retain option index and label in saved context and reject unknown choices', async t => {
+  let received;
+  const f = fixture(t, async (input, { onEvent }) => {
+    received = input;
+    if (f.store.list('director_question', f.project.id).length === 0) await onEvent({ ...identity(input), kind: 'pending_input', nativeRequestId: 'q', questions: [{ id: 'tone', header: 'Tone', question: 'Which tone?', options: [{ label: 'Cool', description: '' }, { label: 'Warm', description: '' }] }] });
+    return completed(input);
+  });
+  f.enqueue('Discuss', { editing: false }); f.supervisor.tick(); await f.supervisor.settle();
+  const question = f.store.list('director_question', f.project.id)[0];
+  for (const answers of [[{ questionId: 'tone', optionIndex: 2 }], [{ questionId: 'tone', optionLabel: 'Unknown' }], [{ questionId: 'unknown', optionIndex: 0 }], [{ questionId: 'tone', optionIndex: 1, optionLabel: 'Cool' }]]) {
+    assert.throws(() => f.supervisor.answerQuestion(f.project.id, 'human', question.id, { answers }, JSON.stringify(answers)), { code: 'VALIDATION_ERROR' });
+  }
+  const answer = { answers: [{ questionId: 'tone', optionIndex: 1, text: 'Warm dawn' }] };
+  const actor = f.supervisor.answerQuestion(f.project.id, 'human', question.id, answer, 'structured');
+  assert.deepEqual(f.supervisor.answerQuestion(f.project.id, 'human', question.id, answer, 'structured'), actor);
+  f.supervisor.tick(); await f.supervisor.settle();
+  const saved = f.store.get('director_question', question.id);
+  assert.deepEqual(saved.answers, [{ questionId: 'tone', optionIndex: 1, optionLabel: 'Warm', text: 'Warm dawn' }]);
+  assert.match(received.context, /"optionIndex":1/);
+});
+test('conversation timestamps, user scopes and assistant runtime survive later runtime changes', async t => {
+  const f = fixture(t); const p = f.store.getProject(f.project.id);
+  f.store.saveProject({ ...p, scenes: [{ id: 'scene-test', revisionId: 'r', purpose: 'Scene' }] }, p.headVersion);
+  f.enqueue('Discuss scene', { scopeIds: ['scene-test'], editing: false }); f.supervisor.tick(); await f.supervisor.settle();
+  const second = new DirectorSupervisor(f.service, { id: 'codex-app-server', start: async input => completed(input, 'Live reply') }, { mode: 'native' });
+  const actor = f.service.beginRequest(f.project.id, 'human', 'Discuss film', { editing: false }); second.enqueue(f.project.id, actor); second.tick(); await second.settle(); await second.close();
+  const entries = f.service.snapshot(f.project.id).conversation;
+  assert.deepEqual(entries[0].scopeIds, ['scene-test']); assert.equal(entries[2].scopeIds, undefined);
+  assert.equal(entries[1].runtime, 'scripted'); assert.equal(entries[3].runtime, 'live'); assert.ok(entries.every(e => !Number.isNaN(Date.parse(e.at))));
+});
+
+test('a native reply without a phase tag is still reported as a reply',async t=>{
+ const f=fixture(t,async(input,{onEvent})=>{
+   await onEvent({...identity(input),kind:'assistant_message',phase:'unknown',text:'The review is saved.'});
+   return completed(input,'The review is saved.');
+ });
+ f.enqueue('Discuss',{editing:false});f.supervisor.tick();await f.supervisor.settle();
+ assert.equal(f.service.snapshot(f.project.id).turns[0].reason,null);
+ assert.equal(f.service.snapshot(f.project.id).conversation.at(-1).text,'The review is saved.');
+});
+
+test('turn effects count an idempotently replayed apply receipt once',async t=>{
+ const f=fixture(t,async input=>{
+   const actor=f.service.actorForBridge(input.projectId,input.bridge.credential),tools=new ToolInvocationService(f.service);
+   const prepared=await tools.invoke(input.projectId,actor,'prepare','prepare_change',{variant:'project',expectedHeadVersion:0,creative:{brief:'A saved brief'}});
+   for(const id of ['apply-first','apply-again'])await tools.invoke(input.projectId,actor,id,'apply_change',{preparedId:prepared.preparedId});
+   return completed(input);
+ });
+ f.enqueue();f.supervisor.tick();await f.supervisor.settle();
+ assert.equal(f.service.snapshot(f.project.id).turns[0].effects.changesApplied,1);
+ assert.equal(f.store.getProject(f.project.id).headVersion,1);
+});

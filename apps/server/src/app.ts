@@ -1,3 +1,5 @@
+import { registerDirectorReviewSetting } from "./application/keyframe-review.js";
+import { registerDirectorProposals } from "./application/director-proposals.js";
 import { registerShotTakes } from "./shot-takes.js";
 import { registerDirectorNotes } from "./application/director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
@@ -67,6 +69,7 @@ export function createApp(options: AppOptions = {}) {
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
   registerDirectorNotes(app, service);
+  registerDirectorProposals(app, service);
   const sceneCommands = options.sceneCommands ?? (options.service ? new SceneConfirmationRunner(options.service, options.narrationRoutes) : undefined);
   registerSceneGeneration(app, service, options.narrationRoutes?.narration, sceneCommands?.enqueueKeyframes);
   if (sceneCommands) { registerSceneConfirmations(app, sceneCommands); registerNarrationFit(app, sceneCommands); }
@@ -204,32 +207,36 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.changeSelection(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
-  app.post<{ Params: { projectId: string }; Body: { text: string; scopeIds?: string[]; editing?: boolean; continueEdits?: ContinueEdits; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
-    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continueEdits: continueEditsSchema, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
-      images: { type: "array", minItems: 1, maxItems: 4, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, ["text"]) },
+  registerDirectorReviewSetting(app, service);
+  app.post<{ Params: { projectId: string }; Body: { text?: string; answers?: import("./application/director-supervisor.js").StructuredAnswer[]; scopeIds?: string[]; editing?: boolean; continueEdits?: ContinueEdits; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
+    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, answers: { type: "array", minItems: 1, maxItems: 8, items: object({ questionId: string, optionIndex: { type: "integer", minimum: 0, maximum: 9 }, optionLabel: string, text: { type: "string", minLength: 1, maxLength: 16000 } }, ["questionId"]) }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continueEdits: continueEditsSchema, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
+      images: { type: "array", minItems: 1, maxItems: 4, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, []) },
   }, async request => {
+    const text = request.body.text ?? "";
+    invariant(text.trim().length > 0 || request.body.answers?.length && request.body.replyToQuestionId, "VALIDATION_ERROR", "Write a message or answer a pending question");
     invariant(!request.body.resumeFromStopId || (!request.body.replyToQuestionId && !request.body.replyToReviewId), "VALIDATION_ERROR", "Continue stopped work with a fresh conversation message");
     invariant(!request.body.continueEdits || (!request.body.replyToQuestionId && !request.body.replyToReviewId && !request.body.resumeFromStopId && !request.body.continuationRequestId), "VALIDATION_ERROR", "Continue reviewed edits with one fresh covering message");
+    invariant(!request.body.answers || request.body.replyToQuestionId, "VALIDATION_ERROR", "Structured answers require a pending question");
     const images = request.body.images ? selectedDirectorImages(request.body.images) : undefined;
     invariant(!images || (options.director && options.runtimeSettings && directorMode(request.params.projectId) === "native" && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_IMAGES_UNAVAILABLE", "Attach references to a new native conversation request");
     if (request.body.replyToQuestionId) {
       invariant(options.director && !request.body.replyToReviewId && !request.body.scopeIds && !request.body.continuationRequestId && request.body.editing === undefined, "VALIDATION_ERROR", "Reply to one pending question using its original scope");
-      const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.text, request.headers["idempotency-key"] as string | undefined ?? newId());
+      const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.answers ? { text, answers: request.body.answers } : text, request.headers["idempotency-key"] as string | undefined ?? newId());
       options.director.tick(); return { requestId: actor.requestId, status: "queued", director: directorMode(request.params.projectId) };
     }
     const actor = service().store.transaction(() => {
-      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.text,
+      const actor = service().beginRequest(request.params.projectId, "local-user", text,
         { ...request.body, contextDigest: imageMessageContext(images, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
       if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
       if (!request.body.replyToReviewId) options.director?.enqueue(request.params.projectId, actor);
       return actor;
     });
-    if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, request.body.text);
+    if (request.body.replyToReviewId) return service().replyToReview(request.params.projectId, actor, request.body.replyToReviewId, text);
     options.director?.tick();
     return { requestId: actor.requestId, status: options.director ? "queued" : "recorded", director: directorMode(request.params.projectId) };
   });
   app.post<{ Params: { projectId: string }; Body: DemoCommand }>("/api/projects/:projectId/demo", {
-    schema: { body: object({ action: { enum: ["create", "close_up", "wide"] }, shotId: string }, ["action"]) },
+    schema: { body: object({ action: { enum: ["create", "close_up", "wide", "review"] }, shotId: string, sceneId: string }, ["action"]) },
   }, async request => {
     invariant(options.director && directorMode(request.params.projectId) === "fake", "ACTOR_DENIED", "The demo is available only with the offline fake director");
     const { projectId } = request.params;
@@ -237,6 +244,14 @@ export function createApp(options: AppOptions = {}) {
     // Dedicated human demo command authorizes bounded fake slots. Ordinary chat never grants generation.
     const result = service().store.command(`local-user:${projectId}:demo`, key, digest(request.body), () => {
       const before = service().store.getProject(projectId);
+      if (request.body.action === "review") {
+        const scene = before.scenes.find(s => s.id === request.body.sceneId);
+        invariant(scene, "SCOPE_DENIED", "Choose a scene in this demo project");
+        const actor = service().beginRequest(projectId, "local-user", "Review this scene in the scripted demonstration.", { source: "app", editing: false, scopeIds: [scene.id], key: `demo:${key}` });
+        service().store.insert("demo_command", actor.requestId, projectId, request.body);
+        const turn = options.director!.enqueue(projectId, actor);
+        return { requestId: actor.requestId, turnId: turn.id, status: "queued", director: "fake" };
+      }
       const lock = service().store.get<{ projectId: string; profiles: unknown }>("capability_lock", before.capabilityLockId);
       invariant(lock?.projectId === projectId, "DEMO_PROVIDER_MISMATCH", "The project provider lock is unavailable");
       assertDemoProviderProfiles(lock.profiles);

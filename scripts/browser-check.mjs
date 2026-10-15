@@ -10,8 +10,6 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
 
 const repo = resolve(import.meta.dirname, "..");
-// Temporary: the next UI reads Director proposals, whose route arrives with Codex card B9. Remove when B9 is merged.
-const TEMPORARILY_ALLOWED = [/^HTTP 404 \/api\/projects\/[^/]+\/director\/proposals$/];
 const scenarioDir = join(repo, "scripts", "browser");
 
 function freePort() {
@@ -80,7 +78,7 @@ try {
       // scenario.query (e.g. "ui=next&fixture=last-ferry") opens a mode; the #connect hash still pairs the session.
       await page.goto(scenario.query ? `${origin}/?${scenario.query}${new URL(url).hash}` : url);
       await scenario.run({ page, origin, projectId });
-      const allowed = [...TEMPORARILY_ALLOWED, ...(scenario.allowConsoleErrors ?? [])];
+      const allowed = scenario.allowConsoleErrors ?? [];
       const unexpected = consoleErrors.filter((text) => !allowed.some((pattern) => pattern.test(text)));
       if (unexpected.length) throw new Error("Console errors:\n" + unexpected.join("\n"));
       console.log(`ok   ${scenario.name} (${Date.now() - started} ms)`);

@@ -19,6 +19,8 @@ export interface SceneAudioPorts { narration: NarrationService; canonical: Narra
 type AttachInput = Parameters<NarrationService["attachGeneratedAudio"]>[2];
 export interface SceneAudioStep {
   shotId: string; step: "speech" | "attach" | "accept" | "done";
+  /** Freeze the effective voice at the human press; later defaults apply to new commands only. */
+  voice?: string;
   sessionId?: string; speechInput?: PrepareNarrationSpeech;
   speechResult?: Awaited<ReturnType<NarrationSpeechService["request"]>>;
   attachInput?: AttachInput; acceptInput?: AcceptShotAudio;
@@ -67,7 +69,7 @@ export class SceneConfirmationRunner {
     this.assertNoOpen(projectId, sceneId, rows.map(r => r.shotId));
     this.assertNoVoiceInFlight(projectId, rows.map(r => r.shotId));
     this.save({ id: actor.requestId, actor, projectId, sceneId, kind: "keyframes", state: "running", createdAt: new Date().toISOString(),
-      sceneIntentDigest: view.sceneIntentDigest, guardDigest: sceneConfirmationGuard(this.store.getProject(projectId), sceneId, this.store.get("capability_lock", this.store.getProject(projectId).capabilityLockId)), framePins: [], frames: [], steps: rows.map(r => ({ shotId: r.shotId, step: r.narration.recordingCurrent ? "accept" : "speech" })) });
+      sceneIntentDigest: view.sceneIntentDigest, guardDigest: sceneConfirmationGuard(this.store.getProject(projectId), sceneId, this.store.get("capability_lock", this.store.getProject(projectId).capabilityLockId)), framePins: [], frames: [], steps: rows.map(r => ({ shotId: r.shotId, step: r.narration.recordingCurrent ? "accept" : "speech", ...(r.narration.voice ? { voice: r.narration.voice } : {}) })) });
   };
   private assertNoVoiceInFlight(projectId: string, shotIds: string[]) {
     const segments = new Set(this.store.list<{ shotId: string; segmentId: string }>("narration_shot_draft", projectId).filter(d => shotIds.includes(d.shotId)).map(d => d.segmentId));
@@ -106,12 +108,12 @@ export class SceneConfirmationRunner {
       invariant(input.expectedEstimateMicros === undefined || input.expectedEstimateMicros === estimate.micros, "ESTIMATE_CHANGED", "Review the scene's current estimate");
       this.assertNoVoiceInFlight(projectId, targets.map(r => r.shotId));
       const actor = this.production.beginRequest(projectId, "local-user", "Confirm the reviewed scene frames, narration and video recipe.",
-        { source: "app", directEdit: true, scopeIds: [sceneId], key: `scene-confirm:${key}` });
+        { source: "app", concurrency: "alongside", holdScopeIds: [], scopeIds: [sceneId], key: `scene-confirm:${key}` });
       this.production.authorize(projectId, actor, targets.map(r => ({ scopeId: r.shotId, kind: "video" as const })), `confirm:${key}`);
       const row: SceneConfirmationRecord = { id: actor.requestId, actor, projectId, sceneId, kind: "video", state: "running", createdAt: new Date().toISOString(),
         sceneIntentDigest: view.sceneIntentDigest, guardDigest: sceneConfirmationGuard(this.store.getProject(projectId), sceneId, this.store.get("capability_lock", this.store.getProject(projectId).capabilityLockId)), framePins: targets.map(r => ({ shotId: r.shotId, artifactId: r.image!.artifactId, sha256: r.image!.sha256, nodeId: r.frameNodeId })), frames: input.reviewedFrames,
         steps: targets.filter(r => !r.narration.ready).map(r => ({ shotId: r.shotId,
-          step: r.narration.mode === "generated" && !r.narration.recordingCurrent ? "speech" : "accept" })) };
+          step: r.narration.mode === "generated" && !r.narration.recordingCurrent ? "speech" : "accept", ...(r.narration.voice ? { voice: r.narration.voice } : {}) })) };
       this.production.engine.setHold(projectId, { scopeId: sceneId, ownerId: row.id });
       this.save(row);
       return confirmationView(row);
@@ -164,7 +166,7 @@ export class SceneConfirmationRunner {
       this.store.transaction(() => {
         this.fresh(row);
         const previous = this.store.get<{ sessionId: string }>("narration_shot_session_head", shotSessionHeadId(projectId, shotId));
-        const session = createShotNarrationSession(this.production, projectId, shotId, stepKey(row, shotId, "session"), previous?.sessionId, true);
+        const session = createShotNarrationSession(this.production, projectId, shotId, stepKey(row, shotId, "session"), previous?.sessionId, { holdScopeIds: [] });
         step.sessionId = session.id;
         this.store.put("scene_confirmation_request", session.requestId, projectId, { confirmationId: row.id });
         this.save(row);
@@ -172,15 +174,16 @@ export class SceneConfirmationRunner {
     }
     const actor = workspace.actorForShot(projectId, step.sessionId!, shotId);
     if (step.step === "speech") {
-      invariant(this.audio?.narrationSpeech && audio.mode === "generated" && audio.profileId && audio.voice, "NARRATION_SPEECH_UNAVAILABLE", "Configure a voice for this shot");
+      const voice = step.voice ?? audio.voice; // Existing checkpoints retain their saved speechInput.
+      invariant(this.audio?.narrationSpeech && audio.mode === "generated" && audio.profileId && voice, "NARRATION_SPEECH_UNAVAILABLE", "Configure a voice for this shot");
       if (!step.speechInput) {
         this.store.transaction(() => {
           this.fresh(row);
           const saved = workspace.saveWriting(projectId, shotId, { sessionId: step.sessionId!, expectedHeadVersion: this.store.getProject(projectId).headVersion,
-            expectedVersion: this.audio!.narration.workspaceSnapshot(projectId).state.version, text: audio.text, language: /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(audio.text) ? "zh" : "en", mode: "generated", voice: audio.voice, profileRevisionId: audio.profileRevisionId }, stepKey(row, shotId, "writing"));
+            expectedVersion: this.audio!.narration.workspaceSnapshot(projectId).state.version, text: audio.text, language: /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(audio.text) ? "zh" : "en", mode: "generated", voice, profileRevisionId: audio.profileRevisionId }, stepKey(row, shotId, "writing"));
           invariant(saved.segment, "NARRATION_SPEECH_INVALID", "The saved voice line is unavailable");
           step.speechInput = { key: stepKey(row, shotId, "speech"), expectedHeadVersion: saved.headVersion, segmentId: saved.segment.entry.segmentId,
-            segmentRevisionId: saved.segment.script.id, profileId: audio.profileId!, voice: audio.voice, instructions: "" };
+            segmentRevisionId: saved.segment.script.id, profileId: audio.profileId!, voice, instructions: "" };
           this.save(row);
         });
       }
