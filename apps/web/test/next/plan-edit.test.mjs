@@ -132,3 +132,12 @@ test('the Chinese impact line reads with the price in place', () => {
   assert.equal(zh, '目的和景别会写进画面描述。保存后，**1.2 的关键帧和视频**会过期，重做两者**约 $0.54**。现有的会作为旧版本保留在素材里。');
   assert.equal(sceneId(1), 'scene-1');
 });
+
+test('a keyframe being made is named; a queued job is not "running"', () => {
+  const making = { ...shot('2.1'), keyframe: { state: 'running', takeCount: 1, opened: false, previous: shot('2.1').keyframe.artifact } };
+  const base = draftOf(making, 'none', 30);
+  assert.equal(text(shotImpact(making, base, { ...base, prompt: 'Fog.' }, prices('2.1'), 'en')), 'Work for 2.1 is still running; what it makes will be out of date.');
+  const queued = { ...shot('1.1'), video: { state: 'queued', takeCount: 0, waiting: { code: 'review', since: '' } } };
+  const queuedBase = draftOf(queued, 'none', 30);
+  assert.equal(text(shotImpact(queued, queuedBase, { ...queuedBase, motion: 'Slow pan left' }, prices('1.1'), 'en')), 'Nothing made goes out of date: 1.1 has no clip yet and the keyframe stays.');
+});

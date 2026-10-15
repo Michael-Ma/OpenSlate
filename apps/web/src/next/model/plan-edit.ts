@@ -34,7 +34,8 @@ export type ShotFieldEdit =
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 const same = (a: number, b: number) => Math.abs(a - b) < 1e-6;
-const isWorking = (slot: MediaSlot) => slot.state === "running" || slot.state === "queued";
+/** An attempt in flight; a queued job is simply taken off by the edit. */
+const inFlight = (slot: MediaSlot) => slot.state === "running";
 
 /** The editor's starting values for a shot as it is now. */
 export function draftOf(shot: ShotOverview, mode: NarrationMode | undefined, fps: number): ShotDraft {
@@ -176,7 +177,7 @@ export interface DraftEffects {
   clip: boolean;
   voice: boolean;
   voiceDropped: boolean;
-  /** A keyframe or clip the change touches is still being made. */
+  /** A keyframe or clip the change touches is being made right now. */
   running: boolean;
   promptLike: boolean;
   clipLike: boolean;
@@ -195,7 +196,7 @@ export function draftEffects(shot: ShotOverview, base: ShotDraft, draft: ShotDra
     clip: clipLike && shot.video.state === "ready",
     voice: voiceReady && draft.narration === "line" && has("line"),
     voiceDropped: voiceReady && draft.narration === "none" && base.narration === "line",
-    running: (promptLike && isWorking(shot.keyframe)) || (clipLike && isWorking(shot.video)),
+    running: (promptLike && inFlight(shot.keyframe)) || (clipLike && inFlight(shot.video)),
     promptLike,
     clipLike,
   };

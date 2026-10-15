@@ -1,7 +1,7 @@
 import type { DirectorProposal, GenerationOverview, MediaSlot, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { narrationChecks } from "./checks.ts";
 import { sceneStatus } from "./keyframes.ts";
-import { noteViews, type NoteView } from "./notes.ts";
+import { noteViews, shotCallouts, type NoteView } from "./notes.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
 /**
@@ -207,7 +207,7 @@ export function shotRow(shot: ShotOverview, snapshotShot: SnapshotShot | undefin
     narration: narrationView(shot, snapshotShot?.narration?.mode, fps),
     pills: clip ? [keyframePill(shot), clip] : [keyframePill(shot)],
     check: check ? msg(check.estimated ? "plan.check.narration_estimated" : "plan.check.narration", { line: check.lineSeconds, shot: check.shotSeconds }) : null,
-    notes: notes.filter((view) => view.shotIds.includes(shot.shotId) && view.state !== "stale").map(chip),
+    notes: shotCallouts(notes, shot.shotId).map(chip),
     index,
     first: index === 0,
     last: index === count - 1,
