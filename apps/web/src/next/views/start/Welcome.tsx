@@ -21,17 +21,32 @@ function DemoStill() {
   );
 }
 
-const setupWord = (state: "found" | "not_found" | "unknown"): MessageId =>
-  state === "found" ? "start.setup.found" : state === "not_found" ? "start.setup.not_found" : "start.setup.unknown";
+type Found = "found" | "not_found" | "unknown";
+const CODEX_WORD: Record<Found, MessageId> = { found: "start.setup.found", not_found: "start.setup.not_found", unknown: "start.setup.unknown" };
+const TOOLS_WORD: Record<Found, MessageId> = { found: "start.setup.found", not_found: "start.setup.not_found", unknown: "start.setup.tools_unknown" };
+
+function SetupLine({ label, state, words }: { label: MessageId; state: Found; words: Record<Found, MessageId> }) {
+  const { t } = useI18n();
+  return (
+    <div data-setup={label}>
+      <span>{t(label)}</span>
+      <span className={state === "found" ? "ok-text" : "dim"}>{state === "found" ? "✓ " : ""}{t(words[state])}</span>
+    </div>
+  );
+}
 
 /**
  * First run, nothing in the list: the demo (free, nothing sent, stamped Demo, stays a demo) beside
- * making your own film, with what this computer has and how keys are set. Keys are explained, not fixed.
+ * making your own film, with what this computer has (Codex, FFmpeg, keys) and how keys are set. Keys
+ * are explained, not fixed. A written plan is off until Codex is found (`planWhy` says why).
  */
-export function Welcome({ setup, offline, demoBusy, onDemo, onNew, onFromPlan }: {
+export function Welcome({ setup, offline, demoBusy, demoOff, planWhy, onDemo, onNew, onFromPlan }: {
   setup: SetupStatus;
   offline: string | null;
   demoBusy: boolean;
+  /** Why the demo cannot work in this studio, or null. */
+  demoOff: string | null;
+  planWhy: MessageId | null;
   onDemo(): void;
   onNew(): void;
   onFromPlan(): void;
@@ -39,9 +54,9 @@ export function Welcome({ setup, offline, demoBusy, onDemo, onNew, onFromPlan }:
   const { t, tm } = useI18n();
   const demoId = useId();
   const ownId = useId();
-  const planWhy = useId();
+  const planWhyId = useId();
+  const demoWhyId = useId();
   const ready = setup.realReady;
-  const noCodex = setup.codex === "not_found";
   return (
     <div className="welcome">
       <section className="panel" aria-labelledby={demoId} data-card="demo">
@@ -52,21 +67,27 @@ export function Welcome({ setup, offline, demoBusy, onDemo, onNew, onFromPlan }:
         <h2 id={demoId}>{t("start.demo.title")}</h2>
         <p>{t("start.demo.body")}</p>
         <div className="acts">
-          <button type="button" className={`pill${ready ? "" : " primary"}`} data-act="open-demo" disabled={demoBusy || !!offline} title={offline ?? undefined} onClick={onDemo}>
+          <button
+            type="button"
+            className={`pill${ready ? "" : " primary"}`}
+            data-act="open-demo"
+            disabled={demoBusy || !!offline || !!demoOff}
+            aria-describedby={demoWhyId}
+            title={offline ?? undefined}
+            onClick={onDemo}
+          >
             {demoBusy ? t("start.busy") : t("start.action.demo")}
           </button>
-          <span className="why">{t("start.demo.why")}</span>
+          <span className="why" id={demoWhyId}>{demoOff ?? t("start.demo.why")}</span>
         </div>
       </section>
       <section className="panel" aria-labelledby={ownId} data-card="own">
         <h2 id={ownId}>{t("start.own.title")}</h2>
         <p>{t(ready ? "start.own.body_ready" : "start.own.body")}</p>
         <div className="setup">
-          <div><span>{t("start.setup.codex")}</span><span className={setup.codex === "found" ? "ok-text" : "dim"}>{setup.codex === "found" ? "✓ " : ""}{t(setupWord(setup.codex))}</span></div>
-          {setup.tools && (
-            <div><span>{t("start.setup.tools")}</span><span className={setup.tools === "found" ? "ok-text" : "dim"}>{setup.tools === "found" ? "✓ " : ""}{t(setupWord(setup.tools))}</span></div>
-          )}
-          <div><span>{t("start.setup.keys")}</span><span className={ready && setup.keys.set >= setup.keys.total ? "ok-text" : "dim"}>{tm(keysMsg(setup.keys))}</span></div>
+          <SetupLine label="start.setup.codex" state={setup.codex} words={CODEX_WORD} />
+          <SetupLine label="start.setup.tools" state={setup.tools} words={TOOLS_WORD} />
+          <div data-setup="start.setup.keys"><span>{t("start.setup.keys")}</span><span className={ready && setup.keys.set >= setup.keys.total ? "ok-text" : "dim"}>{tm(keysMsg(setup.keys))}</span></div>
         </div>
         {!ready && (
           <p className="hint">
@@ -78,10 +99,10 @@ export function Welcome({ setup, offline, demoBusy, onDemo, onNew, onFromPlan }:
             {t(ready ? "start.action.new" : "start.own.new_anyway")}
           </button>
           {!ready && <span className="why">{t("start.own.new_anyway_why")}</span>}
-          <button type="button" className="pill" data-act="new-from-plan" disabled={noCodex || !!offline} aria-describedby={noCodex ? planWhy : undefined} title={offline ?? undefined} onClick={onFromPlan}>
+          <button type="button" className="pill" data-act="new-from-plan" disabled={!!planWhy || !!offline} aria-describedby={planWhy ? planWhyId : undefined} title={offline ?? undefined} onClick={onFromPlan}>
             {t("start.own.from_plan")}
           </button>
-          {noCodex && <span className="why" id={planWhy}>{t("start.own.needs_codex")}</span>}
+          {planWhy && <span className="why" id={planWhyId}>{t(planWhy)}</span>}
         </div>
       </section>
     </div>

@@ -131,10 +131,12 @@ dialog.start-sheet[open] { display: flex; flex-direction: column; }
 .start-sheet .plan-row .count { margin-left: auto; font-variant-numeric: tabular-nums; }
 .start-sheet .plan-row .count.over { color: var(--text); font-weight: 700; }
 
-.start-sheet .impact { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--hairline); background: var(--bar); border-radius: 12px; padding: 9px 12px; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
-.start-sheet .impact .ic { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--text-2); display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--text); margin-top: 1px; }
+.start-sheet .impact, .start-dialog .impact { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--hairline); background: var(--bar); border-radius: 12px; padding: 9px 12px; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
+.start-sheet .impact .ic, .start-dialog .impact .ic { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--text-2); display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--text); margin-top: 1px; }
 .start-sheet .impact.none .ic { border-color: var(--green-line); color: var(--green); }
-.start-sheet .impact.cost { border-color: var(--track); background: var(--raised); }
+/* A refusal: neutral, with an icon and words (DESIGN.md: no red). */
+.start-sheet .impact.cost, .start-dialog .impact.cost { border-color: var(--track); background: var(--raised); color: var(--text); }
+.start-sheet .sheet-alerts:empty { display: none; }
 .start-sheet .see-models { align-self: flex-start; }
 .start-sheet .models { display: flex; flex-direction: column; gap: 8px; }
 .start-sheet .mlist { margin: 0; display: flex; flex-direction: column; gap: 7px; }

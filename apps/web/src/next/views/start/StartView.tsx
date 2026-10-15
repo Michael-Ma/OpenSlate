@@ -1,10 +1,13 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useNarrow } from "../../app/useNarrow.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { filmsView, pickerProjects, runningJobs, sameProjects, type FilmRow as Row, type OpenView } from "../../model/start.ts";
-import { openDemo, renameFilm, setArchived, type Film } from "../../model/start-commands.ts";
-import { createdMsg, setupStatus, stepAvailable, type CreatedOutcome, type FirstStep } from "../../model/start-new.ts";
-import { msg } from "../../model/types.ts";
+import { errorMsg } from "../../i18n/translate.ts";
+import {
+  demoRetryable, filmsView, livePendingDemo, parsePendingDemo, pickerProjects, runningJobs, sameProjects, PENDING_DEMO_KEY, type FilmRow as Row, type OpenView, type PendingDemo,
+} from "../../model/start.ts";
+import { openDemo, renameFilm, setArchived, DEMO_UNAVAILABLE, type Film } from "../../model/start-commands.ts";
+import { createdMsg, planOffReason, setupStatus, type CreatedOutcome, type FirstStep } from "../../model/start-new.ts";
+import { msg, type Msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { StudioStore } from "../../store/store.ts";
 import { ArchiveDialog } from "./ArchiveDialog.tsx";
@@ -13,6 +16,17 @@ import { NewFilmSheet } from "./NewFilmSheet.tsx";
 import { useCodex, useFilms, useProviders } from "./useStartData.ts";
 import { Welcome } from "./Welcome.tsx";
 import "./start.css";
+
+/** Session storage may be missing or refuse (private windows, blocked site data); the demo then simply is not remembered. */
+function readSession(key: string): string | null {
+  try { return window.sessionStorage.getItem(key); } catch { return null; }
+}
+function writeSession(key: string, value: string | null) {
+  try {
+    if (value === null) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, value);
+  } catch { /* unavailable */ }
+}
 
 /** Focus the Director's composer once the new film is loaded and connected (the composer is off until then). */
 function focusComposerWhenReady(store: StudioStore, filmId: string) {
@@ -46,14 +60,16 @@ export function StartView() {
   const pending = useStudio((s) => s.pending);
   const films = useFilms();
   const providers = useProviders();
-  const codex = useCodex();
+  const codex = useCodex(films.data);
   const archivedId = useId();
 
   const [renaming, setRenaming] = useState<string | null>(null);
   const [archiving, setArchiving] = useState<Film | null>(null);
+  /** Why the archive dialog's last Archive was refused (its backdrop covers the toast). */
+  const [archiveProblem, setArchiveProblem] = useState<Msg | null>(null);
   const [sheet, setSheet] = useState<{ step: FirstStep | null } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
-  const [pendingDemo, setPendingDemo] = useState<Film | null>(null);
+  const [savedDemo, setSavedDemo] = useState<PendingDemo | null>(() => parsePendingDemo(readSession(PENDING_DEMO_KEY)));
   const [demoBusy, setDemoBusy] = useState(false);
 
   const offline = connected ? null : t("start.offline");
@@ -61,7 +77,10 @@ export function StartView() {
   const catalog = providers.catalog;
   const setup = useMemo(() => setupStatus(catalog && catalog !== "failed" ? catalog : null, codex), [catalog, codex]);
   const running = useMemo(() => runningJobs(overview), [overview]);
-  const planOff = !stepAvailable("plan", codex);
+  const planWhy = planOffReason(codex);
+  const pendingDemo = useMemo(() => livePendingDemo(savedDemo, films.data), [savedDemo, films.data]);
+  // The studio has no stand-in Director: pressing again could only make another empty film.
+  const demoOff = pendingDemo?.off ? t("start.demo.unavailable") : null;
 
   // The top bar's film picker follows the list (new, renamed, archived and restored films).
   useEffect(() => {
@@ -102,15 +121,25 @@ export function StartView() {
     }
   };
 
+  const saveDemo = (next: PendingDemo | null) => {
+    setSavedDemo(next);
+    writeSession(PENDING_DEMO_KEY, next ? JSON.stringify(next) : null);
+  };
+
   const demo = async () => {
-    if (demoBusy || offline) return;
+    if (demoBusy || offline || demoOff) return;
     setDemoBusy(true);
     try {
-      const { film, filled } = await openDemo(store, t("start.demo.film_name"), pendingDemo);
+      const { film, filled, code } = await openDemo(store, t("start.demo.film_name"), pendingDemo ? { id: pendingDemo.id, name: pendingDemo.name } : null);
       void films.reload();
       if (!film) return;
-      if (!filled) { setPendingDemo(film); return; }
-      setPendingDemo(null);
+      if (!filled) {
+        // The empty film stays listed. Another press fills it when that can help; with no stand-in Director here it cannot.
+        const off = code === DEMO_UNAVAILABLE;
+        saveDemo(off || demoRetryable(code) ? { id: film.id, name: film.name, off } : null);
+        return;
+      }
+      saveDemo(null);
       store.dispatch({ type: "toast", message: msg("start.demo.opened", { name: film.name }), tone: "info" });
       remember(film);
       openFilm(film.id, "keyframes");
@@ -127,9 +156,16 @@ export function StartView() {
 
   const confirmArchive = async () => {
     if (!archiving) return;
-    const ok = await setArchived(store, archiving, true);
+    setArchiveProblem(null);
+    const done = await setArchived(store, archiving, true, true);
     await films.reload();
-    if (ok) setArchiving(null);
+    if (done.ok) setArchiving(null);
+    else setArchiveProblem(done.message);
+  };
+
+  const closeArchive = () => {
+    setArchiving(null);
+    setArchiveProblem(null);
   };
 
   const restore = async (film: Film) => {
@@ -147,10 +183,10 @@ export function StartView() {
         <h1 tabIndex={-1}>{t("start.title")}</h1>
         {view && <span className="line">{tm(view.count)}</span>}
         <div className="actions">
-          <button type="button" className="pill" data-act="open-demo" disabled={demoBusy || !!offline} title={offline ?? undefined} onClick={() => void demo()}>
+          <button type="button" className="pill" data-act="open-demo" disabled={demoBusy || !!offline || !!demoOff} title={offline ?? demoOff ?? undefined} onClick={() => void demo()}>
             {demoBusy ? t("start.busy") : t("start.action.demo")}
           </button>
-          <button type="button" className="pill" data-act="new-from-plan" disabled={planOff || !!offline} title={offline ?? (planOff ? t("start.own.needs_codex") : undefined)} onClick={() => newFilm("plan")}>
+          <button type="button" className="pill" data-act="new-from-plan" disabled={!!planWhy || !!offline} title={offline ?? (planWhy ? t(planWhy) : undefined)} onClick={() => newFilm("plan")}>
             {t("start.action.from_plan")}
           </button>
           <button type="button" className="pill primary" data-act="new-film" disabled={!!offline} title={offline ?? undefined} onClick={() => newFilm(null)}>
@@ -166,12 +202,12 @@ export function StartView() {
       {!view && !films.error && <p className="start-note" role="status">{t("start.loading")}</p>}
       {!view && films.error && (
         <div className="start-note" role="alert">
-          <span>{t("start.load_failed", { code: films.error })}</span>
+          <span>{t("start.load_failed")} {tm(errorMsg(films.error))}</span>
           <button type="button" className="pill sm" data-act="reload-films" onClick={() => void films.reload()}>{t("start.retry")}</button>
         </div>
       )}
       {view?.firstRun && (
-        <Welcome setup={setup} offline={offline} demoBusy={demoBusy} onDemo={() => void demo()} onNew={() => newFilm(null)} onFromPlan={() => newFilm("plan")} />
+        <Welcome setup={setup} offline={offline} demoBusy={demoBusy} demoOff={demoOff} planWhy={planWhy} onDemo={() => void demo()} onNew={() => newFilm(null)} onFromPlan={() => newFilm("plan")} />
       )}
       {view && !view.firstRun && (
         <div className="films">
@@ -193,7 +229,7 @@ export function StartView() {
       )}
       {archivedRows.length > 0 && (
         <div className="archived">
-          <button type="button" className="archived-toggle" data-act="toggle-archived" aria-expanded={showArchived} aria-controls={archivedId} onClick={() => setShowArchived((v) => !v)}>
+          <button type="button" className="archived-toggle" data-act="toggle-archived" aria-expanded={showArchived} aria-controls={showArchived ? archivedId : undefined} onClick={() => setShowArchived((v) => !v)}>
             {t("start.archived.toggle", { count: archivedRows.length })}
           </button>
           {showArchived && (
@@ -226,8 +262,9 @@ export function StartView() {
           running={archiving.id === projectId ? running : 0}
           busy={!!pending[`start:archive:${archiving.id}`]}
           offline={offline}
+          problem={archiveProblem}
           onConfirm={() => void confirmArchive()}
-          onCancel={() => setArchiving(null)}
+          onCancel={closeArchive}
         />
       )}
       {sheet && (

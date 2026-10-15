@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  afterFailure, codexFrom, createBody, createdMsg, createdOutcome, creationSteps, sheetFootMsg, defaultStep, directorSetupBody, effectiveStep, failedMsg, keysMsg, modelPlan,
-  modelSummaryText, notReadyReason, planFileName, planTextProblem, setupStatus, stepAvailable, PLAN_TEXT_MAX,
+  afterFailure, codexFrom, createBody, createdMsg, createdOutcome, creationSteps, sheetFootMsg, defaultStep, directorAfterOpen, directorSetupBody, effectiveStep, failedMsg, failureNeedsReason,
+  keysMsg, modelPlan, modelSummaryText, notReadyReason, planFileName, planOffReason, planTextProblem, setupStatus, stepAvailable, PLAN_TEXT_MAX,
 } from '../../src/next/model/start-new.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
@@ -35,13 +35,18 @@ const allReal = (ready) => [
   row('tts', 'OpenAI gpt-4o-mini-tts', 'speech', 'openai-speech', '10000', ready),
   row('stt', 'OpenAI whisper-1', 'transcription', 'openai-transcription', '10000', ready),
 ];
-const found = { state: 'found', model: 'gpt-6-astra' };
+const CODEX_SETUP = { mode: 'native', binaryPath: '/usr/local/bin/codex', model: 'gpt-6-astra' };
+const found = { state: 'found', model: 'gpt-6-astra', setup: CODEX_SETUP };
 
-test('Codex is found from the host default or the film’s own Codex Director', () => {
+test('Codex is found from the host default, else the film’s own Codex Director; what is named is what a new film is sent', () => {
   assert.deepEqual(codexFrom(null), { state: 'unknown' });
   assert.deepEqual(codexFrom({ selection: { mode: 'fake' }, defaults: { binaryPath: '', model: 'gpt-6-astra' } }), { state: 'not_found' });
   assert.deepEqual(codexFrom({ selection: { mode: 'fake' }, defaults: { binaryPath: '/usr/local/bin/codex', model: 'gpt-6-astra' } }), found);
-  assert.deepEqual(codexFrom({ selection: { mode: 'native', binaryPath: '/opt/codex', model: 'gpt-7' }, defaults: { binaryPath: '', model: 'gpt-6-astra' } }), { state: 'found', model: 'gpt-7' });
+  // The open film runs another model: a new film gets the host defaults, and the sheet names those.
+  assert.deepEqual(codexFrom({ selection: { mode: 'native', binaryPath: '/opt/codex', model: 'gpt-7' }, defaults: { binaryPath: '/usr/local/bin/codex', model: 'gpt-6-astra' } }), found);
+  // The host found no Codex, but the open film runs one set by hand: a new film is sent that same Codex.
+  assert.deepEqual(codexFrom({ selection: { mode: 'native', binaryPath: '/opt/codex', model: 'gpt-7', codexHome: '/h' }, defaults: { binaryPath: '', model: 'gpt-6-astra' } }),
+    { state: 'found', model: 'gpt-7', setup: { mode: 'native', binaryPath: '/opt/codex', model: 'gpt-7', codexHome: '/h' } });
   assert.deepEqual(directorSetupBody({ selection: { mode: 'fake' }, defaults: { binaryPath: '/usr/local/bin/codex', model: 'gpt-6-astra', codexHome: '/h' } }),
     { mode: 'native', binaryPath: '/usr/local/bin/codex', model: 'gpt-6-astra', codexHome: '/h' });
   assert.equal(directorSetupBody({ selection: { mode: 'fake' }, defaults: { binaryPath: '', model: 'gpt-6-astra' } }), null);
@@ -76,9 +81,28 @@ test('without keys the film starts with the free stand-ins and says which model 
     ['narration', null, 'free stand-in', 'OpenAI gpt-4o-mini-tts: key not set'],
     ['transcription', null, 'free stand-in', 'OpenAI whisper-1: key not set'],
   ]);
+  assert.equal(plan.standInWhy, 'no_keys');
   assert.match(modelSummaryText(plan, en), /^No keys are set/);
   // Only the stand-ins installed: nothing waits.
-  assert.equal(en(modelPlan(catalog([]), found, 'en').rows[1].status), 'no model set up');
+  const bare = modelPlan(catalog([]), found, 'en');
+  assert.equal(en(bare.rows[1].status), 'no model set up');
+  assert.equal(bare.standInWhy, 'none');
+  assert.match(modelSummaryText(bare, en), /^No real model is set up on this computer yet, so this film starts with free stand-in models/);
+});
+
+test('when no real model is ready, the line says what they wait for: keys, FFmpeg, or the host turning them on', () => {
+  const someKeys = allReal(false); someKeys[0] = row('img', 'OpenAI gpt-image-2', 'image', 'openai-image', '40000', false, { key: true, tools: false });
+  const keyed = modelPlan(catalog(someKeys), found, 'en');
+  assert.equal(keyed.standInWhy, 'key');
+  assert.match(modelSummaryText(keyed, en), /^The media models are waiting for their keys/);
+  const noTools = allReal(false).map(r => row(r.id, r.label, r.profile.kind, r.profile.adapter, '1', false, { key: true, tools: false }));
+  const tools = modelPlan(catalog(noTools), found, 'en');
+  assert.equal(tools.standInWhy, 'tools');
+  assert.match(modelSummaryText(tools, en), /^FFmpeg was not found on this computer/);
+  assert.doesNotMatch(modelSummaryText(tools, en), /keys/i);
+  const off = allReal(false).map(r => row(r.id, r.label, r.profile.kind, r.profile.adapter, '1', false, { key: true, enabled: false }));
+  assert.match(modelSummaryText(modelPlan(catalog(off), found, 'en'), en), /^No real model is turned on on this computer/);
+  assert.match(modelSummaryText(modelPlan(catalog(off), found, 'zh-CN'), zh), /^本机还没有启用真实模型/);
 });
 
 test('a partly set-up computer mixes ready models and stand-ins in one selection', () => {
@@ -95,6 +119,11 @@ test('prices never read $0.00: Codex images use the plan, an unset estimate says
   assert.equal(en(plan.rows[1].price), 'uses your Codex plan');
   assert.equal(en(plan.rows[2].price), 'no price set');
   for (const r of plan.rows) assert.doesNotMatch(en(r.price), /\$0\.00/);
+  // A host price below a tenth of a cent would round to "$0.000": it reads "under $0.001".
+  const cheap = modelPlan(catalog([row('tts', 'Cheap voice', 'speech', 'openai-speech', '300', true), row('stt', 'Cheap words', 'transcription', 'openai-transcription', '500', true)]), found, 'en');
+  assert.equal(en(cheap.rows[3].price), 'under $0.001 a line');
+  assert.equal(zh(cheap.rows[3].price), '每条不到 $0.001');
+  assert.equal(en(cheap.rows[4].price), 'about $0.001 a recording');
 });
 
 test('the reason a real model is not ready names the most actionable fix', () => {
@@ -107,58 +136,76 @@ test('the reason a real model is not ready names the most actionable fix', () =>
 test('the first-run card reports Codex, FFmpeg and keys without pretending to fix them', () => {
   const none = setupStatus(catalog(allReal(false)), { state: 'not_found' });
   assert.deepEqual(none, { codex: 'not_found', tools: 'found', keys: { set: 0, total: 4 }, realReady: false });
+  // A fresh install has only the stand-ins: FFmpeg is still listed, as not checked yet.
   assert.equal(en(keysMsg(none.keys)), 'none set');
   const some = allReal(false); some[0] = row('img', 'I', 'image', 'openai-image', '1', true);
   assert.equal(en(keysMsg(setupStatus(catalog(some), found).keys)), 'set for 1 of 4');
   assert.equal(zh(keysMsg(setupStatus(catalog(allReal(true)), found).keys)), '都已设置');
-  assert.equal(setupStatus(catalog([]), found).tools, null);
+  assert.equal(setupStatus(catalog([]), found).tools, 'unknown');
+  assert.equal(setupStatus(null, { state: 'unknown' }).tools, 'unknown');
   assert.equal(setupStatus(null, { state: 'unknown' }).realReady, false);
   const noTools = allReal(true).map(r => ({ ...r, readiness: { ...r.readiness, mediaTools: { required: true, available: false } } }));
   assert.equal(setupStatus(catalog(noTools), found).tools, 'not_found');
 });
 
-test('the Director and plan steps need Codex; the empty outline never does', () => {
+test('the Director and plan steps need Codex; a written plan needs it found first; the empty outline never does', () => {
   assert.equal(stepAvailable('director', { state: 'not_found' }), false);
   assert.equal(stepAvailable('plan', { state: 'not_found' }), false);
   assert.equal(stepAvailable('empty', { state: 'not_found' }), true);
-  assert.equal(stepAvailable('plan', { state: 'unknown' }), true);
+  // Unknown (a real first run, no film at all): talking stays possible (nothing is lost if Codex is missing),
+  // a written plan does not (it would be dropped).
+  assert.equal(stepAvailable('director', { state: 'unknown' }), true);
+  assert.equal(stepAvailable('plan', { state: 'unknown' }), false);
+  assert.equal(stepAvailable('plan', found), true);
+  assert.equal(planOffReason(found), null);
+  assert.equal(en({ id: planOffReason({ state: 'not_found' }) }), 'Needs the Codex Director');
+  assert.equal(en({ id: planOffReason({ state: 'unknown' }) }), 'Needs the Codex Director, which is checked when you make a film');
   assert.equal(defaultStep({ state: 'not_found' }), 'empty');
   assert.equal(defaultStep(found), 'director');
-  // Unknown (a first run, no film open): the safe default is the empty outline; the Codex steps stay possible.
   assert.equal(defaultStep({ state: 'unknown' }), 'empty');
 });
 
 test('the shown step follows a late Codex answer: an untouched choice moves to the default, a step that is now off falls back', () => {
   assert.equal(effectiveStep(null, { state: 'unknown' }), 'empty');
   assert.equal(effectiveStep(null, found), 'director');
-  assert.equal(effectiveStep('plan', { state: 'unknown' }), 'plan');
+  assert.equal(effectiveStep('plan', { state: 'unknown' }), 'empty');
+  assert.equal(effectiveStep('director', { state: 'unknown' }), 'director');
   assert.equal(effectiveStep('plan', found), 'plan');
   assert.equal(effectiveStep('director', { state: 'not_found' }), 'empty');
   assert.equal(effectiveStep('plan', { state: 'not_found' }), 'empty');
   assert.equal(effectiveStep('empty', found), 'empty');
 });
 
-test('a failed step after Create: no Codex is final, an empty outline opens anyway, anything else offers Try again', () => {
-  assert.equal(afterFailure('director', 'director', 'CODEX_NOT_FOUND'), 'final');
-  assert.equal(afterFailure('plan', 'director', 'CODEX_NOT_FOUND'), 'final');
-  assert.equal(afterFailure('empty', 'director', 'CODEX_NOT_FOUND'), 'open');
-  assert.equal(afterFailure('empty', 'director', 'DIRECTOR_SETUP_REQUIRED'), 'open');
-  assert.equal(afterFailure('director', 'director', 'DIRECTOR_SETUP_BUSY'), 'retry');
-  assert.equal(afterFailure('director', 'director', null), 'retry');
-  assert.equal(afterFailure('plan', 'import', 'VALIDATION_ERROR'), 'retry');
+test('a failed step after Create: no Codex is final, anything else offers Try again; the sheet adds the refusal’s words when they say more', () => {
+  assert.equal(afterFailure('CODEX_NOT_FOUND'), 'final');
+  assert.equal(afterFailure('DIRECTOR_SETUP_BUSY'), 'retry');
+  assert.equal(afterFailure(null), 'retry');
+  assert.equal(afterFailure('VALIDATION_ERROR'), 'retry');
   assert.equal(en(failedMsg('director', 'director', 'CODEX_NOT_FOUND', 'Harbour')),
     'Harbour was created, but Codex was not found on this computer, so the film starts with the stand-in Director. Once Codex is set up, switch its Director in Settings.');
   assert.match(en(failedMsg('plan', 'director', 'CODEX_NOT_FOUND', 'Harbour')), /cannot read the written plan/);
-  assert.match(en(failedMsg('director', 'director', 'DIRECTOR_SETUP_BUSY', 'Harbour')), /could not be set up\. Try again/);
+  // A check still running is not "could not be set up".
+  assert.match(en(failedMsg('director', 'director', 'DIRECTOR_SETUP_BUSY', 'Harbour')), /^Harbour was created, and its Codex Director is still being checked\. Try again in a moment/);
+  assert.match(en(failedMsg('director', 'director', 'DIRECTOR_SETUP_REQUIRED', 'Harbour')), /could not be set up\. Try again/);
   assert.match(en(failedMsg('plan', 'import', null, 'Harbour')), /the plan was not sent/);
+  assert.equal(failureNeedsReason('DIRECTOR_SETUP_REQUIRED'), true);
+  assert.equal(failureNeedsReason('NETWORK_ERROR'), true);
+  assert.equal(failureNeedsReason('CODEX_NOT_FOUND'), false);
+  assert.equal(failureNeedsReason('DIRECTOR_SETUP_BUSY'), false);
+  assert.equal(failureNeedsReason(null), false);
 });
 
-test('Create sets up the Codex Director when this computer has it and sends a plan only when given', () => {
+test('Create waits for the Codex check only when the first step needs it; an empty outline opens first and sets it up after', () => {
   assert.deepEqual(creationSteps('plan', found, 'Scene 1: the pier'), ['create', 'director', 'import']);
   assert.deepEqual(creationSteps('plan', found, '   '), ['create', 'director']);
   assert.deepEqual(creationSteps('director', found, 'ignored'), ['create', 'director']);
-  assert.deepEqual(creationSteps('empty', { state: 'unknown' }, ''), ['create', 'director']);
-  assert.deepEqual(creationSteps('empty', { state: 'not_found' }, ''), ['create']);
+  assert.deepEqual(creationSteps('director', { state: 'unknown' }, ''), ['create', 'director']);
+  assert.deepEqual(creationSteps('empty', { state: 'unknown' }, ''), ['create']);
+  assert.deepEqual(creationSteps('empty', found, ''), ['create']);
+  assert.equal(directorAfterOpen('empty', found), true);
+  assert.equal(directorAfterOpen('empty', { state: 'unknown' }), true);
+  assert.equal(directorAfterOpen('empty', { state: 'not_found' }), false);
+  assert.equal(directorAfterOpen('director', found), false);
 });
 
 test('the create body carries a selection only when it differs from the stand-ins', () => {
@@ -187,9 +234,11 @@ test('after Create the toast names what happens next; a step that did not finish
   assert.equal(createdOutcome('plan', '  ', done), 'plan_later');
   assert.equal(createdOutcome('empty', '', done), 'empty');
   assert.equal(createdOutcome('plan', 'Scene 1', { failedAt: 'import', code: 'VALIDATION_ERROR' }), 'plan_later');
-  assert.equal(createdOutcome('director', '', { failedAt: 'director', code: 'DIRECTOR_SETUP_BUSY' }), 'setup_later');
-  assert.equal(createdOutcome('empty', '', { failedAt: 'director', code: 'DIRECTOR_SETUP_REQUIRED' }), 'setup_later');
-  assert.equal(createdOutcome('empty', '', { failedAt: 'director', code: 'CODEX_NOT_FOUND' }), 'stand_in');
+  // A check still running is said as such, never as "could not be set up".
+  assert.equal(createdOutcome('director', '', { failedAt: 'director', code: 'DIRECTOR_SETUP_BUSY' }), 'setup_pending');
+  assert.match(en(createdMsg('setup_pending', 'Harbour')), /^Created Harbour\. Its Codex Director is still being checked/);
+  assert.equal(createdOutcome('director', '', { failedAt: 'director', code: 'DIRECTOR_SETUP_REQUIRED' }), 'setup_later');
+  assert.equal(createdOutcome('director', '', { failedAt: 'director', code: 'CODEX_NOT_FOUND' }), 'stand_in');
   assert.equal(createdOutcome('plan', 'Scene 1', { failedAt: 'director', code: 'CODEX_NOT_FOUND' }), 'stand_in');
   assert.match(en(createdMsg('stand_in', 'Harbour')), /^Created Harbour with the stand-in Director: Codex was not found/);
   assert.equal(en(createdMsg('plan', 'Night bus')), 'Created Night bus. The Director is reading the plan; nothing changes until you confirm.');

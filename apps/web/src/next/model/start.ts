@@ -130,6 +130,48 @@ export function renameValue(input: string, current: string): string | null {
   return name;
 }
 
+/**
+ * A demo film whose filling did not finish, kept for this window (session storage) so another press,
+ * also after leaving Start or reloading, fills that film instead of making a second empty one.
+ * `off`: the studio refused the fill because it has no stand-in Director; the demo button stays off.
+ */
+export interface PendingDemo {
+  id: string;
+  name: string;
+  off: boolean;
+}
+
+export const PENDING_DEMO_KEY = "openslate.next.start.pending-demo";
+
+export function parsePendingDemo(raw: string | null): PendingDemo | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<PendingDemo> | null;
+    return value && typeof value.id === "string" && value.id && typeof value.name === "string" ? { id: value.id, name: value.name, off: value.off === true } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The saved demo while it is still an empty film in the list; trusted as is until the list is read. */
+export function livePendingDemo(pending: PendingDemo | null, items: readonly ProjectListItem[] | null): PendingDemo | null {
+  if (!pending || !items) return pending;
+  const item = items.find((film) => film.id === pending.id);
+  return item && !item.archived && item.shots === 0 ? pending : null;
+}
+
+/** Whether pressing the demo again can help after a fill that did not finish: only when it may not have arrived. */
+export const demoRetryable = (code: string | null): boolean => code === null || code === "NETWORK_ERROR";
+
+/**
+ * Whose Director setup tells whether this computer has Codex: the open film's, else (no film open)
+ * any listed film's, archived ones included, since the host's defaults are the same for every film.
+ * Null on a real first run, when there is no film at all.
+ */
+export function codexSource(openId: string | null, items: readonly ProjectListItem[] | null): string | null {
+  return openId ?? items?.[0]?.id ?? null;
+}
+
 const BUSY: readonly MediaState[] = ["queued", "running", "no_answer"];
 
 /**

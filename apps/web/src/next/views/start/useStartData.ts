@@ -1,7 +1,8 @@
 import type { ProjectListItem } from "@openslate/core/public";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client.ts";
-import { PROVIDERS_PATH, readFilms } from "../../model/start-commands.ts";
+import { codexSource } from "../../model/start.ts";
+import { PROVIDERS_PATH, projectPath, readFilms } from "../../model/start-commands.ts";
 import { codexFrom, type Codex, type DirectorSetupRead, type ProviderCatalog } from "../../model/start-new.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 
@@ -71,22 +72,24 @@ export function useProviders(): Providers {
 }
 
 /**
- * Whether this computer has Codex. The server keeps the Director per film and has no library-level
- * read, so this reads the open film's Director setup (its host defaults are the same for every film).
- * With no film open (a first run) it stays unknown, and a new film's Director step finds out.
+ * Whether this computer has Codex. The server keeps the Director per film and has no host-level read,
+ * so this reads the open film's Director setup, else any listed film's (the host defaults are the same
+ * for every film). With no film at all (a real first run) it stays unknown, and a new film's Director
+ * step finds out.
  */
-export function useCodex(): Codex {
+export function useCodex(films: readonly ProjectListItem[] | null): Codex {
   const store = useStore();
   const projectId = useStudio((s) => s.projectId);
+  const source = codexSource(projectId, films);
   const [codex, setCodex] = useState<Codex>({ state: "unknown" });
   useEffect(() => {
-    if (!projectId) { setCodex({ state: "unknown" }); return; }
+    if (!source) { setCodex({ state: "unknown" }); return; }
     const controller = new AbortController();
-    store.read<DirectorSetupRead>("/director/setup", controller.signal).then(
+    store.read<DirectorSetupRead>(projectPath(source, "/director/setup"), controller.signal).then(
       (setup) => { if (!controller.signal.aborted) setCodex(codexFrom(setup)); },
       () => { if (!controller.signal.aborted) setCodex({ state: "unknown" }); },
     );
     return () => controller.abort();
-  }, [store, projectId]);
+  }, [store, source]);
   return codex;
 }

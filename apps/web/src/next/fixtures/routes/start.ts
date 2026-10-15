@@ -17,7 +17,12 @@ import type { FixtureRoute } from "./types.ts";
  * run, where no film is open, the view cannot read whether this computer has Codex (the open Last
  * Ferry's Director setup is not answered), so a new film's Director step is where it finds out.
  * `?start=setup-busy` has keys and Codex, but each new film's first Codex setup answers
- * DIRECTOR_SETUP_BUSY (the check is still running), so Try again and the empty outline's fallback show.
+ * DIRECTOR_SETUP_BUSY (the check is still running), so Try again shows.
+ * `?start=refusals` shows refusals inside the modal dialogs: this computer's models change once, just
+ * before the first Create that names them (PROVIDER_CATALOG_CHANGED), and Night bus has a keyframe
+ * running, so archiving it is refused (ATTEMPTS_RUNNING).
+ * `?start=slow-models` answers GET /api/providers after a moment, so the sheet's Create waits for it.
+ * `?start=no-stand-in` is a studio without the stand-in Director: filling the demo is refused (ACTOR_DENIED).
  */
 
 interface Film {
@@ -39,6 +44,8 @@ interface StartWorld {
   hideCodex: boolean;
   /** Films whose next Codex setup answers DIRECTOR_SETUP_BUSY (setup-busy). */
   busyOnce: Set<string> | null;
+  /** The provider catalog's digest; `changesOnce` replaces it just before the first Create that names models (refusals). */
+  catalog: { digest: string; changesOnce: boolean };
   next: number;
   /** The world cursor last seen, so The Last Ferry's "changed" follows its edits. */
   seenCursor: number;
@@ -46,6 +53,7 @@ interface StartWorld {
 
 const worlds = new WeakMap<FixtureWorld, StartWorld>();
 const DIGEST = "c".repeat(64);
+const SLOW_MODELS_MS = 2500;
 const CODEX = { binaryPath: "/usr/local/bin/codex", model: "gpt-6-astra" };
 
 function mode(): string | null {
@@ -135,8 +143,16 @@ function initial(world: FixtureWorld): StartWorld {
     { id: "lighthouse-test", name: "Lighthouse test", archived: true, updatedAt: daysAgo(now, 13, 16, 30), director: "fake", planImport: null,
       data: draftFilm("lighthouse-test", "Lighthouse test", "Beam", [{ framing: "Wide", prompt: "A lighthouse beam sweeping over a calm sea.", motion: "Static", seconds: 5 }]) },
   ];
+  if (start === "refusals") {
+    const bus = others.find((item) => item.id === "night-bus")!.data!;
+    const [first] = Object.keys(bus.overview.shots);
+    bus.overview.shots[first!] = { ...bus.overview.shots[first!]!, keyframe: { state: "running", takeCount: 0, opened: false } };
+  }
   const bare = start === "no-keys" || firstRun;
-  return { films: [ferry, ...others], codex: !bare, keys: !bare, hideCodex: firstRun, busyOnce: start === "setup-busy" ? new Set() : null, next: 1, seenCursor: world.overview.cursor };
+  return {
+    films: [ferry, ...others], codex: !bare, keys: !bare, hideCodex: firstRun, busyOnce: start === "setup-busy" ? new Set() : null,
+    catalog: { digest: DIGEST, changesOnce: start === "refusals" }, next: 1, seenCursor: world.overview.cursor,
+  };
 }
 
 function state(world: FixtureWorld): StartWorld {
@@ -225,7 +241,7 @@ function provider(id: string, label: string, kind: string, adapter: string, unit
 }
 
 function providers(world: FixtureWorld) {
-  const { keys } = state(world);
+  const { keys, catalog } = state(world);
   const profiles = [
     provider("fake-image-v1", "Demo image", "image", "fake", "100", true, false),
     provider("fake-video-v1", "Demo video", "video", "fake", "1000", true, false),
@@ -237,7 +253,7 @@ function providers(world: FixtureWorld) {
     provider("openai-whisper", "OpenAI whisper-1", "transcription", "openai-transcription", "10000", keys, true),
   ];
   return {
-    catalogDigest: DIGEST,
+    catalogDigest: catalog.digest,
     defaults: ["fake-image-v1", "fake-video-v1", "fake-speech-v1", "fake-transcription-v1"],
     profiles,
     realExecutionEnabled: profiles.some((row) => row.readiness.realExecutionEnabled),
@@ -267,7 +283,14 @@ export const startRoutes: FixtureRoute[] = [
       return { projects: all.map((item) => listItem(world, item)) };
     },
   },
-  { method: "GET", match: /^\/api\/providers$/, handle: (world) => providers(world) },
+  {
+    method: "GET",
+    match: /^\/api\/providers$/,
+    handle(world) {
+      if (mode() !== "slow-models") return providers(world);
+      return new Promise((resolve) => setTimeout(() => resolve(providers(world)), SLOW_MODELS_MS));
+    },
+  },
   {
     method: "POST",
     match: /^\/api\/projects$/,
@@ -275,8 +298,9 @@ export const startRoutes: FixtureRoute[] = [
       const input = asObject(body);
       const name = typeof input.name === "string" ? input.name.trim() : "";
       if (!name || name.length > 160) throw new ApiError("VALIDATION_ERROR", 400);
-      if (input.expectedCatalogDigest !== undefined && input.expectedCatalogDigest !== DIGEST) throw new ApiError("PROVIDER_CATALOG_CHANGED", 409);
       const start = state(world);
+      if (input.expectedCatalogDigest !== undefined && start.catalog.changesOnce) start.catalog = { digest: "b".repeat(64), changesOnce: false };
+      if (input.expectedCatalogDigest !== undefined && input.expectedCatalogDigest !== start.catalog.digest) throw new ApiError("PROVIDER_CATALOG_CHANGED", 409);
       const id = `film-${start.next++}`;
       const data = emptyFilm(id, name);
       start.films.push({ id, name, archived: false, updatedAt: new Date().toISOString(), director: "fake", data, planImport: null });
@@ -315,7 +339,7 @@ export const startRoutes: FixtureRoute[] = [
     handle(world, [id], body) {
       const item = film(world, id);
       if (asObject(body).action !== "create") throw new ApiError("VALIDATION_ERROR", 400);
-      if (item.director !== "fake") throw new ApiError("ACTOR_DENIED", 409);
+      if (item.director !== "fake" || mode() === "no-stand-in") throw new ApiError("ACTOR_DENIED", 409);
       if (!item.data || item.data.snapshot.project.shots.length) throw new ApiError("DEMO_REQUIRES_EMPTY_PROJECT", 409);
       const seeded = demoFilm(item.id, item.name);
       change(world, item, () => seeded);

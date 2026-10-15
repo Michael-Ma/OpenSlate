@@ -47,25 +47,43 @@ export interface DirectorSetupRead {
   selection: { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string };
   /** The host's suggestion for this computer; binaryPath is "" when no Codex executable was found. */
   defaults: { binaryPath: string; model: string; codexHome?: string };
+  /** A setup check or a conversation is running for this film. */
+  busy?: boolean;
 }
+
+/** POST /director/setup body that turns on the Codex Director. */
+export interface DirectorSetupBody { mode: "native"; binaryPath: string; model: string; codexHome?: string }
 
 /**
  * Codex is per film on the server, but whether this computer has it is the same for every film.
- * "unknown" until a film's Director setup has been read: on a first run no film is open, so the
- * answer only comes once the new film exists (its Director step reads it).
+ * "found" carries the setup a new film is sent, so the model the sheet names is the one the film gets.
+ * "unknown" until some film's Director setup has been read: on a real first run there is no film at
+ * all, so the answer only comes once the new film exists (its Director step reads it).
  */
-export type Codex = { state: "found"; model: string } | { state: "not_found" } | { state: "unknown" };
+export type Codex = { state: "found"; model: string; setup: DirectorSetupBody } | { state: "not_found" } | { state: "unknown" };
 
+const setupBody = (from: { binaryPath: string; model: string; codexHome?: string }): DirectorSetupBody =>
+  ({ mode: "native", binaryPath: from.binaryPath, model: from.model, ...(from.codexHome ? { codexHome: from.codexHome } : {}) });
+
+/**
+ * What a new film would get, read from any film's Director setup: this computer's defaults; when they
+ * found no Codex but that film runs a Codex Director of its own (a path set by hand), that Codex.
+ */
 export function codexFrom(setup: DirectorSetupRead | null | undefined): Codex {
   if (!setup) return { state: "unknown" };
-  if (setup.selection.mode === "native" && setup.selection.binaryPath) return { state: "found", model: setup.selection.model ?? setup.defaults.model };
-  return setup.defaults.binaryPath ? { state: "found", model: setup.defaults.model } : { state: "not_found" };
+  const body = directorSetupBody(setup);
+  if (body) return { state: "found", model: body.model, setup: body };
+  const own = setup.selection;
+  if (own.mode === "native" && own.binaryPath) {
+    const fromFilm = setupBody({ binaryPath: own.binaryPath, model: own.model ?? setup.defaults.model, ...(own.codexHome ? { codexHome: own.codexHome } : {}) });
+    return { state: "found", model: fromFilm.model, setup: fromFilm };
+  }
+  return { state: "not_found" };
 }
 
-/** POST /director/setup body that turns on the Codex Director with this computer's defaults; null without Codex. */
-export function directorSetupBody(setup: DirectorSetupRead): { mode: "native"; binaryPath: string; model: string; codexHome?: string } | null {
-  if (!setup.defaults.binaryPath) return null;
-  return { mode: "native", binaryPath: setup.defaults.binaryPath, model: setup.defaults.model, ...(setup.defaults.codexHome ? { codexHome: setup.defaults.codexHome } : {}) };
+/** The setup that turns on the Codex Director with this computer's defaults; null without Codex. */
+export function directorSetupBody(setup: DirectorSetupRead): DirectorSetupBody | null {
+  return setup.defaults.binaryPath ? setupBody(setup.defaults) : null;
 }
 
 // ---- models a new film gets ----
@@ -81,11 +99,11 @@ const JOB_INLINE: Record<Job, MessageId> = {
 };
 
 /** Each media job, its provider kind, and the unit its price is per (a transcription is one per recording). */
-const JOBS: readonly { job: Exclude<Job, "director">; kind: ProviderKind; price: MessageId }[] = [
-  { job: "keyframes", kind: "image", price: "start.price.keyframe" },
-  { job: "video", kind: "video", price: "start.price.clip" },
-  { job: "narration", kind: "speech", price: "start.price.line" },
-  { job: "transcription", kind: "transcription", price: "start.price.recording" },
+const JOBS: readonly { job: Exclude<Job, "director">; kind: ProviderKind; price: { about: MessageId; under: MessageId } }[] = [
+  { job: "keyframes", kind: "image", price: { about: "start.price.keyframe", under: "start.price.keyframe_under" } },
+  { job: "video", kind: "video", price: { about: "start.price.clip", under: "start.price.clip_under" } },
+  { job: "narration", kind: "speech", price: { about: "start.price.line", under: "start.price.line_under" } },
+  { job: "transcription", kind: "transcription", price: { about: "start.price.recording", under: "start.price.recording_under" } },
 ];
 
 export interface ModelRow {
@@ -105,7 +123,12 @@ export interface ModelPlan {
   /** Media jobs (keyframes, video, narration, transcription) with a ready real model. */
   ready: number;
   total: number;
+  /** Why no real model is ready, when none is: what the real models wait for, or "none" when there are none. */
+  standInWhy: StandInWhy;
 }
+
+/** Why a film starts with the stand-ins: no key at all, some keys missing, FFmpeg, not turned on, setup, or no real model. */
+export type StandInWhy = "no_keys" | NotReady | "none";
 
 const isStandIn = (row: ProviderRow) => row.profile?.adapter === "fake" || row.estimatedCost?.basis === "fixture";
 
@@ -127,13 +150,29 @@ const WAITING: Record<NotReady, MessageId> = {
   setup: "start.ready.waiting_setup",
 };
 
-function priceOf(row: ProviderRow, unit: MessageId, locale: Locale): Msg {
+/** Below a tenth of a cent the price would round to "$0.000"; it reads "under $0.001" instead. */
+const PRICE_FLOOR_MICROS = 1000;
+
+function priceOf(row: ProviderRow, unit: { about: MessageId; under: MessageId }, locale: Locale): Msg {
   if (isStandIn(row)) return msg("start.price.stand_in");
   if (row.usage?.kind === "codex_subscription" || row.profile?.adapter === "codex-image") return msg("start.price.codex");
   const micros = row.estimatedCost?.unitMicros;
   // Never "$0.00": a model without a configured estimate says so.
   if (!micros || !/^\d+$/.test(micros) || Number(micros) === 0) return msg("start.price.unset");
-  return msg(unit, { price: formatMicros(micros, locale) });
+  if (Number(micros) * 2 < PRICE_FLOOR_MICROS) return msg(unit.under, { price: formatMicros(PRICE_FLOOR_MICROS, locale) });
+  return msg(unit.about, { price: formatMicros(micros, locale) });
+}
+
+const WHY_ORDER: readonly NotReady[] = ["key", "tools", "off", "setup"];
+
+/** Why none of the real models is ready: the most actionable reason any of them gives. */
+function standInWhy(real: readonly ProviderRow[]): StandInWhy {
+  if (!real.length) return "none";
+  const reasons = new Set(real.map(notReadyReason));
+  const first = WHY_ORDER.find((reason) => reasons.has(reason)) ?? "setup";
+  const needKeys = real.filter((row) => row.readiness.credential.required);
+  if (first === "key" && needKeys.every((row) => row.readiness.credential.present !== true)) return "no_keys";
+  return first;
 }
 
 /**
@@ -143,6 +182,7 @@ function priceOf(row: ProviderRow, unit: MessageId, locale: Locale): Msg {
 export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale): ModelPlan {
   const rows: ModelRow[] = [];
   const chosen: string[] = [];
+  const waitingReal: ProviderRow[] = [];
   let ready = 0;
   rows.push(codex.state === "found"
     ? { job: "director", model: `Codex · ${codex.model}`, price: msg("start.price.codex"), status: msg("start.ready.ready"), ok: true }
@@ -162,6 +202,7 @@ export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale
     }
     if (standIn) chosen.push(standIn.id);
     const waiting = real[0];
+    waitingReal.push(...real);
     rows.push({
       job,
       model: null,
@@ -176,8 +217,18 @@ export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale
     selection: allDefaults || !chosen.length ? null : { expectedCatalogDigest: catalog.catalogDigest, profileIds: chosen },
     ready,
     total: JOBS.length,
+    standInWhy: standInWhy(waitingReal),
   };
 }
+
+const NONE_READY: Record<StandInWhy, MessageId> = {
+  no_keys: "start.models.none_ready",
+  key: "start.models.none_ready_key",
+  tools: "start.models.none_ready_tools",
+  off: "start.models.none_ready_off",
+  setup: "start.models.none_ready_setup",
+  none: "start.models.none_ready_setup",
+};
 
 /**
  * The impact line above "See each model": which ready models the film gets, each with its price, so
@@ -185,7 +236,7 @@ export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale
  * translated parts, so it reads in the interface language).
  */
 export function modelSummaryText(plan: ModelPlan, say: (message: Msg) => string): string {
-  if (plan.ready === 0) return say(msg("start.models.none_ready"));
+  if (plan.ready === 0) return say(msg(NONE_READY[plan.standInWhy]));
   const models = plan.rows
     .filter((row) => row.ok && row.model)
     .map((row) => say(msg("start.models.item", { job: say(msg(JOB_INLINE[row.job])), model: row.model!, price: say(row.price) })))
@@ -198,8 +249,11 @@ export function modelSummaryText(plan: ModelPlan, say: (message: Msg) => string)
 
 export interface SetupStatus {
   codex: Codex["state"];
-  /** FFmpeg and ffprobe, as the media models report them; null when no model needs them. */
-  tools: "found" | "not_found" | null;
+  /**
+   * FFmpeg and ffprobe, as the real media models report them. "unknown" while no real model is set up:
+   * the server reports them only per model (a host-level read is a lead item).
+   */
+  tools: "found" | "not_found" | "unknown";
   keys: { set: number; total: number };
   /** At least one real media model can run now. */
   realReady: boolean;
@@ -211,7 +265,7 @@ export function setupStatus(catalog: ProviderCatalog | null, codex: Codex): Setu
   const needKeys = real.filter((row) => row.readiness.credential.required);
   return {
     codex: codex.state,
-    tools: needTools.length ? (needTools.every((row) => row.readiness.mediaTools.available) ? "found" : "not_found") : null,
+    tools: needTools.length ? (needTools.every((row) => row.readiness.mediaTools.available) ? "found" : "not_found") : "unknown",
     keys: { set: needKeys.filter((row) => row.readiness.credential.present === true).length, total: needKeys.length },
     realReady: real.some((row) => row.readiness.realExecutionEnabled),
   };
@@ -229,7 +283,19 @@ export type FirstStep = "director" | "plan" | "empty";
 
 /** Talking to the Director and reading a written plan need the Codex Director (plan-imports.ts: DIRECTOR_REQUIRED). */
 export const stepNeedsCodex = (step: FirstStep): boolean => step !== "empty";
-export const stepAvailable = (step: FirstStep, codex: Codex): boolean => !stepNeedsCodex(step) || codex.state !== "not_found";
+
+/**
+ * Talk to the Director is off only when Codex is known to be missing: while it is unknown, the new
+ * film's Director step finds out and nothing the person wrote is lost. A written plan needs Codex to
+ * be found first, so a pasted plan is never dropped because the check came out the other way.
+ */
+export const stepAvailable = (step: FirstStep, codex: Codex): boolean =>
+  step === "empty" || (step === "director" ? codex.state !== "not_found" : codex.state === "found");
+
+/** Why "Bring a written plan" is off, or null when it is on. */
+export const planOffReason = (codex: Codex): MessageId | null =>
+  codex.state === "found" ? null : codex.state === "not_found" ? "start.own.needs_codex" : "start.own.plan_after_codex";
+
 /** Talk to the Director only when Codex is known to be here; while it is unknown the safe default is the empty outline. */
 export const defaultStep = (codex: Codex): FirstStep => (codex.state === "found" ? "director" : "empty");
 
@@ -243,17 +309,24 @@ export const effectiveStep = (chosen: FirstStep | null, codex: Codex): FirstStep
 export type CreationStep = "create" | "director" | "import";
 
 /**
- * What Create runs, in order. The Codex Director is set up for every new film unless this computer is
- * known to have no Codex (it is this computer's default Director, and a film's Director locks at its
- * first conversation); while Codex is unknown, this step is where the new film finds out.
- * The written plan is sent only when one was given.
+ * What Create runs before the film opens, in order. Talking to the Director and a written plan set up
+ * the Codex Director first (while Codex is unknown, this step is where the new film finds out); the
+ * written plan is sent only when one was given. An empty outline opens as soon as the film exists:
+ * it does not wait for the Codex check (directorAfterOpen).
  */
 export function creationSteps(step: FirstStep, codex: Codex, planText: string): CreationStep[] {
   const steps: CreationStep[] = ["create"];
-  if (codex.state !== "not_found") steps.push("director");
+  if (stepNeedsCodex(step) && codex.state !== "not_found") steps.push("director");
   if (step === "plan" && planText.trim()) steps.push("import");
   return steps;
 }
+
+/**
+ * An empty outline still gets this computer's Codex Director (a film's Director locks at its first
+ * conversation, so setting it up later may be too late), but after the film has opened, quietly:
+ * the person did not ask for it, and Settings shows how it went.
+ */
+export const directorAfterOpen = (step: FirstStep, codex: Codex): boolean => !stepNeedsCodex(step) && codex.state !== "not_found";
 
 export interface CreateBody {
   name: string;
@@ -294,34 +367,35 @@ export interface CreationEnd {
 
 /** Client-made: the new film's Director setup shows no Codex executable on this computer. Trying again cannot help. */
 export const CODEX_NOT_FOUND = "CODEX_NOT_FOUND";
+/** The setup check is still running (the server refused a second one, or a lost reply was followed by a read that says busy). */
+export const SETUP_BUSY = "DIRECTOR_SETUP_BUSY";
 
 /**
  * What the sheet does when a step after Create did not finish (the film exists either way):
- * - "open": the step was optional (an empty outline does not need the Director): open the film now;
  * - "final": trying again cannot work (no Codex here): Open the film is the only way on;
  * - "retry": offer Try again, which finishes the same film.
  */
-export type AfterFailure = "open" | "final" | "retry";
+export type AfterFailure = "final" | "retry";
 
-export function afterFailure(step: FirstStep, failedAt: Exclude<CreationStep, "create">, code: string | null): AfterFailure {
-  if (failedAt === "director" && !stepNeedsCodex(step)) return "open";
-  if (code === CODEX_NOT_FOUND) return "final";
-  return "retry";
-}
+export const afterFailure = (code: string | null): AfterFailure => (code === CODEX_NOT_FOUND ? "final" : "retry");
 
-/** The sheet's explanation once a later step failed. */
+/** The sheet's explanation once a later step failed (the refusal's own words follow it when they add something). */
 export function failedMsg(step: FirstStep, failedAt: Exclude<CreationStep, "create">, code: string | null, name: string): Msg {
   if (code === CODEX_NOT_FOUND) return msg(step === "plan" ? "start.new.failed.no_codex_plan" : "start.new.failed.no_codex", { name });
+  if (failedAt === "director" && code === SETUP_BUSY) return msg("start.new.failed.director_busy", { name });
   return msg(failedAt === "director" ? "start.new.failed.director" : "start.new.failed.import", { name });
 }
 
-export type CreatedOutcome = "director" | "plan" | "plan_later" | "empty" | "stand_in" | "setup_later";
+/** Whether the refusal's own words add to failedMsg (no Codex and a running check are already said there). */
+export const failureNeedsReason = (code: string | null): boolean => code !== null && code !== CODEX_NOT_FOUND && code !== SETUP_BUSY;
+
+export type CreatedOutcome = "director" | "plan" | "plan_later" | "empty" | "stand_in" | "setup_later" | "setup_pending";
 
 /** What the toast says once the film opens: a step that did not finish says what the film has instead. */
 export function createdOutcome(step: FirstStep, planText: string, end: CreationEnd): CreatedOutcome {
   if (end.failedAt === null) return step === "plan" ? (planText.trim() ? "plan" : "plan_later") : step;
   if (end.code === CODEX_NOT_FOUND) return "stand_in";
-  if (end.failedAt === "director") return "setup_later";
+  if (end.failedAt === "director") return end.code === SETUP_BUSY ? "setup_pending" : "setup_later";
   return "plan_later";
 }
 
@@ -332,6 +406,7 @@ const CREATED: Record<CreatedOutcome, MessageId> = {
   empty: "start.created.empty",
   stand_in: "start.created.stand_in",
   setup_later: "start.created.setup_later",
+  setup_pending: "start.created.setup_pending",
 };
 
 export const createdMsg = (outcome: CreatedOutcome, name: string): Msg => msg(CREATED[outcome], { name });

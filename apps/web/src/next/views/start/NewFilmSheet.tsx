@@ -3,12 +3,14 @@ import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
 import { numberLocale } from "../../i18n/translate.ts";
 import { FILM_NAME_MAX } from "../../model/start.ts";
-import { runCreation, type CreationResult, type Film } from "../../model/start-commands.ts";
+import { runCreation, setUpDirector, type CreationResult, type Film } from "../../model/start-commands.ts";
 import {
-  afterFailure, createBody, createdOutcome, creationSteps, effectiveStep, failedMsg, sheetFootMsg, isPlanFileName, modelPlan, modelSummaryText, planFileName, planTextProblem, stepAvailable,
-  JOB_LABEL, PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep, type ProviderCatalog,
+  afterFailure, createBody, createdOutcome, creationSteps, directorAfterOpen, effectiveStep, failedMsg, failureNeedsReason, sheetFootMsg, isPlanFileName, modelPlan, modelSummaryText,
+  planFileName, planTextProblem, stepAvailable, JOB_LABEL, PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep, type ProviderCatalog,
 } from "../../model/start-new.ts";
+import type { Msg } from "../../model/types.ts";
 import { useStore } from "../../store/react.tsx";
+import { Alert } from "./Alert.tsx";
 import { Dialog } from "./Dialog.tsx";
 
 const STEPS: readonly FirstStep[] = ["director", "plan", "empty"];
@@ -22,14 +24,18 @@ const PROGRESS: Record<CreationStep, MessageId> = { create: "start.new.step.crea
 type Phase =
   | { kind: "idle" }
   | { kind: "running"; first: FirstStep; step: CreationStep }
-  /** The film exists; a later step did not finish. `final`: trying again cannot work (no Codex here). */
-  | { kind: "failed"; first: FirstStep; step: Exclude<CreationStep, "create">; film: Film; code: string | null; final: boolean };
+  /**
+   * The film exists; a later step did not finish. `final`: trying again cannot work (no Codex here).
+   * `reason`: the refusal's own words, when they add to the sheet's explanation.
+   */
+  | { kind: "failed"; first: FirstStep; step: Exclude<CreationStep, "create">; film: Film; code: string | null; final: boolean; reason: Msg | null };
 
 /**
  * The New film sheet: a name and a first step (Talk to the Director, Bring a written plan, Start an
  * empty outline), this computer's models on request, and Create. Creating is free. A failed Codex
  * check or plan send leaves the film made (and listed at once) and offers Try again, which never makes
- * a second film; when Codex turns out to be missing, Open the film is the way on.
+ * a second film; when Codex turns out to be missing, Open the film is the way on. Refusals are said
+ * inside the sheet, never only in the toast behind its backdrop.
  */
 export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, onMade, onCreated, onModelsChanged }: {
   initialStep: FirstStep | null;
@@ -52,6 +58,8 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   const modelsId = useId();
   const planId = useId();
   const planHint = useId();
+  const stepHint = useId();
+  const modelsHint = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const stepRefs = useRef<Partial<Record<FirstStep, HTMLButtonElement | null>>>({});
@@ -64,10 +72,14 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   const [fileProblem, setFileProblem] = useState<MessageId | null>(null);
   const [showModels, setShowModels] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  /** Why the last Create made nothing; cleared by the next change or press. */
+  const [refusal, setRefusal] = useState<Msg | null>(null);
 
   const plan = useMemo(() => (providers && providers !== "failed" ? modelPlan(providers, codex, locale) : null), [providers, codex, locale]);
   const running = phase.kind === "running";
   const failed = phase.kind === "failed" ? phase : null;
+  // Create waits for this computer's models, so the film never gets the stand-ins only because the list was still being read.
+  const modelsLoading = providers === null && !failed;
   // A run keeps the step it started with; otherwise the step follows the person's choice and what Codex allows.
   const step = phase.kind === "idle" ? effectiveStep(chosen, codex) : phase.first;
   const problem = step === "plan" ? planTextProblem(planText) : null;
@@ -76,29 +88,35 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
 
   const finish = (first: FirstStep, result: CreationResult) => {
     const { film, failedAt, code } = result;
-    // Creating failed: the toast says why, and nothing was made.
+    // Creating failed: nothing was made, and the sheet says why.
     if (!film || failedAt === "create") {
       if (code === "PROVIDER_CATALOG_CHANGED") onModelsChanged();
+      setRefusal(result.message);
       setPhase({ kind: "idle" });
       return;
     }
-    if (failedAt === null) { onCreated(film, createdOutcome(first, planText, result)); return; }
+    if (failedAt === null) {
+      onCreated(film, createdOutcome(first, planText, result));
+      // An empty outline opened without waiting for the Codex check; it runs now, and says nothing (Settings shows it).
+      if (directorAfterOpen(first, codex)) void setUpDirector(store, film, codex);
+      return;
+    }
     // A later step did not finish: the film exists (and is already listed).
-    const next = afterFailure(first, failedAt, code);
-    if (next === "open") { onCreated(film, createdOutcome(first, planText, result)); return; }
-    setPhase({ kind: "failed", first, step: failedAt, film, code, final: next === "final" });
+    setPhase({ kind: "failed", first, step: failedAt, film, code, final: afterFailure(code) === "final", reason: failureNeedsReason(code) ? result.message : null });
   };
 
   const create = async () => {
-    if (running || offline || problem || failed?.final) return;
+    if (running || offline || problem || failed?.final || modelsLoading) return;
     const first = step;
     const filmName = failed?.film.name ?? (name.trim() || untitled);
     const input = {
       body: createBody(name, plan, untitled),
       steps: creationSteps(first, codex, planText),
       plan: first === "plan" && planText.trim() ? { fileName: planFileName(filmName, planFile), text: planText } : null,
+      codex,
     };
     const resume = failed ? { film: failed.film, from: failed.step } : undefined;
+    setRefusal(null);
     setPhase({ kind: "running", first, step: resume?.from ?? "create" });
     const result = await runCreation(store, input, { onStep: (current) => setPhase({ kind: "running", first, step: current }), onMade }, resume);
     finish(first, result);
@@ -107,6 +125,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   const chooseStep = (next: FirstStep) => {
     if (!stepAvailable(next, codex) || failed || running) return;
     setChosen(next);
+    setRefusal(null);
   };
 
   const onStepKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -134,10 +153,16 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
 
   // Once a step fails, focus goes to the way on: Try again, or Open the film when trying again cannot work.
   useEffect(() => { if (failed) nextRef.current?.focus(); }, [failed]);
+  // A refusal is said at the end of the sheet's body; bring it into view (the body scrolls with a long plan).
+  const alertRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (failed || refusal) alertRef.current?.scrollIntoView({ block: "nearest" }); }, [failed, refusal]);
 
   const locked = running || !!failed;
   const summary = plan ? modelSummaryText(plan, tm) : null;
   const allReady = !!plan && plan.ready === plan.total;
+  const createOff = running || !!offline || !!problem || modelsLoading;
+  const createTitle = offline ?? (modelsLoading ? t("start.models.loading") : undefined);
+  const codexHint = codex.state === "not_found" ? t("start.step.needs_codex") : codex.state === "unknown" && !failed ? t("start.step.codex_unknown") : null;
 
   return (
     <Dialog className="sheet start-sheet" labelledBy={titleId} onClose={onClose} locked={running} initialFocus={nameRef}>
@@ -148,33 +173,45 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
       <form id={formId} className="sheet-body" noValidate onSubmit={(event) => { event.preventDefault(); void create(); }}>
         <label className="field">
           <span className="label">{t("start.new.name")}</span>
-          <input ref={nameRef} className="input" data-act="film-name" value={failed?.film.name ?? name} maxLength={FILM_NAME_MAX} placeholder={untitled} disabled={locked} onChange={(event) => setName(event.target.value)} />
+          <input
+            ref={nameRef}
+            className="input"
+            data-act="film-name"
+            value={failed?.film.name ?? name}
+            maxLength={FILM_NAME_MAX}
+            placeholder={untitled}
+            disabled={locked}
+            onChange={(event) => { setName(event.target.value); setRefusal(null); }}
+          />
         </label>
 
         <div className="field">
           <span className="label" id={stepLabel}>{t("start.new.first_step")}</span>
           <div className="choice" role="radiogroup" aria-labelledby={stepLabel} onKeyDown={onStepKey}>
-            {STEPS.map((option) => (
-              <button
-                key={option}
-                ref={(element) => { stepRefs.current[option] = element; }}
-                type="button"
-                role="radio"
-                aria-checked={step === option}
-                tabIndex={step === option ? 0 : -1}
-                disabled={!stepAvailable(option, codex) || locked}
-                data-act="step"
-                data-step={option}
-                onClick={() => chooseStep(option)}
-              >
-                <b>{t(STEP_TEXT[option].title)}</b>
-                <span>{t(STEP_TEXT[option].body)}</span>
-              </button>
-            ))}
+            {STEPS.map((option) => {
+              const off = !stepAvailable(option, codex);
+              return (
+                <button
+                  key={option}
+                  ref={(element) => { stepRefs.current[option] = element; }}
+                  type="button"
+                  role="radio"
+                  aria-checked={step === option}
+                  aria-describedby={off && codexHint ? stepHint : undefined}
+                  tabIndex={step === option ? 0 : -1}
+                  disabled={off || locked}
+                  data-act="step"
+                  data-step={option}
+                  onClick={() => chooseStep(option)}
+                >
+                  <b>{t(STEP_TEXT[option].title)}</b>
+                  <span>{t(STEP_TEXT[option].body)}</span>
+                </button>
+              );
+            })}
           </div>
-          {codex.state === "not_found" && <span className="hint">{t("start.step.needs_codex")}</span>}
           {/* Once a step failed, the check has answered and the alert below says what it found. */}
-          {codex.state === "unknown" && !failed && <span className="hint" data-hint="codex-unknown">{t("start.step.codex_unknown")}</span>}
+          {codexHint && <span className="hint" id={stepHint} data-hint={codex.state === "unknown" ? "codex-unknown" : "no-codex"}>{codexHint}</span>}
         </div>
 
         {step === "plan" && (
@@ -209,7 +246,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
 
         <div className="field">
           <span className="label">{t("start.models.label")}</span>
-          {providers === null && <span className="hint" role="status">{t("start.models.loading")}</span>}
+          {providers === null && <span className="hint" role="status" id={modelsHint}>{t("start.models.loading")}</span>}
           {providers === "failed" && <div className="impact"><span className="ic" aria-hidden="true">!</span><span>{t("start.models.unavailable")}</span></div>}
           {summary && (
             <div className={`impact${allReady ? " none" : ""}`}>
@@ -219,7 +256,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
           )}
           {plan && (
             <>
-              <button type="button" className="pill sm ghost see-models" data-act="see-models" aria-expanded={showModels} aria-controls={modelsId} onClick={() => setShowModels((v) => !v)}>
+              <button type="button" className="pill sm ghost see-models" data-act="see-models" aria-expanded={showModels} aria-controls={showModels ? modelsId : undefined} onClick={() => setShowModels((v) => !v)}>
                 {t(showModels ? "start.models.hide" : "start.models.see")}
               </button>
               {showModels && (
@@ -240,12 +277,15 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
           )}
         </div>
 
-        {failed && (
-          <div className="impact cost" role="alert">
-            <span className="ic" aria-hidden="true">!</span>
-            <span>{tm(failedMsg(failed.first, failed.step, failed.code, failed.film.name))}</span>
-          </div>
-        )}
+        <div ref={alertRef} className="sheet-alerts" data-alert={failed ? "step" : refusal ? "create" : undefined}>
+          {failed && (
+            <Alert>
+              {tm(failedMsg(failed.first, failed.step, failed.code, failed.film.name))}
+              {failed.reason && <> {tm(failed.reason)}</>}
+            </Alert>
+          )}
+          {!failed && refusal && <Alert>{t("start.new.not_created")} {tm(refusal)}</Alert>}
+        </div>
       </form>
       <div className="sheet-foot">
         <span className="grow" role="status">{running ? t(PROGRESS[phase.step]) : tm(sheetFootMsg(step, planText))}</span>
@@ -267,7 +307,16 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
         ) : (
           <>
             <button type="button" className="pill" data-act="sheet-cancel" disabled={running} onClick={onClose}>{t("start.new.cancel")}</button>
-            <button type="submit" form={formId} className="pill primary" data-act="create-film" disabled={running || !!offline || !!problem} aria-busy={running || undefined} title={offline ?? undefined}>
+            <button
+              type="submit"
+              form={formId}
+              className="pill primary"
+              data-act="create-film"
+              disabled={createOff}
+              aria-busy={running || undefined}
+              aria-describedby={modelsLoading ? modelsHint : undefined}
+              title={createTitle}
+            >
               {running ? t("start.busy") : t("start.new.create")}
             </button>
           </>
