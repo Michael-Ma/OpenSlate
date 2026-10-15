@@ -1,3 +1,4 @@
+import { keyframeTakeHistory } from "./keyframe-take-history.js";
 import { openBlockingNotes } from "./application/director-notes.js";
 import { confirmationView, type SceneConfirmationRecord } from "./scene-confirmations.js";
 import type { FastifyInstance } from "fastify";
@@ -46,6 +47,7 @@ export class GenerationOverviewReader {
       const plan = project.activePlanId ? store.get<PlanRecord>("plan", project.activePlanId)?.compiled ?? null : null;
       const review = plan?.gates.length ? this.production.engine.inspectReview(projectId) : null;
       const bindings = store.list<NodeBinding>("node_binding", projectId), events = store.readEvents(projectId);
+      const takeHistory = { attempts: snapshot.attempts, bindings, plans: store.list<PlanRecord>("plan", projectId) };
       const views = store.list<{ principal: string; shotId: string; artifactId: string; sha256: string }>("frame_view", projectId);
       const turns = store.list<DirectorTurn>("director_turn", projectId);
       const turn = turns.filter(t => ["running", "queued", "waiting_user"].includes(t.state) && snapshot.messages.some(m => m.id === t.requestId && m.state === "active")).at(-1);
@@ -73,7 +75,8 @@ export class GenerationOverviewReader {
             const nodes = plan?.nodes.filter(n => n.kind === kind && n.shotId === shot.id) ?? [];
             const binding = bindings.find(b => b.id === nodes[0]?.id && b.state === "active" && b.planId === project.activePlanId);
             const history = snapshot.attempts.filter(a => bindings.some(b => b.id === a.nodeId && b.node.shotId === shot.id && b.node.kind === kind));
-            const artifacts = history.flatMap(a => Object.values(a.outputs)).filter(a => a.kind === kind);
+            const artifacts = kind === "image" ? keyframeTakeHistory(this.production, projectId, shot.id, takeHistory).map(t => t.artifact).reverse()
+              : history.flatMap(a => Object.values(a.outputs)).filter(a => a.kind === kind);
             const output = kind === "image" ? row.image : snapshot.outputs.find(o => o.nodeId === row.videoNodeId && o.artifact.kind === "video")?.artifact;
             const current = kind === "image" ? row.imageComplete : row.videoComplete;
             const previous = binding?.outdated?.previous ?? artifacts.at(-1);

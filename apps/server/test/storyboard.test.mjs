@@ -24,7 +24,7 @@ test('reorder and delete/undo retain stable identities and narration, protect ne
  f.edit({kind:'narration',id:a.id,field:'mode',value:'generated'});f.edit({kind:'narration',id:a.id,field:'text',value:'Morning light.'});
  f.edit({kind:'moveShot',id:a.id,sceneId:b.sceneId});let p=f.store.getProject(f.projectId);assert.deepEqual(p.shots.map(x=>x.id),[b.id,a.id]);assert.equal(p.shots[1].narration.text,'Morning light.');
  const removed=f.edit({kind:'deleteShot',id:a.id});assert.equal(f.store.getProject(f.projectId).shots.length,1);f.edit({kind:'undo',commandId:removed.commandId});assert.equal(f.store.getProject(f.projectId).shots[1].id,a.id);
- assert.throws(()=>f.edit({kind:'undo',commandId:removed.commandId}),e=>e.code==='REVISION_CONFLICT');
+ assert.throws(()=>f.edit({kind:'undo',commandId:removed.commandId}),e=>e.code==='UNDO_UNAVAILABLE');
 });
 test('shot change detaches only affected candidates; motion preserves image and other shot',t=>{
  const f=fixture(t),p=f.store.getProject(f.projectId),prior=f.store.list('node_binding',f.projectId);
