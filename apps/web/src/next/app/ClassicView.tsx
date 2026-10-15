@@ -22,8 +22,9 @@ function ClassicMark() {
 }
 
 /**
- * Plan, Assets and Film are not designed for the new studio yet (plan decision D13): the workspace
- * names the view and links to the same view in the classic studio.
+ * A view that is not built in the new studio names itself and links to the same view in the classic studio
+ * (plan decision D13). Every view is designed since phase P5; this panel stays for a view whose build is still
+ * on its way, and the top bar keeps its own link to the classic studio.
  */
 export function ClassicView({ view }: { view: ClassicViewName }) {
   const { t } = useI18n();
@@ -41,22 +42,6 @@ export function ClassicView({ view }: { view: ClassicViewName }) {
         <div className="classic-actions">
           <a className="pill primary" data-act="open-classic" href={classicHref(window.location.search, view)}>{t("classic.open", { view: name })}</a>
           <button type="button" className="pill ghost" data-act="back-to-keyframes" onClick={() => store.setView("keyframes")}>{t("classic.back")}</button>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-/** Connected, but there is no film yet. Creating one is not designed in the new studio. */
-export function NoFilms() {
-  const { t } = useI18n();
-  return (
-    <main className="classic-view" id="workspace" data-view="none">
-      <section className="classic-panel" aria-labelledby="no-films-title">
-        <ClassicMark />
-        <h1 id="no-films-title">{t("start.no_projects")}</h1>
-        <div className="classic-actions">
-          <a className="pill primary" data-act="open-classic" href={classicHref(window.location.search, "plan")}>{t("classic.open_studio")}</a>
         </div>
       </section>
     </main>

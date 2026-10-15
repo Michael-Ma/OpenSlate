@@ -1,22 +1,54 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classicHref, codeSegments, connectionPill, escClosesDrawer, filmHeading, isDesignedView, otherLocale,
-  pauseCountdown, resumeCountdown, searchWithLocale, showProjectPicker, startCountdown, tabKeyTarget,
-  toastLifetime, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS,
+  classicHref, codeSegments, connectionPill, connectScreen, escClosesDrawer, filmHeading, isDesignedView, otherLocale,
+  pauseCountdown, resumeCountdown, searchWithLocale, shownView, showProjectPicker, startCountdown, tabKeyTarget,
+  toastLifetime, topBarMode, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS, VIEWS,
 } from '../../src/next/model/shell.ts';
 import { lastFerryOverview } from '../../src/next/fixtures/last-ferry.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
 const en = m => translateMsg('en', m), zh = m => translateMsg('zh-CN', m);
 
-test('the tab row lists the four views in order and only Keyframes is designed', () => {
+test('the tab row lists the four views in order, and every view is designed', () => {
   const tabs = viewTabs('keyframes');
-  assert.deepEqual(tabs.map(t => [t.view, t.selected, t.classic]),
-    [['plan', false, true], ['keyframes', true, false], ['assets', false, true], ['film', false, true]]);
+  assert.deepEqual(tabs.map(t => [t.view, t.selected, t.focusable]),
+    [['plan', false, false], ['keyframes', true, true], ['assets', false, false], ['film', false, false]]);
   assert.deepEqual(viewTabs('film').filter(t => t.selected).map(t => t.view), ['film']);
-  assert.equal(isDesignedView('keyframes'), true);
-  assert.equal(isDesignedView('plan'), false);
+  for (const view of [...VIEWS, 'settings', 'start']) assert.equal(isDesignedView(view), true, view);
+  assert.equal('classic' in tabs[0], false, 'tabs no longer say they open in the classic studio');
+});
+
+test('with Settings open no tab is selected and the row keeps one tab in the focus order', () => {
+  const tabs = viewTabs('settings');
+  assert.deepEqual(tabs.filter(t => t.selected), []);
+  assert.deepEqual(tabs.filter(t => t.focusable).map(t => t.view), ['plan']);
+});
+
+test('the top bar names the films on this computer on Start and the film everywhere else', () => {
+  assert.equal(topBarMode('start'), 'films');
+  for (const view of [...VIEWS, 'settings']) assert.equal(topBarMode(view), 'film', view);
+});
+
+test('a studio with no films opens on Start whatever view was asked for', () => {
+  const base = { view: 'keyframes', projectId: null, projects: [], connection: 'connected' };
+  assert.equal(shownView(base), 'start');
+  assert.equal(shownView({ ...base, connection: 'connecting' }), 'keyframes', 'not while the list is still loading');
+  assert.equal(shownView({ ...base, projects: [{ id: 'a', name: 'A' }], projectId: 'a' }), 'keyframes');
+  assert.equal(shownView({ ...base, view: 'settings', projects: [{ id: 'a', name: 'A' }], projectId: 'a' }), 'settings');
+});
+
+test('the full Connect screen only replaces a window that never loaded the film list', () => {
+  const loaded = { connection: 'connected', projectId: 'a', loadErrors: {} };
+  assert.equal(connectScreen(loaded), null);
+  // Expired or offline after loading: a dialog or a strip over the page, never a new page.
+  assert.equal(connectScreen({ ...loaded, connection: 'expired' }), null);
+  assert.equal(connectScreen({ ...loaded, connection: 'reconnecting' }), null);
+  assert.equal(connectScreen({ connection: 'expired', projectId: null, loadErrors: {} }), null, 'no films yet, but the list was read');
+  // Before the list was read.
+  assert.equal(connectScreen({ connection: 'connecting', projectId: null, loadErrors: {} }), 'connecting');
+  assert.equal(connectScreen({ connection: 'expired', projectId: null, loadErrors: { projects: 'AUTH_REQUIRED' } }), 'expired');
+  assert.equal(connectScreen({ connection: 'failed', projectId: null, loadErrors: { projects: 'NETWORK_ERROR' } }), 'failed');
 });
 
 test('arrow keys move focus around the tab row and wrap', () => {
@@ -49,6 +81,8 @@ test('the connection pill says Saved locally only while connected', () => {
   assert.equal(zh(connectionPill('reconnecting').label), '正在重新连接…');
   assert.equal(en(connectionPill('connecting').label), 'Connecting…');
   assert.equal(connectionPill('connecting').tone, 'waiting');
+  assert.equal(en(connectionPill('expired').label), 'Not connected');
+  assert.equal(zh(connectionPill('failed').label), '未连接');
 });
 
 test('the film heading names the film and reads duration, frame rate and counts from the overview', () => {
