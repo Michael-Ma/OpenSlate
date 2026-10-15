@@ -58,6 +58,30 @@ test('switching video to the demo shows its impact first, then applies (design s
   } finally { close(); }
 });
 
+test('a switch checked before a job started or finished is refused as stale, like the server', async () => {
+  const { store, port, close } = await studio();
+  try {
+    const status = await store.read('/settings/models');
+    const request = previewRequest(status, 'image', 'codex-image');
+    const preview = await store.command('p', request.body, () => request);
+    const cursor = port.world.overview.cursor;
+    // Shot 3.1's keyframe starts: the settings are unchanged, the pending work is not.
+    const shot = Object.values(port.world.overview.shots).find((s) => s.label === '3.1');
+    port.world.update((w) => { w.overview = { ...w.overview, shots: { ...w.overview.shots, [shot.shotId]: { ...shot, keyframe: { ...shot.keyframe, state: 'running', phase: 'running', startedAt: '2026-10-15T10:00:00.000Z', attemptId: 'attempt-x' } } } }; });
+    assert.ok(port.world.overview.cursor > cursor, 'the change moves the event cursor, so the view marks the check stale');
+    const after = await store.read('/settings/models');
+    assert.equal(previewCurrent(preview, after), true, 'the settings status alone cannot show it');
+    const apply = applyRequest(preview);
+    assert.equal(await store.command('a', apply.body, () => apply), undefined);
+    assert.equal(store.getState().toast?.message.id, 'error.MODEL_SETTINGS_STALE');
+    // A fresh check applies.
+    const again = previewRequest(after, 'image', 'codex-image');
+    const fresh = await store.command('p2', again.body, () => again);
+    const applyFresh = applyRequest(fresh);
+    assert.equal((await store.command('a2', applyFresh.body, () => applyFresh)).status.selected.image, 'codex-image');
+  } finally { close(); }
+});
+
 test('keyframe and narration impacts match the design', async () => {
   const { store, port, close } = await studio();
   try {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
-import { estimateMsg, impactOf, modelRows, previewCurrent, previewRequest, readiness, shotList, applyRequest, choiceFor } from '../../src/next/model/settings.ts';
+import { estimateMsg, impactOf, modelRows, previewCurrent, previewRequest, previewUsable, readiness, sharedRequest, shotList, applyRequest, choiceFor } from '../../src/next/model/settings.ts';
 
 const ready = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: true, realExecutionEnabled: true };
 const option = (id, label, kind, adapter, micros, extra = {}) => ({
@@ -92,6 +92,48 @@ test('a preview is current only for the exact settings it was made from', () => 
   assert.equal(previewCurrent(preview(), { ...status, headVersion: 13 }), false);
   assert.equal(previewCurrent(preview(), { ...status, selectionDigest: 'd'.repeat(64) }), false);
   assert.deepEqual(applyRequest(preview()), { path: '/settings/models/apply', body: { previewId: 'preview-1', previewDigest: 'c'.repeat(64) } });
+});
+
+test('Switch is offered only while nothing happened in the film since the check (the server also refuses changed pending work)', () => {
+  assert.equal(previewUsable(preview(), status, 40, 40), true);
+  // A job started or finished: the settings look the same, but the apply would be refused as stale.
+  assert.equal(previewUsable(preview(), status, 40, 41), false);
+  assert.equal(previewUsable(preview(), { ...status, selectionDigest: 'd'.repeat(64) }, 40, 40), false);
+  assert.equal(previewUsable(preview(), { ...status, catalogDigest: 'e'.repeat(64) }, 40, 40), false);
+  // A settings read older than the preview (Check again read newer ones) does not make it stale.
+  assert.equal(previewUsable(preview({ base: { ...preview().base, headVersion: 13, selectionDigest: 'd'.repeat(64) } }), status, 40, 40), true);
+});
+
+test('asking for the same check while it is on its way reuses it; once settled, a new one starts', async () => {
+  const inflight = new Map();
+  let started = 0;
+  let finish;
+  const start = () => { started++; return { checkedAt: started, promise: new Promise((resolve) => { finish = resolve; }) }; };
+  const a = sharedRequest(inflight, 'video:demo', start);
+  const again = sharedRequest(inflight, 'video:demo', start);
+  assert.equal(again, a);
+  assert.equal(started, 1);
+  sharedRequest(inflight, 'video:viggle', () => ({ promise: Promise.resolve('b') }));
+  finish('preview-a');
+  assert.equal(await again.promise, 'preview-a');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(inflight.size, 0);
+  assert.notEqual(sharedRequest(inflight, 'video:demo', start), a);
+  assert.equal(started, 2);
+});
+
+test('a saved model that is no longer installed stays visible and cannot be chosen; no saved model has no fake choice', () => {
+  const rows = modelRows({ ...status, selected: { ...status.selected, video: 'old-h2' } }, 'en');
+  const video = rows.find((r) => r.kind === 'video');
+  assert.equal(video.selected, 'old-h2');
+  assert.deepEqual(video.choices.map((c) => c.value), ['old-h2', 'minimax', 'viggle', 'fake-video-v1']);
+  const missing = choiceFor(video, 'old-h2');
+  assert.deepEqual([en(missing.name), en(missing.estimate), missing.ready, en(missing.reason), missing.missing], ['old-h2 (saved; not installed)', 'no price set', false, 'not installed', true]);
+  assert.equal(zh(missing.name), 'old-h2（已保存，未安装）');
+  const none = modelRows({ ...status, selected: { ...status.selected, speech: null } }, 'en').find((r) => r.kind === 'speech');
+  assert.equal(none.selected, null);
+  assert.deepEqual(none.choices.map((c) => c.value), ['tts']);
+  assert.ok(none.choices.every((c) => !c.missing));
 });
 
 test('the impact says what would use the new model and what stays, before anything applies', () => {

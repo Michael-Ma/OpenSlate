@@ -58,6 +58,9 @@ test('the Codex form refuses what the server would refuse', () => {
   assert.deepEqual(draftProblems(draft), []);
   assert.deepEqual(draftProblems({ binaryPath: 'codex', model: 'gpt 6', codexHome: '~/.codex' }).map((p) => p.field), ['binaryPath', 'model', 'codexHome']);
   assert.equal(en(draftProblems({ ...draft, binaryPath: 'codex' })[0].problem), 'Use the full path, starting with /.');
+  // No Codex found on this computer: the empty field says so, so Save is never off without a reason.
+  assert.deepEqual(draftProblems({ ...draft, binaryPath: ' ' }).map((p) => [p.field, en(p.problem)]), [['binaryPath', 'No Codex program found. Enter its full path, starting with /.']]);
+  assert.equal(en(draftProblems({ ...draft, model: '' })[0].problem), 'Choose a Codex model.');
 });
 
 test('the review switch (D4) is off with a reason until its route exists and the Codex Director is set', () => {

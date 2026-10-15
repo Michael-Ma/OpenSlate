@@ -164,6 +164,8 @@ export interface ModelChoice {
   estimate: Msg;
   ready: boolean;
   reason: Msg | null;
+  /** The film's saved model is no longer installed here: shown so the select stays honest, never chosen. */
+  missing?: true;
 }
 
 export interface ModelRow {
@@ -174,7 +176,10 @@ export interface ModelRow {
   choices: ModelChoice[];
 }
 
-/** One row per media job, in the design's order, with every installed model for that job. */
+/**
+ * One row per media job, in the design's order, with every installed model for that job. A saved model that
+ * is no longer installed (the server keeps old profiles in the film's lock) comes first, marked missing.
+ */
 export function modelRows(status: ModelSettingsStatus, locale: string): ModelRow[] {
   return MEDIA_KINDS.map((kind) => {
     const choices = status.options
@@ -185,7 +190,11 @@ export function modelRows(status: ModelSettingsStatus, locale: string): ModelRow
       });
     // Configured models first, the stand-in last, as in the design.
     choices.sort((a, b) => Number(a.name.id === DEMO_LABEL[kind]) - Number(b.name.id === DEMO_LABEL[kind]));
-    return { kind, job: JOB_LABEL[kind], selected: status.selected[kind] ?? null, choices };
+    const selected = status.selected[kind] ?? null;
+    if (selected && !choices.some((choice) => choice.value === selected)) {
+      choices.unshift({ value: selected, name: msg("set.models.saved_missing", { id: selected }), estimate: msg("set.estimate.none"), ready: false, reason: msg("set.why.not_installed"), missing: true });
+    }
+    return { kind, job: JOB_LABEL[kind], selected, choices };
   });
 }
 
@@ -213,6 +222,34 @@ export function previewCurrent(preview: ModelPreview, status: ModelSettingsStatu
   const base = preview.base;
   return preview.projectId === status.projectId && base.headVersion === status.headVersion && base.revisionId === status.revisionId
     && base.capabilityLockId === status.capabilityLockId && base.selectionDigest === status.selectionDigest && base.catalogDigest === status.catalogDigest;
+}
+
+/**
+ * Whether Switch may apply a preview as shown. The server also refuses when the film's pending work changed
+ * since the check (a job started or finished, the project changed), which the settings status cannot show:
+ * any studio event since the check (`checkedAt`, the event cursor then) counts as such a change. A status
+ * read older than the preview (lower head version, still being re-read) cannot speak for it.
+ */
+export function previewUsable(preview: ModelPreview, status: ModelSettingsStatus, checkedAt: number, cursor: number): boolean {
+  if (cursor !== checkedAt) return false;
+  if (status.projectId === preview.projectId && status.headVersion < preview.base.headVersion) return true;
+  return previewCurrent(preview, status);
+}
+
+/**
+ * One request per key at a time: asking again while the first is on its way gets the same entry (choosing
+ * A, then B, then A again waits for A's first check instead of failing). The key is free again once it settles.
+ */
+export function sharedRequest<T extends { promise: Promise<unknown> }>(inflight: Map<string, T>, key: string, start: () => T): T {
+  const running = inflight.get(key);
+  if (running) return running;
+  const entry = start();
+  inflight.set(key, entry);
+  entry.promise.then(
+    () => { if (inflight.get(key) === entry) inflight.delete(key); },
+    () => { if (inflight.get(key) === entry) inflight.delete(key); },
+  );
+  return entry;
 }
 
 export const applyRequest = (preview: ModelPreview): Request => ({ path: "/settings/models/apply", body: { previewId: preview.id, previewDigest: preview.previewDigest } });

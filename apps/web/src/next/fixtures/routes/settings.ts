@@ -16,6 +16,8 @@ interface SettingsState {
   selected: ModelSelection;
   lock: number;
   previews: Map<string, ModelPreview>;
+  /** The pending work each preview was made from (the server's work digest), by preview id. */
+  previewWork: Map<string, string>;
   director: DirectorSelection;
   directorRevision: number;
   catalogStatus: DirectorSetup["modelCatalogStatus"];
@@ -34,6 +36,7 @@ function state(world: FixtureWorld): SettingsState {
       selected: { image: "openai-image-2", video: "minimax-h3", speech: "openai-tts", transcription: "openai-whisper" },
       lock: 1,
       previews: new Map(),
+      previewWork: new Map(),
       director: { mode: "native", binaryPath: "/usr/local/bin/codex", model: "gpt-6-astra" },
       directorRevision: 1,
       catalogStatus: "ready",
@@ -120,6 +123,14 @@ function slotOf(world: FixtureWorld, shotId: string, kind: MediaKind): Slot {
   return slot.state === "ready" ? "made" : slot.state === "running" || slot.state === "queued" ? "running" : "pending";
 }
 
+/**
+ * The film's pending work, as the server's work digest sees it: which keyframes, clips and voice lines are
+ * made, running or waiting. A job starting or finishing changes it.
+ */
+function workOf(world: FixtureWorld): string {
+  return JSON.stringify(Object.values(world.overview.shots).map((shot) => [shot.shotId, shot.keyframe.state, shot.video.state, shot.narration.state]));
+}
+
 function preview(world: FixtureWorld, body: unknown): ModelPreview {
   const s = state(world);
   const input = body as { expectedHeadVersion?: number; expectedSelectionDigest?: string; expectedCatalogDigest?: string; profileIds?: unknown; scope?: { kind?: string } } | null;
@@ -155,6 +166,7 @@ function preview(world: FixtureWorld, body: unknown): ModelPreview {
     allowanceRequired: false,
   };
   s.previews.set(id, result);
+  s.previewWork.set(id, workOf(world));
   return structuredClone(result);
 }
 
@@ -165,10 +177,13 @@ function apply(world: FixtureWorld, body: unknown) {
   if (!saved || saved.previewDigest !== input?.previewDigest) throw new ApiError("MODEL_SETTINGS_STALE", 409);
   const status = modelStatus(world);
   if (saved.base.selectionDigest !== status.selectionDigest || saved.base.headVersion !== status.headVersion) throw new ApiError("MODEL_SETTINGS_STALE", 409);
+  // Like the server: a job that started or finished since the preview makes it stale.
+  if (s.previewWork.get(saved.id) !== workOf(world)) throw new ApiError("MODEL_SETTINGS_STALE", 409);
   world.update((w) => {
     s.selected = { ...saved.selected };
     s.lock += 1;
     s.previews.clear();
+    s.previewWork.clear();
     bumpHead(w);
   });
   const after = modelStatus(world);

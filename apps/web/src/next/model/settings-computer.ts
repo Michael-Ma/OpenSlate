@@ -39,9 +39,23 @@ const jobsOf = (kinds: Iterable<string>): MessageId[] => {
   return KIND_ORDER.filter((kind) => set.has(kind)).map((kind) => JOB_LABEL[kind]);
 };
 
-function codexRow(setup: DirectorSetup | null, setupError: string | null): ComputerRow {
-  const base = { id: "codex", name: msg("set.computer.codex"), jobs: [] as MessageId[] };
-  if (!setup) return { ...base, tone: "unknown", status: msg(setupError ? "set.computer.unavailable" : "set.computer.checking"), detail: msg(setupError ? "set.computer.codex_unavailable" : "set.computer.codex_uses") };
+export interface CodexContext {
+  /** No film is open: Codex's setup check runs inside a film, so it cannot be checked here. */
+  noFilm?: boolean;
+  /** The error code of the last "Check again" that could not check Codex. */
+  checkFailed?: string | null;
+}
+
+/** The server answered that it has no Director setup: a fact about this studio, not a failed check. */
+const UNAVAILABLE = new Set(["SERVICE_UNAVAILABLE", "NOT_FOUND"]);
+
+function codexRow(setup: DirectorSetup | null, setupError: string | null, context: CodexContext): ComputerRow {
+  const base = { id: "codex", name: msg("set.computer.codex"), jobs: [] as MessageId[], tone: "unknown" as const };
+  if (context.noFilm) return { ...base, status: msg("set.computer.not_checked"), detail: msg("set.computer.codex_no_film") };
+  const failure = context.checkFailed ?? (setup ? null : setupError);
+  if (failure && UNAVAILABLE.has(failure)) return { ...base, status: msg("set.computer.unavailable"), detail: msg("set.computer.codex_unavailable") };
+  if (failure) return { ...base, status: msg("set.computer.check_failed"), detail: msg("set.computer.codex_check_failed") };
+  if (!setup) return { ...base, status: msg("set.computer.checking"), detail: msg("set.computer.codex_uses") };
   switch (codexState(setup)) {
     case "ready": return { ...base, tone: "ok", status: msg("set.computer.found"), detail: msg("set.computer.codex_ready") };
     case "blocked": return { ...base, tone: "missing", status: msg("set.computer.needs_attention"), detail: msg("set.computer.codex_blocked") };
@@ -50,11 +64,15 @@ function codexRow(setup: DirectorSetup | null, setupError: string | null): Compu
   }
 }
 
-/** FFmpeg turns clips and audio into media; only video and audio models report needing it. */
+/**
+ * FFmpeg turns clips and audio into media. No route reports it on its own (a server gap): the catalog only
+ * checks it for the video and audio models that need it, so with none installed it is "not checked", and the
+ * detail says when it will be.
+ */
 function ffmpegRow(catalog: ProviderCatalogView): ComputerRow {
   const needing = catalog.profiles.filter((option) => option.readiness.mediaTools.required && ["video", "speech", "transcription"].includes(option.profile?.kind ?? ""));
   const base = { id: "ffmpeg", name: msg("set.computer.ffmpeg"), detail: msg("set.computer.ffmpeg_uses"), jobs: [] as MessageId[] };
-  if (!needing.length) return { ...base, tone: "unknown", status: msg("set.computer.not_checked") };
+  if (!needing.length) return { ...base, tone: "unknown", status: msg("set.computer.not_checked"), detail: msg("set.computer.ffmpeg_unchecked") };
   return needing.every((option) => option.readiness.mediaTools.available)
     ? { ...base, tone: "ok", status: msg("set.computer.found") }
     : { ...base, tone: "missing", status: msg("set.computer.not_found") };
@@ -88,8 +106,24 @@ export interface ComputerView {
   demoOnly: boolean;
 }
 
-export function computerView(catalog: ProviderCatalogView | null, setup: DirectorSetup | null, setupError: string | null): ComputerView {
-  if (!catalog) return { rows: [codexRow(setup, setupError)], demoOnly: false };
+export function computerView(catalog: ProviderCatalogView | null, setup: DirectorSetup | null, setupError: string | null, context: CodexContext = {}): ComputerView {
+  if (!catalog) return { rows: [codexRow(setup, setupError, context)], demoOnly: false };
   const demoOnly = catalog.profiles.every((option) => option.estimatedCost?.basis === "fixture" || option.profile?.adapter === "fake");
-  return { rows: [codexRow(setup, setupError), ffmpegRow(catalog), ...keyRows(catalog)], demoOnly };
+  return { rows: [codexRow(setup, setupError, context), ffmpegRow(catalog), ...keyRows(catalog)], demoOnly };
+}
+
+export type CheckOutcome =
+  | { kind: "checked" }
+  /** Codex's check was skipped because the Director is in a turn or a setup check; the keys were read. */
+  | { kind: "busy" }
+  | { kind: "failed"; code: string };
+
+/**
+ * What "Check again" says: success only when every read it made succeeded. `codex` is the result of the
+ * Codex setup check (null when no film is open, so it was not asked); `catalog` the provider catalog read.
+ */
+export function checkOutcome(codex: { ok: true; busy: boolean } | { ok: false; code: string } | null, catalog: { ok: true } | { ok: false; code: string }): CheckOutcome {
+  if (codex && !codex.ok) return { kind: "failed", code: codex.code };
+  if (!catalog.ok) return { kind: "failed", code: catalog.code };
+  return codex?.busy ? { kind: "busy" } : { kind: "checked" };
 }

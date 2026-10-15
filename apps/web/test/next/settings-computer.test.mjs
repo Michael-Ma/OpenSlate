@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
-import { computerView } from '../../src/next/model/settings-computer.ts';
+import { checkOutcome, computerView } from '../../src/next/model/settings-computer.ts';
 
 const en = (m) => translateMsg('en', m);
 const ready = { configurationValid: true, registered: true, mediaTools: { required: true, available: true }, credential: { required: true, present: true, backendUnavailable: false, apiValidated: false }, spendingPermissionRequired: false, enabledByHost: true, realExecutionEnabled: true };
@@ -47,4 +47,25 @@ test('a computer with only the stand-ins says so and lists no keys', () => {
   assert.equal(view.demoOnly, true);
   assert.deepEqual(view.rows.map((r) => r.id), ['codex', 'ffmpeg']);
   assert.equal(en(view.rows[1].status), 'Not checked');
+  assert.match(en(view.rows[1].detail), /^Checked once a video or audio model that needs it is installed\./);
+});
+
+test('with no film open, Codex says it is checked inside a film; a failed check never reads as checked', () => {
+  const noFilm = computerView(catalog, null, null, { noFilm: true }).rows;
+  assert.deepEqual([en(noFilm[0].status), en(noFilm[0].detail)], ['Not checked', 'Codex is checked inside a film. Open one, then check again.']);
+  assert.equal(noFilm.length, 5, 'FFmpeg and keys are still listed');
+  const failed = computerView(catalog, setup(), null, { checkFailed: 'NETWORK_ERROR' }).rows[0];
+  assert.deepEqual([en(failed.status), failed.tone, en(failed.detail)], ["Couldn't check", 'unknown', "Codex couldn't be checked this time. Check again in a moment."]);
+  assert.equal(en(computerView(catalog, setup(), null, { checkFailed: 'SERVICE_UNAVAILABLE' }).rows[0].status), 'Not reported');
+  assert.equal(en(computerView(catalog, null, 'NETWORK_ERROR').rows[0].status), "Couldn't check");
+  assert.equal(en(computerView(catalog, null, null).rows[0].status), 'Checking…');
+});
+
+test('Check again reports success only when every read succeeded', () => {
+  assert.deepEqual(checkOutcome({ ok: true, busy: false }, { ok: true }), { kind: 'checked' });
+  assert.deepEqual(checkOutcome({ ok: true, busy: true }, { ok: true }), { kind: 'busy' });
+  assert.deepEqual(checkOutcome(null, { ok: true }), { kind: 'checked' });
+  assert.deepEqual(checkOutcome({ ok: false, code: 'NETWORK_ERROR' }, { ok: true }), { kind: 'failed', code: 'NETWORK_ERROR' });
+  assert.deepEqual(checkOutcome({ ok: true, busy: false }, { ok: false, code: 'AUTH_REQUIRED' }), { kind: 'failed', code: 'AUTH_REQUIRED' });
+  assert.deepEqual(checkOutcome(null, { ok: false, code: 'NETWORK_ERROR' }), { kind: 'failed', code: 'NETWORK_ERROR' });
 });

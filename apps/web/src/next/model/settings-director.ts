@@ -129,7 +129,9 @@ const absolute = (path: string) => path.startsWith("/") && !path.includes("\0") 
 /** What stops the Codex form from saving, as the server would refuse it. */
 export function draftProblems(draft: DirectorDraft): { field: keyof DirectorDraft; problem: Msg }[] {
   const problems: { field: keyof DirectorDraft; problem: Msg }[] = [];
-  if (!absolute(draft.binaryPath.trim())) problems.push({ field: "binaryPath", problem: msg("set.director.need_path") });
+  // An empty program field means this computer found no Codex: say so, not just "use the full path".
+  if (!draft.binaryPath.trim()) problems.push({ field: "binaryPath", problem: msg("set.director.need_program") });
+  else if (!absolute(draft.binaryPath.trim())) problems.push({ field: "binaryPath", problem: msg("set.director.need_path") });
   if (!/^[A-Za-z0-9_.:/-]{1,120}$/.test(draft.model.trim())) problems.push({ field: "model", problem: msg("set.director.need_model") });
   if (draft.codexHome.trim() && !absolute(draft.codexHome.trim())) problems.push({ field: "codexHome", problem: msg("set.director.need_path") });
   return problems;
