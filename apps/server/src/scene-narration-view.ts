@@ -1,3 +1,4 @@
+import { defaultNarratorVoice } from "./narration/default-voice.js";
 import { digest, shotVideoTiming } from "@openslate/core";
 import type { ProjectRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
@@ -62,22 +63,18 @@ export function sceneNarrationView(
           voice =
             savedVoice && options.voices.includes(savedVoice)
               ? savedVoice
-              : options.voices.includes("cedar")
-                ? "cedar"
-                : (options.voices.find(
-                    (value) => !value.startsWith("openai-custom:"),
-                  ) ?? "");
+              : defaultNarratorVoice(production.store, project, shot);
           if (shot.narration?.voice === "personal") {
             if (
-              !savedVoice?.startsWith("openai-custom:") ||
+              !voice.startsWith("openai-custom:") ||
               !options.personalVoices.some(
-                (value) => value.id === savedVoice && value.ready,
+                (value) => value.id === voice && value.ready,
               )
             ) {
               if (!ready)
                 error ??=
                   "Choose your registered narration voice before confirming this scene.";
-            } else voice = savedVoice;
+            }
           }
           const selected = options.profiles.find(
             (profile) => profile.id === options!.preferredProfileId,
@@ -180,8 +177,8 @@ export function sceneNarrationView(
             ? (row?.audio?.media.sha256 ?? null)
             : null,
           recordingCurrent,
-          measuredSeconds: ready
-            ? (canonical?.segments?.find(segment => segment.segmentId === segmentId)?.audioPlacement.durationSamples ?? (acceptedCue ? acceptedCue.durationFrames * 1600 : 0)) / 48000
+          measuredSeconds: (recordingCurrent || ready) && row?.audio?.media.probe.audio?.samples
+            ? row.audio.media.probe.audio.samples / 48000
             : durationSamples === null ? null : durationSamples / 48000,
           fit: ready ? shot.narrationFit ?? null : null,
           timing: {

@@ -92,7 +92,7 @@ function fixture(t, { sharedScene = false } = {}) {
       await engine.reconcile();
     }
   };
-  return { store, engine, service, app, project, get, post, finish, provider };
+  return { store, engine, service, app, project, get, post, finish, provider, token };
 }
 function replaceLock(f, p, change) {
   const lock = f.store.get("capability_lock", p.capabilityLockId);
@@ -656,8 +656,8 @@ test("explicit shot regeneration retains siblings and old receipts, then needs t
       assert.equal(current.candidateId, binding.candidateId);
       assert.deepEqual(current.outputs, binding.outputs);
     } else if (binding.node.kind === "video") {
-      assert.equal(current.candidateId, null);
-      assert.deepEqual(current.outputs, {});
+      assert.equal(current.candidateId, binding.candidateId);
+      assert.deepEqual(current.outputs, binding.outputs);
     }
   }
   assert.deepEqual(f.engine.attempts(f.project.id), oldAttempts);
@@ -760,7 +760,7 @@ test("shot regeneration rejects ambiguous scope, video shortcuts, missing identi
       targetShotIds: ["shot-0"],
     },
   });
-  assert.equal(noKey.json().error.code, "AUTH_REQUIRED");
+  assert.equal(noKey.json().error.code, "IDEMPOTENCY_KEY_REQUIRED");
   assert.equal(f.store.cursor(f.project.id), cursor);
   f.engine.setHold(f.project.id, {
     scopeId: "scene-0",
@@ -1041,6 +1041,7 @@ for (const conditioning of ["owned", "shared"]) {
     assert.equal(published.gates[0].members[0].frameSource.nodeId, newImage.id);
     assert.equal(pending.candidateId, null);
     assert.deepEqual(pending.outputs, {});
+    assert.ok(Object.keys(pending.retainedTake.outputs).length);
     assert.equal(
       f.store.get("node_binding", video1.id).candidateId,
       sibling.candidateId,
@@ -1050,12 +1051,19 @@ for (const conditioning of ["owned", "shared"]) {
       sibling.outputs,
     );
     const waiting = await f.get();
-    assert.equal(waiting.rows[0].image, null);
-    assert.equal(waiting.rows[0].videoComplete, false);
+    assert.deepEqual(waiting.rows[0].image, oldFrame);
+    assert.equal(waiting.rows[0].videoComplete, true);
     assert.ok(waiting.rows[1].videoComplete);
     await f.finish();
     const ready = await f.get();
     assert.notEqual(ready.rows[0].image.artifactId, oldFrame.artifactId);
+    const historyHeaders = { host: "127.0.0.1", authorization: `Bearer ${f.token}` };
+    const historyResponse = await f.app.inject({ method: "GET", url: `/api/projects/${project.id}/shots/shot-0/takes`, headers: historyHeaders });
+    assert.equal(historyResponse.statusCode, 200, historyResponse.body);
+    assert.equal(historyResponse.json().keyframes.length, 2);
+    assert.ok(historyResponse.json().keyframes.some(t => t.artifact.artifactId === oldFrame.artifactId && !t.current));
+    const overviewResponse = await f.app.inject({ method: "GET", url: `/api/projects/${project.id}/generation`, headers: historyHeaders });
+    assert.equal(overviewResponse.json().shots["shot-0"].keyframe.takeCount, 2);
     assert.deepEqual(ready.rows[1].image, oldFrame);
     assert.equal(f.engine.attempts(project.id).length, attempts + 1);
     const stale = await f.post(ready, "video", randomUUID(), {

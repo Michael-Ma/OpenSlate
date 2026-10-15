@@ -94,7 +94,7 @@ test('one explicit shot acceptance installs measured canonical audio, preserves 
   const accepted = await f.request(path, body, extras); assert.equal(accepted.statusCode, 200, accepted.body);
   const current = f.store.getProject(f.project.id); assert.deepEqual(current.shots[1], before.shots[1]);
   const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
-  assert.deepEqual(overview.shots[before.shots[0].id].narration, {state:'ready',text:'Made with care.',measuredSeconds:6,fits:true,fit:'cut_to_shot'});
+  assert.deepEqual(overview.shots[before.shots[0].id].narration, {state:'ready',text:'Made with care.',measuredSeconds:7,fits:true,fit:'cut_to_shot'});
   assert.equal(current.shots[0].desiredFrames, 180); assert.notEqual(current.shots[0].cueId, before.shots[0].cueId);
   assert.equal(f.store.list('narration_acceptance', f.project.id).length, 3);
   const replay = await f.request(path, body, extras); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), accepted.json());
@@ -120,7 +120,7 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   const accepted = await f.request(`/shots/${shotId}/accept`, body); assert.equal(accepted.statusCode, 200, accepted.body);
   let project = f.store.getProject(f.project.id), cue = project.cues.find(cue => cue.id === project.shots[0].cueId);
   const overview = new GenerationOverviewReader(f.production, f.narration).read(f.project.id);
-  assert.equal(overview.shots[shotId].narration.measuredSeconds, 288001 / 48000);
+  assert.equal(overview.shots[shotId].narration.measuredSeconds, 7, 'original measured recording stays visible; accepted placement retains its exact range');
   assert.equal(overview.shots[shotId].narration.fit, 'extend_shot');
   assert.equal(overview.shots[shotId].narration.fits, true);
   assert.equal(project.shots[0].desiredFrames, 181); assert.equal(cue.durationFrames, 181);
@@ -134,7 +134,7 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   const later = { ...project.scenes[0], id: randomUUID(), revisionId: randomUUID(), purpose: 'Another scene' };
   project.shots.find(shot => shot.id === shotId).sceneId = later.id; project.scenes = [later, ...project.scenes]; project = f.store.saveProject(project, project.headVersion);
   assert.equal((await playback()).atSample, 0, 'scene order also owns the compact voice position');
-  project.scenes.reverse(); project = f.store.saveProject(project, project.headVersion);
+  editStoryboard(f.production,project.id,{kind:'moveScene',id:project.scenes[0].id,expectedHeadVersion:project.headVersion},randomUUID());project=f.store.getProject(project.id);
   assert.equal((await playback()).atSample, 210 * 1600);
   assert.equal(f.canonical.workspaceCurrent(project.id).segments[0].audioPlacement.atSample, 0, 'accepted historical source placement remains immutable');
 });
@@ -190,11 +190,12 @@ test('uploaded-to-generated writing updates the card and preserves visual revisi
 test('personal-voice writing needs no generation approval while synthesis still requires the chosen registered voice',async t=>{
  const f=await fixture(t,{speech:true});await f.start();const project=f.store.getProject(f.project.id),shotId=project.shots[0].id,visualRevision=project.shots[0].revisionId;
  let response=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:project.headVersion,expectedVersion:f.view().state.version,text:'First words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(response.statusCode,200,response.body);
- let changed=f.store.getProject(f.project.id);editStoryboard(f.production,f.project.id,{kind:'narration',id:shotId,field:'voice',value:'personal',expectedHeadVersion:changed.headVersion},randomUUID());
+ let changed=f.store.getProject(f.project.id);
+ const human=f.production.beginRequest(f.project.id,'local-user','Register my existing voice',{editing:false}),voices=new PersonalVoiceService(f.production);voices.register(f.project.id,human,{key:randomUUID(),expectedHeadVersion:changed.headVersion,label:'My recorded voice',provider:'openai',providerVoiceId:'voice_scope_demo',ownVoice:true,permitSynthesis:true});
+ editStoryboard(f.production,f.project.id,{kind:'narration',id:shotId,field:'voice',value:'personal',expectedHeadVersion:changed.headVersion},randomUUID());
  response=await f.request(`/shots/${shotId}/sessions`,{continuationSessionId:f.session.id});assert.equal(response.statusCode,200,response.body);f.session=response.json().session;
  changed=f.store.getProject(f.project.id);const writing=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedVersion:f.view().state.version,text:'Second words.',language:'en',mode:'generated',voice:'coral',profileRevisionId:speechProfile.revision});assert.equal(writing.statusCode,200,writing.body);
  changed=f.store.getProject(f.project.id);const before=f.view(),stale=await f.request(`/shots/${shotId}/generate`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedNarrationVersion:before.state.version,text:'Second words.',voice:'coral',profileId:speechProfile.id});assert.equal(stale.json().error.code,'PERSONAL_VOICE_REQUIRED');assert.deepEqual(f.view(),before);
- const human=f.production.beginRequest(f.project.id,'local-user','Register my existing voice',{editing:false}),voices=new PersonalVoiceService(f.production);voices.register(f.project.id,human,{key:randomUUID(),expectedHeadVersion:changed.headVersion,label:'My recorded voice',provider:'openai',providerVoiceId:'voice_scope_demo',ownVoice:true,permitSynthesis:true});
  response=await f.request(`/shots/${shotId}/script`,{sessionId:f.session.id,expectedHeadVersion:changed.headVersion,expectedVersion:f.view().state.version,text:'Second words.',language:'en',mode:'generated',voice:'openai-custom:voice_scope_demo',profileRevisionId:speechProfile.revision});assert.equal(response.statusCode,200,response.body);
  changed=f.store.getProject(f.project.id);assert.equal(changed.shots[0].revisionId,visualRevision);assert.equal(changed.shots[0].narration.voice,'personal');assert.equal(changed.shots[0].narration.text,'Second words.');assert.equal(changed.shots[0].narrationPending,true);assert.deepEqual(changed.shots[1],project.shots[1]);assert.equal(f.store.list('narration_acceptance',f.project.id).length,0);assert.equal(f.store.list('grant',f.project.id).length,0);assert.equal(f.provider.acceptedCount(),0);
 });
@@ -315,4 +316,16 @@ test('full narration workspace sessions and writing do not supersede an active D
  const saved=await f.request('/segments',{sessionId:session.id,expectedVersion:0,patch:{add:[{text:'Human draft',textKind:'draft',language:'en',meaning:'Opening',source:{kind:'undecided'}}]}});assert.equal(saved.statusCode,200,saved.body);
  assert.equal(f.store.get('message',session.requestId).concurrency,'alongside');assert.equal(f.store.get('message',human.requestId).state,'active');assert.equal(f.store.get('epoch',bridge.actor.epochId).state,'active');
  assert.equal(f.provider.acceptedCount(),0);
+});
+
+test('project narratorVoice is captured by new voice jobs and scene review without changing existing takes',async t=>{
+ const f=await fixture(t,{speech:true}),p=f.store.getProject(f.project.id),shotId=p.shots[0].id;
+ f.store.saveProject({...p,narratorVoice:'coral'},p.headVersion);
+ const response=await f.request(`/shots/${shotId}/generate`,{expectedHeadVersion:f.store.getProject(p.id).headVersion,text:'The ferry leaves at dawn.',profileId:speechProfile.id});assert.equal(response.statusCode,200,response.body);
+ const proposal=f.store.list('narration_speech_proposal',p.id).at(-1);assert.equal(proposal.operation.voice,'coral');
+ const requestVoice=f.store.list('node_binding',p.id).find(b=>b.node.kind==='speech').node.args.voice;assert.equal(requestVoice,'coral');
+ const current=f.store.getProject(p.id);f.store.saveProject({...current,narratorVoice:'cedar'},current.headVersion);
+ assert.equal(f.store.get('narration_speech_proposal',proposal.id).operation.voice,'coral');
+ const {sceneNarrationView}=await import('../dist/scene-narration-view.js');
+ const view=sceneNarrationView(f.production,f.store.getProject(p.id),p.scenes[0].id,f.narration);assert.equal(view.rows[0].narration.voice,'coral','existing writing/takes retain the selected voice');
 });

@@ -86,19 +86,23 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
   return service.store.command(`local-user:${projectId}:resolve-note`, key, digest({ noteId, ...input }), () => {
     const store = service.store, note = directorNotes(store, projectId).find(n => n.noteId === noteId);
     invariant(note, 'NOT_FOUND', 'Note does not belong to this project');
-    if (note.state === 'resolved' && note.resolution?.choiceIndex === input.choiceIndex && note.choices[input.choiceIndex]?.kind === 'proposal' && note.resolution.resultRef === input.resultRef && note.version === input.expectedVersion + 1) return note;
-    invariant(note.version === input.expectedVersion && note.state !== 'resolved', 'REVISION_CONFLICT', 'This note has already changed');
     invariant(Number.isSafeInteger(input.choiceIndex) && Number.isSafeInteger(input.expectedVersion) && Object.keys(input).every(k => ['choiceIndex', 'expectedVersion', 'resultRef'].includes(k)), 'VALIDATION_ERROR', 'Choose a valid note action');
-    const events = store.readEvents(projectId);
-    const noteSequence = events.find(e => e.kind === 'director.note' && e.payload.noteId === noteId)?.sequence ?? Infinity;
     const choice = note.choices[input.choiceIndex];
     invariant(choice, 'VALIDATION_ERROR', 'Choose an action on this note');
     if (choice.kind === 'proposal') {
-      // The preview-bearing accept route is the only authority to publish this choice.
+      // Only the preview-bearing accept route may resolve a proposal choice.
+      // This route can acknowledge its existing result, never create another resolution.
       const proposal = store.get<{ projectId: string; principalId: string; state: string }>('director_proposal', choice.proposalId);
-      invariant(proposal?.projectId === projectId && proposal.principalId === 'local-user' && proposal.state === 'accepted' && input.resultRef === choice.proposalId,
-        'NOTE_RESULT_INVALID', 'Accept the exact reviewed proposal first');
+      invariant(proposal?.projectId === projectId && proposal.principalId === 'local-user' && proposal.state === 'accepted'
+        && input.resultRef === choice.proposalId && note.state === 'resolved'
+        && note.resolution?.choiceIndex === input.choiceIndex && note.resolution.resultRef === choice.proposalId,
+        'NOTE_RESULT_INVALID', 'Accept this note through the exact reviewed proposal first');
+      invariant(note.version === input.expectedVersion || note.version === input.expectedVersion + 1, 'REVISION_CONFLICT', 'This note has already changed');
+      return note;
     }
+    invariant(note.version === input.expectedVersion && note.state !== 'resolved', 'REVISION_CONFLICT', 'This note has already changed');
+    const events = store.readEvents(projectId);
+    const noteSequence = events.find(e => e.kind === 'director.note' && e.payload.noteId === noteId)?.sequence ?? Infinity;
     if (choice.kind === 'accept' || choice.kind === 'reply') invariant(note.state === 'open', 'NOTE_STALE', 'This note is no longer current');
     if (choice.kind === 'reply') {
       const reply = store.get<RequestRecord>('message', input.resultRef ?? '');

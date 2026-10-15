@@ -57,6 +57,7 @@ export class FixturePort implements StudioPort {
       if (path === base) return structuredClone(this.world.snapshot) as T;
       if (path === `${base}/generation`) return structuredClone(this.world.overview) as T;
       if (path === `${base}/director`) return { ...this.world.director } as T;
+      if (path === `${base}/director/proposals`) return { proposals: [] } as T;
     }
     if (method === "POST" && path === `${base}/messages`) return fixtureMessage(this.world, options.body) as T;
     if (path.startsWith(base)) return fixtureCommand(this.world, method, path.slice(base.length), options.body) as T;
@@ -86,7 +87,9 @@ export async function fixtureMedia(): Promise<MediaSource> {
     async url(artifact) {
       const svg = pictures[pictureKey(artifact.artifactId)];
       if (!svg) throw new ApiError("NOT_FOUND", 404);
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      // A standalone SVG image needs its namespace; the illustrations were written for inline use.
+      const standalone = /^<svg[^>]*\sxmlns=/.test(svg) ? svg : svg.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(standalone)}`;
     },
     revoke() { /* data URLs need no cleanup */ },
   };

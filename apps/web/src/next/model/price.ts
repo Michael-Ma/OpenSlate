@@ -5,7 +5,8 @@ import { msg, type Msg } from "./types.ts";
 export function formatMicros(micros: string | number, locale: string): string {
   const dollars = Number(micros) / 1_000_000;
   const fractionDigits = dollars > 0 && dollars < 0.01 ? 3 : 2;
-  return new Intl.NumberFormat(locale, { style: "currency", currency: "USD", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(dollars);
+  // narrowSymbol: "$" in every locale (zh-CN would otherwise print "US$").
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(dollars);
 }
 
 /** Prices are host-configured estimates (plan decision D15): "about $1.50", or "no price set". Never "$0.00". */

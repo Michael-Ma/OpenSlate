@@ -216,3 +216,22 @@ test('actual fake media matches proposal effects: duration keeps frame, outdates
  assert.equal(f.engine.outputs(f.project.id).find(o=>o.nodeId===frame.nodeId).artifact.artifactId,frame.artifact.artifactId);
  assert.equal((await f.engine.runReady()).dispatched,0);assert.equal(f.provider.acceptedCount(),count);
 });
+test('note route only acknowledges the proposal accept route and cannot resolve another note with the accepted ID',async t=>{
+ const f=fixture(t),p=await propose(f),choice={kind:'proposal',proposalId:p.proposalId};
+ const n=(await f.record([f.note({choices:[choice]})])).notes[0];
+ const first=await f.resolve(n.noteId,{expectedVersion:1,choiceIndex:0,resultRef:p.proposalId},'before-accept');assert.equal(first.json().error.code,'NOTE_RESULT_INVALID');
+ const accepted=await accept(f,p);assert.equal(accepted.statusCode,200,accepted.body);
+ const before=f.service.snapshot(f.project.id).notes.find(note=>note.noteId===n.noteId),cursor=f.store.cursor(f.project.id);
+ for(const expectedVersion of [1,2]) {
+  const ack=await f.resolve(n.noteId,{expectedVersion,choiceIndex:0,resultRef:p.proposalId},`ack-${expectedVersion}`);assert.equal(ack.statusCode,200,ack.body);assert.deepEqual(ack.json(),before);assert.equal(f.store.cursor(f.project.id),cursor);
+ }
+ assert.equal((await f.resolve(n.noteId,{expectedVersion:2,choiceIndex:0,resultRef:'other'},'wrong-ref')).json().error.code,'NOTE_RESULT_INVALID');
+ const later=(await f.record([f.note({choices:[choice]})])).notes[0];
+ const rejected=await f.resolve(later.noteId,{expectedVersion:1,choiceIndex:0,resultRef:p.proposalId},'no-new-resolution');assert.equal(rejected.json().error.code,'NOTE_RESULT_INVALID');
+ assert.equal(f.service.snapshot(f.project.id).notes.find(note=>note.noteId===later.noteId).state,'open');
+});
+test('proposal preview includes the paid take B8 retains while a replacement is pending',async t=>{
+ const f=fixture(t),project=f.store.getProject(f.project.id),shot=project.shots[0];
+ f.store.insert('node_binding','retained-image',project.id,{id:'retained-image',state:'active',planId:project.activePlanId,node:{kind:'image',shotId:shot.id,intentDigest:shot.promptIntent.image,args:{prompt:shot.imagePrompt}},outputs:{},retainedTake:{candidateId:null,outputs:{image:{artifactId:'retained-frame',sha256:'a'.repeat(64),kind:'image'}}}});
+ const p=await propose(f);assert.deepEqual(p.preview.effects,[{shotId:shot.id,effect:'keeps_keyframe'}]);
+});

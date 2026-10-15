@@ -88,7 +88,7 @@ test('Opened is durable, independent of editing and authority, resets after rege
   const noKey = await f.call('POST','/shots/shot-0/frame-views',body,null);
   assert.equal(noKey.statusCode,400); assert.equal(noKey.json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
   await ok(await f.post(await f.get(),'image',randomUUID(),{targetShotIds:['shot-0'],regenerate:true}));
-  assert.equal((await f.overview()).shots['shot-0'].keyframe.opened,false);
+  assert.equal((await f.overview()).shots['shot-0'].keyframe.opened,true, 'the retained current frame remains opened until replacement succeeds');
   await f.finish();
   const stale = await f.call('POST','/shots/shot-0/frame-views',body);
   assert.equal(stale.statusCode,409); assert.equal(stale.json().error.code,'FRAME_STALE');
@@ -103,8 +103,8 @@ test('quotes use pinned image, retained video and unmade generated speech units;
     {imageComplete:true,videoComplete:false,videoProfileLabel:'v',narration:{mode:'generated',ready:false,recordingCurrent:true,profileId:'s'}},
     {imageComplete:true,videoComplete:true,narration:{mode:'generated',ready:true,recordingCurrent:true,profileId:'s'}},
   ];
-  assert.deepEqual(quote(lock,rows,'makeKeyframes'),{micros:'40000',units:1,unitMicros:'40000',priceUnknown:false});
-  assert.equal(quote(lock,rows,'regenerateKeyframe').micros,'40000');
+  assert.deepEqual(quote(lock,rows,'makeKeyframes'),{micros:'70000',units:2,unitMicros:'0',priceUnknown:false});
+  assert.equal(quote(lock,rows,'regenerateKeyframe').micros,'70000');
   assert.deepEqual(quote(lock,rows,'confirmVideo'),{micros:'1030000',units:3,unitMicros:'0',priceUnknown:false});
   assert.equal(quote(lock,rows,'voice').micros,'30000');
   assert.equal(quote({profiles:[{...profiles[0],unitCostMicros:'0'}]},rows,'makeKeyframes').priceUnknown,true);
@@ -235,8 +235,9 @@ test('narration has measured precision, text estimates, fit policies, and title 
   const audio = {mode:'generated',text:'Hello 世界',ready:false,recordingCurrent:false,measuredSeconds:null,fit:null};
   assert.deepEqual(shotNarration(audio,180),{state:'text_only',text:'Hello 世界',estimatedSeconds:0.8999999999999999,fits:true});
   assert.equal(shotNarration({...audio,text:'你好世界'},30).fits,false);
-  const measured = shotNarration({...audio,ready:true,measuredSeconds:7.4125,fit:'cut_to_shot'},180);
-  assert.equal(measured.measuredSeconds,7.4125); assert.equal(measured.fits,false); assert.equal(measured.fit,'cut_to_shot');
+  const measured = shotNarration({...audio,ready:true,measuredSeconds:7.4125,fit:'cut_to_shot',timing:{durationFrames:180}},180);
+  assert.equal(measured.measuredSeconds,7.4125); assert.equal(measured.fits,true);
+  assert.equal(shotNarration({...audio,ready:true,measuredSeconds:7.4125,fit:'cut_to_shot',timing:{durationFrames:223}},180).fits,false); assert.equal(measured.fit,'cut_to_shot');
   assert.equal(shotNarration({...audio,text:''},180).fits,null);
   assert.equal(sceneTitle('First sentence. Then details.'),'First sentence.');
   assert.equal(sceneTitle('第一幕。然后出发。'),'第一幕。');

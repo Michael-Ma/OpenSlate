@@ -334,7 +334,8 @@ export class LocalMediaService {
       integer(placement.gainMilliDb ?? 0, -60000, 12000, "audio gain");
       invariant(placement.startSample + placement.durationSamples <= source.probe.audio.samples, "MEDIA_SOURCE_TOO_SHORT", "Audio range exceeds measured samples");
       invariant(placement.atSample + placement.durationSamples <= totalSamples, "MEDIA_AUDIO_OUTSIDE_TIMELINE", "Audio cannot be silently cut at the timeline boundary");
-      audio.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
+      if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(4800, placement.durationSamples), "audio fade");
+      audio.push({ ...(placement.fadeOutSamples !== undefined ? { fadeOutSamples: placement.fadeOutSamples } : {}), source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
     }
     invariant(audioLanes(audio).length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many simultaneous audio placements");
     const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, ...(value.demo ? { demo: true as const } : {}), toolchainDigest: await this.toolchainDigest(signal) };
@@ -396,7 +397,7 @@ export class LocalMediaService {
           filters.push(`[${sourceIndex++}:a:0]asplit=${group.indices.length}${group.indices.map(index => `[sourcea${index}]`).join("")}`);
         }
         manifest.audio.forEach((placement, index) => {
-          filters.push(`[sourcea${index}]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB[a${index}]`);
+          filters.push(`[sourcea${index}]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB${placement.fadeOutSamples ? `,afade=t=out:ss=${placement.durationSamples - placement.fadeOutSamples}:ns=${placement.fadeOutSamples}` : ""}[a${index}]`);
         });
         lanes.forEach((indices, lane) => {
           const parts: string[] = []; let cursor = 0, silenceIndex = 0;

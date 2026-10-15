@@ -1,4 +1,4 @@
-import type { GenerationOverview } from "@openslate/core/public";
+import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 import type { Connection, EditDraft, StudioState } from "./state.ts";
 
@@ -9,6 +9,7 @@ export type Action =
   | { type: "snapshot"; snapshot: ProjectSnapshot }
   | { type: "overview"; overview: GenerationOverview }
   | { type: "director"; director: DirectorStatus }
+  | { type: "proposals"; proposals: DirectorProposal[] }
   | { type: "loadError"; source: keyof StudioState["loadErrors"]; code: string | null }
   | { type: "view"; view: ViewName }
   | { type: "scene"; sceneId: string }
@@ -34,7 +35,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, projects: action.projects };
     case "project":
       if (action.projectId === state.projectId) return state;
-      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, loadErrors: {}, sceneId: null, shotId: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false } };
+      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false } };
     case "snapshot":
       if (action.snapshot.project.id !== state.projectId) return state;
       // A stale read (lower cursor) never replaces a newer one.
@@ -51,6 +52,8 @@ export function reducer(state: StudioState, action: Action): StudioState {
     }
     case "director":
       return { ...state, director: action.director, loadErrors: { ...state.loadErrors, director: undefined } };
+    case "proposals":
+      return { ...state, proposals: action.proposals };
     case "loadError":
       return { ...state, loadErrors: { ...state.loadErrors, [action.source]: action.code ?? undefined } };
     case "view":

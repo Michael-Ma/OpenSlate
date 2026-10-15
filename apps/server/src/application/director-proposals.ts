@@ -18,7 +18,7 @@ const creative = (patch: ProposalPatch): CreativePatch => ({ ...patch, ...(patch
 function bindings(service: ProductionService, project: ProjectRecord): PreviewBindings {
   const result: PreviewBindings = {};
   for (const b of service.store.list<NodeBinding>('node_binding', project.id)) if (b.state === 'active' && b.planId === project.activePlanId && b.node.shotId) {
-    result[b.node.shotId] = [...(result[b.node.shotId] ?? []), b];
+    result[b.node.shotId] = [...(result[b.node.shotId] ?? []), { ...b, outputs: { ...b.retainedTake?.outputs, ...b.outputs } }];
   }
   return result;
 }

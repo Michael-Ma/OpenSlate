@@ -68,8 +68,9 @@ export interface SuppliedAudioPlacement {
   startSample: number;
   durationSamples: number;
   atSample: number;
-  /** Fixed gain only. Fades, ducking and loudness normalization are deferred. */
+  /** Fixed gain; optional short fade for an explicitly cut narration line. */
   gainMilliDb?: number;
+  fadeOutSamples?: number;
 }
 
 export interface RenderManifestInput {

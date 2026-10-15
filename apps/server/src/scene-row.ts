@@ -103,7 +103,7 @@ export function sceneRow(shot: ShotRecord, context: {
   const frame =
     imageTarget && !imageOutput
       ? null
-      : (retainedFrame ?? imageOutput?.artifact ?? null);
+      : (imageOutput?.artifact ?? retainedFrame ?? null);
   const frameNodeId =
     retainedFrame && firstFrame?.kind === "output"
       ? firstFrame.nodeId
@@ -165,7 +165,7 @@ export function sceneRow(shot: ShotRecord, context: {
     narrationPending: !timing.ready,
     imagePending:
       active.some((a) => a.nodeId === imageTarget?.id) ||
-      (!imageOutput && candidatePending(imageTarget?.id)),
+      ((!imageOutput || !!bindings.find(b => b.id === imageTarget?.id)?.retainedTake) && candidatePending(imageTarget?.id)),
     videoPending:
       active.some((a) => a.nodeId === videoTarget?.id) ||
       (!videoComplete &&
@@ -178,10 +178,10 @@ export function sceneRow(shot: ShotRecord, context: {
 }
 
 /** The exact selection rule used by the scene command and the project overview. */
-export function generationTargets<T extends { shotId: string; imageComplete: boolean; videoComplete: boolean }>(
+export function generationTargets<T extends { shotId: string; imageComplete: boolean; videoComplete: boolean; narration?: { mode: string; ready: boolean } }>(
   rows: readonly T[], kind: "image" | "video", targetShotIds?: string[], regenerate?: boolean,
 ): T[] {
   return rows.filter(row => kind === "image"
-    ? (!targetShotIds || targetShotIds.includes(row.shotId)) && (regenerate || !row.imageComplete)
+    ? (!targetShotIds || targetShotIds.includes(row.shotId)) && (regenerate || !row.imageComplete || row.narration?.mode === "generated" && !row.narration.ready)
     : !row.videoComplete);
 }

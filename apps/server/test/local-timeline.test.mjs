@@ -216,3 +216,18 @@ test('six-minute recipe permits 64 separate chronological voices plus music whil
   assert.throws(() => createLocalTimelineDocument({ ...value, audio: [...value.audio, voices[0]] }), invalid);
   assert.throws(() => createLocalTimelineDocument({ ...value, audio: voices.slice(0, 9).map(placement => ({ ...placement, atSample: 0 })) }), invalid);
 });
+
+test('explicit cut fade is bounded, persisted in the recipe and preserved by the render manifest', async () => {
+  const value = input(), baseline = createLocalTimelineDocument(value);
+  value.audio[0].fadeOutSamples = 3840;
+  const document = createLocalTimelineDocument(value);
+  assert.equal(document.audio[0].fadeOutSamples, 3840);
+  assert.notEqual(document.recipeDigest, baseline.recipeDigest);
+  assert.deepEqual(parseLocalTimelineDocument(JSON.parse(canonical(document))), document);
+  const manifest = await media.freezeManifest({ projectId: document.projectId, targetRevisionId: 'fade-render', width: 160, height: 90, clips: document.clips, audio: document.audio });
+  assert.equal(manifest.audio[0].fadeOutSamples, 3840);
+  for (const samples of [0, -1, 4801, 8001, 1.5]) {
+    const invalidFade = input(); invalidFade.audio[0].fadeOutSamples = samples;
+    assert.throws(() => createLocalTimelineDocument(invalidFade), invalid);
+  }
+});
