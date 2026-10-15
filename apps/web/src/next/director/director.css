@@ -58,3 +58,6 @@
 .picker button{color:var(--text)}
 .picker [aria-selected="true"]{background:var(--raised-2)}
 .picker-empty{margin:6px 8px;color:var(--muted);font-size:12.5px}
+
+/* A turn that ended without a reply says so, quietly (DC-16). */
+.dir-ending{margin:10px 0 0;color:var(--muted);font-size:12.5px;line-height:1.45}

@@ -625,10 +625,9 @@ export const scenarios = [
     allowConsoleErrors: [
       // The second load has no session on purpose.
       /^HTTP 40[13] \/api\/session$/,
-      // The first page is still open when the cookies are cleared; a studio event can make it read once more, refused.
-      /^HTTP 403 \/api\/projects\//,
-      // The server has no film overview route yet (plan item GR-1); the shell still loads without it.
-      /^HTTP 404 \/api\/projects\/[^/]+\/generation$/,
+      // After the cookies are cleared, a refresh or a studio event's read that was already in flight is refused:
+      // the session ended on purpose.
+      /^HTTP 403 \/api\/projects(\/.*)?$/,
     ],
     async run({ page, origin }) {
       // Live mode against the fixture studio: the shell shows its project and says it is saved.

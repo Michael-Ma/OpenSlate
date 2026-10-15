@@ -308,3 +308,17 @@ test('the thread shows notes under the Director\'s reply: open amber, settled ne
   ]);
   assert.equal(threadView(snapshot, null, idle, 'en', NOW).entries[1].notes.length, 0, 'no overview, no labels: nothing to show yet');
 });
+
+test('turn status shows what a running turn does and how a turn ended without a reply (DC-16)', async () => {
+  const { turnStatus, structuredAnswers } = await import('../../src/next/model/director.ts');
+  const { translateMsg } = await import('../../src/next/i18n/translate.ts');
+  const en = m => m && translateMsg('en', m);
+  assert.deepEqual(turnStatus(undefined), { activity: null, ending: null });
+  assert.equal(en(turnStatus([{ id: 't', requestId: 'r', state: 'running', progress: { tool: 'record_notes', state: 'started' } }]).activity), 'Writing notes');
+  assert.equal(en(turnStatus([{ id: 't', requestId: 'r', state: 'running', action: 'keyframe_review' }]).activity), 'Reviewing the new keyframes');
+  assert.equal(en(turnStatus([{ id: 't', requestId: 'r', state: 'completed', reason: 'no_reply' }]).ending), 'The Director finished without a reply.');
+  assert.equal(turnStatus([{ id: 't', requestId: 'r', state: 'completed', reason: null }]).ending, null);
+  const question = { id: 'q', items: [{ id: 'i1', header: 'Coat', question: 'Which?', options: [{ label: 'Red', description: '' }, { label: 'Maroon', description: '' }] }] };
+  assert.deepEqual(structuredAnswers(question, { i1: 'Maroon' }), [{ questionId: 'i1', optionIndex: 1 }]);
+  assert.deepEqual(structuredAnswers(question, {}), []);
+});

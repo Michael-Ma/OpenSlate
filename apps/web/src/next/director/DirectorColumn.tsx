@@ -19,6 +19,8 @@ export function DirectorColumn() {
   const overview = useStudio((s) => s.overview);
   const director = useStudio((s) => s.director);
   const sceneId = useStudio((s) => s.sceneId);
+  const view = useStudio((s) => s.view);
+  const projectId = useStudio((s) => s.projectId);
   const connected = useStudio((s) => s.connection === "connected");
   const stopping = useStudio((s) => !!s.pending["control:stop"]);
   const scene = overview ? currentScene(overview, sceneId) : null;
@@ -29,7 +31,8 @@ export function DirectorColumn() {
       <div className="dir-head">
         <span className="avatar" aria-hidden="true">{t("director.avatar")}</span>
         <b>{t("director.title")}</b>
-        <span className="scene">{scene ? t("director.target.scene", { scene: scene.ordinal }) : null}</span>
+        {/* The Director answers about what is on screen: the scene in Keyframes, the whole film elsewhere. */}
+        <span className="scene">{!projectId ? t("director.scope.no_film") : view === "keyframes" && scene ? t("director.target.scene", { scene: scene.ordinal }) : t("director.scope.film")}</span>
         {stoppable && (
           <button type="button" className="pill sm dir-stop" data-act="stop" title={t("director.stop.title")} disabled={stopping || !connected} onClick={() => void store.stopFilm()}>
             {t("stop.button")}
