@@ -178,10 +178,10 @@ export function sceneRow(shot: ShotRecord, context: {
 }
 
 /** The exact selection rule used by the scene command and the project overview. */
-export function generationTargets<T extends { shotId: string; imageComplete: boolean; videoComplete: boolean }>(
+export function generationTargets<T extends { shotId: string; imageComplete: boolean; videoComplete: boolean; narration?: { mode: string; ready: boolean } }>(
   rows: readonly T[], kind: "image" | "video", targetShotIds?: string[], regenerate?: boolean,
 ): T[] {
   return rows.filter(row => kind === "image"
-    ? (!targetShotIds || targetShotIds.includes(row.shotId)) && (regenerate || !row.imageComplete)
+    ? (!targetShotIds || targetShotIds.includes(row.shotId)) && (regenerate || !row.imageComplete || row.narration?.mode === "generated" && !row.narration.ready)
     : !row.videoComplete);
 }

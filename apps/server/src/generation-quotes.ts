@@ -24,7 +24,7 @@ export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: QuoteKin
   for (const row of rows) {
     if (kind === "makeKeyframes" && !row.imageComplete) units.push(profile("image"));
     if (kind === "confirmVideo" && !row.videoComplete) units.push(profile("video", row.videoProfileLabel));
-    if ((kind === "voice" || (kind === "confirmVideo" && !row.videoComplete)) &&
+    if ((kind === "voice" || kind === "regenerateKeyframe" || kind === "makeKeyframes" || (kind === "confirmVideo" && !row.videoComplete)) &&
       row.narration?.mode === "generated" && !row.narration.ready && !row.narration.recordingCurrent)
       units.push(profile("speech", row.narration.profileId));
   }
