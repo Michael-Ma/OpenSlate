@@ -75,7 +75,8 @@ try {
     try {
       const { url, projectId } = await studio.ready;
       const origin = new URL(url).origin;
-      await page.goto(scenario.ui ? `${origin}/?ui=${scenario.ui}${new URL(url).hash}` : url);
+      // scenario.query (e.g. "ui=next&fixture=last-ferry") opens a mode; the #connect hash still pairs the session.
+      await page.goto(scenario.query ? `${origin}/?${scenario.query}${new URL(url).hash}` : url);
       await scenario.run({ page, origin, projectId });
       const allowed = scenario.allowConsoleErrors ?? [];
       const unexpected = consoleErrors.filter((text) => !allowed.some((pattern) => pattern.test(text)));

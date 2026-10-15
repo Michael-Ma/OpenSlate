@@ -1,34 +1,82 @@
+import type { GenerationOverview } from "@openslate/core/public";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import type { MediaSource } from "../media/media-source.ts";
+import type { ProjectSnapshot } from "../model/types.ts";
 import type { StudioPort } from "../store/store.ts";
+import { fixtureCommand } from "./fixture-commands.ts";
+import { fixtureMessage } from "./fixture-director.ts";
 import { lastFerryDirector, lastFerryOverview, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
+
+/** Mutable fixture state that simulated commands change. */
+export interface FixtureWorld {
+  overview: GenerationOverview;
+  snapshot: ProjectSnapshot;
+  director: typeof lastFerryDirector;
+  /** Apply a change, bump the cursor and notify the open event stream, like a server event would. */
+  update(change: (world: FixtureWorld) => void): void;
+  /** Run a change later (simulated provider time). Cancelled when the port closes. */
+  later(ms: number, change: (world: FixtureWorld) => void): void;
+}
 
 /**
  * The Last Ferry sample film served in the browser, with no server (`?ui=next&fixture=last-ferry`).
- * Reads return the fixture; commands are simulated. Nothing is generated, charged or saved.
+ * Reads return the fixture; commands are simulated in fixture-commands.ts and fixture-director.ts.
+ * Nothing is generated, charged or saved.
  */
 export class FixturePort implements StudioPort {
   closed = false;
-  #overview = lastFerryOverview();
-  #snapshot = lastFerrySnapshot();
-  readonly #listeners = new Set<() => void>();
+  readonly #emitters = new Set<() => void>();
+  readonly #timers = new Set<ReturnType<typeof setTimeout>>();
+  readonly world: FixtureWorld;
+
+  constructor() {
+    const port = this;
+    this.world = {
+      overview: lastFerryOverview(),
+      snapshot: lastFerrySnapshot(),
+      director: { ...lastFerryDirector },
+      update(change) {
+        change(port.world);
+        const cursor = port.world.overview.cursor + 1;
+        port.world.overview = { ...port.world.overview, cursor };
+        port.world.snapshot = { ...port.world.snapshot, cursor };
+        for (const emit of port.#emitters) emit();
+      },
+      later(ms, change) {
+        const timer = setTimeout(() => { port.#timers.delete(timer); if (!port.closed) port.world.update(change); }, ms);
+        port.#timers.add(timer);
+      },
+    };
+  }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const method = options.method ?? "GET";
     const base = `/api/projects/${PROJECT_ID}`;
     if (method === "GET") {
-      if (path === "/api/projects") return { projects: [{ id: PROJECT_ID, name: this.#snapshot.project.name }] } as T;
-      if (path === base) return structuredClone(this.#snapshot) as T;
-      if (path === `${base}/generation`) return structuredClone(this.#overview) as T;
-      if (path === `${base}/director`) return lastFerryDirector as T;
+      if (path === "/api/projects") return { projects: [{ id: PROJECT_ID, name: this.world.snapshot.project.name }] } as T;
+      if (path === base) return structuredClone(this.world.snapshot) as T;
+      if (path === `${base}/generation`) return structuredClone(this.world.overview) as T;
+      if (path === `${base}/director`) return { ...this.world.director } as T;
     }
+    if (method === "POST" && path === `${base}/messages`) return fixtureMessage(this.world, options.body) as T;
+    if (path.startsWith(base)) return fixtureCommand(this.world, method, path.slice(base.length), options.body) as T;
     throw new ApiError("FIXTURE_UNSUPPORTED", 400);
   }
 
-  /** No server events: the fixture notifies its own listeners after simulated changes. */
-  events(_projectId: string, options: EventOptions): Promise<void> {
+  /** Simulated server events: one project.invalidate per change. */
+  events(projectId: string, options: EventOptions): Promise<void> {
     options.onOpen();
-    return new Promise((resolve) => options.signal.addEventListener("abort", () => resolve(), { once: true }));
+    const emit = () => {
+      const cursor = this.world.overview.cursor;
+      options.onEvent({ event: "project.invalidate", id: null, data: JSON.stringify({ projectId, version: 1, cursor }) });
+    };
+    this.#emitters.add(emit);
+    return new Promise((resolve) => options.signal.addEventListener("abort", () => { this.#emitters.delete(emit); resolve(); }, { once: true }));
+  }
+
+  close(): void {
+    this.closed = true;
+    for (const timer of this.#timers) clearTimeout(timer);
   }
 }
 
