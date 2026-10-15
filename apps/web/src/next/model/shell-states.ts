@@ -1,4 +1,5 @@
 import type { GenerationOverview } from "@openslate/core/public";
+import type { Locale } from "../../shared/locale-preference.ts";
 import type { StudioState } from "../store/state.ts";
 import { canStop } from "./director.ts";
 import { msg, type DirectorStatus, type Msg, type Target, type ViewName } from "./types.ts";
@@ -14,6 +15,61 @@ import { msg, type DirectorStatus, type Msg, type Target, type ViewName } from "
  * reconnects well within this, so the strip does not flash on every return.
  */
 export const OFFLINE_GRACE_MS = 2000;
+
+/** While the event stream is down, how often the shell asks the studio (a plain read) whether it is still there. */
+export const REACH_PROBE_MS = 5000;
+
+/**
+ * The studio counts as unreachable only when the event stream is down past the grace period and a plain read
+ * failed too. A stream that dropped while reads still work (a proxy that cuts long requests, a hidden tab
+ * coming back) is not offline: edits still save, so nothing is turned off.
+ */
+export function unreachable(input: { streamDown: boolean; graceOver: boolean; lastRead: "ok" | "failed" | null }): boolean {
+  return input.streamDown && input.graceOver && input.lastRead === "failed";
+}
+
+// ---- guards ---------------------------------------------------------------------------
+
+/**
+ * What a control needs (P5 shell change 8): `server` for anything that writes (an edit, Continue, a note's
+ * choice), `run` for anything that starts work (a paid make, a confirm, sending to the Director while stopped).
+ */
+export type Needs = "server" | "run";
+
+/**
+ * The film-wide rule every view applies to its controls: offline or an expired session turns off every write;
+ * a stopped film turns off what would start work. The reason goes in the control's title.
+ */
+export interface WriteGuard {
+  /** Writes reach the studio. */
+  server: boolean;
+  /** New work may start. */
+  run: boolean;
+  /** Why writes are off; null while they are on. */
+  serverWhy: Msg | null;
+  /** Why new work is off; null while it may start. */
+  runWhy: Msg | null;
+}
+
+export function writeGuard({ offline, expired, stopped }: { offline: boolean; expired: boolean; stopped: boolean }): WriteGuard {
+  const serverWhy = expired ? msg("guard.expired") : offline ? msg("guard.offline") : null;
+  const runWhy = serverWhy ?? (stopped ? msg("guard.stopped") : null);
+  return { server: !serverWhy, run: !runWhy, serverWhy, runWhy };
+}
+
+/** One control's state under the guard: off, and why (for its title). */
+export function guardFor(guard: WriteGuard, needs: Needs): { off: boolean; why: Msg | null } {
+  const why = needs === "run" ? guard.runWhy : guard.serverWhy;
+  return { off: why !== null, why };
+}
+
+/** No guard: everything on (outside a provider, and in tests). */
+export const OPEN_GUARD: WriteGuard = { server: true, run: true, serverWhy: null, runWhy: null };
+
+// ---- text ------------------------------------------------------------------------------
+
+/** What goes between two sentences of a strip: a space in English, nothing after Chinese full stops. */
+export const sentenceGap = (locale: Locale): string => (locale.startsWith("zh") ? "" : " ");
 
 // ---- restart casualties --------------------------------------------------------------
 
@@ -109,9 +165,12 @@ export const continuedToast = (detached: number): Msg => msg(detached > 0 ? "str
 
 // ---- Stop ----------------------------------------------------------------------------
 
-/** Whether the top bar offers Stop: something runs (canStop), the studio is reachable and a film is open. */
-export function showStop(overview: GenerationOverview | null, director: DirectorStatus | null, connected: boolean, view: ViewName): boolean {
-  return connected && view !== "start" && canStop(overview, director);
+/**
+ * Whether the top bar offers Stop: something runs (canStop), writes reach the studio (the guard, so a stream
+ * that is only reconnecting does not hide it) and a film is open.
+ */
+export function showStop(overview: GenerationOverview | null, director: DirectorStatus | null, reachable: boolean, view: ViewName): boolean {
+  return reachable && view !== "start" && canStop(overview, director);
 }
 
 /** What a Stop would do, counted the way the server's Stop counts (sent jobs finish; unsent ones are taken off). */

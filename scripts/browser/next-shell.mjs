@@ -37,6 +37,21 @@ async function until(page, read, test, message, timeout = 8000) {
   throw new Error(`${message}; last: ${JSON.stringify(last)}`);
 }
 
+/**
+ * Answer a request with the studio's own JSON, changed by `change`. A request the reload cut off (its response
+ * already disposed) is left alone.
+ */
+async function rewrite(route, change) {
+  try {
+    const response = await route.fetch();
+    const json = await response.json();
+    change(json);
+    await route.fulfill({ response, json });
+  } catch {
+    await route.abort().catch(() => {});
+  }
+}
+
 const tab = (page, view) => page.locator(`.topbar [data-act='tab'][data-view='${view}']`);
 
 /** Open a view the way a person would: a tab, the gear, or the mark. Start has no tabs, so a tab is reached through Settings. */
@@ -57,15 +72,18 @@ async function noSidewaysScroll(page, where = "") {
   expect(scrollWidth <= innerWidth, `The page scrolls sideways${where ? ` (${where})` : ""}: ${scrollWidth}px content in a ${innerWidth}px window`);
 }
 
-/** Scene 2 of the sample film: open its frames, settle 2.3's line and make its three clips (one sent, two queued). */
+/**
+ * Scene 2 of the sample film: open its frames, settle 2.3's line through the Director's note (the proposal
+ * choice) and make its three clips (one sent, two queued).
+ */
 async function makeSceneTwoVideo(page) {
   await page.waitForSelector("main.work[data-view='keyframes'] .preview .pic-img", { timeout: 20000 });
   for (const label of ["2-2", "2-3"]) {
     await page.click(`.card [data-act='open-shot'][data-shot='shot-${label}']`);
     await until(page, () => text(page, `[data-card='shot-${label}'] .stl`), (value) => /Opened/.test(value), `${label} never opened`);
   }
-  await page.click("[data-act='make-fit'][data-shot='shot-2-3']");
-  await page.waitForSelector(".banner[data-state='settled']");
+  await page.click('.banner [data-act="note-choice"][data-note="note-b"][data-kind="proposal"]');
+  await page.waitForSelector('.banner[data-note="note-b"][data-state="settled"]');
   await until(page, () => page.locator("[data-act='confirm-video']").isDisabled(), (disabled) => !disabled, "Confirm stayed disabled");
   await page.click("[data-act='confirm-video']");
   await page.locator(".topbar [data-act='stop-film']").waitFor({ timeout: 5000 });
@@ -332,7 +350,8 @@ export const scenarios = [
       await shot(page, "next-shell-stopped-390");
       // Chinese strings are the longest here; the strip wraps and nothing scrolls sideways.
       await page.locator(".topbar [data-act='language']").click();
-      await until(page, () => text(page, ".film-strip[data-strip='stopped'] .txt"), (value) => value.startsWith("已停止，不会再发送新任务。"), "The strip did not switch to Chinese");
+      const zh = await until(page, () => text(page, ".film-strip[data-strip='stopped'] .txt"), (value) => value.startsWith("已停止，不会再发送新任务。"), "The strip did not switch to Chinese");
+      expect(!/。\s/.test(zh), `The Chinese strip has a space after a full stop: ${JSON.stringify(zh)}`);
       await noSidewaysScroll(page, "stopped in Chinese");
       await shot(page, "next-shell-stopped-390-zh");
       await page.locator(".topbar [data-act='language']").click();
@@ -373,19 +392,18 @@ export const scenarios = [
     query: LIVE,
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
+      // Pair the window first: a reload while the launch link is still being exchanged would lose the session.
+      await ready(page);
       // The studio says which overview attempts were mid-send at its last start; give the first shot's clip that state.
       let casualty = null;
-      await page.route(/\/api\/projects\/[^/]+\/generation$/, async (route) => {
-        const response = await route.fetch();
-        const overview = await response.json();
+      await page.route(/\/api\/projects\/[^/]+\/generation$/, (route) => rewrite(route, (overview) => {
         const first = overview.scenes?.[0]?.shotIds?.[0];
         if (first && overview.shots[first]) {
           casualty = overview.shots[first].label;
           overview.shots[first].video = { state: "no_answer", phase: "submission_unknown", attemptId: "restart-casualty-1", startedAt: "2026-10-15T09:00:00.000Z", takeCount: 0 };
           overview.restartCasualties = ["restart-casualty-1"];
         }
-        await route.fulfill({ response, json: overview });
-      });
+      }));
       await page.reload();
       await ready(page);
       await page.waitForSelector(".film-strip[data-strip='restart']", { timeout: 10000 });
@@ -414,7 +432,8 @@ export const scenarios = [
       await ready(page);
       await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "The live shell never connected");
       // The event stream fails from now on. Hiding and showing the tab drops the open stream and reconnects it.
-      await page.route(/\/api\/projects\/[^/]+\/events/, (route) => route.abort("internetdisconnected"));
+      const events = /\/api\/projects\/[^/]+\/events/;
+      await page.route(events, (route) => route.abort("internetdisconnected"));
       const visibility = (hidden) => page.evaluate((value) => {
         Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
         Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (value ? "hidden" : "visible") });
@@ -423,14 +442,21 @@ export const scenarios = [
       await visibility(true);
       await visibility(false);
       await until(page, () => text(page, ".topbar .saved"), (value) => value === "Reconnecting…", "The pill never said Reconnecting…");
-      // The strip waits a moment (a returning tab reconnects within it), then says what is off.
-      await page.waitForSelector(".film-strip[data-strip='offline']", { timeout: 6000 });
+      // Only the stream is down: a plain read still answers, so edits still save and nothing says otherwise.
+      await page.waitForTimeout(3500);
+      expect((await page.locator(".film-strip-slot").getAttribute("data-strip")) === "none", "The offline strip showed while the studio still answered reads");
+
+      // Now nothing reaches the studio. The strip waits a moment (a returning tab reconnects within it), then says what is off.
+      const api = /\/api\//;
+      await page.route(api, (route) => route.abort("internetdisconnected"));
+      await page.waitForSelector(".film-strip[data-strip='offline']", { timeout: 9000 });
       const offline = await text(page, ".film-strip[data-strip='offline'] .txt");
       expect(offline === "Can’t reach the studio. Changes can’t be saved and nothing can be made until it’s back. OpenSlate keeps trying by itself.", `The offline strip reads ${JSON.stringify(offline)}`);
       await noSidewaysScroll(page);
       await shot(page, "next-shell-offline-1440");
 
-      await page.unroute(/\/api\/projects\/[^/]+\/events/);
+      await page.unroute(api);
+      await page.unroute(events);
       // A retry already on its way may still meet the old route; press again until the studio answers.
       await until(page, async () => {
         const retry = page.locator("[data-act='retry-now']");
@@ -468,9 +494,31 @@ export const scenarios = [
       expect(await page.locator(".app[data-ui='next'] .topbar").isVisible(), "The page behind the dialog was replaced");
       expect((await text(page, ".topbar .saved")) === "Not connected", "The pill does not say Not connected");
       expect((await page.evaluate(() => document.activeElement?.getAttribute("data-act"))) === "reconnect", "Focus is not on Try again");
+      // Esc never dismisses it: once, twice in a row (Chrome ignores preventDefault on the second), or around a click.
+      // A click on plain text leaves focus on the page body; it must never land on the page behind the dialog.
+      const stillOpen = async (how) => {
+        await page.waitForTimeout(200);
+        expect(await dialog.evaluate((node) => node.open && node.matches(":modal")), `${how} dismissed the session-expired dialog`);
+        const focus = await page.evaluate(() => {
+          const active = document.activeElement;
+          return { act: active?.getAttribute("data-act") ?? active?.tagName, inside: !!active?.closest("dialog[data-dialog='expired']") || active === document.body };
+        });
+        expect(focus.inside, `${how} left focus behind the dialog, on ${focus.act}`);
+        return focus.act;
+      };
       await page.keyboard.press("Escape");
-      await page.waitForTimeout(200);
-      expect(await dialog.evaluate((node) => node.open), "Esc dismissed the session-expired dialog");
+      expect((await stillOpen("Esc")) === "reconnect", "Esc moved focus off Try again");
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+      expect((await stillOpen("Esc twice")) === "reconnect", "Esc twice moved focus off Try again");
+      await page.keyboard.press("Escape");
+      await dialog.locator("h2").click();
+      await page.keyboard.press("Escape");
+      await stillOpen("Esc, a click, Esc");
+      await page.mouse.click(8, 450);
+      await page.keyboard.press("Escape");
+      await stillOpen("A click beside the dialog, then Esc");
+      await dialog.locator("[data-act='reconnect']").focus();
       await shot(page, "next-shell-expired-1440");
 
       // Without a session, Try again says it is still not connected.
@@ -484,6 +532,91 @@ export const scenarios = [
       await ready(page);
       await until(page, () => page.locator("[data-field='message']").inputValue().catch(() => ""), (value) => value === "Keep the fog low over the water", "The unsent message was lost");
       await until(page, () => text(page, ".toast"), (value) => value === "Connected again. Your unsent message is still in the composer.", "No toast after reconnecting");
+    },
+  },
+  {
+    name: "next-shell-expired-new-link",
+    query: LIVE,
+    viewport: { width: 1440, height: 900 },
+    allowConsoleErrors: [
+      // The session is cleared on purpose: reads are refused until the window connects again.
+      /^HTTP 40[13] \/api\//,
+    ],
+    async run({ page, origin }) {
+      await ready(page);
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "The live shell never connected");
+      // A place to come back to: the last scene, then Plan, with a message not sent yet.
+      const scenes = await page.locator("[data-act='scene']").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-scene")));
+      const scene = scenes.at(-1);
+      if (scenes.length > 1) {
+        await page.click(`[data-act='scene'][data-scene='${scene}']`);
+        await page.waitForSelector(`[data-act='scene'][data-scene='${scene}'][aria-pressed='true']`);
+      }
+      await tab(page, "plan").click();
+      await page.waitForSelector(".app[data-view='plan']");
+      await page.locator("[data-field='message']").fill("Hold the last shot longer");
+
+      const cookies = await page.context().cookies();
+      await page.context().clearCookies();
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      const dialog = page.locator("dialog[data-dialog='expired']");
+      await dialog.waitFor({ timeout: 10000 });
+
+      // A launcher reuses this window with a fresh #connect= link instead of Try again. The scenario cannot mint a
+      // launch code, so the pairing answers with the window's session as the studio would for a new code.
+      await page.context().addCookies(cookies);
+      await page.route("**/api/session", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        const answer = await page.request.get(`${origin}/api/session`);
+        await route.fulfill({ status: answer.status(), contentType: "application/json", body: await answer.body() });
+      });
+      await page.evaluate(() => { window.location.hash = `#connect=${"A".repeat(43)}`; });
+      await dialog.waitFor({ state: "detached", timeout: 10000 });
+      await ready(page);
+      expect(!(await page.evaluate(() => window.location.hash)), "The launch code stayed in the address");
+      await until(page, () => page.locator("[data-field='message']").inputValue().catch(() => ""), (value) => value === "Hold the last shot longer", "The unsent message was lost on a new link");
+      await until(page, () => page.evaluate(() => document.querySelector(".app")?.getAttribute("data-view")), (value) => value === "plan", "The view was not kept on a new link");
+      await until(page, () => text(page, ".toast"), (value) => value === "Connected again. Your unsent message is still in the composer.", "No toast after the new link connected");
+      if (scenes.length > 1) {
+        await tab(page, "keyframes").click();
+        await page.waitForSelector(`[data-act='scene'][data-scene='${scene}'][aria-pressed='true']`, { timeout: 5000 });
+      }
+    },
+  },
+  {
+    name: "next-shell-narrow-long-title",
+    query: LIVE,
+    viewport: { width: 390, height: 844 },
+    async run({ page }) {
+      // Pair the window first: a reload while the launch link is still being exchanged would lose the session.
+      await ready(page);
+      // A film with a long name: the title ellipsizes inside its own box instead of running under 中文 and the gear.
+      await page.route(/\/api\/projects\/[^/]+$/, (route) => rewrite(route, (snapshot) => {
+        snapshot.project.name = "First Light · integration review of the harbour at dawn";
+      }));
+      await page.reload();
+      await ready(page);
+      await page.waitForFunction(() => document.querySelector(".topbar .film b")?.textContent?.startsWith("First Light · integration review of the harbour"));
+      for (const locale of ["en", "zh"]) {
+        const box = await page.evaluate(() => {
+          const rect = (selector) => document.querySelector(selector)?.getBoundingClientRect();
+          const title = rect(".topbar .film b");
+          const film = rect(".topbar .film");
+          const row = [".topbar .lang", ".topbar .settings-btn", ".topbar .dir-toggle"].map(rect).filter((r) => r && Math.abs(r.top - title.top) < 24);
+          const node = document.querySelector(".topbar .film b");
+          return { title: [title.left, title.right], film: film.right, next: Math.min(...row.map((r) => r.left)), clipped: node.scrollWidth > node.clientWidth };
+        });
+        expect(box.title[1] <= box.film + 0.5, `The title runs out of its box in ${locale}: ${JSON.stringify(box)}`);
+        expect(box.title[1] <= box.next, `The title runs under the controls beside it in ${locale}: ${JSON.stringify(box)}`);
+        expect(box.clipped, `The long title does not ellipsize in ${locale}: ${JSON.stringify(box)}`);
+        await noSidewaysScroll(page, `long title in ${locale}`);
+        await shot(page, `next-shell-narrow-long-title-${locale}`);
+        if (locale === "en") {
+          await page.locator(".topbar [data-act='language']").click();
+          await page.waitForFunction(() => document.querySelector(".topbar [data-act='language']")?.textContent === "English");
+        }
+      }
+      await page.locator(".topbar [data-act='language']").click();
     },
   },
   {

@@ -5,6 +5,7 @@ import { classicHref, connectionPill, filmHeading, otherLocale, searchWithLocale
 import { useStore, useStudio } from "../store/react.tsx";
 import { StopDialog } from "./StopDialog.tsx";
 import { useNarrow } from "./useNarrow.ts";
+import { useWriteGuard } from "./useWriteGuard.ts";
 
 /** First control inside the Director drawer, so opening it puts the person where they will type. */
 function focusIntoDirector() {
@@ -44,11 +45,12 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
   const directorOpen = useStudio((s) => s.directorOpen);
   const stopping = useStudio((s) => !!s.pending["control:stop"]);
   const narrow = useNarrow();
+  const reachable = useWriteGuard().server;
   const heading = useMemo(() => filmHeading(name, projects, projectId, overview), [name, projects, projectId, overview]);
   const mode = topBarMode(view);
   const pill = connectionPill(connection);
   const tabs = viewTabs(view);
-  const stop = mode === "film" && showStop(overview, director, connection === "connected", view);
+  const stop = mode === "film" && showStop(overview, director, reachable, view);
   const [confirming, setConfirming] = useState(false);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -168,6 +170,7 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
             type="button"
             className="pill sm stop-btn"
             data-act="stop-film"
+            data-needs="server"
             aria-haspopup="dialog"
             title={t("shell.stop_title")}
             disabled={stopping}

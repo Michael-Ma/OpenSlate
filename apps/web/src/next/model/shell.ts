@@ -10,12 +10,6 @@ export const NARROW_QUERY = "(max-width: 899px)";
 
 export const VIEWS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"];
 
-/**
- * Every view is designed for the next studio since phase P5 (plan decision D13 is done); the classic
- * studio stays reachable from the top bar's link.
- */
-export const isDesignedView = (_view: ViewName): boolean => true;
-
 export interface ViewTab {
   view: ViewName;
   label: MessageId;
@@ -40,13 +34,16 @@ export function viewTabs(current: ViewName): ViewTab[] {
 
 export const viewLabel = (view: ViewName): MessageId => TAB_LABELS[view];
 
+/** The studio answered and has no films at all. */
+export const hasNoFilms = (state: Pick<StudioState, "projectId" | "projects" | "connection">): boolean =>
+  state.connection !== "connecting" && state.projects.length === 0 && !state.projectId;
+
 /**
  * The view the workspace shows. A studio with no films at all opens on Start, whatever view was asked for,
  * because there is nothing to plan or make yet.
  */
 export function shownView(state: Pick<StudioState, "view" | "projectId" | "projects" | "connection">): ViewName {
-  const noFilms = state.connection !== "connecting" && state.projects.length === 0 && !state.projectId;
-  return noFilms ? "start" : state.view;
+  return hasNoFilms(state) ? "start" : state.view;
 }
 
 /**

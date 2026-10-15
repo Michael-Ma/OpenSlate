@@ -75,18 +75,22 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
 .shell-dialog .foot .pill{padding:7px 14px}
 .shell-dialog .pill[aria-disabled="true"]{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted);cursor:progress}
 
-/* ---------- 900–1365 px: a narrower Director column and a Keyframes view that shrinks (lead decision 8) ---------- */
+/* ---------- 900–1365 px: a narrower Director column and a Keyframes view that shrinks (lead decision 8) ----------
+ * These key on the Keyframes view's own classes and belong in keyframes/keyframes.css; they stay here only until
+ * the Keyframes owner takes them over (see the shell's hand-over notes). */
 @media (min-width:900px){
   /* One column that never grows past the workspace: long lines ellipsize, the scene pills wrap below the title. */
   .app[data-ui="next"] .work.kf{grid-template-columns:minmax(0,1fr)}
   .app[data-ui="next"] .work.kf .scene-head{flex-wrap:wrap;row-gap:6px}
   .app[data-ui="next"] .work.kf .scene-head .line{flex:1 1 120px}
-  .app[data-ui="next"] .work.kf .scene-pills{margin-left:0;min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:none}
+  .app[data-ui="next"] .work.kf .scene-pills{margin-left:0;min-width:0;max-width:100%;flex:0 1 auto;flex-wrap:wrap;row-gap:6px}
+  .app[data-ui="next"] .work.kf .scene-pills .pill{max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .app[data-ui="next"] .work.kf .tl{grid-template-columns:54px minmax(0,1fr)}
   .app[data-ui="next"] .work.kf .tl .segs{min-width:0;overflow:hidden}
-  /* Shots keep their length-true widths; the dashed tail gives way first. */
+  /* Shots keep their length-true widths; the dashed tail gives way first, with an ellipsis (a block, since a
+     flex container never shows one). */
   .app[data-ui="next"] .work.kf .tl .seg:not(.dash){flex-shrink:0}
-  .app[data-ui="next"] .work.kf .tl .seg.dash{min-width:0;text-overflow:ellipsis}
+  .app[data-ui="next"] .work.kf .tl .seg.dash{display:block;min-width:0;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
 @media (min-width:900px) and (max-width:1279px){
   .app[data-ui="next"]{grid-template-columns:320px minmax(0,1fr)}
@@ -102,8 +106,10 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
 /* ---------- narrow ---------- */
 .scrim{display:none}
 @media (max-width:899px){
-  /* Basis 0: the film shrinks (title ellipsis) instead of pushing the Director toggle onto the tab row. */
+  /* Basis 0: the film shrinks (title ellipsis) instead of pushing the Director toggle onto the tab row.
+     The title and meta are capped at the film's width, so a long title ellipsizes instead of running under 中文. */
   .topbar .film{flex:1 1 0}
+  .topbar .film b,.topbar .film-meta{max-width:100%}
   .topbar .tabs{flex:1 1 calc(100% - 120px)}
   .topbar .lang{order:3}
   .topbar .top-right .stop-btn{order:3;margin-left:8px}

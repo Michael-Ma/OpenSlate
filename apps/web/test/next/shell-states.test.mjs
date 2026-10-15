@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  carryFrom, carryReady, carryToApply, continuedToast, filmStrip, reconnectedToast, restartCasualties, restartTitle,
-  showStop, stopLines, stopPreview, stoppedLines, OFFLINE_GRACE_MS,
+  carryFrom, carryReady, carryToApply, continuedToast, filmStrip, guardFor, reconnectedToast, restartCasualties, restartTitle,
+  sentenceGap, showStop, stopLines, stopPreview, stoppedLines, unreachable, writeGuard, OFFLINE_GRACE_MS, OPEN_GUARD, REACH_PROBE_MS,
 } from '../../src/next/model/shell-states.ts';
 import { lastFerryOverview } from '../../src/next/fixtures/last-ferry.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
@@ -153,4 +153,52 @@ test('the reconnect toast mentions the draft only when there was one', () => {
   assert.equal(en(reconnectedToast(carryFrom(state))), 'Connected again. Your unsent message is still in the composer.');
   assert.equal(en(reconnectedToast({ ...carryFrom(state), text: ' ', targets: [] })), 'Connected again.');
   assert.equal(en(reconnectedToast(null)), 'Connected again.');
+});
+
+// ---- reachability and the write guard ---------------------------------------------------
+
+test('only a stream that is down past the grace period and a read with no answer is offline', () => {
+  assert.equal(unreachable({ streamDown: true, graceOver: true, lastRead: 'failed' }), true);
+  assert.equal(unreachable({ streamDown: true, graceOver: true, lastRead: 'ok' }), false, 'the stream dropped but reads work: edits still save');
+  assert.equal(unreachable({ streamDown: true, graceOver: true, lastRead: null }), false, 'not before the first read answered');
+  assert.equal(unreachable({ streamDown: true, graceOver: false, lastRead: 'failed' }), false, 'a returning tab reconnects within the grace period');
+  assert.equal(unreachable({ streamDown: false, graceOver: true, lastRead: 'failed' }), false, 'the stream is back');
+  assert.ok(REACH_PROBE_MS > OFFLINE_GRACE_MS);
+});
+
+test('offline or expired turns off every write; stopped turns off only what starts work', () => {
+  const quiet = writeGuard({ offline: false, expired: false, stopped: false });
+  assert.deepEqual(quiet, OPEN_GUARD);
+  assert.deepEqual(guardFor(quiet, 'run'), { off: false, why: null });
+
+  const stopped = writeGuard({ offline: false, expired: false, stopped: true });
+  assert.deepEqual(guardFor(stopped, 'server'), { off: false, why: null }, 'edits and Continue still work while stopped');
+  assert.equal(guardFor(stopped, 'run').off, true);
+  assert.equal(en(guardFor(stopped, 'run').why), 'The film is stopped. Continue first to start new work.');
+  assert.equal(zh(guardFor(stopped, 'run').why), '影片已停止。请先继续，才能开始新任务。');
+
+  const offline = writeGuard({ offline: true, expired: false, stopped: true });
+  for (const needs of ['server', 'run']) {
+    assert.equal(guardFor(offline, needs).off, true, needs);
+    assert.equal(en(guardFor(offline, needs).why), 'Can’t reach the studio. This works again once it’s back.', `offline says why first, even when stopped (${needs})`);
+  }
+
+  const expired = writeGuard({ offline: true, expired: true, stopped: false });
+  assert.equal(expired.server, false);
+  assert.equal(en(expired.serverWhy), 'This window is no longer connected. Try again in the dialog first.', 'expired wins over offline');
+  assert.equal(zh(expired.runWhy), '这个窗口已断开连接。请先在对话框里重试。');
+});
+
+test('Stop shows while the studio can be reached, not only while the event stream is up', () => {
+  const busy = film({ 'shot-2-1': { video: running('a1') } });
+  const reachable = writeGuard({ offline: false, expired: false, stopped: false }).server;
+  assert.equal(showStop(busy, null, reachable, 'keyframes'), true);
+  assert.equal(showStop(busy, null, writeGuard({ offline: true, expired: false, stopped: false }).server, 'keyframes'), false);
+});
+
+test('strip sentences join with a space in English and nothing after Chinese full stops', () => {
+  assert.equal(sentenceGap('en'), ' ');
+  assert.equal(sentenceGap('zh-CN'), '');
+  const lines = stoppedLines({ sent: 1, detached: 2 });
+  assert.equal(['已停止，不会再发送新任务。', ...lines.map(zh)].join(sentenceGap('zh-CN')), '已停止，不会再发送新任务。已发送的 1 个任务会完成并计费。2 个排队中的任务已撤下，需要重新确认。', 'the study\'s string');
 });

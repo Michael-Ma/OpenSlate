@@ -1,7 +1,7 @@
 import { useI18n } from "../i18n/I18n.tsx";
 import type { MessageId } from "../i18n/messages.ts";
-import { classicHref, viewLabel } from "../model/shell.ts";
-import { useMode, useStore } from "../store/react.tsx";
+import { classicHref, hasNoFilms, viewLabel } from "../model/shell.ts";
+import { useMode, useStore, useStudio } from "../store/react.tsx";
 import "./classic.css";
 
 type ClassicViewName = "plan" | "assets" | "film";
@@ -22,15 +22,18 @@ function ClassicMark() {
 }
 
 /**
- * A view that is not built in the new studio names itself and links to the same view in the classic studio
- * (plan decision D13). Every view is designed since phase P5; this panel stays for a view whose build is still
- * on its way, and the top bar keeps its own link to the classic studio.
+ * A view whose build in the new studio is still on its way (the phase P5 stubs) names itself and links to the
+ * same view in the classic studio (plan decision D13); the top bar keeps its own link to the classic studio.
+ * With no films at all the page is held on Start, so the panel says there is no film yet instead, without a way
+ * back to Keyframes that would only land on Start again.
  */
 export function ClassicView({ view }: { view: ClassicViewName }) {
   const { t } = useI18n();
   const store = useStore();
   const mode = useMode();
+  const noFilms = useStudio(hasNoFilms);
   const name = t(viewLabel(view));
+  if (noFilms) return <NoFilms />;
   return (
     <main className="classic-view" id="workspace" data-view={view}>
       <section className="classic-panel" aria-labelledby="classic-title">
@@ -42,6 +45,22 @@ export function ClassicView({ view }: { view: ClassicViewName }) {
         <div className="classic-actions">
           <a className="pill primary" data-act="open-classic" href={classicHref(window.location.search, view)}>{t("classic.open", { view: name })}</a>
           <button type="button" className="pill ghost" data-act="back-to-keyframes" onClick={() => store.setView("keyframes")}>{t("classic.back")}</button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+/** Connected, but there is no film yet. Until the Start view is built, a film is created in the classic studio. */
+function NoFilms() {
+  const { t } = useI18n();
+  return (
+    <main className="classic-view" id="workspace" data-view="none">
+      <section className="classic-panel" aria-labelledby="no-films-title">
+        <ClassicMark />
+        <h1 id="no-films-title">{t("start.no_projects")}</h1>
+        <div className="classic-actions">
+          <a className="pill primary" data-act="open-classic" href={classicHref(window.location.search, "plan")}>{t("classic.open_studio")}</a>
         </div>
       </section>
     </main>

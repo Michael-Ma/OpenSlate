@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classicHref, codeSegments, connectionPill, connectScreen, escClosesDrawer, filmHeading, isDesignedView, otherLocale,
+  classicHref, codeSegments, connectionPill, connectScreen, escClosesDrawer, filmHeading, hasNoFilms, otherLocale,
   pauseCountdown, resumeCountdown, searchWithLocale, shownView, showProjectPicker, startCountdown, tabKeyTarget,
   toastLifetime, topBarMode, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS, VIEWS,
 } from '../../src/next/model/shell.ts';
@@ -10,12 +10,11 @@ import { translateMsg } from '../../src/next/i18n/translate.ts';
 
 const en = m => translateMsg('en', m), zh = m => translateMsg('zh-CN', m);
 
-test('the tab row lists the four views in order, and every view is designed', () => {
+test('the tab row lists the four views in order', () => {
   const tabs = viewTabs('keyframes');
   assert.deepEqual(tabs.map(t => [t.view, t.selected, t.focusable]),
     [['plan', false, false], ['keyframes', true, true], ['assets', false, false], ['film', false, false]]);
   assert.deepEqual(viewTabs('film').filter(t => t.selected).map(t => t.view), ['film']);
-  for (const view of [...VIEWS, 'settings', 'start']) assert.equal(isDesignedView(view), true, view);
   assert.equal('classic' in tabs[0], false, 'tabs no longer say they open in the classic studio');
 });
 
@@ -36,6 +35,9 @@ test('a studio with no films opens on Start whatever view was asked for', () => 
   assert.equal(shownView({ ...base, connection: 'connecting' }), 'keyframes', 'not while the list is still loading');
   assert.equal(shownView({ ...base, projects: [{ id: 'a', name: 'A' }], projectId: 'a' }), 'keyframes');
   assert.equal(shownView({ ...base, view: 'settings', projects: [{ id: 'a', name: 'A' }], projectId: 'a' }), 'settings');
+  assert.equal(hasNoFilms(base), true);
+  assert.equal(hasNoFilms({ ...base, connection: 'connecting' }), false);
+  assert.equal(hasNoFilms({ ...base, projectId: 'a' }), false, 'a film is open even if the list has not caught up');
 });
 
 test('the full Connect screen only replaces a window that never loaded the film list', () => {
