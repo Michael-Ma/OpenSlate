@@ -37,6 +37,7 @@ export const settingsMessages = {
   "set.models.none": { en: "No model installed for this job", zh: "这项工作没有安装模型" },
   "set.models.option_off": { en: "{name} — {reason}", zh: "{name} — {reason}" },
   "set.models.switch": { en: "Switch", zh: "切换" },
+  "set.models.switching": { en: "Switching…", zh: "正在切换…" },
   "set.models.director_unavailable": { en: "Not available in this studio", zh: "这个工作室不支持" },
   "set.job.director": { en: "Director", zh: "导演" },
   "set.job.image": { en: "Keyframes", zh: "关键帧" },
