@@ -5,6 +5,7 @@ import { currentScene } from "../model/keyframes.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { Composer } from "./Composer.tsx";
 import { DirectorNotices } from "./DirectorNotices.tsx";
+import { isNarrow } from "./narrow.ts";
 import { Thread } from "./Thread.tsx";
 import "./director.css";
 
@@ -30,7 +31,7 @@ export function DirectorColumn() {
     document.querySelector<HTMLElement>('[aria-controls="director"]')?.focus();
   };
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape" && !event.defaultPrevented && directorOpen) close();
+    if (event.key === "Escape" && !event.defaultPrevented && directorOpen && isNarrow()) close();
   };
 
   return (
