@@ -55,6 +55,8 @@ export interface WaitingReason {
   code: WaitingCode;
   ahead?: number;
   since: string;
+  /** edit_pending: the unfinished request whose holds the person can let go (card B13). */
+  requestId?: string;
 }
 
 export interface MediaFailure {
