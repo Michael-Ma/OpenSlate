@@ -97,6 +97,11 @@ test('Stop counts only real work: Director turns, running or queued media, runni
   const overview = lastFerryOverview();
   assert.equal(canStop(overview, idle), false, 'idle with unmade Scene 3 shots is not stoppable');
   assert.equal(canStop(null, idle), false);
+  const awaitingConfirm = structuredClone(overview);
+  for (const shot of Object.values(awaitingConfirm.shots)) shot.video = { state: 'queued', takeCount: 0, waiting: { code: 'review', since: 'x' } };
+  assert.equal(canStop(awaitingConfirm, idle), false, 'clips waiting for a person to confirm are not running work');
+  for (const shot of Object.values(awaitingConfirm.shots)) shot.video.waiting.code = 'capacity';
+  assert.equal(canStop(awaitingConfirm, idle), true, 'clips queued behind other jobs will go out by themselves');
   assert.equal(canStop(overview, { ...idle, status: 'running' }), true);
   assert.equal(canStop(overview, { ...idle, status: 'waiting_user' }), true);
   assert.equal(canStop(overview, { ...idle, status: 'error' }), false);
