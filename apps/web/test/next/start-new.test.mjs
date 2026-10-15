@@ -119,11 +119,11 @@ test('prices never read $0.00: Codex images use the plan, an unset estimate says
   assert.equal(en(plan.rows[1].price), 'uses your Codex plan');
   assert.equal(en(plan.rows[2].price), 'no price set');
   for (const r of plan.rows) assert.doesNotMatch(en(r.price), /\$0\.00/);
-  // A host price below a tenth of a cent would round to "$0.000": it reads "under $0.001".
+  // A host price below a tenth of a cent reads "under $0.001", as in Settings (formatMicros would print "$0.0005").
   const cheap = modelPlan(catalog([row('tts', 'Cheap voice', 'speech', 'openai-speech', '300', true), row('stt', 'Cheap words', 'transcription', 'openai-transcription', '500', true)]), found, 'en');
   assert.equal(en(cheap.rows[3].price), 'under $0.001 a line');
   assert.equal(zh(cheap.rows[3].price), '每条不到 $0.001');
-  assert.equal(en(cheap.rows[4].price), 'about $0.001 a recording');
+  assert.equal(en(cheap.rows[4].price), 'under $0.001 a recording');
 });
 
 test('the reason a real model is not ready names the most actionable fix', () => {

@@ -150,7 +150,10 @@ const WAITING: Record<NotReady, MessageId> = {
   setup: "start.ready.waiting_setup",
 };
 
-/** Below a tenth of a cent the price would round to "$0.000"; it reads "under $0.001" instead. */
+/**
+ * A per-unit estimate below a tenth of a cent reads "under $0.001", as the Settings view's model rows do: the
+ * same model's price reads the same in the New film sheet and in Settings.
+ */
 const PRICE_FLOOR_MICROS = 1000;
 
 function priceOf(row: ProviderRow, unit: { about: MessageId; under: MessageId }, locale: Locale): Msg {
@@ -159,7 +162,7 @@ function priceOf(row: ProviderRow, unit: { about: MessageId; under: MessageId },
   const micros = row.estimatedCost?.unitMicros;
   // Never "$0.00": a model without a configured estimate says so.
   if (!micros || !/^\d+$/.test(micros) || Number(micros) === 0) return msg("start.price.unset");
-  if (Number(micros) * 2 < PRICE_FLOOR_MICROS) return msg(unit.under, { price: formatMicros(PRICE_FLOOR_MICROS, locale) });
+  if (Number(micros) < PRICE_FLOOR_MICROS) return msg(unit.under, { price: formatMicros(PRICE_FLOOR_MICROS, locale) });
   return msg(unit.about, { price: formatMicros(micros, locale) });
 }
 
