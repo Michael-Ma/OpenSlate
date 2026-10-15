@@ -31,7 +31,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
 /** Open Settings: the top bar's gear when the shell has it, otherwise the same store.setView("settings") through React's tree. */
 async function openSettings(page) {
   await page.waitForSelector(".app[data-ui='next'] .topbar", { timeout: 20000 });
-  await page.waitForSelector(".topbar .film span", { timeout: 20000 });
+  // The film's meta line has been read (the top bar hides it between 900 and 1099 px, so attached is enough).
+  await page.waitForSelector(".topbar .film span", { timeout: 20000, state: "attached" });
   const gear = page.locator(".topbar [data-act='settings'], .topbar [data-view='settings']");
   if (await gear.count()) await gear.first().click();
   else {
@@ -446,6 +447,8 @@ export const scenarios = [
       await page.waitForSelector("main[data-view='settings'] #set-models .mtable", { timeout: 15000 });
       const jobs = await page.locator("#set-models .mrow .job").allInnerTexts();
       expect(jobs.join("|") === "Director|Keyframes|Video|Narration|Transcription", `Jobs read ${jobs.join("|")}`);
+      // The Director row fills in once the Director setup is read, which can come after the models.
+      await page.waitForSelector("#set-m-director-price", { timeout: 15000 });
       const prices = await page.locator("#set-models .mrow .price").allInnerTexts();
       expect(prices.every((p) => p && !/\$0\.00/.test(p)), `Estimates read ${prices.join("|")}`);
       await page.waitForSelector("#set-voice [data-act='narrator']", { timeout: 10000 });

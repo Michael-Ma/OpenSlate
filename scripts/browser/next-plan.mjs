@@ -386,7 +386,9 @@ export const scenarios = [
       // Stop the film while the Director works: bringing a written plan starts work, so it waits for Continue.
       await page.fill(".composer textarea", "Hold the last shot a little longer.");
       await page.keyboard.press("Enter");
-      await page.click('[data-act="stop"]', { timeout: 10000 });
+      // Stop is the shell's, in the top bar, and asks first.
+      await page.click('.topbar [data-act="stop-film"]', { timeout: 10000 });
+      await page.click('dialog[data-dialog="stop"] [data-act="confirm-stop"]');
       await page.waitForFunction(() => document.querySelector('[data-act="import-open"]')?.disabled === true, null, { timeout: 10000 });
       expect((await page.locator('[data-act="import-open"]').getAttribute("title")) === "Stopped. Continue first.", "The import button does not say why it is off");
       // Free edits still save while stopped.

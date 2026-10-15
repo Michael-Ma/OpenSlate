@@ -48,7 +48,8 @@ async function noSidewaysScroll(page) {
 /** Open the Assets tab and wait for the library. */
 async function openAssets(page) {
   await page.waitForSelector(".app[data-ui='next'] .topbar", { timeout: 20000 });
-  await page.waitForSelector(".topbar .film span", { timeout: 20000 });
+  // The film's meta line has been read (the top bar hides it between 900 and 1099 px, so attached is enough).
+  await page.waitForSelector(".topbar .film span", { timeout: 20000, state: "attached" });
   await page.locator(".topbar [data-act='tab'][data-view='assets']").click();
   await page.waitForSelector("main[data-view='assets'][data-state='ready']", { timeout: 15000 });
 }

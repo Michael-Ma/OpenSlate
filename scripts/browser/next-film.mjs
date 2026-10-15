@@ -433,7 +433,8 @@ export const scenarios = [
       await expectText(page, "#fv-export-why", /^Stopped\. Continue to export$/);
       expect(!(await page.locator("[data-act='export']").evaluate((el) => el.classList.contains("primary"))), "A stopped Export is still the white primary action");
       await screenshot(page, "stopped-1440");
-      await page.click("[data-act='continue']");
+      // Continue is the shell's, on the film-wide strip.
+      await page.click(".film-strip [data-act='continue-film']");
       await page.waitForFunction(() => !document.querySelector("[data-act='export']")?.disabled, null, { timeout: 8000 })
         .catch(() => { throw new Error("Export stayed off after Continue"); });
       await expectText(page, "#fv-export-why", /^MP4 of the whole film$/);
