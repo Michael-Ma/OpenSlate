@@ -88,6 +88,8 @@ export interface MediaSlot {
   outdatedFields?: string[];
   /** A released no-answer attempt is still polled; a late result becomes an earlier take. */
   releasedAttemptIds?: string[];
+  /** The slot was taken off by Stop or by giving up on a job with no answer; it needs a new press. */
+  takenOff?: "stopped" | "released";
 }
 
 export interface KeyframeSlot extends MediaSlot {
@@ -488,4 +490,15 @@ export interface AssetItem {
   label: string;
   createdAt: string;
   durationSeconds?: number;
+}
+
+// ---------------------------------------------------------------------------
+// This computer (Start and Settings): GET /api/installation/status. No secrets, no paths beyond tool names.
+// ---------------------------------------------------------------------------
+
+export interface InstallationStatus {
+  codex: { found: boolean; version: string | null; pinnedVersion: string | null; signedIn: boolean | null };
+  mediaTools: { ffmpeg: { available: boolean; version: string | null }; ffprobe: { available: boolean; version: string | null } };
+  /** Whether real providers are configured at all; false means only the demo path works. */
+  providersConfigured: boolean;
 }
