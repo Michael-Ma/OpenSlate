@@ -3,7 +3,6 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { composerView, filterPicker, mentionAt, pickerItems, removeMention, type PickerItem } from "../model/director.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { AtPicker, pickerOptionId } from "./AtPicker.tsx";
-import { isNarrow } from "./narrow.ts";
 
 /** About six lines; past that the textarea scrolls. */
 const MAX_LINES = 6;
@@ -18,7 +17,6 @@ export function Composer() {
   const composer = useStudio((s) => s.composer);
   const connected = useStudio((s) => s.connection === "connected");
   const overview = useStudio((s) => s.overview);
-  const directorOpen = useStudio((s) => s.directorOpen);
   const view = useMemo(() => composerView(composer, connected, overview), [composer, connected, overview]);
   const items = useMemo(() => pickerItems(overview), [overview]);
 
@@ -51,11 +49,6 @@ export function Composer() {
       caretAfterRender.current = null;
     }
   }, [composer.text]);
-
-  // The narrow drawer opens straight into the reply box.
-  useEffect(() => {
-    if (directorOpen && isNarrow()) textarea.current?.focus({ preventScroll: true });
-  }, [directorOpen]);
 
   // A click anywhere outside the composer closes the picker.
   useEffect(() => {
@@ -111,8 +104,8 @@ export function Composer() {
         return;
       }
       if (event.key === "Escape") {
+        // The shell's Esc closes the narrow drawer unless the key was already used (escClosesDrawer).
         event.preventDefault();
-        event.stopPropagation();
         closePicker();
         return;
       }
