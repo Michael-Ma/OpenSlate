@@ -137,6 +137,7 @@ export function editStoryboard(
           revisionId: newId(),
           sceneId: input.sceneId!,
           purpose: "New shot",
+          promptState: "placeholder",
           action: "Describe the action",
           framing: "Describe the visual direction",
           motion: "Describe the camera movement",
@@ -187,6 +188,7 @@ export function editStoryboard(
               | "imagePrompt"
               | "videoPrompt"
           ] = value();
+        if (["action", "framing", "imagePrompt", "videoPrompt"].includes(input.field ?? "")) row.promptState = "ready";
         row.revisionId = newId();
         changed.add(row.id);
         if (["purpose", "action", "framing"].includes(input.field ?? "")) {
@@ -268,6 +270,7 @@ export function editStoryboard(
           digest(
             before.shots.find((shot) => shot.id === row.id)?.narration ?? null,
           ) !== digest(draft);
+        if (writingChanged) delete row.narrationFit;
         row.narration = draft;
         // The human's no-narration choice detaches this shot only. Canonical recordings remain historical evidence.
         if (draft.mode === "none") row.cueId = null;
@@ -381,20 +384,13 @@ export function editStoryboard(
         "local-user",
         `Storyboard edit: ${input.kind}${input.field ? ` ${input.field}` : ""}. Preserve unaffected work and replan only what this edit requires.`,
         {
+          source: "app",
           key: `storyboard:${key}`,
           editing: true,
           directEdit: true,
           scopeIds: scopes.length ? scopes : [projectId],
         },
       );
-      const request = s.store.get<Record<string, unknown>>(
-        "message",
-        actor.requestId,
-      )!;
-      s.store.put("message", actor.requestId, projectId, {
-        ...request,
-        source: "storyboard",
-      });
       const bindings = s.store
         .list<NodeBinding>("node_binding", projectId)
         .filter(
@@ -468,6 +464,11 @@ export function editStoryboard(
           ...b,
           candidateId: null,
           outputs: {},
+          ...(Object.values(b.outputs)[0] || b.outdated ? { outdated: {
+            at: new Date().toISOString(),
+            fields: [...new Set([...(Object.keys(b.outputs).length ? [] : b.outdated?.fields ?? []), input.field ?? input.kind])],
+            previous: Object.values(b.outputs)[0] ?? b.outdated!.previous,
+          } } : {}),
         });
       // Existing in-flight attempts retain their durable receipts and cannot publish into detached candidates.
       next = s.store.saveProject(

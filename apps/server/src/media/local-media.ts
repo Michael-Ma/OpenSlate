@@ -262,6 +262,33 @@ export class LocalMediaService {
     }));
   }
 
+  /** Trusted fixture adapter. Bytes are supplied by the host after project ownership/hash checks. */
+  async importFixture(input: { artifactId: string; bytes: Uint8Array; kind: "video" | "audio"; durationFrames: number }): Promise<SuppliedMedia> {
+    const value = structuredClone(input);
+    return this.exclusive(async () => this.temporary(async dir => {
+      invariant(ID.test(value.artifactId) && ["video", "audio"].includes(value.kind) && value.bytes.length > 0 && value.bytes.length <= this.limits.maxInputBytes, "MEDIA_INVALID_INPUT", "Invalid fixture source");
+      integer(value.durationFrames, 1, this.limits.maxDurationFrames, "fixture frames");
+      const path = join(dir, "fixture"), file = await open(path, "wx", 0o600);
+      try { await file.writeFile(value.bytes); await file.sync(); } finally { await file.close(); }
+      const output = join(dir, value.kind === "video" ? "fixture.mp4" : "fixture.wav");
+      const args = ["-nostdin", "-v", "error", "-xerror", "-threads", "1", ...INPUT_OPTIONS, "-i", path];
+      if (value.kind === "video") args.push("-an", "-vf", `fps=30,tpad=stop_mode=clone:stop_duration=${value.durationFrames / 30},trim=end_frame=${value.durationFrames},setpts=PTS-STARTPTS,format=yuv420p`, "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-frames:v", String(value.durationFrames));
+      else args.push("-vn", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le");
+      args.push("-map_metadata", "-1", "-fs", String(this.limits.maxOutputBytes), output);
+      const toolchainDigest = await this.toolchainDigest();
+      await this.run(this.ffmpeg, args);
+      const probe = await this.inspect(output);
+      invariant(value.kind !== "video" || probe.video?.frames === value.durationFrames, "MEDIA_VALIDATION_FAILED", "Fixture duration differs from planned frames");
+      await this.decode(output);
+      const original = await this.installFile(path, "source", this.limits.maxInputBytes);
+      const normalized = await this.installFile(output, value.kind === "video" ? "mp4" : "wav", this.limits.maxOutputBytes);
+      const body = { artifactId: value.artifactId, kind: value.kind, originalSha256: original.sha256, originalByteLength: original.byteLength,
+        sha256: normalized.sha256, byteLength: normalized.byteLength, probe, toolchainDigest };
+      const source = { id: digest(body), ...body };
+      await this.installJson("sources", source.id, source); return frozen(source);
+    }));
+  }
+
   async freezeManifest(input: RenderManifestInput, options: { signal?: AbortSignal } = {}): Promise<FrozenRenderManifest> {
     const { signal } = options;
     aborted(signal);
@@ -272,6 +299,7 @@ export class LocalMediaService {
     invariant(value.width % 2 === 0 && value.height % 2 === 0 && value.width * value.height <= 1920 * 1080, "MEDIA_INVALID_INPUT", "Output requires bounded even dimensions");
     invariant(Array.isArray(value.clips) && value.clips.length > 0 && value.clips.length <= this.limits.maxClips, "MEDIA_INVALID_INPUT", "Invalid clip count");
     invariant(Array.isArray(value.audio ?? []) && (value.audio?.length ?? 0) <= this.limits.maxAudioPlacements, "MEDIA_INVALID_INPUT", "Too many audio placements");
+    invariant(value.demo === undefined || value.demo === true, "MEDIA_INVALID_INPUT", "Invalid demo mark");
     let totalFrames = 0;
     const clips = [];
     const sourceIdentities = new Map<string, string>();
@@ -306,10 +334,11 @@ export class LocalMediaService {
       integer(placement.gainMilliDb ?? 0, -60000, 12000, "audio gain");
       invariant(placement.startSample + placement.durationSamples <= source.probe.audio.samples, "MEDIA_SOURCE_TOO_SHORT", "Audio range exceeds measured samples");
       invariant(placement.atSample + placement.durationSamples <= totalSamples, "MEDIA_AUDIO_OUTSIDE_TIMELINE", "Audio cannot be silently cut at the timeline boundary");
-      audio.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
+      if (placement.fadeOutSamples !== undefined) integer(placement.fadeOutSamples, 1, Math.min(4800, placement.durationSamples), "audio fade");
+      audio.push({ ...(placement.fadeOutSamples !== undefined ? { fadeOutSamples: placement.fadeOutSamples } : {}), source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample, gainMilliDb: placement.gainMilliDb ?? 0 });
     }
     invariant(audioLanes(audio).length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Too many simultaneous audio placements");
-    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, toolchainDigest: await this.toolchainDigest(signal) };
+    const body = { version: 1 as const, projectId: value.projectId, targetRevisionId: value.targetRevisionId, width: value.width, height: value.height, frameRate: { numerator: 30 as const, denominator: 1 as const }, sampleRate: 48000 as const, totalFrames, clips, audio, ...(value.demo ? { demo: true as const } : {}), toolchainDigest: await this.toolchainDigest(signal) };
     aborted(signal);
     const manifest: FrozenRenderManifest = { digest: digest(body), ...body };
     await this.installJson("manifests", manifest.digest, manifest);
@@ -345,7 +374,21 @@ export class LocalMediaService {
         const fit = clip.fit === "contain" ? `scale=${size}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${size}:(ow-iw)/2:(oh-ih)/2:color=black` : `scale=${size}:force_original_aspect_ratio=increase:force_divisible_by=2,crop=${size}`;
         filters.push(`[${index}:v:0]trim=start_frame=${clip.startFrame}:end_frame=${clip.startFrame + clip.durationFrames},setpts=PTS-STARTPTS,${fit},setsar=1,format=yuv420p[v${index}]`);
       });
-      filters.push(`${manifest.clips.map((_, i) => `[v${i}]`).join("")}concat=n=${manifest.clips.length}:v=1:a=0[outv]`);
+      filters.push(`${manifest.clips.map((_, i) => `[v${i}]`).join("")}concat=n=${manifest.clips.length}:v=1:a=0[${manifest.demo ? "demov" : "outv"}]`);
+      if (manifest.demo) {
+        // Fixed bitmap glyphs spell "Demo". No host fonts or drawtext dependency in the pinned media profile.
+        const glyphs = [
+          ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+          ["00000", "00000", "01110", "10001", "11111", "10000", "01111"],
+          ["00000", "00000", "11010", "10101", "10101", "10101", "10101"],
+          ["00000", "00000", "01110", "10001", "10001", "10001", "01110"],
+        ];
+        const size = Math.max(1, Math.floor(manifest.width / 160)), boxes = [`drawbox=x=4:y=4:w=${25 * size}:h=${9 * size}:color=black@0.8:t=fill`];
+        glyphs.forEach((rows, letter) => rows.forEach((row, y) => [...row].forEach((pixel, x) => {
+          if (pixel === "1") boxes.push(`drawbox=x=${4 + (letter * 6 + x + 1) * size}:y=${4 + (y + 1) * size}:w=${size}:h=${size}:color=white:t=fill`);
+        })));
+        filters.push(`[demov]${boxes.join(",")}[outv]`);
+      }
       if (manifest.audio.length) {
         const lanes = audioLanes(manifest.audio);
         invariant(lanes.length <= this.limits.maxAudioTracks, "MEDIA_INVALID_INPUT", "Frozen manifest exceeds the simultaneous audio limit");
@@ -354,7 +397,7 @@ export class LocalMediaService {
           filters.push(`[${sourceIndex++}:a:0]asplit=${group.indices.length}${group.indices.map(index => `[sourcea${index}]`).join("")}`);
         }
         manifest.audio.forEach((placement, index) => {
-          filters.push(`[sourcea${index}]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB[a${index}]`);
+          filters.push(`[sourcea${index}]atrim=start_sample=${placement.startSample}:end_sample=${placement.startSample + placement.durationSamples},asetpts=PTS-STARTPTS,volume=${placement.gainMilliDb / 1000}dB${placement.fadeOutSamples ? `,afade=t=out:ss=${placement.durationSamples - placement.fadeOutSamples}:ns=${placement.fadeOutSamples}` : ""}[a${index}]`);
         });
         lanes.forEach((indices, lane) => {
           const parts: string[] = []; let cursor = 0, silenceIndex = 0;

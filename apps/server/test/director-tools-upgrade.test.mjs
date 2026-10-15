@@ -39,7 +39,7 @@ function fixture(t) {
 test("tool status is read-only and new projects use the current contract without an upgrade", async t => {
   const f = fixture(t), project = f.service.createProject("New project"), cursor = f.store.cursor(project.id);
   const response = await f.req("GET", project.id); assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), { currentVersion: "4.0.0", lockId: null, lockDigest: null, availableVersion: "4.0.0", upgradeAvailable: false, busy: false });
+  assert.deepEqual(response.json(), { currentVersion: "5.0.0", lockId: null, lockDigest: null, availableVersion: "5.0.0", upgradeAvailable: false, busy: false });
   assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.list("director_skill_lock", project.id).length, 0);
 });
 test("explicit upgrade installs one successor while preserving old locks, canonical state and edit authority", async t => {
@@ -84,7 +84,7 @@ test("setup, wrong-project predecessors and stale predecessor digests cannot ins
 test("the upgrade endpoint requires local authentication and rejects model-supplied actor or package fields", async t => {
   const f = fixture(t), project = f.service.createProject("Route"), prior = f.legacy(project.id), url = `/api/projects/${project.id}/director/tools/upgrade`;
   assert.equal((await f.app.inject({ method: "POST", url, payload: prior.input, headers: { host: "127.0.0.1" } })).statusCode, 403);
-  for (const extra of [{ actor: "human" }, { snapshotRoot: "/tmp/arbitrary" }, { targetVersion: "5.0.0" }]) {
+  for (const extra of [{ actor: "human" }, { snapshotRoot: "/tmp/arbitrary" }, { targetVersion: "99.0.0" }]) {
     const response = await f.req("POST", project.id, { ...prior.input, ...extra }, newId(), "/upgrade"); assert.equal(response.statusCode, 400, response.body);
   }
   assert.equal(f.store.list("director_skill_lock", project.id).length, 1);
@@ -128,7 +128,7 @@ test("historical V2 upgrade replay survives a later V3 update without accessing 
   assert.throws(() => f.director.upgradeTools(project.id, { expectedLockId: second.lockId, expectedLockDigest: second.lockDigest, targetVersion: "2.0.0" }, "downgrade"), { code: "DIRECTOR_TOOLS_STALE" });
 });
 
-for (const version of ["1.0.0", "2.0.0", "3.0.0", "4.0.0"]) test(
+for (const version of ["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"]) test(
   `director receives every declared reference from its immutable ${version} skill lock`, t => {
     const f = fixture(t), project = f.service.createProject("Complete references");
     const saved = createDirectorSkillLock(f.configuration, version);
@@ -138,7 +138,7 @@ for (const version of ["1.0.0", "2.0.0", "3.0.0", "4.0.0"]) test(
     const prepare = createDirectorInput(f.service, { ...f.configuration, endpoint: "http://127.0.0.1:3001" });
     const input = prepare({ id: newId(), projectId: project.id, requestId: human.requestId }, human, bridge);
     const context = JSON.parse(input.context), reads = f.store.list("skill_read", project.id);
-    assert.equal(context.snapshot.applicationCapabilities.narration.speechSynthesis.toolAvailable, ["3.0.0", "4.0.0"].includes(version),
+    assert.equal(context.snapshot.applicationCapabilities.narration.speechSynthesis.toolAvailable, ["3.0.0", "4.0.0", "5.0.0"].includes(version),
       "the first captured snapshot must advertise the exact catalog bound to its activation and MCP bridge");
     let count = 0;
     for (const skill of saved.lock.skills) {
@@ -166,7 +166,7 @@ for (const version of ["1.0.0", "2.0.0", "3.0.0"]) test(`explicit ${version} to 
   const before = digest(f.store.getProject(project.id));
   const input = { expectedLockId: saved.lock.id, expectedLockDigest: saved.lock.lockDigest, targetVersion: "4.0.0" };
   const response = await f.req("POST", project.id, input, "v4-upgrade", "/upgrade"); assert.equal(response.statusCode, 200, response.body);
-  const result = response.json(); assert.equal(result.currentVersion, "4.0.0"); assert.equal(result.upgradeAvailable, false);
+  const result = response.json(); assert.equal(result.currentVersion, "4.0.0"); assert.equal(result.upgradeAvailable, true);
   assert.equal(result.receipt.toolContract, "4.0.0"); assert.equal(digest(f.store.getProject(project.id)), before);
   assert.deepEqual(f.store.get("director_skill_lock", saved.lock.id).lock, saved.lock);
   const installed = f.store.get("director_skill_lock", result.lockId).lock;

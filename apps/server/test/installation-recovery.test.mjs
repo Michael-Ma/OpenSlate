@@ -11,7 +11,7 @@ import { Engine } from "../dist/execution/engine.js";
 import { ProductionService } from "../dist/application/service.js";
 import { DirectorSupervisor } from "../dist/application/director-supervisor.js";
 import { ToolInvocationService } from "../dist/application/tool-invocations.js";
-import { ProjectBudgetService, projectBudgetContextDigest, projectBudgetSnapshot } from "../dist/application/project-budget.js";
+import { historicalBudget } from "./project-budget-fixture.mjs";
 import { InstallationRecoveryGuard, installRecoveryQuarantine, releaseRecovery } from "../dist/application/installation-recovery.js";
 import { recoveryBodyHash } from "../dist/persistence/recovery-records.js";
 import { setup, sourceFor } from "./execution-fixture.mjs";
@@ -182,14 +182,13 @@ test("imported waiting questions cannot revive authority; explicit fresh continu
   f.service.control(f.projectId, fresh, "resume"); f.supervisor.tick(); await f.supervisor.settle(); assert.equal(f.calls(), 1);
 });
 
-test("budget receipt replay requires fresh human authority after restoration", t => {
-  const f = fixture(t), budget = new ProjectBudgetService(f.service), before = projectBudgetSnapshot(f.service, f.projectId);
-  const input = { expectedRevision: before.revision, expectedCapMicros: before.capMicros, capMicros: "2000000" };
-  const actor = f.service.beginRequest(f.projectId, "human", "Raise reviewed cap", { editing: false, contextDigest: projectBudgetContextDigest(f.projectId, input) });
-  budget.revise(f.projectId, actor, input); installRecoveryQuarantine(f.store, origin(f.root));
-  assert.throws(() => budget.revise(f.projectId, actor, input), { code: "INSTALLATION_QUARANTINED" }); release(f.store);
-  assert.throws(() => budget.revise(f.projectId, actor, input), { code: "RESTORED_AUTHORITY_REQUIRES_NEW" });
-  assert.equal(projectBudgetSnapshot(f.service, f.projectId).capMicros, "2000000");
+test("historical budget receipt survives restoration without granting new authority", t => {
+  const f = fixture(t), audit = historicalBudget(f.service, f.projectId);
+  installRecoveryQuarantine(f.store, origin(f.root));
+  assert.equal(f.service.recovery.isImported(f.projectId, 'message', audit.requestId), true);
+  release(f.store);
+  assert.deepEqual(f.store.get('project_budget_revision', audit.id), audit);
+  assert.throws(()=>f.service.recovery.assertFreshAuthority(f.projectId, 'message', audit.requestId),{code:'RESTORED_AUTHORITY_REQUIRES_NEW'});
 });
 
 test("fresh continuation selects its new generation grant rather than an unused imported ancestor grant", async t => {

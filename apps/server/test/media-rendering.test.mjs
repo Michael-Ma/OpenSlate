@@ -265,3 +265,16 @@ test("executable bytes are pinned and a changed configured tool cannot fulfill a
   await assert.rejects(owner.render(frozen), code("MEDIA_TOOLCHAIN_CHANGED"));
   assert.deepEqual(await readdir(join(owner.rootDir, "completions")), []);
 });
+
+test('a cut narration fade reduces the final samples while preserving the earlier audio', async () => {
+  const placement = { source: audio, startSample: 0, durationSamples: 24000, atSample: 0 };
+  const full = await shared.render(await manifest([video(red, 15)], [placement]));
+  const faded = await shared.render(await manifest([video(red, 15)], [{ ...placement, fadeOutSamples: 3840 }]));
+  async function power(path, start, end) {
+    const { stdout } = await execute(ffmpeg, ['-nostdin', '-v', 'error', '-i', path, '-map', '0:a:0', '-ac', '1', '-ar', '48000', '-f', 'f32le', '-'], { encoding: 'buffer', timeout: 15000 });
+    let sum = 0; for (let i = start; i < end; i++) sum += stdout.readFloatLE(i * 4) ** 2;
+    return sum / (end - start);
+  }
+  assert.ok(await power(faded.artifact.path, 21000, 23500) < await power(full.artifact.path, 21000, 23500) * 0.5);
+  assert.ok(await power(faded.artifact.path, 5000, 10000) > await power(full.artifact.path, 5000, 10000) * 0.8);
+});

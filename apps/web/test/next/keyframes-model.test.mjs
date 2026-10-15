@@ -145,6 +145,7 @@ test('prices never print $0.00 and keep sub-cent amounts', () => {
   assert.equal(en(priceMsg({ micros: '0', units: 1, unitMicros: '0', priceUnknown: true }, 'en-US')), 'no price set');
   assert.equal(en(priceMsg({ micros: '0', units: 2, unitMicros: '0', priceUnknown: false }, 'en-US')), 'no price set');
   assert.equal(formatMicros('4000', 'en-US'), '$0.004');
+  assert.equal(en(priceMsg({ micros: '1560000', units: 4, unitMicros: '0', priceUnknown: false }, 'en-US')), 'about $1.56');
   assert.equal(en(priceMsg({ micros: '40000', units: 1, unitMicros: '40000', priceUnknown: false }, 'en-US')), 'about $0.04');
 });
 

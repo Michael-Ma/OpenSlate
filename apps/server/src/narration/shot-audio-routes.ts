@@ -96,20 +96,20 @@ async function connected<T>(
   }
 }
 
-/** Human shot workspace. Requested speech retains exact operation identity; returned audio/timing acceptance is separate. */
-export function registerShotAudioRoutes(
-  app: FastifyInstance,
-  options: {
-    production: ProductionService;
-    narration: NarrationService;
-    canonical: NarrationCanonicalService;
-    narrationSpeech?: NarrationSpeechService;
-    actorFor(projectId: string, sessionId: string): ActorContext;
-  },
-) {
+export interface AcceptShotAudio {
+  sessionId: string; expectedHeadVersion: number; expectedVersion: number;
+  segmentId: string; segmentRevisionId: string; audioId: string; sha256: string;
+  startSample: number; endSample: number; durationMode?: "keep" | "match_audio";
+}
+export interface ShotAudioOptions {
+  production: ProductionService; narration: NarrationService; canonical: NarrationCanonicalService;
+  narrationSpeech?: NarrationSpeechService;
+  actorFor(projectId: string, sessionId: string): ActorContext;
+}
+/** Shared exact shot operations for HTTP and durable server commands. */
+export function createShotAudioWorkspace(options: ShotAudioOptions) {
   const { production, narration, canonical: commits, actorFor } = options,
     store = production.store;
-  const base = "/api/projects/:projectId/narration/shots/:shotId";
   const actorForShot = (
     projectId: string,
     sessionId: string,
@@ -252,6 +252,7 @@ export function registerShotAudioRoutes(
               ?.script.id ||
           digest(shot.narration ?? null) !== digest(writing);
         if (changed) {
+          delete shot.narrationFit;
           shot.narration = writing;
           shot.narrationPending = true;
           const saved = store.saveProject(
@@ -272,6 +273,142 @@ export function registerShotAudioRoutes(
       },
     );
   };
+  const accept = async (projectId: string, shotId: string, b: AcceptShotAudio, commandKey: string) => {
+    const actor = actorForShot(projectId, b.sessionId, shotId);
+    const prepared = store.command<PreparedAcceptance>(
+      `local-user:${projectId}:shot-audio-accept`,
+      commandKey,
+      digest({ shotId, ...b }),
+      () => {
+        const project = store.getProject(projectId),
+          shot = project.shots.find((shot) => shot.id === shotId),
+          row = detail(projectId, shotId).segment;
+        invariant(
+          shot && project.headVersion === b.expectedHeadVersion,
+          "REVISION_CONFLICT",
+          "Shot changed before review",
+        );
+        invariant(
+          row &&
+            row.entry.segmentId === b.segmentId &&
+            row.script.id === b.segmentRevisionId &&
+            row.audio?.id === b.audioId &&
+            row.audio.media.sha256 === b.sha256,
+          "NARRATION_STALE_ACCEPTANCE",
+          "The displayed script or recording changed",
+        );
+        const snapshot = narration.workspaceSnapshot(projectId);
+        invariant(
+          snapshot.state.version === b.expectedVersion,
+          "REVISION_CONFLICT",
+          "Narration changed before review",
+        );
+        const frames = Math.ceil((b.endSample - b.startSample) / 1600);
+        invariant(
+          b.endSample > b.startSample &&
+            shot.desiredFrames >= 90 &&
+            shot.desiredFrames <= 450,
+          "NARRATION_INVALID_INPUT",
+          "Choose a nonempty recording range and a planned 3–15 second shot",
+        );
+        invariant(
+          b.durationMode === "match_audio"
+            ? frames >= 90 && frames <= 450
+            : frames <= shot.desiredFrames,
+          "NARRATION_CUE_OUT_OF_RANGE",
+          "Trim the recording to fit this shot, or explicitly match a 3–15 second shot to the recording",
+        );
+        const ordered = project.scenes.flatMap((scene) =>
+          project.shots.filter((shot) => shot.sceneId === scene.id),
+        );
+        const atSample = ordered
+          .slice(
+            0,
+            ordered.findIndex((value) => value.id === shotId),
+          )
+          .reduce((sum, shot) => sum + shot.desiredFrames * 1600, 0);
+        let state = narration.recordHumanCue(
+          projectId,
+          actor,
+          b.expectedVersion,
+          `${commandKey}:cue`,
+          {
+            segmentId: b.segmentId,
+            startSample: b.startSample,
+            endSample: b.endSample,
+          },
+        );
+        state = narration.placeSegments(
+          projectId,
+          actor,
+          state.state.version,
+          `${commandKey}:place`,
+          [{ segmentId: b.segmentId, atSample }],
+        );
+        state = narration.accept(
+          projectId,
+          actor,
+          state.state.version,
+          `${commandKey}:script`,
+          "script",
+          [row.script.id],
+        );
+        state = narration.acceptAudio(
+          projectId,
+          actor,
+          state.state.version,
+          `${commandKey}:audio`,
+          [{ segmentRevisionId: row.script.id, audioId: b.audioId }],
+        );
+        state = narration.accept(
+          projectId,
+          actor,
+          state.state.version,
+          `${commandKey}:timing`,
+          "timing",
+          [
+            state.segments.find((row) => row.entry.segmentId === b.segmentId)!
+              .cue!.id,
+          ],
+        );
+        const change = commits.prepare(projectId, actor, {
+          expectedHeadVersion: b.expectedHeadVersion,
+          expectedNarrationVersion: state.state.version,
+          segmentIds: [b.segmentId],
+          shotRelativeSegmentIds: [b.segmentId],
+          shotDurationMode:
+            b.durationMode === "match_audio" ? "match_audio" : "preserve",
+          shotMappings: [{ shotId, segmentId: b.segmentId }],
+          key: `${commandKey}:prepare`,
+        });
+        return { preparedId: change.id, projectId, shotId };
+      },
+    );
+    const receipt: NarrationCommitReceipt = await commits.apply(
+      projectId,
+      actor,
+      prepared.preparedId,
+    );
+    return { receipt, ...detail(projectId, shotId) };
+  };
+  return { detail, saveWriting, actorForShot, accept };
+}
+
+/** Human shot workspace. Requested speech retains exact operation identity; returned audio/timing acceptance is separate. */
+export function registerShotAudioRoutes(
+  app: FastifyInstance,
+  options: {
+    production: ProductionService;
+    narration: NarrationService;
+    canonical: NarrationCanonicalService;
+    narrationSpeech?: NarrationSpeechService;
+    actorFor(projectId: string, sessionId: string): ActorContext;
+  },
+) {
+  const workspace = createShotAudioWorkspace(options);
+  const { detail, saveWriting, actorForShot } = workspace;
+  const { production, narration, canonical: commits } = options, store = production.store;
+  const base = "/api/projects/:projectId/narration/shots/:shotId";
   app.get<{ Params: { projectId: string; shotId: string } }>(
     base,
     async (request) => detail(request.params.projectId, request.params.shotId),
@@ -700,125 +837,7 @@ export function registerShotAudioRoutes(
       },
     },
     async (request) => {
-      const { projectId, shotId } = request.params,
-        b = request.body,
-        actor = actorForShot(projectId, b.sessionId, shotId),
-        commandKey = key(request);
-      const prepared = store.command<PreparedAcceptance>(
-        `local-user:${projectId}:shot-audio-accept`,
-        commandKey,
-        digest({ shotId, ...b }),
-        () => {
-          const project = store.getProject(projectId),
-            shot = project.shots.find((shot) => shot.id === shotId),
-            row = detail(projectId, shotId).segment;
-          invariant(
-            shot && project.headVersion === b.expectedHeadVersion,
-            "REVISION_CONFLICT",
-            "Shot changed before review",
-          );
-          invariant(
-            row &&
-              row.entry.segmentId === b.segmentId &&
-              row.script.id === b.segmentRevisionId &&
-              row.audio?.id === b.audioId &&
-              row.audio.media.sha256 === b.sha256,
-            "NARRATION_STALE_ACCEPTANCE",
-            "The displayed script or recording changed",
-          );
-          const snapshot = narration.workspaceSnapshot(projectId);
-          invariant(
-            snapshot.state.version === b.expectedVersion,
-            "REVISION_CONFLICT",
-            "Narration changed before review",
-          );
-          const frames = Math.ceil((b.endSample - b.startSample) / 1600);
-          invariant(
-            b.endSample > b.startSample &&
-              shot.desiredFrames >= 90 &&
-              shot.desiredFrames <= 450,
-            "NARRATION_INVALID_INPUT",
-            "Choose a nonempty recording range and a planned 3–15 second shot",
-          );
-          invariant(
-            b.durationMode === "match_audio"
-              ? frames >= 90 && frames <= 450
-              : frames <= shot.desiredFrames,
-            "NARRATION_CUE_OUT_OF_RANGE",
-            "Trim the recording to fit this shot, or explicitly match a 3–15 second shot to the recording",
-          );
-          const ordered = project.scenes.flatMap((scene) =>
-            project.shots.filter((shot) => shot.sceneId === scene.id),
-          );
-          const atSample = ordered
-            .slice(
-              0,
-              ordered.findIndex((value) => value.id === shotId),
-            )
-            .reduce((sum, shot) => sum + shot.desiredFrames * 1600, 0);
-          let state = narration.recordHumanCue(
-            projectId,
-            actor,
-            b.expectedVersion,
-            `${commandKey}:cue`,
-            {
-              segmentId: b.segmentId,
-              startSample: b.startSample,
-              endSample: b.endSample,
-            },
-          );
-          state = narration.placeSegments(
-            projectId,
-            actor,
-            state.state.version,
-            `${commandKey}:place`,
-            [{ segmentId: b.segmentId, atSample }],
-          );
-          state = narration.accept(
-            projectId,
-            actor,
-            state.state.version,
-            `${commandKey}:script`,
-            "script",
-            [row.script.id],
-          );
-          state = narration.acceptAudio(
-            projectId,
-            actor,
-            state.state.version,
-            `${commandKey}:audio`,
-            [{ segmentRevisionId: row.script.id, audioId: b.audioId }],
-          );
-          state = narration.accept(
-            projectId,
-            actor,
-            state.state.version,
-            `${commandKey}:timing`,
-            "timing",
-            [
-              state.segments.find((row) => row.entry.segmentId === b.segmentId)!
-                .cue!.id,
-            ],
-          );
-          const change = commits.prepare(projectId, actor, {
-            expectedHeadVersion: b.expectedHeadVersion,
-            expectedNarrationVersion: state.state.version,
-            segmentIds: [b.segmentId],
-            shotRelativeSegmentIds: [b.segmentId],
-            shotDurationMode:
-              b.durationMode === "match_audio" ? "match_audio" : "preserve",
-            shotMappings: [{ shotId, segmentId: b.segmentId }],
-            key: `${commandKey}:prepare`,
-          });
-          return { preparedId: change.id, projectId, shotId };
-        },
-      );
-      const receipt: NarrationCommitReceipt = await commits.apply(
-        projectId,
-        actor,
-        prepared.preparedId,
-      );
-      return { receipt, ...detail(projectId, shotId) };
+      return workspace.accept(request.params.projectId, request.params.shotId, request.body, key(request));
     },
   );
   app.get<{ Params: { projectId: string } }>(
@@ -853,6 +872,7 @@ export function registerShotAudioRoutes(
                 durationSamples: placement.durationSamples,
                 atSample: placement.atSample,
                 gainMilliDb: placement.gainMilliDb,
+                ...(placement.fadeOutSamples ? { fadeOutSamples: placement.fadeOutSamples } : {}),
                 shotIds: project.shots
                   .filter((shot) => shot.cueId === segment.cue.id)
                   .map((shot) => shot.id),

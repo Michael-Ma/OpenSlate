@@ -1,3 +1,5 @@
+import { recordNotes, type NoteInput } from "./director-notes.js";
+import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog, toolHandlerId } from "@openslate/core";
 import type { ActorContext, JsonValue, ToolName, ToolContractVersion } from "@openslate/core";
 import type { SkillCapabilityLock } from "@openslate/director";
@@ -31,7 +33,7 @@ export interface ToolInvocation {
   error: { code: string; message: string } | null;
   /** Minimal domain correlation; credentials and full context never belong here. */
   recovery?: { preparedId?: string; proposalDigest?: string; narrationCommand?: { key: string; digest: string };
-    audioProposalCommand?: { kind: "recording_transcription" | "narration_speech"; key: string; digest: string; requested?: boolean } };
+    audioProposalCommand?: { kind: "recording_transcription" | "narration_speech"; key: string; digest: string; requested?: boolean; suggested?: boolean } };
 }
 
 /** Full text and media descriptors stay in domain storage and paged context, never this receipt. */
@@ -57,7 +59,27 @@ function audioProposalReceipt(value: unknown, kind: "recording_transcription" | 
     && proposal.inputDigest === inputDigest && proposal.state === "ungranted" && Buffer.byteLength(canonical(proposal)) <= AUDIO_PROPOSAL_MAX_BYTES,
     "TOOL_CALL_UNRESOLVED", "Audio proposal differs from its exact originating request");
   return { id: proposal.id, proposalId: proposal.id, proposalDigest: digest(proposal), kind, state: "ungranted",
-    next: "Read audio_operations for the saved proposal. Human plan review and separate finite spending approval are required. No generation, attachment, adoption or acceptance was performed." };
+    next: "Read audio_operations for the saved proposal. A human must press the existing audio request action to generate this suggestion. No job, grant, reservation, attachment, adoption or acceptance was created." };
+}
+
+/** A durable suggestion is displayable and replayable, but carries no execution authority. */
+function pendingAudioReceipt(store: Store, value: unknown, kind: 'recording_transcription' | 'narration_speech', projectId: string,
+  actor: Pick<ActorContext, 'principalId' | 'requestId'>, epochId: string, inputDigest: string, commandKey: string) {
+  let preparedDigest = inputDigest;
+  if (kind === 'narration_speech') {
+    const normalized = store.db.prepare('SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?')
+      .get(`${actor.principalId}:${projectId}:${actor.requestId}:narration-speech-request:${epochId}-input`, commandKey, inputDigest) as { result: string } | undefined;
+    if (normalized) preparedDigest = digest(JSON.parse(normalized.result));
+  }
+  const receipt = audioProposalReceipt(value, kind, projectId, actor, epochId, preparedDigest);
+  const id = digest({ purpose: 'director_audio_suggestion', projectId, proposalId: receipt.proposalId });
+  return store.transaction(() => {
+    const suggestion = store.get<{ id: string; action: { kind: string; proposalId: string; proposalDigest: string } }>('director_audio_request', id)
+      ?? store.insert('director_audio_request', id, projectId, { id, projectId, requestId: actor.requestId, epochId,
+        source: 'director', state: 'pending', title: kind === 'narration_speech' ? 'The Director suggests making this voice line.' : 'The Director suggests transcribing this recording.', proposalId: receipt.proposalId, proposalDigest: receipt.proposalDigest,
+        action: { kind: kind === 'narration_speech' ? 'request_speech' : 'request_transcription', proposalId: receipt.proposalId, proposalDigest: receipt.proposalDigest } });
+    return { ...receipt, pendingRequestId: suggestion.id, action: suggestion.action };
+  });
 }
 
 /** The transport describes already-published application evidence, never an inferred provider result. */
@@ -141,7 +163,7 @@ export class ToolInvocationService {
       const record: ToolInvocation = { id, projectId, requestId: actor.requestId, epochId: actor.epochId, callId,
         tool: parsed.name, toolContractVersion: selected.catalog.version, catalogDigest: selected.catalog.digest, skillLockId: selected.lockId,
         argumentsDigest: argumentHash, state: "started", result: null, resultDigest: null, error: null,
-        recovery: audioTool(parsed.name) ? { audioProposalCommand: { kind: audioKind(parsed.name), key: commandKey, digest: digest(proposalInput), ...(selected.audioRequests ? { requested: true } : {}) } }
+        recovery: audioTool(parsed.name) ? { audioProposalCommand: { kind: audioKind(parsed.name), key: commandKey, digest: digest(proposalInput), suggested: true } }
           : parsed.name === "apply_change" ? { preparedId: parsed.arguments.preparedId as string }
           : parsed.name === "prepare_change" ? { proposalDigest: digest(parsed.arguments) }
           : parsed.name === "revise_narration_draft" ? { narrationCommand: { key: `director-tool:${id}`,
@@ -162,6 +184,7 @@ export class ToolInvocationService {
       if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution"].includes(parsed.name),
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
+        case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {
           const prepared = await this.service.prepare(projectId, actor, parsed.arguments);
@@ -180,25 +203,17 @@ export class ToolInvocationService {
         case "prepare_recording_transcription": {
           const port = this.#ownedTranscription;
           invariant(port, "TOOL_CAPABILITY_UNAVAILABLE", "Recording proposal preparation is not configured on this server");
-          if (selected.audioRequests) {
-            const result = await port.request(projectId, actor, proposalInput as unknown as PrepareOwnedTranscription, signal ? { signal } : {});
-            stopped(); value = audioRequestReceipt(store, result.proposal, result.receipt, 'recording_transcription', projectId, actor, actor.epochId, digest(proposalInput), commandKey);
-          } else {
-            const proposal = await port.prepare(projectId, actor, proposalInput as unknown as PrepareOwnedTranscription, signal ? { signal } : {});
-            stopped(); value = audioProposalReceipt(proposal, "recording_transcription", projectId, actor, actor.epochId, digest(proposalInput));
-          }
+          const proposal = await port.prepare(projectId, actor, proposalInput as unknown as PrepareOwnedTranscription, signal ? { signal } : {});
+          stopped(); value = pendingAudioReceipt(store, proposal, "recording_transcription", projectId, actor, actor.epochId, digest(proposalInput), commandKey);
           break;
         }
         case "prepare_narration_speech": {
           const port = this.#narrationSpeech;
           invariant(port, "TOOL_CAPABILITY_UNAVAILABLE", "Speech proposal preparation is not configured on this server");
-          if (selected.audioRequests) {
-            const result = await port.request(projectId, actor, proposalInput as unknown as PrepareNarrationSpeech, signal ? { signal } : {});
-            stopped(); value = audioRequestReceipt(store, result.proposal, result.receipt, 'narration_speech', projectId, actor, actor.epochId, digest(proposalInput), commandKey);
-          } else {
-            const proposal = await port.prepare(projectId, actor, proposalInput as unknown as PrepareNarrationSpeech, signal ? { signal } : {});
-            stopped(); value = audioProposalReceipt(proposal, "narration_speech", projectId, actor, actor.epochId, digest(proposalInput));
-          }
+          const proposal = selected.audioRequests
+            ? await port.prepareRequest(projectId, actor, proposalInput as unknown as PrepareNarrationSpeech, signal ? { signal } : {})
+            : await port.prepare(projectId, actor, proposalInput as unknown as PrepareNarrationSpeech, signal ? { signal } : {});
+          stopped(); value = pendingAudioReceipt(store, proposal, "narration_speech", projectId, actor, actor.epochId, digest(proposalInput), commandKey);
           break;
         }
         case "revise_narration_draft": value = narrationReceipt(this.narration.reviseSegments(projectId, actor,
@@ -237,6 +252,10 @@ export class ToolInvocationService {
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
         let receipt: unknown = null;
+        if (call.tool === "record_notes" && call.toolContractVersion === "5.0.0" && call.catalogDigest === toolCatalog("5.0.0").digest) {
+          const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>("director_notes_receipt", call.id);
+          if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
+        }
         if (call.tool === "apply_change" && call.recovery?.preparedId) {
           const prepared = store.get<{ projectId: string; requestId: string; epochId: string; proposalDigest: string }>("prepared", call.recovery.preparedId);
           if (prepared?.projectId === projectId && prepared.requestId === call.requestId && prepared.epochId === epochId) {
@@ -250,7 +269,7 @@ export class ToolInvocationService {
             .find(row => row.requestId === call.requestId && row.epochId === epochId && row.proposalDigest === call.recovery!.proposalDigest);
           if (prepared) receipt = { preparedId: prepared.id, proposalDigest: prepared.proposalDigest };
         }
-        if (call.tool === "revise_narration_draft" && ["2.0.0", "3.0.0", "4.0.0"].includes(call.toolContractVersion ?? "1.0.0") && call.recovery?.narrationCommand) {
+        if (call.tool === "revise_narration_draft" && (SUPPORTED_TOOL_CONTRACTS.slice(1) as readonly string[]).includes(call.toolContractVersion ?? "1.0.0") && call.recovery?.narrationCommand) {
           const command = call.recovery.narrationCommand;
           if (command.key === `director-tool:${call.id}`) {
             const row = store.db.prepare("SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?")
@@ -261,12 +280,12 @@ export class ToolInvocationService {
             }
           }
         }
-        if ((call.toolContractVersion === "3.0.0" || call.toolContractVersion === "4.0.0") && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
+        if ((call.toolContractVersion && (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(call.toolContractVersion)) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
           const command = call.recovery.audioProposalCommand, kind = audioKind(call.tool);
           if (command.kind === kind && command.key === `director-tool:${call.id}`) {
             const suffix = kind === "recording_transcription" ? "owned-transcription" : "narration-speech";
             let inputDigest = command.digest;
-            if (command.requested && kind === 'narration_speech') {
+            if ((command.requested || command.suggested) && kind === 'narration_speech') {
               const normalized = store.db.prepare('SELECT result FROM commands WHERE actor_scope=? AND key=? AND digest=?')
                 .get(`${epoch.principalId}:${projectId}:${call.requestId}:narration-speech-request:${epochId}-input`, command.key, command.digest) as { result: string } | undefined;
               if (normalized) inputDigest = digest(JSON.parse(normalized.result));
@@ -289,7 +308,8 @@ export class ToolInvocationService {
                     receipt = published ? audioRequestReceipt(store, proposal, JSON.parse(published.result), kind, projectId, epoch, epochId, command.digest, command.key)
                       : { ...audioProposalReceipt(proposal, kind, projectId, epoch, epochId, inputDigest), state: 'prepared_only',
                         next: 'Exact audio preparation was saved, but no application publication was found. Continue from current saved input.' };
-                  } else receipt = audioProposalReceipt(proposal, kind, projectId, epoch, epochId, command.digest);
+                  } else receipt = command.suggested ? pendingAudioReceipt(store, proposal, kind, projectId, epoch, epochId, command.digest, command.key)
+                    : audioProposalReceipt(proposal, kind, projectId, epoch, epochId, command.digest);
                 }
               } catch { /* Missing, restored or inconsistent evidence cannot authorize a new proposal. */ }
             }

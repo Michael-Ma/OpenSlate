@@ -70,9 +70,12 @@ test('public preparation and application retain their legacy records, grant bind
   assert.deepEqual(state(f.store), saved); noExecution(f);
 });
 
-test('a current editable audio request creates fresh missing operation ownership without a separate authorization step', async t => {
-  const f = fixture(t), [existing] = f.authorize(1), prepared = await f.prepare();
-  assert.equal(Object.keys(prepared.grantBindings).length, 2);assert.equal(f.store.list('grant',f.project.id).length,2);
+test('Director preparation requires every paid audio grant while a human request may create missing audio ownership', async t => {
+  const f = fixture(t), [existing] = f.authorize(1), before = state(f.store);
+  await assert.rejects(f.prepare(), {code:'ORIGIN_NOT_AUTHORIZED'});
+  assert.deepEqual(state(f.store),before);noExecution(f);
+  const prepared=await f.service.prepare(f.project.id,f.human,f.proposal());
+  assert.equal(Object.keys(prepared.grantBindings).length,2);assert.equal(f.store.list('grant',f.project.id).length,2);
   assert.ok(Object.values(prepared.grantBindings).includes(existing.id));assert.deepEqual(f.store.get('grant',existing.id),existing);
   assert.equal(f.store.list('candidate',f.project.id).length,0);noExecution(f);
 });

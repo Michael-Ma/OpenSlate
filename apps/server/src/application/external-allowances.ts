@@ -1,8 +1,8 @@
-import { canonical, invariant, moneyMicros } from "@openslate/core";
+import { canonical, invariant } from "@openslate/core";
 import type { ActorContext } from "@openslate/core";
 import { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "./installation-recovery.js";
-import { allowanceUsage, currentAllowanceSelection } from "../execution/durable-external-admission.js";
+import { currentAllowanceSelection } from "../execution/durable-external-admission.js";
 import { allowanceIssueContextDigest, allowanceIssueInput, allowanceRevokeContextDigest, MAX_EXTERNAL_ALLOWANCE_LIFETIME_MS } from "../execution/external-allowance-records.js";
 import type { AllowanceHumanRequest, AllowanceIssueInput, AllowanceRevokeInput, ExternalAllowance, ExternalAllowanceRevocation } from "../execution/external-allowance-records.js";
 
@@ -50,19 +50,6 @@ export class ExternalAllowanceService {
         { id: allowance.id, projectId, version: 1, allowanceId: allowance.id, requestId: actor.requestId, principalId: actor.principalId,
           contextDigest, createdAt: new Date().toISOString() });
       this.store.appendEvent(projectId, "external_allowance.revoked", { allowanceId: allowance.id }); return result;
-    });
-  }
-  list(projectId: string, actor: ActorContext) {
-    // Money summaries expose the whole project and therefore require project scope.
-    const request = this.request(projectId, actor);
-    invariant(actor.kind === "human" && request.scopeIds.includes(projectId), "SCOPE_DENIED", "Allowance summaries require the project human");
-    return this.store.list<ExternalAllowance>("external_allowance", projectId).map(allowance => {
-      const used = allowanceUsage(this.store, allowance), revoked = !!this.store.get("external_allowance_revocation", allowance.id);
-      const expired = Date.parse(allowance.expiresAt) <= Date.now();
-      return { ...allowance, usedAttempts: used.attempts, usedEstimatedMicros: used.estimatedMicros,
-        remainingAttempts: Math.max(0, allowance.maxAttempts - used.attempts),
-        remainingEstimatedMicros: (moneyMicros(allowance.maxEstimatedMicros) > moneyMicros(used.estimatedMicros)
-          ? moneyMicros(allowance.maxEstimatedMicros) - moneyMicros(used.estimatedMicros) : 0n).toString(), revoked, expired };
     });
   }
   private human(projectId: string, actor: ActorContext, contextDigest: string): AllowanceHumanRequest {

@@ -1,3 +1,4 @@
+import { allowanceSummary } from './allowance-usage-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, readFile, unlink, writeFile } from 'node:fs/promises';
@@ -380,7 +381,7 @@ test('a separate exact one-start spending allowance does not create another cand
   const before = bodies(f, [...authorityKinds, ...narrationKinds, 'hold', 'epoch']), project = f.store.getProject(f.project.id);
   const human = f.production.beginRequest(f.project.id, 'human', 'Approve this exact one-start recognition estimate.',
     { editing: false, contextDigest: allowanceIssueContextDigest(f.project.id, input) });
-  const allowance = allowances.issue(f.project.id, human, input), summary = allowances.list(f.project.id, human)[0];
+  const allowance = allowances.issue(f.project.id, human, input), summary = allowanceSummary(f.store, f.project.id)[0];
   assert.equal(allowance.maxAttempts, 1); assert.equal(summary.remainingAttempts, 1); assert.equal(summary.usedAttempts, 0);
   assert.equal(summary.remainingEstimatedMicros, f.profile.unitCostMicros); assert.deepEqual(f.store.getProject(f.project.id), project);
   assert.equal(bodies(f, [...authorityKinds, ...narrationKinds, 'hold', 'epoch']), before); assert.equal(f.provider.acceptedCount(), 0); noSpending(f);

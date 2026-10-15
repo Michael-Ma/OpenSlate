@@ -131,7 +131,13 @@ export function lastFerryOverview(): GenerationOverview {
   };
 }
 
-export function lastFerrySnapshot(): ProjectSnapshot {
+/** Local "YYYY-MM-DDTHH:MM:00" on the given day, so the sample conversation always reads as today. */
+function todayAt(now: Date, hours: number, minutes: number): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(hours)}:${pad(minutes)}:00`;
+}
+
+export function lastFerrySnapshot(now: Date = new Date()): ProjectSnapshot {
   return {
     project: {
       id: PROJECT_ID,
@@ -154,8 +160,8 @@ export function lastFerrySnapshot(): ProjectSnapshot {
       })),
     },
     conversation: [
-      { id: "m1", role: "user", text: "@Scene 2 make the harbour feel colder, more like early morning, and keep Mara's red coat.", scopeIds: [sceneId(2)], at: "2026-10-14T10:42:00" },
-      { id: "m2", role: "assistant", text: "I rewrote the three Scene 2 prompts with a blue dawn light and kept Mara's red coat in 2.2. Keyframes for all three shots are back. Two things to check before I make video:", at: "2026-10-14T10:44:00" },
+      { id: "m1", role: "user", text: "@Scene 2 make the harbour feel colder, more like early morning, and keep Mara's red coat.", scopeIds: [sceneId(2)], at: todayAt(now, 10, 42) },
+      { id: "m2", role: "assistant", text: "I rewrote the three Scene 2 prompts with a blue dawn light and kept Mara's red coat in 2.2. Keyframes for all three shots are back. Two things to check before I make video:", at: todayAt(now, 10, 44) },
     ],
     questions: [],
     control: { paused: false },

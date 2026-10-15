@@ -100,7 +100,8 @@ test("health remains public on loopback while project routes require a valid loc
     ["GET", f.path], ["GET", `${f.path}/review`], ["GET", `${f.path}/events`],
     ["POST", "/api/projects", { name: "Denied project" }],
     ["POST", `${f.path}/messages`, { text: "Denied request" }],
-    ["POST", `${f.path}/controls`, { action: "resume" }],
+    ["POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
     ["POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video"] }],
   ]) {
     error(await f.app.inject({ method, url, payload, headers: { host: "127.0.0.1" } }), 403, "AUTH_REQUIRED");
@@ -139,7 +140,7 @@ test("public schemas reject additional authority fields and type coercion before
   ]) error(await f.request("POST", `${f.path}/messages`, payload), 400, "VALIDATION_ERROR");
   for (const payload of [{ name: "Project", actor: "human" }, { name: 12 }, { name: "" }])
     error(await f.request("POST", "/api/projects", payload), 400, "VALIDATION_ERROR");
-  error(await f.request("POST", `${f.path}/controls`, { action: "resume", principalId: "forged" }), 400, "VALIDATION_ERROR");
+  error(await f.request("POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null, principalId: "forged" }), 400, "VALIDATION_ERROR");
   error(await f.request("POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video"], actor: "human" }), 400, "VALIDATION_ERROR");
   error(await f.request("POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video", "video"] }), 400, "VALIDATION_ERROR");
   assert.equal(f.store.cursor(f.project.id), cursor);
@@ -171,7 +172,8 @@ test("local-user and director tokens cannot cross routes or gain human review an
   error(await f.tool("read_context", {}, f.localToken), 403, "EPOCH_REVOKED");
   for (const [method, url, payload] of [
     ["GET", f.path],
-    ["POST", `${f.path}/controls`, { action: "resume" }],
+    ["POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
     ["POST", `${f.path}/approvals`, { snapshotId: "snapshot", videoNodeIds: ["video"] }],
   ]) error(await f.app.inject({ method, url, payload, headers: f.headers(bridge.token) }), 403, "AUTH_REQUIRED");
   const read = await f.tool("read_context", {}, bridge.token);
@@ -364,7 +366,7 @@ test('chat stop and continuation retries never override newer human intent or mu
 });
 
 test('stopped continuation is project-wide and cannot be smuggled through a review reply',async t=>{
-  const f=fixture(t);await f.request('POST',`${f.path}/controls`,{action:'stop'});
+  const f=fixture(t);const stopped=await f.request('POST',`${f.path}/controls`,{action:'stop'},{'idempotency-key':randomUUID()});assert.equal(stopped.statusCode,200,stopped.body);
   const resumeFromStopId=f.service.snapshot(f.project.id).control.authorityId;
   const before=f.store.list('message',f.project.id).length;
   const readOnly=await f.request('POST',`${f.path}/messages`,{text:'Continue',editing:false,resumeFromStopId});

@@ -1,3 +1,9 @@
+import { registerDirectorNotes } from "./application/director-notes.js";
+import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
+import { SceneConfirmationRunner, registerSceneConfirmations } from "./scene-confirmations.js";
+import { registerNarrationFit } from "./narration-fit.js";
+import { requiredCommandKey } from "./application/command-key.js";
+import { registerGenerationOverview } from "./generation-overview.js";
 import { registerSceneGeneration } from './scene-generation.js';
 import { continueEditsSchema, type ContinueEdits } from './application/pending-edit-continuation.js';
 import { registerStoryboard } from "./storyboard.js";
@@ -14,6 +20,7 @@ import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync }
 import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
+import type { ControlInput, ReleaseAttemptInput } from "@openslate/core/public";
 import { ToolInvocationService } from "./application/tool-invocations.js";
 import { imageMessageContext, selectedDirectorImages } from "./application/director-images.js";
 import type { SelectedDirectorImage } from "./application/director-images.js";
@@ -28,15 +35,13 @@ import { registerMediaRoutes } from "./media/routes.js";
 import { registerImageRoutes } from "./media/image-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./application/provider-catalog.js";
-import { registerAllowanceRoutes } from "./application/allowance-routes.js";
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
 
-interface AppOptions { service?: ProductionService; localToken?: string; logger?: boolean;
+interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string; logger?: boolean;
   /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
   allowedOrigins?: readonly string[];
   studioSessions?: StudioSessions;
-  allowanceRoutes?: Parameters<typeof registerAllowanceRoutes>[1];
   providerCatalog?: InstalledProviderCatalog;
   webAssets?: WebAssets;
   director?: Pick<DirectorSupervisor, "status" | "enqueue" | "answerQuestion" | "tick">;
@@ -59,12 +64,16 @@ export function createApp(options: AppOptions = {}) {
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
   const directorMode = (projectId: string) => options.director?.status(projectId).mode ?? "not_connected";
-  registerSceneGeneration(app, service, options.narrationRoutes?.narration);
+  registerDirectorNotes(app, service);
+  const sceneCommands = options.sceneCommands ?? (options.service ? new SceneConfirmationRunner(options.service, options.narrationRoutes) : undefined);
+  registerSceneGeneration(app, service, options.narrationRoutes?.narration, sceneCommands?.enqueueKeyframes);
+  if (sceneCommands) { registerSceneConfirmations(app, sceneCommands); registerNarrationFit(app, sceneCommands); }
+  registerGenerationOverview(app, service, options.narrationRoutes?.narration);
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403
-        : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : error.code === "VALIDATION_ERROR" ? 400 : 409;
-      void reply.status(status).send({ error: { code: error.code, message: error.message, ...(error.code === "SHOT_SHORTER_THAN_NARRATION" ? { details: error.details } : {}) } });
+        : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : ["VALIDATION_ERROR", "IDEMPOTENCY_KEY_REQUIRED"].includes(error.code) ? 400 : 409;
+      void reply.status(status).send({ error: { code: error.code, message: error.message, ...(["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });
@@ -73,8 +82,9 @@ export function createApp(options: AppOptions = {}) {
     invariant(host === "127.0.0.1" || host === "localhost", "ORIGIN_DENIED", "Use a loopback address");
     const origin = request.headers.origin;
     invariant(!origin || allowedOrigins.includes(origin), "ORIGIN_DENIED", "Origin is not permitted");
+    const requiresCommandKey = request.method === "POST" && ["/api/projects/:projectId/controls", "/api/projects/:projectId/scenes/:sceneId/generate", "/api/projects/:projectId/scenes/:sceneId/confirm", "/api/projects/:projectId/shots/:shotId/narration-fit"].includes(request.routeOptions.url ?? "");
     const commandKey = request.headers["idempotency-key"];
-    invariant(commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
+    invariant(requiresCommandKey || commandKey === undefined || (typeof commandKey === "string" && commandKey.length > 0 && commandKey.length <= 160), "VALIDATION_ERROR", "Use one bounded command identity");
     if (request.routeOptions.url === "/api/health" || isPublicWebRequest(request)) return;
     if (options.studioSessions && request.routeOptions.url === "/api/session" && request.method === "POST") {
       invariant(origin && request.headers["x-openslate-client"] === "studio", "ORIGIN_DENIED", "Pair from the local studio page");
@@ -92,6 +102,7 @@ export function createApp(options: AppOptions = {}) {
       options.studioSessions.authorize(request);
       reply.header("Cache-Control", "no-store");
     }
+    if (requiresCommandKey) requiredCommandKey(request);
     // Pairing/logout are independent of installation recovery and grant no execution authority.
     if (options.studioSessions && ["/api/session", "/api/session/logout", "/api/studio/launch"].includes(request.routeOptions.url ?? "")) return;
     // Authenticate first. The narrow release endpoint is independent of project/model authority;
@@ -115,10 +126,6 @@ export function createApp(options: AppOptions = {}) {
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
-  if (options.allowanceRoutes) {
-    invariant(options.allowanceRoutes.service === options.service, "ALLOWANCE_CONFIGURATION_INVALID", "Spending routes must use this application's service");
-    registerAllowanceRoutes(app, options.allowanceRoutes);
-  }
   app.get("/api/projects", async () => ({ projects: service().store.listProjects().map(project => ({ id: project.id, name: project.name, headVersion: project.headVersion, activePlanId: project.activePlanId, shotCount: project.shots.length })) }));
   app.get("/api/providers", async () => providerCatalog().view());
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
@@ -176,8 +183,8 @@ export function createApp(options: AppOptions = {}) {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.tools(request.params.projectId);
   });
-  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: "2.0.0" | "3.0.0" | "4.0.0" } }>("/api/projects/:projectId/director/tools/upgrade", {
-    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: ["2.0.0", "3.0.0", "4.0.0"] } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
+  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: Exclude<import("@openslate/core").ToolContractVersion, "1.0.0"> } }>("/api/projects/:projectId/director/tools/upgrade", {
+    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: SUPPORTED_TOOL_CONTRACTS.slice(1) } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
   }, async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
     return options.runtimeSettings.upgradeTools(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
@@ -236,7 +243,7 @@ export function createApp(options: AppOptions = {}) {
       const shotIds = request.body.action === "create" ? project.shots.map(shot => shot.id) : [request.body.shotId];
       invariant(shotIds.every(id => id && project.shots.some(shot => shot.id === id)), "VALIDATION_ERROR", "Select a demo shot");
       const text = request.body.action === "create" ? "Create a 2-shot offline demo with sample media." : `Try ${request.body.action === "close_up" ? "a close-up" : "a wide view"} for the selected demo shot.`;
-      const actor = service().beginRequest(projectId, "local-user", text, { scopeIds: request.body.action === "create" ? [projectId] : shotIds as string[], key: `demo:${key}`, contextDigest: digest(request.body) });
+      const actor = service().beginRequest(projectId, "local-user", text, { source: "app", scopeIds: request.body.action === "create" ? [projectId] : shotIds as string[], key: `demo:${key}`, contextDigest: digest(request.body) });
       service().authorize(projectId, actor, (shotIds as string[]).flatMap(scopeId => [{ scopeId, kind: "image" as const }, { scopeId, kind: "video" as const }]), `demo-slots:${actor.requestId}`, request.body.action === "create" ? "initial_slot" : "user_change");
       service().store.insert("demo_command", actor.requestId, projectId, request.body);
       const turn = options.director!.enqueue(projectId, actor);
@@ -289,18 +296,28 @@ export function createApp(options: AppOptions = {}) {
   app.post<{ Params: { projectId: string }; Body: { snapshotId: string; videoNodeIds: string[] } }>("/api/projects/:projectId/approvals", {
     schema: { body: object({ snapshotId: string, videoNodeIds: { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: string } }, ["snapshotId", "videoNodeIds"]) },
   }, async request => {
-    const actor = service().beginRequest(request.params.projectId, "local-user", "Review the displayed keyframes", { editing: false, contextDigest: digest({ snapshotId: request.body.snapshotId, videoNodeIds: [...request.body.videoNodeIds].sort() }), key: `review:${request.headers["idempotency-key"] ?? digest(request.body)}` });
+    const actor = service().beginRequest(request.params.projectId, "local-user", "Review the displayed keyframes", { source: "app", editing: false, contextDigest: digest({ snapshotId: request.body.snapshotId, videoNodeIds: [...request.body.videoNodeIds].sort() }), key: `review:${request.headers["idempotency-key"] ?? digest(request.body)}` });
     return service().approve(request.params.projectId, actor, request.body.snapshotId, request.body.videoNodeIds);
   });
-  app.post<{ Params: { projectId: string }; Body: { action: "pause" | "resume" | "stop" } }>("/api/projects/:projectId/controls", {
-    schema: { body: object({ action: { enum: ["pause", "resume", "stop"] } }, ["action"]) },
+  app.post<{ Params: { projectId: string }; Body: ControlInput }>("/api/projects/:projectId/controls", {
+    schema: { body: { oneOf: [object({ action: { const: "stop" } }, ["action"]),
+      object({ action: { const: "resume" }, expectedAuthorityId: { anyOf: [string, { type: "null" }] } }, ["action", "expectedAuthorityId"])] } },
   }, async request => {
-    const key = request.headers["idempotency-key"] as string | undefined ?? newId();
-    const result = service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
-      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action === "stop" ? "Stop the current conversation and new generation." : request.body.action, { editing: false, key: `control:${key}` });
-      return service().control(request.params.projectId, actor, request.body.action);
+    const key = requiredCommandKey(request);
+    // Continue changes control state only; it never drives a worker or Director tick.
+    return service().store.command(`local-user:${request.params.projectId}:control`, key, digest(request.body), () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.action === "stop" ? "Stop the current conversation and new generation." : request.body.action, { source: "app", editing: false, key: `control:${key}` });
+      return service().control(request.params.projectId, actor, request.body.action, request.body.action === "resume" ? request.body.expectedAuthorityId : undefined);
     });
-    options.director?.tick(); return result;
+  });
+  app.post<{ Params: { projectId: string; attemptId: string }; Body: ReleaseAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/release", {
+    schema: { body: object({ expectedPhase: { const: "submission_unknown" }, acknowledgeDoubleCharge: { type: "boolean" } }, ["expectedPhase"]) },
+  }, async request => {
+    const key = requiredCommandKey(request);
+    return service().store.command(`local-user:${request.params.projectId}:release-attempt`, key, digest({ attemptId: request.params.attemptId, ...request.body }), () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", "Release an unconfirmed submission; both jobs may be charged.", { source: "app", editing: false, key: `release-attempt:${key}` });
+      return service().releaseAttempt(request.params.projectId, actor, request.params.attemptId, request.body);
+    });
   });
   if (options.service) registerProjectEventStream(app, { store: options.service.store,
     authorize: request => { if (!request.headers.authorization) options.studioSessions?.authorize(request); } });

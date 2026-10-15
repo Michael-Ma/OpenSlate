@@ -12,7 +12,7 @@ export function contextToolVersion(store: Store, projectId: string, actor: Actor
   if (actor.kind === 'director' && !epoch) return '1.0.0';
   invariant(!epoch || epoch.projectId === projectId && epoch.requestId === actor.requestId, 'CAPABILITY_MISMATCH', 'Context epoch lock differs');
   const id = epoch?.lockId ?? (store.db.prepare("SELECT id FROM entities WHERE kind='director_skill_lock' AND project_id=? ORDER BY rowid DESC LIMIT 1").get(projectId) as { id: string } | undefined)?.id;
-  if (!id) return '4.0.0';
+  if (!id) return '5.0.0';
   const record = store.get<{ projectId: string; lock: { id: string; lockDigest: string; compatibility: { toolContract: string } } }>('director_skill_lock', id);
   invariant(record?.projectId === projectId && record.lock.id === id, 'CAPABILITY_MISMATCH', 'Context skill lock is missing');
   const { lockDigest, ...body } = record.lock;
@@ -77,8 +77,8 @@ export function projectAudioOperations(service: ProductionService, projectId: st
         sections: entries.length, recordings: totalAudio, speechProposals: speechCount, transcriptionProposals: transcriptCount,
         pagination: 'One adaptive shared window per collection; follow nextOffset. Compare the context guard across pages.', hostReadiness: 'not_evaluated' },
       ...(requestsEnabled ? { savedShotScripts: savedShotScripts.slice(offset, offset + count) } : {}),
-      authority: requestsEnabled ? 'Use exact saved writing or owned recordings to request audio with the configured provider. savedShotScripts expose shot IDs as virtual segment IDs with the saved narration digest as segmentRevisionId; a speech request materializes the mapped section automatically. Refresh current context between requests. No generation or spending approval is needed. One studio scene confirmation after reviewing the keyframes, motion and narration saves exact script, recording and measured within-shot timing acceptance; do not ask for a separate narration review. Listening and recording edits are optional. Transcript adoption remains an explicit human editorial choice, not automatic recognition. Preserve acceptance/provenance records and treat missing or failed canonical work as pending.'
-        : 'These are proposal choices and saved records, never generation permission. Prepare with exact saved IDs. The human reviews the proposal and spending separately. Results require independent listening/word/timing acceptance.' });
+      authority: requestsEnabled ? 'Director tools only prepare pending suggestions from exact saved writing or owned recordings. Only an explicit human press on the existing audio request route may start paid work with the configured provider. savedShotScripts expose shot IDs as virtual segment IDs with the saved narration digest as segmentRevisionId; a speech request materializes the mapped section automatically. Refresh current context between requests. No generation or spending approval is needed. One studio scene confirmation after reviewing the keyframes, motion and narration saves exact script, recording and measured within-shot timing acceptance; do not ask for a separate narration review. Listening and recording edits are optional. Transcript adoption remains an explicit human editorial choice, not automatic recognition. Preserve acceptance/provenance records and treat missing or failed canonical work as pending.'
+        : 'These are proposal choices and saved records, never generation permission. Prepare with exact saved IDs. The human presses the existing audio request action; no spending allowance is required. Results require independent listening/word/timing acceptance.' });
     let count = 0;
     for (; count < maximum; count++) {
       try {

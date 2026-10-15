@@ -1,3 +1,4 @@
+import { sceneConfirmationGuard, confirmationFramesCurrent, type ConfirmationFramePin } from "../scene-confirmation-state.js";
 import { activeAttemptIngestionIssue, reportableIngestionIssue, sanitizedIngestionIssueCode, INGESTION_ISSUE_MESSAGE } from './ingestion-issue.js';
 import type { AttemptIngestionIssue } from './ingestion-issue.js';
 import { requestedTranscriptionHoldIds } from '../narration/request-holds.js';
@@ -37,7 +38,14 @@ export interface Candidate { id: string; projectId: string; nodeId: string; gran
 export interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 export interface NodeBinding {
   id: string; projectId: string; planId: string; node: PlanNode;
+  outdated?: { at: string; fields: string[]; previous: ArtifactRef };
   candidateId: string | null; state: "active" | "retired"; outputs: Record<string, ArtifactRef>;
+  outdatedReason?: "stopped" | "released";
+}
+/** A new current output resolves the edit metadata; historical artifacts stay immutable. */
+function bindingWithOutputs(binding: NodeBinding, outputs: NodeBinding["outputs"]): NodeBinding {
+  const { outdated: _outdated, ...current } = binding;
+  return { ...current, outputs };
 }
 export type AttemptPhase = "submitting" | "preparing" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
 export interface Attempt {
@@ -50,6 +58,8 @@ export interface Attempt {
   applicationInput?: OwnedTranscriptionAttemptInput;
   narrationSpeech?: NarrationSpeechAttemptInput;
   outputs: Record<string, ArtifactRef>; createdAt: string;
+  /** Human release removes blocking/publication authority, never reconciliation or liability. */
+  released?: { by: string; at: string };
 }
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
@@ -83,9 +93,11 @@ export interface ExternalExecutionAdmission {
 }
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
+const WAIT_CODES = new Set(["CAPACITY_EXCEEDED", "LOCAL_EXECUTION_BUSY", "EXECUTION_HELD", "HUMAN_REVIEW_REQUIRED", "INPUT_PENDING", "TIMING_REQUIRED"]);
 
 /** Durable executor over registered ports. The shipped launcher enables only fake execution. */
 export class Engine {
+  readonly startedAt = new Date(performance.timeOrigin).toISOString();
   readonly recovery: InstallationRecoveryGuard;
   readonly registry: ExecutionRegistry;
   private readonly externalAdmission: ExternalExecutionAdmission | undefined;
@@ -190,7 +202,7 @@ export class Engine {
         }
         const reuse = same && !grantId && !deferred.has(node.id) && !Object.hasOwn(node.args, "localExecution");
         if (!reuse) replaced.add(node.id);
-        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {} };
+        const binding: NodeBinding = { id: node.id, projectId, planId, node, candidateId, state: "active", outputs: reuse ? old.outputs : {}, ...(old?.outdated && old.node.shotId === node.shotId && old.node.kind === node.kind && !(reuse && Object.keys(old.outputs).length) ? { outdated: old.outdated } : {}) };
         this.store.put("node_binding", node.id, projectId, binding); nodes.push(binding);
       }
       for (const binding of previous.values()) if (!seen.has(binding.id)) this.store.put("node_binding", binding.id, projectId, { ...binding, state: "retired" });
@@ -331,6 +343,52 @@ export class Engine {
 
   attempts(projectId: string): Attempt[] { return this.store.list<Attempt>("attempt", projectId); }
 
+  /** Called in the Stop transaction. Admitted attempts keep their immutable submission intent. */
+  detachUnsent(projectId: string, stopId: string): { sentJobs: number; detachedJobs: number } {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      const pending = this.attempts(projectId).filter(attempt => !TERMINAL.has(attempt.phase));
+      let detachedJobs = 0;
+      for (const binding of this.store.list<NodeBinding>("node_binding", projectId)) {
+        if (binding.state !== "active" || !binding.candidateId || Object.keys(binding.outputs).length) continue;
+        if (pending.some(attempt => attempt.candidateId === binding.candidateId)) {
+          // Reconciliation may finish this intent, but a failure after Stop must
+          // not turn Continue into permission to buy a technical retry.
+          if (!this.store.get("candidate_stop", binding.candidateId))
+            this.store.insert("candidate_stop", binding.candidateId, projectId, { stopId });
+          continue;
+        }
+        this.store.put("node_binding", binding.id, projectId, { ...binding, candidateId: null, outdatedReason: "stopped" });
+        detachedJobs++;
+      }
+      for (const row of this.store.list<import("../scene-confirmations.js").SceneConfirmationRecord>("scene_confirmation", projectId)) {
+        if (!["running", "blocked"].includes(row.state)) continue;
+        this.store.put("scene_confirmation", row.id, projectId, { ...row, state: "cancelled" });
+        for (const hold of this.store.list<Hold>("hold", projectId).filter(h => h.active && h.ownerId === row.id))
+          this.releaseHold(projectId, hold.id, row.id);
+        this.store.appendEvent(projectId, "scene.confirmation_changed", { confirmationId: row.id, state: "cancelled", stopId });
+      }
+      return { sentJobs: pending.length, detachedJobs };
+    });
+  }
+
+  releaseAttempt(projectId: string, attemptId: string, by: string, acknowledgeDoubleCharge: boolean) {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      invariant(acknowledgeDoubleCharge === true, "DOUBLE_CHARGE_NOT_ACKNOWLEDGED", "Acknowledge that both jobs may be charged");
+      const attempt = this.store.get<Attempt>("attempt", attemptId);
+      invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
+      invariant(attempt.phase === "submission_unknown" && !attempt.released, "ATTEMPT_NOT_RELEASABLE", "Only an unreleased unconfirmed submission can be released");
+      const at = new Date().toISOString();
+      this.store.put("attempt", attempt.id, projectId, { ...attempt, released: { by, at } });
+      const binding = this.store.get<NodeBinding>("node_binding", attempt.nodeId);
+      if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId)
+        this.store.put("node_binding", binding.id, projectId, { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
+      this.store.appendEvent(projectId, "attempt.released", { attemptId, by, at, acknowledgeDoubleCharge: true });
+      return { attemptId, shotId: binding?.node.shotId ?? null, releasedAt: at };
+    });
+  }
+
   /** Read-only UI evidence. Historical attempts remain available for reconciliation. */
   currentAttemptIds(projectId: string, attempts = this.attempts(projectId)): string[] {
     const project = this.store.getProject(projectId);
@@ -342,6 +400,7 @@ export class Engine {
         && nodes.has(binding.id) && canonical(nodes.get(binding.id)) === canonical(binding.node))
       .map(binding => [binding.id, binding]));
     return attempts.filter(attempt => {
+      if (attempt.released) return false;
       const binding = bindings.get(attempt.nodeId);
       if (!binding || binding.node.specDigest !== attempt.specDigest || binding.node.kind !== attempt.request.kind) return false;
       try {
@@ -403,7 +462,7 @@ export class Engine {
         if (this.reuseLocal(binding, prepared.fingerprint)) { reused++; return; }
         attempt = this.admit(binding.projectId, binding.id, prepared.fingerprint);
       }
-      catch (error) { if (error instanceof DomainError) { blocked.push({ nodeId: binding.id, code: error.code }); return; } throw error; }
+      catch (error) { if (error instanceof DomainError) { this.recordNodeWait(binding, error.code); blocked.push({ nodeId: binding.id, code: error.code }); return; } throw error; }
       dispatched++;
       if (attempt.candidateId === null) {
         await this.handle(attempt, { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) }); return;
@@ -416,6 +475,22 @@ export class Engine {
     }));
     const rejected = settled.find(result => result.status === "rejected"); if (rejected?.status === "rejected") throw rejected.reason;
     return { dispatched, reused, blocked };
+  }
+
+  private recordNodeWait(binding: NodeBinding, code: string): void {
+    // Invalid or unauthorized inputs fail without writes; they are not queueing conditions.
+    if (!WAIT_CODES.has(code)) return;
+    this.store.transaction(() => {
+      const previous = this.store.get<{ code: string }>("node_wait", binding.id);
+      if (previous?.code === code) return;
+      this.store.put("node_wait", binding.id, binding.projectId, { nodeId: binding.id, code, since: new Date().toISOString() });
+      this.store.appendEvent(binding.projectId, "node.wait_changed", { nodeId: binding.id, code });
+    });
+  }
+  private clearNodeWait(projectId: string, nodeId: string): void {
+    if (!this.store.get("node_wait", nodeId)) return;
+    this.store.db.prepare("DELETE FROM entities WHERE kind='node_wait' AND id=? AND project_id=?").run(nodeId, projectId);
+    this.store.appendEvent(projectId, "node.wait_changed", { nodeId, code: null });
   }
 
   async reconcile(): Promise<{ reconciled: number; blocked?: { attemptId: string; code: string }[] }> {
@@ -573,6 +648,7 @@ export class Engine {
           inputs: this.resolveInputs(project.id, binding.node).artifacts, execution: snapshotLocalExecution(binding.node.args.localExecution) },
         phase: "ingesting", leaseOwner: this.workerId, leaseEpoch: 1, leaseExpiresAt: Date.now() + this.leaseMs,
         taskId: null, reservationId: null, failure: null, outputs: {}, createdAt: new Date().toISOString() };
+      this.clearNodeWait(project.id, binding.id);
       this.store.insert("attempt", id, project.id, admitted);
       const intent: LocalExecutionIntent = { id, projectId: project.id, version: 1, attemptId: id, requestDigest: digest(admitted.request),
         capabilityLockId: project.capabilityLockId, execution: snapshotLocalExecution(binding.node.args.localExecution), prepared,
@@ -656,7 +732,7 @@ export class Engine {
   private selectLocal(binding: NodeBinding, attemptId: string, prepared: PreparedLocalExecution, result: LocalExecutionResult): void {
     this.store.put<LocalExecutionBinding>("local_execution_binding", binding.id, binding.projectId,
       { id: binding.id, projectId: binding.projectId, attemptId, prepared });
-    this.store.put("node_binding", binding.id, binding.projectId, { ...binding, outputs: { [result.port]: result.artifact.artifact } });
+    this.store.put("node_binding", binding.id, binding.projectId, bindingWithOutputs(binding, { [result.port]: result.artifact.artifact }));
   }
   private async verifyLocalResult(intent: LocalExecutionIntent, result: LocalExecutionResult, signal: AbortSignal): Promise<void> {
     assertLocalExecutionResult(result, intent);
@@ -708,7 +784,7 @@ export class Engine {
       this.lockedProfiles(project);
       invariant(!this.held(project, binding.id), "EXECUTION_HELD", "Dispatch is paused or held");
       invariant(binding.candidateId === null && this.resolveInputs(project.id, binding.node).fingerprint === fingerprint, "REVISION_CONFLICT", "Local cache target changed during verification");
-      this.store.put("node_binding", binding.id, project.id, { ...binding, outputs: previous.outputs });
+      this.store.put("node_binding", binding.id, project.id, bindingWithOutputs(binding, previous.outputs));
       this.store.appendEvent(project.id, "execution.output_reused", { nodeId: binding.id, attemptId: previous.id }); return true;
     });
   }
@@ -778,6 +854,14 @@ export class Engine {
       const ownedInput = resolveOwnedTranscriptionNode(this.store, project, node, binding.candidateId);
       if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, node, binding.candidateId, ownedInput.resolved);
       const speechInput = resolveNarrationSpeechNode(this.store, project, node, binding.candidateId);
+      const candidateOwner = binding.candidateId ? this.store.get<{ grantId: string }>("candidate", binding.candidateId) : undefined;
+      const ownerGrant = candidateOwner ? this.store.get<Grant>("grant", candidateOwner.grantId) : undefined;
+      const sceneOwner = speechInput ? this.store.get<{ confirmationId: string }>("scene_confirmation_request", speechInput.resolved.review.requestId) : undefined;
+      const confirmationId = sceneOwner?.confirmationId ?? ownerGrant?.authorityId;
+      const confirmation = confirmationId ? this.store.get<{ state: string; sceneId: string; guardDigest: string; framePins: ConfirmationFramePin[] }>("scene_confirmation", confirmationId) : undefined;
+      if (confirmation) invariant(["running", "done"].includes(confirmation.state) && confirmation.guardDigest === sceneConfirmationGuard(project, confirmation.sceneId, this.store.get("capability_lock", project.capabilityLockId)) && confirmationFramesCurrent(this.store, project, confirmation.framePins),
+        "SCENE_REVIEW_STALE", "The scene confirmation changed before dispatch");
+
       if (speechInput) assertNarrationSpeechCurrent(this.store, project, node, binding.candidateId, speechInput.resolved);
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
       invariant(!this.held(project, nodeId), "EXECUTION_HELD", "Dispatch is paused or held");
@@ -819,14 +903,17 @@ export class Engine {
         this.recovery.assertFreshAuthority(projectId, "grant", grant.id);
       } else invariant(!GENERATED.has(node.kind), "ORIGIN_NOT_AUTHORIZED", "Generation requires a candidate");
       const workKey = binding.candidateId ? null : digest({ projectId, nodeId, fingerprint: inputs.fingerprint });
-      const previous = this.attempts(projectId).filter(attempt => binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey).sort((a, b) => b.ordinal - a.ordinal)[0];
+      const previous = this.attempts(projectId).filter(attempt => !attempt.released && (binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey)).sort((a, b) => b.ordinal - a.ordinal)[0];
       if (previous) {
+        invariant(!confirmation, "RETRY_NOT_AUTHORIZED", "A scene confirmation never retries paid work");
         invariant(previous.phase === "failed", "ATTEMPT_EXISTS", "Existing work must be reconciled, never resubmitted");
+        invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
+          "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's retry authority; generate again with a new press");
         invariant(binding.candidateId && previous.failure?.technical && previous.failure.retryAllowed && previous.ordinal <= (profile?.maxRetries ?? 0), "RETRY_NOT_AUTHORIZED", "No trusted technical retry allowance");
         invariant(previous.fingerprint === inputs.fingerprint, "NEW_CANDIDATE_REQUIRED", "A technical retry cannot change its creative inputs");
       }
       if (profile) {
-        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !TERMINAL.has(attempt.phase)
+        const active = this.projects().flatMap(item => this.attempts(item.id)).filter(attempt => !attempt.released && !TERMINAL.has(attempt.phase)
           && attempt.request.args.profileIdentity === profile.id && attempt.request.args.profileRevision === profile.revision
           && canonical(requestExecutionIdentity(attempt.request)) === canonical(execution)).length;
         invariant(active < profile.maxConcurrency, "CAPACITY_EXCEEDED", "Configured provider capacity is occupied");
@@ -856,6 +943,7 @@ export class Engine {
         ...(ownedInput ? { applicationInput: structuredClone(ownedInput.input) } : {}),
         ...(speechInput ? { narrationSpeech: structuredClone(speechInput.input) } : {}),
       };
+      this.clearNodeWait(projectId, nodeId);
       this.store.insert("attempt", id, projectId, attempt);
       if (reservationId) this.store.insert("reservation", reservationId, projectId, { attemptId: id, micros: cost.toString(), state: "reserved" });
       if (externalAllowanceId && this.externalAdmission?.recordAdmission) {
@@ -1034,7 +1122,7 @@ export class Engine {
           retryAllowed: outcome.technical === true && outcome.retryAllowed === true } : null;
       const taskId = outcome.type === "accepted" || outcome.type === "failed" || outcome.type === "unknown" ? outcome.taskId ?? current.taskId : current.taskId;
       this.store.put("attempt", current.id, current.projectId, { ...current, phase, taskId, failure, leaseExpiresAt: 0 });
-      if (outcome.type === "rejected") this.setReservation(current, "released");
+      if (outcome.type === "rejected" && !current.released) this.setReservation(current, "released");
       if (outcome.type === "failed") this.setReservation(current, "charged");
       this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase }); return false;
     });
@@ -1087,7 +1175,7 @@ export class Engine {
         this.store.appendEvent(current.projectId, "attempt.ingestion_issue_resolved", { attemptId: current.id });
       }
       const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
-      if (binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
+      if (!current.released && binding && binding.projectId === current.projectId && binding.state === "active" && binding.candidateId === current.candidateId) {
         const project = this.store.getProject(current.projectId);
         if (binding.planId === project.activePlanId) {
           try {
@@ -1098,7 +1186,7 @@ export class Engine {
               assertPersonalVoiceCurrent(this.store, current.projectId, String(binding.node.args.voice), String(binding.node.args.adapter));
             }
             if (this.resolveInputs(current.projectId, binding.node).fingerprint === current.fingerprint)
-              this.store.put("node_binding", binding.id, binding.projectId, { ...binding, outputs: mapped });
+              this.store.put("node_binding", binding.id, binding.projectId, bindingWithOutputs(binding, mapped));
           } catch (error) { if (!(error instanceof DomainError)) throw error; }
         }
       }

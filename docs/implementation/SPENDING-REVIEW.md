@@ -1,3 +1,5 @@
+> Retired by card B1. Spending, budget and allowance HTTP routes and display projections have been removed. Historical receipt validation and execution admission remain for compatibility. The review below records the former surface.
+
 # Generation, review and spending
 
 Historical implementation reference. The current studio uses configured-provider scene actions and keyframe/video review without a separate spending approval or usage allowance. Earlier accounting records remain stored; the retired GenerationPermission/SpendingPanel frontend and its step model have been removed. Use [current status](STATUS.md) and [the studio guide](../design/STORYBOARD-STUDIO.md) for current controls.

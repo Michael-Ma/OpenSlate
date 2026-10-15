@@ -57,6 +57,7 @@ export class FixturePort implements StudioPort {
       if (path === base) return structuredClone(this.world.snapshot) as T;
       if (path === `${base}/generation`) return structuredClone(this.world.overview) as T;
       if (path === `${base}/director`) return { ...this.world.director } as T;
+      if (path === `${base}/director/proposals`) return { proposals: [] } as T;
     }
     if (method === "POST" && path === `${base}/messages`) return fixtureMessage(this.world, options.body) as T;
     if (path.startsWith(base)) return fixtureCommand(this.world, method, path.slice(base.length), options.body) as T;

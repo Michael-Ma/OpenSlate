@@ -63,6 +63,7 @@ export class OwnedTranscriptionService {
     options: { signal?: AbortSignal } = {}): Promise<{ proposal: OwnedTranscriptionProposal; receipt: OwnedTranscriptionApplyReceipt }> {
     actor = snapshotOwnedTranscriptionData(actor, 16384); input = snapshotOwnedTranscriptionData(input, 16384);
     const signal = options.signal; options = signal ? { signal } : {};
+    invariant(actor.kind === "human", "ACTOR_DENIED", "Only a human press may request paid transcription");
     this.authority(projectId,actor);
     const scope=`${actor.principalId}:${projectId}:${actor.requestId}:owned-transcription-request:${epoch(actor)??'human'}`;
     const requestedAtCursor=this.store.command(`${scope}-cursor`,input.key,digest(input),()=>requestHoldCutoff(this.store,projectId,actor));
@@ -78,7 +79,7 @@ export class OwnedTranscriptionService {
       stopped(); human = snapshotOwnedTranscriptionData(human, 16384); input = captureOwnedTranscriptionReviewInput(input);
       const scope = ownedTranscriptionReviewScope(projectId, human), inputDigest = digest(input);
       const checkpoint = (): OwnedTranscriptionApplyReceipt | undefined => {
-        stopped(); invariant(human.kind === 'human' || automatic && human.kind === 'director', "ACTOR_DENIED", "A current application request is required for recording transcription");
+        stopped(); invariant(human.kind === 'human', "ACTOR_DENIED", "A current application request is required for recording transcription");
         this.authority(projectId, human);
         this.production.recovery.assertFreshAuthority(projectId, "owned_transcription_proposal", input.proposalId);
         const replay = this.store.commandReplay<OwnedTranscriptionApplyReceipt>(scope, input.key, inputDigest);

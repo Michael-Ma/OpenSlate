@@ -1,3 +1,4 @@
+import { allowanceSummary } from './allowance-usage-fixture.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -77,7 +78,7 @@ test("explicit read-only human spending authority issues once without changing p
   assert.deepEqual(f.allowances.issue(f.projectId, issued.actor, issued.input), issued.allowance);
   assert.equal(rows(f, "external_allowance").length, 1);
   assert.deepEqual({ project: f.store.getProject(f.projectId), grants: rows(f, "grant"), holds: rows(f, "hold"), epochs: rows(f, "epoch") }, before);
-  const projection = f.allowances.list(f.projectId, issued.actor)[0];
+  const projection = allowanceSummary(f.store, f.projectId)[0];
   assert.equal(projection.remainingAttempts, 4); assert.equal(projection.remainingEstimatedMicros, "400"); assert.equal(projection.revoked, false);
 });
 
@@ -136,7 +137,7 @@ test("admission writes exact permanent consumption with attempt and reservation,
   }
   await f.engine.reconcile(); await f.engine.runReady(); assert.deepEqual(rows(f, "external_allowance_consumption"), consumed);
   assert.equal(f.calls.length, 2);
-  const status = f.allowances.list(f.projectId, issued.actor)[0];
+  const status = allowanceSummary(f.store, f.projectId)[0];
   assert.equal(status.usedAttempts, 2); assert.equal(status.usedEstimatedMicros, "200"); assert.equal(status.remainingAttempts, 0);
   assert.equal(status.remainingEstimatedMicros, "0");
 });
@@ -201,7 +202,7 @@ test("expiry and explicit revocation stop future starts without refunding unreso
   const input = { allowanceId: issued.allowance.id }, revoke = f.human(input, [f.projectId], "revoke");
   const result = f.allowances.revoke(f.projectId, revoke, input);
   assert.deepEqual(f.allowances.revoke(f.projectId, revoke, input), result);
-  assert.equal(f.allowances.list(f.projectId, revoke)[0].revoked, true); assert.deepEqual(rows(f, "attempt")[0], attempt);
+  assert.equal(allowanceSummary(f.store, f.projectId)[0].revoked, true); assert.deepEqual(rows(f, "attempt")[0], attempt);
   f.engine.releaseHold(f.projectId, held.id, "offline-pending-edit");
   await f.engine.reconcile(); await f.engine.runReady(); assert.deepEqual(rows(f, "external_allowance_consumption"), before);
   assert.equal(f.calls.length, 1); assert.equal(f.engine.budget(f.projectId).committedMicros, "100");
@@ -287,7 +288,7 @@ test("each trusted retry permanently consumes another start; rejected requests n
   const issued = f.issue({ maxAttempts: 2, maxEstimatedMicros: "200" });
   await f.engine.runReady(); await f.engine.runReady(); await f.engine.runReady();
   assert.equal(f.calls.length, 2); assert.equal(rows(f, "external_allowance_consumption").length, 2);
-  assert.equal(f.allowances.list(f.projectId, issued.actor)[0].remainingEstimatedMicros, "0");
+  assert.equal(allowanceSummary(f.store, f.projectId)[0].remainingEstimatedMicros, "0");
   assert.equal(f.engine.budget(f.projectId).committedMicros, "0", "released project reservation does not refund allowance");
   const g = fixture(t, { submit: () => ({ type: "rejected", certainty: "not_accepted", failureId: "offline-declined", technical: false, retryAllowed: false }) });
   g.issue({ maxAttempts: 4, maxEstimatedMicros: "100" }); await g.engine.runReady(); await g.engine.runReady();

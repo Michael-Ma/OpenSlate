@@ -9,7 +9,6 @@ import { Store } from "../dist/persistence/index.js";
 import { Engine } from "../dist/execution/index.js";
 import { ProductionService } from "../dist/application/service.js";
 import { InstallationRecoveryGuard, installRecoveryQuarantine } from "../dist/application/installation-recovery.js";
-import { ExternalAllowanceService } from "../dist/application/external-allowances.js";
 import { LocalMediaService, MediaApplicationService } from "../dist/media/index.js";
 import { ManagedUploadStore } from "../dist/narration/managed-upload.js";
 import { NarrationService } from "../dist/narration/service.js";
@@ -36,7 +35,7 @@ function fixture(t) {
   const media = new MediaApplicationService(service, local), narration = new NarrationService(service, local), canonical = new NarrationCanonicalService(narration);
   const token = randomBytes(32).toString("base64url");
   app = createApp({ service, localToken: token, mediaRoutes: { production: service, media, uploads }, imageRoutes: { production: service, images: null, uploads },
-    narrationRoutes: { production: service, narration, canonical, uploadDirectory: uploads.rootDir }, allowanceRoutes: { service, allowances: new ExternalAllowanceService(store) } });
+    narrationRoutes: { production: service, narration, canonical, uploadDirectory: uploads.rootDir } });
   const headers = { host: "127.0.0.1", authorization: `Bearer ${token}` };
   const request = (method, url, payload, key = randomUUID(), extra = {}) => app.inject({ method, url, ...(payload === undefined ? {} : { payload }), headers: { ...headers, "idempotency-key": key, ...extra } });
   const quarantine = () => installRecoveryQuarantine(store, origin(directory));
@@ -49,7 +48,7 @@ test("ordinary status has no recovery authority; restored inspection stays authe
   f.quarantine(); const before = rows(f.store), files = readdirSync(f.uploads.rootDir);
   denied(await f.request("GET", statusPath, undefined, "missing", { authorization: "" }), "AUTH_REQUIRED", 403);
   denied(await f.request("GET", statusPath, undefined, "origin", { origin: "https://wrong.invalid" }), "ORIGIN_DENIED", 403);
-  for (const path of [statusPath, "/api/projects", "/api/providers", f.path, `${f.path}/providers`, `${f.path}/director`, `${f.path}/review`, `${f.path}/images`, `${f.path}/media`, `${f.path}/narration`, `${f.path}/spending`]) {
+  for (const path of [statusPath, "/api/projects", "/api/providers", f.path, `${f.path}/providers`, `${f.path}/director`, `${f.path}/review`, `${f.path}/images`, `${f.path}/media`, `${f.path}/narration`]) {
     const response = await f.request("GET", path); assert.equal(response.statusCode, 200, `${path}: ${response.body}`);
   }
   const state = (await f.request("GET", statusPath)).json(); assert.equal(state.state, "quarantined"); assert.equal(state.receipt.backupCreatedAt, "2026-09-11T00:00:00.000Z");
@@ -62,7 +61,8 @@ test("quarantine blocks every mutation family and future routes before body cons
   f.app.post("/api/future/write", async () => { futureCalls++; return {}; });
   f.app.get("/api/future/reconcile", async () => { futureCalls++; return {}; });
   f.quarantine(); const before = rows(f.store);
-  for (const [url, body] of [["/api/projects", { name: "No new project" }], [`${f.path}/messages`, { text: "New request" }], [`${f.path}/controls`, { action: "resume" }],
+  for (const [url, body] of [["/api/projects", { name: "No new project" }], [`${f.path}/messages`, { text: "New request" }], [`${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
+    [`${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
     [`${f.path}/approvals`, { snapshotId: "old", videoNodeIds: ["video"] }], [`${f.path}/director/setup`, { mode: "native" }],
     [`${f.path}/narration/sessions`, {}], [`${f.path}/media/renders`, { expectedHeadVersion: 0, renderNodeId: "render" }],
     [`${f.path}/spending/budget`, { expectedRevision: 0, expectedCapMicros: "100000", capMicros: "200000" }], ["/api/future/write", {}]]) denied(await f.request("POST", url, body));

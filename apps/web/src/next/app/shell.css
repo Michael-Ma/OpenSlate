@@ -1,0 +1,53 @@
+/*
+ * Shell additions on top of ui/studio.css: top bar extras, the workspace slot and the drawer scrim.
+ * This file can load before studio.css, so every rule that overrides it is more specific, never later.
+ */
+
+/* ---------- top bar ---------- */
+.topbar .film b,.topbar .film-meta{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.topbar .film b{flex:0 1 auto}
+/* The meta gives way long before the title does. */
+.topbar .film-meta{flex:0 100 auto}
+.topbar .tabs{flex:none}
+.film-pick-wrap{position:relative;display:inline-flex;flex:0 1 auto;min-width:0;max-width:220px;align-self:center}
+.film-pick-wrap::after{content:"";position:absolute;right:11px;top:50%;width:5px;height:5px;margin-top:-4px;border-right:1.5px solid var(--text-2);border-bottom:1.5px solid var(--text-2);transform:rotate(45deg);pointer-events:none}
+.topbar .pill.film-pick{appearance:none;-webkit-appearance:none;field-sizing:content;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-weight:700;font-size:13.5px;padding:3px 28px 3px 12px;color:var(--text)}
+.topbar .pill.film-pick option{background:var(--raised);color:var(--text)}
+.topbar .saved{display:inline-flex;align-items:center;gap:7px}
+.topbar .saved.waiting{color:var(--text);border-style:dashed;border-color:var(--track)}
+.topbar .saved.waiting::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}
+.topbar .lang{border:0;background:none;color:var(--text-2);font-size:12.5px;font-weight:600;padding:4px 6px;border-radius:6px}
+.topbar .lang:hover{color:var(--text)}
+.topbar .classic-link{color:var(--muted);text-decoration:none;font-size:12.5px;border-radius:4px}
+.topbar .classic-link:hover{color:var(--text-2);text-decoration:underline;text-underline-offset:2px}
+
+/* 900–1279 px: the fixed film column and the counts no longer fit beside the tabs. */
+@media (min-width:900px) and (max-width:1279px){
+  .topbar .brand{width:auto;margin-right:22px}
+  .topbar .film{width:auto;flex:1 1 0;margin-right:18px}
+  .topbar .top-right .counts{display:none}
+}
+@media (min-width:900px) and (max-width:1099px){
+  .topbar .film:has(.film-pick-wrap) .film-meta{display:none}
+}
+
+/* ---------- workspace slot ---------- */
+.workspace-slot{display:contents}
+
+/* ---------- narrow ---------- */
+.scrim{display:none}
+@media (max-width:899px){
+  /* Basis 0: the film shrinks (title ellipsis) instead of pushing the Director toggle onto the tab row. */
+  .topbar .film{flex:1 1 0}
+  .topbar .tabs{flex:1 1 calc(100% - 120px)}
+  .topbar .lang{order:3}
+  /* Reconnecting gets its own slim row under the tabs instead of crowding the first row. */
+  .topbar .top-right .saved.waiting{display:flex;order:7;flex:1 0 100%;justify-content:center;font-size:11.5px;padding:2px 9px;border-radius:8px}
+  .topbar .classic-link{order:6;margin-left:auto;padding-left:10px;font-size:12px}
+  .topbar .tab:focus-visible{outline-offset:-2px}
+  .film-pick-wrap{max-width:100%}
+  .scrim{display:block;position:fixed;inset:0;z-index:35;background:rgba(10,11,12,.55)}
+}
+@media (max-width:400px){
+  .topbar .tab{padding:6px 9px}
+}

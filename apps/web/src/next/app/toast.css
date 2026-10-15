@@ -1,0 +1,5 @@
+/* Toast additions on top of ui/studio.css. This file can load before studio.css, so overrides are more specific, never later. */
+.toast .pill.toast-close{padding:5px 8px;display:inline-grid;place-items:center}
+.toast.error{border-color:var(--text-2)}
+.toast{animation:toast-in .16s ease-out}
+@keyframes toast-in{from{opacity:0}to{opacity:1}}

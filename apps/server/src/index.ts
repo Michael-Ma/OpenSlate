@@ -1,3 +1,4 @@
+import { SceneConfirmationRunner } from "./scene-confirmations.js";
 import { randomBytes } from "node:crypto";
 import { StudioSessions } from "./studio-sessions.js";
 import { openStudioBrowser, studioUrl } from "./studio-launcher.js";
@@ -69,12 +70,13 @@ const narration = new NarrationService(service, localMedia ?? undefined);
 // Each project starts in demo mode until its user chooses and checks local Codex.
 const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
 const studioSessions = new StudioSessions();
-const app = createApp({ service, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
-  allowanceRoutes: { service, allowances: runtime.allowances },
+const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
+const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });
+const app = createApp({ service, sceneCommands, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },
-  narrationRoutes: { production: service, narration, narrationSpeech: new NarrationSpeechService(narration), canonical: new NarrationCanonicalService(narration), uploadDirectory,
+  narrationRoutes: { production: service, narration, narrationSpeech, canonical, uploadDirectory,
     ...(localMedia ? { ownedTranscription: new OwnedTranscriptionService(narration, join(directory, "artifacts")) } : {}) },
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
 let running = false;
@@ -83,7 +85,7 @@ const timer = setInterval(() => {
   try { director.tick(); } catch (error) { app.log.error(error); }
   if (running) return;
   running = true;
-  void engine.reconcile().then(() => engine.runReady()).catch(error => app.log.error(error)).finally(() => { running = false; });
+  void engine.reconcile().then(() => engine.runReady()).then(() => sceneCommands.advance()).catch(error => app.log.error(error)).finally(() => { running = false; });
 }, 500);
 app.addHook("preClose", async () => { clearInterval(timer); await Promise.all([director.close(), runtime.close()]); });
 app.addHook("onClose", async () => {

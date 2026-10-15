@@ -8,7 +8,6 @@ import { createApp } from '../dist/app.js';
 import { registerNarrationRoutes } from '../dist/narration/routes.js';
 import { NarrationCanonicalService } from '../dist/narration/canonical.js';
 import { installRecoveryQuarantine } from '../dist/application/installation-recovery.js';
-import { ExternalAllowanceService } from '../dist/application/external-allowances.js';
 import { ownedTranscriptionFixture, key, draft, rows, bodies } from './owned-transcription-fixture.mjs';
 
 const token = 'offline_owned_transcription_http_token';
@@ -27,7 +26,7 @@ async function setup(t, options = {}) {
   if (options.outputs) { await f.engine.runReady(); await f.engine.reconcile(); }
   f.canonical = new NarrationCanonicalService(f.narration);
   f.app = createApp({ service: f.production, localToken: token,
-    ...(options.spending ? { allowanceRoutes: { service: f.production, allowances: new ExternalAllowanceService(f.store) } } : {}) });
+ });
   registerNarrationRoutes(f.app, { production: f.production, narration: f.narration, canonical: f.canonical,
     uploadDirectory: join(f.root, 'uploads'), ...(options.available === false ? {} : { ownedTranscription: f.service }) });
   await f.app.ready(); t.after(() => f.app.close()); f.base = `/api/projects/${f.project.id}/narration`;
@@ -274,22 +273,4 @@ test('quarantined restoration retains read-only recording options and proposal h
     const response = await f.request(path, body); assert.equal(response.json().error.code, 'INSTALLATION_QUARANTINED');
   }
   assert.deepEqual(allRows(f), before); assert.equal(f.store.db.prepare('SELECT total_changes() n').get().n, changes); noSpending(f);
-});
-
-test('spending eligibility follows only the exact reviewed section while same-head unrelated edits remain selectable', async t => {
-  const f = await setup(t, { section: true, spending: true }), session = await f.session(), { proposal } = await f.propose(session);
-  const reviewed = await f.review(session, proposal); assert.equal(reviewed.statusCode, 200, reviewed.body);
-  const { candidateId } = reviewed.json().receipt, head = f.store.getProject(f.project.id).headVersion;
-  async function spending() {
-    const before = allRows(f), response = await f.request('', undefined, { url: `/api/projects/${f.project.id}/spending?focusCandidateId=${candidateId}` });
-    assert.equal(response.statusCode, 200, response.body); assert.deepEqual(allRows(f), before); noSpending(f);
-    assert.deepEqual(response.json().focus, { candidateId, found: true });
-    const selection = response.json().candidates.find(value => value.candidateId === candidateId); assert.ok(selection); return selection;
-  }
-  let selection = await spending(); assert.equal(selection.selectionCurrent, true); assert.equal(selection.suggestedForIssue, true); assert.equal(selection.unavailableCode, null);
-  editSection(f, session, 1); assert.equal(f.store.getProject(f.project.id).headVersion, head);
-  selection = await spending(); assert.equal(selection.selectionCurrent, true); assert.equal(selection.suggestedForIssue, true); assert.equal(selection.unavailableCode, null);
-  editSection(f, session, 0); assert.equal(f.store.getProject(f.project.id).headVersion, head);
-  selection = await spending(); assert.equal(selection.selectionCurrent, false); assert.equal(selection.suggestedForIssue, false);
-  assert.equal(selection.unavailableCode, 'SUBMISSION_PREPARATION_OBSOLETE'); assert.equal(selection.matchingAllowanceCount, 0);
 });

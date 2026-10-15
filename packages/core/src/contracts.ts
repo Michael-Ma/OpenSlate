@@ -23,10 +23,13 @@ export interface ArtifactRef {
 }
 
 export interface ShotRecord {
+  /** Explicit unfinished direction for a newly added storyboard shot. */
+  promptState?: "placeholder" | "ready";
   /** App-derived writing gap. Models cannot clear it; canonical human audio acceptance does. */
   narrationPending?: boolean;
   /** Protected canonical policy: actual narration may be shorter than this shot's visual slot. */
   narrationTimingMode?: "within_shot";
+  narrationFit?: "cut_to_shot" | "extend_shot";
   /** Shot-level writing intent; acceptance and measured audio remain in narration records. */
   narration?: {
     mode: "undecided" | "none" | "generated" | "uploaded";
