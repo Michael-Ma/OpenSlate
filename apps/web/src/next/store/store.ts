@@ -1,4 +1,4 @@
-import type { ControlInput, ControlReceipt, FrameViewInput, GenerationOverview, ReleaseAttemptInput } from "@openslate/core/public";
+import type { AcceptProposalInput, ControlInput, ControlReceipt, DirectorProposal, FrameViewInput, GenerationOverview, ProposalList, ProposalReceipt, ReleaseAttemptInput, ResolveNoteInput } from "@openslate/core/public";
 import { ProjectSubscription } from "../../shared/project-subscription.ts";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import { errorMsg } from "../i18n/translate.ts";
@@ -115,6 +115,10 @@ export class StudioStore {
           client.request<DirectorStatus>(path(projectId, "/director")).then(
             (director) => this.dispatch({ type: "director", director }),
             (error) => this.#loadFailed("director", error)),
+          // Proposals exist from phase P4 on; an older server answers 404 and the list stays empty.
+          client.request<ProposalList>(path(projectId, "/director/proposals")).then(
+            ({ proposals }) => this.dispatch({ type: "proposals", proposals }),
+            () => this.dispatch({ type: "proposals", proposals: [] })),
         ]);
       } while (this.#refreshAgain);
     })().finally(() => { this.#refreshing = null; });
@@ -267,6 +271,31 @@ export class StudioStore {
   releaseAttempt(attemptId: string): Promise<unknown> {
     const body: ReleaseAttemptInput = { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true };
     return this.#press(`release:${attemptId}`, { attemptId }, async () => ({ path: path(this.#state.projectId!, `/attempts/${encodeURIComponent(attemptId)}/release`), body }));
+  }
+
+  /** Settle a Director note with one of its choices (DC-10). Paid and edit choices pass the request or edit that carried them out. */
+  resolveNote(noteId: string, choiceIndex: number, resultRef?: string): Promise<unknown> {
+    const note = this.#state.snapshot?.notes?.find((n) => n.noteId === noteId);
+    if (!note || !this.#state.projectId) return Promise.resolve(undefined);
+    const body: ResolveNoteInput = { choiceIndex, expectedVersion: note.version, ...(resultRef ? { resultRef } : {}) };
+    return this.#press(`note:${noteId}`, { noteId, choiceIndex, version: note.version }, async () => ({ path: path(this.#state.projectId!, `/director/notes/${encodeURIComponent(noteId)}/resolve`), body }));
+  }
+
+  /** Accept a held Director proposal exactly as previewed (DC-2, DC-3). */
+  acceptProposal(proposal: DirectorProposal, toast?: Msg): Promise<ProposalReceipt | undefined> {
+    const body: AcceptProposalInput = { previewDigest: proposal.previewDigest };
+    return this.#press<ProposalReceipt>(`proposal:accept:${proposal.proposalId}`, { proposalId: proposal.proposalId, ...body }, async () => ({ path: path(this.#state.projectId!, `/director/proposals/${encodeURIComponent(proposal.proposalId)}/accept`), body }), toast);
+  }
+
+  rejectProposal(proposalId: string): Promise<ProposalReceipt | undefined> {
+    return this.#press<ProposalReceipt>(`proposal:reject:${proposalId}`, { proposalId }, async () => ({ path: path(this.#state.projectId!, `/director/proposals/${encodeURIComponent(proposalId)}/reject`), body: {} }));
+  }
+
+  /** Undo an accepted proposal; fields the person changed since are left alone (DC-4). */
+  async undoProposal(proposalId: string): Promise<ProposalReceipt | undefined> {
+    const receipt = await this.#press<ProposalReceipt>(`proposal:undo:${proposalId}`, { proposalId }, async () => ({ path: path(this.#state.projectId!, `/director/proposals/${encodeURIComponent(proposalId)}/undo`), body: {} }));
+    if (receipt) this.dispatch({ type: "toast", message: receipt.leftAlone?.length ? msg("note.proposal.left_alone", { count: receipt.leftAlone.length }) : msg("note.proposal.undone"), tone: "info" });
+    return receipt;
   }
 
   // ---- plain UI state ----------------------------------------------------------

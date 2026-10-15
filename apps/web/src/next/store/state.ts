@@ -1,4 +1,4 @@
-import type { GenerationOverview } from "@openslate/core/public";
+import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 
 export type Connection = "connecting" | "connected" | "reconnecting" | "expired" | "failed";
@@ -27,6 +27,8 @@ export interface StudioState {
   snapshot: ProjectSnapshot | null;
   overview: GenerationOverview | null;
   director: DirectorStatus | null;
+  /** Held and settled Director proposals (phase P4); empty on servers without them. */
+  proposals: DirectorProposal[];
   /** Load failures by source, so one failed read does not blank the whole studio. */
   loadErrors: Partial<Record<"snapshot" | "overview" | "director" | "projects", string | undefined>>;
   view: ViewName;
@@ -48,6 +50,7 @@ export const initialState: StudioState = {
   snapshot: null,
   overview: null,
   director: null,
+  proposals: [],
   loadErrors: {},
   view: "keyframes",
   sceneId: null,

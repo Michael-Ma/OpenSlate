@@ -1,4 +1,4 @@
-import type { GenerationOverview } from "@openslate/core/public";
+import type { DirectorNote, GenerationOverview } from "@openslate/core/public";
 import type { MessageValues } from "../i18n/format.ts";
 import type { MessageId } from "../i18n/messages.ts";
 
@@ -34,6 +34,8 @@ export interface ProjectSnapshot {
   };
   conversation?: ConversationEntry[];
   questions?: PendingQuestion[];
+  /** Director notes (phase P4); absent on servers without contract 5.0.0. */
+  notes?: DirectorNote[];
   control?: { paused: boolean; authorityId?: string };
   cursor: number;
 }

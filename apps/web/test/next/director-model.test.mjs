@@ -17,7 +17,7 @@ const NOW = new Date('2026-10-14T12:00:00');
 const idle = { mode: 'fake', status: 'idle', activeRequestId: null };
 
 test('the golden thread: two entries, bylines with times, the @Scene 2 chip and the Director without a bubble', () => {
-  const view = threadView(lastFerrySnapshot(), lastFerryOverview(), lastFerryDirector, 'en', NOW);
+  const view = threadView(lastFerrySnapshot(NOW), lastFerryOverview(), lastFerryDirector, "en", NOW);
   assert.equal(view.entries.length, 2);
   const [you, director] = view.entries;
   assert.deepEqual([you.who, you.time, you.chips.map(en)], ['you', '10:42', ['Scene 2']]);
