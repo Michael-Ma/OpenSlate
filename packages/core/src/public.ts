@@ -5,3 +5,4 @@ export interface HealthResponse {
   status: "ok";
   stage: "foundation";
 }
+export type * from "./studio-api.js";
