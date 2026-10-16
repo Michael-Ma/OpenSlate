@@ -295,6 +295,7 @@ export const scenarios = [
       await card.waitFor();
       const title = (await card.locator("b").textContent()).trim();
       if (title !== "An unfinished Director edit is holding 3.1 and 3.2") fail(`The card reads ${title}`);
+      if (!(await card.locator("p").textContent()).includes("their waiting keyframes and clips start right away, as already approved")) fail("The card does not say letting go starts the waiting work");
       // How the edit's turn ended reads right under the message, then the card says what that leaves waiting.
       const order = await page.$$eval('.thread-body > [data-entry]', (nodes) => nodes.slice(-3).map((node) => node.getAttribute("data-entry")));
       if (order.join() !== "request-held,ending,held") fail(`The thread ends ${order}`);

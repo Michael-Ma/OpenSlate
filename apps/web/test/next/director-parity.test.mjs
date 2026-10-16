@@ -235,6 +235,9 @@ test('held edits: queued slots waiting on edit_pending, grouped by request, off 
   const working = heldEdits({ ...overview, shots }, { turns: [{ id: 't', requestId: 'r1', state: 'running' }] }, lastFerryDirector);
   assert.match(en(working.find(h => h.requestId === 'r1').blocked), /still working on this edit/);
   assert.equal(heldEdits(overview, null, null).length, 0);
+  // The card says that letting go starts the waiting work at once, under the approval already given.
+  assert.match(en({ id: 'director.held.body' }), /start right away, as already approved/);
+  assert.match(zh({ id: 'director.held.body' }), /按之前的批准立即开始生成/);
 });
 
 test('fixture presets: codex takes pictures, held holds Scene 3, failed fails like the server does, markdown adds a rich reply', () => {

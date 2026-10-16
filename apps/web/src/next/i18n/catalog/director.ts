@@ -91,7 +91,7 @@ export const director = {
   "director.new_messages": { en: "View new messages", zh: "查看新消息" },
   // An unfinished Director edit that holds shots (card B13).
   "director.held.title": { en: "An unfinished Director edit is holding {shots}", zh: "导演有一项未完成的修改占用着 {shots}" },
-  "director.held.body": { en: "Their keyframes and clips wait for the edit to finish. If the Director won't finish it, let it go: the edit ends and these shots can go ahead. Anything it already changed stays.", zh: "这些镜头的关键帧和视频要等这项修改完成。如果导演不会再完成它，可以放弃：修改结束，这些镜头就能继续，已经做出的改动会保留。" },
+  "director.held.body": { en: "Their keyframes and clips wait for the edit to finish. If the Director won't finish it, let it go: the edit ends, and their waiting keyframes and clips start right away, as already approved. Anything it already changed stays.", zh: "这些镜头的关键帧和视频要等这项修改完成。如果导演不会再完成它，可以放弃：修改结束，等待中的关键帧和视频会按之前的批准立即开始生成。已经做出的改动会保留。" },
   "director.held.release": { en: "Let it go", zh: "放弃这项修改" },
   "director.held.working": { en: "The Director is still working on this edit. Wait for it to finish, or Stop it first.", zh: "导演还在进行这项修改。请等它完成，或先停止。" },
   "director.held.released": { en: "Let go. {shots} can go ahead.", zh: "已放弃这项修改，{shots} 可以继续了。" },
