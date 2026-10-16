@@ -37,9 +37,12 @@ export function SettingsView() {
   const hasFilm = useStudio((s) => !!s.projectId);
   const film = useStudio((s) => s.snapshot?.project.name ?? s.projects.find((p) => p.id === s.projectId)?.name ?? "");
   const connection = useStudio((s) => s.connection);
-  // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one.
+  // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one for
+  // anything that writes. Reads keep working, so a control that only reads (This computer's Check again) is off only
+  // while the studio cannot be reached.
   const locked = useRecoveryLock();
-  const offline = locked ?? (connection === "connected" ? null : t("set.offline"));
+  const unreachable = connection === "connected" ? null : t("set.offline");
+  const offline = locked ?? unreachable;
   // What makes each section read again. A studio restart reconnects, so every follow includes the connection.
   const head = useStudio((s) => s.snapshot?.project.headVersion ?? s.overview?.headVersion ?? 0);
   const filmChanged = `${head}|${connection === "connected"}`;
@@ -146,7 +149,7 @@ export function SettingsView() {
               <NoFilmPanel id="set-voice" title="set.section.voice" lead="set.no_film.voice" />
             </>
           )}
-          <ComputerPanel providers={providers} setup={setup} hasFilm={hasFilm} offline={offline} />
+          <ComputerPanel providers={providers} setup={setup} hasFilm={hasFilm} offline={unreachable} />
           <LanguagePanel />
         </div>
       </div>

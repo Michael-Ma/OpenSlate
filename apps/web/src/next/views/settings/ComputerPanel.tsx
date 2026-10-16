@@ -15,7 +15,8 @@ const codeOf = (error: unknown): string => (error instanceof ApiError ? error.co
 /**
  * This computer: Codex, FFmpeg and each key a model needs, for every film. "Check again" re-reads the catalog
  * and, inside a film, runs Codex's read-only setup check (GET /director/models); keys are explained, never
- * shown or set here. It says "Checked" only when every read succeeded.
+ * shown or set here. It says "Checked" only when every read succeeded. Both are reads, so `offline` is only the
+ * connection's reason: a studio in recovery review still checks.
  */
 export function ComputerPanel({ providers, setup, hasFilm, offline }: { providers: Resource<ProviderCatalogView>; setup: Resource<DirectorSetup>; hasFilm: boolean; offline: string | null }) {
   const store = useStore();

@@ -61,7 +61,7 @@ test('a PNG is checked by its first bytes: a real PNG, at most 3840 × 2160 pixe
 });
 
 test('Try again is offered only where the same file can work on another try', () => {
-  for (const code of ['NETWORK_ERROR', 'TIMEOUT', 'REQUEST_FAILED', 'AUTH_REQUIRED', 'CSRF_DENIED', 'SESSION_CLOSED', 'REVISION_CONFLICT', 'UPLOAD_CORRUPT', 'MEDIA_TIMEOUT'])
+  for (const code of ['NETWORK_ERROR', 'TIMEOUT', 'REQUEST_FAILED', 'AUTH_REQUIRED', 'CSRF_DENIED', 'SESSION_CLOSED', 'REVISION_CONFLICT', 'UPLOAD_CORRUPT', 'MEDIA_TIMEOUT', 'INSTALLATION_QUARANTINED'])
     assert.equal(retryable(code), true, code);
   for (const code of ['IMAGE_INPUT_INVALID', 'IMAGE_VALIDATION_FAILED', 'MEDIA_DURATION_LIMIT', 'UPLOAD_TOO_LARGE', 'MEDIA_STREAM_MISSING', 'NARRATION_MEDIA_UNAVAILABLE', 'NOT_FOUND', 'SOMETHING_NEW'])
     assert.equal(retryable(code), false, code);

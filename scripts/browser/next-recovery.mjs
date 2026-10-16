@@ -157,6 +157,11 @@ export const scenarios = [
       await page.waitForSelector("main.work[data-view='settings']");
       await off(page, "[data-act='narrator']", "Settings");
       await off(page, "[data-act='voice-open']", "Settings");
+      // This computer's Check again only reads, and reads keep working in review.
+      const recheck = await page.locator("[data-act='recheck']").evaluate((node) => ({ disabled: node.disabled, title: node.getAttribute("title") }));
+      expect(!recheck.disabled && recheck.title === null, `Check again is ${JSON.stringify(recheck)} in review`);
+      await page.locator("[data-act='recheck']").click();
+      await until(page, () => text(page, ".toast"), (value) => value.startsWith("Checked"), "Check again did not check in review");
 
       await page.locator(".topbar [data-act='all-films']").click();
       await page.waitForSelector(".app[data-view='start']");

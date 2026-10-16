@@ -327,3 +327,15 @@ test('a write refused because the studio is in review makes the page read the st
   assert.equal(await store.edit({ kind: 'shot', id: shotId('2.1'), field: 'motion', value: 'Slow push' }), null);
   assert.equal(posts().length, 1, 'the next write is not sent');
 });
+
+test('imports are refused in review before anything is sent, live and in the sample studio', async (t) => {
+  const { fixtureUploader, liveUploader } = await import('../../src/next/views/assets/upload.ts');
+  const { store, calls } = await studio(t);
+  const before = calls.length;
+  const file = { name: 'harbour.png', size: 10, type: 'image/png' };
+  const request = { path: '/images/import', file, kind: 'image', key: 'import-1', durationSeconds: null, signal: new AbortController().signal };
+  const progress = { sending() { throw new Error('nothing is sent'); }, checking() { throw new Error('nothing is sent'); } };
+  for (const uploader of [liveUploader(store), fixtureUploader(store)])
+    await assert.rejects(uploader.send(request, progress), (error) => error.code === 'INSTALLATION_QUARANTINED');
+  assert.equal(calls.length, before, 'not even the session read');
+});
