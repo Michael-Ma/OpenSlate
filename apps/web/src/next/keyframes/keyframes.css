@@ -203,28 +203,37 @@
 
 /* ---------- inspector: the rows view fits its room (useInspectorFit, model/inspector-fit.ts) ---------- */
 /* Compact, when the rows would not fit above the stacked actions: the framing beside the title, tighter spacing, and
-   Edit prompt and Edit motion & duration side by side (shortened only when the words cannot fit). */
-.insp:is([data-fit="compact"], [data-fit="scroll"]) { padding: 13px 13px 12px; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-title > div { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .framing { margin-top: 0; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .st { margin: 8px 0 4px; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .rows { gap: 5px 8px; margin-top: 4px; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions { flex-flow: row wrap; gap: 6px; padding-top: 8px; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions > * { flex: 1 1 100%; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions .pill { padding: 6px 8px; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) { flex: 1 1 0; }
-.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) .lbl { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Scroll, when even compact does not fit: the whole inspector scrolls as one column, the actions after the rows (never
-   painted over them). A unit only partly in view is not drawn until it is scrolled fully in, so the padding at each
-   edge stays clear; a small chevron there says there is more (the solid bands that scroll with the content cover it
-   at either end). */
-.insp[data-fit="scroll"] {
-  --insp-stroke: transparent calc(50% - .75px), var(--muted) calc(50% - .75px) calc(50% + .75px), transparent calc(50% + .75px);
+   Edit prompt and Edit motion & duration side by side (shortened only when the words cannot fit). Pinned and scroll
+   build on it. */
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) { padding: 13px 13px 12px; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-title > div { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .framing { margin-top: 0; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .st { margin: 8px 0 4px; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .rows { gap: 5px 8px; margin-top: 4px; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions { flex-flow: row wrap; gap: 6px; padding-top: 8px; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions > * { flex: 1 1 100%; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions .pill { padding: 6px 8px; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) { flex: 1 1 0; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) .lbl { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Pinned, when even compact does not fit: the actions stay at the inspector's foot, in view at rest, and the rows
+   above them scroll (Scroll, the last resort, scrolls the whole column, the actions after the rows). Either way a unit
+   only partly in view is not drawn until it is scrolled fully in, so nothing is ever painted over a half-cut row and
+   the padding at each edge stays clear; a small chevron says there is more: in the top padding (the solid band that
+   scrolls with the content covers it at the top), and over the pinned actions, or in the bottom padding. */
+.insp:is([data-fit="pinned"], [data-fit="scroll"]) {
+  --insp-stroke: transparent calc(50% - .75px), var(--text-2) calc(50% - .75px) calc(50% + .75px), transparent calc(50% + .75px);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--track) transparent;
-  scroll-padding: 13px 0 12px;
+  scroll-padding: 13px 0 max(12px, var(--insp-pin, 0px));
+  background:
+    linear-gradient(var(--surface), var(--surface)) top / 100% 13px no-repeat local,
+    linear-gradient(to top left, var(--insp-stroke)) calc(50% - 3.5px) 5px / 7px 4px no-repeat scroll,
+    linear-gradient(to top right, var(--insp-stroke)) calc(50% + 3.5px) 5px / 7px 4px no-repeat scroll,
+    var(--surface);
+}
+.insp[data-fit="scroll"] {
   background:
     linear-gradient(var(--surface), var(--surface)) top / 100% 13px no-repeat local,
     linear-gradient(var(--surface), var(--surface)) bottom / 100% 12px no-repeat local,
@@ -234,11 +243,27 @@
     linear-gradient(to top left, var(--insp-stroke)) calc(50% + 3.5px) calc(100% - 4px) / 7px 4px no-repeat scroll,
     var(--surface);
 }
-/* The rows view's body never scrolls by itself (roomy and compact fit; scroll moves the whole inspector): no fade. */
+/* The rows view's body never scrolls by itself (roomy and compact fit; the others move the inspector): no fade. */
 .insp[data-fit] .insp-body { mask-image: none; animation: none; }
-.insp[data-fit="scroll"] .insp-body { flex: none; overflow: visible; }
+.insp:is([data-fit="pinned"], [data-fit="scroll"]) .insp-body { flex: none; overflow: visible; }
 .insp[data-fit="scroll"] .insp-actions { margin-top: 0; }
-.insp[data-fit="scroll"] [data-cut] { clip-path: inset(0 0 100% 0); }
+/* The pinned actions cover the bottom padding too, so a row scrolling under them never shows below them. The status
+   line and the actions give up 2 px each, enough for Motion and Duration to show at rest on a 768 px tall window. */
+.insp[data-fit="pinned"] .st { margin-top: 6px; }
+.insp[data-fit="pinned"] .insp-actions { position: sticky; bottom: -12px; z-index: 1; margin-bottom: -12px; padding: 6px 0 12px; background: var(--surface); }
+.insp[data-fit="pinned"][data-below] .insp-actions::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: calc(50% - 7px);
+  width: 14px;
+  height: 4px;
+  background:
+    linear-gradient(to top right, var(--insp-stroke)) left / 7px 4px no-repeat,
+    linear-gradient(to top left, var(--insp-stroke)) right / 7px 4px no-repeat;
+  pointer-events: none;
+}
+.insp:is([data-fit="pinned"], [data-fit="scroll"]) [data-cut] { clip-path: inset(0 0 100% 0); }
 .insp .rows .row-pair { display: contents; }
 .insp .rows dd { min-width: 0; overflow-wrap: anywhere; }
 /* A long line is clamped so its length and fit notes stay in view; the full line is in the editor and the title. */

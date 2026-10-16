@@ -1,13 +1,16 @@
 /**
  * How the Keyframes inspector's rows view fits its room. The rows come first: when they do not fit above the
- * stacked actions, the layout tightens a step at a time instead of cutting a row or a button mid-height.
+ * stacked actions, the layout tightens a step at a time instead of cutting a row or a button mid-height. The actions
+ * stay in view at rest in every step but the last.
  *  - roomy: the design's layout, with Edit prompt, Edit motion & duration and Regenerate keyframe stacked.
  *  - compact: Edit prompt and Edit motion & duration side by side, and tighter spacing.
- *  - scroll: compact, and the whole inspector scrolls as one unit. A row or button only partly in view is not
- *    drawn until it is scrolled fully in, so nothing shows half-cut (partlyInView).
+ *  - pinned: compact, with the actions pinned at the inspector's foot and the rows above them scrolling. A row only
+ *    partly in view (at the top edge, or behind the actions) is not drawn until it is scrolled fully in (partlyInView).
+ *  - scroll: the last resort, when the pinned actions would leave no room for the title: the whole inspector scrolls
+ *    as one unit, drawn whole in the same way.
  * `short` gives Edit motion & duration its short label, only once the full words cannot fit side by side.
  */
-export type InspectorFit = "roomy" | "compact" | "scroll";
+export type InspectorFit = "roomy" | "compact" | "pinned" | "scroll";
 
 export interface InspectorLayout {
   fit: InspectorFit;
@@ -23,7 +26,12 @@ export interface FitMeasure {
   overflows: boolean;
   /** A side-by-side action's label does not fit on its one line. */
   labelCut: boolean;
+  /** Pinned at the foot, the actions leave too little room above them for the title at rest. */
+  cramped: boolean;
 }
+
+/** The inspector scrolls in these layouts (its rows under pinned actions, or everything). */
+export const scrolls = (fit: InspectorFit) => fit === "pinned" || fit === "scroll";
 
 /**
  * One step tighter while something does not fit, else the same layout (the same object, so a caller can tell).
@@ -31,11 +39,13 @@ export interface FitMeasure {
  */
 export function tighten(layout: InspectorLayout, measure: FitMeasure): InspectorLayout {
   if (layout.fit !== "roomy" && measure.labelCut && !layout.short) return { ...layout, short: true };
+  // Pinned overflows by design (its rows scroll): it gives way only when the actions leave the title no room.
+  if (layout.fit === "pinned") return measure.cramped ? { ...layout, fit: "scroll" } : layout;
   if (!measure.overflows || layout.fit === "scroll") return layout;
-  return { ...layout, fit: layout.fit === "roomy" ? "compact" : "scroll" };
+  return { ...layout, fit: layout.fit === "roomy" ? "compact" : "pinned" };
 }
 
-/** A unit's top and bottom edge (a row, the title, one action); the view is the scrolled inspector's content box. */
+/** A unit's top and bottom edge (a row, the title, one action); the view is the part of the inspector they show in. */
 export interface Span {
   top: number;
   bottom: number;

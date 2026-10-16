@@ -653,9 +653,10 @@ export const scenarios = [
     },
   },
   {
-    // The inspector fits its room a step at a time (roomy, compact, then scrolling as one unit): at laptop and narrow
-    // sizes, with a short and a long narration row, in both languages, no row or action is ever cut mid-height. On a
-    // narrow stage the preview keeps the whole frame; on a phone its head is one row and its caption one line.
+    // The inspector fits its room a step at a time (roomy, compact, then the actions pinned at its foot with the rows
+    // scrolling above them): at laptop and narrow sizes, with a short and a long narration row, in both languages, no
+    // row or action is ever cut mid-height and the actions are in view at rest. On a narrow stage the preview keeps the
+    // whole frame; on a phone its head is one row and its caption one line.
     name: "next-shell-inspector-fit",
     query: FIXTURE,
     viewport: { width: 1440, height: 900 },
@@ -696,7 +697,7 @@ export const scenarios = [
       // The design's layout where it has room; a phone's inspector is as tall as it needs.
       expect(fits["2.1 1440x900 en"] === "roomy", `2.1 at 1440 is not in the design's layout: ${JSON.stringify(fits)}`);
       expect(fits["2.3 1440x900 en"] === "compact", `2.3's longer narration at 1440 does not tighten to compact: ${JSON.stringify(fits)}`);
-      expect(fits["2.1 1366x768 en"] === "scroll" && fits["2.1 390x844 en"] === null, `The fits are ${JSON.stringify(fits)}`);
+      expect(fits["2.1 1366x768 en"] === "pinned" && fits["2.1 390x844 en"] === null, `The fits are ${JSON.stringify(fits)}`);
       // Compact puts the two edits side by side, shortened only when the words cannot fit; the name keeps them all.
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.locator(".topbar [data-act='language']").click();

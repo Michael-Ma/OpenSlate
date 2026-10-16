@@ -111,8 +111,9 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
   const close = () => { backTo.current = open; setOpen(null); };
   const lostRegen = unconfirmed.regenerate && regen.enabled && !busy.regenerate;
   const regenNotes = [lostRegen ? t("error.PAID_UNCONFIRMED") : null, ...[regen.reason, regen.cost, regen.clipNote].filter((note) => note !== null).map((note) => tm(note!))].filter(Boolean);
-  // The rows view fits its room a step at a time (roomy, compact, then scrolling as one unit), so no row or button is
-  // ever cut mid-height. A panel or an edit form has its own scrolling body; a phone's inspector is as tall as it needs.
+  // The rows view fits its room a step at a time (roomy, compact, then the actions pinned at the foot with the rows
+  // scrolling above them), so no row or button is ever cut mid-height and the actions stay in view. A panel or an edit
+  // form has its own scrolling body; a phone's inspector is as tall as it needs.
   const narrow = useNarrow();
   const rowsView = !editing && !sub;
   const fitting = rowsView && !narrow;
