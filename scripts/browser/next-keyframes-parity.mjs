@@ -553,6 +553,9 @@ export const scenarios = [
       expect(Math.abs((await player.evaluate((video) => video.currentTime)) - 1) < 0.1, "The clip did not seek");
       expect(duration > 0, "No duration");
       await headClear(page);
+      // The head has its own row above the clip: the clip's top edge never runs through the badges and the toggle.
+      const seam = await page.evaluate(() => ({ head: document.querySelector(".preview .pv-head").getBoundingClientRect().bottom, clip: document.querySelector('.preview video[data-act="clip-player"]').getBoundingClientRect().top }));
+      expect(seam.head <= seam.clip + 0.5, `The preview head straddles the clip: ${JSON.stringify(seam)}`);
       await screenshot(page, "live-clip-player-1440");
       // The arrow keys stay with the player while it has focus.
       const first = await page.locator(".preview").getAttribute("data-shot");

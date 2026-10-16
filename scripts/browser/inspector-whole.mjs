@@ -1,4 +1,4 @@
-// Shared checks for the Keyframes inspector's rows view (no scenarios of its own).
+// Shared checks for the Keyframes inspector's rows view and the preview's frame (no scenarios of its own).
 
 /**
  * Every row and action of the inspector is drawn whole or not at all: none is cut mid-height by the inspector's
@@ -63,4 +63,34 @@ export async function inspectorWhole(page, where) {
   await page.locator(".insp").evaluate((element) => { element.scrollTop = 0; });
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   return report;
+}
+
+/**
+ * The preview shows the whole 16:9 frame: where its box is taller than that, the frame keeps 16:9 and the caption
+ * and the controls sit under it (only the shot's badge and status lie on the picture).
+ */
+export async function previewWholeFrame(page, where) {
+  const layout = await page.evaluate(() => {
+    const rect = (element) => { if (!element) return null; const box = element.getBoundingClientRect(); return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height }; };
+    const preview = document.querySelector(".preview");
+    const frame = preview?.querySelector(".pv-frame");
+    const image = frame?.querySelector(".pic-img");
+    return {
+      preview: rect(preview), frame: rect(frame), fit: image ? getComputedStyle(image).objectFit : null,
+      caption: rect(preview?.querySelector(".pv-caption")), side: rect(preview?.querySelector(".pv-side")), scrub: rect(preview?.querySelector(".scrub")),
+    };
+  });
+  const detail = JSON.stringify(layout);
+  if (!layout.preview || !layout.frame) throw new Error(`No preview frame ${where}: ${detail}`);
+  const ratio = layout.frame.width / layout.frame.height;
+  // A frame box narrower than 16:9 would crop the picture's sides unless it is letterboxed.
+  if (ratio < 16 / 9 - 0.03 && layout.fit !== "contain") throw new Error(`The preview crops the 16:9 frame ${where}: ${detail}`);
+  if (layout.preview.height > layout.preview.width * 9 / 16 * 1.25) {
+    // A tall box: the caption, the controls and the scrubber are under the frame, inside the preview.
+    for (const part of ["caption", "side", "scrub"]) {
+      const box = layout[part];
+      if (box && (box.top < layout.frame.bottom - 0.5 || box.bottom > layout.preview.bottom + 0.5)) throw new Error(`The preview's ${part} is not under the frame ${where}: ${detail}`);
+    }
+  }
+  return layout;
 }

@@ -1,11 +1,11 @@
 // Next studio shell checks: top bar, tabs, Settings and All films, language, the narrow drawer, Connect,
 // the film-wide strip (stopped, offline, restart casualties), Stop and its confirm, the session-expired dialog,
 // and no sideways scroll from 900 to 1366 px in every view. The Keyframes inspector draws every row and action whole
-// at common window sizes.
+// at common window sizes, and the preview shows the whole frame on a narrow stage.
 // Set BROWSER_CHECK_SHOTS=/some/dir to also save screenshots of each scenario.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { inspectorWhole } from "./inspector-whole.mjs";
+import { inspectorWhole, previewWholeFrame } from "./inspector-whole.mjs";
 
 const FIXTURE = "ui=next&fixture=last-ferry";
 const LIVE = "ui=next";
@@ -513,8 +513,9 @@ export const scenarios = [
         // Priced actions show their price, stay inside their card or panel, and keep clear of the badge and caption.
         await pricedActionsFit(page, width);
         expect(await page.evaluate(() => document.documentElement.scrollHeight) <= 900, `Priced actions make Keyframes scroll the page at ${width}`);
-        // The inspector's rows and actions are whole.
+        // The inspector's rows and actions are whole; below 1100 the preview shows the whole frame.
         await inspectorWhole(page, `at ${width}`);
+        if (width < 1100) await previewWholeFrame(page, `at ${width}`);
         await noSidewaysScroll(page, `priced actions at ${width}`);
         await shot(page, `next-shell-keyframes-${width}`);
       }
@@ -530,7 +531,8 @@ export const scenarios = [
   },
   {
     // The inspector fits its room a step at a time (roomy, compact, then scrolling as one unit): at laptop and narrow
-    // sizes, with a short and a long narration row, in both languages, no row or action is ever cut mid-height.
+    // sizes, with a short and a long narration row, in both languages, no row or action is ever cut mid-height. On a
+    // narrow stage the preview keeps the whole frame; on a phone its head is one row and its caption one line.
     name: "next-shell-inspector-fit",
     query: FIXTURE,
     viewport: { width: 1440, height: 900 },
@@ -558,6 +560,7 @@ export const scenarios = [
             } else await page.locator(".insp").scrollIntoViewIfNeeded();
             const report = await inspectorWhole(page, where);
             fits[`${label} ${width}x${height} ${language}`] = report.fit;
+            if (width >= 900 && width < 1100) await previewWholeFrame(page, where);
             await noSidewaysScroll(page, where);
           }
         }
@@ -576,6 +579,17 @@ export const scenarios = [
         return { prompt: top(".insp-actions [data-act='edit-prompt']"), motion: top(".insp-actions [data-act='edit-motion']"), text: motion.textContent, name: motion.getAttribute("aria-label") };
       });
       expect(pair.prompt === pair.motion && pair.text === "Edit motion" && pair.name === "Edit motion & duration", `The compact edits are ${JSON.stringify(pair)}`);
+      // A phone: the preview's head is one row (Previous and Next without the position), and its caption one line.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.click(".card [data-act='open-shot'][data-shot='shot-2-1']");
+      await page.locator(".preview").scrollIntoViewIfNeeded();
+      const head = await page.evaluate(() => {
+        const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+        const caption = document.querySelector(".preview .pv-caption");
+        return { top: box(".preview .pv-top").top, side: box(".preview .pv-side").top, caption: caption.getBoundingClientRect().height, line: parseFloat(getComputedStyle(caption).lineHeight) || parseFloat(getComputedStyle(caption).fontSize) * 1.3, position: document.querySelector(".preview .pv-pos").getAttribute("aria-label") };
+      });
+      expect(Math.abs(head.top - head.side) < 4, `The preview's head takes two rows at 390: ${JSON.stringify(head)}`);
+      expect(head.caption <= head.line * 1.5 && head.position === "Shot 4 of 8 in the film", `The caption or the position at 390: ${JSON.stringify(head)}`);
       await shot(page, "next-shell-inspector-fit-390");
     },
   },
