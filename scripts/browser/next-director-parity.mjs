@@ -195,6 +195,12 @@ export const scenarios = [
       await page.waitForSelector(".av-detail-sheet", { state: "detached" });
       if ((await pictureNames(page)).join() !== "Imported image") fail(`Pictures: ${await pictureNames(page)}`);
       await page.waitForTimeout(300);
+      // No toast over the reply box being typed in: the chip shows the picture, and the box's description names it.
+      if (await page.locator(".toast").count()) fail(`A toast covers the reply box: ${await page.locator(".toast").textContent()}`);
+      await page.waitForFunction(() => document.activeElement?.matches('[data-field="message"]'), null, { timeout: 2000 }).catch(() => fail("Focus did not move to the reply box"));
+      const described = await page.locator('[data-field="message"]').evaluate((node) => (node.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent ?? "").join(" | "));
+      if (!described.includes("Pictures in this message: Imported image")) fail(`The reply box is described as ${JSON.stringify(described)}`);
+      await removeTargets(page);
       await noSidewaysScroll(page, 390);
       await page.screenshot({ path: shot("pictures-narrow-390") });
       // The Keyframes preview has the button at phone width too.

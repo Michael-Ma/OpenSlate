@@ -35,10 +35,13 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
   const draftId = `${id}-draft`;
   const scopeId = `${id}-scope`;
   const hintId = `${id}-hint`;
+  const picturesId = `${id}-pictures`;
   // The hint describes the textarea when it says why a message waits (offline, stopped), not when it explains @.
   const hintDescribes = !!view.hint && view.hint.id !== "director.composer.hint";
   const showDraft = restored && !view.off && (!!composer.text || composer.targets.length > 0 || composer.images.length > 0);
-  const describedBy = [view.problem ? noteId : null, hintDescribes ? hintId : null, view.pointsAt.length ? scopeId : null, showDraft ? draftId : null].filter(Boolean).join(" ") || undefined;
+  // Focus lands here after "Show the Director" (on a phone with no toast), so the box names the pictures it carries.
+  const describedBy = [view.pictures.length ? picturesId : null, view.problem ? noteId : null, hintDescribes ? hintId : null, view.pointsAt.length ? scopeId : null, showDraft ? draftId : null].filter(Boolean).join(" ") || undefined;
+  const pictureNames = view.pictures.map((picture) => tm(picture.label));
   const textarea = useRef<HTMLTextAreaElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const caretAfterRender = useRef<number | null>(null);
@@ -155,8 +158,8 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
       <div className="composer">
         {view.pictures.length > 0 && (
           <ul className="pic-chips" aria-label={t("director.picture.group")}>
-            {view.pictures.map((picture) => {
-              const name = tm(picture.label);
+            {view.pictures.map((picture, index) => {
+              const name = pictureNames[index]!;
               return (
                 <li className={`pic-chip${picture.problem ? " problem" : ""}`} key={picture.key} data-picture={picture.image.artifactId} data-source={picture.image.source}>
                   <PictureThumb picture={picture.image} alt="" />
@@ -218,6 +221,7 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
         </div>
       )}
       {showDraft && <p className="composer-draft" id={draftId} data-draft="restored">{t("director.draft.restored")}</p>}
+      {view.pictures.length > 0 && <span className="sr" id={picturesId}>{t("director.picture.in_message", { names: labelList(pictureNames, locale) })}</span>}
     </div>
   );
 }

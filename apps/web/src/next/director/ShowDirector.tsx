@@ -18,6 +18,8 @@ export function focusComposer(tries = 12): void {
  * "Show the Director" a picture: it joins the message being written (with its thumbnail) and the reply box gets
  * focus, in the drawer on a phone. When the picture cannot be shown (the scripted Director, no FFmpeg, an earlier
  * take, four already) a toast says why and nothing is added. Returns whether it was added.
+ * On a phone the drawer opens over everything and the toast would sit on the reply box being typed in, so there is
+ * no toast: the new picture chip shows it, and the reply box's description names the pictures it carries.
  */
 export function useShowToDirector(): (candidate: PictureCandidate) => boolean {
   const store = useStore();
@@ -28,7 +30,7 @@ export function useShowToDirector(): (candidate: PictureCandidate) => boolean {
       return false;
     }
     if (window.matchMedia(NARROW_QUERY).matches) store.setDirectorOpen(true);
-    store.dispatch({ type: "toast", message: msg("director.picture.added"), tone: "info" });
+    else store.dispatch({ type: "toast", message: msg("director.picture.added"), tone: "info" });
     focusComposer();
     return true;
   }, [store]);

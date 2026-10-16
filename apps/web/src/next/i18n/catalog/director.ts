@@ -58,6 +58,7 @@ export const director = {
   "director.picture.keyframe": { en: "{shot} keyframe", zh: "{shot} 关键帧" },
   "director.picture.keyframe_gone": { en: "Removed shot's keyframe", zh: "已删除镜头的关键帧" },
   "director.picture.group": { en: "Pictures for the Director", zh: "给导演看的图片" },
+  "director.picture.in_message": { en: "Pictures in this message: {names}", zh: "这条消息里的图片：{names}" },
   "director.picture.remove": { en: "Remove picture {name}", zh: "移除图片 {name}" },
   "director.picture.already": { en: "This picture is already in your message.", zh: "这张图片已经在消息里了。" },
   "director.picture.limit": { en: "One message can show the Director up to 4 pictures. Remove one first.", zh: "一条消息最多给导演看 4 张图片，请先移除一张。" },
