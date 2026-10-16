@@ -1,12 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { composerView, filterPicker, mentionAt, pickerItems, removeMention, type PickerItem } from "../model/director.ts";
+import { msg } from "../model/types.ts";
 import { useStore, useStudio } from "../store/react.tsx";
-import { useGuarded } from "../app/useWriteGuard.ts";
+import { useGuarded, useRecoveryLock } from "../app/useWriteGuard.ts";
 import { AtPicker, pickerOptionId } from "./AtPicker.tsx";
 
 /** About six lines; past that the textarea scrolls. */
 const MAX_LINES = 6;
+/** The composer's hint while a restored studio is in recovery review. */
+const RECOVERY_HINT = msg("guard.recovery_short");
 
 /**
  * The reply box. One explicit target model: the chips are what the message points at, added only
@@ -23,6 +26,9 @@ export function Composer({ hasFilm }: { hasFilm: boolean }) {
   const stopped = useStudio((s) => !!s.overview?.stopped);
   const overview = useStudio((s) => s.overview);
   const view = useMemo(() => composerView(composer, reachable, overview, { open: hasFilm, stopped }), [composer, reachable, overview, hasFilm, stopped]);
+  // A restored studio in recovery review: the hint names that reason instead of "offline" (the draft is kept as well).
+  const locked = useRecoveryLock() !== null;
+  const hint = locked && view.hint ? RECOVERY_HINT : view.hint;
   const items = useMemo(() => pickerItems(overview), [overview]);
 
   const id = useId();
@@ -30,7 +36,7 @@ export function Composer({ hasFilm }: { hasFilm: boolean }) {
   const noteId = `${id}-note`;
   const hintId = `${id}-hint`;
   // The hint describes the textarea when it says why a message waits (offline, stopped), not when it explains @.
-  const hintDescribes = !!view.hint && view.hint.id !== "director.composer.hint";
+  const hintDescribes = !!hint && hint.id !== "director.composer.hint";
   const describedBy = [view.problem ? noteId : null, hintDescribes ? hintId : null].filter(Boolean).join(" ") || undefined;
   const textarea = useRef<HTMLTextAreaElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -172,7 +178,7 @@ export function Composer({ hasFilm }: { hasFilm: boolean }) {
         />
         <div className="composer-foot">
           <button type="button" className="at-btn" data-act="at" aria-label={t("director.composer.pick")} aria-haspopup="listbox" aria-expanded={picker.open} aria-controls={picker.open && shown.length ? listId : undefined} disabled={view.off} onClick={toggleFromButton}>@</button>
-          <span id={hintId} data-hint={view.hint?.id ?? "none"}>{view.hint ? tm(view.hint) : ""}</span>
+          <span id={hintId} data-hint={hint?.id ?? "none"}>{hint ? tm(hint) : ""}</span>
           <button type="button" className="send" data-act="send" aria-label={t("director.composer.send")} {...sendGuard} disabled={!view.canSend} onClick={send}>
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 12V2M2.5 6.5 7 2l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>

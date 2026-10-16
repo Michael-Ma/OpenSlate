@@ -133,8 +133,11 @@ export function afterFailure(code: string, resent: boolean): AfterFailure {
   return "settle";
 }
 
-/** Failures where the same file can work on another try: unknown answers, a film that moved, a file that changed in transit, a slow check. */
-const RETRYABLE = new Set([...UNCERTAIN, "REVISION_CONFLICT", "UPLOAD_CORRUPT", "IMAGE_DIGEST_MISMATCH", "MEDIA_TIMEOUT", "MEDIA_CANCELLED"]);
+/**
+ * Failures where the same file can work on another try: unknown answers, a film that moved, a file that changed in
+ * transit, a slow check, a studio in recovery review (the same file imports once the review is finished).
+ */
+const RETRYABLE = new Set([...UNCERTAIN, "REVISION_CONFLICT", "UPLOAD_CORRUPT", "IMAGE_DIGEST_MISMATCH", "MEDIA_TIMEOUT", "MEDIA_CANCELLED", "INSTALLATION_QUARANTINED"]);
 
 /**
  * Whether the import sheet offers Try again. Any other refusal is final for this file (not a PNG, too long, too

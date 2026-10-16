@@ -1,4 +1,5 @@
 import type { ExportView, GenerationOverview } from "@openslate/core/public";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { EXPORT_SIZE, MAX_FILM_SECONDS, elapsedSeconds, filmSeconds, panelState, readinessRows, unavailableMsg, whenMsg, whyNotReady, type MediaView } from "../../model/film-export.ts";
 import { clock as formatClock } from "../../model/motion.ts";
@@ -31,7 +32,8 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
   const state = panelState(view, media, now);
   const readiness = view?.readiness ?? null;
   const demo = !!readiness?.demo;
-  const offline = writable ? undefined : t("film.offline");
+  const locked = useRecoveryLock();
+  const offline = writable ? undefined : locked ?? t("film.offline");
   // Stopped turns off what would start work, and the title says why (P5-DESIGN shell change 8).
   // Exports render on this computer and spend nothing, so Stop does not turn them off (card B12).
   const startOff = offline;
@@ -115,7 +117,7 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
           {t(demo ? "film.export.button_demo" : "film.export.button")}
         </button>
         <div className="why" id="fv-export-why">
-          {!writable ? t("film.offline") : !readiness ? null : !ready ? t("film.export.settle_first") : demo ? t("film.export.demo_stamp") : t("film.export.size")}
+          {!writable ? offline : !readiness ? null : !ready ? t("film.export.settle_first") : demo ? t("film.export.demo_stamp") : t("film.export.size")}
         </div>
       </>
     );

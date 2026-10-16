@@ -1,5 +1,6 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
+import { NO_RECOVERY, type RecoveryState } from "../model/recovery.ts";
 import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 
 export type Connection = "connecting" | "connected" | "reconnecting" | "expired" | "failed";
@@ -61,6 +62,8 @@ export interface StudioState {
   /** Presses in flight, keyed by press id (e.g. "confirm:scene-2"); a control is disabled while its press is pending. */
   pending: Record<string, true>;
   toast: Toast | null;
+  /** Installation recovery after a restore from backup; while it is in review the studio is read-only (model/recovery.ts). */
+  recovery: RecoveryState;
 }
 
 export const initialState: StudioState = {
@@ -82,4 +85,5 @@ export const initialState: StudioState = {
   edit: null,
   pending: {},
   toast: null,
+  recovery: NO_RECOVERY,
 };

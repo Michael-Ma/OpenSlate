@@ -1,5 +1,6 @@
 import { ApiError } from "../../api/client.ts";
 import { checkLength, checkPngHeader, PNG_HEADER_BYTES, type FileCheck, type ImportKind } from "../../model/assets-import.ts";
+import { recoveryReadOnly } from "../../model/recovery.ts";
 import type { StudioStore } from "../../store/store.ts";
 
 export interface UploadRequest {
@@ -27,6 +28,14 @@ export interface Uploader {
 
 const abortError = () => new DOMException("Upload cancelled", "AbortError");
 
+/**
+ * A restored studio in recovery review is read-only: an import is refused here, before anything is sent, as the store
+ * refuses its own presses. The sheet says it in place, as it would the studio's own refusal.
+ */
+function refuseInReview(store: StudioStore): void {
+  if (recoveryReadOnly(store.getState())) throw new ApiError("INSTALLATION_QUARANTINED", 409);
+}
+
 /** A check of a long video can take a while, but not forever: past this the answer counts as lost (same key next time). */
 const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -46,6 +55,7 @@ export function liveUploader(store: StudioStore): Uploader {
   };
   return {
     async send(request, progress) {
+      refuseInReview(store);
       const projectId = store.getState().projectId;
       if (!projectId) throw new ApiError("NOT_FOUND", 404);
       const value = await token();
@@ -70,6 +80,8 @@ export function liveUploader(store: StudioStore): Uploader {
           const code = (body as { error?: { code?: string } } | null)?.error?.code ?? (xhr.status === 413 ? "UPLOAD_TOO_LARGE" : xhr.status === 404 ? "NOT_FOUND" : xhr.status === 403 ? "AUTH_REQUIRED" : "REQUEST_FAILED");
           if (code === "CSRF_DENIED" || code === "AUTH_REQUIRED") csrf = null;
           if (code === "AUTH_REQUIRED") store.dispatch({ type: "connection", connection: "expired" });
+          // The studio is in recovery review while this page did not know: the page reads it and turns read-only.
+          if (code === "INSTALLATION_QUARANTINED") void store.readRecovery();
           reject(new ApiError(code, xhr.status));
         };
         xhr.onerror = () => { request.signal.removeEventListener("abort", onAbort); reject(new ApiError("NETWORK_ERROR")); };
@@ -148,6 +160,7 @@ function dataUrl(file: File): Promise<string | null> {
 export function fixtureUploader(store: StudioStore): Uploader {
   return {
     async send(request, progress) {
+      refuseInReview(store);
       const total = request.file.size;
       for (let step = 0; step <= 6; step++) {
         progress.sending(Math.round((total * step) / 6), total);

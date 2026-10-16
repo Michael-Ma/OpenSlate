@@ -121,17 +121,43 @@ export function searchWithLocale(search: string, locale: Locale): string | null 
 
 export interface ConnectionPill {
   label: Msg;
-  /** "ok" while changes reach the studio; "waiting" otherwise. */
-  tone: "ok" | "waiting";
+  /** "ok" while changes reach the studio; "waiting" while it reconnects; "offline" once it cannot be reached. */
+  tone: "ok" | "waiting" | "offline";
 }
 
-export function connectionPill(connection: Connection): ConnectionPill {
+/**
+ * Synced while the studio's events arrive; Reconnecting while the event stream is down but the studio may still
+ * answer; Offline once a plain read got no answer either (`offline`, the shell's reachability check). Before the
+ * first connection it says Connecting, and Not connected once the session ended.
+ */
+export function connectionPill(connection: Connection, offline = false): ConnectionPill {
   switch (connection) {
-    case "connected": return { label: msg("shell.saved"), tone: "ok" };
-    case "connecting": return { label: msg("connect.connecting"), tone: "waiting" };
-    case "reconnecting": return { label: msg("shell.offline"), tone: "waiting" };
-    default: return { label: msg("shell.not_connected"), tone: "waiting" };
+    case "connected": return { label: msg("shell.synced"), tone: "ok" };
+    case "connecting": return offline ? { label: msg("shell.offline"), tone: "offline" } : { label: msg("connect.connecting"), tone: "waiting" };
+    case "reconnecting": return offline ? { label: msg("shell.offline"), tone: "offline" } : { label: msg("shell.reconnecting"), tone: "waiting" };
+    default: return { label: msg("shell.not_connected"), tone: "offline" };
   }
+}
+
+// ---- the view in the address ------------------------------------------------------------------
+
+const URL_VIEWS: Record<string, ViewName> = {
+  plan: "plan", keyframes: "keyframes", film: "film", assets: "assets", settings: "settings", start: "start",
+  // The classic studio's names, so a link from it opens the same view here.
+  frames: "keyframes", cut: "film",
+};
+
+/** The view a link or a reload asks for (`?view=plan`), or null when it names none. */
+export function viewFromSearch(search: string): ViewName | null {
+  const value = new URLSearchParams(search).get("view");
+  return value && Object.hasOwn(URL_VIEWS, value) ? URL_VIEWS[value]! : null;
+}
+
+/** The address's query with the view on screen, keeping everything else (`ui`, `fixture`, `lang`, `project`). */
+export function searchWithView(search: string, view: ViewName): string {
+  const params = new URLSearchParams(search);
+  params.set("view", view);
+  return `?${params.toString()}`;
 }
 
 export interface FilmHeading {

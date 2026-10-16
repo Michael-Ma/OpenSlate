@@ -10,12 +10,13 @@ function StoppedMark() {
 }
 
 /**
- * One strip at the top of the workspace for a film-wide state, the same in every view: offline (Try now),
- * stopped (what finishes and is charged, what was taken off, Continue) or restart casualties (Show, Dismiss).
+ * One strip at the top of the workspace for a film-wide state, the same in every view: offline (Try now), the
+ * recovery review put away (Review), stopped (why, what finishes and is charged, what was taken off, Continue) or
+ * restart casualties (Show, Dismiss).
  * Neutral surface with a white icon; Continue is the primary action, so it is white. Continue writes, so it follows
  * the write guard and says why it is off. Sentences are joined the way the language joins them (no space after 。).
  */
-export function FilmStrip({ strip, onRetry, onDismissRestart }: { strip: Strip; onRetry(): void; onDismissRestart(key: string): void }) {
+export function FilmStrip({ strip, onRetry, onDismissRestart, onReview }: { strip: Strip; onRetry(): void; onDismissRestart(key: string): void; onReview?(): void }) {
   const { t, tm, locale } = useI18n();
   const store = useStore();
   const resuming = useStudio((s) => !!s.pending["control:resume"]);
@@ -29,6 +30,17 @@ export function FilmStrip({ strip, onRetry, onDismissRestart }: { strip: Strip; 
         <p className="txt"><b>{t("strip.offline.title")}</b>{gap}<span>{t("strip.offline.body")}</span></p>
         <div className="acts">
           <button type="button" className="pill sm" data-act="retry-now" onClick={onRetry}>{t("strip.offline.retry")}</button>
+        </div>
+      </section>
+    );
+
+  if (strip.kind === "recovery")
+    return (
+      <section className="film-strip" data-strip="recovery" aria-label={t("strip.recovery.title")}>
+        <span className="ic" aria-hidden="true">!</span>
+        <p className="txt"><b>{t("strip.recovery.title")}</b>{gap}<span>{t("strip.recovery.body")}</span></p>
+        <div className="acts">
+          <button type="button" className="pill sm primary" data-act="review-recovery" onClick={onReview}>{t("strip.recovery.review")}</button>
         </div>
       </section>
     );

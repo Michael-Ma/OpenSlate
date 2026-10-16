@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ApiError } from "../../api/client.ts";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import {
   afterFailure,
@@ -63,6 +64,8 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
   const store = useStore();
   const mode = useMode();
   const connected = useStudio((s) => s.connection === "connected");
+  // A restored studio in recovery review is read-only (app/useWriteGuard.ts): Import is off with that one reason.
+  const locked = useRecoveryLock();
   const uploader = useMemo(() => (mode === "fixture" ? fixtureUploader(store) : liveUploader(store)), [mode, store]);
   const input = useRef<HTMLInputElement>(null);
   /** The import being sent: `sentAll` turns true the moment the last byte has gone out. */
@@ -136,7 +139,7 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
     onClose();
   };
 
-  const canGo = !!file && !refusedFile && !busy && connected && reading.state !== "reading";
+  const canGo = !!file && !refusedFile && !busy && connected && !locked && reading.state !== "reading";
 
   const go = async () => {
     if (!file || !kind || !canGo) return;
@@ -264,7 +267,7 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
           </div>
         )}
         {phase.state === "stopped" && <p className="hint av-stopped" role="status">{t("assets.import.stopped")}</p>}
-        {!connected && <p className="hint" role="status">{t("assets.import.offline")}</p>}
+        {!connected ? <p className="hint" role="status">{t("assets.import.offline")}</p> : locked && <p className="hint" role="status" data-note="recovery">{locked}</p>}
       </div>
       <div className="sheet-foot">
         <span className="grow">{t("assets.import.free")}</span>
@@ -273,7 +276,7 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
           : phase.state === "checking"
             ? <button type="button" className="pill" data-act="import-background" onClick={close}>{t("assets.import.background")}</button>
             : <button type="button" className="pill" data-act="import-cancel" onClick={close}>{t("assets.import.cancel")}</button>}
-        <button type="button" className="pill primary" data-act="import-go" disabled={!canGo} title={!connected ? t("assets.import.offline") : undefined} onClick={() => void go()}>
+        <button type="button" className="pill primary" data-act="import-go" disabled={!canGo} title={!connected ? t("assets.import.offline") : locked ?? undefined} onClick={() => void go()}>
           {t(tryAgain ? "assets.import.retry" : "assets.import.go")}
         </button>
       </div>

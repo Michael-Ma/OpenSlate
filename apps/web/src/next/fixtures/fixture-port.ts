@@ -5,6 +5,7 @@ import type { ProjectSnapshot } from "../model/types.ts";
 import type { StudioPort } from "../store/store.ts";
 import { fixtureCommand } from "./fixture-commands.ts";
 import { fixtureRoute } from "./routes/index.ts";
+import { recoveryRequest } from "./routes/recovery.ts";
 import { DECLINE } from "./routes/types.ts";
 import { fixtureMessage } from "./fixture-director.ts";
 import { lastFerryDirector, lastFerryOverview, lastFerryProposals, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
@@ -57,6 +58,9 @@ export class FixturePort implements StudioPort {
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const method = options.method ?? "GET";
     const base = `/api/projects/${PROJECT_ID}`;
+    // Installation recovery and the session first: a studio in recovery review refuses every write, messages included.
+    const installation = recoveryRequest(this.world, method, path, options);
+    if (installation !== DECLINE) return installation as T;
     if (method === "GET") {
       if (path === base) return structuredClone(this.world.snapshot) as T;
       if (path === `${base}/generation`) return structuredClone(this.world.overview) as T;

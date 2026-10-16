@@ -16,3 +16,6 @@
 .connect-dots i:nth-child(2){animation-delay:.2s}
 .connect-dots i:nth-child(3){animation-delay:.4s}
 @keyframes connect-in{from{opacity:0}to{opacity:1}}
+/* After Disconnect: a Try again without a fresh link says so above the button. */
+.connect .connect-still{margin:0 0 14px;color:var(--text);font-size:13px}
+.connect .connect-still:empty{margin:0}

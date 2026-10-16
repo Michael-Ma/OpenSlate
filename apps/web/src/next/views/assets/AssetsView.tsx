@@ -1,6 +1,7 @@
 import type { AssetItem } from "@openslate/core/public";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNarrow } from "../../app/useNarrow.ts";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { importDoneMsg } from "../../model/assets-import.ts";
 import {
@@ -64,7 +65,9 @@ function Library() {
   const store = useStore();
   const { t, tm, locale } = useI18n();
   const overview = useStudio((s) => s.overview)!;
-  const connected = useStudio((s) => s.connection === "connected");
+  // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one.
+  const locked = useRecoveryLock();
+  const connected = useStudio((s) => s.connection === "connected") && !locked;
   const focus = useStudio((s) => s.focus);
   const narrow = useNarrow();
   const list = useAssetList();
@@ -177,7 +180,7 @@ function Library() {
         <h1 tabIndex={-1}>{t("assets.title")}</h1>
         <span className="line">{list.items ? t("assets.line", { count: list.total }) : ""}</span>
         <div className="actions">
-          <button type="button" className="pill" data-act="import" disabled={!connected} title={!connected ? t("assets.import.offline") : undefined} onClick={() => setImporting(true)}>{t("assets.import")}</button>
+          <button type="button" className="pill" data-act="import" disabled={!connected} title={!connected ? locked ?? t("assets.import.offline") : undefined} onClick={() => setImporting(true)}>{t("assets.import")}</button>
         </div>
       </div>
 

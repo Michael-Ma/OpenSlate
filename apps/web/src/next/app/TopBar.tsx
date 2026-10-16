@@ -3,7 +3,9 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { showStop } from "../model/shell-states.ts";
 import { classicHref, connectionPill, filmHeading, otherLocale, searchWithLocale, shownView, showProjectPicker, tabKeyTarget, topBarMode, viewTabs } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
+import { DisconnectDialog } from "./DisconnectDialog.tsx";
 import { StopDialog } from "./StopDialog.tsx";
+import { StudioMenu } from "./StudioMenu.tsx";
 import { useNarrow } from "./useNarrow.ts";
 import { useWriteGuard } from "./useWriteGuard.ts";
 
@@ -27,11 +29,20 @@ function Gear() {
 }
 
 /**
- * 52 px bar: the mark (all films), the film, view tabs, Stop while something runs, counts, connection,
- * language, the classic studio, Settings and (narrow) the Director toggle. On Start no film is open, so the bar
- * names the films on this computer and drops the tabs, counts and Stop.
+ * 52 px bar: the mark (all films), the film, view tabs, Stop while something runs, counts, connection (Synced,
+ * Reconnecting, Offline), language, the classic studio, Settings, the studio menu (Disconnect this studio) and
+ * (narrow) the Director toggle. On Start no film is open, so the bar names the films on this computer and drops the
+ * tabs, counts and Stop. `onNavigate` runs on every tab, mark or Settings press, even for the view already shown
+ * (the shell puts the recovery review away so the view shows); `onDisconnected` once the session was ended.
  */
-export function TopBar({ inert = false, expired = false }: { inert?: boolean; expired?: boolean }) {
+export function TopBar({ inert = false, expired = false, offline = false, onNavigate, onDisconnected }: {
+  inert?: boolean;
+  expired?: boolean;
+  /** The studio could not be reached (the shell's reachability check): the pill says Offline. */
+  offline?: boolean;
+  onNavigate?(): void;
+  onDisconnected?(): void;
+}) {
   const store = useStore();
   const { t, tm, locale, setLocale } = useI18n();
   const name = useStudio((s) => s.snapshot?.project.name);
@@ -48,10 +59,15 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
   const reachable = useWriteGuard().server;
   const heading = useMemo(() => filmHeading(name, projects, projectId, overview), [name, projects, projectId, overview]);
   const mode = topBarMode(view);
-  const pill = connectionPill(connection);
+  const pill = connectionPill(connection, offline);
   const tabs = viewTabs(view);
   const stop = mode === "film" && showStop(overview, director, reachable, view);
   const [confirming, setConfirming] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const go = (next: Parameters<typeof store.setView>[0]) => {
+    onNavigate?.();
+    store.setView(next);
+  };
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(directorOpen);
@@ -117,7 +133,7 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
   return (
     <>
     <header className="topbar" inert={inert} data-mode={mode}>
-      <button type="button" className="brand" data-act="all-films" aria-label={t("shell.all_films")} aria-current={view === "start" ? "page" : undefined} onClick={() => store.setView("start")}>
+      <button type="button" className="brand" data-act="all-films" aria-label={t("shell.all_films")} aria-current={view === "start" ? "page" : undefined} onClick={() => go("start")}>
         <span className="logo" aria-hidden="true"><i /></span>
         <span className="word">{t("app.name")}</span>
       </button>
@@ -157,7 +173,7 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
               data-view={tab.view}
               aria-selected={tab.selected}
               tabIndex={tab.focusable ? 0 : -1}
-              onClick={() => store.setView(tab.view)}
+              onClick={() => go(tab.view)}
             >
               {t(tab.label)}
             </button>
@@ -193,10 +209,11 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
           aria-label={t("shell.settings")}
           title={t("shell.settings")}
           aria-current={view === "settings" ? "page" : undefined}
-          onClick={() => store.setView("settings")}
+          onClick={() => go("settings")}
         >
           <Gear />
         </button>
+        <StudioMenu items={[{ act: "disconnect", label: t("shell.disconnect"), onSelect: () => setDisconnecting(true) }]} />
         <button
           ref={toggleRef}
           type="button"
@@ -211,6 +228,7 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
       </div>
     </header>
     {confirming && <StopDialog onClose={() => setConfirming(false)} onStop={confirmStop} />}
+    {disconnecting && <DisconnectDialog onClose={() => setDisconnecting(false)} onDisconnected={() => onDisconnected?.()} />}
     </>
   );
 }

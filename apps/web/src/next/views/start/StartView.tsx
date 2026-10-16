@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useNarrow } from "../../app/useNarrow.ts";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { errorMsg } from "../../i18n/translate.ts";
 import {
@@ -72,7 +73,9 @@ export function StartView() {
   const [savedDemo, setSavedDemo] = useState<PendingDemo | null>(() => parsePendingDemo(readSession(PENDING_DEMO_KEY)));
   const [demoBusy, setDemoBusy] = useState(false);
 
-  const offline = connected ? null : t("start.offline");
+  // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one.
+  const locked = useRecoveryLock();
+  const offline = locked ?? (connected ? null : t("start.offline"));
   const view = useMemo(() => (films.data ? filmsView(films.data, projectId, new Date(), locale) : null), [films.data, projectId, locale]);
   const catalog = providers.catalog;
   const setup = useMemo(() => setupStatus(catalog && catalog !== "failed" ? catalog : null, codex), [catalog, codex]);

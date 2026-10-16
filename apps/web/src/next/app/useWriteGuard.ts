@@ -11,6 +11,17 @@ export function useWriteGuard(): WriteGuard {
 }
 
 /**
+ * The recovery review's one reason, translated, while a restored studio is read-only; null otherwise (and while the
+ * studio is offline or the session expired, whose reasons come first). Views that turn their writes off by the
+ * connection (Plan, Film, Assets, Settings, Start) put it first, so every write says the same reason.
+ */
+export function useRecoveryLock(): string | null {
+  const { tm } = useI18n();
+  const why = useWriteGuard().serverWhy;
+  return why?.id === "guard.recovery" ? tm(why) : null;
+}
+
+/**
  * Props for one control under the guard (P5 shell change 8). Spread them on the button:
  * `<button {...useGuarded("run")} onClick={make}>`. It is off while the guard says so and its title says why;
  * `data-needs` names what it needs. A control with its own reason to be off combines it:

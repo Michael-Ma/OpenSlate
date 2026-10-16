@@ -1,5 +1,6 @@
 import type { ShotOverview } from "@openslate/core/public";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { lengthLimits, shotSeconds, type FilmMusic, type FilmShot } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
@@ -24,7 +25,8 @@ export function ShotTools({ shot, overview, fps, writable, onLength, onMove, onO
   const seconds = shotSeconds(overview, fps);
   // Buttons stay enabled while an edit saves, so keyboard focus stays on them; a press during a save is ignored.
   const off = !writable;
-  const offline = writable ? undefined : t("film.offline");
+  const locked = useRecoveryLock();
+  const offline = writable ? undefined : locked ?? t("film.offline");
   const notes = [
     limits.voiceFloor ? t("film.tools.voice_floor", { seconds: limits.voiceFloor }) : null,
     shot.picture === "clip" ? t("film.tools.outdates_clip") : null,
@@ -103,7 +105,8 @@ export function MusicTools({ music, total, writable, saving, onStart, onGain, on
   const slider = useRef<HTMLInputElement>(null);
   const commit = useRef(onGain);
   commit.current = onGain;
-  const offline = writable ? undefined : t("film.offline");
+  const locked = useRecoveryLock();
+  const offline = writable ? undefined : locked ?? t("film.offline");
   // The saved level shows unless a newer one waits to be saved.
   useEffect(() => { if (unsavedRef.current === null) setDraft(music.gainDb); }, [music.gainDb]);
   const save = useCallback((db: number) => {

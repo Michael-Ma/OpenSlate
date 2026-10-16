@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classicHref, codeSegments, connectionPill, connectScreen, directorHasFilm, escClosesDrawer, filmHeading, hasNoFilms, noteOpenView, otherLocale,
-  pauseCountdown, resumeCountdown, searchWithLocale, shownView, showProjectPicker, startCountdown, tabKeyTarget,
+  pauseCountdown, resumeCountdown, searchWithLocale, searchWithView, shownView, showProjectPicker, startCountdown, tabKeyTarget, viewFromSearch,
   toastLifetime, topBarMode, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS, VIEWS,
 } from '../../src/next/model/shell.ts';
 import { lastFerryOverview } from '../../src/next/fixtures/last-ferry.ts';
@@ -85,14 +85,34 @@ test('switching language flips between English and Chinese and updates an explic
   assert.equal(searchWithLocale('?lang=en&ui=next', 'zh-CN'), '?lang=zh-CN&ui=next');
 });
 
-test('the connection pill says Saved locally only while connected', () => {
-  assert.deepEqual([en(connectionPill('connected').label), connectionPill('connected').tone], ['Saved locally', 'ok']);
-  assert.equal(en(connectionPill('reconnecting').label), 'Reconnecting…');
+test('the connection pill says Synced, Reconnecting or Offline', () => {
+  assert.deepEqual([en(connectionPill('connected').label), connectionPill('connected').tone], ['Synced', 'ok']);
+  assert.equal(zh(connectionPill('connected').label), '已同步');
+  // The event stream is down but the studio may still answer reads.
+  assert.deepEqual([en(connectionPill('reconnecting').label), connectionPill('reconnecting').tone], ['Reconnecting…', 'waiting']);
   assert.equal(zh(connectionPill('reconnecting').label), '正在重新连接…');
+  // A plain read got no answer either.
+  assert.deepEqual([en(connectionPill('reconnecting', true).label), connectionPill('reconnecting', true).tone], ['Offline', 'offline']);
+  assert.equal(zh(connectionPill('reconnecting', true).label), '离线');
+  // Offline only qualifies a connection that is not up: a connected stream is synced.
+  assert.equal(en(connectionPill('connected', true).label), 'Synced');
   assert.equal(en(connectionPill('connecting').label), 'Connecting…');
   assert.equal(connectionPill('connecting').tone, 'waiting');
   assert.equal(en(connectionPill('expired').label), 'Not connected');
   assert.equal(zh(connectionPill('failed').label), '未连接');
+});
+
+test('the view on screen goes into the address and comes back from it', () => {
+  for (const view of ['plan', 'keyframes', 'film', 'assets', 'settings', 'start']) assert.equal(viewFromSearch(`?ui=next&view=${view}`), view);
+  // The classic studio's names open the same views.
+  assert.equal(viewFromSearch('?view=frames'), 'keyframes');
+  assert.equal(viewFromSearch('?view=cut'), 'film');
+  for (const search of ['', '?ui=next', '?view=', '?view=timeline', '?view=__proto__', '?view=toString']) assert.equal(viewFromSearch(search), null, search);
+  // Everything else in the address stays (mode, sample film, language, film).
+  assert.equal(searchWithView('?ui=next&fixture=last-ferry&lang=en', 'plan'), '?ui=next&fixture=last-ferry&lang=en&view=plan');
+  assert.equal(searchWithView('?view=keyframes&project=p1', 'film'), '?view=film&project=p1');
+  assert.equal(searchWithView('', 'settings'), '?view=settings');
+  assert.equal(viewFromSearch(searchWithView('?ui=next', 'assets')), 'assets');
 });
 
 test('the film heading names the film and reads duration, frame rate and counts from the overview', () => {

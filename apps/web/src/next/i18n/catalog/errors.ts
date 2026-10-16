@@ -78,5 +78,11 @@ export const errors = {
   "error.PERSONAL_VOICE_REVOKED": { en: "This voice was revoked. Make a new voice in your provider account to use it again.", zh: "这个声音已被撤回。要再次使用，请在服务商账号里新建一个声音。" },
   "error.PERSONAL_VOICE_NOT_ENROLLED": { en: "That personal voice isn't registered for this film.", zh: "这个个人声音没有为这部影片登记。" },
   "error.PERSONAL_VOICE_LIMIT": { en: "A film can have at most 32 personal voices.", zh: "一部影片最多可以有 32 个个人声音。" },
+  // Installation recovery after a restore from backup.
+  "error.INSTALLATION_QUARANTINED": { en: "This studio was restored from a backup. Finish the recovery review first.", zh: "这个工作室是从备份恢复的，请先完成恢复检查。" },
+  "error.RECOVERY_CONFLICT": { en: "The recovery summary changed. Look over it again, then finish the review.", zh: "恢复摘要已变化。请再看一遍，然后完成检查。" },
+  "error.RECOVERY_ALREADY_RELEASED": { en: "The recovery review was already finished.", zh: "恢复检查已经完成。" },
+  "error.RECOVERY_INVALID": { en: "The restored studio’s recovery record could not be read. Check again.", zh: "无法读取恢复记录，请重新检查。" },
+  "error.RESTORED_AUTHORITY_REQUIRES_NEW": { en: "This was saved before the restore and can’t start new work. Ask for it again.", zh: "这是恢复前保存的，不能开始新的工作，请重新发起。" },
   "error.PERSONAL_VOICE_PROVIDER_UNAVAILABLE": { en: "This voice's provider isn't connected to narration.", zh: "这个声音的服务商没有接入旁白。" },
 } satisfies Record<string, Entry>;

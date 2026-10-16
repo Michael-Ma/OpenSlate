@@ -1,0 +1,43 @@
+/*
+ * The recovery review after a restore from backup (app/RecoveryReview.tsx), in place of the view.
+ * Only :root tokens. Neutral surfaces: amber is the Director's; white is the primary action; green marks done.
+ * This file can load before studio.css, so every rule that overrides it is more specific, never later.
+ */
+
+/* One calm page that scrolls inside the workspace, like Settings. */
+.work.recovery-work{display:block;padding:10px 22px 24px;overflow:auto;min-width:0;min-height:0}
+@media (min-width:900px){ .app[data-ui="next"] > .workspace-slot > .work.recovery-work{grid-column:2;grid-row:3} }
+
+.recovery-card{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--r-big);padding:20px 22px 18px;margin-top:4px}
+.recovery-card .recovery-eyebrow{display:flex;align-items:center;gap:8px;margin:0;font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--text-2)}
+.recovery-card h1{margin:6px 0 8px;font-size:20px;font-weight:700;letter-spacing:-.01em}
+.recovery-card h1:focus{outline:none}
+.recovery-card h1:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.recovery-card .recovery-lead{margin:0 0 8px;color:var(--text-2);line-height:1.55;max-width:68ch}
+.recovery-card .recovery-backup{margin:10px 0 0;color:var(--text);font-weight:600;line-height:1.5;max-width:68ch}
+.recovery-card .recovery-ok{width:18px;height:18px;border-radius:50%;background:var(--green-surface);border:1px solid var(--green-line);color:var(--green);display:inline-grid;place-items:center;font-size:11px;letter-spacing:0}
+
+/* What the backup holds: the number, what it is, and what happens to it. */
+.recovery-card .recovery-sub{margin:18px 0 4px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--muted)}
+.recovery-card .recovery-counts{margin:0;padding:0}
+.recovery-card .recovery-row{display:grid;grid-template-columns:52px minmax(0,1fr);grid-template-areas:"n label" "n what";column-gap:12px;row-gap:2px;padding:10px 0;border-top:1px solid var(--hairline);align-items:baseline}
+.recovery-card .recovery-row:first-child{border-top:0}
+.recovery-card .recovery-row dt{grid-area:label;font-weight:600}
+.recovery-card .recovery-row .n{grid-area:n;margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;text-align:right;line-height:1.1}
+.recovery-card .recovery-row .what{grid-area:what;margin:0;color:var(--text-2);font-size:13px;line-height:1.5;max-width:68ch}
+
+/* The decision. */
+.recovery-card .recovery-decision{margin-top:12px;padding-top:14px;border-top:1px solid var(--track)}
+.recovery-card .recovery-after{margin:0 0 12px;color:var(--text);line-height:1.5;max-width:68ch}
+.recovery-card .recovery-notice{display:flex;gap:10px;align-items:flex-start;margin:0 0 12px;border:1px solid var(--track);background:var(--raised);border-radius:12px;padding:9px 12px;line-height:1.5;max-width:68ch}
+.recovery-card .recovery-notice .ic{flex:none;width:20px;height:20px;border-radius:50%;background:var(--text);color:var(--surface);display:grid;place-items:center;font-size:11.5px;font-weight:800;line-height:1;margin-top:1px}
+.recovery-card .recovery-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.recovery-card .recovery-actions .pill{padding:7px 16px}
+.recovery-card .recovery-actions .pill[aria-disabled="true"]{background:var(--raised-2);border-color:var(--raised-2);color:var(--muted);cursor:progress}
+
+@media (max-width:899px){
+  .work.recovery-work{padding:14px 16px 28px}
+  .recovery-card{padding:16px 16px 14px}
+  .recovery-card .recovery-row{grid-template-columns:40px minmax(0,1fr)}
+  .recovery-card .recovery-actions .pill{flex:1 1 auto;justify-content:center}
+}
