@@ -4,7 +4,6 @@ import { toolVersion } from "./installation-status.js";
 import { registerDirectorProposals } from "./application/director-proposals.js";
 import { registerShotTakes } from "./shot-takes.js";
 import { registerDirectorNotes } from "./application/director-notes.js";
-import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { SceneConfirmationRunner, registerSceneConfirmations } from "./scene-confirmations.js";
 import { registerNarrationFit } from "./narration-fit.js";
 import { requiredCommandKey } from "./application/command-key.js";
@@ -15,7 +14,6 @@ import { registerStoryboard } from "./storyboard.js";
 import { registerPlanImports } from "./plan-imports.js";
 import { registerProjectLibrary } from "./project-library.js";
 import { registerAssetLibrary } from "./asset-library.js";
-import { registerGenerationPermission } from "./generation-permission.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
 import { registerStudioSessions, type StudioSessions } from "./studio-sessions.js";
 import Fastify from "fastify";
@@ -33,7 +31,7 @@ import type { SelectedDirectorImage } from "./application/director-images.js";
 import type { ProductionService } from "./application/service.js";
 import type { DirectorSupervisor } from "./application/director-supervisor.js";
 import type { LocalDirectorController, LocalDirectorSelection } from "./application/local-director.js";
-import type { ArtifactRecord, PlanRecord, ReviewSnapshot } from "./execution/engine.js";
+import type { ArtifactRecord, PlanRecord } from "./execution/engine.js";
 import { seedFixture } from "./demo.js";
 import type { DemoCommand } from "./application/fake-director.js";
 import { registerNarrationRoutes } from "./narration/routes.js";
@@ -68,7 +66,6 @@ export function createApp(options: AppOptions = {}) {
   const allowedOrigins = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
   const actors = new WeakMap<object, ActorContext>();
   const recovery = options.service ? new InstallationRecoveryGuard(options.service.store) : undefined;
-  const reviewCache = new Map<string, { cursor: number; snapshot: ReviewSnapshot }>();
   const service = () => { invariant(options.service, "SERVICE_UNAVAILABLE", "Application storage is not configured"); return options.service; };
   let defaultProviderCatalog: InstalledProviderCatalog | undefined;
   const providerCatalog = () => options.providerCatalog ?? (defaultProviderCatalog ??= new InstalledProviderCatalog({ registry: service().engine.registry }));
@@ -156,12 +153,6 @@ export function createApp(options: AppOptions = {}) {
       (p.readiness.credential.present === true || ("nativeAccess" in p.readiness && p.readiness.nativeAccess?.configured === true)));
     return reply.header("Cache-Control", "no-store").send({ codex, mediaTools, providersConfigured });
   });
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/providers", async request => {
-    const project = service().store.getProject(request.params.projectId);
-    const lock = service().store.get<{ projectId: string; profiles: unknown; providerSelection?: unknown; localExecution?: unknown }>("capability_lock", project.capabilityLockId);
-    invariant(lock?.projectId === project.id, "PROVIDER_CATALOG_INVALID", "The project provider lock is unavailable");
-    return providerCatalog().projectView(lock.profiles, lock.providerSelection, lock.localExecution);
-  });
   const modelSettings = () => new ProjectModelSettings(service(), providerCatalog());
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/settings/models", async request => modelSettings().status(request.params.projectId));
   app.post<{ Params: { projectId: string }; Body: ProjectModelPreviewInput }>("/api/projects/:projectId/settings/models/preview", {
@@ -192,7 +183,6 @@ export function createApp(options: AppOptions = {}) {
     const selection = request.body.profileIds ? providerCatalog().select(request.body.expectedCatalogDigest!, request.body.profileIds) : undefined;
     return service().createProject(request.body.name, selection);
   }));
-  registerGenerationPermission(app, service, options.director);
   registerAssetLibrary(app, service);
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async request => service().snapshot(request.params.projectId));
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director", async request => {
@@ -206,16 +196,6 @@ export function createApp(options: AppOptions = {}) {
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/models", async request => {
     invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director setup is not available in this server");
     return options.runtimeSettings.models(request.params.projectId);
-  });
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/director/tools", async request => {
-    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
-    return options.runtimeSettings.tools(request.params.projectId);
-  });
-  app.post<{ Params: { projectId: string }; Body: { expectedLockId: string; expectedLockDigest: string; targetVersion: Exclude<import("@openslate/core").ToolContractVersion, "1.0.0"> } }>("/api/projects/:projectId/director/tools/upgrade", {
-    schema: { body: object({ expectedLockId: string, expectedLockDigest: { type: "string", pattern: "^[a-f0-9]{64}$" }, targetVersion: { enum: SUPPORTED_TOOL_CONTRACTS.slice(1) } }, ["expectedLockId", "expectedLockDigest", "targetVersion"]) },
-  }, async request => {
-    invariant(options.runtimeSettings, "SERVICE_UNAVAILABLE", "Local director settings are not available in this server");
-    return options.runtimeSettings.upgradeTools(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
   app.post<{ Params: { projectId: string }; Body: LocalDirectorSelection }>("/api/projects/:projectId/director/setup", {
     schema: { body: object({ mode: { enum: ["fake", "native"] }, binaryPath: { type: "string", maxLength: 4096 }, model: { type: "string", maxLength: 120 }, codexHome: { type: "string", maxLength: 4096 } }, ["mode"]) },
@@ -299,16 +279,9 @@ export function createApp(options: AppOptions = {}) {
     // Planning may stop at images before a video/review recipe exists. Keep the
     // workspace readable without fabricating an approval snapshot or authority.
     if (!activePlan.compiled.gates.length) return { id: null, projectId, planId: activePlan.id, members: [], headVersion: project.headVersion, revisionId: project.revisionId };
-    let snapshot: ReviewSnapshot | (Omit<ReviewSnapshot, "id"> & { id: null });
-    if (recovery?.isQuarantined()) snapshot = { ...service().engine.inspectReview(projectId), id: null };
-    else {
-      const cursor = service().store.cursor(projectId);
-      let cached = reviewCache.get(projectId);
-      if (!cached || cached.cursor !== cursor) {
-        cached = { cursor, snapshot: service().engine.reviewSnapshot(projectId) }; reviewCache.set(projectId, cached);
-      }
-      snapshot = cached.snapshot;
-    }
+    // Historical plan inspection grants no approval identity, in ordinary use or
+    // during recovery. Durable approval snapshots belong to scene confirmation.
+    const snapshot = { ...service().engine.inspectReview(projectId), id: null };
     const plan = service().store.get<PlanRecord>("plan", snapshot.planId)!;
     const approvals = service().store.list<{ videoNodeId: string; approvalDigest: string }>("approval", projectId);
     return { ...snapshot, headVersion: project.headVersion, revisionId: project.revisionId, members: snapshot.members.map(member => {
@@ -332,12 +305,6 @@ export function createApp(options: AppOptions = {}) {
       invariant(allowed.includes(artifact.mimeType), "ARTIFACT_TYPE_UNSUPPORTED", "Artifact is not a supported preview");
       return reply.header("X-Content-Type-Options", "nosniff").header("Cache-Control", "private, no-store").header("Content-Security-Policy", "sandbox; default-src 'none'").type(artifact.mimeType).send(bytes);
     } finally { closeSync(fd); }
-  });
-  app.post<{ Params: { projectId: string }; Body: { snapshotId: string; videoNodeIds: string[] } }>("/api/projects/:projectId/approvals", {
-    schema: { body: object({ snapshotId: string, videoNodeIds: { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: string } }, ["snapshotId", "videoNodeIds"]) },
-  }, async request => {
-    const actor = service().beginRequest(request.params.projectId, "local-user", "Review the displayed keyframes", { source: "app", editing: false, contextDigest: digest({ snapshotId: request.body.snapshotId, videoNodeIds: [...request.body.videoNodeIds].sort() }), key: `review:${request.headers["idempotency-key"] ?? digest(request.body)}` });
-    return service().approve(request.params.projectId, actor, request.body.snapshotId, request.body.videoNodeIds);
   });
   app.post<{ Params: { projectId: string }; Body: ControlInput }>("/api/projects/:projectId/controls", {
     schema: { body: { oneOf: [object({ action: { const: "stop" } }, ["action"]),

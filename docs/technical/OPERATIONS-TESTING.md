@@ -15,11 +15,15 @@ FFmpeg/ffprobe enable media import/export. Native director/image setup requires 
 | Command | Scope |
 |---|---|
 | `pnpm check` | Build, isolated offline tests, all workspace typechecks |
+| `pnpm studio:fixture` | Disposable fake First Light studio on port 3101; add `--film last-ferry` for the three-scene/eight-shot server seed |
+| `pnpm check:browser` | Build and rendered next-UI scenarios in system Chrome against disposable state; card sandboxes reserve launching for the lead |
 | `pnpm demo:headless` | Fake two-shot edit/restart and uncertain-submission proof |
 | `pnpm probe:workflow` | Fake sixty-shot/six-minute workflow and scoped recovery |
 | `pnpm probe:toolchain` | SQLite/schema and optional FFmpeg H.264/AAC support |
 | `pnpm probe:runtime --codex /absolute/path/to/codex` | Installed compatibility with zero model turns |
 | `pnpm probe:launcher` | Disposable real process on port 3001; no model/media calls |
+
+The browser-only `?fixture=last-ferry` sample uses its own simulated transport; it is distinct from the fake-provider server seed. Neither is real-provider evidence. The only UI is `apps/web/src/next`.
 
 Tests bind loopback and use temporary databases/media. Optional native probes are separate from paid model turns. Real media experiments must identify their explicitly authorized scope and exact job/attempt outcomes; unknown dispatch is reconciled before any retry. The studio has no separate usage-allowance or API-key approval step.
 

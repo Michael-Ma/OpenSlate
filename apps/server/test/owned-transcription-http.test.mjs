@@ -1,3 +1,4 @@
+import { narrationServiceHarness } from './narration-service-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
@@ -30,9 +31,7 @@ async function setup(t, options = {}) {
   registerNarrationRoutes(f.app, { production: f.production, narration: f.narration, canonical: f.canonical,
     uploadDirectory: join(f.root, 'uploads'), ...(options.available === false ? {} : { ownedTranscription: f.service }) });
   await f.app.ready(); t.after(() => f.app.close()); f.base = `/api/projects/${f.project.id}/narration`;
-  f.request = (suffix = '', payload, extras = {}) => f.app.inject({ method: payload === undefined ? 'GET' : 'POST', url: `${f.base}${suffix}`,
-    ...(payload === undefined ? {} : { payload }), ...extras,
-    headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': key(), ...extras.headers } });
+  f.testToken = token; f.request = narrationServiceHarness(f, { uploadDirectory: f.uploadDirectory ?? join(f.root ?? f.dir, 'uploads'), speech: f.speechService ?? (f.profile?.kind === 'speech' ? f.service : undefined), transcription: f.service });
   f.session = async (body = {}, commandKey = key()) => { const response = await f.request('/sessions', body, { headers: { 'idempotency-key': commandKey } });
     assert.equal(response.statusCode, 200, response.body); return response.json().session; };
   f.prepareBody = (session, patch = {}) => { const { key: _key, ...input } = f.input(); return { ...input, sessionId: session.id, ...patch }; };
@@ -45,7 +44,7 @@ async function setup(t, options = {}) {
   };
   f.reviewBody = (session, proposal) => ({ sessionId: session.id, proposalId: proposal.id, proposalDigest: digest(proposal) });
   f.review = (session, proposal, commandKey = key()) => f.request(REVIEWS, f.reviewBody(session, proposal), { headers: { 'idempotency-key': commandKey } });
-  f.media.describeTranscriptionAudio = f.media.deriveTranscriptionAudio = () => { throw Error('HTTP proposal/review cannot prepare provider audio'); };
+  f.media.describeTranscriptionAudio = f.media.deriveTranscriptionAudio = () => { throw Error('service proposal/review cannot prepare provider audio'); };
   return f;
 }
 function actor(session) { return { kind: 'human', principalId: 'local-user', requestId: session.requestId }; }
@@ -60,18 +59,16 @@ async function changeHead(f, session) {
   f.production.apply(f.project.id, actor(session), prepared.id);
 }
 
-test('authenticated options and proposal reads create no request, session, hold, authority or media work', async t => {
+test('options and proposal projections create no request, session, hold, authority or media work', async t => {
   const f = await setup(t), before = allRows(f), calls = f.provider.acceptedCount();
   for (const path of ['/transcription-options', PROPOSALS]) {
-    assert.equal((await f.request(path, undefined, { headers: { authorization: '' } })).statusCode, 403);
-    assert.equal((await f.request(path, undefined, { headers: { origin: 'https://foreign.example' } })).statusCode, 403);
     const res = await f.request(path); assert.equal(res.statusCode, 200, res.body);
     assert.ok(!res.body.includes(f.root)); assert.ok(!res.body.includes('OPENSLATE_OPENAI_API_KEY')); assert.ok(res.rawPayload.length <= 64 * 1024);
   }
   assert.deepEqual(allRows(f), before); assert.equal(f.provider.acceptedCount(), calls); noSpending(f);
 });
 
-test('HTTP upload-first preparation creates only its exact ungranted proposal without any script or canonical acceptance', async t => {
+test('service upload-first preparation creates only its exact ungranted proposal without any script or canonical acceptance', async t => {
   const f = await setup(t), session = await f.session(), before = unchanged(f), count = f.provider.acceptedCount();
   const { proposal, response } = await f.propose(session);
   assert.equal(unchanged(f), before); assert.equal(proposal.state, 'ungranted'); assert.equal(proposal.requestId, session.requestId);
@@ -86,14 +83,8 @@ test('HTTP upload-first preparation creates only its exact ungranted proposal wi
   assert.equal(f.provider.acceptedCount(), count); noSpending(f);
 });
 
-test('strict authenticated HTTP rejects forged authority, malformed input and foreign or stale sessions before writes', async t => {
+test('service rejects foreign or stale sessions and exact source mismatches before writes', async t => {
   const f = await setup(t), session = await f.session(), input = f.prepareBody(session), before = allRows(f);
-  for (const patch of [{ actor: actor(session) }, { principalId: 'local-user' }, { requestId: session.requestId }, { key: 'body-key' }, { path: f.originalPath },
-    { sourceRecordDigest: 'bad' }, { expectedHeadVersion: -1 }, { target: { kind: 'recording', segmentId: 'inferred' } }])
-    assert.equal((await f.request(PROPOSALS, { ...input, ...patch })).statusCode, 400);
-  assert.equal((await f.request(PROPOSALS, input, { headers: { authorization: '' } })).statusCode, 403);
-  assert.equal((await f.request(PROPOSALS, input, { headers: { origin: 'https://foreign.example' } })).statusCode, 403);
-  assert.equal((await f.request(PROPOSALS, input, { headers: { 'idempotency-key': '' } })).statusCode, 400);
   assert.equal((await f.request(PROPOSALS, { ...input, sessionId: key() })).json().error.code, 'NARRATION_SESSION_STALE');
   for (const patch of [{ audioId: key() }, { sourceRecordDigest: 'f'.repeat(64) }, { expectedHeadVersion: input.expectedHeadVersion + 1 }, { profileId: 'fake-image-v1' }])
     assert.equal((await f.request(PROPOSALS, { ...input, ...patch })).statusCode, 409);
@@ -137,7 +128,7 @@ for (const boundary of ['head', 'section']) test(`review rejects ${boundary} cha
   assert.equal(rows(f, 'owned_transcription_review').length, 0); assert.equal(rows(f, 'owned_transcription_application').length, 0); noSpending(f);
 });
 
-test('human HTTP review appends one reviewed transcription while retaining the full active plan and existing outputs', async t => {
+test('human service review appends one reviewed transcription while retaining the full active plan and existing outputs', async t => {
   const f = await setup(t, { plan: true, outputs: true }), session = await f.session(), base = f.store.getProject(f.project.id);
   const oldPlan = f.store.get('plan', base.activePlanId).compiled, oldBindings = rows(f, 'node_binding'), oldGrants = rows(f, 'grant'), oldCandidates = rows(f, 'candidate');
   const narration = canonical(f.narration.workspaceSnapshot(f.project.id)), accepted = f.provider.acceptedCount(), { proposal } = await f.propose(session);
@@ -163,8 +154,6 @@ test('review replay returns the exact original receipt after later state and mis
   const before = allRows(f), replay = await f.request(REVIEWS, input, { headers }); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), response.json());
   assert.deepEqual(allRows(f), before);
   assert.equal((await f.request(REVIEWS, { ...input, proposalDigest: 'f'.repeat(64) }, { headers })).json().error.code, 'IDEMPOTENCY_CONFLICT');
-  for (const patch of [{ actor: actor(session) }, { requestId: session.requestId }, { key: 'body-key' }, { proposalDigest: 'bad' }])
-    assert.equal((await f.request(REVIEWS, { ...input, ...patch })).statusCode, 400);
   const other = f.production.createProject('Other'); assert.equal((await f.request(REVIEWS, input, { url: `/api/projects/${other.id}/narration${REVIEWS}` })).json().error.code, 'NARRATION_SESSION_STALE');
   await f.session({ continuationSessionId: session.id }); assert.equal((await f.request(REVIEWS, input, { headers })).json().error.code, 'NARRATION_SESSION_STALE'); noSpending(f);
 });
@@ -173,11 +162,11 @@ for (const boundary of ['event', 'command']) test(`review ${boundary} failure ro
   const f = await setup(t), session = await f.session(), { proposal } = await f.propose(session), input = f.reviewBody(session, proposal), headers = { 'idempotency-key': `rollback-${boundary}` };
   const before = allRows(f); let intercepted = 0, restore;
   if (boundary === 'event') {
-    const original = f.store.appendEvent.bind(f.store); f.store.appendEvent = (...args) => { if (args[1] === 'narration.transcription_reviewed') { intercepted++; throw Error('INJECTED_HTTP_REVIEW_EVENT'); } return original(...args); };
+    const original = f.store.appendEvent.bind(f.store); f.store.appendEvent = (...args) => { if (args[1] === 'narration.transcription_reviewed') { intercepted++; throw Error('INJECTED_SERVICE_REVIEW_EVENT'); } return original(...args); };
     restore = () => { f.store.appendEvent = original; };
   } else {
-    f.store.db.exec("CREATE TEMP TRIGGER fail_owned_http_command BEFORE INSERT ON commands WHEN NEW.actor_scope LIKE '%:owned-transcription-review' BEGIN SELECT RAISE(ABORT,'INJECTED_HTTP_REVIEW_COMMAND'); END");
-    restore = () => f.store.db.exec('DROP TRIGGER fail_owned_http_command');
+    f.store.db.exec("CREATE TEMP TRIGGER fail_owned_service_command BEFORE INSERT ON commands WHEN NEW.actor_scope LIKE '%:owned-transcription-review' BEGIN SELECT RAISE(ABORT,'INJECTED_SERVICE_REVIEW_COMMAND'); END");
+    restore = () => f.store.db.exec('DROP TRIGGER fail_owned_service_command');
   }
   let response; try { response = await f.request(REVIEWS, input, { headers }); } finally { restore(); }
   assert.equal(response.statusCode, 500, response.body); if (boundary === 'event') assert.equal(intercepted, 1); assert.deepEqual(allRows(f), before);
@@ -186,64 +175,11 @@ for (const boundary of ['event', 'command']) test(`review ${boundary} failure ro
   const saved = allRows(f); assert.deepEqual((await f.request(REVIEWS, input, { headers })).json(), response.json()); assert.deepEqual(allRows(f), saved); noSpending(f);
 });
 
-test('explicit current request continuation transfers only named holds and session replay keeps its original identity', async t => {
-  const f = await setup(t), old = await f.session(), oldHolds = rows(f, 'hold').filter(hold => hold.ownerId === old.requestId);
-  const current = f.production.beginRequest(f.project.id, 'local-user', 'Transcribe this uploaded recording.'), currentHolds = rows(f, 'hold').filter(hold => hold.ownerId === current.requestId);
-  assert.ok(oldHolds.some(hold => hold.active)); assert.ok(currentHolds.some(hold => hold.active));
-  for (const hold of oldHolds) assert.equal(f.store.get('hold', hold.id).active, false, 'the superseded previous session no longer holds the film');
-  const beforeRead = allRows(f), view = await f.request(); assert.equal(view.statusCode, 200, view.body);
-  assert.deepEqual(view.json().continuationRequest, { id: current.requestId, text: 'Transcribe this uploaded recording.' });
-  await f.request('/transcription-options'); await f.request(PROPOSALS); assert.deepEqual(allRows(f), beforeRead);
-  const unrelated = f.production.beginRequest(f.project.id, 'local-user', 'An independent alongside edit.', { concurrency: 'alongside' });
-  const unrelatedHolds = rows(f, 'hold').filter(hold => hold.ownerId === unrelated.requestId);
-  assert.ok(unrelatedHolds.some(hold => hold.active));
-  const missing = await f.request('/sessions', { continuationRequestId: current.requestId }); assert.notEqual(missing.statusCode, 200);
-  const input = { continuationSessionId: old.id, continuationRequestId: current.requestId }, headers = { 'idempotency-key': 'continue-current-request' };
-  const response = await f.request('/sessions', input, { headers }); assert.equal(response.statusCode, 200, response.body); const next = response.json().session;
-  for (const hold of oldHolds) assert.equal(f.store.get('hold', hold.id).active, false);
-  for (const hold of unrelatedHolds) assert.deepEqual(f.store.get('hold', hold.id), hold, 'unselected active alongside holds stay untouched');
-  for (const hold of currentHolds) assert.equal(f.store.get('hold', hold.id).active, false);
-  const transferred = rows(f, 'request_continuation').filter(row => row.toRequestId === next.requestId); assert.equal(transferred.length, 1); assert.equal(transferred[0].fromRequestId, current.requestId);
-  f.production.beginRequest(f.project.id, 'local-user', 'Later independent request.'); const beforeReplay = allRows(f);
-  const replay = await f.request('/sessions', input, { headers }); assert.equal(replay.statusCode, 200, replay.body);
-  assert.equal(replay.json().session.id, next.id); assert.equal(replay.json().session.requestId, next.requestId); assert.equal(replay.json().session.state, 'stale');
-  assert.deepEqual(allRows(f), beforeReplay); assert.equal((await f.request('/sessions', { ...input, text: 'Different intent' }, { headers })).json().error.code, 'IDEMPOTENCY_CONFLICT');
-});
-
-for (const invalid of ['foreign', 'wrong-principal', 'read-only', 'shot-scope', 'superseded'])
-test(`explicit request continuation rejects ${invalid} authority without transferring holds`, async t => {
-  const f = await setup(t, { plan: true }), old = await f.session(); let prior;
-  if (invalid === 'foreign') { const other = f.production.createProject('Foreign'); prior = f.production.beginRequest(other.id, 'local-user', 'Foreign request.'); }
-  else prior = f.production.beginRequest(f.project.id, invalid === 'wrong-principal' ? 'different-user' : 'local-user', 'Explicit continuation candidate.',
-    { editing: invalid !== 'read-only', ...(invalid === 'shot-scope' ? { scopeIds: [f.store.getProject(f.project.id).shots[0].id] } : {}) });
-  if (invalid === 'superseded') f.production.beginRequest(f.project.id, 'local-user', 'Newer current request.');
-  const before = allRows(f), response = await f.request('/sessions', { continuationSessionId: old.id, continuationRequestId: prior.requestId });
-  assert.notEqual(response.statusCode, 200, response.body); assert.deepEqual(allRows(f), before);
-});
-
-for (const action of ['prepare', 'review']) test(`real HTTP disconnect cancels original ${action} before publication and drains the handler`, { timeout: 15000 }, async t => {
-  const f = await setup(t), session = await f.session(), proposal = action === 'review' ? (await f.propose(session)).proposal : null;
-  const body = action === 'prepare' ? f.prepareBody(session) : f.reviewBody(session, proposal), path = action === 'prepare' ? PROPOSALS : REVIEWS;
-  const entered = latch(), released = latch(), finished = latch(), original = f.media.verifiedSource.bind(f.media), run = f.service[action].bind(f.service); let capturedSignal;
-  f.media.verifiedSource = async (...args) => { const verified = await original(...args); capturedSignal = args[1]?.signal; entered.release(); await released.promise; return verified; };
-  f.service[action] = async (...args) => { try { return await run(...args); } finally { finished.release(); } };
-  const before = allRows(f), address = await f.app.listen({ host: '127.0.0.1', port: 0 }), payload = JSON.stringify(body);
-  const request = httpRequest(`${address}${f.base}${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`,
-    'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), 'idempotency-key': `disconnect-${action}` } });
-  request.on('error', () => {}); request.on('response', response => response.resume()); request.end(payload);
-  try {
-    await entered.promise; assert.ok(capturedSignal instanceof AbortSignal); const aborted = capturedSignal.aborted ? Promise.resolve() : new Promise(resolve => capturedSignal.addEventListener('abort', resolve, { once: true }));
-    request.destroy(); await aborted; assert.equal(capturedSignal.aborted, true);
-  } finally { request.destroy(); released.release(); await finished.promise; }
-  assert.deepEqual(allRows(f), before); assert.equal(rows(f, 'owned_transcription_review').length, 0); noSpending(f);
-});
-
 test('options report exact supported saved profile and proposal list guards its bounded page identity', async t => {
   const f = await setup(t), session = await f.session(), first = await f.propose(session), second = await f.propose(session, { language: 'en' });
   const before = allRows(f), options = await f.request('/transcription-options'); assert.equal(options.statusCode, 200, options.body);
   assert.deepEqual(options.json().profiles, [{ id: f.profile.id, revision: f.profile.revision, provider: 'OpenAI', model: 'whisper-1', estimatedMicros: '100', currency: 'USD' }]);
   assert.ok(options.json().languages.includes('auto')); assert.ok(options.json().languages.includes('en')); assert.equal(options.json().timing, 'word');
-  assert.equal(options.json().capabilities.configured, true); assert.equal(options.json().capabilities.directorToolAvailable, false);
   const response = await f.request(PROPOSALS), page = response.json(); assert.equal(response.statusCode, 200, response.body);
   assert.equal(page.coverage.total, 2); assert.equal(page.coverage.nextOffset, null);
   assert.deepEqual(new Set(page.proposals.map(item => item.id)), new Set([first.proposal.id, second.proposal.id]));
@@ -251,31 +187,52 @@ test('options report exact supported saved profile and proposal list guards its 
   const detail = await f.request(`${PROPOSALS}/${first.proposal.id}`); assert.equal(detail.statusCode, 200, detail.body);
   assert.deepEqual(detail.json().proposal, first.response.json().proposal); assert.deepEqual(detail.json().eligibility, { current: true, code: null });
   assert.equal(detail.json().application, null); assert.equal(detail.json().execution.state, 'not_applied');
-  for (const query of ['?offset=-1', '?offset=10000000', '?expectedDigest=bad', '?path=/tmp/file', '?actor=human']) assert.equal((await f.request(`${PROPOSALS}${query}`)).statusCode, 400);
-  assert.equal((await f.request('/transcription-options?actor=human')).statusCode, 400);
-  assert.equal((await f.request(`${PROPOSALS}/${first.proposal.id}?actor=human`)).statusCode, 400); assert.deepEqual(allRows(f), before);
+  assert.deepEqual(allRows(f), before);
   await f.propose(session, { language: 'fr' });
   const stale = await f.request(`${PROPOSALS}?offset=1&expectedDigest=${page.coverage.dataDigest}`); assert.equal(stale.statusCode, 409, stale.body);
 });
 
-test('unconfigured owned service stays readable and refuses preparation without authority or media work', async t => {
-  const f = await setup(t, { available: false }), session = await f.session(), before = allRows(f), options = await f.request('/transcription-options');
-  assert.equal(options.statusCode, 200, options.body); assert.equal(options.json().capabilities.configured, false);
-  assert.equal((await f.request(PROPOSALS)).statusCode, 200);
-  const response = await f.request(PROPOSALS, f.prepareBody(session)); assert.equal(response.json().error.code, 'NARRATION_MEDIA_UNAVAILABLE');
-  assert.deepEqual(allRows(f), before); noSpending(f);
+test('unconfigured current transcription command refuses publication without paid work', async t => {
+  const f=await setup(t,{available:false}),{key:_key,...body}=f.input();
+  const response=await directTranscription(f,body);assert.equal(response.json().error.code,'NARRATION_MEDIA_UNAVAILABLE');
+  for(const kind of ['owned_transcription_proposal','owned_transcription_review','owned_transcription_application','grant','candidate'])assert.equal(rows(f,kind).length,0,kind);
+  noSpending(f);
 });
 
-test('quarantined restoration retains read-only recording options and proposal history while all related writes stay blocked', async t => {
-  const f = await setup(t), session = await f.session(), { proposal } = await f.propose(session);
-  installRecoveryQuarantine(f.store, { restoreId: key(), backupId: key(), backupManifestSha256: 'a'.repeat(64), sourceDatabaseSha256: 'b'.repeat(64),
-    originalDataRoot: f.root, backupCreatedAt: '2026-09-12T00:00:00.000Z', restoredAt: '2026-09-13T00:00:00.000Z' });
-  const before = allRows(f), changes = f.store.db.prepare('SELECT total_changes() n').get().n;
-  for (const path of ['', '/transcription-options', PROPOSALS, `${PROPOSALS}/${proposal.id}`]) {
-    const response = await f.request(path); assert.equal(response.statusCode, 200, response.body);
-  }
-  for (const [path, body] of [[PROPOSALS, f.prepareBody(session)], [REVIEWS, f.reviewBody(session, proposal)], ['/sessions', { continuationSessionId: session.id }]]) {
-    const response = await f.request(path, body); assert.equal(response.json().error.code, 'INSTALLATION_QUARANTINED');
-  }
-  assert.deepEqual(allRows(f), before); assert.equal(f.store.db.prepare('SELECT total_changes() n').get().n, changes); noSpending(f);
+test('quarantined restoration retains recording playback and blocks the current transcription command', async t => {
+  const f=await setup(t),{key:_key,...body}=f.input();
+  installRecoveryQuarantine(f.store,{restoreId:key(),backupId:key(),backupManifestSha256:'a'.repeat(64),sourceDatabaseSha256:'b'.repeat(64),originalDataRoot:f.root,backupCreatedAt:'2026-09-12T00:00:00.000Z',restoredAt:'2026-09-13T00:00:00.000Z'});
+  const before=allRows(f),changes=f.store.db.prepare('SELECT total_changes() n').get().n;
+  const playback=await f.app.inject({url:`${f.base}/audio/${f.audio.id}/content`,headers:{host:'127.0.0.1',authorization:`Bearer ${token}`}});
+  assert.equal(playback.statusCode,200,playback.body);
+  const response=await directTranscription(f,body);assert.equal(response.json().error.code,'INSTALLATION_QUARANTINED');
+  assert.deepEqual(allRows(f),before);assert.equal(f.store.db.prepare('SELECT total_changes() n').get().n,changes);noSpending(f);
+});
+
+const directTranscription = (f, body, commandKey = key(), headers = {}) => f.app.inject({ method: 'POST', url: `${f.base}/transcriptions`, payload: body,
+  headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, 'idempotency-key': commandKey, ...headers } });
+test('direct owned transcription validates local authority and exact source before publishing once', async t => {
+  const f=await setup(t),{key:_key,...body}=f.input(),before=allRows(f);
+  for(const headers of [{authorization:''},{origin:'https://foreign.example'},{'idempotency-key':''}]) assert.notEqual((await directTranscription(f,body,key(),headers)).statusCode,200);
+  for(const patch of [{actor:{kind:'human'}},{path:f.originalPath},{sourceRecordDigest:'bad'},{expectedHeadVersion:-1}]) assert.equal((await directTranscription(f,{...body,...patch})).statusCode,400);
+  assert.deepEqual(allRows(f),before);
+  const first=await directTranscription(f,body,'direct-transcription-once');assert.equal(first.statusCode,200,first.body);
+  const settled=allRows(f),replay=await directTranscription(f,body,'direct-transcription-once');assert.equal(replay.statusCode,200,replay.body);assert.deepEqual(replay.json(),first.json());assert.deepEqual(allRows(f),settled);
+  assert.equal(rows(f,'owned_transcription_application').length,1);assert.equal(rows(f,'candidate').length,1);assert.equal(rows(f,'grant').length,1);noSpending(f);
+  assert.equal((await directTranscription(f,{...body,language:'en'},'direct-transcription-once')).json().error.code,'IDEMPOTENCY_CONFLICT');
+});
+for (const action of ['prepare', 'review']) test(`direct transcription HTTP disconnect cancels original ${action} before publication and drains the handler`, { timeout: 15000 }, async t => {
+  const f = await setup(t), {key:_key,...body}=f.input();
+  const entered=latch(),released=latch(),finished=latch(),run=f.service.request.bind(f.service),prepare=f.service.prepare.bind(f.service),verify=f.media.verifiedSource.bind(f.media);
+  let capturedSignal,prepared=false,gated=false;
+  f.service.prepare=async(...args)=>{const result=await prepare(...args);prepared=true;return result;};
+  f.service.request=async(...args)=>{try{return await run(...args);}finally{finished.release();}};
+  f.media.verifiedSource=async(...args)=>{const result=await verify(...args);if(!gated&&(action==='prepare'||prepared)){gated=true;capturedSignal=args[1]?.signal;entered.release();await released.promise;}return result;};
+  const address=await f.app.listen({host:'127.0.0.1',port:0}),payload=JSON.stringify(body);
+  const request=httpRequest(`${address}${f.base}/transcriptions`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json','content-length':Buffer.byteLength(payload),'idempotency-key':`disconnect-${action}`}});
+  request.on('error',()=>{});request.on('response',response=>response.resume());request.end(payload);
+  try { await entered.promise;assert.ok(capturedSignal instanceof AbortSignal);const aborted=capturedSignal.aborted?Promise.resolve():new Promise(resolve=>capturedSignal.addEventListener('abort',resolve,{once:true}));request.destroy();await aborted;assert.equal(capturedSignal.aborted,true); }
+  finally {request.destroy();released.release();await finished.promise;}
+  for(const kind of ['owned_transcription_review','owned_transcription_application','grant','candidate'])assert.equal(rows(f,kind).length,0,kind);
+  noSpending(f);
 });

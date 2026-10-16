@@ -32,8 +32,6 @@ import type { ProviderProfile } from "@openslate/core";
 
 const id = { type: "string", minLength: 1, maxLength: 160 },
   version = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
-const hash = { type: "string", pattern: "^[a-f0-9]{64}$" },
-  sample = { type: "integer", minimum: 0, maximum: 17280000 };
 const object = (properties: object, required: string[]) => ({
   type: "object",
   properties,
@@ -404,7 +402,7 @@ export function createShotAudioWorkspace(options: ShotAudioOptions) {
   return { detail, saveWriting, actorForShot, accept };
 }
 
-/** Human shot workspace. Requested speech retains exact operation identity; returned audio/timing acceptance is separate. */
+/** Current shot reads and direct speech requests. Confirmation and recording runners use the workspace internally. */
 export function registerShotAudioRoutes(
   app: FastifyInstance,
   options: {
@@ -422,77 +420,6 @@ export function registerShotAudioRoutes(
   app.get<{ Params: { projectId: string; shotId: string } }>(
     base,
     async (request) => detail(request.params.projectId, request.params.shotId),
-  );
-  app.post<{
-    Params: { projectId: string; shotId: string };
-    Body: { continuationSessionId?: string };
-  }>(
-    `${base}/sessions`,
-    {
-      schema: { body: object({ continuationSessionId: id }, []) },
-    },
-    async (request) => {
-      const { projectId, shotId } = request.params;
-      const session = createShotNarrationSession(
-        production,
-        projectId,
-        shotId,
-        key(request),
-        request.body.continuationSessionId,
-      );
-      let state: "active" | "stale" = "active";
-      try {
-        actorForShot(projectId, session.id, shotId);
-      } catch {
-        state = "stale";
-      }
-      return { ...detail(projectId, shotId), session: { ...session, state } };
-    },
-  );
-  app.post<{
-    Params: { projectId: string; shotId: string };
-    Body: {
-      sessionId: string;
-      expectedHeadVersion: number;
-      expectedVersion: number;
-      text: string;
-      language: string;
-      mode: "generated" | "uploaded";
-      voice: string | null;
-      profileRevisionId: string | null;
-    };
-  }>(
-    `${base}/script`,
-    {
-      schema: {
-        body: object(
-          {
-            sessionId: id,
-            expectedHeadVersion: version,
-            expectedVersion: version,
-            text: { type: "string", minLength: 1, maxLength: 16000 },
-            language: { type: "string", minLength: 1, maxLength: 64 },
-            mode: { enum: ["generated", "uploaded"] },
-            voice: { anyOf: [id, { type: "null" }] },
-            profileRevisionId: { anyOf: [id, { type: "null" }] },
-          },
-          [
-            "sessionId",
-            "expectedHeadVersion",
-            "expectedVersion",
-            "text",
-            "language",
-            "mode",
-            "voice",
-            "profileRevisionId",
-          ],
-        ),
-      },
-    },
-    async (request) => {
-      const { projectId, shotId } = request.params;
-      return saveWriting(projectId, shotId, request.body, key(request));
-    },
   );
   app.post<{
     Params: { projectId: string; shotId: string };
@@ -683,171 +610,6 @@ export function registerShotAudioRoutes(
         receipt: result.receipt,
         shot: detail(projectId, shotId),
       }));
-    },
-  );
-  app.post<{
-    Params: { projectId: string; shotId: string };
-    Body: {
-      expectedHeadVersion: number;
-      expectedRequestId?: string | null;
-      expectedNarrationVersion?: number;
-      sessionId?: string;
-      continuationSessionId?: string;
-      text?: string;
-      mode: "generated" | "uploaded";
-      voice?: string;
-      profileId?: string;
-    };
-  }>(
-    `${base}/initialize`,
-    {
-      schema: {
-        body: object(
-          {
-            expectedHeadVersion: version,
-            expectedRequestId: { type: ["string", "null"], minLength: 1, maxLength: 160 },
-            expectedNarrationVersion: version,
-            sessionId: id,
-            continuationSessionId: id,
-            text: { type: "string", maxLength: 16000 },
-            mode: { enum: ["generated", "uploaded"] },
-            voice: id,
-            profileId: id,
-          },
-          ["expectedHeadVersion", "mode"],
-        ),
-      },
-    },
-    async (request) => {
-      const { projectId, shotId } = request.params,
-        b = request.body,
-        commandKey = key(request);
-      production.recovery.assertWritable(projectId);
-      invariant(
-        !store.get<{ paused: boolean }>("execution_control", projectId)?.paused,
-        "EXECUTION_PAUSED",
-        "Work is stopped. Send a fresh direction before editing narration.",
-      );
-      return store.command(
-        `local-user:${projectId}:shot-audio-initialize`,
-        commandKey,
-        digest({ shotId, ...b }),
-        () => {
-          assertExpectedHumanRequest(production, projectId, b.expectedRequestId);
-          const project = store.getProject(projectId),
-            shot = project.shots.find((shot) => shot.id === shotId);
-          invariant(
-            shot && project.headVersion === b.expectedHeadVersion,
-            "REVISION_CONFLICT",
-            "Shot changed before narration editing.",
-          );
-          invariant(
-            b.expectedNarrationVersion === undefined ||
-              narration.workspaceSnapshot(projectId).state.version ===
-                b.expectedNarrationVersion,
-            "REVISION_CONFLICT",
-            "Narration writing changed before editing.",
-          );
-          const session = b.sessionId
-            ? store.get<NarrationSession>("narration_session", b.sessionId)
-            : createShotNarrationSession(
-                production,
-                projectId,
-                shotId,
-                digest({ key: commandKey, action: "initialize-shot-audio" }),
-                b.continuationSessionId,
-              );
-          invariant(
-            session?.projectId === projectId && session.shotId === shotId,
-            "NARRATION_SESSION_STALE",
-            "Shot narration session changed.",
-          );
-          const lock = store.get<{ profiles: ProviderProfile[] }>(
-            "capability_lock",
-            project.capabilityLockId,
-          );
-          const profile = lock?.profiles.find(
-            (profile) =>
-              profile.id === b.profileId && profile.kind === "speech",
-          );
-          const text =
-            b.text?.trim() ||
-            shot.narration?.text.trim() ||
-            (b.mode === "uploaded" ? "Uploaded narration recording" : "");
-          invariant(
-            text,
-            "NARRATION_SPEECH_INVALID",
-            "Write narration for this shot before saving.",
-          );
-          return saveWriting(
-            projectId,
-            shotId,
-            {
-              sessionId: session.id,
-              expectedHeadVersion: project.headVersion,
-              expectedVersion:
-                narration.workspaceSnapshot(projectId).state.version,
-              text,
-              language:
-                detail(projectId, shotId).segment?.script.language ?? "en",
-              mode: b.mode,
-              voice: b.mode === "generated" ? (b.voice ?? null) : null,
-              profileRevisionId:
-                b.mode === "generated" ? (profile?.revision ?? null) : null,
-            },
-            digest({ key: commandKey, action: "initialize-shot-writing" }),
-          );
-        },
-      );
-    },
-  );
-  app.post<{
-    Params: { projectId: string; shotId: string };
-    Body: {
-      sessionId: string;
-      expectedHeadVersion: number;
-      expectedVersion: number;
-      segmentId: string;
-      segmentRevisionId: string;
-      audioId: string;
-      sha256: string;
-      startSample: number;
-      endSample: number;
-      durationMode?: "keep" | "match_audio";
-    };
-  }>(
-    `${base}/accept`,
-    {
-      schema: {
-        body: object(
-          {
-            sessionId: id,
-            expectedHeadVersion: version,
-            expectedVersion: version,
-            segmentId: id,
-            segmentRevisionId: id,
-            audioId: id,
-            sha256: hash,
-            startSample: sample,
-            endSample: sample,
-            durationMode: { enum: ["keep", "match_audio"] },
-          },
-          [
-            "sessionId",
-            "expectedHeadVersion",
-            "expectedVersion",
-            "segmentId",
-            "segmentRevisionId",
-            "audioId",
-            "sha256",
-            "startSample",
-            "endSample",
-          ],
-        ),
-      },
-    },
-    async (request) => {
-      return workspace.accept(request.params.projectId, request.params.shotId, request.body, key(request));
     },
   );
   app.get<{ Params: { projectId: string } }>(

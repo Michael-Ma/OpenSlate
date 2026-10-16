@@ -47,6 +47,9 @@ function expectedLock(project) {
     recipeDigest: RECIPE_DIGEST, stageContractsDigest: STAGE_CONTRACTS_DIGEST, tools: TOOL_NAMES };
 }
 function lock(f, project) { return f.store.get("capability_lock", project.capabilityLockId); }
+function projectView(f, project, catalog = f.catalog) {
+  const saved = lock(f, project); return catalog.projectView(saved.profiles, saved.providerSelection, saved.localExecution);
+}
 function untouchedAuthority(f, projectId) {
   for (const kind of ["message", "hold", "epoch", "director_turn", "grant", "candidate", "attempt", "reservation", "approval", "external_allowance", "external_allowance_claim"])
     assert.equal(f.store.list(kind, projectId).length, 0, kind);
@@ -206,9 +209,9 @@ test("human audio model selection saves exact immutable locks without authority 
   assert.deepEqual(saved.profiles, [...DEFAULT_PROFILES.slice(0, 2), speech().profile, transcription().profile]);
   assert.equal(canonical(lock(f, old)), oldBytes); untouchedAuthority(f, project.id); assert.equal(f.readNames.length, 0);
   const changes = f.store.db.prepare("SELECT total_changes() AS n").get().n;
-  const projection = await f.req("GET", `/api/projects/${project.id}/providers`); assert.equal(projection.statusCode, 200, projection.body);
-  assert.deepEqual(projection.json().profiles.map(value => value.profile), saved.profiles);
-  for (const row of projection.json().profiles.slice(-2)) { assert.equal(row.projectExecution.compatible, true); assert.equal(row.readiness.realExecutionEnabled, false); }
+  const projection = projectView(f, project);
+  assert.deepEqual(projection.profiles.map(value => value.profile), saved.profiles);
+  for (const row of projection.profiles.slice(-2)) { assert.equal(row.projectExecution.compatible, true); assert.equal(row.readiness.realExecutionEnabled, false); }
   assert.equal(f.store.db.prepare("SELECT total_changes() AS n").get().n, changes);
   const replacement = f.appFor(f.catalogs({ configuration: configuration() }));
   const replay = await f.req("POST", "/api/projects", body, "audio-project-once", replacement);
@@ -216,7 +219,7 @@ test("human audio model selection saves exact immutable locks without authority 
   assert.equal((await f.req("POST", "/api/projects", body, "audio-project-new", replacement)).statusCode, 409); untouchedAuthority(f, project.id);
 });
 
-test("project provider HTTP separates installation readiness from immutable local assembly compatibility without writes", async t => {
+test("project provider projection separates installation readiness from immutable local assembly compatibility without writes", async t => {
   const f = fixture(t, configuration(image(), video()), { readCredential: () => credential });
   const port = adapter => registerExecutionProvider({ submit: async () => { throw Error("No provider calls"); },
     lookup: async () => { throw Error("No provider calls"); }, poll: async () => { throw Error("No provider calls"); } }, { adapter, version: "1" });
@@ -232,8 +235,7 @@ test("project provider HTTP separates installation readiness from immutable loca
   const installation = (await f.req("GET", "/api/providers", undefined, randomUUID(), app)).json();
   assert.equal(installation.realExecutionEnabled, true); assert.equal(installation.profiles.find(row => row.id === "video-pinned").projectExecution, undefined);
   for (const [project, compatible, profileId] of [[legacy, false, "video-pinned"], [pinned, true, "video-pinned"], [imageOnly, true, "image-pinned"]]) {
-    const response = await f.req("GET", `/api/projects/${project.id}/providers`, undefined, randomUUID(), app); assert.equal(response.statusCode, 200, response.body);
-    const view = response.json(), row = view.profiles.find(row => row.id === profileId);
+    const view = projectView(f, project, catalog), row = view.profiles.find(row => row.id === profileId);
     assert.equal(row.readiness.realExecutionEnabled, true, "Installation readiness remains independent");
     assert.equal(row.projectExecution.compatible, compatible); assert.equal(view.realExecutionEnabled, compatible);
     assert.equal(row.projectExecution.code, compatible ? null : "LOCAL_EXECUTION_UPGRADE_REQUIRED");
@@ -266,8 +268,8 @@ test("human project selection saves exact lock and creates no requests, authorit
   assert.deepEqual(selected.providerSelection, { catalogDigest: f.catalog.digest, profileIds: selected.profiles.map(profile => profile.id) });
   assert.deepEqual(lock(f, old), oldLock); assert.deepEqual(f.store.getProject(old.id), oldProject);
   untouchedAuthority(f, project.id); assert.equal(f.readNames.length, 0, "Selection neither resolves keys nor checks remote APIs");
-  const view = await f.req("GET", `/api/projects/${project.id}/providers`); assert.equal(view.statusCode, 200);
-  assert.deepEqual(view.json().profiles.map(row => row.profile), selected.profiles);
+  const view = projectView(f, project);
+  assert.deepEqual(view.profiles.map(row => row.profile), selected.profiles);
 });
 
 test("project creation schema requires paired selection fields and rejects user-authored configuration", async t => {
@@ -291,8 +293,8 @@ test("stale and unknown selections reject before writes; exact replay survives a
   const replay = await f.req("POST", "/api/projects", body, "same-command", app); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), project);
   assert.equal((await f.req("POST", "/api/projects", body, "new-command", app)).statusCode, 409);
   assert.deepEqual(lock(f, project), original); assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.listProjects().length, 1);
-  const pinned = await f.req("GET", `/api/projects/${project.id}/providers`, undefined, randomUUID(), app);
-  assert.deepEqual(pinned.json().profiles[0].profile, image().profile); assert.equal(pinned.json().profiles[0].installedDefinition, false);
+  const pinned = projectView(f, project, next);
+  assert.deepEqual(pinned.profiles[0].profile, image().profile); assert.equal(pinned.profiles[0].installedDefinition, false);
 });
 
 test("real-profile projects cannot enter the hardcoded demo or gain its grants", async t => {

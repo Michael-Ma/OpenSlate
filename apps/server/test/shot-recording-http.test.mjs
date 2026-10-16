@@ -125,8 +125,8 @@ test('a shot edit during async recording import refuses attachment and keeps the
 test('recording Undo retains unrelated narration edits completed while local import was running', async t => {
   const f = await confirmationFixture(t), deferred = await deferImport(t, f), pending = raw(f, wave(24000));
   await deferred.started;
-  const session = await f.call('POST', '/narration/sessions', {}).then(f.ok);
-  await f.call('POST', '/narration/segments', { sessionId: session.session.id, expectedVersion: 0, patch: { add: [{ text: 'A newer unrelated paragraph', textKind: 'draft', language: 'en', meaning: 'Elsewhere', source: { kind: 'undecided' } }] } }).then(f.ok);
+  const actor = f.production.beginRequest(f.project.id, 'local-user', 'An unrelated narration edit', { source: 'app', concurrency: 'alongside', holdScopeIds: [] });
+  f.narration.reviseSegments(f.project.id, actor, 0, 'unrelated-segment', { add: [{ text: 'A newer unrelated paragraph', textKind: 'draft', language: 'en', meaning: 'Elsewhere', source: { kind: 'undecided' } }] });
   const unrelated = f.narration.workspaceSnapshot(f.project.id).segments[0]; deferred.release();
   const result = await pending.then(f.ok);
   await f.call('POST', '/storyboard', { kind: 'undo', commandId: result.commandId, expectedHeadVersion: result.headVersion }).then(f.ok);

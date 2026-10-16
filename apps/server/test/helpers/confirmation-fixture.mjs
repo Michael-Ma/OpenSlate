@@ -1,3 +1,4 @@
+import { narrationServiceHarness } from '../narration-service-harness.mjs';
 import { ExecutionIngestionRouter } from "../../dist/execution/ingestion-router.js";
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -40,6 +41,7 @@ export async function confirmationFixture(t, { seconds = 1, modes = ['generated'
     const app = createApp({ service: production, sceneCommands: runner, localToken: token, logger: false,
       narrationRoutes: { production, narration, canonical, narrationSpeech, uploadDirectory: join(root, 'uploads') } }); apps.push(app);
     Object.assign(f, { store, engine, production, narration, canonical, narrationSpeech, runner, app, media });
+    f.setupNarration = (...args) => narrationServiceHarness({ ...f, testToken: token }, { uploadDirectory: join(root, 'uploads'), speech: narrationSpeech })(...args);
     f.call = (method, path, payload, key = randomUUID()) => app.inject({ method, url: `/api/projects/${f.project.id}${path}`,
       headers: { host: '127.0.0.1', authorization: `Bearer ${token}`, ...(key === null ? {} : { 'idempotency-key': key }) }, ...(payload === undefined ? {} : { payload }) });
   };

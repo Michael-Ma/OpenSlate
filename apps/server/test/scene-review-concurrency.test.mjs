@@ -72,62 +72,6 @@ function fixture(t) {
   return { store, production, narration, project, send };
 }
 
-test("a newer editing request at the same project head rejects narration initialization before any new session or writing", async (t) => {
-  const f = fixture(t),
-    prior = f.production.beginRequest(
-      f.project.id,
-      "local-user",
-      "First direction",
-      { scopeIds: ["shot-0"] },
-    );
-  const head = f.store.getProject(f.project.id).headVersion;
-  f.production.beginRequest(f.project.id, "local-user", "New other-shot edit", {
-    scopeIds: ["shot-1"],
-  });
-  const before = f.store.db.prepare("SELECT total_changes() n").get().n;
-  const response = await f.send("/narration/shots/shot-0/initialize", {
-    expectedHeadVersion: head,
-    expectedRequestId: prior.requestId,
-    mode: "uploaded",
-    text: "Recording words",
-  });
-  assert.equal(response.statusCode, 409, response.body);
-  assert.equal(response.json().error.code, "SCENE_REVIEW_STALE");
-  assert.equal(f.store.db.prepare("SELECT total_changes() n").get().n, before);
-  assert.equal(f.store.list("narration_session", f.project.id).length, 0);
-});
-
-test("exact narration initialization replay after a newer edit returns saved facts without renewing authority", async (t) => {
-  const f = fixture(t),
-    body = {
-      expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
-      expectedRequestId: null,
-      mode: "uploaded",
-      text: "Recording words",
-    };
-  const first = await f.send(
-    "/narration/shots/shot-0/initialize",
-    body,
-    "same-initialize",
-  );
-  assert.equal(first.statusCode, 200, first.body);
-  f.production.beginRequest(
-    f.project.id,
-    "local-user",
-    "A newer explicit edit",
-    { scopeIds: ["shot-1"] },
-  );
-  const before = f.store.db.prepare("SELECT total_changes() n").get().n;
-  const replay = await f.send(
-    "/narration/shots/shot-0/initialize",
-    body,
-    "same-initialize",
-  );
-  assert.equal(replay.statusCode, 200, replay.body);
-  assert.deepEqual(replay.json(), first.json());
-  assert.equal(f.store.db.prepare("SELECT total_changes() n").get().n, before);
-});
-
 test("scene generation catches a same-head newer request and creates no grant or candidate", async (t) => {
   const f = fixture(t),
     prior = f.production.beginRequest(

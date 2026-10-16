@@ -7,15 +7,17 @@ OpenSlate is a single-user local video studio. The conversational director devel
 | Capability | Implemented design |
 |---|---|
 | Conversational filmmaking | A native/fake director reads saved brief, treatment, scenes, shots, media and pending decisions; compatible shipped guidance updates before eligible fresh native turns |
-| Editable production | Stable identities and revision-checked commands preserve unaffected outputs across scoped edits; a resizable Director pane and safe Markdown support iteration |
+| Editable production | Stable identities and revision-checked commands preserve unaffected outputs across scoped edits; the next studio uses explicit @ scope, per-control state and alongside human edits |
 | Declarative planning | Restricted TypeScript compiles into a durable graph; no generated JavaScript is evaluated |
 | Human review | Two per-scene generation decisions: create keyframes, then review exact returned frames/motion/video recipe before starting video; configured providers need no separate usage approval |
 | Recovery | Service-issued intents/candidates/attempts, durable receipts and uncertain-submission handling survive interruption |
 | Narration | Explicit silence, script-first or recording-first review and accepted short within-shot voiceover |
 | Playback/export | Synchronized picture/narration/music preview and an exact local FFmpeg render manifest |
-| Provider choice | Compact job-based settings, actual Director model choices and separately saved Director/media settings; immutable media definitions remain pinned |
+| Provider choice | Separate Settings sections, actual Director model choices and separately saved Director/media settings; immutable media definitions remain pinned |
 
 These design choices address revision integrity, review and recovery. They do not by themselves establish commercial quality, speed superiority or complete live-provider acceptance.
+
+The only browser entry is `apps/web/src/next`, with Plan, Keyframes, Assets, Film, Start and Settings. It follows the [Last Ferry design](../ai/prototypes/last-ferry/DESIGN.md); the earlier Radix Day/Night workbench is retired. Current routes and durable server confirmation are described in [Application API](../technical/APPLICATION-API.md).
 
 ## Ownership
 
@@ -71,4 +73,4 @@ A project revision, a compiled plan, a creative candidate, a provider attempt an
 - Existing eligible OpenAI custom voice IDs are supported; in-app enrollment from a recording is pending.
 - Local source-checkout launch, private same-root backups and recovery are implemented. Portable relocation, installer packaging, advanced timeline editing and same-machine H3 inference remain later work.
 
-See [studio behavior](STORYBOARD-STUDIO.md), the [OpenSlate Light design system](OPENSLATE-LIGHT.md), [component references](../technical/README.md), [current evidence](../implementation/STATUS.md) and the [accepted runtime trust boundary](../implementation/RUNTIME-TRUST-DECISION.md).
+See [studio behavior](STORYBOARD-STUDIO.md), the [current UI reference](../technical/REVIEW-UI.md), [component references](../technical/README.md), [current evidence](../implementation/STATUS.md) and the [accepted runtime trust boundary](../implementation/RUNTIME-TRUST-DECISION.md).
