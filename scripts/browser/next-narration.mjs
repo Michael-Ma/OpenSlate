@@ -106,6 +106,23 @@ export const scenarios = [
       await page.keyboard.press("Space");
       await page.waitForFunction(() => { const audio = document.querySelector('.insp audio[data-act="narration-audio"]'); return audio && !audio.paused; }, null, { timeout: 3000 });
       await page.locator('.insp audio[data-act="narration-audio"]').evaluate((el) => el.pause());
+      // A short inspector (1440 x 900 under the Director's banner): the voice and the line are both in view above
+      // the sticky buttons, and a seek slider joins the native player, whose timeline has no room here.
+      const box = await page.evaluate(() => {
+        const r = (sel) => document.querySelector(sel)?.getBoundingClientRect();
+        const body = r(".insp .insp-body"), foot = r(".insp .narr-foot"), select = r(".insp select[data-act='narr-voice']"), line = r('.insp textarea[data-field="line"]');
+        return { top: body.top, footTop: foot.top, select: [select.top, select.bottom], line: [line.top, line.top + 40] };
+      });
+      expect(box.select[0] >= box.top && box.select[1] <= box.footTop, `The voice is out of view: ${JSON.stringify(box)}`);
+      expect(box.line[0] >= box.top && box.line[1] <= box.footTop, `The line is out of view: ${JSON.stringify(box)}`);
+      const seek = page.locator('.insp input[data-act="narration-seek"]');
+      expect(await seek.isVisible(), "No seek slider beside a native player without its timeline");
+      expect(await seek.getAttribute("aria-label") === "Position: Voice line of 2.3, 7.4 s", "The seek slider is not named");
+      await seek.focus();
+      await page.keyboard.press("End");
+      await page.waitForFunction(() => document.querySelector('.insp audio[data-act="narration-audio"]').currentTime > 7, null, { timeout: 3000 });
+      expect(/^7\.4 s of 7\.4 s$/.test(await seek.getAttribute("aria-valuetext")), `Seek position: ${await seek.getAttribute("aria-valuetext")}`);
+      await page.keyboard.press("Home");
       // The voice: following the film first, the film default marked.
       const options = await page.locator(".insp select[data-act='narr-voice'] option").allInnerTexts();
       expect(options[0] === "Same as the film (Cedar)" && options.includes("Cedar · film default") && options.includes("Ash"), `Voice options: ${options.join(", ")}`);
@@ -119,6 +136,19 @@ export const scenarios = [
       expect(await page.locator('.insp [data-act="narration-listen"]').count() === 0, "Listen is offered for a line that is not voiced");
       await page.click('.toast [data-act="undo"]');
       await expectText(page, '.insp [data-row="narration"]', /7\.4 s voiced/);
+      // Closing the panel gives the focus back to the control that opened it: Listen, or Edit.
+      await page.click('.insp [data-act="narration-listen"]');
+      await page.waitForSelector('.insp form[data-form="narration"]');
+      await page.focus('.insp [data-act="narr-choice"][data-choice="line"]');
+      await page.keyboard.press("Escape");
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "narration-listen", null, { timeout: 3000 });
+      await page.keyboard.press("Enter");
+      await page.waitForSelector('.insp form[data-form="narration"]');
+      await page.click('.insp [data-act="cancel-edit"]');
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "narration-listen", null, { timeout: 3000 });
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.click('.insp [data-act="cancel-edit"]');
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "narration-edit", null, { timeout: 3000 });
     },
   },
   {
@@ -203,10 +233,18 @@ export const scenarios = [
       expect(await page.locator('.insp [data-act="narr-add"]').isDisabled(), "Add stays on after a final refusal");
       expect(await page.locator(".toast").count() === 0, "A refusal also showed as a toast");
       await screenshot(page, "recording-refused-1440");
-      // Escape closes the panel.
+      // The refused file and Choose another… stay in view with the refusal, above the buttons.
+      const inView = await page.evaluate(() => {
+        const body = document.querySelector(".insp .insp-body").getBoundingClientRect();
+        return ['[data-field="refused-file"]', '[data-act="narr-choose"]'].map((sel) => { const box = document.querySelector(`.insp .narr-refusal ${sel}`)?.getBoundingClientRect(); return !!box && box.top >= body.top && box.bottom <= body.bottom; });
+      });
+      expect(inView.every(Boolean), `The refused file or Choose another… is out of view: ${inView}`);
+      expect(await page.locator('.insp .narr-refusal [data-field="refused-file"]').innerText() === "broken.wav · 24 B", "The refused file is not named with its refusal");
+      // Escape closes the panel; the focus goes back to Edit.
       await page.locator('.insp [data-act="narr-choose"]').focus();
       await page.keyboard.press("Escape");
       await page.waitForSelector('.insp [data-row="narration"]');
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "narration-edit", null, { timeout: 3000 });
     },
   },
   {
@@ -236,6 +274,8 @@ export const scenarios = [
       await expectText(page, ".insp .est", /fits 6 s/);
       await page.click('.insp [data-act="save-edit"]');
       await expectText(page, '.insp [data-row="narration"]', /The office closes at six\.[\s\S]*estimate, not voiced yet/);
+      // The line went first and choosing a line last: the toast says its Undo takes back only the choice.
+      await expectText(page, ".toast", /^1\.1 has a line to voice now\. Undo takes back only that choice; the line and voice stay as saved\./);
     },
   },
   {
@@ -251,7 +291,7 @@ export const scenarios = [
       await page.click('[data-act="narr-recording"]');
       expect(await page.locator('[data-act="narr-recording"]').getAttribute("aria-checked") === "true", "My recording is not chosen");
       await expectText(page, '[data-note="recording"]', /^Add the recording on 1\.2 in Keyframes\.$/);
-      await expectText(page, '[data-impact="cost"] .txt', /1\.2 will use your recording instead of its voice line, which stays in Assets; add it in Keyframes\./);
+      await expectText(page, '[data-impact="cost"] .txt', /1\.2 will use your recording instead of its voice line once you add it in Keyframes \(until then the voice line plays; it stays in Assets\)\./);
       const group = await page.locator('form[data-form="shot"] .segctl').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
       expect(group.scroll <= group.client + 1, `The narration choices overflow: ${JSON.stringify(group)}`);
       await screenshot(page, "plan-recording-1440");
@@ -260,6 +300,121 @@ export const scenarios = [
       await page.click(`[data-act="edit-shot"][data-shot="${shot("1.2")}"]`);
       await page.waitForSelector('form[data-form="shot"]');
       expect(await page.locator('[data-act="narr-recording"]').getAttribute("aria-checked") === "true", "The saved shot does not read as My recording");
+      // No recording was added: the voice line is still what plays, and nothing calls it the person's recording.
+      await expectText(page, '[data-note="recording"]', /^Still the voice line \(2\.1 s\): add your recording on 1\.2 in Keyframes\.$/);
+      await page.click('[data-act="narr-line"]');
+      await expectText(page, "[data-impact] .txt", /Nothing made goes out of date\./);
+      await page.click('form[data-form="shot"] [data-act="cancel-edit"]');
+      await page.click(".topbar [data-act='tab'][data-view='keyframes']");
+      await ready(page);
+      await page.click(`[data-act="scene"][data-scene="${scene(1)}"]`);
+      await openCard(page, "1.2");
+      await expectText(page, '.insp [data-row="narration"]', /Your recording[\s\S]*not added yet · the voice line plays \(2\.1 s\)/);
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.waitForSelector('.insp form[data-form="narration"][data-choice="recording"]');
+      await expectText(page, '.insp .narr-state[data-take="voice"]', /^No recording yet\. Until you add one, the voice line below plays\.$/);
+      await expectText(page, ".insp .narr-take", /^Voice line · 2\.1 s · Cedar/);
+      expect(!/Your recording/.test(await page.locator(".insp .narr-panel").innerText()), "The panel calls the voice line the person's recording");
+      await screenshot(page, "voice-under-recording-1440");
+    },
+  },
+  {
+    name: "next-narration-words-not-added",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      // The words are saved before the bytes; a recording that is not added gives them back.
+      await ready(page);
+      await openCard(page, "2.3");
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
+      await page.fill('.insp textarea[data-field="words"]', "Completely different words for my take.");
+      await chooseFile(page, "broken.wav", "audio/wav", Buffer.from("RIFF0000WAVEjunkjunkjunk"));
+      await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      await page.click('.insp [data-act="narr-add"]');
+      await expectText(page, '.insp .narr-refusal[role="alert"]', /The studio could not read this recording\. Try another file\.\s*The words are back as they were\./, 8000);
+      expect(await page.locator(".toast").count() === 0, "Restoring the words showed a toast");
+      await screenshot(page, "words-restored-1440");
+      // Stopped while sending: nothing added, the words back.
+      await chooseFile(page, "mara-take-2.wav", "audio/wav", wav(3, 16000));
+      await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      await page.click('.insp [data-act="narr-add"]');
+      await page.click('.insp [data-act="narr-stop"]');
+      await expectText(page, '.insp [data-state="stopped"][data-words="restored"]', /^Sending stopped\. The recording was not added\. The words are back as they were\.$/, 8000);
+      await page.click('.insp [data-act="cancel-edit"]');
+      // The line and its paid voice line are as they were.
+      await expectText(page, '.insp [data-row="narration"]', /“It was the last boat of the season, and I nearly missed it\.”[\s\S]*7\.4 s voiced/);
+      // Added with new words: the toast says its Undo leaves them.
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
+      await page.fill('.insp textarea[data-field="words"]', "The last boat, and I nearly missed it.");
+      await chooseFile(page, "mara-take-3.wav", "audio/wav", wav(5, 16000));
+      await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      await page.click('.insp [data-act="narr-add"]');
+      await expectText(page, ".toast", /^2\.3 now uses your recording \(5 s\) with its new words\. Undo takes back the recording; the words stay\./, 8000);
+    },
+  },
+  {
+    name: "next-narration-closed-while-sending",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await openCard(page, "2.2");
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
+      await chooseFile(page, "mara-take-1.wav", "audio/wav", wav(3, 16000));
+      await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      await page.click('.insp [data-act="narr-add"]');
+      await page.waitForSelector('.insp .narr-progress-row[data-state="sending"]');
+      // Escape waits while bytes go out: Stop sending is the way to stop them.
+      await page.focus('.insp [data-act="narr-stop"]');
+      await page.keyboard.press("Escape");
+      expect(await page.locator('.insp .narr-progress-row[data-state="sending"]').count() === 1, "Escape closed the panel while sending");
+      // Opening another shot closes the panel: the transfer stops and a toast says so.
+      await openCard(page, "2.3");
+      await expectText(page, ".toast", /^Sending the recording for 2\.2 stopped; nothing was added\./, 6000);
+      await openCard(page, "2.2");
+      await expectText(page, '.insp [data-row="narration"]', /^Narration\s*Edit\s*None/);
+    },
+  },
+  {
+    name: "next-narration-leave-recording",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await openCard(page, "2.2");
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
+      await chooseFile(page, "mara-take-1.wav", "audio/wav", wav(3, 16000));
+      await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      await page.click('.insp [data-act="narr-add"]');
+      await expectText(page, ".toast", /^2\.2 now uses your recording \(3 s\)\./, 6000);
+      await expectText(page, ".insp .narr-take", /^Your recording · 3 s/);
+      // Back to a line: the recording stops being used and a voice line will be made (priced, or no price set).
+      await page.click('.insp [data-act="narr-choice"][data-choice="line"]');
+      await page.fill('.insp textarea[data-field="line"]', "On the pier.");
+      const lineImpact = await expectText(page, '.insp form[data-form="narration"] .stale[id^="narr-impact"]', /^Your recording stops being used \(it stays in Assets\)\. A voice line will be made/);
+      expect(!/\$0\.00/.test(lineImpact) && (/about \$\d/.test(lineImpact) || /no price is set/.test(lineImpact)), `The voice line is not priced: ${lineImpact}`);
+      await page.click('.insp [data-act="narr-choice"][data-choice="none"]');
+      await expectText(page, '.insp form[data-form="narration"] .stale[id^="narr-impact"]', /^2\.2 will have no narration\. Your recording stops being used; it stays in Assets\.$/);
+      await page.click('.insp [data-act="cancel-edit"]');
+      // Plan says the same, as a cost, and its row shows the take, not the studio's stand-in words.
+      await page.click(".topbar [data-act='tab'][data-view='plan']");
+      await page.waitForSelector('main.work[data-view="plan"] .scenes .shot-row', { timeout: 20000 });
+      const row = await page.locator(`.shot-row[data-shot="${shot("2.2")}"] .shot-say`).innerText();
+      expect(/My recording chosen · 3 s take/.test(row) && !/Uploaded narration recording|voice line/.test(row), `Plan's row for the recording: ${row}`);
+      await page.click(`[data-act="edit-shot"][data-shot="${shot("2.2")}"]`);
+      await page.waitForSelector('form[data-form="shot"]');
+      await expectText(page, '[data-note="recording"]', /^Your recording, 3 s\. Replace it in Keyframes\.$/);
+      await page.click('[data-act="narr-line"]');
+      await page.fill('form[data-form="shot"] [data-field="line"]', "On the pier.");
+      await expectText(page, '[data-impact="cost"] .txt', /2\.2 stops using your recording \(it stays in Assets\); a voice line will be made/);
+      expect(!/Nothing made goes out of date/.test(await page.locator("[data-impact] .txt").innerText()), "Leaving the recording reads as free");
+      await page.click('[data-act="narr-none"]');
+      await expectText(page, '[data-impact="cost"] .txt', /2\.2 will have no narration: your recording stops being used \(it stays in Assets\)\./);
+      await screenshot(page, "plan-leave-recording-1440");
     },
   },
   {
@@ -307,6 +462,21 @@ export const scenarios = [
       await screenshot(page, "panel-zh-1440");
       await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
       await screenshot(page, "panel-recording-zh-1440");
+      await page.click('.insp [data-act="cancel-edit"]');
+      // A recording without words: Plan's row never shows the studio's English stand-in.
+      await openCard(page, "2.2");
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
+      await chooseFile(page, "take.wav", "audio/wav", wav(3, 16000));
+      await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      await page.click('.insp [data-act="narr-add"]');
+      await expectText(page, ".toast", /2\.2 现在使用你的录音（3 秒）/, 6000);
+      await page.click(".topbar [data-act='tab'][data-view='plan']");
+      await page.waitForSelector('main.work[data-view="plan"] .scenes .shot-row', { timeout: 20000 });
+      const row = await page.locator(`.shot-row[data-shot="${shot("2.2")}"] .shot-say`).innerText();
+      expect(row.trim() === "已选“我的录音” · 3 秒音频", `Plan's row in Chinese: ${JSON.stringify(row)}`);
+      await page.locator(`.shot-row[data-shot="${shot("2.2")}"]`).scrollIntoViewIfNeeded();
+      await screenshot(page, "plan-row-recording-zh-1440");
     },
   },
   {
@@ -348,6 +518,33 @@ export const scenarios = [
       await page.waitForSelector(".insp .narr-take", { state: "detached", timeout: 10000 });
       await page.click('.insp [data-act="cancel-edit"]');
       await expectText(page, `.insp[data-shot="${target}"] [data-row="narration"]`, /^Narration\s*Edit\s*(None|Not decided)/, 10000);
+    },
+  },
+  {
+    name: "next-narration-live-words-restored",
+    query: "ui=next",
+    viewport: { width: 1440, height: 900 },
+    // The studio's refusal of an unreadable recording is an expected 4xx.
+    allowConsoleErrors: [/HTTP 4\d\d \/api\/projects\/[^/]+\/shots\/[^/]+\/narration\/recording/],
+    async run({ page }) {
+      // The disposable fixture studio: words saved for a recording the studio refuses are undone through the real route.
+      await ready(page);
+      const target = await page.locator(".insp").getAttribute("data-shot");
+      const before = await page.locator(`.insp[data-shot="${target}"] [data-row="narration"]`).innerText();
+      const edits = [];
+      page.on("request", (request) => { if (request.method() === "POST" && /\/storyboard$/.test(request.url())) edits.push(request.postDataJSON()); });
+      await page.click('.insp [data-act="narration-edit"]');
+      await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
+      await page.fill('.insp textarea[data-field="words"]', "Words for a take that never lands.");
+      await chooseFile(page, "broken.wav", "audio/wav", Buffer.from("RIFF0000WAVEjunkjunkjunk"));
+      await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      await page.click('.insp [data-act="narr-add"]');
+      await page.waitForSelector('.insp .narr-refusal[role="alert"] [data-words]', { timeout: 20000 });
+      const words = await page.locator(".insp .narr-refusal [data-words]").getAttribute("data-words");
+      expect(words === "restored", `The words were not given back (${words}): ${await page.locator(".insp .narr-refusal").innerText()}`);
+      expect(edits.length === 2 && edits[0].kind === "narration" && edits[0].field === "text" && edits[1].kind === "undo", `Storyboard commands: ${JSON.stringify(edits)}`);
+      await page.click('.insp [data-act="cancel-edit"]');
+      await expectText(page, `.insp[data-shot="${target}"] [data-row="narration"]`, new RegExp(`^${before.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), 8000);
     },
   },
 ];
