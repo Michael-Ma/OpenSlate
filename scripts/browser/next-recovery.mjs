@@ -299,7 +299,8 @@ export const scenarios = [
         const path = new URL(request.url()).pathname;
         if (request.method() === "POST" && path.startsWith("/api/") && path !== "/api/session" && path !== "/api/installation/recovery/release") writes.push(path);
       });
-      await page.route("**/api/installation/recovery", (route) => route.fulfill({ json: { state, receipt, receiptDigest, summaryDigest: firstSummary, counts } }));
+      let statusReads = 0;
+      await page.route("**/api/installation/recovery", (route) => { statusReads++; return route.fulfill({ json: { state, receipt, receiptDigest, summaryDigest: firstSummary, counts } }); });
       await page.route("**/api/installation/recovery/release", async (route) => {
         const request = route.request();
         releases.push({ key: request.headers()["idempotency-key"], body: request.postDataJSON(), csrf: request.headers()["x-openslate-csrf"] });
@@ -314,6 +315,9 @@ export const scenarios = [
       const guarded = await page.evaluate(() => [...document.querySelectorAll("[data-needs]")].filter((node) => !node.disabled).map((node) => node.getAttribute("data-act")));
       expect(guarded.length === 0, `Writes stay on in the live studio: ${guarded.join(", ")}`);
       await page.locator("[data-act='review-recovery']").click();
+      await review(page);
+      await page.waitForTimeout(300);
+      const readsBeforeFinish = statusReads;
       await finish(page);
       expect(releases.length === 1, `${releases.length} releases were sent`);
       const [release] = releases;
@@ -324,6 +328,8 @@ export const scenarios = [
       await page.locator("[data-act='recovery-done']").click();
       await page.waitForSelector(".app:not([data-recovery])");
       await until(page, () => page.locator("main.work [data-act='edit-prompt']").first().isDisabled().catch(() => true), (value) => value === false, "Edits stayed off after the review");
+      // The release's answer carries the status, and once finished the film refreshes no longer read it.
+      expect(statusReads === readsBeforeFinish, `The status was read ${statusReads - readsBeforeFinish} more times after the review`);
     },
   },
 ];

@@ -265,3 +265,65 @@ test('Disconnect on a session that had already ended counts as disconnected, not
   t.after(() => { store.stop(); port.close(); });
   assert.equal(await store.disconnect(), 'CSRF_DENIED');
 });
+
+test('film refreshes read the recovery status only while there is a review to finish', async (t) => {
+  const { store, calls } = await studio(t);
+  const reads = () => calls.filter((call) => call.path === '/api/installation/recovery').length;
+  const atStart = reads();
+  assert.ok(atStart >= 1, 'start() reads it with the film list');
+  await store.refresh();
+  assert.equal(reads(), atStart + 1, 'in review: a release elsewhere reaches every film as an event, and the status follows it');
+  assert.equal(await store.releaseRecovery(), 'released');
+  await store.refresh();
+  const released = reads();
+  await store.refresh();
+  await store.refresh();
+  assert.equal(reads(), released, 'once finished, refreshes stop asking: building the summary walks every restored film');
+  // Asked for on purpose (Review, coming back to the window), it is still read.
+  await store.readRecovery();
+  assert.equal(reads(), released + 1);
+
+  // An ordinary studio is not asked on every refresh either.
+  const plain = await studio(t, { preset: null });
+  const plainReads = () => plain.calls.filter((call) => call.path === '/api/installation/recovery').length;
+  const first = plainReads();
+  await plain.store.refresh();
+  assert.equal(plainReads(), first);
+});
+
+test('a status that could not be read is asked again on refresh; a server without the route is not', async (t) => {
+  let fail = true;
+  const { store, calls } = await studio(t, { drop: (path) => path === '/api/installation/recovery' && fail });
+  assert.equal(store.getState().recovery.status, null, 'the first read got no answer');
+  fail = false;
+  await store.refresh();
+  assert.equal(store.getState().recovery.status.state, 'quarantined', 'the next refresh found the review');
+  assert.equal(recoveryReadOnly(store.getState()), true);
+
+  const port = new FixturePort();
+  let asked = 0;
+  const older = { get closed() { return port.closed; }, events: port.events.bind(port), request: (path, options) => (path.startsWith('/api/installation') ? (asked++, Promise.reject(new ApiError('NOT_FOUND', 404))) : port.request(path, options)) };
+  const plain = new StudioStore({ client: older, storage: null, newKey: () => 'k' });
+  await plain.start();
+  t.after(() => { plain.stop(); port.close(); });
+  const once = asked;
+  await plain.refresh();
+  await plain.refresh();
+  assert.equal(asked, once, 'no recovery route: refreshes stop asking');
+  assert.ok(calls.length > 0);
+});
+
+test('a write refused because the studio is in review makes the page read the status and turn read-only', async (t) => {
+  const { store, posts } = await studio(t);
+  // This page believes the studio is ordinary (its refreshes no longer ask).
+  const ordinary = { ...store.getState().recovery.status, state: 'ordinary', receipt: null, receiptDigest: null, summaryDigest: null };
+  store.dispatch({ type: 'recovery', recovery: { status: ordinary } });
+  assert.equal(recoveryReadOnly(store.getState()), false);
+  assert.equal(await store.edit({ kind: 'shot', id: shotId('2.1'), field: 'motion', value: 'Slow push' }), null);
+  assert.equal(posts().length, 1, 'the studio refused the one write');
+  assert.equal(store.getState().toast.message.id, 'error.INSTALLATION_QUARANTINED');
+  for (let tick = 0; tick < 20 && !recoveryReadOnly(store.getState()); tick++) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(recoveryReadOnly(store.getState()), true, 'the page now knows');
+  assert.equal(await store.edit({ kind: 'shot', id: shotId('2.1'), field: 'motion', value: 'Slow push' }), null);
+  assert.equal(posts().length, 1, 'the next write is not sent');
+});

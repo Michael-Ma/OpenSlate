@@ -5,7 +5,7 @@ import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
 import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
 import {
-  NO_RECOVERY, parseRecoveryStatus, parseSavedRelease, RECOVERY_LOCK, RECOVERY_PATH, recoveryReadOnly, RELEASE_PATH, RELEASE_PRESS, RELEASE_STORAGE_KEY,
+  isQuarantined, NO_RECOVERY, parseRecoveryStatus, parseSavedRelease, RECOVERY_LOCK, RECOVERY_PATH, recoveryReadOnly, RELEASE_PATH, RELEASE_PRESS, RELEASE_STORAGE_KEY,
   recoveryChange, releaseBody, releaseOutcome, unconfirmedStillApplies, type ReleaseOutcome, type SavedRelease,
 } from "../model/recovery.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
@@ -53,6 +53,8 @@ export class StudioStore {
   #refreshAgain = false;
   /** The latest recovery read (or release answer); an older read that answers later never replaces it. */
   #recoveryRead = 0;
+  /** The server has no recovery route (an older one): refreshes stop asking. */
+  #recoveryMissing = false;
 
   constructor(deps: StoreDeps) {
     this.#deps = deps;
@@ -146,12 +148,23 @@ export class StudioStore {
           client.request<ProposalList>(path(projectId, "/director/proposals")).then(
             ({ proposals }) => this.dispatch({ type: "proposals", proposals }),
             () => this.dispatch({ type: "proposals", proposals: [] })),
-          // A restore or a release elsewhere reaches every film as an event; the status follows it.
-          this.readRecovery(),
+          // A release elsewhere reaches every film as an event; the status follows it while there is a review to finish.
+          this.#recoveryOpen() ? this.readRecovery() : undefined,
         ]);
       } while (this.#refreshAgain);
     })().finally(() => { this.#refreshing = null; });
     return this.#refreshing;
+  }
+
+  /**
+   * Whether a film refresh reads the recovery status too: while the studio is in review, a release of this page's is
+   * unconfirmed, or the status is not known yet (its first read failed). Once the review is finished nothing is left to
+   * follow, and the status is not read again on every refresh: building it walks every restored film. A new restore
+   * takes the studio offline and ends every session, so the next session's start() reads it.
+   */
+  #recoveryOpen(): boolean {
+    const { status, unconfirmed } = this.#state.recovery;
+    return (status === null && !this.#recoveryMissing) || isQuarantined(status) || unconfirmed !== null;
   }
 
   #loadFailed(source: "snapshot" | "overview" | "director", error: unknown): void {
@@ -197,6 +210,8 @@ export class StudioStore {
     this.#deps.onError?.(error);
     const code = error instanceof ApiError || error instanceof CommandRefused ? error.code : "NETWORK_ERROR";
     this.dispatch({ type: "toast", message: errorMsg(code), tone: "error" });
+    // The studio says it is in recovery review while this page did not know: read the status, so the page turns read-only.
+    if (code === "INSTALLATION_QUARANTINED") void this.readRecovery();
   }
 
   async #sceneRead(sceneId: string): Promise<SceneGenerationRead> {
@@ -403,7 +418,9 @@ export class StudioStore {
       const same = recovery.status && canonicalJson(recovery.status) === canonicalJson(status);
       if (same && (keep || !recovery.unconfirmed)) return;
       this.dispatch({ type: "recovery", recovery: { status, ...(keep ? {} : { unconfirmed: null }), ...recoveryChange(recovery.status, status, recovery.unconfirmed) } });
-    } catch { /* see above */ }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) this.#recoveryMissing = true;
+    }
   }
 
   #saveRelease(saved: SavedRelease | null): void {
