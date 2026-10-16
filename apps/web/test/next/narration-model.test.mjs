@@ -74,6 +74,8 @@ test('the take: a voice line or a recording with its measured length, only while
   assert.equal(recording.origin, 'recording');
   assert.equal(en(recording.label), 'Your recording · 4.2 s');
   assert.equal(zh(recording.label), '你的录音 · 4.2 秒');
+  // A read from before the overview moved (the voice line a recording just replaced) is not offered as the take.
+  assert.equal(takeView({ ...s23, narration: { ...s23.narration, measuredSeconds: 3 } }, voiced), null);
   // Not voiced (an edited line), another shot's read, or nothing read: no take.
   assert.equal(takeView(shot('3.2'), { ...voiced, shotId: shotId('3.2') }), null);
   assert.equal(takeView(s23, { ...voiced, shotId: shotId('2.2') }), null);

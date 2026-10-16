@@ -62,6 +62,7 @@ export const narrationMessages = {
   // ---- recordings
   "narr.recording_label": { en: "Recording", zh: "录音" },
   "narr.choose": { en: "Choose a recording…", zh: "选择录音…" },
+  "narr.choose_new": { en: "Choose a new recording…", zh: "选择新的录音…" },
   "narr.choose_other": { en: "Choose another…", zh: "换一个…" },
   "narr.reading": { en: "Reading the file…", zh: "正在读取文件…" },
   "narr.file": { en: "{name} · {size}", zh: "{name} · {size}" },

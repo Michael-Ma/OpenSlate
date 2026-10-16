@@ -1,6 +1,7 @@
 import type { DirectorNote, GenerationOverview } from "@openslate/core/public";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { noteBanner, noteCallout, type NoteBannerAction, type NoteBannerView, type NoteCallout } from "../model/note-banner.ts";
+import { wordsOf } from "../model/narration.ts";
 import { noteViews, sceneOpenNotes, shotCallouts, type NoteView } from "../model/notes.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 
@@ -103,7 +104,7 @@ export function useDirectorNotes(options: {
         if (!shot) return;
         pendingEdit.current = { noteId: action.noteId, choiceIndex: action.choiceIndex, shotId: action.shotId, field: action.field };
         openShot(action.shotId);
-        const value = action.field === "narration" ? shot.narration.text : action.field === "imagePrompt" ? shot.imagePrompt : shot.motion;
+        const value = action.field === "narration" ? wordsOf(shot.narration.text) : action.field === "imagePrompt" ? shot.imagePrompt : shot.motion;
         store.setEdit({ shotId: action.shotId, field: action.field, value });
         return;
       }

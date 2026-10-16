@@ -1,10 +1,12 @@
 import type { ShotOverview } from "@openslate/core/public";
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { lineEstimate, lineEstimateMsg, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
+import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
 import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../model/inspector.ts";
+import { wordsOf } from "../model/narration.ts";
 import type { EditDraft } from "../store/state.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { NarrationPanel } from "./NarrationPanel.tsx";
 import { StatusPill } from "./parts.tsx";
 
 /** Common camera moves offered as suggestions in the interface language; motion stays free text. */
@@ -36,6 +38,13 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
   const run = useGuarded("run");
   const editing = draft && draft.shotId === shot.shotId ? draft : null;
   const regen = view.regenerate;
+  /** The row's Listen opened the narration panel: its player takes focus once the take has loaded. */
+  const [listening, setListening] = useState(false);
+  useEffect(() => { if (editing?.field !== "narration") setListening(false); }, [editing?.field]);
+  const openNarration = (listen: boolean) => {
+    setListening(listen);
+    onEdit({ shotId: shot.shotId, field: "narration", value: wordsOf(shot.narration.text) });
+  };
   return (
     <aside className="insp" aria-label={t("inspector.label")} data-shot={shot.shotId}>
       <div className="insp-title">
@@ -50,13 +59,29 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
       <div className="st"><StatusPill status={view.status} tone={view.tone} /></div>
 
       <div className="insp-body">
-      {editing ? (
+      {editing?.field === "narration" ? (
+        <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} focusTake={listening} onEdit={onEdit} onSaveDraft={onSaveDraft} />
+      ) : editing ? (
         <EditForm key={`${editing.shotId}:${editing.field}`} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} onEdit={onEdit} onSaveDraft={onSaveDraft} onSaveMotion={onSaveMotion} />
       ) : (
         <dl className="rows">
           {view.rows.map((row) => (
             <div key={row.key} className="row-pair" data-row={row.key}>
-              <dt>{tm(row.label)}</dt>
+              <dt>
+                {tm(row.label)}
+                {row.key === "narration" ? (
+                  // Narration is edited and heard in its own panel (the line or a recording, the voice, the current take).
+                  // Its two controls sit under the label, so the row is no taller than the line and its notes.
+                  <span className="narr-acts">
+                    <button type="button" className="pill sm" data-act="narration-edit" data-shot={shot.shotId} aria-label={t("narr.row.edit_label", { shot: view.label })} onClick={() => openNarration(false)}>{t("narr.row.edit")}</button>
+                    {shot.narration.state === "ready" ? (
+                      <button type="button" className="play sm" data-act="narration-listen" data-shot={shot.shotId} aria-label={t("narr.row.listen_label", { shot: view.label })} title={t("narr.row.listen")} onClick={() => openNarration(true)}>
+                        <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>
+                      </button>
+                    ) : null}
+                  </span>
+                ) : null}
+              </dt>
               <dd>
                 {typeof row.value === "string"
                   ? (row.quoted ? <span className="quote" title={row.value}>{`“${row.value}”`}</span> : row.value)
@@ -123,7 +148,7 @@ interface FormProps {
   onSaveMotion(motion: string, seconds: number): void;
 }
 
-/** Inline edit with Save / Cancel. It says before saving which media the change outdates. */
+/** Inline edit of the prompt, or motion and duration, with Save / Cancel. It says before saving which media the change outdates. */
 function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion }: FormProps) {
   const { t, tm } = useI18n();
   const shotSeconds = Math.round(shot.durationFrames / fps);
@@ -165,24 +190,6 @@ function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion 
         {issue ? <span className={`stale${issue.kind === "refusal" ? " warn" : ""}`} role={issue.kind === "refusal" ? "alert" : undefined}>{tm(issue.message)}</span> : null}
         <span className="stale" id={id("impact")}>{tm(editImpact(shot, ["motion", "desiredFrames"]))}</span>
         <FormButtons saving={saving} disabled={value === null || !motion.trim() || !changed} onCancel={cancel} />
-      </form>
-    );
-  }
-
-  if (draft.field === "narration") {
-    const estimate = lineEstimate(draft.value, shot, fps);
-    const submit = (event: FormEvent) => {
-      event.preventDefault();
-      if (draft.value.trim() === shot.narration.text || saving) return;
-      onSaveDraft({ ...draft, value: draft.value.trim() });
-    };
-    return (
-      <form className="edit-form" data-form="narration" onSubmit={submit} onKeyDown={onKey}>
-        <label htmlFor={id("narration")}>{t("inspector.narration_label", { shot: shot.label })}</label>
-        <textarea id={id("narration")} rows={4} value={draft.value} autoFocus aria-describedby={`${id("estimate")} ${id("impact")}`} onChange={(event) => onEdit({ ...draft, value: event.target.value })} />
-        <span className={`est${estimate.fits ? "" : " warn"}`} id={id("estimate")} aria-live="polite">{draft.value.trim() ? tm(lineEstimateMsg(estimate)) : ""}</span>
-        <span className="stale" id={id("impact")}>{tm(editImpact(shot, ["narration"]))}</span>
-        <FormButtons saving={saving} disabled={draft.value.trim() === shot.narration.text} onCancel={cancel} />
       </form>
     );
   }

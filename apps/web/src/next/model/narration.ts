@@ -149,11 +149,15 @@ export interface TakeView {
 /**
  * The take a person can listen to: the shot's current voice line or recording. Only while the overview says the
  * line is voiced (its length is measured), so an out-of-date or failed take is never offered as the current one.
+ * The section is read a moment after the overview moves: one whose recording has another length is still the
+ * take before (a recording that just replaced a voice line), so nothing is offered until it is read again.
  */
 export function takeView(shot: ShotOverview, read: ShotNarrationRead | null): TakeView | null {
   const audio = read && read.shotId === shot.shotId ? read.segment?.audio : null;
   if (shot.narration.state !== "ready" || !audio) return null;
   const samples = audio.media.probe?.audio?.samples;
+  const measured = shot.narration.measuredSeconds;
+  if (samples && measured !== undefined && Math.abs(samples / NARRATION_SAMPLE_RATE - measured) > 0.01) return null;
   const length = round1(shot.narration.measuredSeconds ?? (samples ? samples / NARRATION_SAMPLE_RATE : 0));
   const ref: StudioArtifactRef = { artifactId: audio.id, sha256: audio.media.sha256, kind: "audio" };
   if (audio.originEvidence !== "verified_generated_audio")
