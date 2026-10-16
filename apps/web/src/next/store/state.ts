@@ -12,6 +12,8 @@ export interface EditDraft {
   value: string;
   /** Present while the save is in flight. */
   saving?: boolean;
+  /** The recording upload's original draft revision; survives newer typing, never Cancel/reopen. */
+  recordingRevision?: number;
   /** A subtitle/composite pre-save must retain its editor when an uncertain result is checked. */
   keepOpenAfterSave?: boolean;
   /** Exact reconciliation keeps the original internal/user feedback intent. */

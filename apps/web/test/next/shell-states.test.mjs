@@ -129,6 +129,20 @@ test('the Stop confirm counts sent jobs, queued jobs and the Director the way th
   assert.deepEqual(stopLines(released).map(en), ['3 jobs already sent will finish and be charged.']);
 });
 
+test('Stop can detach input and unknown queues without treating a review-only film as active', () => {
+  for (const code of ['input_pending', 'unknown']) {
+    const overview = film({ 'shot-2-1': { video: { state: 'queued', takeCount: 0, waiting: { code, since: '' } } } });
+    assert.equal(showStop(overview, null, true, 'keyframes'), true, code);
+    assert.deepEqual(stopPreview(overview, null), { sent: 0, queued: 1, director: false });
+    assert.deepEqual(stopLines(stopPreview(overview, null)).map(en), ['1 queued job will be taken off; it needs a new confirm later.']);
+  }
+  const review = film({ 'shot-2-1': { video: { state: 'queued', takeCount: 0, waiting: { code: 'review', since: '' } } } });
+  assert.equal(showStop(review, null, true, 'keyframes'), false);
+  assert.equal(stopPreview(review, null).queued, 1, 'if Stop is opened for other work, it also detaches this bound review candidate');
+  review.shots['shot-2-1'].video.waiting.code = 'stopped';
+  assert.equal(showStop(review, null, true, 'keyframes'), false, 'an already-stopped slot has nothing left to detach');
+});
+
 // ---- after the session expired --------------------------------------------------------
 
 const state = {

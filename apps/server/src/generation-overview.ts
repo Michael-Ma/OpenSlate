@@ -93,7 +93,7 @@ export class GenerationOverviewReader {
             const progress = (pending: MediaSlot & { state: "running" | "queued" | "failed" | "no_answer" }): MediaSlot => current && output
               ? { ...base, state: "ready", artifact: ref(output), replacement: { state: pending.state,
                 ...(pending.attemptId ? { attemptId: pending.attemptId } : {}), ...(pending.phase ? { phase: pending.phase } : {}),
-                ...(pending.failure ? { failure: pending.failure } : {}) } }
+                ...(pending.failure ? { failure: pending.failure } : {}), ...(pending.waiting ? { waiting: pending.waiting } : {}) } }
               : pending;
             // Detached, still-live attempts are honest in-flight work; they must never look safe to resubmit.
             const active = history.filter(a => !a.released && !["failed", "succeeded"].includes(a.phase)).at(-1);
@@ -117,8 +117,8 @@ export class GenerationOverviewReader {
               const wait = store.get<{ code: string; since: string }>("node_wait", binding.id);
               const held = snapshot.holds.find(h => { const hold = h as { active: boolean; scopeId: string }; return hold.active && [projectId, scene.id, shot.id, binding.id].includes(hold.scopeId); }) as { ownerId: string } | undefined;
               const heldRequest = held && snapshot.messages.find(message => message.id === held.ownerId);
-              const codes: Record<string, WaitingCode> = { CAPACITY_EXCEEDED: "capacity", LOCAL_EXECUTION_BUSY: "capacity", HUMAN_REVIEW_REQUIRED: "review", INPUT_PENDING: row.narrationPending && kind === "video" ? "voice" : "review", TIMING_REQUIRED: "timing" };
-              const code: WaitingCode = snapshot.control.paused ? "stopped" : held ? "edit_pending" : codes[wait?.code ?? ""] ?? (row.narrationPending && kind === "video" ? "voice" : "review");
+              const codes: Record<string, WaitingCode> = { CAPACITY_EXCEEDED: "capacity", LOCAL_EXECUTION_BUSY: "capacity", HUMAN_REVIEW_REQUIRED: "review", INPUT_PENDING: row.narrationPending && kind === "video" ? "voice" : "input_pending", TIMING_REQUIRED: "timing" };
+              const code: WaitingCode = snapshot.control.paused ? "stopped" : held ? "edit_pending" : wait && Object.hasOwn(codes, wait.code) ? codes[wait.code]! : "unknown";
               // Capacity is installation-wide, just like admission; count actual in-flight jobs on this lock profile.
               const capacityProfile = captured.lock.profiles.find(p => p.id === binding.node.profileId);
               const ahead = code === "capacity" ? capacityProfile ? store.listProjects().flatMap(p => this.production.engine.attempts(p.id)).filter(a =>
@@ -155,13 +155,17 @@ export class GenerationOverviewReader {
         if (!isKeyframeReview(this.production, requestId) && overview.director.state !== "idle" && (!scopeIds.length || scopeIds.includes(scene.id) || rows.some(r => scopeIds.includes(r.shotId)))) blockers.push({ code: "director_working" });
         const shots = rows.map(r => overview.shots[r.shotId]!);
         const counts = { shots: shots.length, keyframesReady: shots.filter(s => s.keyframe.state === "ready").length, opened: shots.filter(s => s.keyframe.opened).length, videosReady: shots.filter(s => s.video.state === "ready").length };
-        const attention = shots.some(s => [s.keyframe.state, s.video.state, s.keyframe.replacement?.state, s.video.replacement?.state].some(state => state && ["failed", "no_answer", "outdated", "choose_take", "direction_required"].includes(state)));
+        const attention = shots.some(s => [s.keyframe.state, s.video.state, s.keyframe.replacement?.state, s.video.replacement?.state, s.narration.state].some(state => state && ["failed", "no_answer", "outdated", "choose_take", "direction_required"].includes(state)));
         const regenerationQuotes = rows.map(r => quote(captured.lock, [r], "regenerateKeyframe"));
         const commonRegenerationQuote = regenerationQuotes.length && regenerationQuotes.every(q => canonical(q) === canonical(regenerationQuotes[0])) ? regenerationQuotes[0] : undefined;
         const confirmation = store.list<SceneConfirmationRecord>("scene_confirmation", projectId).filter(r => r.sceneId === scene.id && r.kind === "video").at(-1);
         if (confirmation?.state === "running") blockers.push({ code: "confirmation_running" });
+        // A bound candidate is not proof that a clip is being made. Only a known execution wait or
+        // an in-flight attempt moves on its own; review waits still need the person's decision.
+        const moving = (slot: Pick<MediaSlot, "state" | "waiting" | "failure">, pending: boolean) => slot.state === "running" || (slot.state === "queued" && !["review", "stopped", "unknown", "timing"].includes(slot.waiting?.code ?? "") && ((slot.failure?.autoRetriesLeft ?? 0) > 0 || pending && !!slot.waiting && ["capacity", "edit_pending", "input_pending", "voice"].includes(slot.waiting.code)));
+        const makingVideo = shots.some((s, i) => moving(s.video, rows[i]!.videoPending) || (s.video.replacement && moving(s.video.replacement, rows[i]!.videoPending)));
         overview.scenes.push({ sceneId: scene.id, ordinal: index + 1, title: sceneTitle(scene.purpose, scene.title), purpose: scene.purpose,
-          state: attention ? "needs_attention" : shots.length && counts.videosReady === shots.length ? "video_saved" : shots.some(s => ["running", "queued"].includes(s.video.state)) ? "making_video" : shots.length && counts.keyframesReady === shots.length ? "keyframes_back" : counts.keyframesReady ? "keyframes_partial" : "not_started",
+          state: attention ? "needs_attention" : shots.length && counts.videosReady === shots.length ? "video_saved" : makingVideo ? "making_video" : shots.length && counts.keyframesReady === shots.length ? "keyframes_back" : counts.keyframesReady ? "keyframes_partial" : "not_started",
           shotIds: rows.map(r => r.shotId), counts,
           videoTargets: generationTargets(rows, "video").map(r => r.shotId), keyframeTargets: generationTargets(rows, "image").map(r => r.shotId),
           quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), ...(commonRegenerationQuote ? { regenerateKeyframe: commonRegenerationQuote } : {}), confirmVideo: quote(captured.lock, rows, "confirmVideo"), voice: quote(captured.lock, rows, "voice") },

@@ -166,9 +166,9 @@ test('a clip waiting for the person\'s confirm is not being made: one story, and
   // A shot whose clip has no answer makes the scene need attention, as the studio would say.
   overview.shots[shotId('2.1')].video = { state: 'no_answer', attemptId: 'a', takeCount: 0 };
   assert.equal(sceneStateOf(overview, scene), 'needs_attention');
-  // Real work keeps the studio's "making video".
+  // Other real work keeps its own progress, but cannot hide an unanswered paid outcome.
   overview.shots[shotId('2.2')].video = { state: 'running', takeCount: 0, attemptId: 'b' };
-  assert.equal(sceneStateOf(overview, scene), 'making_video');
+  assert.equal(sceneStateOf(overview, scene), 'needs_attention');
 });
 
 test('shots held by an unfinished Director edit wait for it everywhere: no "making", no "keep working"', () => {
@@ -259,7 +259,8 @@ test('a replacement take in progress keeps the current keyframe and says how the
   const shot = lastFerryOverview().shots[shotId('2.2')];
   const withReplacement = (replacement) => ({ ...shot, keyframe: { ...shot.keyframe, replacement } });
   assert.equal(en(cardStatus(withReplacement({ state: 'running', attemptId: 'a1' })).status), 'Making a new take · current kept');
-  assert.equal(isWorking(withReplacement({ state: 'queued' }).keyframe), true);
+  assert.equal(isWorking(withReplacement({ state: 'queued', waiting: { code: 'capacity', ahead: 0, since: 'x' } }).keyframe), true);
+  assert.equal(isWorking(withReplacement({ state: 'queued' }).keyframe), false, 'an unclassified replacement queue is not proof that work will run');
   assert.equal(en(cardStatus(withReplacement({ state: 'failed', failure: { code: 'X', technical: true, retryAllowed: false, autoRetriesLeft: 0, charged: true, at: 'x' } })).status), 'New take failed · counted as spent · current kept');
   assert.equal(cardStatus(withReplacement({ state: 'no_answer', attemptId: 'a2' })).tone, 'attention');
   assert.equal(en(cardStatus(shot).status), 'Not opened');

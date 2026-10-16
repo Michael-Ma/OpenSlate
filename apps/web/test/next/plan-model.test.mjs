@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { lastFerryOverview, lastFerrySnapshot, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { catalog } from '../../src/next/i18n/messages.ts';
+import { translateMsg } from '../../src/next/i18n/translate.ts';
 import {
   addedScene, addedShot, clipPill, clockText, deleteSceneFacts, deleteShotFacts, keyframePill, locate, mediaCountMsgs, mediaCounts,
   actionLine, directedPrompt, narrationView, planOutline, promptText, promptToSave, sceneChoices, sceneMove, shotDrop, shotMove, written,
@@ -51,6 +52,19 @@ test('rows say framing, length, narration and the media state in neutral pills (
   assert.deepEqual(r31.pills.map((pill) => pill.text.id), ['plan.pill.kf_none'], 'no clip pill before a keyframe exists');
   assert.deepEqual([r31.picture, r31.emptyThumb], [null, { id: 'plan.thumb.none' }]);
   assert.deepEqual(row(outline, '3.2').narration.detail, { id: 'plan.narr.estimate', values: { seconds: 1.6 } });
+});
+
+test('Plan names input and unknown waits without turning either into a human confirm', () => {
+  const shot = lastFerryOverview().shots[shotId('2.1')];
+  for (const [code, english, chinese, tone] of [
+    ['input_pending', 'Waiting for required media', '等待所需素材', 'busy'],
+    ['unknown', 'Waiting for the studio to report its status', '等待工作室报告状态', 'plain'],
+    [undefined, 'Waiting for the studio to report its status', '等待工作室报告状态', 'plain'],
+  ]) {
+    const slot = { state: 'queued', takeCount: 0, ...(code ? { waiting: { code, since: '' } } : {}) };
+    for (const value of [keyframePill({ ...shot, keyframe: { ...slot, opened: false } }), clipPill({ ...shot, video: slot })])
+      assert.deepEqual([translateMsg('en', value.text), translateMsg('zh-CN', value.text), value.tone, value.icon], [english, chinese, tone, null]);
+  }
 });
 
 test('failures and unanswered jobs are neutral with an icon; an earlier keyframe shows dimmed', () => {

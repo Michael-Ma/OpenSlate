@@ -48,7 +48,7 @@ test('a note settled by a regenerate says so while the new keyframe is being mad
   const settled = note({ state: 'resolved', resolution: { choiceIndex: 1, at: 'x' } });
   const shot = overview.shots[shotId('2.2')];
   // The keyframe is being made again (its old picture kept as previous), or a replacement take runs behind it.
-  for (const keyframe of [{ ...shot.keyframe, state: 'running', previous: shot.keyframe.artifact, artifact: undefined }, { ...shot.keyframe, replacement: { state: 'queued' } }]) {
+  for (const keyframe of [{ ...shot.keyframe, state: 'running', previous: shot.keyframe.artifact, artifact: undefined }, { ...shot.keyframe, replacement: { state: 'queued', waiting: { code: 'capacity', since: 'x' } } }]) {
     const making = { ...overview, shots: { ...overview.shots, [shot.shotId]: { ...shot, keyframe } } };
     const [view] = noteViews([settled], making);
     assert.equal(en(view.settled), 'Regenerating 2.2…');

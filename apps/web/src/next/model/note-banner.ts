@@ -1,7 +1,7 @@
-import type { DirectorProposal, GenerationOverview, ProposalPreview } from "@openslate/core/public";
+import type { DirectorProposal, GenerationOverview, ProposalPreview, ShotOverview } from "@openslate/core/public";
 import type { TimelineSegment } from "./checks.ts";
-import { isWorking } from "./keyframes.ts";
-import { regenerating, type NoteAction, type NoteView } from "./notes.ts";
+import { isWorking, shotHasNoAnswer, unresolvedQueue, waitingMsg } from "./keyframes.ts";
+import { regenerationSummary, type NoteAction, type NoteView } from "./notes.ts";
 import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -93,6 +93,14 @@ export function regeneratePrice(shotIds: readonly string[], overview: Generation
   return quote.priceUnknown ? msg("price.unknown") : msg("price.about", { total: formatMicros(quote.micros, locale) });
 }
 
+/** Neutral waiting still guards the inputs of a bound purchase; it is separate from visible running progress. */
+function regenerationBlock(shot: ShotOverview): Msg | null {
+  if (shotHasNoAnswer(shot)) return msg("scene.unknown_outcome", { shots: shot.label });
+  const wait = unresolvedQueue(shot.keyframe) ?? unresolvedQueue(shot.video);
+  if (wait) return waitingMsg(wait);
+  return isWorking(shot.keyframe) || isWorking(shot.video) ? msg(isWorking(shot.video) ? "note.callout.wait_clip" : "note.callout.wait_keyframe", { shot: shot.label }) : null;
+}
+
 function choiceAction(note: NoteView, index: number, overview: GenerationOverview, proposals: readonly DirectorProposal[], locale: string): NoteBannerAction {
   const choice = note.choices[index]!;
   const action = choice.action;
@@ -105,7 +113,7 @@ function choiceAction(note: NoteView, index: number, overview: GenerationOvervie
       return { ...base, proposal, enabled: base.enabled && proposal?.state === "held" };
     }
     case "regenerate": {
-      const busy = action.shotIds.some((id) => { const shot = overview.shots[id]; return !shot || isWorking(shot.keyframe) || isWorking(shot.video); });
+      const busy = action.shotIds.some((id) => { const shot = overview.shots[id]; return !shot || !!regenerationBlock(shot); });
       // A stale note can still be carried out by a regenerate (the server accepts it); only an in-flight job stops it.
       return { ...base, price: regeneratePrice(action.shotIds, overview, locale), enabled: note.state !== "resolved" && !busy && keyframeEstimate(action.shotIds, overview) !== null };
     }
@@ -158,7 +166,7 @@ export function settledMsg(action: NoteAction, label: Label, overview: Generatio
   switch (action.kind) {
     case "accept": return msg("note.settled.accepted", { choice: "text" in label ? label.text : "" });
     // Not "regenerated" while the new keyframe is still being made.
-    case "regenerate": return msg(regenerating(overview, action.shotIds) ? "note.settled.regenerating" : "note.settled.regenerated", { shots: labels(action.shotIds) });
+    case "regenerate": return regenerationSummary(overview, action.shotIds);
     case "edit": return msg("note.settled.edited", { shot: labels([action.shotId]) });
     case "proposal": return msg("note.settled.applied");
     case "reply": return msg("note.settled.replied");
@@ -218,8 +226,7 @@ export function noteCallout(note: NoteView, shotId: string, overview: Generation
   const shots = unique.map((id) => overview.shots[id]?.label ?? "?").join(", ");
   const priced = !!estimate && !estimate.priceUnknown;
   // A job on one of its shots holds the link; its tooltip says which one to wait for.
-  const working = unique.map((id) => overview.shots[id]).find((shot) => !!shot && (isWorking(shot.keyframe) || isWorking(shot.video)));
-  const wait = working ? msg(isWorking(working.video) ? "note.callout.wait_clip" : "note.callout.wait_keyframe", { shot: working.label }) : null;
+  const wait = unique.map((id) => overview.shots[id]).flatMap((shot) => shot ? [regenerationBlock(shot)] : []).find((reason) => !!reason) ?? null;
   return {
     noteId: note.noteId,
     letter: note.letter,

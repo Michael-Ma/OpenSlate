@@ -2,6 +2,7 @@ import type { ExportReadiness, ExportRecord, ExportView, GenerationOverview, Sho
 import { formatList } from "../i18n/typeset.ts";
 import { isMessageId } from "../i18n/messages.ts";
 import { making } from "./film.ts";
+import { awaitingStudioStatus, waitingMsg } from "./media-state.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -47,6 +48,7 @@ export interface ReadinessRow {
 }
 
 export function clipCell(shot: ShotOverview, demo: boolean): ReadinessRow["clip"] {
+  if (awaitingStudioStatus(shot.video) || shot.video.state === "queued" && ["input_pending", "timing"].includes(shot.video.waiting?.code ?? "")) return { text: waitingMsg(shot.video), tone: "plain" };
   if (making(shot.video)) return { text: msg("film.cell.making"), tone: "plain" };
   switch (shot.video.state) {
     case "ready": return shot.video.artifact ? { text: msg(demo ? "film.cell.demo_clip" : "film.cell.clip"), tone: "ok" } : { text: msg("film.cell.no_clip"), tone: "plain" };

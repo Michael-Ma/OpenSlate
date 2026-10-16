@@ -198,7 +198,7 @@ export interface StopPreview {
    * they finish and are charged. The server's Stop counts every attempt that has not finished the same way.
    */
   sent: number;
-  /** Jobs bound but not sent yet: Stop takes them off and they need a new confirm. */
+  /** Bound unsent jobs, including review, input and unclassified waits: Stop detaches them, even though they are not all being made. */
   queued: number;
   /** The Director is working or waiting on a question: it stops. */
   director: boolean;

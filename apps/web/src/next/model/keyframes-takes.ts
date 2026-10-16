@@ -1,7 +1,7 @@
 import type { GenerationOverview, ShotOverview, ShotTakes, StudioArtifactRef, UseTakeReceipt } from "@openslate/core/public";
 import { madeMsg } from "./assets.ts";
 import { clipUnit } from "./inspector.ts";
-import { isWorking } from "./keyframes.ts";
+import { isWorking, unresolvedQueue, waitingMsg } from "./keyframes.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -51,7 +51,10 @@ export function takeImpact(overview: GenerationOverview, shot: ShotOverview, loc
 
 /** The studio refuses to switch takes while this shot's keyframe is being made (ATTEMPT_EXISTS); a clip in the making is waited for too. */
 export function takeBlocked(shot: ShotOverview): Msg | null {
-  if (isWorking(shot.keyframe) || shot.keyframe.state === "no_answer") return msg("takes.wait_keyframe");
+  if (isWorking(shot.keyframe) || shot.keyframe.state === "no_answer" || shot.keyframe.replacement?.state === "no_answer") return msg("takes.wait_keyframe");
+  if (shot.video.state === "no_answer" || shot.video.replacement?.state === "no_answer") return msg("card.no_answer");
+  const wait = unresolvedQueue(shot.keyframe) ?? unresolvedQueue(shot.video);
+  if (wait) return waitingMsg(wait);
   if (isWorking(shot.video)) return msg("inspector.wait_for_clip");
   return null;
 }
