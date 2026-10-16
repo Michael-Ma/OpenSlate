@@ -139,6 +139,78 @@ async function pricedActionsFit(page, width) {
 }
 
 /**
+ * Every shot card holds its footer: one title line, the seconds with their unit, the status pill and the motion
+ * inside the card, and the motion never squeezed below a word. The prompt over the picture shows whole lines only
+ * (no slice of a clamped third line), and the badge and the note chips sit side by side, tops aligned.
+ */
+async function cardsFit(page, where) {
+  const problems = await page.evaluate(() => {
+    const out = [];
+    const rect = (element) => element.getBoundingClientRect();
+    for (const card of document.querySelectorAll(".kf-row .card[data-card]")) {
+      const id = card.getAttribute("data-card");
+      const outer = rect(card);
+      for (const part of card.querySelectorAll(".ttl, .stl, .ttl > *, .stl > *")) {
+        const r = rect(part);
+        if (r.left < outer.left - 0.5 || r.right > outer.right + 0.5 || r.bottom > outer.bottom - 0.5) out.push(`${id}: "${part.textContent}" leaves the card`);
+      }
+      const title = card.querySelector(".ttl b");
+      const seconds = card.querySelector(".ttl span");
+      if (title && rect(title).height > 24) out.push(`${id}: the title wraps (${rect(title).height}px)`);
+      if (seconds && rect(seconds).height > 24) out.push(`${id}: the seconds break from their unit`);
+      const motion = card.querySelector(".stl > span:last-child");
+      if (motion && motion.textContent && rect(motion).width < Math.min(motion.scrollWidth, 40)) out.push(`${id}: the motion is squeezed to ${rect(motion).width}px`);
+      const caption = card.querySelector(".pic .ptxt");
+      if (caption) {
+        const style = getComputedStyle(caption);
+        const box = rect(caption);
+        const clip = { top: box.top + parseFloat(style.borderTopWidth), bottom: box.bottom - parseFloat(style.borderBottomWidth) };
+        const range = document.createRange();
+        range.selectNodeContents(caption);
+        for (const line of range.getClientRects()) {
+          const shown = Math.min(line.bottom, clip.bottom) - Math.max(line.top, clip.top);
+          if (shown > 1 && shown < line.height - 1) out.push(`${id}: a prompt line is sliced (${Math.round(shown)} of ${Math.round(line.height)}px show)`);
+        }
+      }
+      const badge = card.querySelector(".pic .badge");
+      for (const chip of card.querySelectorAll(".callout .anno")) {
+        const a = rect(badge), b = rect(chip);
+        if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) out.push(`${id}: a note chip overlaps the badge`);
+        if (Math.abs(a.top - b.top) > 1.5 && chip === card.querySelector(".callout .anno")) out.push(`${id}: the chip and the badge are not aligned (${a.top} vs ${b.top})`);
+      }
+    }
+    return out;
+  });
+  expect(!problems.length, `Shot cards break at ${where}: ${problems.join("; ")}`);
+}
+
+/**
+ * The banner's Now / After strip fits its row: every segment inside it, a label that does not fit ends with "…"
+ * (never cut through a glyph), and the title keeps each number with its unit on one line. The strip refits a frame
+ * after its row resizes, so a new window size gets a moment to settle.
+ */
+async function stripFits(page, where) {
+  const problems = await until(page, () => stripProblems(page), (list) => !list.length, `The banner's strip breaks at ${where}`, 2000).catch((error) => [error.message]);
+  expect(!problems.length, problems.join("; "));
+}
+
+function stripProblems(page) {
+  return page.evaluate(() => {
+    const out = [];
+    for (const segs of document.querySelectorAll(".banner .tl .segs")) {
+      const row = segs.getBoundingClientRect();
+      for (const seg of segs.querySelectorAll(":scope > .seg")) {
+        const r = seg.getBoundingClientRect();
+        if (r.right > row.right + 0.5) out.push(`"${seg.textContent}" runs past the strip (${Math.round(r.right)} > ${Math.round(row.right)})`);
+        if (seg.scrollWidth > seg.clientWidth + 1 && getComputedStyle(seg).textOverflow !== "ellipsis") out.push(`"${seg.textContent}" is cut without an ellipsis`);
+      }
+    }
+    for (const keep of document.querySelectorAll(".banner h2 .keep, .banner .sub .keep")) if (keep.getClientRects().length > 1) out.push(`"${keep.textContent}" breaks across lines`);
+    return out;
+  });
+}
+
+/**
  * Scene 2 of the sample film: open its frames, settle 2.3's line through the Director's note (the proposal
  * choice) and make its three clips (one sent, two queued).
  */
@@ -360,6 +432,15 @@ export const scenarios = [
     async run({ page }) {
       await ready(page);
       await makeSceneTwoVideo(page);
+      // The settled note's banner is only as tall as what it says: no empty band under its one strip row.
+      const done = await page.locator('.banner.done[data-note="note-b"]').evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return { height: box.height, below: box.bottom - element.querySelector(".banner-main").getBoundingClientRect().bottom };
+      });
+      expect(done.below <= 16, `The done banner leaves an empty band: ${JSON.stringify(done)}`);
+      // 2.2's note link is off while its clip is made: a solid backing (the picture never shows through) and a reason.
+      const link = await page.locator("[data-card='shot-2-2'] [data-act='note-regenerate']").evaluate((element) => ({ disabled: element.disabled, title: element.title, background: getComputedStyle(element).backgroundColor, opacity: getComputedStyle(element).opacity }));
+      expect(link.disabled && link.title === "Wait for 2.2's clip to finish." && /^rgb\(/.test(link.background) && link.opacity === "1", `The held note link is not legible or does not say why: ${JSON.stringify(link)}`);
       await shot(page, "next-shell-running-1440");
       const stop = page.locator(".topbar [data-act='stop-film']");
       expect((await stop.innerText()).trim() === "Stop", `Stop reads "${await stop.innerText()}"`);
@@ -457,6 +538,13 @@ export const scenarios = [
       await page.waitForSelector(".film-strip[data-strip='stopped']");
       await noSidewaysScroll(page, "stopped");
       await page.evaluate(() => window.scrollTo(0, 0));
+      // The scene pills scroll inside their row; the selected one is shown whole.
+      const pill = await page.evaluate(() => {
+        const row = document.querySelector(".scene-pills").getBoundingClientRect();
+        const selected = document.querySelector(".scene-pills [aria-pressed='true']").getBoundingClientRect();
+        return { row: [row.left, row.right], selected: [selected.left, selected.right] };
+      });
+      expect(pill.selected[0] >= pill.row[0] - 0.5 && pill.selected[1] <= pill.row[1] + 0.5, `The selected scene pill is cut by its row: ${JSON.stringify(pill)}`);
       await shot(page, "next-shell-stopped-390");
       // Chinese strings are the longest here; the strip wraps and nothing scrolls sideways.
       await page.locator(".topbar [data-act='language']").click();
@@ -508,6 +596,8 @@ export const scenarios = [
         expect(!kf.scrolls || /gradient/.test(kf.mask), `The card row hides cards without a sign at ${width}: ${kf.mask}`);
         // Priced actions show their price, stay inside their card or panel, and keep clear of the badge and caption.
         await pricedActionsFit(page, width);
+        await cardsFit(page, width);
+        await stripFits(page, width);
         expect(await page.evaluate(() => document.documentElement.scrollHeight) <= 900, `Priced actions make Keyframes scroll the page at ${width}`);
         await noSidewaysScroll(page, `priced actions at ${width}`);
         await shot(page, `next-shell-keyframes-${width}`);
@@ -515,11 +605,19 @@ export const scenarios = [
       // On a phone the page may scroll vertically, while every priced action remains fully readable and usable.
       await page.setViewportSize({ width: 390, height: 844 });
       await pricedActionsFit(page, 390);
+      await cardsFit(page, 390);
+      await stripFits(page, 390);
       await noSidewaysScroll(page, "priced actions at 390");
       await page.locator(".topbar [data-act='language']").click();
       await page.waitForFunction(() => document.documentElement.lang === "zh-CN");
       await pricedActionsFit(page, "390 zh-CN");
+      await cardsFit(page, "390 zh-CN");
+      await stripFits(page, "390 zh-CN");
       await noSidewaysScroll(page, "priced actions at 390 in Chinese");
+      // In Chinese at 900 px the strip is at its narrowest beside the banner's actions.
+      await page.setViewportSize({ width: 900, height: 900 });
+      await stripFits(page, "900 zh-CN");
+      await cardsFit(page, "900 zh-CN");
     },
   },
   {

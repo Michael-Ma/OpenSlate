@@ -43,17 +43,21 @@
 .banner .tl-sizer > div { display: flex; width: max-content; }
 .banner .tl-sizer .seg { flex: none; width: auto; min-width: 0; max-width: none; }
 .callout .callout-note { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; max-width: 100%; }
-/* Chips never cover the shot badge: they take the room right of it and end with an ellipsis. */
-.card .callout { left: 44px; pointer-events: none; }
+/* The picture's top row: the badge, then the chips from 6 px after it to the right edge, tops aligned (both are
+   20 px tall). Chips never cover the badge; a chip is one line ending in "…", and the card's tooltip and
+   description carry the whole note. */
+.card .pic .pic-head { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 2; display: flex; align-items: flex-start; gap: 6px; pointer-events: none; }
+.card .pic .pic-head .badge { position: static; flex: none; line-height: 16px; }
+.card .pic-head .callout { position: static; flex: 1 1 auto; min-width: 0; }
 /* A chip is a label: a click on it opens the card; only the regenerate link is its own control. It is one short
    line with its price ("New take · about $0.04"); on a card too narrow for that, the price wraps under the words,
-   never inside them. It may run left under the badge's column, so it starts below the badge (which sits lower
-   than the chip). */
-.card .callout .link { position: relative; pointer-events: auto; width: max-content; max-width: calc(100% + 36px); margin-top: 5px; text-align: right; }
+   never inside them. It sits under the chip, below the badge, so it may run left under the badge's column. */
+.card .callout .link { position: relative; pointer-events: auto; width: max-content; max-width: calc(100% + 36px); text-align: right; line-height: 1.25; }
 .card .callout .link .link-words, .card .callout .link .link-price { white-space: nowrap; }
 .card .callout .anno { max-width: 100%; min-width: 0; }
 .card .callout .anno-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.callout .link:disabled { opacity: .5; }
+/* Off, the link keeps a solid backing over the picture and greys its words; its tooltip says why. */
+.callout .link:disabled { background: var(--ground); color: var(--muted); text-decoration-color: var(--track); cursor: not-allowed; }
 
 /* ---------- neutral check chips on cards ---------- */
 .anno.check { background: var(--raised-2); color: var(--text); border: 1px solid var(--track); }
@@ -86,6 +90,33 @@
 /* ---------- shot cards: any number, scrolling inside the row ---------- */
 .card .hit:focus-visible { outline-offset: -2px; }
 .card.empty { text-align: center; padding: 12px; }
+/* While an inspector edit is open the other cards are held, and look it, as the held scene pills do. */
+.card.held { opacity: .5; }
+.card.held .hit { cursor: not-allowed; }
+/* The prompt over the picture: two lines and no slice of a third. The bottom gap is a transparent border, outside
+   the clamp's clip (padding would leave a third line showing in it); the scrim runs under the border. (ui/studio.css
+   loads after this file, so these rules are one class more specific than its own.) */
+.kf-row .card .pic .ptxt { padding-bottom: 0; border-bottom: 7px solid transparent; background-origin: border-box; }
+.kf-row .card .pic.vp .ptxt { padding-bottom: 0; border-bottom-width: 16px; }
+/* The footer never leaves the card: one title line ending in "…", the seconds kept with their unit, and the status
+   pill ending in "…" only when it would leave the motion less than a word. The card's tooltip has them whole. */
+.card .ttl { gap: 8px; min-width: 0; }
+.card .ttl b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .ttl span { flex: none; white-space: nowrap; }
+.card .stl > .status { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.card .stl > .status > [aria-hidden] { margin-right: 4px; }
+.card .stl > span:last-child { flex: 1 1 0; min-width: min(4.5em, 40%); }
+/* A card too narrow for a pill and a word of motion side by side (the two-card rows just above 900 px): the motion
+   takes its own line under the pill, on every card of the row alike, and the footer's gaps give up the room (the
+   picture keeps its height, so the note link stays clear of the prompt). */
+.kf-row .card { container: kf-card / inline-size; }
+@container kf-card (max-width: 160px) {
+  /* The note link takes two lines here; it keeps clear of the prompt under it. */
+  .kf-row .card .callout .callout-note { gap: 3px; }
+  .kf-row .card .ttl { margin-top: 6px; }
+  .kf-row .card .stl { flex-wrap: wrap; row-gap: 1px; margin-top: 3px; }
+  .kf-row .card .stl > span:last-child { flex-basis: 100%; line-height: 16px; }
+}
 @media (min-width: 900px) {
   .row.kf-row { grid-template-columns: minmax(0, 1fr) 230px; }
   .kf-row .cards {

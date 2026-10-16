@@ -302,7 +302,10 @@ export const scenarios = [
       // The confirm voices 3.2's line first, step by step, before any clip.
       await expectText(page, '[data-card="shot-3-2"] .stl', /Making voice line…/);
       await expectText(page, ".vpanel p", /^Making the voice line for 3\.2; the clips follow\.$/);
-      await expectText(page, '[data-card="shot-3-1"] .stl', /Waiting for the voice line/);
+      await expectText(page, '[data-card="shot-3-1"] .stl', /^Waiting for voice/);
+      // The waiting pill leaves the motion its room: both read whole.
+      const footer = await page.locator('[data-card="shot-3-1"] .stl').evaluate((row) => [...row.children].map((part) => [part.textContent, part.scrollWidth <= part.clientWidth + 1]));
+      expect(footer.every(([, whole]) => whole), `3.1's status row is cut: ${JSON.stringify(footer)}`);
       await screenshot(page, "confirm-step-speech-1440");
       await expectText(page, '[data-card="shot-3-2"] .stl', /Saving voice line…/);
       await expectText(page, ".vpanel p", /^Saving the voice line for 3\.2; the clips follow\.$/);
@@ -587,6 +590,15 @@ export const scenarios = [
       });
       await page.waitForSelector('main.work[data-view="keyframes"] .preview .pic-img', { timeout: 30000 });
       await page.waitForSelector('.vpanel[data-stopped="NARRATION_SPEECH_UNAVAILABLE"]', { timeout: 15000 });
+      // The integration film's titles are long: each card keeps one title line, its seconds whole, its footer inside.
+      const footers = await page.locator(".kf-row .card[data-card]").evaluateAll((cards) => cards.map((card) => {
+        const outer = card.getBoundingClientRect();
+        const title = card.querySelector(".ttl b").getBoundingClientRect();
+        const seconds = card.querySelector(".ttl span").getBoundingClientRect();
+        const status = card.querySelector(".stl").getBoundingClientRect();
+        return { title: title.height, seconds: seconds.height, inside: status.bottom <= outer.bottom - 0.5 && status.right <= outer.right + 0.5 };
+      }));
+      expect(footers.every((card) => card.title <= 24 && card.seconds <= 24 && card.inside), `A card's footer breaks: ${JSON.stringify(footers)}`);
       await expectText(page, ".vpanel .vcount", /^Stopped\s*at 1\.2$/);
       await expectText(page, ".vpanel .vstop", /^No narrator voice is set up for the line in 1\.2\. Choose a narrator voice in Settings, then confirm again\.$/);
       await panelFits(page);
@@ -608,6 +620,9 @@ export const scenarios = [
       const other = await page.locator('.card [data-act="open-shot"]').nth(1).getAttribute("data-shot");
       await page.click(`.card [data-act="open-shot"][data-shot="${other}"]`);
       await page.click('.insp [data-act="edit-motion"]');
+      // The other cards are held as the scene pills are, and look it: dimmed, with a not-allowed pointer.
+      const heldCard = await page.locator(`.card[data-card]:not([data-card="${other}"])`).first().evaluate((card) => ({ held: card.classList.contains("held"), opacity: Number(getComputedStyle(card).opacity), cursor: getComputedStyle(card.querySelector(".hit")).cursor }));
+      expect(heldCard.held && heldCard.opacity <= 0.6 && heldCard.cursor === "not-allowed", `A held card looks live: ${JSON.stringify(heldCard)}`);
       const editInPlan = page.locator('.vpanel [data-act="stop-edit-in-plan"]');
       expect(await editInPlan.isDisabled(), "Edit 2.1 in Plan is on while 2.2 is being edited");
       expect((await editInPlan.getAttribute("title")) === "Save or cancel the edit to 2.2 first", `Edit in Plan does not say why: ${await editInPlan.getAttribute("title")}`);

@@ -32,7 +32,7 @@ export const keyframes = {
   "media.waiting.edit_pending": { en: "Waiting for an edit to finish", zh: "等待编辑完成" },
   "media.waiting.stopped": { en: "Stopped", zh: "已停止" },
   "media.waiting.review": { en: "Waiting for your confirm", zh: "等待你确认" },
-  "media.waiting.voice": { en: "Waiting for the voice line", zh: "等待配音" },
+  "media.waiting.voice": { en: "Waiting for voice", zh: "等待配音" },
   "media.waiting.timing": { en: "Waiting for timing", zh: "等待定时" },
   "media.waiting.queued": { en: "Queued", zh: "排队中" },
 
