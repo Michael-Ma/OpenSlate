@@ -70,8 +70,13 @@ export function editHold(edit: { shotId: string } | null, overview: GenerationOv
 /**
  * The preview caption: the shot's framing, then its picture prompt. Both are the film's own words, so the stop between
  * them is "。" after Chinese and ". " after anything else, whatever the interface language ("Wide. The empty
- * harbour…", never "Wide。The empty harbour…").
+ * harbour…", never "Wide。The empty harbour…"); a framing that already ends in a stop gets no second one. A framing
+ * written as a whole sentence (more than four words, as a Director may write it) is left to the inspector, and the
+ * caption is the prompt alone, so the picture is not covered twice by the same description.
  */
 export function previewCaption(framing: string, prompt: string): Msg {
-  return msg(isCjk(framing.trimEnd().at(-1)) ? "preview.caption_cjk" : "preview.caption", { framing: framing.trimEnd(), prompt });
+  const label = framing.trim();
+  if (!label || label.split(/\s+/).length > 4) return msg("preview.caption_plain", { text: prompt });
+  if (/[.!?…。！？]$/u.test(label)) return msg("preview.caption_plain", { text: `${label} ${prompt}` });
+  return msg(isCjk(label.at(-1)) ? "preview.caption_cjk" : "preview.caption", { framing: label, prompt });
 }

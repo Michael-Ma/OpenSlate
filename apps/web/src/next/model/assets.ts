@@ -348,7 +348,10 @@ export function assetDetail(item: AssetItem, items: readonly AssetItem[], overvi
   rows.push({ label: msg("assets.row.source"), value: sourceMsg(item) });
   rows.push({ label: msg("assets.row.made"), value: madeMsg(item.createdAt, now, locale) });
   const length = durationMsg(item.durationSeconds);
-  if (length) rows.push({ label: msg("assets.row.length"), value: length });
+  // A clip comes back longer or shorter than its shot (a 6.6 s clip for a 6 s shot): say how much of it the film uses.
+  const used = shot && item.role === "clip" && item.current ? Math.round((shot.durationFrames / overview.fps) * 10) / 10 : null;
+  const trimmed = used !== null && item.durationSeconds !== undefined && Math.abs(item.durationSeconds - used) >= 0.05;
+  if (length) rows.push({ label: msg("assets.row.length"), value: length, ...(trimmed ? { sub: msg("assets.row.length_used", { seconds: used }) } : {}) });
 
   const point: AssetDetailView["point"] = shot ? { target: { kind: "shot", id: shot.shotId }, name: msg("assets.raw", { text: shot.label }) }
     : scene ? { target: { kind: "scene", id: scene.sceneId }, name: msg("assets.target.scene", { n: scene.ordinal }) }

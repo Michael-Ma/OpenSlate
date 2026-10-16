@@ -72,9 +72,12 @@
 .film-work .player .pic.dim .fv-still { opacity: .6; }
 .film-work .player .pv-top { right: 12px; flex-wrap: wrap; }
 .film-work .player .pv-top .end { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+/* The player shows each frame whole, with side bars, as the exported MP4 does ("the exported MP4 is exact"); the
+   timeline's picture blocks below stay filled. */
 .film-work .fv-still { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; }
+.film-work .player .fv-still { object-fit: contain; background: var(--ground); }
 .film-work .fv-still-wait { width: 100%; height: 100%; background: var(--surface-stripe); }
-.film-work .fv-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--ground); z-index: 1; }
+.film-work .fv-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: transparent; z-index: 1; }
 .film-work .player .dashed-frame { background: var(--surface); }
 .film-work .music-on { display: inline-flex; align-items: center; gap: 6px; background: rgba(20,21,23,.78); border-radius: var(--r-pill); padding: 2px 9px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
 .film-work .music-on.lost { color: var(--text-2); font-weight: 500; }

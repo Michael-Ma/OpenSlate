@@ -369,6 +369,15 @@
   /* The phone's smaller play button, so a second caption line fits on the 1024 px stage. */
   .kf .preview .pv-bottom .scrub .play { width: 26px; height: 26px; }
 }
+/* A frame that is not about 16:9 (a model's square image, data-whole) is shown whole the same way at any width: the
+   picture fills the height above the band, centred on the preview's ground, and the caption and scrubber sit in the
+   band under it instead of over its lower third, where the subject often is. */
+.kf .preview[data-whole]:not([data-player]) .pv-stage { display: flex; flex-direction: column; }
+.kf .preview[data-whole]:not([data-player]) .pv-frame { position: relative; inset: auto; flex: none; height: max(calc(100cqh - 86px), calc(100cqh * .72)); background: var(--ground); }
+.kf .preview[data-whole]:not([data-player]) .pv-frame :is(.pic-img, .pv-clip) { object-fit: contain; }
+.kf .preview[data-whole]:not([data-player]) .pv-bottom { container: kf-band / size; position: relative; inset: auto; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; overflow: hidden; padding: 8px 14px; background: none; }
+.kf .preview[data-whole]:not([data-player]) .pv-caption { flex: none; margin: 0; font-size: 13.5px; line-height: 1.35; text-shadow: none; -webkit-line-clamp: 2; }
+.kf .preview[data-whole]:not([data-player]) .pv-bottom .scrub .play { width: 26px; height: 26px; }
 /* (Heights of the band's content box: the scrubber is 26 px, each caption line 18.2 px and a gap of 6 px.) */
 @container kf-band (max-height: 86.7px) { .kf .preview .pv-caption { -webkit-line-clamp: 2; } }
 @container kf-band (max-height: 68.5px) { .kf .preview .pv-caption { -webkit-line-clamp: 1; } }

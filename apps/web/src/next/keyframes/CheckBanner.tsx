@@ -86,7 +86,15 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, a
   }
 
   const first = checks[0];
-  if (!first && !attention && idle) return null;
+  // Before any keyframe there is nothing to check yet: a neutral line (no green all-clear), keeping the row in place.
+  if (!first && !attention && idle) {
+    return (
+      <div className="quiet" role="status" data-check="idle">
+        <span aria-hidden="true">·</span>
+        <span>{t("check.idle")}</span>
+      </div>
+    );
+  }
   if (!first) {
     return (
       <div className="quiet" role="status" data-check={attention ? "attention" : "none"}>

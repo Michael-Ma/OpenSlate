@@ -73,6 +73,7 @@ export const assetsMessages = {
   "assets.label.demo_export": { en: "Demo export", zh: "示例导出" },
   "assets.raw": { en: "{text}", zh: "{text}" },
   "assets.seconds": { en: "{seconds} s", zh: "{seconds} 秒" },
+  "assets.row.length_used": { en: "The film uses {seconds} s of it, the shot's length.", zh: "影片使用其中 {seconds} 秒，即镜头的时长。" },
   "assets.picture.none": { en: "No preview", zh: "无预览" },
   "assets.picture.loading": { en: "Loading the picture", zh: "正在载入画面" },
   "assets.picture.failed": { en: "Couldn’t show it ({code})", zh: "无法显示（{code}）" },

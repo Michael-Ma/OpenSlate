@@ -67,6 +67,9 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
   const time = useRef<HTMLSpanElement>(null);
   const visible = useOnScreen(section);
   const [loaded, setLoaded] = useState<string | null>(null);
+  // The decoded picture's width over height: a frame that is not about 16:9 (a model's square image) is shown whole,
+  // with the caption and scrubber under it rather than over its lower third.
+  const [aspect, setAspect] = useState<{ key: string; value: number } | null>(null);
   const [consumed, setConsumed] = useState(0);
   const openPending = useStudio((s) => !!s.pending[`frame-view:${shot.shotId}`]);
   // Recording "Opened" writes; offline or expired the button is off and says why.
@@ -170,6 +173,7 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
       data-opened={keyframe.opened ? "true" : "false"}
       data-media={showVideo ? "video" : "keyframe"}
       data-player={player ? "true" : undefined}
+      data-whole={!player && picture && aspect && aspect.key === artifactKey(picture) && aspect.value < 1.6 ? "true" : undefined}
       onKeyDown={onKeyDown}
     >
       {/* The frame, the head and the caption with the scrubber: over the picture, or (a narrow stage, the Video side)
@@ -181,7 +185,7 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
           ) : picture ? (
             <div className={`pic${card.pictureDimmed && !showVideo ? " dim" : ""}`}>
               <div className="pv-anim" ref={anim}>
-                <Picture artifact={picture} alt={caption} onDecoded={(key) => setLoaded(key)} />
+                <Picture artifact={picture} alt={caption} onDecoded={(key, value) => { setLoaded(key); setAspect(value ? { key, value } : null); }} />
               </div>
             </div>
           ) : !making ? (
