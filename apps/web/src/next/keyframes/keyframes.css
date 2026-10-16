@@ -23,8 +23,25 @@
 
 /* ---------- Director notes: banner options may wrap (a price makes them long) ---------- */
 .banner .banner-actions .pill { white-space: normal; text-align: center; line-height: 1.3; }
-.banner .tl .segs { min-width: 0; overflow: hidden; }
 .banner h2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* A number stays on one line with its unit ("6 s"), in the title and the line under it. */
+.banner .keep { white-space: nowrap; }
+/* Settled, the banner is only as tall as what it says (one strip row, or none). */
+.banner.done { min-height: 0; }
+
+/* ---------- the Now / After strip, fitted to its row (BannerFrame measures it; keyframes-layout.ts) ---------- */
+.banner .tl { position: relative; grid-template-columns: 54px minmax(0, 1fr); }
+.banner .tl .segs { min-width: 0; overflow: hidden; }
+/* Every width comes from the fit. A label that still does not fit ends with "…", never cut through a glyph (a
+   block, since a flex container never shows an ellipsis). */
+.banner .tl .segs .seg { flex: none; display: block; min-width: 0; max-width: none; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.banner .tl .segs .seg.dash { line-height: 18px; }
+/* A shot showing its label alone (or less) keeps a narrower inset; the fit measures it with the same one. */
+.banner .tl .segs .seg[data-fit], .banner .tl-sizer [data-part="short"] { padding: 0 4px; }
+/* Each label at its natural width, out of sight and out of the page's scroll area. */
+.banner .tl-sizer { position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.banner .tl-sizer > div { display: flex; width: max-content; }
+.banner .tl-sizer .seg { flex: none; width: auto; min-width: 0; max-width: none; }
 .callout .callout-note { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; max-width: 100%; }
 /* Chips never cover the shot badge: they take the room right of it and end with an ellipsis. */
 .card .callout { left: 44px; pointer-events: none; }
@@ -110,12 +127,6 @@
   .app[data-ui="next"] .work.kf .scene-head .line { flex: 1 0 auto; max-width: 100%; }
   .app[data-ui="next"] .work.kf .scene-pills { margin-left: 0; min-width: 0; max-width: 100%; flex: 0 1 auto; flex-wrap: wrap; row-gap: 6px; }
   .app[data-ui="next"] .work.kf .scene-pills .pill { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .app[data-ui="next"] .work.kf .tl { grid-template-columns: 54px minmax(0, 1fr); }
-  .app[data-ui="next"] .work.kf .tl .segs { min-width: 0; overflow: hidden; }
-  /* Shots keep their length-true widths; the dashed tail gives way first, with an ellipsis (a block, since a
-     flex container never shows one). */
-  .app[data-ui="next"] .work.kf .tl .seg:not(.dash) { flex-shrink: 0; }
-  .app[data-ui="next"] .work.kf .tl .seg.dash { display: block; min-width: 0; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (min-width: 900px) and (max-width: 1099px) {
   /* Two shot cards at a time; the rest scroll into view inside the row. The edge that has more cards behind it

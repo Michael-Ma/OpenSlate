@@ -51,7 +51,7 @@ export function noteProposal(note: NoteView, proposals: readonly DirectorProposa
 }
 
 function shotSegment(label: string, seconds: number, hot: boolean): TimelineSegment {
-  return { kind: "shot", text: msg("check.segment.shot", { label, seconds }), seconds, hot };
+  return { kind: "shot", text: msg("check.segment.shot", { label, seconds }), seconds, hot, label };
 }
 
 /** The scene after the note's scene, for the dashed tail of the strip. */
