@@ -1,10 +1,11 @@
 import type { ShotOverview } from "@openslate/core/public";
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
 import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../model/inspector.ts";
-import { wordsOf } from "../model/narration.ts";
+import { wordsOf, type ShotNarrationRead } from "../model/narration.ts";
 import type { EditDraft } from "../store/state.ts";
+import type { Resource } from "../store/useResource.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { NarrationPanel } from "./NarrationPanel.tsx";
 import { StatusPill } from "./parts.tsx";
@@ -17,6 +18,8 @@ interface Props {
   shot: ShotOverview;
   fps: number;
   draft: EditDraft | null;
+  /** The shot's narration section and current take (GET /narration/shots/:shotId), read while the panel is open. */
+  narrationDetail: Resource<ShotNarrationRead>;
   busy: { regenerate: boolean; edit: boolean; release: boolean; video: boolean };
   onPoint(): void;
   onRegenerate(): void;
@@ -32,7 +35,7 @@ interface Props {
  * Edits follow the shell's write guard (off while offline or expired); paid makes also stop while the film is
  * stopped. A control the guard turns off says why in its title.
  */
-export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease }: Props) {
+export function Inspector({ view, shot, fps, draft, narrationDetail, busy, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease }: Props) {
   const { t, tm } = useI18n();
   const server = useGuarded("server");
   const run = useGuarded("run");
@@ -43,10 +46,28 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
   useEffect(() => { if (editing?.field !== "narration") setListening(false); }, [editing?.field]);
   const openNarration = (listen: boolean) => {
     setListening(listen);
+    returnTo.current = listen ? "listen" : "edit";
     onEdit({ shotId: shot.shotId, field: "narration", value: wordsOf(shot.narration.text) });
   };
+  // Closing the narration panel (Escape, Cancel, Done, Save) gives the focus back to the row's control that opened
+  // it (Listen, else Edit), unless the person has moved on to something outside the inspector.
+  const aside = useRef<HTMLElement>(null);
+  const returnTo = useRef<"edit" | "listen" | null>(null);
+  const narrationOpen = editing?.field === "narration";
+  const wasOpen = useRef(narrationOpen);
+  useEffect(() => {
+    const was = wasOpen.current;
+    wasOpen.current = narrationOpen;
+    if (!was || narrationOpen) return;
+    const target = returnTo.current;
+    returnTo.current = null;
+    const root = aside.current;
+    const active = document.activeElement;
+    if (!target || !root || (active && active !== document.body && !root.contains(active))) return;
+    (root.querySelector<HTMLElement>(`[data-act="narration-${target}"]`) ?? root.querySelector<HTMLElement>('[data-act="narration-edit"]'))?.focus();
+  }, [narrationOpen]);
   return (
-    <aside className="insp" aria-label={t("inspector.label")} data-shot={shot.shotId}>
+    <aside ref={aside} className="insp" aria-label={t("inspector.label")} data-shot={shot.shotId} data-editing={editing?.field}>
       <div className="insp-title">
         <div>
           <h3>{tm(view.title)}</h3>
@@ -60,7 +81,7 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
 
       <div className="insp-body">
       {editing?.field === "narration" ? (
-        <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} focusTake={listening} onEdit={onEdit} onSaveDraft={onSaveDraft} />
+        <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} detail={narrationDetail} saving={busy.edit || !!editing.saving} focusTake={listening} onEdit={onEdit} onSaveDraft={onSaveDraft} />
       ) : editing ? (
         <EditForm key={`${editing.shotId}:${editing.field}`} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} onEdit={onEdit} onSaveDraft={onSaveDraft} onSaveMotion={onSaveMotion} />
       ) : (

@@ -87,7 +87,7 @@ export function ShotRow({ row, guard, busy, flash, onEdit, onMove, onPoint, onOp
       <div className="shot-say" data-narration={row.narration.kind}>
         {row.narration.kind === "line" ? (
           <>
-            <q>{row.narration.text}</q>
+            {row.narration.text ? <q>{row.narration.text}</q> : null}
             {row.narration.detail ? <small>{tm(row.narration.detail)}</small> : null}
           </>
         ) : (

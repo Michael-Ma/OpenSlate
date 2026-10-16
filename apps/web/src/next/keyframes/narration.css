@@ -10,6 +10,11 @@
 .insp .narr-acts .play.sm svg { margin-left: 1px; }
 
 /* ---------- the panel ---------- */
+/* While it is open the panel gets the inspector's room: the keyframe's status pill and the framing step aside. */
+.insp[data-editing="narration"] .st, .insp[data-editing="narration"] .insp-title .framing { display: none; }
+.insp[data-editing="narration"] .insp-body > form { margin-top: 8px; }
+/* A field that takes the focus (the line, a refusal's Choose another…) scrolls clear of the sticky buttons. */
+.insp[data-editing="narration"] .insp-body { scroll-padding-bottom: 60px; }
 .insp .narr-panel { gap: 7px; }
 .insp .narr-panel > .label { font-size: 12px; color: var(--muted); }
 .insp .narr-panel .segctl { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--hairline); background: var(--bar); border-radius: var(--r-pill); min-width: 0; }
@@ -19,14 +24,25 @@
 .insp .narr-panel .segctl button[aria-checked="true"] { background: var(--raised-2); color: var(--text); }
 .insp .narr-panel .segctl button:disabled { cursor: not-allowed; }
 .insp .narr-panel .stale { margin-top: 0; line-height: 1.4; }
-.insp .narr-voice { display: flex; flex-direction: column; gap: 5px; }
-.insp .narr-voice select { appearance: auto; }
+/* The voice on one row with its label, so the line stays in view with it in a short inspector. */
+.insp .narr-voice { display: flex; align-items: center; gap: 8px; }
+.insp .narr-voice label { flex: none; }
+.insp .narr-voice select { appearance: auto; flex: 1 1 auto; min-width: 0; font-size: 12.5px; padding: 7px 6px; }
 .insp .narr-voice select option { background: var(--raised); color: var(--text); }
 
 /* The current take: its label and the native player (seek, volume, keyboard). */
 .insp .narr-take { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--hairline); background: var(--bar); border-radius: 10px; padding: 7px 8px; }
 .insp .narr-take-label { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .insp .narr-audio { display: block; width: 100%; height: 34px; }
+/*
+ * In a narrow inspector the native player has no room for its timeline: a full-width seek slider joins it there
+ * (keyboard and pointer, its position said in seconds). Where the native timeline fits, the slider is not shown.
+ */
+.insp .narr-take { container-type: inline-size; }
+.insp .narr-seek { display: none; width: 100%; margin: -2px 0 0; height: 14px; padding: 0; border: 0; border-radius: 0; background: none; accent-color: var(--text); cursor: pointer; }
+@container (max-width: 300px) {
+  .insp .narr-seek { display: block; }
+}
 .insp .narr-loading { font-size: 12px; color: var(--muted); }
 .insp .narr-state { font-size: 12.5px; color: var(--text-2); line-height: 1.4; }
 .insp .narr-state.warn { color: var(--text); font-weight: 600; }
@@ -38,6 +54,10 @@
 .insp .narr-file .name { display: block; overflow-wrap: anywhere; }
 .insp .narr-choose { align-self: flex-start; }
 .insp .narr-refusal { margin: 0; display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--track); background: var(--raised); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; color: var(--text); line-height: 1.4; }
+.insp .narr-refusal-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.insp .narr-refusal-body .name { color: var(--text-2); overflow-wrap: anywhere; }
+.insp .narr-refusal-body .narr-words-note { color: var(--text-2); }
+.insp .narr-refusal-body .narr-choose { align-self: flex-start; margin-top: 2px; }
 .insp .narr-refusal .ic { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--text); color: var(--select-ink); display: grid; place-items: center; font-size: 11px; font-weight: 700; margin-top: 1px; }
 .insp .narr-free { color: var(--muted); font-size: 12px; }
 

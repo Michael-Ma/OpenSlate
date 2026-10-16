@@ -6,6 +6,8 @@ import type { MediaSource } from "../media/media-source.ts";
 import type { ArtifactUrl } from "../media/useArtifactUrl.ts";
 import { useMode, useStore } from "../store/react.tsx";
 import type { StudioStore } from "../store/store.ts";
+import { useResource, type Resource } from "../store/useResource.ts";
+import type { ShotNarrationRead } from "../model/narration.ts";
 import { liveUploader, type Uploader } from "../views/assets/upload.ts";
 
 type Ref = Pick<StudioArtifactRef, "artifactId" | "sha256" | "kind">;
@@ -61,6 +63,15 @@ function fixtureNarrationSource(store: StudioStore): MediaSource {
     },
     revoke: (url) => URL.revokeObjectURL(url),
   };
+}
+
+/**
+ * GET /narration/shots/:shotId: the shot's narration section and its current take (voice line or recording),
+ * read again as the studio's events move. Null reads nothing. The Keyframes inspector reads it for the selected
+ * shot (its narration row and panel), the Plan editor for the shot it edits ("My recording" may still be a voice line).
+ */
+export function useShotNarration(shotId: string | null): Resource<ShotNarrationRead> {
+  return useResource<ShotNarrationRead>(shotId ? `/narration/shots/${encodeURIComponent(shotId)}` : null);
 }
 
 /** One source (and so one shared, reference-counted URL cache) per store and mode. */
