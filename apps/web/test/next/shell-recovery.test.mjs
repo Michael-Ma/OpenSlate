@@ -118,10 +118,16 @@ test('the decision: Finish, sending, or only Retry after a lost reply', () => {
   const recovery = { ...NO_RECOVERY, status: status() };
   assert.equal(decisionPhase(recovery, false), 'ready');
   assert.equal(decisionPhase(recovery, true), 'sending');
-  assert.equal(decisionPhase({ ...recovery, unconfirmed: { key: 'k', body: releaseBody(status()) } }, false), 'unconfirmed');
+  const lost = { ...recovery, unconfirmed: { key: 'k', body: releaseBody(status()) } };
+  assert.equal(decisionPhase(lost, false), 'unconfirmed');
+  assert.equal(decisionPhase(lost, true), 'sending', 'a Retry on its way is busy like a Finish');
+  // A decision saved for another restore does not hold this one back.
+  assert.equal(decisionPhase({ ...lost, status: status({ receipt: { ...receipt, restoreId: 'restore-2' } }) }, false), 'ready');
+  // A quarantine read without its digests cannot be finished as read: Check again.
+  assert.equal(decisionPhase({ ...recovery, status: status({ summaryDigest: 'nope' }) }, false), 'unavailable');
 });
 
-test('the counts list each kind with what happens to it; local preparations only when there are some', () => {
+test('the counts list every kind, each with what happens to it when there are some', () => {
   const rows = recoveryRows(counts);
   assert.deepEqual(rows.map((row) => [row.key, row.count]), [['films', 2], ['known', 2], ['uncertain', 1], ['preparing', 1], ['requests', 1]]);
   assert.deepEqual(rows.map((row) => en({ id: row.label })), ['Films', 'Known pending jobs', 'Uncertain jobs', 'Local preparations, not submitted', 'Saved Director requests']);
@@ -133,7 +139,7 @@ test('the counts list each kind with what happens to it; local preparations only
   assert.equal(en(rows[4].note), 'It won’t run again. Send the Director a new message when you continue.');
   assert.equal(rows[0].note, null, 'films need no note');
   const quiet = { ...counts, knownJobs: 0, unknownJobs: 0, preparingJobs: 0, nativeRequests: 0 };
-  assert.deepEqual(recoveryRows(quiet).map((row) => [row.key, row.count, row.note]), [['films', 2, null], ['known', 0, null], ['uncertain', 0, null], ['requests', 0, null]]);
+  assert.deepEqual(recoveryRows(quiet).map((row) => [row.key, row.count, row.note]), [['films', 2, null], ['known', 0, null], ['uncertain', 0, null], ['preparing', 0, null], ['requests', 0, null]], 'a zero says plainly that none were found');
   assert.equal(nothingInFlight(quiet), true);
   assert.equal(nothingInFlight(counts), false);
 });

@@ -212,18 +212,19 @@ export interface RecoveryRow {
 }
 
 /**
- * The counts the review lists, each with what happens to it. Local preparations only appear when there are some
- * (as in the classic review); the rest always show, so a zero says plainly that nothing of that kind was found.
+ * The counts the review lists, each with what happens to it when there are any. Every row always shows, so a zero says
+ * plainly that nothing of that kind was found.
  */
 export function recoveryRows(counts: RecoveryCounts): RecoveryRow[] {
-  const rows: RecoveryRow[] = [
-    { key: "films", label: "recovery.count.films", count: counts.projects, note: null },
-    { key: "known", label: "recovery.count.known", count: counts.knownJobs, note: counts.knownJobs > 0 ? msg("recovery.note.known", { count: counts.knownJobs }) : null },
-    { key: "uncertain", label: "recovery.count.uncertain", count: counts.unknownJobs, note: counts.unknownJobs > 0 ? msg("recovery.note.uncertain", { count: counts.unknownJobs }) : null },
+  const row = (key: RecoveryRow["key"], label: MessageId, count: number, note: MessageId | null): RecoveryRow =>
+    ({ key, label, count, note: note && count > 0 ? msg(note, { count }) : null });
+  return [
+    row("films", "recovery.count.films", counts.projects, null),
+    row("known", "recovery.count.known", counts.knownJobs, "recovery.note.known"),
+    row("uncertain", "recovery.count.uncertain", counts.unknownJobs, "recovery.note.uncertain"),
+    row("preparing", "recovery.count.preparing", counts.preparingJobs, "recovery.note.preparing"),
+    row("requests", "recovery.count.requests", counts.nativeRequests, "recovery.note.requests"),
   ];
-  if (counts.preparingJobs > 0) rows.push({ key: "preparing", label: "recovery.count.preparing", count: counts.preparingJobs, note: msg("recovery.note.preparing", { count: counts.preparingJobs }) });
-  rows.push({ key: "requests", label: "recovery.count.requests", count: counts.nativeRequests, note: counts.nativeRequests > 0 ? msg("recovery.note.requests", { count: counts.nativeRequests }) : null });
-  return rows;
 }
 
 /** Nothing was in flight when the backup was made: the review says so instead of listing what happens to it. */

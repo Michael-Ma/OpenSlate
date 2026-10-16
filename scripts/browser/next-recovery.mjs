@@ -313,7 +313,9 @@ export const scenarios = [
         await route.fulfill({ json: { receipt: { ...request.postDataJSON(), version: 1, commandId: request.headers()["idempotency-key"], principalId: "local-user", releasedAt: "2026-10-15T09:00:00.000Z" }, recovery: { state, receipt, receiptDigest, summaryDigest: firstSummary, counts } } });
       });
       await review(page);
-      expect(JSON.stringify(await page.evaluate(() => [...document.querySelectorAll(".recovery-row")].map((row) => row.getAttribute("data-count")))) === JSON.stringify(["films", "known", "uncertain", "requests"]), "Local preparations show with none of them");
+      // Every kind is listed, a zero included; only kinds with something in them say what happens to it.
+      const rows = await page.evaluate(() => [...document.querySelectorAll(".recovery-row")].map((row) => [row.getAttribute("data-count"), Number(row.querySelector(".n")?.textContent), !!row.querySelector(".what")]));
+      expect(JSON.stringify(rows) === JSON.stringify([["films", 1, false], ["known", 0, false], ["uncertain", 2, true], ["preparing", 0, false], ["requests", 0, false]]), `The rows are ${JSON.stringify(rows)}`);
       await page.locator("[data-act='recovery-later']").click();
       await page.waitForSelector(".film-strip[data-strip='recovery']");
       await page.waitForSelector("main.work [data-needs]", { timeout: 20000 });

@@ -1,9 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { numberLocale } from "../i18n/translate.ts";
-import {
-  backupLine, nothingInFlight, RELEASE_PRESS, recoveryRows, releaseBody, reviewMode, unconfirmedStillApplies,
-} from "../model/recovery.ts";
+import { backupLine, decisionPhase, nothingInFlight, RELEASE_PRESS, recoveryRows, reviewMode } from "../model/recovery.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import "./recovery.css";
 
@@ -33,6 +31,8 @@ export function RecoveryReview({ onPutAway }: { onPutAway(): void }) {
   const recovery = useStudio((s) => s.recovery);
   const sending = useStudio((s) => !!s.pending[RELEASE_PRESS]);
   const section = useRef<HTMLElement>(null);
+  /** The button that sent the decision being sent: it keeps its name while busy, so focus and scripts stay on it. */
+  const [pressed, setPressed] = useState<"recovery-finish" | "recovery-retry">("recovery-finish");
   const mode = reviewMode(recovery);
 
   // Finished: the decision area is gone, so the heading takes focus and is read out.
@@ -69,11 +69,12 @@ export function RecoveryReview({ onPutAway }: { onPutAway(): void }) {
 
   const status = recovery.status!;
   const rows = recoveryRows(status.counts);
-  const unconfirmed = unconfirmedStillApplies(recovery.unconfirmed, status);
-  const releasable = !!releaseBody(status);
+  // ready: Finish; unconfirmed: only Retry (the same decision); sending: busy; unavailable: Check again.
+  const phase = decisionPhase(recovery, sending);
   const number = new Intl.NumberFormat(numberLocale(locale));
-  const finish = () => {
+  const send = (act: "recovery-finish" | "recovery-retry") => () => {
     if (sending) return;
+    setPressed(act);
     void store.releaseRecovery().then(() => focusAfter(section.current));
   };
 
@@ -99,19 +100,19 @@ export function RecoveryReview({ onPutAway }: { onPutAway(): void }) {
 
         <div className="recovery-decision">
           {recovery.stale && <p className="recovery-notice" role="alert" data-note="stale"><span className="ic" aria-hidden="true">!</span><span>{t("recovery.stale")}</span></p>}
-          {unconfirmed && !sending && (
+          {phase === "unconfirmed" && (
             <p className="recovery-notice" role="status" data-note="unconfirmed"><span className="ic" aria-hidden="true">?</span><span>{t("recovery.unconfirmed")}</span></p>
           )}
-          {!releasable && !unconfirmed && <p className="recovery-notice" role="status" data-note="unavailable"><span className="ic" aria-hidden="true">!</span><span>{t("recovery.unavailable")}</span></p>}
+          {phase === "unavailable" && <p className="recovery-notice" role="status" data-note="unavailable"><span className="ic" aria-hidden="true">!</span><span>{t("recovery.unavailable")}</span></p>}
           <p className="recovery-after" id="recovery-after">{t("recovery.after")}</p>
           <div className="recovery-actions">
-            {sending ? (
+            {phase === "sending" ? (
               // aria-disabled, not disabled, so focus stays on the button while the decision is sent.
-              <button type="button" className="pill primary" data-act={unconfirmed ? "recovery-retry" : "recovery-finish"} aria-disabled="true" aria-busy="true">{t("recovery.finishing")}</button>
-            ) : unconfirmed ? (
-              <button type="button" className="pill primary" data-act="recovery-retry" aria-describedby="recovery-after" onClick={finish}>{t("recovery.retry")}</button>
-            ) : releasable ? (
-              <button type="button" className="pill primary" data-act="recovery-finish" aria-describedby="recovery-after" onClick={finish}>{t("recovery.finish")}</button>
+              <button type="button" className="pill primary" data-act={pressed} aria-disabled="true" aria-busy="true">{t("recovery.finishing")}</button>
+            ) : phase === "unconfirmed" ? (
+              <button type="button" className="pill primary" data-act="recovery-retry" aria-describedby="recovery-after" onClick={send("recovery-retry")}>{t("recovery.retry")}</button>
+            ) : phase === "ready" ? (
+              <button type="button" className="pill primary" data-act="recovery-finish" aria-describedby="recovery-after" onClick={send("recovery-finish")}>{t("recovery.finish")}</button>
             ) : (
               <button type="button" className="pill" data-act="recovery-check" onClick={() => void store.readRecovery()}>{t("recovery.check")}</button>
             )}
