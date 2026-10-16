@@ -336,7 +336,7 @@ export const scenarios = [
       await chooseFile(page, "broken.wav", "audio/wav", Buffer.from("RIFF0000WAVEjunkjunkjunk"));
       await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
       await page.click('.insp [data-act="narr-add"]');
-      await expectText(page, '.insp .narr-refusal[role="alert"]', /The studio could not read this recording\. Try another file\.\s*The words are back as they were\./, 8000);
+      await expectText(page, '.insp .narr-refusal[role="alert"]', /The studio could not read this recording\. Try another file\.\s*The saved words are unchanged\. The new words above are not saved\./, 8000);
       expect(await page.locator(".toast").count() === 0, "Restoring the words showed a toast");
       await screenshot(page, "words-restored-1440");
       // Stopped while sending: nothing added, the words back.
@@ -344,7 +344,7 @@ export const scenarios = [
       await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
       await page.click('.insp [data-act="narr-add"]');
       await page.click('.insp [data-act="narr-stop"]');
-      await expectText(page, '.insp [data-state="stopped"][data-words="restored"]', /^Sending stopped\. The recording was not added\. The words are back as they were\.$/, 8000);
+      await expectText(page, '.insp [data-state="stopped"][data-words="restored"]', /^Sending stopped\. The recording was not added\. The saved words are unchanged\. The new words above are not saved\.$/, 8000);
       await page.click('.insp [data-act="cancel-edit"]');
       // The line and its paid voice line are as they were.
       await expectText(page, '.insp [data-row="narration"]', /“It was the last boat of the season, and I nearly missed it\.”[\s\S]*7\.4 s voiced/);

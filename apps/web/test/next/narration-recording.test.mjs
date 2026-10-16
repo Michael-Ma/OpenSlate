@@ -49,7 +49,8 @@ test('the receipt and its toast: a fitting recording, and one that still needs f
 
 test('a recording not added: what became of the words saved for it, in place and in a toast once the panel is closed', () => {
   assert.equal(wordsNote('none'), null);
-  assert.equal(en(wordsNote('restored')), 'The words are back as they were.');
+  // The field keeps what was typed: the note says the saved words are unchanged and the typed ones are not saved.
+  assert.equal(en(wordsNote('restored')), 'The saved words are unchanged. The new words above are not saved.');
   assert.equal(en(wordsNote('kept')), 'The new words were saved, though the recording was not added.');
   const refusal = recordingRefusal('MEDIA_INVALID_INPUT');
   assert.equal(en(notAddedToast('2.2', true, 'none', refusal)), 'Sending the recording for 2.2 stopped; nothing was added.');

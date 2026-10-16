@@ -364,7 +364,9 @@ export const scenarios = [
       await ready(page);
       await page.click('.banner [data-act="note-choice"][data-note="note-b"][data-kind="edit"]');
       await page.waitForSelector('.insp form[data-form="narration"]');
-      await expectText(page, ".insp .est", /About 7\.4 s at the recorded voice's pace \(an estimate\) · still longer than 6 s/);
+      // Unchanged, the line shows its measured length and nothing about saving (an estimate only once it changes).
+      await expectText(page, ".insp .est", /^7\.4 s voiced · longer than 6 s$/);
+      if ((await page.locator('.insp [id^="narr-impact-"]').innerText()).trim()) throw new Error("The unchanged line says what saving would remake");
       await page.fill(".insp textarea", "The last boat, and I nearly missed it.");
       await expectText(page, ".insp .est", /About 4\.6 s .*an estimate.* · fits 6 s/);
       await expectText(page, '.insp form[data-form="narration"]', /Nothing visual changes/);

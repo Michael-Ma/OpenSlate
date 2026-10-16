@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  choiceLabel, lineFromRecordingImpact, modeEdit, modeOf, NARRATION_CHOICES, narrationChoiceOf, narrationRow, noneImpact, planLeaveRecordingImpact,
+  choiceLabel, lineFromRecordingImpact, lineNotes, modeEdit, modeOf, NARRATION_CHOICES, narrationChoiceOf, narrationRow, noneImpact, planLeaveRecordingImpact,
   planRecordingImpact, planRecordingNote, planRowRecording, RECORDING_WITHOUT_WORDS, recordingInUse, slotNote, takeOrigin, takeView, voiceImpact,
   voiceOptions, voiceUnit, wordsOf,
 } from '../../src/next/model/narration.ts';
@@ -83,6 +83,36 @@ test('the take: a voice line or a recording with its measured length, only while
   assert.equal(takeView(shot('3.2'), { ...voiced, shotId: shotId('3.2') }), null);
   assert.equal(takeView(s23, { ...voiced, shotId: shotId('2.2') }), null);
   assert.equal(takeView(s23, null), null);
+  // While its audio loads, or when it cannot be played, the take is named by its kind: a voice line is never "the recording".
+  assert.deepEqual([en(take.loading), en({ id: take.failed, values: { code: 'X' } })], ['Loading the voice line…', 'The voice line could not be played (X).']);
+  assert.deepEqual([en(recording.loading), en({ id: recording.failed, values: { code: 'X' } })], ['Loading your recording…', 'Your recording could not be played (X).']);
+  assert.equal(zh(take.loading), '正在加载配音…');
+});
+
+test('the line form: unchanged it shows the measured length and nothing to save; changed, an estimate and what saving costs', () => {
+  const s23 = shot('2.3'); // 7.4 s voiced, a 6 s shot
+  const same = { text: s23.narration.text, voiceChanged: false, modeChanged: false };
+  const impacts = { leave: null, voice: voiceImpact(s23, 10000, 'en-US') };
+  const unchanged = lineNotes(s23, 30, same, impacts, 10000, 'en-US');
+  assert.deepEqual([en(unchanged.length), unchanged.long, unchanged.impact], ['7.4 s voiced · longer than 6 s', true, []]);
+  assert.equal(zh(unchanged.length), '配音 7.4 秒 · 比 6 秒长');
+  // New words: a labelled estimate, and the voice line made again at its price (or "no price set", never $0.00).
+  const shorter = lineNotes(s23, 30, { ...same, text: 'The last boat, and I nearly missed it.' }, impacts, 10000, 'en-US');
+  assert.match(en(shorter.length), /^About 4\.\d s at the recorded voice's pace \(an estimate\) · fits 6 s$/);
+  assert.equal(shorter.long, false);
+  assert.deepEqual(shorter.impact.map(en), ["Nothing visual changes. The voice line will be made again, about $0.01, with the scene's next keyframes or video."]);
+  assert.deepEqual(lineNotes(s23, 30, { ...same, text: 'Other words.' }, impacts, null, 'en-US').impact.map(en), ["Nothing visual changes. The voice line will be made again with the scene's next keyframes or video; no price is set for it."]);
+  // A new voice says so once, with its price; with new words too, the words add only that nothing visual changes.
+  assert.deepEqual(lineNotes(s23, 30, { ...same, voiceChanged: true }, impacts, 10000, 'en-US').impact.map(en), ["The voice line will be made again in this voice, about $0.01, with the scene's next keyframes or video."]);
+  assert.deepEqual(lineNotes(s23, 30, { ...same, text: 'Other words.', voiceChanged: true }, impacts, 10000, 'en-US').impact.map(en), ['Nothing visual changes.', "The voice line will be made again in this voice, about $0.01, with the scene's next keyframes or video."]);
+  // Leaving the person's recording says only that (priced); an unvoiced line estimates; an empty one asks for words.
+  const leave = lineFromRecordingImpact(10000, 'en-US');
+  assert.deepEqual(lineNotes(s23, 30, { ...same, modeChanged: true }, { ...impacts, leave }, 10000, 'en-US').impact, [leave]);
+  const s32 = shot('3.2');
+  const unvoiced = lineNotes(s32, 30, { text: s32.narration.text, voiceChanged: false, modeChanged: false }, impacts, 10000, 'en-US');
+  assert.deepEqual([/an estimate/.test(en(unvoiced.length)), unvoiced.impact], [true, []]);
+  assert.deepEqual(lineNotes(s32, 30, { text: 'New words for it.', voiceChanged: false, modeChanged: false }, impacts, 10000, 'en-US').impact.map(en), ['Nothing visual changes.']);
+  assert.deepEqual([en(lineNotes(s23, 30, { ...same, text: '  ' }, impacts, 10000, 'en-US').length)], ['Write the line, or choose None.']);
 });
 
 test("the voice line's state from the overview's narration slot", () => {
