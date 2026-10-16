@@ -92,6 +92,11 @@ export interface MediaSlot {
   releasedAttemptIds?: string[];
   /** The slot was taken off by Stop or by giving up on a job with no answer; it needs a new press. */
   takenOff?: "stopped" | "released";
+  /**
+   * A replacement take in progress while the current output stays shown (state "ready"): its own state,
+   * so a no-answer replacement can be given up (attemptId) and a failed one explained.
+   */
+  replacement?: { state: "running" | "queued" | "failed" | "no_answer"; attemptId?: string; phase?: string; failure?: MediaFailure };
 }
 
 export interface KeyframeSlot extends MediaSlot {
@@ -413,7 +418,8 @@ export interface UseTakeReceipt {
 /** Earlier takes of a shot, newest first. GET /api/projects/:projectId/shots/:shotId/takes */
 export interface ShotTakes {
   shotId: string;
-  keyframes: { artifact: StudioArtifactRef; current: boolean; createdAt: string }[];
+  /** `selectable` false: an earlier frame the shot cannot switch back to (e.g. a shared conditioning source). */
+  keyframes: { artifact: StudioArtifactRef; current: boolean; createdAt: string; selectable: boolean }[];
 }
 
 // ---------------------------------------------------------------------------
