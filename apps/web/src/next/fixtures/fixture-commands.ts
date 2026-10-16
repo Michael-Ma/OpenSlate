@@ -22,7 +22,9 @@ import type {
   SceneOverview,
   ShotNarration,
   ShotOverview,
+  ShotTakes,
   StudioArtifactRef,
+  UseTakeReceipt,
 } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS, narrationPace } from "../model/checks.ts";
@@ -41,8 +43,14 @@ import { artifactFor } from "./last-ferry.ts";
 
 /** Per-unit estimates in micro-dollars, as a host would configure them. */
 export const FIXTURE_PRICES = { keyframe: 40000, clip: 500000 } as const;
-/** Simulated provider time. */
-export const FIXTURE_TIMING = { keyframeMs: 3000, clipMs: 2000 } as const;
+/** Simulated provider time; a scene confirm spends `voiceStepMs` on each voice step (make, save, fit) before its clips. */
+export const FIXTURE_TIMING = { keyframeMs: 3000, clipMs: 2000, voiceStepMs: 900 } as const;
+/**
+ * A made voice line runs this much longer than its estimate (the estimate counts words; a voice adds pauses), so a
+ * line estimated just under its shot's length comes back too long and stops the confirm at the fit step, as the
+ * studio does (NARRATION_CUE_OUT_OF_RANGE).
+ */
+export const FIXTURE_VOICE_STRETCH = 1.1;
 
 const DIGEST = "f".repeat(64);
 const isWorking = (slot: MediaSlot) => slot.state === "running" || slot.state === "queued";
@@ -159,6 +167,10 @@ interface Extra {
   serial: number;
   undo: UndoEntry | null;
   takes: Record<string, number>;
+  /** Every keyframe the person opened, as "artifactId:sha256": a take used again is opened if it was before. */
+  opened: Set<string>;
+  /** When each keyframe take was made, by "artifactId:sha256" (takes made before this tab are sample times). */
+  madeAt: Record<string, string>;
   /** Keyframe presses by request id, so a note's regenerate choice can be linked to the press that did it. */
   requests: Record<string, { regenerate: boolean; shotIds: string[] }>;
   /** Storyboard edits by command id, so a note's edit choice can be linked to the edit that did it. */
@@ -170,7 +182,7 @@ interface Extra {
 const extras = new WeakMap<FixtureWorld, Extra>();
 function extra(world: FixtureWorld): Extra {
   let value = extras.get(world);
-  if (!value) { value = { serial: 0, undo: null, takes: {}, requests: {}, edits: {}, accepted: {} }; extras.set(world, value); }
+  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {} }; extras.set(world, value); }
   return value;
 }
 const nextId = (world: FixtureWorld, prefix: string) => `${prefix}-${++extra(world).serial}`;
@@ -182,11 +194,16 @@ function hexDigest(text: string): string {
   return out.padEnd(64, "0").replace(/[^0-9a-f]/g, "a").slice(0, 64);
 }
 
-/** The picture a new take shows: 2.2's remake has the red coat the Director asked for; other shots reuse theirs. */
+/**
+ * The picture a new take shows: 2.2's remake has the red coat the Director asked for; other shots reuse theirs. Each
+ * take is its own artifact, as in the studio: a picture's first take keeps its id, later ones get "~n" (same picture).
+ */
 function takeArtifact(label: string, take: number): StudioArtifactRef {
   const key = label === "2.2" && take >= 2 ? "2.2-red" : label;
   const base = artifactFor(key);
-  return take <= 1 ? base : { ...base, sha256: hexDigest(`${key}#${take}`) };
+  if (take <= 1) return base;
+  const first = key === "2.2-red" ? 2 : 1;
+  return { ...base, artifactId: take === first ? base.artifactId : `${base.artifactId}~${take}`, sha256: hexDigest(`${key}#${take}`) };
 }
 
 const clipArtifact = (label: string, take: number): StudioArtifactRef => ({ artifactId: `art-${label}-clip`, sha256: hexDigest(`${label}-clip#${take}`), kind: "video" });
@@ -219,8 +236,14 @@ function staleProposals(proposals: readonly DirectorProposal[], overview: Genera
   });
 }
 
+const takeKey = (artifact: Pick<StudioArtifactRef, "artifactId" | "sha256">) => `${artifact.artifactId}:${artifact.sha256}`;
+
 /** Every change ends here: notes and proposals follow the shots, then the roll-ups are derived again. */
 function settle(w: FixtureWorld, overview: GenerationOverview): void {
+  // Remember every opened take, from before the change too (the sample film's opened frames were never pressed).
+  const opened = extra(w).opened;
+  for (const state of [w.overview, overview])
+    for (const shot of Object.values(state.shots)) if (shot.keyframe.opened && shot.keyframe.artifact) opened.add(takeKey(shot.keyframe.artifact));
   const notes = staleNotes(w.snapshot.notes ?? [], overview);
   if (notes) w.snapshot = { ...w.snapshot, notes };
   w.proposals = staleProposals(w.proposals ?? [], overview);
@@ -344,7 +367,9 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
       next = withShot(next, id, (shot) => {
         if (shot.keyframe.state !== "running" || shot.keyframe.attemptId !== attempts[id]) return shot;
         const take = shot.keyframe.takeCount + 1;
-        return { ...shot, keyframe: { state: "ready", artifact: takeArtifact(shot.label, take), takeCount: take, opened: false } };
+        const artifact = takeArtifact(shot.label, take);
+        extra(w).madeAt[takeKey(artifact)] = localTime(new Date());
+        return { ...shot, keyframe: { state: "ready", artifact, takeCount: take, opened: false } };
       });
     settle(w, next);
   });
@@ -388,8 +413,104 @@ function confirmScene(world: FixtureWorld, sceneId: string, body: ConfirmSceneIn
   if (!body?.confirmationDigest || body.confirmationDigest !== scene.confirmationDigest) throw new ApiError("SCENE_REVIEW_STALE", 409);
   const targets = clipTargets(world, scene, body.reviewedFrames);
   if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== String(targets.length * FIXTURE_PRICES.clip)) throw new ApiError("ESTIMATE_CHANGED", 409);
-  const confirmationId = startClips(world, scene, targets);
-  return { confirmationId, state: "running", currentShotId: targets[0]!, currentStep: "video" };
+  // Lines with words but no voice yet are voiced first, one shot at a time: make, save, fit (speech, attach, accept).
+  const voices = targets.filter((id) => world.overview.shots[id]!.narration.state === "text_only");
+  if (!voices.length) {
+    const confirmationId = startClips(world, scene, targets);
+    return { confirmationId, state: "running", currentShotId: targets[0]!, currentStep: "video" };
+  }
+  return startVoices(world, scene, targets, voices);
+}
+
+/** One confirm's voice steps: its clips, the lines to voice first, and the frames it was confirmed with. */
+interface VoiceRun {
+  sceneId: string;
+  confirmationId: string;
+  targets: string[];
+  voices: string[];
+  /** The keyframe each clip was confirmed with; a frame that changes meanwhile stops the confirm. */
+  frames: Record<string, string | undefined>;
+}
+
+/**
+ * The confirm's voice steps on the simulated clock: make, save and fit each line (speech, attach, accept), then the
+ * clips. It stops (blocked) as the studio does, with the clips taken off: at the fit step when a line comes back
+ * longer than its shot with no fit chosen (NARRATION_CUE_OUT_OF_RANGE; the fit measures the estimate, stretched a
+ * little), and at any step when a confirmed frame changed meanwhile (SCENE_REVIEW_STALE).
+ */
+function startVoices(world: FixtureWorld, scene: SceneOverview, targets: string[], voices: string[]): SceneConfirmationView {
+  extra(world).undo = null;
+  const confirmationId = nextId(world, "confirmation");
+  const since = now();
+  const first = voices[0]!;
+  const frames = Object.fromEntries(targets.map((id) => [id, world.overview.shots[id]!.keyframe.artifact?.artifactId]));
+  commit(world, (overview) => {
+    let next = withScene(overview, scene.sceneId, (s) => ({ ...s, confirmation: { confirmationId, state: "running", currentShotId: first, currentStep: "speech" } }));
+    for (const id of targets)
+      next = withShot(next, id, (shot) => ({ ...shot, video: { state: "queued", takeCount: shot.video.takeCount, waiting: { code: "voice", since }, ...(shot.video.previous ? { previous: shot.video.previous } : {}) } }));
+    return { overview: withShot(next, first, (shot) => ({ ...shot, narration: { ...shot.narration, state: "making" } })) };
+  });
+  scheduleVoice(world, { sceneId: scene.sceneId, confirmationId, targets, voices, frames }, 0, "speech");
+  return { confirmationId, state: "running", currentShotId: first, currentStep: "speech" };
+}
+
+/** Stop a confirm partway: its clips that were still waiting are taken off, and the scene says why and where. */
+function blockConfirm(overview: GenerationOverview, run: VoiceRun, code: string, shotId: string): GenerationOverview {
+  let next = overview;
+  for (const id of run.targets)
+    next = withShot(next, id, (s) => (s.video.state === "queued" ? { ...s, video: { state: "none", takeCount: s.video.takeCount, ...(s.video.previous ? { previous: s.video.previous } : {}) } } : s));
+  return withScene(next, run.sceneId, (s) => ({ ...s, confirmation: { confirmationId: run.confirmationId, state: "blocked", blocker: { code, shotId } } }));
+}
+
+function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: "speech" | "attach" | "accept"): void {
+  const { sceneId, confirmationId, targets, voices } = run;
+  world.later(FIXTURE_TIMING.voiceStepMs, (w) => {
+    const scene = w.overview.scenes.find((s) => s.sceneId === sceneId);
+    const shotId = voices[index]!;
+    let next = w.overview;
+    // Stop cancels the confirm; a cancelled or replaced one goes no further. A voice job already sent still finishes.
+    if (!scene || scene.confirmation?.confirmationId !== confirmationId || scene.confirmation.state !== "running") {
+      if (step === "speech" && next.shots[shotId]?.narration.state === "making") settle(w, withShot(next, shotId, (s) => ({ ...s, narration: { ...s.narration, state: "text_only" } })));
+      return;
+    }
+    if (step === "speech") next = withShot(next, shotId, (shot) => ({ ...shot, narration: { ...shot.narration, state: "text_only" } }));
+    // A confirmed frame that changed meanwhile (a new take, an edited prompt) stops the confirm at its shot.
+    const changed = targets.find((id) => { const keyframe = next.shots[id]?.keyframe; return keyframe?.state !== "ready" || keyframe.artifact?.artifactId !== run.frames[id]; });
+    if (changed) { settle(w, blockConfirm(next, run, "SCENE_REVIEW_STALE", changed)); return; }
+    const at = (currentShotId: string, currentStep: "speech" | "attach" | "accept") =>
+      withScene(next, sceneId, (s) => ({ ...s, confirmation: { confirmationId, state: "running", currentShotId, currentStep } }));
+    if (step === "speech" || step === "attach") {
+      const following = step === "speech" ? "attach" : "accept";
+      settle(w, at(shotId, following));
+      scheduleVoice(w, run, index, following);
+      return;
+    }
+    // accept: the line is measured; one longer than its shot stops the confirm here.
+    const shot = next.shots[shotId]!;
+    const estimate = shot.narration.estimatedSeconds ?? estimateNarrationSeconds(shot.narration.text);
+    const measured = Math.round(estimate * FIXTURE_VOICE_STRETCH * 10) / 10;
+    const { estimatedSeconds: _estimate, ...line } = shot.narration;
+    next = withShot(next, shotId, (s) => ({ ...s, narration: { ...line, state: "ready", measuredSeconds: measured } }));
+    if (measured > shot.durationFrames / w.overview.fps + 1e-9 && !shot.narration.fit) {
+      settle(w, blockConfirm(next, run, "NARRATION_CUE_OUT_OF_RANGE", shotId));
+      return;
+    }
+    const following = voices[index + 1];
+    if (following) {
+      next = withShot(next, following, (s) => ({ ...s, narration: { ...s.narration, state: "making" } }));
+      settle(w, at(following, "speech"));
+      scheduleVoice(w, run, index + 1, "speech");
+      return;
+    }
+    // Every line is voiced: the clips go out one after another, as without voice steps.
+    next = withScene(next, sceneId, (s) => ({ ...s, confirmation: { confirmationId, state: "running", currentShotId: targets[0]!, currentStep: "video" } }));
+    const since = now();
+    targets.forEach((id, order) => {
+      next = withShot(next, id, (s) => ({ ...s, video: { ...s.video, waiting: { code: "capacity", ahead: order, since } } }));
+    });
+    settle(w, startNextClip(next, sceneId, w));
+    scheduleClip(w, sceneId, confirmationId);
+  });
 }
 
 /** Queue the clips, send the first, and run the rest on the simulated clock. Paid work ends any pending Undo. */
@@ -759,6 +880,44 @@ function release(world: FixtureWorld, attemptId: string, body: ReleaseAttemptInp
   return { attemptId, shotId: entry.shot.shotId, releasedAt: now() };
 }
 
+// ---- takes (card B8) ---------------------------------------------------------------------
+
+const pad = (n: number) => String(n).padStart(2, "0");
+/** A local "YYYY-MM-DDTHH:MM:SS" time, like the studio's createdAt. */
+function localTime(at: Date): string {
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+}
+
+/** Every keyframe this shot ever had, newest first. Takes are numbered as they were made, so take n is takeArtifact(label, n). */
+function shotTakes(world: FixtureWorld, shotId: string): ShotTakes {
+  const shot = findShot(world, shotId);
+  const state = extra(world);
+  const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact : undefined;
+  const keyframes: ShotTakes["keyframes"] = [];
+  for (let take = shot.keyframe.takeCount; take >= 1; take--) {
+    const artifact = takeArtifact(shot.label, take);
+    // Takes from before this tab were made two hours ago, an hour apart (the sample film's history).
+    const createdAt = state.madeAt[takeKey(artifact)] ?? localTime(new Date(Date.now() - (2 + shot.keyframe.takeCount - take) * 3_600_000));
+    keyframes.push({ artifact, current: !!current && takeKey(current) === takeKey(artifact), createdAt });
+  }
+  return { shotId, keyframes };
+}
+
+/** Use an earlier take: free; it becomes the current keyframe (opened if it was before) and the clip goes out of date. Undoable. */
+function useTake(world: FixtureWorld, shotId: string, artifactId: string): UseTakeReceipt {
+  const shot = findShot(world, shotId);
+  const take = shotTakes(world, shotId).keyframes.find((entry) => entry.artifact.artifactId === artifactId);
+  if (!take) throw new ApiError("NOT_FOUND", 404);
+  if (isWorking(shot.keyframe) || shot.keyframe.state === "no_answer" || isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
+  if (take.current) throw new ApiError("ALREADY_COMPLETE", 409);
+  const state = extra(world);
+  const commandId = nextId(world, "command");
+  state.undo = { commandId, shotId, fields: ["keyframe", "video"], before: shot, beforeSnapshotShot: world.snapshot.project.shots.find((row) => row.id === shotId) };
+  const keyframe: KeyframeSlot = { state: "ready", artifact: take.artifact, takeCount: shot.keyframe.takeCount, opened: state.opened.has(takeKey(take.artifact)) };
+  commit(world, (overview, snapshot) => bumpRevision(snapshot, withShot(overview, shotId, (s) => ({ ...s, keyframe, video: outdateClip(s.video, "keyframe") })), world));
+  return { shotId, artifactId, commandId };
+}
+
 // ---- routing ---------------------------------------------------------------------------
 
 export function fixtureCommand(world: FixtureWorld, method: "GET" | "POST", path: string, body: unknown): unknown {
@@ -766,7 +925,10 @@ export function fixtureCommand(world: FixtureWorld, method: "GET" | "POST", path
   let id: string | null;
   if (method === "GET") {
     if ((id = match(/^\/scenes\/([^/]+)\/generation$/))) return sceneRead(world, id);
+    if ((id = match(/^\/shots\/([^/]+)\/takes$/))) return shotTakes(world, id);
   } else {
+    const use = path.match(/^\/shots\/([^/]+)\/takes\/([^/]+)\/use$/);
+    if (use) return useTake(world, decodeURIComponent(use[1]!), decodeURIComponent(use[2]!));
     if ((id = match(/^\/shots\/([^/]+)\/frame-views$/))) return frameView(world, id, body as FrameViewInput);
     if ((id = match(/^\/scenes\/([^/]+)\/generate$/))) return generate(world, id, body as GenerateInput);
     if ((id = match(/^\/scenes\/([^/]+)\/confirm$/))) return confirmScene(world, id, body as ConfirmSceneInput);
