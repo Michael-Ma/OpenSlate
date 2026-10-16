@@ -16,11 +16,18 @@ const en = m => translateMsg('en', m), zh = m => translateMsg('zh-CN', m);
 const scene = (overview, ordinal) => overview.scenes[ordinal - 1];
 const shot = (overview, label) => overview.shots[shotId(label)];
 
-/** Scene 3 with its keyframes made and opened, and its last confirm stopped with this blocker. */
-function stoppedScene3(blocker) {
+/** Scene 3 with its keyframes made and opened, ready to confirm (no confirm yet). */
+function readyScene3() {
   const overview = lastFerryOverview();
   for (const label of ['3.1', '3.2']) Object.assign(shot(overview, label).keyframe, { state: 'ready', artifact: { artifactId: `art-${label}`, sha256: 'a'.repeat(64), kind: 'image' }, takeCount: 1, opened: true });
-  Object.assign(scene(overview, 3), { state: 'keyframes_back', videoTargets: [shotId('3.1'), shotId('3.2')], keyframeTargets: [], confirmation: { confirmationId: 'c-1', state: 'blocked', blocker } });
+  Object.assign(scene(overview, 3), { state: 'keyframes_back', videoTargets: [shotId('3.1'), shotId('3.2')], keyframeTargets: [], blockers: [] });
+  return overview;
+}
+
+/** Scene 3 with its keyframes made and opened, and its last confirm stopped with this blocker. */
+function stoppedScene3(blocker) {
+  const overview = readyScene3();
+  scene(overview, 3).confirmation = { confirmationId: 'c-1', state: 'blocked', blocker };
   return overview;
 }
 
@@ -264,6 +271,67 @@ test('paid presses: their ids map back to the press as it would be sent now', ()
   assert.equal(pressFromId(overview, `regenerate:${shotId('2.2')},shot-9-9`), null);
   assert.equal(pressFromId(overview, 'nocolon'), null);
   assert.ok(!PAID_PRESS.test('take:shot-2-1') && !PAID_PRESS.test('edit:shot:x') && !PAID_PRESS.test('frame-view:x'));
+});
+
+/** Saved presses of one film, keyed k-1, k-2… */
+function pressKeys() {
+  let n = 0;
+  const keys = new PressKeys('last-ferry', null, () => `k-${++n}`);
+  return { keys, wouldResend: (press) => keys.saved(press.pressId)?.logical === canonicalJson(press.logical) };
+}
+
+test('a lost Confirm holds until the film shows its confirmation; after it stops, "confirm again" is a new request', () => {
+  const { keys, wouldResend } = pressKeys();
+  const before = readyScene3();
+  const press = confirmPress(before, scene(before, 3));
+  const sent = keys.begin(press.pressId, press.logical, { path: '/x', body: {} });
+  assert.equal(lostReplyHolds(before, keys.ids(), wouldResend), true, 'nothing shows yet: pressing again resends it');
+  // It landed: the studio's new confirmation voices 3.2's line, and its clips wait. Nothing to press meanwhile.
+  const running = readyScene3();
+  Object.assign(scene(running, 3), { state: 'making_video', confirmation: { confirmationId: 'c-7', state: 'running', currentShotId: shotId('3.2'), currentStep: 'speech' } });
+  for (const label of ['3.1', '3.2']) shot(running, label).video = { state: 'queued', takeCount: 0, waiting: { code: 'voice', since: '2026-10-15T10:00:00Z' } };
+  assert.equal(lostReplyHolds(running, keys.ids(), wouldResend), false);
+  assert.equal(videoPanel(running, scene(running, 3), 'en-US').action, null);
+  // It stopped: Confirm is offered again, with no "Not confirmed", and pressing it starts a new confirm (a new key).
+  const stopped = stoppedScene3({ code: 'NARRATION_SPEECH_FAILED', shotId: shotId('3.2') });
+  scene(stopped, 3).confirmation.confirmationId = 'c-7';
+  assert.equal(lostReplyHolds(stopped, keys.ids(), wouldResend), false);
+  const panel = videoPanel(stopped, scene(stopped, 3), 'en-US');
+  assert.deepEqual([panel.action, panel.enabled], ['confirm', true]);
+  const again = confirmPress(stopped, scene(stopped, 3));
+  assert.equal(wouldResend(again), false);
+  assert.notEqual(keys.begin(again.pressId, again.logical, { path: '/x', body: {} }).key, sent.key);
+  // A confirm pressed after an earlier stop names that one: until a newer confirmation shows, it is resent as it was.
+  const later = keys.begin(again.pressId, again.logical, { path: '/x', body: {} });
+  assert.equal(keys.begin(again.pressId, confirmPress(stopped, scene(stopped, 3)).logical, {}).key, later.key);
+});
+
+test('a lost Make keyframes holds until a target keyframe shows its job; after it fails or is taken off, it is a new request', () => {
+  const { keys, wouldResend } = pressKeys();
+  const before = lastFerryOverview();
+  const press = keyframesPress(before, scene(before, 3));
+  const sent = keys.begin(press.pressId, press.logical, { path: '/x', body: {} });
+  assert.equal(lostReplyHolds(before, keys.ids(), wouldResend), true);
+  // It landed: 3.1 is being made, 3.2 waits its turn. The panel has nothing to press.
+  const running = lastFerryOverview();
+  shot(running, '3.1').keyframe = { state: 'running', attemptId: 'attempt-1', startedAt: '2026-10-15T10:00:00Z', takeCount: 0, opened: false };
+  shot(running, '3.2').keyframe = { state: 'queued', takeCount: 0, opened: false, waiting: { code: 'capacity', ahead: 1, since: '2026-10-15T10:00:00Z' } };
+  assert.equal(lostReplyHolds(running, keys.ids(), wouldResend), false);
+  assert.equal(videoPanel(running, scene(running, 3), 'en-US').action, null);
+  // 3.1 failed and the film's Stop took 3.2 off: Make keyframes is offered again, and pressing it is a new request.
+  const ended = lastFerryOverview();
+  shot(ended, '3.1').keyframe = { state: 'failed', takeCount: 0, opened: false, failure: { code: 'EXECUTION_FAILED', technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: '2026-10-15T10:01:00Z' } };
+  shot(ended, '3.2').keyframe = { state: 'none', takeCount: 0, opened: false, takenOff: 'stopped' };
+  assert.equal(lostReplyHolds(ended, keys.ids(), wouldResend), false);
+  const panel = videoPanel(ended, scene(ended, 3), 'en-US');
+  assert.deepEqual([panel.action, panel.enabled], ['make_keyframes', true]);
+  const again = keyframesPress(ended, scene(ended, 3));
+  assert.equal(wouldResend(again), false);
+  assert.notEqual(keys.begin(again.pressId, again.logical, { path: '/x', body: {} }).key, sent.key);
+  // A second failure of the same shot is another job: it does not read as the first one.
+  const twice = structuredClone(ended);
+  shot(twice, '3.1').keyframe.failure.at = '2026-10-15T10:05:00Z';
+  assert.equal(wouldResend(keyframesPress(twice, scene(twice, 3))), false);
 });
 
 test('"Not confirmed" holds while pressing again would resend the saved request, and not once the film shows the job', () => {

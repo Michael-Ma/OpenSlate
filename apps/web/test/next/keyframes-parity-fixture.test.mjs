@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import { fixtureCommand, FIXTURE_TIMING } from '../../src/next/fixtures/fixture-commands.ts';
 import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, lastFerryProposals, pictureKey, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { confirmBody, keyframesBody } from '../../src/next/model/commands.ts';
-import { confirmationStop } from '../../src/next/model/keyframes.ts';
+import { confirmationStop, videoPanel } from '../../src/next/model/keyframes.ts';
+import { confirmPress, keyframesPress, lostReplyHolds } from '../../src/next/model/keyframes-press.ts';
+import { recompute } from '../../src/next/fixtures/fixture-commands.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
 const en = m => translateMsg('en', m);
@@ -203,6 +205,8 @@ async function lossyStudio(t, lose) {
 test('a paid press whose reply was lost says pressing again checks without paying twice, and resends the same key', async (t) => {
   let losing = true;
   const { store, port, sent } = await lossyStudio(t, (path, options) => (losing && options?.method === 'POST' && path.endsWith('/generate') ? 'reply' : null));
+  const before = store.getState().overview;
+  const press = keyframesPress(before, before.scenes[1], [shotId('2.2')], true);
   await store.regenerateKeyframe(shotId('2.2'));
   assert.equal(store.getState().toast.message.id, 'error.PAID_UNCONFIRMED');
   assert.equal(store.getState().toast.tone, 'error');
@@ -211,7 +215,7 @@ test('a paid press whose reply was lost says pressing again checks without payin
   assert.equal(port.world.overview.shots[shotId('2.2')].keyframe.state, 'running');
   // Pressing again (before the film shows the job) resends the same request with the same key: the studio replays it.
   losing = false;
-  const press = { pressId: `regenerate:${shotId('2.2')}`, logical: JSON.parse(JSON.stringify({ kind: 'image', sceneId: sceneId(2), targets: [shotId('2.2')], regenerate: true, previous: ['art-2.2'] })) };
+  assert.equal(press.pressId, `regenerate:${shotId('2.2')}`);
   assert.equal(store.wouldResend(press.pressId, press.logical), true);
   await store.regenerateKeyframe(shotId('2.2'));
   assert.equal(sent.length, 2);
