@@ -1,4 +1,5 @@
 import type { FixtureWorld } from "../fixture-port.ts";
+import { directorRoutes } from "../fixture-director.ts";
 import { assetsRoutes } from "./assets.ts";
 import { computerRoutes } from "./computer.ts";
 import { filmRoutes } from "./film.ts";
@@ -17,7 +18,7 @@ import { DECLINE, type Decline, type FixtureRoute } from "./types.ts";
  * POST /director/setup of the sample film (settings.ts; Start's routes answer the other films'), GET /api/projects
  * (start.ts), GET /audio-library (film.ts; Assets' audio imports join it).
  */
-export const extraRoutes: FixtureRoute[] = [...planRoutes, ...filmRoutes, ...assetsRoutes, ...settingsRoutes, ...startRoutes, ...computerRoutes];
+export const extraRoutes: FixtureRoute[] = [...planRoutes, ...filmRoutes, ...assetsRoutes, ...settingsRoutes, ...startRoutes, ...computerRoutes, ...directorRoutes];
 
 /**
  * The answer of the first route for this request that does not decline, or DECLINE when none answers (the caller
