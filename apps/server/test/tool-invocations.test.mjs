@@ -59,6 +59,72 @@ test('completed invocation survives process recreation and same identity cannot 
   assert.throws(() => r.store.put('tool_invocation', record.id, f.project.id, { ...record, result: null }), { code: 'IMMUTABLE_RECORD' });
 });
 
+async function savedWriting(f) {
+  const prepared = await f.tools.invoke(f.project.id, f.bridge.actor, 'save-writing', 'prepare_change', {
+    variant: 'project', expectedHeadVersion: 0, creative: {
+      brief: 'A boat on water. Save writing only.', story: 'A boat gently drifts.',
+      createScenes: [{ key: 'scene', purpose: 'Paper boat' }],
+      createShots: [{ key: 'shot', sceneId: 'scene', purpose: 'Observe the boat', action: 'Boat on water', framing: 'Close-up',
+        motion: 'Static', desiredFrames: 180, imagePrompt: 'A paper boat on water', videoPrompt: 'The boat drifts', referenceArtifactIds: [], cueId: null }],
+    },
+  });
+  await f.tools.invoke(f.project.id, f.bridge.actor, 'apply-writing', 'apply_change', { preparedId: prepared.id });
+  return f.store.getProject(f.project.id);
+}
+function imagePlan(project) {
+  const shot = project.shots[0], q = JSON.stringify;
+  return `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});return p.image("keyframe",{intent:shot,profile:"fake-image-v1",references:[],prompt:${q(shot.imagePrompt)}});});`;
+}
+
+test('a generation preparation without a human press reports the next action and retains saved writing', async t => {
+  const f = fixture(t), project = await savedWriting(f), proposal = { variant: 'plan', expectedHeadVersion: project.headVersion, source: imagePlan(project) };
+  const outcome = await f.tools.invoke(f.project.id, f.bridge.actor, 'human-next', 'prepare_change', proposal);
+  assert.equal(outcome.state, 'awaiting_human_generation');
+  assert.equal(outcome.preparedId, null); assert.equal(outcome.applied, false); assert.equal(outcome.generationStarted, false);
+  assert.deepEqual(outcome.savedProject, { revisionId: project.revisionId, headVersion: project.headVersion, activePlanId: null, sceneCount: 1, shotCount: 1 });
+  assert.match(outcome.next, /expected next step/i); assert.match(outcome.next, /previously saved writing is retained/i);
+  assert.match(outcome.next, /this call saved no writing or generation plan/i); assert.match(outcome.next, /person.*scene.*keyframes/i);
+  assert.deepEqual(f.store.getProject(f.project.id), project);
+  assert.equal(f.store.list('prepared', f.project.id).length, 1, 'only the earlier writing preparation exists');
+  for (const kind of ['grant', 'candidate', 'attempt', 'reservation']) assert.equal(f.store.list(kind, f.project.id).length, 0, kind);
+  assert.equal(f.provider.acceptedCount(), 0);
+  const receipt = f.store.list('tool_invocation', f.project.id).find(row => row.callId === 'human-next');
+  assert.equal(receipt.state, 'succeeded'); assert.equal(receipt.error, null);
+  assert.deepEqual(receipt.result, outcome);
+  const reopened = f.reopen(), cursor = reopened.store.cursor(f.project.id);
+  reopened.service.prepare = async () => { throw Error('replay must not prepare again'); };
+  assert.deepEqual(await reopened.tools.invoke(f.project.id, f.bridge.actor, 'human-next', 'prepare_change', proposal), outcome);
+  assert.equal(reopened.store.cursor(f.project.id), cursor);
+  await assert.rejects(reopened.tools.invoke(f.project.id, f.bridge.actor, 'apply-next-step', 'apply_change', { preparedId: outcome.preparedId }), { code: 'VALIDATION_ERROR' });
+});
+
+test('the next-action receipt preserves grant integrity and never authorizes an incomplete multi-operation plan', async t => {
+  const f = fixture(t), project = await savedWriting(f);
+  const [grant] = f.service.authorize(f.project.id, f.human, [{ scopeId: f.project.id, kind: 'speech' }], 'one-slot');
+  const source = `definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{const one=p.speech("one",{profile:"fake-speech-v1",text:"One",voice:"demo"});const two=p.speech("two",{profile:"fake-speech-v1",text:"Two",voice:"demo"});return [one,two];});`;
+  const outcome = await f.tools.invoke(f.project.id, f.bridge.actor, 'incomplete-grants', 'prepare_change', { variant: 'plan', expectedHeadVersion: project.headVersion, source });
+  assert.equal(outcome.state, 'awaiting_human_generation');
+  assert.deepEqual(f.store.list('grant', f.project.id), [grant]);
+  assert.equal(f.store.list('candidate', f.project.id).length, 0); assert.equal(f.store.list('attempt', f.project.id).length, 0);
+  assert.deepEqual(f.store.getProject(f.project.id), project); assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('generation guidance cannot hide stale revisions, invalid plans or revoked epochs', async t => {
+  const f = fixture(t), project = await savedWriting(f);
+  await assert.rejects(f.tools.invoke(f.project.id, f.bridge.actor, 'stale-generation', 'prepare_change', {
+    variant: 'plan', expectedHeadVersion: 0, source: imagePlan(project),
+  }), { code: 'REVISION_CONFLICT' });
+  await assert.rejects(f.tools.invoke(f.project.id, f.bridge.actor, 'invalid-generation', 'prepare_change', {
+    variant: 'plan', expectedHeadVersion: project.headVersion, source: 'invalid source',
+  }), error => error.code !== 'ORIGIN_NOT_AUTHORIZED' && error.code !== 'TOOL_CALL_UNRESOLVED');
+  f.service.beginRequest(f.project.id, 'human', 'Use a different direction');
+  await assert.rejects(f.tools.invoke(f.project.id, f.bridge.actor, 'revoked-generation', 'prepare_change', {
+    variant: 'plan', expectedHeadVersion: project.headVersion, source: imagePlan(project),
+  }), { code: 'EPOCH_REVOKED' });
+  for (const callId of ['stale-generation', 'invalid-generation']) assert.equal(f.store.list('tool_invocation', f.project.id).find(row => row.callId === callId).state, 'failed');
+  assert.equal(f.store.list('candidate', f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
+});
+
 test('in-progress transport replay never dispatches a second handler', async t => {
   const f = fixture(t); let release; let entered; let calls = 0;
   const waiting = new Promise(r => entered = r), gate = new Promise(r => release = r);

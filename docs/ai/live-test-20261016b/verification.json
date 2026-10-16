@@ -1,0 +1,33 @@
+{
+  "checkedAt": "2026-10-16T23:03:29.488Z",
+  "projectPreserved": true,
+  "attemptsPreserved": true,
+  "mediaSlotsPreserved": true,
+  "exportPreserved": true,
+  "takes1Preserved": true,
+  "takes2Preserved": true,
+  "noSubmissionsDuringAssetsSettings": true,
+  "exportSha256": "3d648ea5d62d4b75f49426af9742c0cae647c30d13819ddd3f7fe8c287096581",
+  "ffprobe": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "index": 0,
+        "codec_name": "h264",
+        "codec_type": "video",
+        "width": 1280,
+        "height": 720,
+        "r_frame_rate": "30/1",
+        "avg_frame_rate": "30/1",
+        "duration": "12.000000"
+      }
+    ],
+    "format": {
+      "filename": "docs/ai/live-test-20261016b/harbour-test-b.mp4",
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration": "12.000000",
+      "size": "1706947"
+    }
+  }
+}

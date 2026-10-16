@@ -61,4 +61,6 @@ export interface DirectorRunResult extends DirectorRunIdentity {
 export interface DirectorRuntime {
   readonly id: string;
   start(input: DirectorRunInput, options?: DirectorStartOptions): Promise<DirectorRunResult>;
+  /** Host shutdown fences new runs and closes owned native process groups. */
+  close?(): Promise<void>;
 }

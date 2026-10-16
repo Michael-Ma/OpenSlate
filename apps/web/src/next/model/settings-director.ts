@@ -29,6 +29,10 @@ export interface DirectorSetup {
   modelChoices: { id: string; label: string }[];
   modelCatalogStatus: "unchecked" | "ready" | "blocked";
   modelCatalogCheckedAt: string | null;
+  /** Historical local setup evidence for this exact program/model/configuration; does not start a turn. */
+  lastSuccessfulCheck?: { binaryPath: string; version: string; checkedAt: string } | null;
+  /** Current version-only inspection. Null means the selected program could not be found/verified. */
+  codexVersion?: string | null;
   /** Present after a save: the result of Codex's setup check for that selection. */
   /** The most recent local version failure, including an attempted unsaved program. */
   codexDiagnostic?: { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string } | null;
@@ -52,14 +56,19 @@ export const codexProgram = (setup: DirectorSetup): string => setup.selection.bi
 export const codexDiagnostic = (setup: DirectorSetup): Msg | null => setup.codexDiagnostic
   ? errorMsg(setup.codexDiagnostic.code, setup.codexDiagnostic) : null;
 
-export type CodexState = "ready" | "blocked" | "unchecked" | "missing";
+export type CodexState = "ready" | "found" | "blocked" | "unchecked" | "missing";
 
 /** Codex on this computer, from the last setup check. No program found at all is "missing". */
 export function codexState(setup: DirectorSetup): CodexState {
   if (setup.codexDiagnostic) return "blocked";
+  if (setup.codexVersion === null) return "missing";
+  // A setup-command replay may still include its original ready result after a newer failed check.
+  if (setup.modelCatalogStatus === "blocked") return "blocked";
   if (setup.readiness?.status === "ready") return "ready";
   if (setup.readiness?.status === "blocked") return "blocked";
   if (!codexProgram(setup)) return "missing";
+  if (setup.lastSuccessfulCheck) return "ready";
+  if (setup.modelCatalogStatus === "unchecked" && setup.codexVersion) return "found";
   return setup.modelCatalogStatus;
 }
 

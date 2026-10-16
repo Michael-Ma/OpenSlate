@@ -24,6 +24,7 @@ import { readMediaExecutionConfiguration } from "./application/media-execution-c
 import { createMediaExecutionRuntime } from "./application/media-execution-runtime.js";
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { assertInstallationRestoreComplete } from "./persistence/installation-restore-state.js";
+import { createServerShutdown } from "./shutdown.js";
 
 const serveWeb = process.argv.includes("--serve-web");
 const directory = resolve(process.env.OPENSLATE_DATA_DIR ?? ".openslate");
@@ -82,22 +83,32 @@ const app = createApp({ service, sceneCommands, director, runtimeSettings: direc
   narrationRoutes: { production: service, narration, narrationSpeech, canonical, uploadDirectory,
     ...(localMedia ? { ownedTranscription: new OwnedTranscriptionService(narration, join(directory, "artifacts")) } : {}) },
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
-let running = false;
+let running = false, stopping = false, activeWork: Promise<unknown> = Promise.resolve();
 const timer = setInterval(() => {
+  if (stopping) return;
   if (recovery.isQuarantined()) return;
   try { director.tick(); } catch (error) { app.log.error(error); }
   if (running) return;
   running = true;
-  void engine.reconcile().then(() => engine.runReady()).then(() => sceneCommands.advance()).catch(error => app.log.error(error)).finally(() => { running = false; });
+  activeWork = engine.reconcile().then(() => { if (!stopping) return engine.runReady(); }).then(() => { if (!stopping) return sceneCommands.advance(); })
+    .catch(error => app.log.error(error)).finally(() => { running = false; });
 }, 500);
-app.addHook("preClose", async () => { clearInterval(timer); await Promise.all([director.close(), runtime.close()]); });
-app.addHook("onClose", async () => {
-  while (running) await new Promise(resolve => setTimeout(resolve, 10));
-  store.close(); provider.close();
-  installation.close(); process.off("exit", releaseInstallation);
+const close = createServerShutdown(app, {
+  stop: () => { stopping = true; clearInterval(timer); engine.stop(); },
+  cleanup: [
+    { name: "Director turns", close: () => director.close() },
+    { name: "native media workers", close: () => runtime.close() },
+    { name: "media reconciliation", close: () => activeWork },
+  ],
+  resources: [
+    { name: "project storage", close: () => store.close() },
+    { name: "fixture provider storage", close: () => provider.close() },
+    { name: "installation ownership", close: () => { installation.close(); process.off("exit", releaseInstallation); } },
+  ],
+  // Final storage/ownership cleanup and exit share one synchronous stack. A
+  // timed-out adapter cannot resume later against a replacement installation.
+  terminate: code => process.exit(process.exitCode || code),
 });
-let closing: Promise<void> | undefined;
-const close = () => closing ??= app.close();
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void close().catch(error => { app.log.error(error); process.exitCode = 1; }); });
 try {
   await app.listen({ host: "127.0.0.1", port: 3001 });
@@ -110,4 +121,4 @@ try {
     else process.stdout.write(`Open studio (valid for 60 seconds): ${url}\n`);
   }
 }
-catch (error) { clearInterval(timer); app.log.error(error); await close(); process.exitCode = 1; }
+catch (error) { app.log.error(error); process.exitCode = 1; await close(); }

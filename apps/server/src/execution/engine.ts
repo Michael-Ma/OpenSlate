@@ -114,6 +114,8 @@ export class Engine {
   readonly outputIngestor: ExecutionOutputIngestor | undefined;
   readonly outputStore: ExecutionOutputStore | undefined;
   readonly localExecutor: LocalExecutionPort | undefined;
+  private stopping = false;
+  private readonly operations = new Set<AbortController>();
   constructor(readonly store: Store, readonly provider: ExecutionProvider | ExecutionRegistry, options: {
     artifactDir: string; profiles?: ProviderProfile[]; budgetMicros?: string; workerId?: string; leaseMs?: number;
     outputIngestor?: ExecutionOutputIngestor;
@@ -158,6 +160,18 @@ export class Engine {
     moneyMicros(this.defaultBudgetMicros);
     mkdirSync(this.artifactDir, { recursive: true });
   }
+
+  /** Host shutdown only. Preserve durable intent/liability and never turn it into a retry. */
+  stop(): void {
+    this.stopping = true;
+    for (const controller of this.operations) controller.abort();
+  }
+  private operationController(): AbortController {
+    const controller = new AbortController();
+    if (this.stopping) controller.abort(); else this.operations.add(controller);
+    return controller;
+  }
+  private finishOperation(controller: AbortController): void { this.operations.delete(controller); controller.abort(); }
 
   createGrant(projectId: string, scopeId: string, kind: OperationKind, authorityId: string, origin: Grant["origin"] = "user_change"): Grant {
     this.recovery.assertWritable(projectId, authorityId);
@@ -451,6 +465,7 @@ export class Engine {
   }
 
   async runReady(): Promise<{ dispatched: number; reused: number; blocked: { nodeId: string; code: string }[] }> {
+    if (this.stopping) return { dispatched: 0, reused: 0, blocked: [] };
     this.recovery.assertWritable();
     this.store.transaction(() => {
       for (const project of this.projects()) for (const binding of this.store.list<NodeBinding>("node_binding", project.id))
@@ -510,6 +525,7 @@ export class Engine {
   }
 
   async reconcile(): Promise<{ reconciled: number; blocked?: { attemptId: string; code: string }[] }> {
+    if (this.stopping) return { reconciled: 0 };
     this.recovery.assertWritable();
     const pending = this.projects().flatMap(project => this.attempts(project.id)).filter(attempt => !TERMINAL.has(attempt.phase));
     let reconciled = 0; const blocked: { attemptId: string; code: string }[] = [];
@@ -612,6 +628,7 @@ export class Engine {
   private async runLocalReady(observed: NodeBinding): Promise<"reused" | "dispatched"> {
     const port = this.localMode(this.store.getProject(observed.projectId), observed.node);
     const prepared = structuredClone(await port.prepare(observed.projectId, observed.id)); assertPreparedLocalExecution(prepared);
+    invariant(!this.stopping, "EXECUTION_SHUTTING_DOWN", "Local execution is shutting down; saved work is retained");
     invariant(prepared.projectId === observed.projectId && prepared.nodeId === observed.id && prepared.specDigest === observed.node.specDigest,
       "LOCAL_EXECUTION_STALE", "Prepared local work belongs to a different node");
     const effective = this.resolveInputs(observed.projectId, observed.node).fingerprint;
@@ -621,7 +638,7 @@ export class Engine {
     if (previous) {
       const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", previous.id);
       invariant(intent, "LOCAL_EXECUTION_CONFLICT", "Cached local output lost its original intent"); assertLocalExecutionIntent(intent, previous);
-      const abort = new AbortController();
+      const abort = this.operationController();
       try {
         const recovered = await port.recover(structuredClone(intent), this.localOptions(previous, abort.signal));
         invariant(recovered, "LOCAL_EXECUTION_COMPLETION_MISSING", "Cached local output has no verified completion");
@@ -638,7 +655,7 @@ export class Engine {
           this.store.appendEvent(project.id, "execution.output_reused", { nodeId: binding.id, attemptId: previous.id });
         });
         return "reused";
-      } finally { abort.abort(); }
+      } finally { this.finishOperation(abort); }
     }
     const attempt = this.store.transaction(() => {
       const project = this.store.getProject(observed.projectId), binding = this.currentBinding(project.id, observed.id);
@@ -685,6 +702,7 @@ export class Engine {
     let verifiedCompletion = false;
     try {
       let result = await this.withLease(attempt, signal => port.recover(structuredClone(intent), this.localOptions(attempt, signal)));
+      if (this.stopping) return;
       if (!this.owns(attempt)) return;
       if (!result) {
         this.store.transaction(() => {
@@ -1078,7 +1096,8 @@ export class Engine {
   }
   private async runPreparation(attempt: Attempt, resume: boolean): Promise<void> {
     const port = this.submissionPreparation!;
-    const controller = new AbortController();
+    const controller = this.operationController();
+    if (controller.signal.aborted) return;
     const context: SubmissionPreparationContext = Object.freeze({ signal: controller.signal,
       expectedLease: Object.freeze({ owner: attempt.leaseOwner, epoch: attempt.leaseEpoch }),
       eligibility: () => this.preparationEligibility(attempt) });
@@ -1102,7 +1121,7 @@ export class Engine {
     try {
       try { outcome = await port[resume ? "resume" : "start"](structuredClone(attempt.request), context); }
       catch (error) { failure = error; }
-    } finally { clearInterval(timer); clearTimeout(deadline); controller.abort(); }
+    } finally { clearInterval(timer); clearTimeout(deadline); this.finishOperation(controller); }
     const current = this.store.get<Attempt>("attempt", attempt.id);
     if (current?.phase === "preparing" && !this.preparationObserved(current)) {
       if (!this.owns(attempt)) return;
@@ -1278,7 +1297,7 @@ export class Engine {
 
   /** Keep paid effects owned during slow I/O; cancellation never discards a late vendor receipt. */
   private async observeProvider(attempt: Attempt, operation: (options: ExecutionCallOptions) => Promise<ExecutionOutcome>, diagnostic: string): Promise<ExecutionOutcome | null> {
-    const controller = new AbortController();
+    const controller = this.operationController();
     const renew = () => {
       if (controller.signal.aborted) return;
       try {
@@ -1289,7 +1308,7 @@ export class Engine {
         });
       } catch { controller.abort(); }
     };
-    renew(); if (controller.signal.aborted) return null;
+    renew(); if (controller.signal.aborted) { this.finishOperation(controller); return null; }
     const timer = setInterval(renew, Math.max(1, Math.floor(this.leaseMs / 3))); timer.unref();
     const deadline = setTimeout(() => controller.abort(), this.providerTimeoutMs);
     try {
@@ -1298,12 +1317,13 @@ export class Engine {
       try { return await operation(Object.freeze({ signal: controller.signal,
         expectedLease: Object.freeze({ owner: attempt.leaseOwner, epoch: attempt.leaseEpoch }) })); }
       catch { return { type: "unknown", diagnostic }; }
-    } finally { clearInterval(timer); clearTimeout(deadline); controller.abort(); }
+    } finally { clearInterval(timer); clearTimeout(deadline); this.finishOperation(controller); }
   }
 
   private async withLease<T>(attempt: Attempt, operation: (signal: AbortSignal) => Promise<T>, pauseAware = false): Promise<T | null> {
-    const controller = new AbortController();
+    const controller = this.operationController();
     const renew = (): void => {
+      if (controller.signal.aborted) return;
       try {
         this.store.transaction(() => {
           const current = this.owns(attempt);
@@ -1319,7 +1339,7 @@ export class Engine {
       if (controller.signal.aborted) return null;
       const result = await operation(controller.signal);
       return controller.signal.aborted ? null : result;
-    } finally { clearInterval(timer); controller.abort(); }
+    } finally { clearInterval(timer); this.finishOperation(controller); }
   }
 
   private async ingestOutputs(attempt: Attempt, descriptors: IngestibleExecutionOutput[]): Promise<IngestedOutput[] | null> {

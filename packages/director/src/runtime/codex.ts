@@ -70,10 +70,15 @@ export class CodexDirectorRuntime implements DirectorRuntime {
   readonly id = "codex-app-server";
   #options: ReturnType<typeof validateOptions>;
   #projects = new Set<string>();
+  #closed = false;
+  #closing: Promise<void> | undefined;
+  #transports = new Set<CodexTransport>();
+  #stops = new Set<() => void>();
 
   constructor(options: CodexDirectorOptions) { this.#options = validateOptions(options); }
 
   async start(supplied: DirectorRunInput, options: DirectorStartOptions = {}): Promise<DirectorRunResult> {
+    requireRuntime(!this.#closed, "RUNTIME_CLOSED", "Director runtime is shutting down");
     const input = validateInput(supplied); const base = identity(input);
     requireRuntime(!this.#projects.has(input.projectId), "RUNTIME_BUSY", "This project already has an active director run");
     this.#projects.add(input.projectId);
@@ -90,6 +95,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     let resolveStop!: () => void; const stopping = new Promise<void>(resolve => { resolveStop = resolve; });
     const stop = (reason: RuntimeFault) => { if (!stopReason) { stopReason = reason; cancellation.abort(); resolveStop(); } };
     const abort = () => stop(new RuntimeFault("RUNTIME_ABORTED", "Director run was cancelled"));
+    this.#stops.add(abort);
     const emit = (event: DirectorRuntimeEvent) => {
       if (!options.onEvent || deliveryFailed) return;
       if (++queued > config.limits.eventQueue) { stop(new RuntimeFault("RUNTIME_EVENT_LIMIT", "Runtime event consumer is too slow")); return; }
@@ -167,6 +173,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       transport = new CodexTransport({ command: config.command.file, args: [...(config.command.args ?? []), "app-server", "--strict-config",
         ...Object.entries(launch).flatMap(([key, value]) => ["-c", `${key}=${toml(value)}`])],
       cwd: config.cwd, env: { ...config.env }, limits: config.limits, secrets, onMessage });
+      this.#transports.add(transport);
       const rpc = (method: string, params: unknown) => {
         if (stopReason) return Promise.reject(stopReason);
         return transport!.request(method, params, cancellation.signal);
@@ -227,8 +234,9 @@ export class CodexDirectorRuntime implements DirectorRuntime {
         }
         const diagnostic = transport.diagnostics();
         if (diagnostic && stopReason) emit({ ...base, kind: "diagnostic", code: "RUNTIME_STDERR", message: diagnostic });
+        this.#transports.delete(transport);
       }
-      await delivery; this.#projects.delete(input.projectId);
+      await delivery; this.#projects.delete(input.projectId); this.#stops.delete(abort);
     }
     if (deliveryFailed || stopReason?.code === "RUNTIME_EVENT_LIMIT") {
       result = { ...base, ...result, text: result?.text ?? "", dispatched, status: dispatched ? "unknown" : "failed",
@@ -236,6 +244,15 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     }
     requireRuntime(result, "RUNTIME_FAILED", "Director runtime produced no result");
     return result;
+  }
+  /** Close process groups concurrently with interruption, before a host deadline expires. */
+  close(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    this.#closed = true;
+    for (const stop of this.#stops) stop();
+    return this.#closing = Promise.allSettled([...this.#transports].map(transport => transport.close())).then(results => {
+      requireRuntime(results.every(result => result.status === "fulfilled"), "RUNTIME_CLEANUP_FAILED", "Native process cleanup was not confirmed");
+    });
   }
   private finalText(messages: { text: string; phase: string }[]): string {
     const final = messages.filter(message => message.phase === "final");

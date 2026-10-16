@@ -30,6 +30,14 @@ interface SelectionCommand { id: string; projectId: string; selectionDigest: str
 type Setup = typeof setupLocalCodex;
 type Ready = Awaited<ReturnType<Setup>>;
 interface CodexVersionDiagnostic { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string }
+interface SuccessfulCodexCheck { binaryPath: string; version: string; checkedAt: string }
+/** Diagnostic evidence only: never cached runtime options, native configuration, sign-in data or authority. */
+interface SavedCodexCheck {
+  id: string; projectId: string; status: "ready" | "blocked"; checkedAt: string;
+  modelChoices?: { id: string; label: string }[];
+  lastSuccessfulCheck: SuccessfulCodexCheck | null;
+  diagnostic: CodexVersionDiagnostic | null;
+}
 export interface LocalDirectorOptions {
   repositoryRoot: string; dataDirectory: string; endpoint: string;
   /** Finite trusted host turn deadline; defaults to the runtime's three minutes. */
@@ -53,6 +61,9 @@ export class LocalDirectorController {
   private readonly modelChecks = new Map<string, Promise<Ready["readiness"]>>();
   private readonly binaryDiagnostics = new Map<string, CodexVersionDiagnostic>();
   private readonly setupEpoch = new Map<string, number>();
+  private readonly shutdown = new AbortController();
+  private readonly activeNativeRuntimes = new Set<DirectorRuntime>();
+  private readonly setupChecks = new Set<Promise<Ready>>();
   readonly defaults: NonNullable<LocalDirectorOptions["defaults"]>;
   private readonly toolSettings: DirectorToolSettings;
   private readonly imageProjector: DirectorImageProjector | null;
@@ -130,18 +141,26 @@ export class LocalDirectorController {
   answerQuestion(...args: Parameters<DirectorSupervisor["answerQuestion"]>) { return this.controller(args[0]).answerQuestion(...args); }
   tick(): void { triggerKeyframeReviews(this.service, (id, actor) => this.enqueue(id, actor)); this.fake.tick(); this.native.tick(); }
   async settle(): Promise<void> { await Promise.all([this.fake.settle(), this.native.settle()]); }
-  async close(): Promise<void> { await Promise.all([this.fake.close(), this.native.close()]); }
+  async close(): Promise<void> {
+    this.shutdown.abort();
+    await Promise.all([this.fake.close(), this.native.close(), ...[...this.activeNativeRuntimes].map(runtime => runtime.close?.()),
+      // Canceled setup is expected, but its native finally/close must finish
+      // before the installation can exit and release process ownership.
+      Promise.allSettled([...this.setupChecks])]);
+  }
   settings(projectId: string) {
     this.service.store.getProject(projectId);
     const saved = this.service.store.get<SavedSelection>("project_director_selection", projectId);
     const busy = this.configuring.has(projectId) || this.conversationBusy(projectId);
-    const catalog = this.modelReadiness.get(this.modelKey(projectId, this.modelSelection(projectId)));
+    const selection = this.modelSelection(projectId), storedCheck = this.savedCheck(projectId, selection);
+    const catalog = this.modelReadiness.get(this.modelKey(projectId, selection)) ?? storedCheck;
     return { selection: saved?.selection ?? { mode: "fake" as const }, selectionDigest: saved?.digest ?? digest({ mode: "fake" }),
       busy, changeAvailable: !busy, changeAppliesTo: "next_turn" as const, defaults: this.defaults, locked: this.locked(projectId),
       modelCalls: this.service.store.list("native_model_start", projectId).length,
       modelChoices: structuredClone(catalog?.modelChoices ?? []), modelCatalogStatus: !catalog || catalog.status === "ready" && catalog.modelChoices === undefined ? "unchecked" as const
         : catalog.status === "ready" ? "ready" as const : "blocked" as const, modelCatalogCheckedAt: catalog?.checkedAt ?? null,
-      codexDiagnostic: this.binaryDiagnostics.has(projectId) ? structuredClone(this.binaryDiagnostics.get(projectId)!) : null };
+      lastSuccessfulCheck: structuredClone(storedCheck?.lastSuccessfulCheck ?? null),
+      codexDiagnostic: this.binaryDiagnostics.has(projectId) ? structuredClone(this.binaryDiagnostics.get(projectId)!) : storedCheck?.diagnostic ?? null };
   }
   private modelSelection(projectId: string): LocalDirectorSelection {
     const selection = this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection;
@@ -149,7 +168,28 @@ export class LocalDirectorController {
   }
   private modelKey(projectId: string, selection: LocalDirectorSelection): string { return digest({ projectId, selection }); }
 
-  /** Existing read-only local preflight only. No selection, project record, thread or turn is written. */
+  private checkKey(projectId: string, selection: LocalDirectorSelection): string {
+    // Bump setupRevision whenever the trusted setup requirements change. A prior check never prepares
+    // a runtime: prepare() still runs the complete local check before the next native conversation.
+    return digest({ projectId, selection, setupRevision: 1, version: CODEX_PROTOCOL_VERSION,
+      repositoryRoot: resolve(this.config.repositoryRoot), dataDirectory: resolve(this.config.dataDirectory),
+      nativeHome: homedir(), runTimeoutMs: this.config.runTimeoutMs ?? null });
+  }
+  private savedCheck(projectId: string, selection: LocalDirectorSelection): SavedCodexCheck | undefined {
+    return this.service.store.get<SavedCodexCheck>("director_local_check", this.checkKey(projectId, selection));
+  }
+  private saveCheck(projectId: string, selection: LocalDirectorSelection, readiness: Ready["readiness"]) {
+    this.service.recovery.assertWritable(projectId);
+    const id = this.checkKey(projectId, selection), previous = this.savedCheck(projectId, selection);
+    const checkedAt = readiness.checkedAt ?? new Date().toISOString();
+    const lastSuccessfulCheck = readiness.status === "ready"
+      ? { binaryPath: selection.binaryPath!, version: CODEX_PROTOCOL_VERSION, checkedAt } : previous?.lastSuccessfulCheck ?? null;
+    const diagnostic = this.recordVersionDiagnostic(projectId, selection, readiness);
+    this.service.store.put<SavedCodexCheck>("director_local_check", id, projectId, { id, projectId, status: readiness.status, checkedAt,
+      ...(readiness.modelChoices === undefined ? {} : { modelChoices: structuredClone(readiness.modelChoices) }), lastSuccessfulCheck, diagnostic });
+  }
+
+  /** Read-only native preflight; only local diagnostic evidence is retained. No selection, project, thread or turn is written. */
   async models(projectId: string) {
     this.service.store.getProject(projectId); this.service.recovery.assertWritable(projectId);
     if (this.configuring.has(projectId) || this.conversationBusy(projectId)) return this.settings(projectId);
@@ -161,7 +201,7 @@ export class LocalDirectorController {
         if (this.modelKey(projectId, this.modelSelection(projectId)) === identity && !this.configuring.has(projectId)
           && setupEpoch === (this.setupEpoch.get(projectId) ?? 0)) {
           this.modelReadiness.set(identity, structuredClone(result.readiness));
-          this.recordVersionDiagnostic(projectId, selection, result.readiness);
+          this.saveCheck(projectId, selection, result.readiness);
         }
         return result.readiness;
       });
@@ -302,7 +342,8 @@ export class LocalDirectorController {
       for (const path of [projection, snapshots, storage]) mkdirSync(path, { recursive: true, mode: 0o700 });
       const result = await this.checkLocal(projectId, selection);
       this.modelReadiness.set(this.modelKey(projectId, selection), structuredClone(result.readiness));
-      const diagnostic = this.recordVersionDiagnostic(projectId, selection, result.readiness);
+      this.saveCheck(projectId, selection, result.readiness);
+      const diagnostic = this.binaryDiagnostics.get(projectId);
       if (diagnostic && result.readiness.issues?.some(issue => issue.code === "SETUP_VERSION_MISMATCH"))
         throw new DomainError(diagnostic.code, `Codex ${diagnostic.expectedVersion} is required; found ${diagnostic.foundVersion ?? "an unrecognized version"} at ${diagnostic.binaryPath}. The supported installation is ${diagnostic.installPath}.`, diagnostic);
       invariant(result.readiness.status === "ready" && result.runtimeOptions, "DIRECTOR_SETUP_REQUIRED", "Codex setup checks did not pass. Verify the selected binary, model and existing Codex sign-in.");
@@ -312,15 +353,21 @@ export class LocalDirectorController {
     })();
     this.prepared.set(key, pending); void pending.catch(() => this.prepared.delete(key)); return pending;
   }
-  private async checkLocal(projectId: string, selection: LocalDirectorSelection): Promise<Ready> {
+  private checkLocal(projectId: string, selection: LocalDirectorSelection): Promise<Ready> {
+    invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
     const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace");
-    const result = await this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
+    const checking = this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
       ...(this.config.runTimeoutMs === undefined ? {} : { limits: { runTimeoutMs: this.config.runTimeoutMs } }),
       env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", NO_COLOR: "1", CI: "1" },
-      directories: { projection, snapshots: join(projection, ".agents", "skills"), storage: join(root, "runtime") } });
-    return result;
+      directories: { projection, snapshots: join(projection, ".agents", "skills"), storage: join(root, "runtime") } }, { signal: this.shutdown.signal }).then(result => {
+      invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down"); return result;
+    });
+    this.setupChecks.add(checking);
+    void checking.finally(() => this.setupChecks.delete(checking)).catch(() => {});
+    return checking;
   }
   private async startNative(input: DirectorRunInput, options: DirectorStartOptions = {}) {
+    invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
     this.service.recovery.assertWritable(input.projectId, input.requestId);
     this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
     const prepared = await this.ready(input.projectId);
@@ -353,13 +400,15 @@ export class LocalDirectorController {
     }
     this.service.recovery.assertWritable(input.projectId, input.requestId);
     this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
-    return runtime.start(input, { ...options, onEvent: async event => {
+    invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
+    this.activeNativeRuntimes.add(runtime);
+    try { return await runtime.start(input, { ...options, onEvent: async event => {
       if (event.kind === "runtime_started") this.service.store.transaction(() => {
         invariant(!this.service.store.get("native_model_start", input.turnId), "NATIVE_DISPATCH_ALREADY_RESERVED", "This native turn already has a dispatch reservation; do not replay it");
         this.service.store.insert("native_model_start", input.turnId, input.projectId, { id: input.turnId, projectId: input.projectId, requestId: input.requestId,
           epochId: input.epochId, nativeThreadId: event.nativeThreadId, contextDigest: digest(input.context), inputDigest: directorInputDigest(input), reservedAt: new Date().toISOString() });
       });
       await options.onEvent?.(event);
-    } });
+    } }); } finally { this.activeNativeRuntimes.delete(runtime); }
   }
 }

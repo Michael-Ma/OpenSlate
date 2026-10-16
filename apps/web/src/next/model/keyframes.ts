@@ -193,7 +193,7 @@ export function currentScene(overview: GenerationOverview, sceneId: string | nul
 export const awaitsConfirm = (slot: MediaSlot) => slot.state === "queued" && slot.waiting?.code === "review";
 
 /** A slot an unfinished Director edit holds (waiting code "edit_pending", card B13): it starts once the edit ends or is let go. */
-export const heldByEdit = (slot: MediaSlot) => slot.state === "queued" && slot.waiting?.code === "edit_pending";
+export const heldByEdit = (slot: Pick<MediaSlot, "state" | "waiting">) => slot.state === "queued" && slot.waiting?.code === "edit_pending";
 
 /**
  * A slot is busy while it is made or queued to be made, or while a replacement take is made behind the current one
@@ -273,8 +273,8 @@ function pillStatus(overview: GenerationOverview, scene: SceneOverview, selected
 export function heldOnly(overview: GenerationOverview, scene: SceneOverview): boolean {
   if (scene.confirmation?.state === "running") return false;
   const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
-  const slots = shots.flatMap((shot) => [shot.keyframe, shot.video]);
-  return slots.some(heldByEdit) && !slots.some((slot) => isWorking(slot) && !heldByEdit(slot));
+  const slots = shots.flatMap((shot) => [shot.keyframe, shot.video].flatMap((slot) => [slot, ...(slot.replacement ? [slot.replacement] : [])]));
+  return slots.some(heldByEdit) && !slots.some((slot) => (slot.state === "running" || queuedToRun(slot)) && !heldByEdit(slot));
 }
 
 /** The status of a replacement take while the current output stays shown, or null when none is in progress. */
@@ -397,6 +397,14 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     action: null, enabled: false, label: msg("panel.unknown_wait"), reason: msg("panel.unknown_reason"), note: unknown,
     headline: { value: msg("panel.unknown_headline"), unit: null },
   };
+  // Video targets can already exist while their conditioning frames are still being made. Current frame work
+  // precedes unopened counts, passive downstream input waits, and older saved-video aggregates.
+  const keyframesWorking = shots.some((shot) => isWorking(shot.keyframe));
+  if (keyframesWorking && !heldOnly(overview, scene)) return {
+    ...base, ...noPrice, segments: segmentsOf(shots), eyebrow: msg("panel.title_keyframes", { scene: scene.ordinal }),
+    action: null, enabled: false, label: msg("panel.making_keyframes"), reason: msg("panel.making_keyframes_reason"), note: msg("panel.making_keyframes_note"),
+    headline: keyframeHeadline,
+  };
   // Missing/unknown wait reasons, timing decisions and paused queues are not proof that execution will happen.
   const waiting = shots.flatMap((shot) => [shot.keyframe, shot.video].flatMap((slot) => [slot, ...(slot.replacement ? [slot.replacement] : [])])
     .filter((slot) => slot.state === "queued" && !queuedToRun(slot) && slot.waiting?.code !== "review")
@@ -411,7 +419,7 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     note: waitCode === "stopped" ? null : msg(waitCode === "timing" ? "panel.timing_shots" : "panel.waiting_shots", { shots: waitingLabels }),
     headline: { value: waitingMsg(waiting[0]!.slot), unit: null },
   };
-  if (state === "video_saved") {
+  if (state === "video_saved" && !heldOnly(overview, scene)) {
     const total = shots.reduce((sum, shot) => sum + shot.durationFrames, 0);
     return {
       ...base, ...noPrice, segments: segmentsOf(shots),
@@ -424,8 +432,9 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   const stopped = confirmationStop(overview, scene);
   // Nothing moves until an unfinished Director edit ends: the panel says it waits for that edit, not that work runs.
   if (!stopped && heldOnly(overview, scene)) {
-    const held = shots.filter((shot) => heldByEdit(shot.keyframe) || heldByEdit(shot.video));
-    const clips = !held.some((shot) => heldByEdit(shot.keyframe));
+    const heldSlot = (slot: MediaSlot) => heldByEdit(slot) || !!slot.replacement && heldByEdit(slot.replacement);
+    const held = shots.filter((shot) => heldSlot(shot.keyframe) || heldSlot(shot.video));
+    const clips = !held.some((shot) => heldSlot(shot.keyframe));
     return {
       ...base, ...noPrice, segments: segmentsOf(clips && targets.length ? targets : shots),
       ...(clips ? {} : { eyebrow: msg("panel.title_keyframes", { scene: scene.ordinal }) }),
@@ -449,16 +458,9 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
       headline: { value: msg("panel.making_video_headline"), unit: null },
     };
   }
-  const keyframesWorking = shots.some((shot) => isWorking(shot.keyframe));
   if (scene.keyframeTargets.length && !keyframesWorking)
     return makeKeyframes({ ...base, segments: segmentsOf(shots), headline: keyframeHeadline }, scene, locale);
   if (!targets.length) {
-    if (keyframesWorking)
-      return {
-        ...base, ...noPrice, segments: segmentsOf(shots), eyebrow: msg("panel.title_keyframes", { scene: scene.ordinal }),
-        action: null, enabled: false, label: msg("panel.making_keyframes"), reason: msg("panel.keep_working"), note: msg("panel.making_keyframes_note"),
-        headline: keyframeHeadline,
-      };
     if (scene.keyframeTargets.length) return makeKeyframes({ ...base, segments: segmentsOf(shots), headline: keyframeHeadline }, scene, locale);
     return { ...base, ...noPrice, action: null, enabled: false, label: msg("panel.confirm"), reason: msg("panel.nothing_to_make"), note: null, headline: keyframeHeadline };
   }

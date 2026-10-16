@@ -83,3 +83,17 @@ test('Settings recognizes an app-bundled prerelease mismatch before setup and id
   assert.ok(setup.codexDiagnostic.installPath.endsWith('/.local/share/openslate-codex/node_modules/.bin/codex'));
   assert.equal(f.store.list('native_model_start', project.id).length, 0); assert.equal(f.store.list('project_director_selection', project.id).length, 0);
 });
+
+test('Settings cheaply reports a current version for legacy native choices without fabricating a historical successful check', async t => {
+  const f = fixture(t), project = f.service.createProject('Legacy Director');
+  const selection = { mode: 'native', ...f.director.defaults };
+  f.store.put('project_director_selection', project.id, project.id, { id: project.id, projectId: project.id, selection, digest: 'a'.repeat(64) });
+  const before = f.store.db.prepare('SELECT * FROM entities ORDER BY rowid').all();
+  const response = await f.get(`/api/projects/${project.id}/director/setup`); assert.equal(response.statusCode, 200, response.body);
+  const setup = response.json();
+  assert.equal(setup.codexVersion, CODEX_PROTOCOL_VERSION); assert.equal(setup.modelCatalogStatus, 'unchecked');
+  assert.equal(setup.lastSuccessfulCheck, null); assert.equal(setup.modelCatalogCheckedAt, null);
+  assert.deepEqual(setup.modelChoices, []); assert.equal(setup.modelCalls, 0);
+  assert.deepEqual(f.store.db.prepare('SELECT * FROM entities ORDER BY rowid').all(), before);
+  assert.deepEqual(readFileSync(f.log, 'utf8').trim().split('\n').map(JSON.parse), [['codex', '--version']]);
+});

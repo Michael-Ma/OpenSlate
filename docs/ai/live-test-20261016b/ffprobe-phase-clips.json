@@ -1,0 +1,145 @@
+[
+  {
+    "name": "phase-01-start.webm",
+    "durationSeconds": 11.64,
+    "bytes": 813648,
+    "creationTime": "2026-10-16T22:54:05.573Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-02-start-director.webm",
+    "durationSeconds": 11.92,
+    "bytes": 780752,
+    "creationTime": "2026-10-16T22:54:32.609Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-03-director-request.webm",
+    "durationSeconds": 1.2,
+    "bytes": 79268,
+    "creationTime": "2026-10-16T22:54:55.189Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-04-director-progress.webm",
+    "durationSeconds": 10.08,
+    "bytes": 793747,
+    "creationTime": "2026-10-16T22:55:26.859Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-05-plan.webm",
+    "durationSeconds": 15.2,
+    "bytes": 1104009,
+    "creationTime": "2026-10-16T22:55:45.134Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-06-keyframes-submit.webm",
+    "durationSeconds": 1.28,
+    "bytes": 148069,
+    "creationTime": "2026-10-16T22:56:12.859Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-07-keyframes-progress.webm",
+    "durationSeconds": 8.12,
+    "bytes": 619413,
+    "creationTime": "2026-10-16T22:56:41.223Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-08-keyframe-one.webm",
+    "durationSeconds": 15.04,
+    "bytes": 1290457,
+    "creationTime": "2026-10-16T22:57:22.120Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-09-keyframes-review.webm",
+    "durationSeconds": 1.6,
+    "bytes": 201327,
+    "creationTime": "2026-10-16T22:57:43.030Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-10-video-submit-reload.webm",
+    "durationSeconds": 16.84,
+    "bytes": 1672983,
+    "creationTime": "2026-10-16T22:58:17.108Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-11-film-export.webm",
+    "durationSeconds": 28.6,
+    "bytes": 3156358,
+    "creationTime": "2026-10-16T23:00:37.014Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-12-restart.webm",
+    "durationSeconds": 1.36,
+    "bytes": 199084,
+    "creationTime": "2026-10-16T23:02:26.870Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  },
+  {
+    "name": "phase-13-assets-settings.webm",
+    "durationSeconds": 25.76,
+    "bytes": 2186538,
+    "creationTime": "2026-10-16T23:02:39.154Z",
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0
+  }
+]

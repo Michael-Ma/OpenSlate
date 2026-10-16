@@ -223,6 +223,7 @@ export const keyframes = {
   "panel.make_keyframes": { en: "Make {count, plural, one {# keyframe} other {# keyframes}}", zh: "生成 {count} 张关键帧" },
   "panel.make_keyframes_note": { en: "The prompts are written. Make keyframes to see the shots.", zh: "画面描述已写好。生成关键帧后就能看到镜头。" },
   "panel.making_keyframes": { en: "Making keyframes…", zh: "正在生成关键帧…" },
+  "panel.making_keyframes_reason": { en: "Wait for the keyframes to finish before confirming video.", zh: "请等关键帧生成完成，再确认生成视频。" },
   "panel.making_keyframes_note": { en: "Keyframes are being made. Open each one when it is back.", zh: "关键帧正在生成，回来后请逐张查看。" },
   "panel.play_scene": { en: "Play Scene {scene}", zh: "播放第 {scene} 场" },
   "panel.stop_scene": { en: "Stop", zh: "停止" },

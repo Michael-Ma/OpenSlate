@@ -44,6 +44,31 @@ test('Codex and FFmpeg say plainly when they are missing or not checked', () => 
   assert.equal(en(computerView(catalog, null, 'SERVICE_UNAVAILABLE').rows[0].status), 'Not reported');
 });
 
+test('a retained successful Director check shows its program, version and original time without claiming current sign-in', () => {
+  const lastSuccessfulCheck = { binaryPath: '/local/bin/codex', version: '0.153.4', checkedAt: '2026-10-16T12:34:56.000Z' };
+  const checked = setup({ modelCatalogStatus: 'unchecked', lastSuccessfulCheck, codexVersion: '0.153.4' });
+  const row = computerView(null, checked, null).rows[0];
+  assert.equal(en(row.status), 'Checked'); assert.equal(row.tone, 'ok');
+  assert.equal(en(row.detail), 'Last successful check: Codex 0.153.4 · 2026-10-16T12:34:56.000Z · /local/bin/codex');
+  assert.equal(translateMsg('zh-CN', row.detail), '上次检查通过：Codex 0.153.4 · 2026-10-16T12:34:56.000Z · /local/bin/codex');
+  assert.doesNotMatch(en(row.detail), /is signed in|Runs and/);
+  assert.equal(en(computerView(null, setup({ ...checked, modelCatalogStatus: 'blocked' }), null).rows[0].status), 'Needs attention');
+  assert.equal(en(computerView(null, setup({ ...checked, modelCatalogStatus: 'blocked', readiness: { status: 'ready' } }), null).rows[0].status), 'Needs attention', 'a cached setup-command result cannot override a later failed check');
+  assert.equal(en(computerView(null, setup({ ...checked, codexVersion: null }), null).rows[0].status), 'Not found');
+  assert.equal(en(computerView(null, setup({ ...checked, codexDiagnostic: { code: 'DIRECTOR_CODEX_VERSION_MISMATCH' } }), null).rows[0].status), 'Needs attention');
+});
+
+test('a cheap current version check is Found rather than Not checked, without claiming a historical setup or sign-in', () => {
+  const versionOnly = setup({ modelCatalogStatus: 'unchecked', modelChoices: [], codexVersion: '0.153.4', lastSuccessfulCheck: null });
+  const before = structuredClone(versionOnly), row = computerView(null, versionOnly, null).rows[0];
+  assert.equal(en(row.status), 'Found'); assert.equal(row.tone, 'ok');
+  assert.equal(en(row.detail), 'Codex 0.153.4 · /usr/local/bin/codex. Version check only; sign-in and model setup are checked before the next Director turn.');
+  assert.match(translateMsg('zh-CN', row.detail), /仅检查了版本/);
+  assert.deepEqual(versionOnly, before); assert.equal(versionOnly.modelCatalogStatus, 'unchecked');
+  assert.equal(en(computerView(null, setup({ ...versionOnly, modelCatalogStatus: 'blocked' }), null).rows[0].status), 'Needs attention');
+  assert.equal(en(computerView(null, setup({ ...versionOnly, codexVersion: null }), null).rows[0].status), 'Not found');
+});
+
 test('a computer with only the stand-ins says so and lists no keys', () => {
   const view = computerView({ ...catalog, profiles: [catalog.profiles[0]] }, setup(), null);
   assert.equal(view.demoOnly, true);

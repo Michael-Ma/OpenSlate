@@ -27,6 +27,74 @@ function ready() {
   return { overview, scene, first: overview.shots[scene.shotIds[0]], second: overview.shots[scene.shotIds[1]] };
 }
 
+test('B23 running and capacity-queued keyframes precede video targets and unopened counts', () => {
+  for (const downstreamWait of ['review', 'input_pending']) {
+    const { overview, scene, first, second } = ready();
+    first.keyframe = { state: 'running', takeCount: 0, opened: false };
+    second.keyframe = { state: 'queued', takeCount: 0, opened: false, waiting: { code: 'capacity', ahead: 1, since: 'x' } };
+    for (const id of scene.shotIds) overview.shots[id].video.waiting.code = downstreamWait;
+    scene.counts.keyframesReady = 0;
+    scene.blockers = scene.shotIds.map(shotId => ({ code: 'keyframe_missing', shotId }));
+    const before = structuredClone(overview);
+    const panel = keyframesView(overview, scene.sceneId, null, 'en-US').panel;
+    assert.deepEqual([panel.action, panel.enabled, panel.price, panel.priceTotal, panel.priceEach], [null, false, null, null, null]);
+    assert.equal(en(panel.label), 'Making keyframes…');
+    assert.equal(en(panel.note), 'Keyframes are being made. Open each one when it is back.');
+    assert.equal(en(panel.reason), 'Wait for the keyframes to finish before confirming video.');
+    assert.equal(zh(panel.reason), '请等关键帧生成完成，再确认生成视频。');
+    assert.equal(en(panel.eyebrow), 'Scene 1 keyframes');
+    assert.deepEqual(overview, before, 'progress is read-only');
+  }
+});
+
+test('B23 queued and replacement keyframes cannot show confirm or saved-video playback', () => {
+  for (const replacement of [false, true]) for (const state of ['queued', 'running']) {
+    const { overview, scene, first } = ready();
+    const pending = { state, waiting: { code: 'capacity', ahead: 0, since: 'x' } };
+    if (replacement) {
+      first.keyframe.replacement = pending;
+      scene.state = 'video_saved';
+      scene.videoTargets = [];
+    } else first.keyframe = { ...pending, opened: false, takeCount: 0 };
+    const panel = keyframesView(overview, scene.sceneId, null, 'en-US').panel;
+    assert.equal(en(panel.label), 'Making keyframes…', `${state} replacement=${replacement}`);
+    assert.deepEqual([panel.action, panel.enabled], [null, false]);
+    assert.doesNotMatch(en(panel.note), /Every frame is opened/);
+  }
+});
+
+test('B23 keyframe progress gives way to exact frame review only after results arrive', () => {
+  const { overview, scene, first, second } = ready();
+  first.keyframe = { state: 'running', takeCount: 0, opened: false };
+  second.keyframe.opened = false;
+  assert.equal(keyframesView(overview, scene.sceneId, null, 'en-US').panel.action, null);
+  first.keyframe = { state: 'ready', takeCount: 1, opened: false };
+  scene.blockers = scene.shotIds.map(shotId => ({ code: 'frame_not_opened', shotId }));
+  const review = keyframesView(overview, scene.sceneId, null, 'en-US').panel;
+  assert.deepEqual([review.action, review.enabled], ['confirm', false]);
+  assert.match(en(review.note), /Open 1\.1 and 1\.2 to confirm/);
+  for (const id of scene.shotIds) overview.shots[id].keyframe.opened = true;
+  scene.blockers = [];
+  assert.deepEqual([keyframesView(overview, scene.sceneId, null, 'en-US').panel.enabled, en(keyframesView(overview, scene.sceneId, null, 'en-US').panel.note)],
+    [true, 'Every frame is opened. Earlier keyframes are kept.']);
+});
+
+test('B23 held keyframes and replacement takes keep their wait beside a stale saved-video state', () => {
+  for (const replacement of [false, true]) {
+    const { overview, scene, first } = ready();
+    const held = { state: 'queued', waiting: { code: 'edit_pending', since: 'x', requestId: 'edit' } };
+    if (replacement) first.keyframe.replacement = held;
+    else first.keyframe = { ...held, takeCount: 0, opened: false };
+    scene.state = 'video_saved'; scene.videoTargets = [];
+    const panel = keyframesView(overview, scene.sceneId, null, 'en-US').panel;
+    assert.deepEqual([panel.action, panel.enabled], [null, false]);
+    assert.equal(en(panel.label), 'Held by an edit');
+    assert.equal(en(panel.eyebrow), 'Scene 1 keyframes');
+    assert.equal(en(panel.note), 'An unfinished Director edit holds 1.1.');
+    assert.doesNotMatch(en(panel.reason), /finish|keep working/i);
+  }
+});
+
 test('B20 a restarted unanswered clip names its shot and blocks confirm even if scene blockers are stale', () => {
   const { overview, scene, first } = ready();
   first.video = { ...noAnswer };

@@ -192,7 +192,22 @@ export class ToolInvocationService {
         case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
         case "prepare_change": {
-          const prepared = await this.service.prepare(projectId, actor, parsed.arguments);
+          let prepared: Awaited<ReturnType<ProductionService["prepare"]>>;
+          try { prepared = await this.service.prepare(projectId, actor, parsed.arguments); }
+          catch (error) {
+            // The domain guard remains mandatory. A missing human generation press is
+            // an expected next action, rather than a failure of earlier writing saves.
+            // Only this exact preparation refusal is translated; stale/invalid/unknown
+            // outcomes retain their ordinary failure and reconciliation boundaries.
+            if (!(error instanceof DomainError) || error.code !== "ORIGIN_NOT_AUTHORIZED" || !parsed.arguments.source) throw error;
+            stopped(); this.service.assertActor(projectId, actor, true);
+            const saved = store.getProject(projectId);
+            value = { state: "awaiting_human_generation", preparedId: null, applied: false, generationStarted: false,
+              savedProject: { revisionId: saved.revisionId, headVersion: saved.headVersion, activePlanId: saved.activePlanId,
+                sceneCount: saved.scenes.length, shotCount: saved.shots.length },
+              next: "A human generation press is the expected next step. This call saved no writing or generation plan and returned no prepared-change ID; previously saved writing is retained. Save any remaining writing with a creative patch without source. For visual work, the person uses the scene action to create keyframes, then reviews the returned frames and actual video recipe before the video action. For audio, the person presses the existing audio request action. Do not call apply_change with this result or retry preparation to obtain authorization." };
+            break;
+          }
           // Full source, next project and compiled graph stay in the durable proposal.
           // A usable prepared ID must not be lost because these repeat megabytes of input.
           value = { id: prepared.id, preparedId: prepared.id, proposalDigest: prepared.proposalDigest,

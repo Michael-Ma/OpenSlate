@@ -137,6 +137,22 @@ test('a repeated first-input preparation keeps one successor and one epoch bindi
   assert.equal(f.store.db.prepare("SELECT count(*) total FROM events WHERE project_id=? AND json_extract(body,'$.kind')='director.lock_installed' AND json_extract(body,'$.payload.source')='application_compatible_upgrade'").get(f.project.id).total, 1);
 });
 
+test('native writing context separates save-only work from human generation and supplies compact card labels', t => {
+  const f = fixture(t); f.install('5.0.0');
+  const current = f.fresh('Save the story and two shots only; do not generate media.');
+  const input = f.prepareInput(current.turn, current.human, current.bridge), guide = JSON.parse(input.context).filmPlanning;
+  const procedure = guide.procedure.join('\n');
+  assert.match(procedure, /save-only request.*variant="project".*without source or requestNewTakes/i);
+  assert.match(procedure, /do not prepare an executable generation plan/i);
+  assert.match(procedure, /saved writing.*successful.*human.*generation.*next step/i);
+  assert.match(procedure, /framing.*1 to 3 words.*Close-up.*Medium.*Wide/i);
+  assert.match(procedure, /scene.*at most about 6 words/i);
+  assert.match(procedure, /locked creative schema.*no separate scene title.*purpose.*short name/i);
+  assert.match(procedure, /descriptions.*shot purpose.*imagePrompt.*videoPrompt/i);
+  for (const kind of ['prepared', 'grant', 'candidate', 'attempt']) assert.equal(f.store.list(kind, f.project.id).length, 0, kind);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
 test('changed predecessor snapshot bytes and setup configuration fail before installing a successor', t => {
   const f = fixture(t), saved = f.install('2.0.0'), current = f.fresh('Verify old guidance');
   const entry = join(f.configuration.snapshotRoot, saved.lock.skills[0].packageDigest, 'SKILL.md');
