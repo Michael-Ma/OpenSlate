@@ -232,3 +232,96 @@ test('a paid press that failed before it was sent, or a free press whose reply w
   await store.openFrame(shotId('2.2'));
   assert.equal(store.getState().toast.message.id, 'error.NETWORK_ERROR');
 });
+
+/** A sample-film studio on a fake clock: simulated provider time runs on `tick`, and the store reads the film after. */
+async function clockedStudio(t, lose) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const studio = await lossyStudio(t, lose);
+  const tick = async (ms) => { t.mock.timers.tick(ms); await studio.store.refresh(); };
+  return { ...studio, tick };
+}
+
+const holds = (store) => lostReplyHolds(store.getState().overview, store.savedPressIds(), (press) => store.wouldResend(press.pressId, press.logical));
+const LONG_LINE = 'I stood at the rail until the town was only a line of lights, and then not even that.';
+
+test('a Confirm whose reply was lost: the notice holds until its confirmation shows; once it stops, confirm again starts a new one', async (t) => {
+  let losing = false;
+  const { store, port, sent, tick } = await clockedStudio(t, (path, options) => (losing && options?.method === 'POST' && path.endsWith('/confirm') ? 'reply' : null));
+  // Scene 3 with a line that will come back too long, its keyframes made and opened.
+  await store.edit({ kind: 'narration', id: shotId('3.2'), field: 'text', value: LONG_LINE });
+  await store.makeKeyframes(sceneId(3));
+  await tick(FIXTURE_TIMING.keyframeMs);
+  await store.openFrame(shotId('3.1'));
+  await store.openFrame(shotId('3.2'));
+  await store.refresh();
+  // Confirm: the request lands, the reply is lost.
+  losing = true;
+  await store.confirmVideo(sceneId(3));
+  losing = false;
+  assert.equal(store.getState().toast.message.id, 'error.PAID_UNCONFIRMED');
+  const first = port.world.overview.scenes[2].confirmation;
+  assert.equal(first.state, 'running', 'the studio started it');
+  // Until the film is read again, pressing again would resend it: the notice holds.
+  assert.equal(holds(store), true);
+  await store.refresh();
+  assert.equal(holds(store), false, 'the film shows the confirmation: the notice goes');
+  assert.equal(videoPanel(store.getState().overview, store.getState().overview.scenes[2], 'en-US').action, null, 'nothing to press while it runs');
+  // The line comes back too long: the confirm stops at 3.2. The stop says it; the button adds nothing.
+  for (let step = 0; step < 3; step++) await tick(FIXTURE_TIMING.voiceStepMs);
+  let scene3 = store.getState().overview.scenes[2];
+  assert.deepEqual([scene3.confirmation.confirmationId, scene3.confirmation.state, scene3.confirmation.blocker.code], [first.confirmationId, 'blocked', 'NARRATION_CUE_OUT_OF_RANGE']);
+  assert.equal(holds(store), false);
+  assert.equal(videoPanel(store.getState().overview, scene3, 'en-US').reason, null);
+  // Lengthen the shot, then confirm again: a new key, and a new confirm starts (the old receipt is not replayed).
+  await store.narrationFit(shotId('3.2'), 'extend_shot');
+  scene3 = store.getState().overview.scenes[2];
+  assert.equal(videoPanel(store.getState().overview, scene3, 'en-US').enabled, true);
+  assert.equal(store.wouldResend(...Object.values(confirmPress(store.getState().overview, scene3))), false);
+  await store.confirmVideo(sceneId(3));
+  const confirms = sent.filter((request) => request.path.endsWith('/confirm'));
+  assert.equal(confirms.length, 2);
+  assert.notEqual(confirms[1].key, confirms[0].key);
+  const second = port.world.overview.scenes[2].confirmation;
+  assert.notEqual(second.confirmationId, first.confirmationId);
+  assert.deepEqual([second.state, second.currentStep], ['running', 'video']);
+  assert.deepEqual(store.savedPressIds(), []);
+});
+
+test('a Make keyframes whose reply was lost: the notice goes once the keyframes are being made; after they fail, a press is a new request', async (t) => {
+  let losing = true;
+  const { store, port, sent } = await clockedStudio(t, (path, options) => (losing && options?.method === 'POST' && path.endsWith('/generate') ? 'reply' : null));
+  await store.makeKeyframes(sceneId(3));
+  losing = false;
+  assert.equal(store.getState().toast.message.id, 'error.PAID_UNCONFIRMED');
+  assert.deepEqual(['3.1', '3.2'].map((label) => port.world.overview.shots[shotId(label)].keyframe.state), ['running', 'running']);
+  assert.equal(holds(store), true);
+  await store.refresh();
+  assert.equal(holds(store), false, 'the keyframes are being made: the notice goes');
+  // Both fail before they are made: Make keyframes is offered again, and it is a new request.
+  port.world.update((w) => {
+    const shots = { ...w.overview.shots };
+    for (const label of ['3.1', '3.2']) shots[shotId(label)] = { ...shots[shotId(label)], keyframe: { state: 'failed', takeCount: 0, opened: false, failure: { code: 'EXECUTION_FAILED', technical: true, retryAllowed: true, autoRetriesLeft: 0, charged: false, at: '2026-10-15T10:01:00Z' } } };
+    w.overview = recompute({ ...w.overview, shots });
+  });
+  await store.refresh();
+  const overview = store.getState().overview;
+  assert.equal(holds(store), false);
+  assert.deepEqual([videoPanel(overview, overview.scenes[2], 'en-US').action, videoPanel(overview, overview.scenes[2], 'en-US').enabled], ['make_keyframes', true]);
+  await store.makeKeyframes(sceneId(3));
+  const generates = sent.filter((request) => request.path.endsWith('/generate'));
+  assert.equal(generates.length, 2);
+  assert.notEqual(generates[1].key, generates[0].key);
+});
+
+test('a motion edit rewrites the video prompt as the studio does; a picture prompt edit leaves it, and Undo restores it', () => {
+  const w = world();
+  const videoPrompt = () => w.snapshot.project.shots.find((row) => row.id === shotId('2.3')).videoPrompt;
+  const before = videoPrompt();
+  edit(w, { kind: 'shot', id: shotId('2.3'), field: 'imagePrompt', value: 'The ticket, close.' });
+  assert.equal(videoPrompt(), before, 'the picture prompt has its own words');
+  const { commandId } = edit(w, { kind: 'shot', id: shotId('2.3'), field: 'motion', value: 'Slow push in' });
+  assert.match(videoPrompt(), /^OpenSlate current direction:\n.*Camera movement: Slow push in\nReference details \(retain only where consistent\):\n/s);
+  assert.ok(videoPrompt().endsWith(before), 'the earlier words are kept');
+  edit(w, { kind: 'undo', commandId });
+  assert.equal(videoPrompt(), before);
+});
