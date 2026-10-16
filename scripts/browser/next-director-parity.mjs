@@ -47,6 +47,26 @@ async function noSidewaysScroll(page, width) {
   const widths = await page.evaluate(() => [document.documentElement.scrollWidth, document.querySelector(".director").scrollWidth - document.querySelector(".director").clientWidth]);
   if (widths[0] > width || widths[1] > 0) fail(`The page scrolls sideways: ${widths}`);
 }
+/** The picture action and the newer media/navigation controls share the preview head without covering each other. */
+async function previewActionsReachable(page) {
+  await page.locator('.preview [data-act="show-director"]').scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => {
+    const preview = document.querySelector(".preview");
+    const show = preview?.querySelector('[data-act="show-director"]');
+    if (!show) return false;
+    const controls = [...preview.querySelectorAll('.pv-head button, [data-act="show-director"]')];
+    const bounds = controls.map((button) => button.getBoundingClientRect());
+    return controls.every((button, index) => {
+      const rect = bounds[index];
+      if (!rect.width || !rect.height) return false;
+      const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      if (!target || !button.contains(target)) return false;
+      return bounds.every((other, otherIndex) => otherIndex === index
+        || Math.min(rect.right, other.right) - Math.max(rect.left, other.left) <= 1
+        || Math.min(rect.bottom, other.bottom) - Math.max(rect.top, other.top) <= 1);
+    });
+  }, null, { timeout: 4000 }).catch(() => fail("The preview's Show the Director, media or navigation controls cover each other or cannot be reached"));
+}
 
 export const scenarios = [
   {
@@ -55,6 +75,7 @@ export const scenarios = [
     async run({ page }) {
       await ready(page);
       // The Keyframes preview shows its current keyframe to the Director.
+      await previewActionsReachable(page);
       await page.locator('.preview [data-act="show-director"]').click();
       await toast(page, /^Added to your message/);
       if ((await pictureNames(page)).join() !== "2.1 keyframe") fail(`Pictures after the preview: ${await pictureNames(page)}`);
@@ -99,6 +120,10 @@ export const scenarios = [
       if (chips.join() !== "@2.1") fail(`The sent message points at ${chips}`);
       await noNamelessImages(page);
       await page.screenshot({ path: shot("pictures-sent-1440"), clip: column });
+      // A shot with a clip adds Keyframe / Video to the same row; it must keep every control reachable too.
+      await page.locator('.scene-pills [aria-pressed]').first().click();
+      await page.waitForSelector('.preview[data-shot="shot-1-1"] .pv-media');
+      await previewActionsReachable(page);
     },
   },
   {
@@ -207,7 +232,11 @@ export const scenarios = [
       await page.locator(".dir-close").click();
       await page.locator('[data-act="tab"][data-view="keyframes"]').click();
       await page.waitForSelector('.preview [data-act="show-director"]');
+      await previewActionsReachable(page);
       await page.screenshot({ path: shot("preview-narrow-390") });
+      await page.locator('.scene-pills [aria-pressed]').first().click();
+      await page.waitForSelector('.preview[data-shot="shot-1-1"] .pv-media');
+      await previewActionsReachable(page);
     },
   },
   {

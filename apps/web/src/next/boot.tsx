@@ -104,6 +104,7 @@ function Root() {
    * The session that took them gets them as `carried` until it has put them back.
    */
   const handover = useRef<Carry | null>(null);
+  const relinquishedDrafts = useRef(new Set<string>());
   const [carried, setCarried] = useState<Carry | null>(null);
   const hand = useCallback((carry: Carry | null) => {
     handover.current = carry;
@@ -137,6 +138,9 @@ function Root() {
       if (!handover.current && !fixture) {
         const stored = readStoredCarry();
         clearStoredCarry();
+        // This window took its own handover before another tab did. Its ordinary per-film cache may also hold
+        // pictures, which the carry does not include, so it is safe to restore that cache in this session.
+        if (stored) relinquishedDrafts.current.delete(stored.projectId);
         hand(stored);
       }
       setSession(next);
@@ -159,14 +163,16 @@ function Root() {
   const disconnect = useCallback(() => {
     const own = current.current ? carryFrom(current.current.store.getState()) : null;
     const kept = carryToKeep(handover.current ?? (fixture ? null : readStoredCarry()), own);
-    hand(kept && !fixture && writeStoredCarry(kept) ? null : kept);
+    const shared = !!kept && !fixture && writeStoredCarry(kept);
+    if (shared && own) relinquishedDrafts.current.add(own.projectId);
+    hand(shared ? null : kept);
     setFailed(false);
     setDisconnected(true);
     setSession(null);
   }, [fixture, hand]);
   if (!session) return <ConnectGate failed={failed} disconnected={disconnected} onRetry={connect} />;
   return (
-    <StudioProvider value={session}>
+    <StudioProvider value={{ ...session, relinquishedDrafts: relinquishedDrafts.current }}>
       <NextApp onReconnect={connect} onDisconnected={disconnect} carried={carried} onCarried={carriedTaken} />
     </StudioProvider>
   );

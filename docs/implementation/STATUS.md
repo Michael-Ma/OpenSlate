@@ -1,6 +1,16 @@
 # Current implementation status
 
-Reconciled October 15, 2026 (B15 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 16, 2026 (B16 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 16 merged-branch verification — B16 source checks passed twice; browser replay reserved for lead
+
+B16 fixes the shared layout cause of seven reported Show the Director click timeouts by placing the picture action in the existing wrapping preview header with navigation/media controls. Browser regressions now check actual hit targets and nonoverlap at desktop and phone widths. The two Film export scenarios fix Date to browser-local noon and rebuild their presets; a bilingual unit regression preserves correct previous-day formatting across midnight.
+
+Disconnect handoff now prevents the originating page's Retry from restoring a second copy through the ordinary per-film composer cache after another tab takes the carry. A testable draft watcher preserves the receiving tab's saved words, chips and pictures, ordinary reload/film switching, self-claimed carry and storage-failure behavior. The failing recovery scenario waits for a cache-ready signal instead of a fixed delay. Relinquishment is scoped to the current page lifetime; a full origin reload retains the established shared-cache behavior.
+
+Pinned Node **24.15.0**, pnpm **10.33.0** and FFmpeg/ffprobe **8.1.1** passed setup/preflight without a download. The initial build/test/typecheck sequence passed **3,222 tests, zero failures and one optional native-probe skip (3,223 total)**. After seven new node regressions, **86 targeted tests passed**, and **two consecutive complete build/test/typecheck sequences passed**: each full suite returned **3,229 passed, zero failures/cancelled/todo and one optional skip (3,230 total)**; all five package builds and typechecks passed in both rounds. Three changed browser scripts passed syntax checks, `git diff --check` passed, and independent review found no outstanding must-fix issue.
+
+No browser was launched under the card rules; the lead must replay the ten reported scenarios and new layout assertions outside the sandbox. No new rendered-browser pass count is claimed. No server source, browser contract, schema, frozen catalog or skill package changed. Checks used disposable state and fake transports, with no real model/provider call, external network request, credential read, production-state access/restart or port 3001 listener. Changes remain uncommitted for lead review. [Per-failure causes/fixes, complete file inventory, exact counts, proposed commits and decisions](../ai/uiux-plan/codex/reports/B16-verify-and-fix.md).
 
 ## October 15 backend review fixes — B15 verified
 

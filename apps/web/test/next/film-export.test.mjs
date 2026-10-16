@@ -142,6 +142,17 @@ test('times read as today or a date, and elapsed time never goes negative', () =
   assert.deepEqual(EXPORT_SIZE, { width: 1280, height: 720 });
 });
 
+test('an export half an hour earlier shows its actual date across local midnight, in both languages', () => {
+  const now = new Date(2026, 9, 16, 0, 15);
+  const earlier = new Date(now.getTime() - 30 * 60_000).toISOString();
+  assert.equal(en(whenMsg(earlier, now, 'en-US')), 'Oct 15 23:45');
+  assert.equal(zh(whenMsg(earlier, now, 'zh-CN')), '10月15日 23:45');
+  const noon = new Date(2026, 9, 16, 12);
+  const recent = new Date(noon.getTime() - 30 * 60_000).toISOString();
+  assert.equal(en(whenMsg(recent, noon, 'en-US')), 'Today 11:30');
+  assert.equal(zh(whenMsg(recent, noon, 'zh-CN')), '今天 11:30');
+});
+
 test('fingerprints tell which of shots, order, music and narration changed', () => {
   const before = filmFingerprint(finished(), { audioId: 'a', gainMilliDb: -18000 });
   assert.deepEqual(changedSince(before, filmFingerprint(finished(), { audioId: 'a', gainMilliDb: -18000 })), []);

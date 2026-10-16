@@ -94,14 +94,6 @@ button.atchip:hover{background:var(--track)}
 .dir-held .row{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:8px}
 .dir-held .why{color:var(--muted);font-size:12px;line-height:1.35;margin-right:auto}
 
-/* Show the Director on the Keyframes preview: top right, over the picture; on a phone it steps down a row when the
-   top left also holds the Open button, so the two never overlap */
-.preview .pv-show{position:absolute;right:12px;top:12px;z-index:2}
-@media (max-width: 899px){
-  .preview .pv-show{right:8px;top:8px}
-  .preview:has(.pv-top [data-act="open-frame"]) .pv-show{top:44px}
-}
-
 /* the Director's lettered notes (studio.css has .note, .letter, .note.done, .handled) */
 .note-text{white-space:pre-line;overflow-wrap:anywhere}
 /* stale: a global .stale rule styles inspector lines, so key off the state attribute instead */
