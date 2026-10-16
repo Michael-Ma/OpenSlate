@@ -685,6 +685,19 @@ export const scenarios = [
             const report = await inspectorWhole(page, where);
             fits[`${label} ${width}x${height} ${language}`] = report.fit;
             if (width >= 900 && width < 1100) await previewWholeFrame(page, where);
+            // Pinned, a row's control that takes the focus from the keyboard is scrolled whole into view above the actions.
+            if (label === "2.1" && width === 1366) {
+              await page.focus(".insp [data-act='prompts']");
+              await page.keyboard.press("Tab");
+              const focused = await page.evaluate(() => {
+                const active = document.activeElement;
+                const box = active.getBoundingClientRect();
+                return { act: active.getAttribute("data-act"), bottom: box.bottom, actions: document.querySelector(".insp-actions").getBoundingClientRect().top, undrawn: getComputedStyle(active.closest("dt") ?? active).clipPath !== "none" };
+              });
+              expect(focused.act === "narration-edit" && focused.bottom <= focused.actions + 0.5 && !focused.undrawn, `The focused row control is not in view above the pinned actions ${where}: ${JSON.stringify(focused)}`);
+              await page.locator(".insp").evaluate((element) => { element.scrollTop = 0; });
+              await page.locator(".insp [data-act='narration-edit']").evaluate((element) => element.blur());
+            }
             // At 1024 the band under the frame has the room for 2.1's caption in full (two lines).
             if (label === "2.1" && width === 1024 && language === "en") {
               const caption = await page.locator(".preview .pv-caption").evaluate((element) => [element.scrollHeight, element.clientHeight]);
