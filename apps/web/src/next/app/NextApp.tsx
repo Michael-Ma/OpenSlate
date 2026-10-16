@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { carryFrom, carryReady, carryToApply, filmStrip, reconnectedToast, writeGuard, type Carry } from "../model/shell-states.ts";
 import { msg } from "../model/types.ts";
-import { connectScreen, escClosesDrawer, NARROW_QUERY, shownView } from "../model/shell.ts";
+import { connectScreen, escClosesDrawer, NARROW_QUERY, searchWithView, shownView } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import type { StudioStore } from "../store/store.ts";
 import { Connect } from "./Connect.tsx";
@@ -56,6 +56,7 @@ function restoreCarry(store: StudioStore, carry: Carry, done: () => void): () =>
  *
  * The shell also owns the film-wide write guard (offline, expired, stopped) that every view reads through
  * useWriteGuard, and carries the unsent message and the person's place into whatever session replaces this one.
+ * The view on screen is kept in the address (`?view=plan`), so a reload or a link reopens it.
  */
 export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
   const store = useStore();
@@ -81,6 +82,13 @@ export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
   const carry = useRef<{ from: StudioStore; carry: Carry } | null>(null);
 
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  // The view on screen goes into the address (`?view=plan`), so a reload or a shared link opens it again.
+  useEffect(() => {
+    if (screen) return;
+    const search = searchWithView(window.location.search, view);
+    if (search === window.location.search) return;
+    try { window.history.replaceState(window.history.state, "", window.location.pathname + search + window.location.hash); } catch { /* history unavailable */ }
+  }, [view, screen]);
   useEffect(() => () => store.stop(), [store]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

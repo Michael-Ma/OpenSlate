@@ -7,6 +7,7 @@ import { Connect } from "./app/Connect.tsx";
 import { NextApp } from "./app/NextApp.tsx";
 import { I18nProvider } from "./i18n/I18n.tsx";
 import type { MediaSource } from "./media/media-source.ts";
+import { viewFromSearch } from "./model/shell.ts";
 import { StudioProvider } from "./store/react.tsx";
 import { StudioStore } from "./store/store.ts";
 import "./ui/studio.css";
@@ -15,6 +16,12 @@ const storage = (() => { try { return window.localStorage; } catch { return null
 const newKey = () => crypto.randomUUID();
 
 interface Session { store: StudioStore; media: MediaSource; mode: "live" | "fixture"; close(): void }
+
+/** A link or a reload opens the view it names (`?view=plan`); the shell keeps the address up to date. */
+function openAskedView(store: StudioStore): void {
+  const view = viewFromSearch(window.location.search);
+  if (view) store.setView(view);
+}
 
 /**
  * Resolves once the store has read the film list (and chosen a film, whose reads go on behind the page), or the
@@ -41,6 +48,7 @@ function filmListRead(store: StudioStore): Promise<void> {
 async function liveSession(): Promise<Session> {
   const client = await StudioClient.connect(takeStudioLaunchCode(window.location, window.history));
   const store = new StudioStore({ client, storage, newKey });
+  openAskedView(store);
   client.onSessionExpired = () => store.dispatch({ type: "connection", connection: "expired" });
   const media: MediaSource = {
     url: (artifact, signal) => client.artifactUrl(store.getState().projectId ?? "", artifact, signal),
@@ -60,6 +68,7 @@ async function liveSession(): Promise<Session> {
 async function fixtureSession(): Promise<Session> {
   const { FixturePort, fixtureMedia } = await import("./fixtures/fixture-port.ts");
   const store = new StudioStore({ client: new FixturePort(), storage: null, newKey });
+  openAskedView(store);
   void store.start();
   return { store, media: await fixtureMedia(), mode: "fixture", close: () => store.stop() };
 }

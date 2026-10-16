@@ -139,6 +139,27 @@ export function connectionPill(connection: Connection, offline = false): Connect
   }
 }
 
+// ---- the view in the address ------------------------------------------------------------------
+
+const URL_VIEWS: Record<string, ViewName> = {
+  plan: "plan", keyframes: "keyframes", film: "film", assets: "assets", settings: "settings", start: "start",
+  // The classic studio's names, so a link from it opens the same view here.
+  frames: "keyframes", cut: "film",
+};
+
+/** The view a link or a reload asks for (`?view=plan`), or null when it names none. */
+export function viewFromSearch(search: string): ViewName | null {
+  const value = new URLSearchParams(search).get("view");
+  return value && Object.hasOwn(URL_VIEWS, value) ? URL_VIEWS[value]! : null;
+}
+
+/** The address's query with the view on screen, keeping everything else (`ui`, `fixture`, `lang`, `project`). */
+export function searchWithView(search: string, view: ViewName): string {
+  const params = new URLSearchParams(search);
+  params.set("view", view);
+  return `?${params.toString()}`;
+}
+
 export interface FilmHeading {
   title: string;
   /** Duration and frame rate; null until the overview is read. */

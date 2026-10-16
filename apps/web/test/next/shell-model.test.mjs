@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classicHref, codeSegments, connectionPill, connectScreen, directorHasFilm, escClosesDrawer, filmHeading, hasNoFilms, noteOpenView, otherLocale,
-  pauseCountdown, resumeCountdown, searchWithLocale, shownView, showProjectPicker, startCountdown, tabKeyTarget,
+  pauseCountdown, resumeCountdown, searchWithLocale, searchWithView, shownView, showProjectPicker, startCountdown, tabKeyTarget, viewFromSearch,
   toastLifetime, topBarMode, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS, VIEWS,
 } from '../../src/next/model/shell.ts';
 import { lastFerryOverview } from '../../src/next/fixtures/last-ferry.ts';
@@ -100,6 +100,19 @@ test('the connection pill says Synced, Reconnecting or Offline', () => {
   assert.equal(connectionPill('connecting').tone, 'waiting');
   assert.equal(en(connectionPill('expired').label), 'Not connected');
   assert.equal(zh(connectionPill('failed').label), '未连接');
+});
+
+test('the view on screen goes into the address and comes back from it', () => {
+  for (const view of ['plan', 'keyframes', 'film', 'assets', 'settings', 'start']) assert.equal(viewFromSearch(`?ui=next&view=${view}`), view);
+  // The classic studio's names open the same views.
+  assert.equal(viewFromSearch('?view=frames'), 'keyframes');
+  assert.equal(viewFromSearch('?view=cut'), 'film');
+  for (const search of ['', '?ui=next', '?view=', '?view=timeline', '?view=__proto__', '?view=toString']) assert.equal(viewFromSearch(search), null, search);
+  // Everything else in the address stays (mode, sample film, language, film).
+  assert.equal(searchWithView('?ui=next&fixture=last-ferry&lang=en', 'plan'), '?ui=next&fixture=last-ferry&lang=en&view=plan');
+  assert.equal(searchWithView('?view=keyframes&project=p1', 'film'), '?view=film&project=p1');
+  assert.equal(searchWithView('', 'settings'), '?view=settings');
+  assert.equal(viewFromSearch(searchWithView('?ui=next', 'assets')), 'assets');
 });
 
 test('the film heading names the film and reads duration, frame rate and counts from the overview', () => {
