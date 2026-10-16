@@ -1,5 +1,6 @@
 import type { AssetItem, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, ShotOverview } from "@openslate/core/public";
 import type { Locale } from "../../shared/locale-preference.ts";
+import { readAllAssets, type AssetPage } from "./assets.ts";
 import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "./markdown.ts";
 import { noteViews, type NoteView } from "./notes.ts";
 import { isMessageId, type MessageId } from "../i18n/messages.ts";
@@ -625,11 +626,35 @@ export function pictureFromAsset(item: AssetItem, overview: GenerationOverview |
   return { image: { ...base, source: "keyframe", shotId: shot.shotId, name: "" } };
 }
 
-/** The Keyframes preview's picture: the shot's current keyframe. */
-export function pictureFromShot(shot: ShotOverview): PictureCandidate {
+/**
+ * The Keyframes preview's picture: the shot's current keyframe. `library` is the shot's keyframes as the asset library
+ * lists them: a current keyframe a demo provider made is refused, as Assets refuses it (the Director is only told
+ * about those, never shown them).
+ */
+export function pictureFromShot(shot: ShotOverview, library: readonly AssetItem[] = []): PictureCandidate {
   const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact : undefined;
   if (!current) return { refused: msg("director.picture.no_keyframe", { shot: shot.label }) };
+  const listed = library.find((item) => item.artifact.artifactId === current.artifactId && item.artifact.sha256 === current.sha256);
+  if (listed?.source === "demo") return { refused: msg("director.picture.demo") };
   return { image: { artifactId: current.artifactId, sha256: current.sha256, source: "keyframe", shotId: shot.shotId, name: "" } };
+}
+
+/** GET /assets for one shot's keyframes (every page); the library says which provider made each one. */
+export const shotKeyframesPath = (shotId: string, offset: number) => `/assets?shotId=${encodeURIComponent(shotId)}&role=keyframe&offset=${offset}`;
+
+/**
+ * The preview's picture, checked against the asset library when it is pressed (the overview does not say whether a
+ * keyframe came from a demo provider). A library that cannot be read refuses for now, with a reason to try again.
+ */
+export async function checkedShotPicture(shot: ShotOverview, readPage: (offset: number) => Promise<AssetPage>): Promise<PictureCandidate> {
+  const plain = pictureFromShot(shot);
+  if ("refused" in plain) return plain;
+  try {
+    const { items } = await readAllAssets(readPage);
+    return pictureFromShot(shot, items);
+  } catch {
+    return { refused: msg("director.picture.check_failed", { shot: shot.label }) };
+  }
 }
 
 /** Add a picture to the message, or say why not: the Director cannot take pictures, it is already there, or four are. */

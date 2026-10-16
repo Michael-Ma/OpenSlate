@@ -71,6 +71,7 @@ export const director = {
   "director.picture.earlier_take": { en: "The Director only sees a shot's current keyframe, and this is an earlier take.", zh: "导演只能看到镜头当前的关键帧，这是较早的版本。" },
   "director.picture.former": { en: "This keyframe's shot is no longer in the film.", zh: "这张关键帧所属的镜头已不在影片中。" },
   "director.picture.no_keyframe": { en: "{shot} has no current keyframe to show.", zh: "{shot} 没有可以展示的当前关键帧。" },
+  "director.picture.check_failed": { en: "{shot}'s keyframe couldn't be checked just now. Try again in a moment.", zh: "暂时无法核对 {shot} 的关键帧，请稍后再试。" },
   "director.picture.not_current": { en: "{shot} has a newer keyframe. Remove its picture, then show the new one.", zh: "{shot} 有了新的关键帧。请移除这张图片，再加入新的关键帧。" },
   "director.picture.gone": { en: "A picture's shot was removed. Remove the picture to send.", zh: "有图片所属的镜头已被删除。移除这张图片后才能发送。" },
   "director.picture.points_at": { en: "This message also points at {shots}, so the Director sees {n, plural, one {its keyframe} other {their keyframes}}.", zh: "这条消息也会指向 {shots}，导演才能看到{n, plural, =1 {它的关键帧} other {这些关键帧}}。" },

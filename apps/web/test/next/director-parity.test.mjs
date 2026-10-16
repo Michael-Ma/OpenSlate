@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  pictureRefusal, pictureFromAsset, pictureFromShot, addPicture, pictureChips, composerView, messageBody, messageText,
+  pictureRefusal, pictureFromAsset, pictureFromShot, checkedShotPicture, shotKeyframesPath, addPicture, pictureChips, composerView, messageBody, messageText,
   userMessage, resolveRef, sentPictureName, labelList, draftToSave, readDraft, draftKey, failedTurns, heldEdits, threadView, withoutKeyframes, afterSend,
   PICTURE_LIMIT, MESSAGE_LIMIT,
 } from '../../src/next/model/director.ts';
@@ -52,6 +52,28 @@ test('the Keyframes preview offers the shot\'s current keyframe, and says so whe
   const overview = lastFerryOverview();
   assert.deepEqual(pictureFromShot(overview.shots[shotId('2.2')]), { image: keyframe22 });
   assert.equal(en(pictureFromShot(overview.shots[shotId('3.1')]).refused), '3.1 has no current keyframe to show.');
+});
+
+test('the preview checks the library like Assets does: a demo provider\'s keyframe is refused there too', async () => {
+  const shot = lastFerryOverview().shots[shotId('2.2')];
+  const listed = (source, artifact = artifactFor('2.2')) => ({ artifact: { ...artifact, kind: 'image' }, role: 'keyframe', shotId: shot.shotId, takeIndex: 1, current: true, source, label: 'k', createdAt: 'x' });
+  assert.match(en(pictureFromShot(shot, [listed('demo')]).refused), /demo stand-in/);
+  assert.deepEqual(pictureFromShot(shot, [listed('generated')]), { image: keyframe22 });
+  // An earlier demo take does not count against the current keyframe.
+  assert.deepEqual(pictureFromShot(shot, [listed('demo', artifactFor('2.2-old'))]), { image: keyframe22 });
+  // When pressed: every page of the shot's keyframes is read.
+  const paths = [];
+  const pages = [[listed('generated', artifactFor('2.2-old'))], [listed('demo')]];
+  const read = async (offset) => { paths.push(shotKeyframesPath(shot.shotId, offset)); const index = offset ? 1 : 0; return { assets: pages[index], total: 2, offset, nextOffset: index ? null : 1 }; };
+  assert.match(en((await checkedShotPicture(shot, read)).refused), /demo stand-in/);
+  assert.deepEqual(paths, [`/assets?shotId=${shotId('2.2')}&role=keyframe&offset=0`, `/assets?shotId=${shotId('2.2')}&role=keyframe&offset=1`]);
+  assert.deepEqual(await checkedShotPicture(shot, async (offset) => ({ assets: [listed('generated')], total: 1, offset, nextOffset: null })), { image: keyframe22 });
+  // A library that cannot be read refuses for now, in both languages; a shot with no keyframe is not read at all.
+  const failed = await checkedShotPicture(shot, async () => { throw new Error('offline'); });
+  assert.deepEqual([en(failed.refused), zh(failed.refused)], ["2.2's keyframe couldn't be checked just now. Try again in a moment.", '暂时无法核对 2.2 的关键帧，请稍后再试。']);
+  let reads = 0;
+  assert.match(en((await checkedShotPicture(lastFerryOverview().shots[shotId('3.1')], async () => { reads++; return { assets: [], total: 0, offset: 0, nextOffset: null }; })).refused), /no current keyframe/);
+  assert.equal(reads, 0);
 });
 
 test('adding pictures: the Director must take them, no picture twice, at most four', () => {

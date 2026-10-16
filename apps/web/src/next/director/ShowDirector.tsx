@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import type { PictureCandidate } from "../model/director.ts";
 import { NARROW_QUERY } from "../model/shell.ts";
@@ -36,12 +36,30 @@ export function useShowToDirector(): (candidate: PictureCandidate) => boolean {
   }, [store]);
 }
 
-/** The button itself, for the Assets detail and the Keyframes preview. */
-export function ShowDirectorButton({ candidate, label, className = "pill", onShown }: { candidate: PictureCandidate; label?: string; className?: string; onShown?(): void }) {
+/**
+ * The button itself, for the Assets detail and the Keyframes preview. `candidate` may be a check to run when it is
+ * pressed (the preview asks the asset library whether its keyframe came from a demo provider); the button is busy
+ * meanwhile, and a second press waits for the first.
+ */
+export function ShowDirectorButton({ candidate, label, className = "pill", onShown }: { candidate: PictureCandidate | (() => Promise<PictureCandidate>); label?: string; className?: string; onShown?(): void }) {
   const { t } = useI18n();
   const show = useShowToDirector();
+  const [checking, setChecking] = useState(false);
+  const busy = useRef(false);
+  const press = async () => {
+    if (busy.current) return;
+    if (typeof candidate !== "function") { if (show(candidate)) onShown?.(); return; }
+    busy.current = true;
+    setChecking(true);
+    try {
+      if (show(await candidate())) onShown?.();
+    } finally {
+      busy.current = false;
+      setChecking(false);
+    }
+  };
   return (
-    <button type="button" className={className} data-act="show-director" aria-label={label} onClick={() => { if (show(candidate)) onShown?.(); }}>
+    <button type="button" className={className} data-act="show-director" aria-label={label} aria-busy={checking || undefined} onClick={() => void press()}>
       {t("director.picture.show")}
     </button>
   );
