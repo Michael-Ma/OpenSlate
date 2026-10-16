@@ -144,10 +144,17 @@ async function pricedActionsFit(page, width) {
 /**
  * Every shot card holds its footer: one title line, the seconds with their unit, the status pill and the motion
  * inside the card, and the motion never squeezed below a word. The prompt over the picture shows whole lines only
- * (no slice of a clamped third line), and the badge and the note chips sit side by side, tops aligned.
+ * (no slice of a clamped third line), and the badge and the note chips sit side by side, tops aligned. A chip shows
+ * whole words, as many as fit, and never a lone "…".
  */
 async function cardsFit(page, where) {
-  const problems = await page.evaluate(() => {
+  // The chips refit a frame after their room resizes, so a new window size gets a moment to settle.
+  const problems = await until(page, () => cardProblems(page), (list) => !list.length, `Shot cards break at ${where}`, 2000).catch((error) => [error.message]);
+  expect(!problems.length, problems.join("; "));
+}
+
+function cardProblems(page) {
+  return page.evaluate(() => {
     const out = [];
     const rect = (element) => element.getBoundingClientRect();
     for (const card of document.querySelectorAll(".kf-row .card[data-card]")) {
@@ -180,11 +187,21 @@ async function cardsFit(page, where) {
         const a = rect(badge), b = rect(chip);
         if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) out.push(`${id}: a note chip overlaps the badge`);
         if (Math.abs(a.top - b.top) > 1.5 && chip === card.querySelector(".callout .anno")) out.push(`${id}: the chip and the badge are not aligned (${a.top} vs ${b.top})`);
+        // A chip shows whole words: all of them, the first ones up to a word with "…" and the last word whole, or
+        // the last word alone. Never a lone "…", a word cut through, or nothing where the last word would fit.
+        const fit = chip.dataset.fit;
+        const words = chip.querySelector(".anno-words"), head = chip.querySelector(".anno-head"), tail = chip.querySelector(".anno-tail");
+        if (!fit) { out.push(`${id}: a chip was never fitted`); continue; }
+        if (fit === "none") out.push(`${id}: a chip shows none of its words (${Math.round(rect(chip.closest(".callout")).width)}px of room)`);
+        if (tail && fit !== "none" && rect(tail).right > rect(words).right + 0.5) out.push(`${id}: the chip's last word "${tail.textContent}" is cut`);
+        if (fit === "whole" && head.scrollWidth > head.clientWidth + 1) out.push(`${id}: a whole chip cuts "${head.textContent}"`);
+        if (fit === "cut" && rect(head).width < 24) out.push(`${id}: a cut chip shows a lone "…"`);
+        // A cut head is as wide as its words up to the cut and the "…"; squeezed narrower, it would end mid-word.
+        if (fit === "cut" && rect(head).width < parseFloat(head.style.maxWidth) - 0.1) out.push(`${id}: a cut chip ends mid-word ("${head.textContent}" in ${rect(head).width}px)`);
       }
     }
     return out;
   });
-  expect(!problems.length, `Shot cards break at ${where}: ${problems.join("; ")}`);
 }
 
 /**
@@ -480,6 +497,14 @@ export const scenarios = [
       // 2.2's note link is off while its clip is made: a solid backing (the picture never shows through) and a reason.
       const link = await page.locator("[data-card='shot-2-2'] [data-act='note-regenerate']").evaluate((element) => ({ disabled: element.disabled, title: element.title, background: getComputedStyle(element).backgroundColor, opacity: getComputedStyle(element).opacity }));
       expect(link.disabled && link.title === "Wait for 2.2's clip to finish." && /^rgb\(/.test(link.background) && link.opacity === "1", `The held note link is not legible or does not say why: ${JSON.stringify(link)}`);
+      // The settled note's chip keeps its letter, its check and its point however narrow the card.
+      for (const width of [1440, 1100, 900]) {
+        await page.setViewportSize({ width, height: 900 });
+        await cardsFit(page, `running at ${width}`);
+        const settled = await page.locator("[data-card='shot-2-3'] .anno[data-note='note-b']").evaluate((chip) => ({ fit: chip.dataset.fit, check: !!chip.querySelector(".anno-check"), words: chip.querySelector(".anno-words")?.innerText.replace(/\s+/g, " ").trim() }));
+        expect(settled.check && settled.fit !== "none" && /8\s?s$/.test(settled.words), `The settled chip says nothing at ${width}: ${JSON.stringify(settled)}`);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
       await shot(page, "next-shell-running-1440");
       const stop = page.locator(".topbar [data-act='stop-film']");
       expect((await stop.innerText()).trim() === "Stop", `Stop reads "${await stop.innerText()}"`);

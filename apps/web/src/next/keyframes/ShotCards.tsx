@@ -1,15 +1,32 @@
 import { useEffect, useId, useRef } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
+import { chipParts } from "../model/chip-fit.ts";
 import { checkCallout } from "../model/checks.ts";
 import type { ShotCard } from "../model/keyframes.ts";
 import { revealScroll } from "../model/keyframes-layout.ts";
 import type { Label, NoteCallout } from "../model/note-banner.ts";
 import type { Msg } from "../model/types.ts";
 import { Picture, StatusPill } from "./parts.tsx";
+import { useChipFit } from "./useChipFit.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 
 /** Columns the wide layout shows at once; more cards scroll inside the row, fewer leave a dashed placeholder. */
 const VISIBLE = 3;
+
+/**
+ * A chip's words on one line, as many as its room holds (useChipFit): all of them, the first ones up to a word and
+ * "…" before the last word ("Mara's coat… maroon"), the last word alone, or none. Screen readers get the chip's text
+ * whole.
+ */
+function ChipWords({ text }: { text: string }) {
+  const { head, tail, cuts } = chipParts(text);
+  return (
+    <span className="anno-words" aria-hidden="true">
+      <span className="anno-head" data-cuts={cuts.join(",")}>{head}</span>
+      {tail ? <span className="anno-tail">{tail}</span> : null}
+    </span>
+  );
+}
 
 /**
  * One card per shot: picture (or the dashed prompt), badge, prompt over the picture, title and seconds,
@@ -37,6 +54,14 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
   const run = useGuarded("run");
   const selectedId = cards.find((card) => card.selected)?.shotId;
   const idBase = useId();
+
+  // Each chip shows what its room holds; it fits again when the words change (a settled note, the language).
+  const chipWords = cards.map((card) => [
+    card.shotId,
+    ...(notes[card.shotId] ?? []).map((note) => `${note.noteId}:${note.done && note.doneLabel ? label(note.doneLabel) : note.text}`),
+    ...card.callouts.map(({ check }) => tm(checkCallout(check))),
+  ].join("|")).join("/");
+  useChipFit(row, chipWords);
 
   // Keep the selected card in view when the row scrolls sideways (many shots, or the narrow layout).
   // Only the row scrolls; the page never moves.
@@ -94,36 +119,43 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
                 <span className="badge">{card.label}</span>
                 {cardNotes.length || card.callouts.length ? (
                   <div className="callout">
-                    {cardNotes.map((note) => (
-                      <span key={note.noteId} className="callout-note">
-                        <span className={`anno${note.done ? " done" : ""}`} data-note={note.noteId} data-state={note.done ? "settled" : "open"}>
-                          <span className="letter">{note.letter}</span>
-                          <span className="anno-text">{note.done && note.doneLabel ? t("note.callout.done", { choice: label(note.doneLabel) }) : note.text}</span>
+                    {cardNotes.map((note) => {
+                      const settled = note.done && note.doneLabel ? label(note.doneLabel) : null;
+                      return (
+                        <span key={note.noteId} className="callout-note">
+                          {/* Settled, the chip keeps its letter and check even where none of its words fit. */}
+                          <span className={`anno${note.done ? " done" : ""}`} data-note={note.noteId} data-state={note.done ? "settled" : "open"}>
+                            <span className="letter">{note.letter}</span>
+                            <span className="sr-only">{settled !== null ? t("note.callout.done", { choice: settled }) : note.text}</span>
+                            {settled !== null ? <span className="anno-check" aria-hidden="true">✓</span> : null}
+                            <ChipWords text={settled ?? note.text} />
+                          </span>
+                          {note.regenerate ? (
+                            <button
+                              type="button"
+                              className="link"
+                              data-act="note-regenerate"
+                              data-note={note.noteId}
+                              data-shot={card.shotId}
+                              {...run}
+                              title={held && isHeld ? tm(held) : run.title ?? (note.regenerate.wait ? tm(note.regenerate.wait) : label(note.regenerate.label))}
+                              disabled={isHeld || busy || run.disabled || !note.regenerate.enabled}
+                              onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}
+                            >
+                              {/* One line with its price where the card has room; on a narrow card the price wraps under it. */}
+                              <span className="link-words">{tm(note.regenerate.take)} ·</span>{" "}
+                              <span className="link-price">{note.regenerate.price ? tm(note.regenerate.price) : null}</span>
+                              <span className="sr-only"> · {note.regenerate.shots}</span>
+                            </button>
+                          ) : null}
                         </span>
-                        {note.regenerate ? (
-                          <button
-                            type="button"
-                            className="link"
-                            data-act="note-regenerate"
-                            data-note={note.noteId}
-                            data-shot={card.shotId}
-                            {...run}
-                            title={held && isHeld ? tm(held) : run.title ?? (note.regenerate.wait ? tm(note.regenerate.wait) : label(note.regenerate.label))}
-                            disabled={isHeld || busy || run.disabled || !note.regenerate.enabled}
-                            onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}
-                          >
-                            {/* One line with its price where the card has room; on a narrow card the price wraps under it. */}
-                            <span className="link-words">{tm(note.regenerate.take)} ·</span>{" "}
-                            <span className="link-price">{note.regenerate.price ? tm(note.regenerate.price) : null}</span>
-                            <span className="sr-only"> · {note.regenerate.shots}</span>
-                          </button>
-                        ) : null}
-                      </span>
-                    ))}
+                      );
+                    })}
                     {card.callouts.map(({ letter, check }) => (
                       <span key={check.shotId} className="anno check" data-check={check.shotId}>
                         <span className="letter">{letter}</span>
-                        <span className="anno-text">{tm(checkCallout(check))}</span>
+                        <span className="sr-only">{tm(checkCallout(check))}</span>
+                        <ChipWords text={tm(checkCallout(check))} />
                       </span>
                     ))}
                   </div>

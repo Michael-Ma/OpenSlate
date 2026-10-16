@@ -43,10 +43,10 @@
 .banner .tl-sizer > div { display: flex; width: max-content; }
 .banner .tl-sizer .seg { flex: none; width: auto; min-width: 0; max-width: none; }
 .callout .callout-note { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; max-width: 100%; }
-/* The picture's top row: the badge, then the chips from 6 px after it to the right edge, tops aligned (both are
-   20 px tall). Chips never cover the badge; a chip is one line ending in "…", and the card's tooltip and
-   description carry the whole note. */
-.card .pic .pic-head { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 2; display: flex; align-items: flex-start; gap: 6px; pointer-events: none; }
+/* The picture's top row: the badge, then the chips from 4 px after it to the right edge, tops aligned (both are
+   20 px tall). Chips never cover the badge; a chip is one line, and the card's tooltip and description carry the
+   whole note. */
+.card .pic .pic-head { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 2; display: flex; align-items: flex-start; gap: 4px; pointer-events: none; }
 .card .pic .pic-head .badge { position: static; flex: none; line-height: 16px; }
 .card .pic-head .callout { position: static; flex: 1 1 auto; min-width: 0; }
 /* A chip is a label: a click on it opens the card; only the regenerate link is its own control. It is one short
@@ -54,8 +54,19 @@
    never inside them. It sits under the chip, below the badge, so it may run left under the badge's column. */
 .card .callout .link { position: relative; pointer-events: auto; width: max-content; max-width: calc(100% + 36px); text-align: right; line-height: 1.25; }
 .card .callout .link .link-words, .card .callout .link .link-price { white-space: nowrap; }
-.card .callout .anno { max-width: 100%; min-width: 0; }
-.card .callout .anno-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A card's chip is a little tighter than the design's (11 px, 3 px inside) so more of the note shows beside the badge.
+   Its words take what room is left, as many as fit (useChipFit, model/chip-fit.ts): whole; the first ones up to a word
+   and "…", then the last word whole ("Mara's coat… maroon"); the last word alone; or none, never a lone "…". */
+.card .callout .anno { max-width: 100%; min-width: 0; gap: 3px; padding: 2px 6px 2px 2px; font-size: 11px; }
+.card .callout .anno.done, .card .callout .anno.check { padding: 1px 5px 1px 1px; }
+.card .callout .anno-check { flex: none; }
+.card .callout .anno-words { display: flex; min-width: 0; overflow: hidden; white-space: nowrap; }
+.card .callout .anno-head { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.card .callout .anno-tail { flex: none; margin-left: .3em; }
+.card .callout .anno[data-fit="tail"] .anno-head { display: none; }
+.card .callout .anno[data-fit="tail"] .anno-tail { margin-left: 0; }
+.card .callout .anno[data-fit="none"] .anno-words { display: none; }
+.card .callout .anno[data-fit="none"]:not(.done) { padding-right: 2px; }
 /* Off, the link keeps a solid backing over the picture and greys its words; its tooltip says why. */
 .callout .link:disabled { background: var(--ground); color: var(--muted); text-decoration-color: var(--track); cursor: not-allowed; }
 
