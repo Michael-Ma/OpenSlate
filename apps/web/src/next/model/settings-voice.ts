@@ -1,3 +1,6 @@
+import { ApiError } from "../api/client.ts";
+import { errorMsg } from "../i18n/translate.ts";
+import type { StudioStore } from "../store/store.ts";
 import type { Request } from "./settings.ts";
 import { settingsRequest } from "./settings-ownership.ts";
 import { msg, type Msg } from "./types.ts";
@@ -106,16 +109,54 @@ export async function prepareNarratorUndo(
   origin: NarratorOrigin,
   read: <T>(path: string) => Promise<T>,
   current: () => { projectId: string | null; projectEpoch: number },
-): Promise<{ request: Request; target: string; voices: PersonalVoice[] } | null> {
+): Promise<{ request: Request; target: string; voices: PersonalVoice[] } | { kind: "waiting" } | null> {
   if (!narratorOriginCurrent(origin, current())) return null;
   const base = `/api/projects/${encodeURIComponent(origin.projectId)}`;
   const [voice, personal] = await Promise.all([
     read<VoiceSetting>(`${base}/settings/voice`),
     read<PersonalVoices>(`${base}/narration/personal-voices`),
   ]);
-  if (!narratorOriginCurrent(origin, current()) || voice.headVersion !== personal.headVersion) return null;
+  if (!narratorOriginCurrent(origin, current())) return null;
+  if (voice.headVersion !== personal.headVersion) return { kind: "waiting" };
   const target = undoTarget(undo, voice.narratorVoice, personal.voices);
   return target ? { request: settingsRequest(origin.projectId, narratorRequest(target, voice.headVersion)), target, voices: personal.voices } : null;
+}
+
+export const NARRATOR_PRESS = "settings:narrator";
+
+/** Offer one human Undo, retaining the same callback when its fresh reads temporarily disagree. */
+export function offerNarratorUndo(
+  store: Pick<StudioStore, "read" | "getState" | "command" | "dispatch" | "toastUndo">,
+  origin: NarratorOrigin,
+  change: NarratorUndo,
+  message: Msg,
+  callbacks: { reload(): void; saved(): void },
+): void {
+  const active = () => narratorOriginCurrent(origin, store.getState());
+  if (!active()) return;
+  const undo = async () => {
+    try {
+      const prepared = await prepareNarratorUndo(change, origin, store.read.bind(store), store.getState);
+      if (!active()) return;
+      if (prepared && "kind" in prepared) {
+        callbacks.reload();
+        if (active()) store.toastUndo(message, undo);
+        return;
+      }
+      if (!prepared) {
+        store.dispatch({ type: "toast", message: errorMsg("REVISION_CONFLICT"), tone: "error" });
+        callbacks.reload();
+        return;
+      }
+      const result = await store.command(NARRATOR_PRESS, prepared.request.body, () => prepared.request);
+      if (!result || !active()) return;
+      store.dispatch({ type: "toast", message: msg("set.toast.narrator", { name: narratorName(prepared.target, prepared.voices) }), tone: "info" });
+      callbacks.saved();
+    } catch (error) {
+      if (active()) store.dispatch({ type: "toast", message: errorMsg(error instanceof ApiError ? error.code : "NETWORK_ERROR"), tone: "error" });
+    }
+  };
+  store.toastUndo(message, undo);
 }
 
 export const narratorRequest =(voice: string, headVersion: number): Request => ({ path: "/settings/voice", body: { narratorVoice: voice, expectedHeadVersion: headVersion } });
@@ -183,6 +224,28 @@ export function registerRequest(draft: VoiceDraft, headVersion: number): Request
     path: "/narration/personal-voices",
     body: { expectedHeadVersion: headVersion, label: draft.label.trim(), provider: draft.provider, providerVoiceId: draft.voiceId.trim(), ownVoice: true, permitSynthesis: true },
   };
+}
+
+/** The head belongs to an actual sent registration, rather than to opening this new-identity form. */
+export interface VoiceRegistrationForm {
+  value: VoiceDraft;
+  submittedHeadVersion?: number;
+}
+
+/**
+ * Registration creates a new identity, so unrelated saved fields cannot conflict with it. A fresh
+ * human press uses the current coherent displayed head. Only an exact unanswered command keeps its
+ * original head/body, allowing the store to replay the same identity without a second registration.
+ */
+export function prepareVoiceRegistration(
+  form: VoiceRegistrationForm,
+  head: number | null,
+  wouldResend: (logical: unknown) => boolean,
+): { request: Request; submitted: VoiceRegistrationForm } | null {
+  if (head === null) return null;
+  const savedHead = form.submittedHeadVersion;
+  const expected = savedHead !== undefined && wouldResend(registerRequest(form.value, savedHead).body) ? savedHead : head;
+  return { request: registerRequest(form.value, expected), submitted: { ...form, submittedHeadVersion: expected } };
 }
 
 export const revokeRequest = (identityId: string): Request => ({ path: `/narration/personal-voices/${encodeURIComponent(identityId)}/revoke`, body: {} });

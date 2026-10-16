@@ -11,6 +11,7 @@ import {
 import { addPicture, messageBody, pictureKey, type Draft, type PictureCandidate } from "../model/director.ts";
 import { confirmPress, keyframesPress, PAID_PRESS } from "../model/keyframes-press.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
+import { editConflict, editValues, motionForm, sameEditForm } from "../model/edit-conflict.ts";
 import { displayedHead } from "../model/displayed-baseline.ts";
 import { keyframeEstimate } from "../model/price.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
@@ -38,6 +39,23 @@ export const DISCONNECT_PRESS = "session:disconnect";
 /** A logout refused because the session had already ended: the window is disconnected all the same. */
 const SESSION_GONE = new Set(["AUTH_REQUIRED", "SESSION_CLOSED"]);
 const path = (projectId: string, rest = "") => `/api/projects/${encodeURIComponent(projectId)}${rest}`;
+
+/** Feedback for a human save or an internal step of a larger action. */
+export interface EditSaveFeedback {
+  /** null suppresses success feedback; omitted keeps the ordinary Saved toast. */
+  toast?: Msg | null;
+  /** Internal recording preparation/rollback must not publish errors or successes of its own. */
+  quiet?: boolean;
+}
+
+interface PendingEditBody {
+  kind: "shot" | "shotFields" | "narration";
+  id: string;
+  field?: string;
+  value?: string;
+  fields?: { motion: string; desiredFrames: number };
+  expectedHeadVersion: number;
+}
 
 /** Definite refusals: the request was answered and will not succeed by resending it. */
 const definite = (error: unknown) => error instanceof CommandRefused || (error instanceof ApiError && error.status >= 400 && error.status < 500);
@@ -187,14 +205,14 @@ export class StudioStore {
    * Run one press with a stable request identity. A lost reply keeps the saved key and body, so the
    * next press of the same thing resends them and the server replays its receipt.
    */
-  async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg, timeoutMs?: number, backgroundResult = false): Promise<T | undefined> {
+  async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg, timeoutMs?: number, backgroundResult = false, quiet = false): Promise<T | undefined> {
     const keys = this.#keys;
     const { projectId, projectEpoch } = this.#state;
     const current = () => projectId === this.#state.projectId && projectEpoch === this.#state.projectEpoch;
     if (this.#state.pending[pressId]) return undefined;
     // A restored studio in recovery review is read-only: nothing is sent, and the one reason is said.
     if (recoveryReadOnly(this.#state)) {
-      this.dispatch({ type: "toast", message: RECOVERY_LOCK, tone: "error" });
+      if (!quiet) this.dispatch({ type: "toast", message: RECOVERY_LOCK, tone: "error" });
       return undefined;
     }
     this.dispatch({ type: "pending", pressId, pending: true });
@@ -212,7 +230,7 @@ export class StudioStore {
     } catch (error) {
       if (definite(error) && requestKey) keys.settle(pressId, requestKey);
       // Only a request that was sent can have lost its reply; one that failed before sending says why.
-      if (current()) this.#fail(error, !definite(error) && PAID_PRESS.test(pressId) && keys.saved(pressId)?.logical === canonicalJson(logical));
+      if (current()) this.#fail(error, !definite(error) && PAID_PRESS.test(pressId) && keys.saved(pressId)?.logical === canonicalJson(logical), quiet);
       if (current() && definite(error)) void this.refresh();
       return undefined;
     } finally {
@@ -221,10 +239,10 @@ export class StudioStore {
   }
 
   /** `unconfirmedPaid`: a paid press whose reply was lost; pressing again resends its saved key and body. */
-  #fail(error: unknown, unconfirmedPaid = false): void {
+  #fail(error: unknown, unconfirmedPaid = false, quiet = false): void {
     this.#deps.onError?.(error);
     const code = error instanceof ApiError || error instanceof CommandRefused ? error.code : "NETWORK_ERROR";
-    this.dispatch({ type: "toast", message: unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code), tone: "error" });
+    if (!quiet) this.dispatch({ type: "toast", message: unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code), tone: "error" });
     // The studio says it is in recovery review while this page did not know: read the status, so the page turns read-only.
     if (code === "INSTALLATION_QUARANTINED") void this.readRecovery();
   }
@@ -305,12 +323,12 @@ export class StudioStore {
    * Storyboard edits are free. The toast offers Undo with the returned command id. Resolves to the command id
    * (a Director note links its "edit" choice to it), or null when the edit was not saved.
    */
-  async edit(edit: StoryboardEdit, toast?: Msg): Promise<string | null> {
+  async edit(edit: StoryboardEdit, toast?: Msg | null): Promise<string | null> {
     const snapshot = this.#state.snapshot;
     if (!snapshot) return null;
     const body = { ...edit, expectedHeadVersion: snapshot.project.headVersion };
     const pressId = `edit:${edit.kind}:${"id" in edit ? edit.id : edit.commandId}`;
-    const receipt = await this.#press<{ commandId: string }>(pressId, body, async () => ({ path: path(snapshot.project.id, "/storyboard"), body }));
+    const receipt = await this.#press<{ commandId: string }>(pressId, body, async () => ({ path: path(snapshot.project.id, "/storyboard"), body }), undefined, undefined, false, toast === null);
     if (!receipt) return null;
     if (toast) this.dispatch({ type: "toast", message: toast, tone: "info", ...(edit.kind !== "undo" ? { undoCommandId: receipt.commandId } : {}) });
     return receipt.commandId || null;
@@ -341,33 +359,90 @@ export class StudioStore {
     void held.run();
   }
 
-  async saveEdit(draft: EditDraft, motionSeconds?: number): Promise<string | null> {
-    const original = this.#state.edit;
-    const { projectId, projectEpoch, snapshot } = this.#state;
-    if (!original || !snapshot || draft.projectId !== projectId || original.projectId !== projectId || draft.revision !== original.revision || original.expectedHeadVersion !== snapshot.project.headVersion) {
-      this.dispatch({ type: "toast", message: msg("error.EDIT_BASELINE_CHANGED"), tone: "error" });
-      return null;
+  /** An unanswered edit is a saved request to check, never fresh authority over a changed field. */
+  #pendingEdit(draft: EditDraft): { pressId: string; path: string; body: PendingEditBody; feedback?: NonNullable<EditDraft["saveFeedback"]>; keepOpen?: boolean } | null {
+    if (!draft.projectId || draft.projectId !== this.#state.projectId) return null;
+    const kinds = motionForm(draft.field) ? ["shotFields", "shot"] : [draft.field === "narration" ? "narration" : "shot"];
+    for (const kind of kinds) {
+      const pressId = `edit:${kind}:${draft.shotId}`;
+      const saved = this.#keys.saved(pressId);
+      const request = saved?.body as { path?: string; body?: PendingEditBody; feedback?: NonNullable<EditDraft["saveFeedback"]>; keepOpen?: boolean } | undefined;
+      const body = request?.body;
+      if (!body || request!.path !== path(draft.projectId, "/storyboard") || body.id !== draft.shotId || body.kind !== kind
+        || !Number.isSafeInteger(body.expectedHeadVersion) || saved!.logical !== canonicalJson(body)) continue;
+      const valid = kind === "shotFields" ? body.fields && typeof body.fields.motion === "string" && Number.isSafeInteger(body.fields.desiredFrames)
+        : typeof body.value === "string" && (kind === "narration" ? body.field === "text" : body.field === draft.field);
+      if (valid) return { pressId, path: request!.path!, body, ...(request!.feedback ? { feedback: request!.feedback } : {}), ...(typeof request!.keepOpen === "boolean" ? { keepOpen: request!.keepOpen } : {}) };
     }
-    const submitted = { ...original, ...draft, saving: true };
-    this.dispatch({ type: "edit", edit: submitted });
+    return null;
+  }
+
+  canReconcileEdit = (draft: EditDraft | null): boolean => {
+    const saved = draft && this.#pendingEdit(draft);
+    return !!saved && !this.#state.pending[saved.pressId];
+  };
+
+  reconcileEdit = (): Promise<string | null> => {
+    const draft = this.#state.edit;
+    const saved = draft && this.#pendingEdit(draft);
+    if (!draft || !saved) return Promise.resolve(null);
+    const seconds = saved.body.kind === "shotFields" ? Number(draft.secondsText ?? saved.body.fields!.desiredFrames / (this.#state.overview?.fps ?? 24)) : undefined;
+    return this.saveEdit(draft, seconds, false, true);
+  };
+
+  async saveEdit(draft: EditDraft, motionSeconds?: number, keepOpen = false, reconcile = false, feedback: EditSaveFeedback = {}): Promise<string | null> {
+    const original = this.#state.edit;
+    const { projectId, projectEpoch, snapshot, overview } = this.#state;
+    if (!original || original.saving || !snapshot || draft.projectId !== projectId || original.projectId !== projectId
+      || draft.shotId !== original.shotId || !sameEditForm(draft.field, original.field) || draft.revision !== original.revision) return null;
+    const head = displayedHead(projectId, snapshot, overview);
+    const conflict = editConflict(original, overview, head);
+    if (conflict.kind === "waiting") return null;
     const edit = motionSeconds !== undefined
-      ? { kind: "shotFields", id: draft.shotId, fields: { motion: draft.value, desiredFrames: Math.round(motionSeconds * (this.#state.overview?.fps ?? 24)) } }
+      ? { kind: "shotFields", id: draft.shotId, fields: { motion: draft.value, desiredFrames: Math.round(motionSeconds * overview!.fps) } }
       : draft.field === "narration"
         ? { kind: "narration", id: draft.shotId, field: "text", value: draft.value }
         : { kind: "shot", id: draft.shotId, field: draft.field, value: draft.value };
-    const body = { ...edit, expectedHeadVersion: original.expectedHeadVersion };
-    const receipt = await this.#press<{ commandId: string; headVersion?: number }>(`edit:${edit.kind}:${draft.shotId}`, body, async () => ({ path: path(projectId!, "/storyboard"), body }));
+    const candidateBody = { ...edit, expectedHeadVersion: head! };
+    const pressId = `edit:${edit.kind}:${draft.shotId}`;
+    if (this.#state.pending[pressId]) return null;
+    const target = path(projectId!, "/storyboard");
+    const previous = this.#pendingEdit(draft);
+    const sameInput = !!previous && canonicalJson({ ...previous.body, expectedHeadVersion: head }) === canonicalJson(candidateBody);
+    const replay = previous && (sameInput || reconcile);
+    if (previous && !sameInput && !reconcile) return null;
+    const originalFeedback = replay ? previous.feedback ?? original.saveFeedback : undefined;
+    const output = originalFeedback ?? { message: feedback.toast === undefined ? msg("toast.saved") : feedback.toast, quiet: feedback.quiet === true };
+    if (conflict.kind === "changed" && !replay) {
+      if (!output.quiet) this.dispatch({ type: "toast", message: msg("error.EDIT_BASELINE_CHANGED"), tone: "error" });
+      return null;
+    }
+    const body = replay ? previous.body : candidateBody;
+    const savedValue = body.kind === "shotFields" ? body.fields!.motion : body.value!;
+    const savedFrames = body.kind === "shotFields" ? body.fields!.desiredFrames : undefined;
+    const retain = keepOpen || !!(replay && (previous.keepOpen ?? original.keepOpenAfterSave));
+    const submitted = { ...original, ...draft, saving: true, expectedHeadVersion: body.expectedHeadVersion, keepOpenAfterSave: retain, saveFeedback: output };
+    this.dispatch({ type: "edit", edit: submitted });
+    const receipt = await this.#press<{ commandId: string; headVersion?: number }>(pressId, body, async () => ({ path: target, body, feedback: output, keepOpen: retain }), undefined, undefined, false, output.quiet);
     if (projectEpoch !== this.#state.projectEpoch || projectId !== this.#state.projectId) return null;
     const current = this.#state.edit;
-    // Cancel, a different form, or fresh typing must never be replaced by the submitted text.
-    if (current?.shotId === original.shotId && current.projectId === projectId && current.revision === original.revision) {
-      this.dispatch({ type: "edit", edit: receipt ? null : { ...current, saving: false } });
-    } else if (current?.shotId === original.shotId && current.field === original.field && current.projectId === projectId && current.saving) {
-      this.dispatch({ type: "edit", edit: { ...current, saving: false,
-        ...(receipt ? { expectedHeadVersion: receipt.headVersion ?? original.expectedHeadVersion! + 1, baselineValue: submitted.value,
-          ...(motionSeconds !== undefined ? { baselineMotion: submitted.value, baselineFrames: Math.round(motionSeconds * (this.#state.overview?.fps ?? 24)) } : {}) } : {}) } });
+    // Only this form's submitted revision or its newer typing may be updated; Cancel/reopen is another owner.
+    if (current?.shotId === original.shotId && sameEditForm(current.field, original.field) && current.projectId === projectId
+      && (current.revision === original.revision || current.saving)) {
+      const savedHead = receipt?.headVersion ?? body.expectedHeadVersion + 1;
+      const now = this.#state;
+      const shownHead = displayedHead(now.projectId, now.snapshot, now.overview);
+      const shownShot = now.overview?.shots[current.shotId];
+      const shown = shownShot && editValues(current.field, shownShot);
+      const newerSavedValue = shownHead !== null && shownHead > savedHead && shown
+        && (savedFrames !== undefined ? shown.motion !== savedValue || shown.durationFrames !== savedFrames : shown.value !== savedValue);
+      const next = receipt ? { ...current, saving: false, expectedHeadVersion: savedHead,
+        baselineValue: savedValue,
+        ...(savedFrames !== undefined ? { baselineMotion: savedValue, baselineFrames: savedFrames } : {}) } : { ...current, saving: false };
+      this.dispatch({ type: "edit", edit: receipt && current.revision === original.revision && !retain
+        && (!replay || sameInput) && !newerSavedValue ? null : next });
     }
-    if (receipt) this.dispatch({ type: "toast", message: msg("toast.saved"), tone: "info", undoCommandId: receipt.commandId });
+    if (receipt && output.message && !output.quiet) this.dispatch({ type: "toast", message: output.message, tone: "info", undoCommandId: receipt.commandId });
     return receipt?.commandId ?? null;
   }
 
@@ -593,8 +668,8 @@ export class StudioStore {
     const { projectId, snapshot, overview, edit } = this.#state;
     const head = displayedHead(projectId, snapshot, overview);
     const shot = edit && overview?.shots[edit.shotId];
-    if (!edit || !shot || head === null) { this.#fail(new CommandRefused("PROJECTION_CHANGED")); return; }
-    const saved = edit.field === "narration" ? shot.narration.text : edit.field === "desiredFrames" ? String(shot.durationFrames) : shot[edit.field];
+    if (!edit || !shot || head === null) return;
+    const saved = editValues(edit.field, shot).value;
     this.dispatch({ type: "edit", edit: { ...edit, saving: false, value: keepText ? edit.value : saved,
       baselineValue: saved, baselineMotion: shot.motion, baselineFrames: shot.durationFrames, expectedHeadVersion: head,
       ...(!keepText ? { secondsText: String(Math.round(shot.durationFrames / overview!.fps)) } : {}), revision: ++this.#editRevision } });
@@ -604,11 +679,16 @@ export class StudioStore {
     const current = this.#state.edit;
     if (current && current.shotId !== edit.shotId) return;
     const shot = this.#state.overview?.shots[edit.shotId];
-    const motionForm = (field: EditDraft["field"]) => field === "motion" || field === "desiredFrames";
-    const same = current?.shotId === edit.shotId && (current.field === edit.field || motionForm(current.field) && motionForm(edit.field)) && current.projectId === this.#state.projectId;
+    const same = current?.shotId === edit.shotId && sameEditForm(current.field, edit.field) && current.projectId === this.#state.projectId;
+    const legacy = edit.expectedHeadVersion === -1;
+    const baselineValue = edit.baselineValue ?? (!legacy && shot ? editValues(edit.field, shot).value : undefined);
+    const baselineMotion = edit.baselineMotion ?? (!legacy ? shot?.motion : undefined);
+    const baselineFrames = edit.baselineFrames ?? (!legacy ? shot?.durationFrames : undefined);
     const base = same ? current : { ...(this.#state.projectId ? { projectId: this.#state.projectId } : {}),
       ...((edit.expectedHeadVersion ?? this.#state.overview?.headVersion ?? this.#state.snapshot?.project.headVersion) !== undefined ? { expectedHeadVersion: (edit.expectedHeadVersion ?? this.#state.overview?.headVersion ?? this.#state.snapshot?.project.headVersion)! } : {}),
-      baselineValue: edit.baselineValue ?? edit.value, ...(shot ? { baselineMotion: edit.baselineMotion ?? shot.motion, baselineFrames: edit.baselineFrames ?? shot.durationFrames } : {}),
+      ...(baselineValue !== undefined ? { baselineValue } : {}),
+      ...(baselineMotion !== undefined ? { baselineMotion } : {}),
+      ...(baselineFrames !== undefined ? { baselineFrames } : {}),
       ...(shot ? { secondsText: String(Math.round(shot.durationFrames / this.#state.overview!.fps)) } : {}) };
     this.dispatch({ type: "edit", edit: { ...edit, ...base, field: edit.field, value: edit.value, ...(edit.secondsText !== undefined ? { secondsText: edit.secondsText } : {}), revision: ++this.#editRevision } });
   };

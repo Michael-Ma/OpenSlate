@@ -5,6 +5,10 @@ import { useGuarded } from "../app/useWriteGuard.ts";
 import { useI18n } from "../i18n/I18n.tsx";
 import { lineEstimate, lineEstimateMsg } from "../model/checks.ts";
 import type { StoryboardEdit } from "../model/commands.ts";
+import { displayedHead } from "../model/displayed-baseline.ts";
+import { editConflict } from "../model/edit-conflict.ts";
+import { runNarrationEdits } from "../model/narration-edits.ts";
+import { rollbackRecordingWords, saveRecordingWords, type RecordingWordSave } from "../model/recording-words.ts";
 import { editImpact } from "../model/inspector.ts";
 import {
   choiceLabel,
@@ -65,6 +69,7 @@ interface Props {
   detail: Resource<ShotNarrationRead>;
   /** A narration edit is in flight. */
   saving: boolean;
+  saveBlocked: Msg | null;
   /** Opened from the row's Listen: the player takes focus once the take has loaded. */
   focusTake: boolean;
   onEdit(draft: EditDraft | null): void;
@@ -96,7 +101,7 @@ const aborted = (error: unknown, signal: AbortSignal) => signal.aborted || (erro
  * Leaving the person's recording says so (it stays in Assets) and, for a line, prices the voice line to be made.
  * A shot set to "My recording" whose take is still a voice line says that the voice line plays until one is added.
  */
-export function NarrationPanel({ shot, fps, draft, detail, saving, focusTake, onEdit, onSaveDraft }: Props) {
+export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, focusTake, onEdit, onSaveDraft }: Props) {
   const { t, tm, locale } = useI18n();
   const store = useStore();
   const mode = useMode();
@@ -163,13 +168,13 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, focusTake, on
    * Storyboard narration edits, in turn: each needs the film version the one before it produced. Only the last
    * one's toast is shown, with its Undo (the studio undoes only its latest command); that toast says so.
    */
-  const run = async (edits: { edit: StoryboardEdit; toast: Msg }[]): Promise<boolean> => {
-    for (const [index, { edit, toast }] of edits.entries()) {
-      if (index > 0) await store.refresh();
-      if (!(await store.edit(edit, index === edits.length - 1 ? toast : undefined))) return false;
-    }
-    return true;
+  const canWrite = () => {
+    const state = store.getState();
+    return mounted.current && state.projectId === draft.projectId && state.edit?.revision === draft.revision
+      && editConflict(draft, state.overview, displayedHead(state.projectId, state.snapshot, state.overview)).kind === "none";
   };
+  const run = (edits: { edit: StoryboardEdit; toast: Msg }[]): Promise<boolean> => canWrite()
+    ? runNarrationEdits(store, draft, edits) : Promise.resolve(false);
 
   return (
     <form className="edit-form narr-panel" data-form="narration" data-choice={choice} onKeyDown={onKey} onSubmit={(event: FormEvent) => event.preventDefault()} aria-label={t("narr.panel.label", { shot: shot.label })}>
@@ -208,11 +213,13 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, focusTake, on
           voices={voices}
           focusField={focusField}
           working={working}
+          saveBlocked={saveBlocked}
           onVoice={setVoice}
           onEdit={onEdit}
           impactVoice={voiceImpact(shot, unit, locale)}
           impactLeave={leavesRecording ? lineFromRecordingImpact(unit, locale) : null}
           onSave={async (textChanged) => {
+            if (!canWrite()) return;
             const values = { shot: shot.label };
             const text = draft.value.trim();
             // The line first, then its voice, then choosing a line, as Plan saves them: a failure part-way never
@@ -239,12 +246,15 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, focusTake, on
 
       {choice === "recording" ? (
         <RecordingPart
+          draft={draft}
           shot={shot}
           fps={fps}
           words={wordsOf(stored?.text ?? shot.narration.text)}
           take={take}
           focusField={focusField}
           saving={saving}
+          saveBlocked={saveBlocked}
+          canWrite={canWrite}
           onBusy={setBusy}
           onClose={close}
           live={mode === "live"}
@@ -260,7 +270,8 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, focusTake, on
               className="pill chosen"
               data-act="save-edit"
               {...server}
-              disabled={working || server.disabled || modeEdit("none", narrationMode) === null}
+              disabled={working || server.disabled || !!saveBlocked || modeEdit("none", narrationMode) === null}
+              title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)}
               onClick={async () => {
                 setBusy(true);
                 try {
@@ -293,6 +304,7 @@ interface LineProps {
   /** The panel just opened on this choice: its first field takes the focus. */
   focusField: boolean;
   working: boolean;
+  saveBlocked: Msg | null;
   impactVoice: Msg;
   /** The person's recording is in use now: going to a line drops it and makes a voice line (priced). */
   impactLeave: Msg | null;
@@ -301,7 +313,7 @@ interface LineProps {
   onSave(textChanged: boolean): Promise<void>;
 }
 
-function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices, focusField, working, impactVoice, impactLeave, onVoice, onEdit, onSave }: LineProps) {
+function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices, focusField, working, saveBlocked, impactVoice, impactLeave, onVoice, onEdit, onSave }: LineProps) {
   const { t, tm } = useI18n();
   const server = useGuarded("server");
   const id = (part: string) => `narr-${part}-${shot.shotId}`;
@@ -312,7 +324,7 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
   const options = useMemo(() => voiceOptions(voices.data, currentVoice), [voices.data, currentVoice]);
   const modeChanged = modeEdit("line", narrationMode) !== null;
   const empty = !text;
-  const canSave = !empty && (textChanged || voiceChanged || modeChanged) && !working && !server.disabled;
+  const canSave = !empty && (textChanged || voiceChanged || modeChanged) && !working && !server.disabled && !saveBlocked;
   const impact = impactLeave ? [impactLeave]
     : [textChanged || !voiceChanged ? editImpact(shot, ["narration"]) : null, voiceChanged ? impactVoice : null].filter((part): part is Msg => part !== null);
 
@@ -341,7 +353,7 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
       </span>
       <span className="stale" id={id("impact")}>{impact.map((part) => tm(part)).join(" ")}</span>
       <div className="narr-foot two">
-        <button type="button" className="pill chosen" data-act="save-edit" {...server} disabled={!canSave} onClick={() => void onSave(textChanged)}>
+        <button type="button" className="pill chosen" data-act="save-edit" {...server} disabled={!canSave} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)} onClick={() => void onSave(textChanged)}>
           {t(working ? "inspector.saving" : "inspector.save")}
         </button>
         <button type="button" className="pill" data-act="cancel-edit" onClick={() => onEdit(null)}>{t("inspector.cancel")}</button>
@@ -353,6 +365,7 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
 // ---- my recording ----------------------------------------------------------------------------------------
 
 interface RecordingProps {
+  draft: EditDraft;
   shot: ShotOverview;
   fps: number;
   /** The shot's words now; they become the recording's subtitle. */
@@ -362,6 +375,8 @@ interface RecordingProps {
   focusField: boolean;
   saving: boolean;
   live: boolean;
+  saveBlocked: Msg | null;
+  canWrite(): boolean;
   onBusy(busy: boolean): void;
   onClose(): void;
 }
@@ -374,7 +389,7 @@ interface RecordingProps {
  * subtitle); when the recording is then not added, that save is undone and the panel says so. Closing the panel
  * while bytes are still going out stops them, and a toast says what happened.
  */
-function RecordingPart({ shot, fps, words: savedWords, take, focusField, saving, live, onBusy, onClose }: RecordingProps) {
+function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, saving, live, saveBlocked, canWrite, onBusy, onClose }: RecordingProps) {
   const { t, tm } = useI18n();
   const store = useStore();
   const mode = useMode();
@@ -412,7 +427,7 @@ function RecordingPart({ shot, fps, words: savedWords, take, focusField, saving,
   const final = phase.state === "refused" && !phase.retry;
   const refusal = check && !check.ok ? check.refusal : inspected && !inspected.ok ? inspected.refusal : phase.state === "refused" ? phase.refusal : null;
   const usable = !!file && check?.ok === true && (inspected === null || inspected.ok) && !final;
-  const canAdd = usable && !sendingNow && !saving && reading.state !== "reading" && connected && !server.disabled;
+  const canAdd = !saveBlocked && usable && !sendingNow && !saving && reading.state !== "reading" && connected && !server.disabled;
   const shotSeconds = seconds(shot.durationFrames, fps);
   const fitNote = usable ? recordingFitNote(length, shotSeconds) : null;
 
@@ -435,55 +450,59 @@ function RecordingPart({ shot, fps, words: savedWords, take, focusField, saving,
   };
 
   const add = async () => {
-    if (!file || !canAdd) return;
+    if (!file || !canAdd || !canWrite()) return;
     const keys = importKeysFor(store, mode);
     if (!keys) return;
+    const origin = store.getState();
+    const active = () => store.getState().projectId === origin.projectId && store.getState().projectEpoch === origin.projectEpoch;
     const chosen = file;
     const label = shot.label;
     const controller = new AbortController();
     const current = { controller, sentAll: false };
     flight.current = current;
-    const set = (next: Phase) => { if (mounted.current && !controller.signal.aborted) setPhase(next); };
-    let wordsCommand: string | null = null;
+    const set = (next: Phase) => { if (active() && mounted.current && !controller.signal.aborted) setPhase(next); };
+    let wordsSaved: RecordingWordSave | null = null;
 
     /** The recording was not added: undo the words saved for it, then say what happened (in place, or in a toast once closed). */
     const notAdded = async (stopped: boolean, refusal: Msg, retry: boolean) => {
       const said = (outcome: Words): Phase => (stopped ? { state: "stopped", words: outcome } : { state: "refused", refusal, retry, words: outcome });
       let outcome: WordsAfterFailure = "none";
-      if (wordsCommand) {
-        if (mounted.current) setPhase(said("restoring"));
-        // The undo carries the film version as it is now.
-        await store.refresh();
-        outcome = (await store.edit({ kind: "undo", commandId: wordsCommand })) ? "restored" : "kept";
+      if (wordsSaved) {
+        if (active() && mounted.current) setPhase(said("restoring"));
+        outcome = await rollbackRecordingWords(store, wordsSaved) ? "restored" : "kept";
       }
-      if (mounted.current) setPhase(said(outcome));
-      else store.dispatch({ type: "toast", message: notAddedToast(label, stopped, outcome, refusal), tone: stopped || outcome === "kept" ? "info" : "error" });
+      if (active() && mounted.current) setPhase(said(outcome));
+      else if (active()) store.dispatch({ type: "toast", message: notAddedToast(label, stopped, outcome, refusal), tone: stopped || outcome === "kept" ? "info" : "error" });
     };
 
     set({ state: "sending", loaded: 0, total: chosen.size });
     try {
       // The words first: the studio keeps them as the recording's subtitle.
       if (words.trim() !== savedWords.trim()) {
-        wordsCommand = await store.edit({ kind: "narration", id: shot.shotId, field: "text", value: words.trim() });
-        if (!wordsCommand) {
-          if (mounted.current) setPhase({ state: "ready" });
+        wordsSaved = await saveRecordingWords(store, draft, words);
+        if (!wordsSaved) {
+          if (active() && mounted.current) setPhase({ state: "ready" });
           return;
         }
         await store.refresh();
       }
+      if (!active()) return;
       if (controller.signal.aborted) { await notAdded(true, msg("narr.stopped"), false); return; }
       const identity = recordingIdentity(shot.shotId, chosen);
       const pathNow = () => recordingPath(shot.shotId, store.getState().snapshot?.project.headVersion ?? 0);
       let request = keys.begin(identity, pathNow());
       for (;;) {
+        if (!active()) return;
         try {
           const receipt = await uploader.send({ path: request.path, file: chosen, kind: "audio", key: request.key, durationSeconds: length, signal: controller.signal }, {
             sending: (loaded, total) => set({ state: "sending", loaded, total }),
             checking: () => { current.sentAll = true; set({ state: "checking" }); },
           });
           keys.settle(identity);
+          if (!active()) return;
           if (live) await store.refresh();
-          const done = isRecordingReceipt(receipt) ? recordingDone(label, receipt, shotSeconds, !!wordsCommand) : msg("narr.toast.recording_mode", { shot: label });
+          if (!active()) return;
+          const done = isRecordingReceipt(receipt) ? recordingDone(label, receipt, shotSeconds, !!wordsSaved) : msg("narr.toast.recording_mode", { shot: label });
           const commandId = isRecordingReceipt(receipt) ? receipt.commandId : undefined;
           store.dispatch({ type: "toast", message: done, tone: "info", ...(commandId ? { undoCommandId: commandId } : {}) });
           if (mounted.current) {
@@ -505,6 +524,7 @@ function RecordingPart({ shot, fps, words: savedWords, take, focusField, saving,
           if (next === "fresh") {
             keys.settle(identity);
             await store.refresh();
+            if (!active()) return;
             request = keys.begin(identity, pathNow());
             current.sentAll = false;
             continue;
@@ -576,7 +596,7 @@ function RecordingPart({ shot, fps, words: savedWords, take, focusField, saving,
         </span>
       ) : null}
       <div className="two">
-        <button type="button" className="pill chosen" data-act="narr-add" {...server} disabled={!canAdd} onClick={() => void add()}>
+        <button type="button" className="pill chosen" data-act="narr-add" {...server} disabled={!canAdd} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)} onClick={() => void add()}>
           {t(sendingNow ? "narr.adding" : retry ? "narr.try_again" : "narr.add")}
         </button>
         {phase.state === "sending"

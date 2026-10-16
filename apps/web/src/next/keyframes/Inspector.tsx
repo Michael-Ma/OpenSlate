@@ -1,6 +1,9 @@
 import type { ShotOverview } from "@openslate/core/public";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
+import { displayedHead } from "../model/displayed-baseline.ts";
+import { editConflict, editSaveReason, motionForm } from "../model/edit-conflict.ts";
+import { msg, type Msg } from "../model/types.ts";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
 import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../model/inspector.ts";
 import { wordsOf, type ShotNarrationRead } from "../model/narration.ts";
@@ -8,6 +11,7 @@ import type { EditDraft } from "../store/state.ts";
 import type { Resource } from "../store/useResource.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { useSustained } from "../app/useSustained.ts";
 import { NarrationPanel } from "./NarrationPanel.tsx";
 import { StatusPill } from "./parts.tsx";
 import { PromptsPanel } from "./PromptsPanel.tsx";
@@ -46,10 +50,16 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
   const { t, tm } = useI18n();
   const store = useStore();
   const snapshot = useStudio(s => s.snapshot);
-  const conflict = !!draft && draft.expectedHeadVersion !== snapshot?.project.headVersion;
+  const overview = useStudio(s => s.overview);
+  const projectId = useStudio(s => s.projectId);
   const server = useGuarded("server");
   const run = useGuarded("run");
   const editing = draft && draft.shotId === shot.shotId ? draft : null;
+  const comparison = editing ? editConflict(editing, overview, displayedHead(projectId, snapshot, overview)) : null;
+  const canReconcile = store.canReconcileEdit(editing);
+  const saveBlocked = canReconcile ? msg("plan.unconfirmed.retry") : comparison ? editSaveReason(comparison) : null;
+  // Save waits at once; the note says so only if the wait lasts (useSustained).
+  const waitingLong = useSustained(comparison?.kind === "waiting");
   const regen = view.regenerate;
   /** The row's Listen opened the narration panel: its player takes focus once the take has loaded. */
   const [listening, setListening] = useState(false);
@@ -122,18 +132,26 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       )}
 
       <div className="insp-body">
-      {editing && conflict ? <div className="insp-alert" role="alert" data-act="edit-conflict">
+      {editing && !editing.saving && !busy.edit && !canReconcile && comparison?.kind === "changed" ? <div className="insp-alert" role="alert" data-act="edit-conflict">
         <p>{t("error.EDIT_BASELINE_CHANGED")}</p>
-        <p>{t("inspector.conflict_saved")}: {editing.field === "narration" ? shot.narration.text : editing.field === "desiredFrames" ? String(shot.durationFrames) : shot[editing.field]}</p>
+        <p>{t("inspector.conflict_saved")}: {motionForm(editing.field) && comparison.saved ? <>{comparison.saved.motion} · {t("inspector.duration_value", { seconds: Math.round(comparison.saved.durationFrames / fps * 10) / 10 })}</> : comparison.saved?.value}</p>
         <div className="two">
           <button type="button" className="pill sm" data-act="edit-keep-text" onClick={() => store.resolveEditConflict(true)}>{t("inspector.conflict_keep")}</button>
           <button type="button" className="pill sm" data-act="edit-use-saved" onClick={() => store.resolveEditConflict(false)}>{t("inspector.conflict_use_saved")}</button>
         </div>
       </div> : null}
+      {editing && canReconcile ? <div className="insp-alert" role="status" data-act="edit-unconfirmed">
+        <p>{t("plan.unconfirmed.body")}</p>
+        <button type="button" className="pill sm" data-act="edit-reconcile" {...server}
+          disabled={server.disabled || busy.edit || !!editing.saving || comparison?.kind === "waiting"}
+          title={server.title ?? (comparison?.kind === "waiting" ? t("error.PROJECTION_CHANGED") : undefined)}
+          onClick={() => void store.reconcileEdit()}>{t("plan.unconfirmed.retry")}</button>
+      </div> : null}
+      {editing && waitingLong ? <p className="hint" role="status" data-act="edit-waiting">{t("error.PROJECTION_CHANGED")}</p> : null}
       {editing?.field === "narration" ? (
-        <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} detail={narrationDetail} saving={busy.edit || !!editing.saving} focusTake={listening} onEdit={onEdit} onSaveDraft={onSaveDraft} />
+        <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} detail={narrationDetail} saving={busy.edit || !!editing.saving} saveBlocked={saveBlocked} focusTake={listening} onEdit={onEdit} onSaveDraft={onSaveDraft} />
       ) : editing ? (
-        <EditForm key={`${editing.shotId}:${editing.field}`} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} onEdit={onEdit} onSaveDraft={onSaveDraft} onSaveMotion={onSaveMotion} />
+        <EditForm key={`${editing.shotId}:${editing.field}`} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} saveBlocked={saveBlocked} onEdit={onEdit} onSaveDraft={onSaveDraft} onSaveMotion={onSaveMotion} />
       ) : strip ? (
         <TakesStrip shot={shot} onClose={close} />
       ) : prompts ? (
@@ -249,6 +267,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
 }
 
 interface FormProps {
+  saveBlocked: Msg | null;
   shot: ShotOverview;
   fps: number;
   draft: EditDraft;
@@ -259,7 +278,7 @@ interface FormProps {
 }
 
 /** Inline edit of the prompt, or motion and duration, with Save / Cancel. It says before saving which media the change outdates. */
-function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion }: FormProps) {
+function EditForm({ shot, fps, draft, saving, saveBlocked, onEdit, onSaveDraft, onSaveMotion }: FormProps) {
   const { t, tm } = useI18n();
   const shotSeconds = Math.round(shot.durationFrames / fps);
   const secondsText = draft.secondsText ?? String(shotSeconds);
@@ -275,7 +294,7 @@ function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion 
     const changed = motion.trim() !== shot.motion || (value !== null && value * fps !== shot.durationFrames);
     const submit = (event: FormEvent) => {
       event.preventDefault();
-      if (value === null || !motion.trim() || !changed || saving) return;
+      if (value === null || !motion.trim() || !changed || saving || saveBlocked) return;
       onSaveMotion(motion.trim(), value);
     };
     return (
@@ -298,14 +317,14 @@ function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion 
         />
         {issue ? <span className={`stale${issue.kind === "refusal" ? " warn" : ""}`} role={issue.kind === "refusal" ? "alert" : undefined}>{tm(issue.message)}</span> : null}
         <span className="stale" id={id("impact")}>{tm(editImpact(shot, ["motion", "desiredFrames"]))}</span>
-        <FormButtons saving={saving} disabled={value === null || !motion.trim() || !changed} onCancel={cancel} />
+        <FormButtons saveBlocked={saveBlocked} saving={saving} disabled={value === null || !motion.trim() || !changed} onCancel={cancel} />
       </form>
     );
   }
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!draft.value.trim() || draft.value.trim() === shot.imagePrompt || saving) return;
+    if (!draft.value.trim() || draft.value.trim() === shot.imagePrompt || saving || saveBlocked) return;
     onSaveDraft({ ...draft, value: draft.value.trim() });
   };
   return (
@@ -313,17 +332,17 @@ function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion 
       <label htmlFor={id("prompt")}>{t("inspector.prompt_label", { shot: shot.label })}</label>
       <textarea id={id("prompt")} rows={6} value={draft.value} autoFocus aria-describedby={id("impact")} onChange={(event) => onEdit({ ...draft, value: event.target.value })} />
       <span className="stale" id={id("impact")}>{tm(editImpact(shot, ["imagePrompt"]))}</span>
-      <FormButtons saving={saving} disabled={!draft.value.trim() || draft.value.trim() === shot.imagePrompt} onCancel={cancel} />
+      <FormButtons saveBlocked={saveBlocked} saving={saving} disabled={!draft.value.trim() || draft.value.trim() === shot.imagePrompt} onCancel={cancel} />
     </form>
   );
 }
 
-function FormButtons({ saving, disabled, onCancel }: { saving: boolean; disabled: boolean; onCancel(): void }) {
-  const { t } = useI18n();
+function FormButtons({ saving, disabled, saveBlocked, onCancel }: { saving: boolean; disabled: boolean; saveBlocked: Msg | null; onCancel(): void }) {
+  const { t, tm } = useI18n();
   const server = useGuarded("server");
   return (
     <div className="two">
-      <button type="submit" className="pill chosen" data-act="save-edit" {...server} disabled={disabled || saving || server.disabled}>{t(saving ? "inspector.saving" : "inspector.save")}</button>
+      <button type="submit" className="pill chosen" data-act="save-edit" {...server} disabled={disabled || saving || server.disabled || !!saveBlocked} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)}>{t(saving ? "inspector.saving" : "inspector.save")}</button>
       <button type="button" className="pill" data-act="cancel-edit" onClick={onCancel}>{t("inspector.cancel")}</button>
     </div>
   );

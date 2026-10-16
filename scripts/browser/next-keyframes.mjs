@@ -47,6 +47,46 @@ async function openCard(page, label) {
   await expectText(page, `[data-card="${shot(label)}"] .stl`, /Opened/);
 }
 
+/** Reuse the provider bridge used by next-settings: exercise the in-browser fixture's own command routes. */
+async function inspectorFixtureState(page, change = null) {
+  return page.evaluate(async (edit) => {
+    const app = document.querySelector(".app");
+    const key = app && Object.keys(app).find((name) => name.startsWith("__reactFiber$"));
+    let store = null;
+    for (let fiber = key ? app[key] : null; fiber; fiber = fiber.return) {
+      const value = fiber.memoizedProps?.value;
+      if (value?.mode === "fixture" && value.store?.getState) { store = value.store; break; }
+    }
+    if (!store) throw new Error("The in-browser fixture store was not found");
+    await store.refresh();
+    const before = store.getState();
+    if (!before.snapshot || before.snapshot.project.id !== before.projectId || before.overview?.projectId !== before.projectId)
+      throw new Error("The fixture projections do not belong to its selected film");
+    if (edit) {
+      const target = Object.values(before.overview.shots).find((item) => item.label === edit.label);
+      if (!target) throw new Error(`The fixture has no shot ${edit.label}`);
+      const body = { kind: "shot", id: target.shotId, field: "imagePrompt", value: edit.value, expectedHeadVersion: before.snapshot.project.headVersion };
+      const receipt = await store.command(`b18-other-edit:${target.shotId}:${body.expectedHeadVersion}`, body,
+        () => ({ path: `/api/projects/${encodeURIComponent(before.projectId)}/storyboard`, body }));
+      if (!receipt?.commandId) throw new Error(`The fixture refused the storyboard edit to ${edit.label}`);
+      await store.refresh();
+    }
+    const state = store.getState();
+    if (state.snapshot.project.headVersion !== state.overview.headVersion || state.snapshot.project.revisionId !== state.overview.revisionId)
+      throw new Error("The fixture's displayed projections have not caught up");
+    return {
+      projectId: state.projectId,
+      headVersion: state.snapshot.project.headVersion,
+      prompts: Object.fromEntries(Object.values(state.overview.shots).map((item) => {
+        const saved = state.snapshot.project.shots.find((row) => row.id === item.shotId);
+        if (!saved || saved.imagePrompt !== item.imagePrompt) throw new Error(`The saved prompt differs from the displayed ${item.label}`);
+        return [item.label, saved.imagePrompt];
+      })),
+      draft: state.edit ? { shotId: state.edit.shotId, value: state.edit.value } : null,
+    };
+  }, change);
+}
+
 export const scenarios = [
   {
     name: "next-keyframes-golden-layout",
@@ -256,6 +296,64 @@ export const scenarios = [
       if (!(await regen.evaluate((el) => el.classList.contains("primary")))) throw new Error("Regenerate is not the primary action for an outdated keyframe");
       await expectText(page, ".insp", /The prompt changed; the earlier keyframe is shown\. A new take costs about \$0\.04\./);
       await screenshot(page, "outdated-1440");
+    },
+  },
+  {
+    name: "next-keyframes-edit-while-generating",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await openCard(page, "2.3");
+      const baseline = await inspectorFixtureState(page);
+      await page.click('.insp [data-act="edit-prompt"]');
+      const prompt = page.locator('.insp form[data-form="prompt"] textarea');
+      const firstDraft = "The ticket's date in sharp focus, cold dawn light across Mara's thumb.";
+      await prompt.fill(firstDraft);
+      // An unrelated storyboard save advances the same head as a keyframe landing, without touching 2.3.
+      const otherPrompt = "The empty harbour at dawn, with a new curl of fog beside the moored ferry.";
+      const advanced = await inspectorFixtureState(page, { label: "2.1", value: otherPrompt });
+      if (advanced.projectId !== baseline.projectId || advanced.headVersion <= baseline.headVersion || advanced.prompts["2.3"] !== baseline.prompts["2.3"])
+        throw new Error(`The unrelated fixture save did not preserve 2.3: ${JSON.stringify({ baseline, advanced })}`);
+      if ((await prompt.inputValue()) !== firstDraft) throw new Error("The unrelated save replaced the person's prompt draft");
+      if (await page.locator('[data-act="edit-conflict"]').count()) throw new Error("An unrelated head change produced an inspector conflict");
+      await page.click('.insp [data-act="save-edit"]');
+      await expectText(page, '.toast[data-tone="info"]', /^Saved\.\s*Undo$/);
+      await page.waitForSelector('.insp form[data-form="prompt"]', { state: "detached" });
+      if (await page.locator('[data-act="edit-conflict"]').count()) throw new Error("Saving the rebased prompt produced a conflict");
+      const saved = await inspectorFixtureState(page);
+      if (saved.prompts["2.3"] !== firstDraft || saved.prompts["2.1"] !== otherPrompt || saved.headVersion <= advanced.headVersion || saved.draft !== null)
+        throw new Error(`The rebased inspector save did not persist both edits: ${JSON.stringify(saved)}`);
+      await page.click('.toast [data-act="toast-close"]');
+      await page.waitForSelector(".toast", { state: "detached" });
+
+      await page.click('.insp [data-act="edit-prompt"]');
+      const secondDraft = "My close-up keeps the Sunday date, with the ticket edge visible against the coat.";
+      const savedElsewhere = "The saved close-up shows the ferry ticket beside the pier railing.";
+      await prompt.fill(secondDraft);
+      const changed = await inspectorFixtureState(page, { label: "2.3", value: savedElsewhere });
+      await expectText(page, '[data-act="edit-conflict"][role="alert"]', /Saved value:\s*The saved close-up shows the ferry ticket beside the pier railing\./);
+      if ((await prompt.inputValue()) !== secondDraft) throw new Error("The true conflict lost the person's prompt text");
+      // The in-browser port is private, so compare its saved head/value instead of counting network requests it never sends.
+      const save = page.locator('.insp [data-act="save-edit"]');
+      if (!(await save.isDisabled())) await save.click();
+      const blocked = await inspectorFixtureState(page);
+      if (blocked.headVersion !== changed.headVersion || blocked.prompts["2.3"] !== savedElsewhere || blocked.draft?.value !== secondDraft)
+        throw new Error(`Save overwrote the conflicting prompt before the person chose: ${JSON.stringify({ changed, blocked })}`);
+      await expectText(page, '[data-act="edit-conflict"]', /Saved value:\s*The saved close-up shows the ferry ticket beside the pier railing\./);
+      await page.click('[data-act="edit-keep-text"]');
+      await page.waitForSelector('[data-act="edit-conflict"]', { state: "detached" });
+      if ((await prompt.inputValue()) !== secondDraft) throw new Error("Keep my text replaced the person's prompt draft");
+      const chosen = await inspectorFixtureState(page);
+      if (chosen.headVersion !== changed.headVersion || chosen.prompts["2.3"] !== savedElsewhere)
+        throw new Error("Choosing Keep my text saved before the person pressed Save");
+      await save.click();
+      await expectText(page, '.toast[data-tone="info"]', /^Saved\.\s*Undo$/);
+      await page.waitForSelector('.insp form[data-form="prompt"]', { state: "detached" });
+      const kept = await inspectorFixtureState(page);
+      if (kept.prompts["2.3"] !== secondDraft || kept.prompts["2.1"] !== otherPrompt || kept.headVersion <= changed.headVersion || kept.draft !== null)
+        throw new Error(`The chosen prompt was not saved at the new displayed head: ${JSON.stringify(kept)}`);
+      if (await page.locator('[data-act="edit-conflict"]').count()) throw new Error("The resolved prompt conflict stayed visible after saving");
     },
   },
   {

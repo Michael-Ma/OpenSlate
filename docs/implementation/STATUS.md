@@ -1,6 +1,26 @@
 # Current implementation status
 
-Reconciled October 16, 2026 (feature branch after the B17 merge, including B1–B17). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 16 narration feedback — B18 browser follow-up verified
+
+The lead's B18 browser run passed **163/164**, including edit-while-generating. The remaining recording-refusal failure was a real feedback regression: its internal subtitle pre-save published Saved/Undo before the recording was rejected and words restored. Subtitle preparation and its exact rollback are now fully silent, preserving other actions' toasts; add results/refusal notes retain ownership of feedback. Composite narration suppresses intermediate success messages and emits exactly one final toast/Undo only after all steps and ownership checks complete. Normal Save errors remain visible, and ordinary later Inspector saves keep their default feedback.
+
+Original feedback/retain-editor intent is bound to the saved request identity, so a lost-reply check remains silent even after Cancel/reopen. Field comparisons, baseline restoration, request identities and film/revision fencing remain. The lead's `useSustained.ts` and its Inspector, FilmView and VoicePanel integrations are byte-for-byte unchanged; no UI source or browser scenario changed.
+
+**11 regressions added**, none deleted/disabled. Final build passed; **672 web tests passed**, zero failures/skips. Full `pnpm test` returned **3,109 passed, zero failures/cancelled/todo and one optional skip (3,110 total)**. Web and all five package typechecks passed. No Git command, browser launch/check, real model/provider call, external network request, credential read, production-state access/restart or port 3001 listener occurred. Changes remain uncommitted for lead review/browser replay. [Files, exact tests, scope and proposed commit](../ai/uiux-plan/codex/reports/B18-narration-feedback.md).
+
+## October 16 field-level draft conflicts — B18 verified
+
+Inspector prompts/narration now compare their original edited values, and motion forms compare motion plus duration. A shared pure comparison drives both rendering and Save. Unrelated project-head moves rebase silently to the current coherent displayed head; mismatched projections wait neutrally with Save disabled, without a conflict alert or refusal toast. Actual changed fields keep the explicit Keep / Use saved choices. A stale server refusal keeps text and refreshes for the next human press, with no automatic write retry.
+
+Composite narration and recording subtitle saves share that field comparison and update their own retained baselines. Exact unknown-request checks preserve original body/key/head, newer typing, later saved values and the pre-save intent to retain pending recording/voice choices. Music compares only audio identity and gain, including old-receipt/new-writer protection. The baseline audit confirms Plan field comparisons and per-selection Director digests; instant Film controls wait only for actual projection disagreement. Add voice no longer conflicts merely because the head moved, and narrator Undo waits quietly on inconsistent fresh reads while keeping its manual retry. Whole-impact model-switch preview CAS remains intact.
+
+The lead's B17 presentation is preserved: the Inspector regeneration button keeps its plain name with price in its descriptive note, and the card keeps its priced New take link. The new `next-keyframes-edit-while-generating` scenario covers unrelated advancement and a real changed prompt through fixture routes; it passed syntax checking but was not run.
+
+Pinned Node **24.15.0**, pnpm **10.33.0** and FFmpeg/ffprobe **8.1.1** passed setup/preflight without a download. All five package builds passed. **661 frontend tests passed**, zero failures/skips; full `pnpm test` returned **3,098 passed, zero failures/cancelled/todo and one optional native-probe skip (3,099 total)**. Web and all five package typechecks passed. **46 tests were added and four obsolete expectations/cases were rewritten**; no tests were deleted or disabled. Independent review found no outstanding must-fix issue.
+
+No Git command, browser launch/check, real provider/model call, external network request, credential read, production-state access/restart or port 3001 listener occurred. No browser contract, server, schema, catalog or skill package changed. B18 changes are uncommitted; the lead owns review, commits and browser replay. [Per-rule fixes/tests, baseline audit, complete inventory, decisions and proposed commits](../ai/uiux-plan/codex/reports/B18-field-conflicts.md).
 
 ## Current branch delivery — P0 to P6
 

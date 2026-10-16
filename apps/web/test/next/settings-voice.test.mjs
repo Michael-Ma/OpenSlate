@@ -84,7 +84,7 @@ test('B17 #6 narrator Undo refuses another saved choice, revoked voices and mism
   const read = (saved, personalHead = saved.headVersion) => async path => path.endsWith('/settings/voice') ? saved : { voices, headVersion: personalHead };
   assert.equal(await voiceModel.prepareNarratorUndo(undoChange, undoOrigin, read({ narratorVoice: 'ash', headVersion: 14 }), () => undoOrigin), null);
   assert.equal(await voiceModel.prepareNarratorUndo({ previous: voices[2].id, set: 'marin' }, undoOrigin, read({ narratorVoice: 'marin', headVersion: 14 }), () => undoOrigin), null);
-  assert.equal(await voiceModel.prepareNarratorUndo(undoChange, undoOrigin, read({ narratorVoice: 'marin', headVersion: 14 }, 15), () => undoOrigin), null);
+  assert.deepEqual(await voiceModel.prepareNarratorUndo(undoChange, undoOrigin, read({ narratorVoice: 'marin', headVersion: 14 }, 15), () => undoOrigin), { kind: 'waiting' });
 });
 
 test('B17 #6 narrator Undo is fenced before and after reads, including A to B to A', async () => {
