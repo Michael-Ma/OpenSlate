@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { carryFrom, carryReady, carryToApply, filmStrip, reconnectedToast, writeGuard, type Carry } from "../model/shell-states.ts";
-import { recoveryReadOnly, reviewMode, stoppedByRestore } from "../model/recovery.ts";
+import { finishedAwayToast, RECOVERY_POLL_MS, recoveryReadOnly, reviewMode, stoppedByRestore } from "../model/recovery.ts";
 import { msg } from "../model/types.ts";
 import { connectScreen, escClosesDrawer, NARROW_QUERY, searchWithView, shownView } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
@@ -107,14 +107,31 @@ export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried
     void store.readRecovery();
     requestAnimationFrame(() => document.querySelector<HTMLElement>(".recovery-card h1")?.focus({ preventScroll: true }));
   }, [store]);
-  // While in review, coming back to the window reads the status again: another window may have finished it, and
-  // Start has no film whose events would say so.
+  // While in review, coming back to the window reads the status again: another window may have finished it. With no
+  // film open (Start on a first run) no film events would say so, so the page also asks now and then while visible.
+  const filmOpen = useStudio((s) => !!s.projectId);
   useEffect(() => {
     if (!quarantined) return;
-    const onVisible = () => { if (document.visibilityState === "visible") void store.readRecovery(); };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [quarantined, store]);
+    const read = () => { if (document.visibilityState === "visible") void store.readRecovery(); };
+    document.addEventListener("visibilitychange", read);
+    const poll = filmOpen ? 0 : window.setInterval(read, RECOVERY_POLL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", read);
+      if (poll) window.clearInterval(poll);
+    };
+  }, [quarantined, filmOpen, store]);
+  // Finished while the review was put away (another window, or this page's lost reply found applied): the strip goes
+  // and writes work again, so a toast says why; what the finished review would have said is put away with it.
+  const held = useStudio((s) => s.recovery.unconfirmed !== null);
+  const seenMode = useRef({ mode: recoveryMode, held });
+  useEffect(() => {
+    const before = seenMode.current;
+    seenMode.current = { mode: recoveryMode, held };
+    const toast = finishedAwayToast(before, recoveryMode, reviewOpen);
+    if (!toast) return;
+    store.dismissRecovery();
+    store.dispatch({ type: "toast", message: toast, tone: "info" });
+  }, [recoveryMode, held, reviewOpen, store]);
   const focus = useStudio((s) => s.focus);
   const navigated = useRef({ view, focus });
   useEffect(() => {

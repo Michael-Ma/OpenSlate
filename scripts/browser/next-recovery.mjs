@@ -339,4 +339,34 @@ export const scenarios = [
       expect(statusReads === readsBeforeFinish, `The status was read ${statusReads - readsBeforeFinish} more times after the review`);
     },
   },
+  {
+    name: "next-recovery-live-elsewhere",
+    query: "ui=next",
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      // Another window finishes the review while this one is looking around: the strip goes, writes work again, and a
+      // toast says why. Nothing is released from here.
+      const receipt = { restoreId: "restore-live-2", backupCreatedAt: "2026-10-12T07:30:00.000Z", restoredAt: "2026-10-15T08:00:00.000Z" };
+      const counts = { projects: 1, knownJobs: 1, unknownJobs: 0, nativeRequests: 0, unusedAllowances: 0, preparingJobs: 0 };
+      let state = "quarantined";
+      const releases = [];
+      page.on("request", (request) => { if (new URL(request.url()).pathname === "/api/installation/recovery/release") releases.push(request.url()); });
+      await page.route("**/api/installation/recovery", (route) => route.fulfill({ json: { state, receipt, receiptDigest: "a".repeat(64), summaryDigest: "b".repeat(64), counts } }));
+      await review(page);
+      await page.locator("[data-act='recovery-later']").click();
+      await page.waitForSelector(".film-strip[data-strip='recovery']");
+      await page.waitForSelector("main.work [data-act='edit-prompt']", { timeout: 20000 });
+      expect(await page.locator("main.work [data-act='edit-prompt']").first().isDisabled(), "Edits are on while the studio is in review");
+      // The other window's release; this one hears of it when it reads the status again (here: coming back to it).
+      state = "released";
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await until(page, () => text(page, ".toast"), (value) => value === "The recovery review was finished in another window. Changes work again; every film stays stopped until you continue it.", "No toast said the review was finished elsewhere");
+      await page.waitForSelector(".film-strip-slot:not([data-strip='recovery'])", { state: "attached" });
+      expect(await page.locator(".app[data-recovery]").count() === 0, "The finished review took over the view");
+      await until(page, () => page.locator("main.work [data-act='edit-prompt']").first().isDisabled().catch(() => true), (value) => value === false, "Edits stayed off after the review was finished elsewhere");
+      expect(releases.length === 0, "This window sent a release");
+      await page.waitForTimeout(400);
+      await shot(page, "next-recovery-live-elsewhere-1440");
+    },
+  },
 ];

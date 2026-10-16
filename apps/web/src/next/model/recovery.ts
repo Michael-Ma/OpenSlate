@@ -194,6 +194,23 @@ export function reviewMode(recovery: RecoveryState): ReviewMode {
   return "none";
 }
 
+/**
+ * While in review with no film open (Start on a first run) no film event says that another window finished the review,
+ * so the page asks this often; with a film open its events (and coming back to the window) do.
+ */
+export const RECOVERY_POLL_MS = 30_000;
+
+/**
+ * The toast when the review was finished while it was put away (the person was looking around): the strip goes and
+ * writes work again, so the page says why. `held`: this page had sent a decision whose reply was lost, and a later read
+ * found it applied; otherwise another window finished it. Null when the review is on screen (it says so itself) or
+ * nothing was finished.
+ */
+export function finishedAwayToast(before: { mode: ReviewMode; held: boolean }, after: ReviewMode, reviewOpen: boolean): Msg | null {
+  if (reviewOpen || before.mode !== "review" || after !== "released") return null;
+  return msg(before.held ? "recovery.toast.confirmed" : "recovery.toast.elsewhere");
+}
+
 /** The decision area: Finish, sending, or a lost reply that only Retry can settle. */
 export type DecisionPhase = "ready" | "sending" | "unconfirmed" | "unavailable";
 

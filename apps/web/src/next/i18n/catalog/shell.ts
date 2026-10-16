@@ -120,6 +120,8 @@ export const shell = {
   "recovery.done.how": { en: "To continue a film, open it and press Continue in the strip at the top. Then make new keyframes or clips from its scenes; results of jobs sent before the backup can still arrive.", zh: "要继续一部影片，请打开它并按顶部提示条里的“继续”。之后在场景里生成新的关键帧或视频；备份前发送的任务仍可能返回结果。" },
   "recovery.done.ok": { en: "Done", zh: "好的" },
   "recovery.toast.already": { en: "The recovery review was already finished in another window.", zh: "恢复检查已在另一个窗口完成。" },
+  "recovery.toast.elsewhere": { en: "The recovery review was finished in another window. Changes work again; every film stays stopped until you continue it.", zh: "恢复检查已在另一个窗口完成。现在可以修改了；每部影片仍保持停止，直到你继续。" },
+  "recovery.toast.confirmed": { en: "Your decision to finish the recovery review went through. Changes work again; every film stays stopped until you continue it.", zh: "完成恢复检查的决定已生效。现在可以修改了；每部影片仍保持停止，直到你继续。" },
   "start.choose": { en: "Choose a film", zh: "选择一部影片" },
   "toast.saved": { en: "Saved.", zh: "已保存。" },
   "toast.undone": { en: "Undone.", zh: "已撤销。" },

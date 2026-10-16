@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  backupLine, decisionPhase, isQuarantined, nothingInFlight, NO_RECOVERY, parseRecoveryStatus, parseSavedRelease, RECOVERY_LOCK, recoveryChange,
-  recoveryLock, recoveryReadOnly, recoveryRows, releaseBody, releaseOutcome, reviewMode, stoppedByRestore, unconfirmedStillApplies,
+  backupLine, decisionPhase, finishedAwayToast, isQuarantined, nothingInFlight, NO_RECOVERY, parseRecoveryStatus, parseSavedRelease, RECOVERY_LOCK,
+  RECOVERY_POLL_MS, recoveryChange, recoveryLock, recoveryReadOnly, recoveryRows, releaseBody, releaseOutcome, reviewMode, stoppedByRestore,
+  unconfirmedStillApplies,
 } from '../../src/next/model/recovery.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
@@ -125,6 +126,18 @@ test('the decision: Finish, sending, or only Retry after a lost reply', () => {
   assert.equal(decisionPhase({ ...lost, status: status({ receipt: { ...receipt, restoreId: 'restore-2' } }) }, false), 'ready');
   // A quarantine read without its digests cannot be finished as read: Check again.
   assert.equal(decisionPhase({ ...recovery, status: status({ summaryDigest: 'nope' }) }, false), 'unavailable');
+});
+
+test('a review finished while it was put away is said in a toast; on screen the review says it itself', () => {
+  const review = { mode: 'review', held: false };
+  assert.equal(en(finishedAwayToast(review, 'released', false)), 'The recovery review was finished in another window. Changes work again; every film stays stopped until you continue it.');
+  assert.equal(zh(finishedAwayToast(review, 'released', false)), '恢复检查已在另一个窗口完成。现在可以修改了；每部影片仍保持停止，直到你继续。');
+  assert.equal(en(finishedAwayToast({ mode: 'review', held: true }, 'released', false)), 'Your decision to finish the recovery review went through. Changes work again; every film stays stopped until you continue it.');
+  assert.equal(finishedAwayToast(review, 'released', true), null, 'the review is on screen');
+  assert.equal(finishedAwayToast(review, 'review', false), null, 'still in review');
+  assert.equal(finishedAwayToast({ mode: 'released', held: false }, 'none', false), null, 'put away after it was finished');
+  assert.equal(finishedAwayToast({ mode: 'none', held: false }, 'released', false), null);
+  assert.ok(RECOVERY_POLL_MS >= 15_000, 'Start asks now and then, not all the time');
 });
 
 test('the counts list every kind, each with what happens to it when there are some', () => {
