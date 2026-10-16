@@ -3,7 +3,9 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { showStop } from "../model/shell-states.ts";
 import { classicHref, connectionPill, filmHeading, otherLocale, searchWithLocale, shownView, showProjectPicker, tabKeyTarget, topBarMode, viewTabs } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
+import { DisconnectDialog } from "./DisconnectDialog.tsx";
 import { StopDialog } from "./StopDialog.tsx";
+import { StudioMenu } from "./StudioMenu.tsx";
 import { useNarrow } from "./useNarrow.ts";
 import { useWriteGuard } from "./useWriteGuard.ts";
 
@@ -28,17 +30,18 @@ function Gear() {
 
 /**
  * 52 px bar: the mark (all films), the film, view tabs, Stop while something runs, counts, connection (Synced,
- * Reconnecting, Offline), language, the classic studio, Settings and (narrow) the Director toggle. On Start no film
- * is open, so the bar names the films on this computer and drops the tabs, counts and Stop. `onNavigate` runs on
- * every tab, mark or Settings press, even for the view already shown (the shell puts the recovery review away so the
- * view shows).
+ * Reconnecting, Offline), language, the classic studio, Settings, the studio menu (Disconnect this studio) and
+ * (narrow) the Director toggle. On Start no film is open, so the bar names the films on this computer and drops the
+ * tabs, counts and Stop. `onNavigate` runs on every tab, mark or Settings press, even for the view already shown
+ * (the shell puts the recovery review away so the view shows); `onDisconnected` once the session was ended.
  */
-export function TopBar({ inert = false, expired = false, offline = false, onNavigate }: {
+export function TopBar({ inert = false, expired = false, offline = false, onNavigate, onDisconnected }: {
   inert?: boolean;
   expired?: boolean;
   /** The studio could not be reached (the shell's reachability check): the pill says Offline. */
   offline?: boolean;
   onNavigate?(): void;
+  onDisconnected?(): void;
 }) {
   const store = useStore();
   const { t, tm, locale, setLocale } = useI18n();
@@ -60,6 +63,7 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
   const tabs = viewTabs(view);
   const stop = mode === "film" && showStop(overview, director, reachable, view);
   const [confirming, setConfirming] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const go = (next: Parameters<typeof store.setView>[0]) => {
     onNavigate?.();
     store.setView(next);
@@ -209,6 +213,7 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
         >
           <Gear />
         </button>
+        <StudioMenu items={[{ act: "disconnect", label: t("shell.disconnect"), onSelect: () => setDisconnecting(true) }]} />
         <button
           ref={toggleRef}
           type="button"
@@ -223,6 +228,7 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
       </div>
     </header>
     {confirming && <StopDialog onClose={() => setConfirming(false)} onStop={confirmStop} />}
+    {disconnecting && <DisconnectDialog onClose={() => setDisconnecting(false)} onDisconnected={() => onDisconnected?.()} />}
     </>
   );
 }

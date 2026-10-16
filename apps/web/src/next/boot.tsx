@@ -76,6 +76,8 @@ async function fixtureSession(): Promise<Session> {
 function Root() {
   const [session, setSession] = useState<Session | null>(null);
   const [failed, setFailed] = useState(false);
+  /** The person disconnected this window (Disconnect this studio): Connect says so until a session connects again. */
+  const [disconnected, setDisconnected] = useState(false);
   const fixture = new URLSearchParams(window.location.search).get("fixture") === "last-ferry";
   const latest = useRef(0);
   const shown = useRef(0);
@@ -99,6 +101,7 @@ function Root() {
       const next = await (fixture ? fixtureSession() : liveSession());
       if (attempt < shown.current) { next.close(); return false; }
       shown.current = attempt;
+      setDisconnected(false);
       setSession(next);
       return true;
     } catch {
@@ -113,16 +116,22 @@ function Root() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, [connect]);
-  if (!session) return <ConnectGate failed={failed} onRetry={connect} />;
+  // The session ended on purpose: the page closes it (store stopped, reads aborted) and shows Connect.
+  const disconnect = useCallback(() => {
+    setFailed(false);
+    setDisconnected(true);
+    setSession(null);
+  }, []);
+  if (!session) return <ConnectGate failed={failed} disconnected={disconnected} onRetry={connect} />;
   return (
     <StudioProvider value={session}>
-      <NextApp onReconnect={connect} />
+      <NextApp onReconnect={connect} onDisconnected={disconnect} />
     </StudioProvider>
   );
 }
 
-function ConnectGate({ failed, onRetry }: { failed: boolean; onRetry(): unknown }) {
-  return <Connect state={failed ? "failed" : "connecting"} onRetry={() => void onRetry()} />;
+function ConnectGate({ failed, disconnected, onRetry }: { failed: boolean; disconnected: boolean; onRetry(): unknown }) {
+  return <Connect state={disconnected ? "disconnected" : failed ? "failed" : "connecting"} still={disconnected && failed} onRetry={() => void onRetry()} />;
 }
 
 export function bootNext(root: HTMLElement) {

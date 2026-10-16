@@ -69,6 +69,8 @@ test('the sample studio refuses writes like the server while in review, the Dire
   for (const path of ['/api/projects/last-ferry/messages', '/api/projects/last-ferry/storyboard', '/api/projects'])
     await assert.rejects(port.request(path, { method: 'POST', body: {} }), (error) => error.code === 'INSTALLATION_QUARANTINED' && error.status === 409, path);
   await port.request('/api/projects/last-ferry/generation');
+  // Logout is not a studio write.
+  assert.deepEqual(await port.request('/api/session/logout', { method: 'POST' }), { disconnected: true });
   port.close();
 });
 
@@ -228,4 +230,19 @@ test('an ordinary studio is not read-only and has nothing to review; a server wi
   assert.equal(plain.getState().recovery.status, null);
   assert.equal(recoveryReadOnly(plain.getState()), false);
   assert.equal(plain.getState().snapshot.project.name, 'The Last Ferry');
+});
+
+test('Disconnect ends the session and stops the store; a refusal keeps the page and names the reason', async (t) => {
+  const { store, posts } = await studio(t, { preset: 'quarantined' });
+  assert.equal(await store.disconnect(), null, 'allowed while the studio is in review: it is not a studio write');
+  assert.deepEqual(posts().map((call) => call.path), ['/api/session/logout']);
+  assert.equal(store.getState().pending['session:disconnect'], undefined);
+
+  const port = new FixturePort();
+  const refusing = { get closed() { return port.closed; }, events: port.events.bind(port), request: (path, options) => (path === '/api/session/logout' ? Promise.reject(new ApiError('NETWORK_ERROR')) : port.request(path, options)) };
+  const kept = new StudioStore({ client: refusing, storage: null, newKey: () => 'k' });
+  await kept.start();
+  t.after(() => { kept.stop(); port.close(); });
+  assert.equal(await kept.disconnect(), 'NETWORK_ERROR');
+  assert.ok(kept.getState().snapshot, 'the page stays as it was');
 });

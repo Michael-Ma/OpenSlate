@@ -60,9 +60,9 @@ function restoreCarry(store: StudioStore, carry: Carry, done: () => void): () =>
  * studio) that every view reads through useWriteGuard, and carries the unsent message and the person's place into
  * whatever session replaces this one. After a restore from backup the full-width recovery review stands in place of
  * the view until it is finished or put away (the strip brings it back). The view on screen is kept in the address
- * (`?view=plan`), so a reload or a link reopens it.
+ * (`?view=plan`), so a reload or a link reopens it. `onDisconnected` runs once Disconnect this studio ended the session.
  */
-export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
+export function NextApp({ onReconnect, onDisconnected }: { onReconnect(): Promise<boolean>; onDisconnected?(): void }) {
   const store = useStore();
   const { locale } = useI18n();
   const screen = useStudio(connectScreen);
@@ -191,7 +191,7 @@ export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
   return (
     <WriteGuardContext.Provider value={guard}>
       <div className={`app${directorOpen ? " dir-open" : ""}`} data-ui="next" data-view={view} data-recovery={showReview ? recoveryMode : undefined}>
-        <TopBar inert={drawer} expired={expired} offline={offline} onNavigate={putAway} />
+        <TopBar inert={drawer} expired={expired} offline={offline} onNavigate={putAway} {...(onDisconnected ? { onDisconnected } : {})} />
         <DirectorColumn />
         {/* display: contents, so the strip and the view are the grid's second column. */}
         <div className="workspace-slot" inert={drawer}>

@@ -1,5 +1,6 @@
-// Next studio shell details from the recovery card: the view kept in the address (?view=) so a reload or a link
-// reopens it.
+// Next studio shell details from the recovery card: the top bar's menu with Disconnect this studio (its confirm, the
+// logout, and the Connect screen after it), the view kept in the address (?view=) so a reload or a link reopens it, and
+// the connection pill's words.
 // Set BROWSER_CHECK_SHOTS=/some/dir to also save screenshots of each scenario.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -39,6 +40,90 @@ const asked = (page) => page.evaluate(() => new URLSearchParams(location.search)
 const tab = (page, name) => page.locator(`.topbar [data-act='tab'][data-view='${name}']`);
 
 export const scenarios = [
+  {
+    name: "next-recovery-shell-disconnect",
+    query: "ui=next",
+    viewport: { width: 1440, height: 900 },
+    allowConsoleErrors: [
+      // After the logout the window has no session on purpose: Try again is refused until a fresh link is opened.
+      /^HTTP 40[13] \/api\//,
+    ],
+    async run({ page }) {
+      await ready(page);
+      await until(page, () => page.locator(".topbar .saved").innerText(), (value) => value === "Synced", "The live shell never connected");
+      const logouts = [];
+      page.on("request", (request) => { if (new URL(request.url()).pathname === "/api/session/logout") logouts.push({ method: request.method(), csrf: request.headers()["x-openslate-csrf"] }); });
+
+      // The menu opens from the keyboard and closes with Esc, giving focus back to its button.
+      const button = page.locator(".topbar [data-act='studio-menu']");
+      expect((await button.getAttribute("aria-label")) === "Studio menu", "The menu button has no name");
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await page.waitForSelector(".menu.studio-menu[role='menu']");
+      expect((await button.getAttribute("aria-expanded")) === "true", "The menu button does not say it is open");
+      await until(page, () => focused(page), (act) => act === "disconnect", "Focus is not on the first item", 2000);
+      expect((await page.locator(".studio-menu [data-act='disconnect']").innerText()) === "Disconnect this studio…", "The item has the wrong words");
+      await shot(page, "next-recovery-shell-menu-1440");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector(".menu.studio-menu", { state: "detached" });
+      await until(page, () => focused(page), (act) => act === "studio-menu", "Esc did not give focus back to the menu button", 2000);
+
+      // The confirm says what happens; Stay connected (or Esc) leaves everything as it was.
+      await button.click();
+      await page.locator(".studio-menu [data-act='disconnect']").click();
+      const dialog = page.locator("dialog[data-dialog='disconnect']");
+      await dialog.waitFor();
+      expect(await dialog.evaluate((node) => node.open && node.matches(":modal")), "The confirm is not a modal dialog");
+      expect((await dialog.locator("h2").innerText()) === "Disconnect this studio?", "The confirm has the wrong title");
+      expect((await dialog.locator("code").innerText()) === "pnpm studio", "The confirm does not show how to come back");
+      expect(/anything already running carries on/.test(await dialog.locator("#disconnect-body").innerText()), "The confirm does not say running work carries on");
+      await shot(page, "next-recovery-shell-disconnect-1440");
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "detached" });
+      await until(page, () => focused(page), (act) => act === "studio-menu", "Focus did not go back to the menu button after Esc", 2000);
+      expect(logouts.length === 0, "Esc disconnected the studio");
+
+      // Disconnect: the session ends and the page becomes the Connect screen, which says so.
+      await button.click();
+      await page.locator(".studio-menu [data-act='disconnect']").click();
+      await dialog.waitFor();
+      await dialog.locator("[data-act='confirm-disconnect']").click();
+      const connect = page.locator(".connect[data-state='disconnected']");
+      await connect.waitFor({ timeout: 10000 });
+      expect(logouts.length === 1 && logouts[0].method === "POST" && /^[A-Za-z0-9_-]{43}$/.test(logouts[0].csrf ?? ""), `The logout was ${JSON.stringify(logouts)}`);
+      expect((await connect.locator("h1").innerText()) === "Disconnected", "Connect does not say Disconnected");
+      expect((await connect.locator(".connect-reason").innerText()) === "You disconnected this window. Your films are saved on this computer.", "Connect has the wrong reason");
+      await until(page, () => focused(page), (act) => act === "retry", "Focus is not on Try again", 2000);
+      await shot(page, "next-recovery-shell-disconnected-1440");
+      // The session really ended: without a fresh link, Try again says it is still not connected.
+      await connect.locator("[data-act='retry']").click();
+      await until(page, () => connect.locator("[data-note='still']").innerText().catch(() => ""), (value) => value === "Still not connected. Open a fresh link first, then try again.", "Try again without a link said nothing");
+      expect(await page.locator(".connect[data-state='disconnected']").count() === 1, "Try again lost the disconnected screen");
+    },
+  },
+  {
+    name: "next-recovery-shell-disconnect-fixture",
+    query: FIXTURE,
+    viewport: { width: 390, height: 844 },
+    async run({ page }) {
+      // On a phone the menu sits beside Settings on the first row, and the sample studio connects again on Try again.
+      await ready(page);
+      const rows = await page.evaluate(() => {
+        const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
+        return { menu: top(".topbar [data-act='studio-menu']"), settings: top(".topbar [data-act='settings']"), scroll: document.documentElement.scrollWidth - window.innerWidth };
+      });
+      expect(Math.abs(rows.menu - rows.settings) < 8 && rows.scroll <= 0, `The menu is out of place on a phone: ${JSON.stringify(rows)}`);
+      await page.locator(".topbar [data-act='studio-menu']").click();
+      const menu = await page.locator(".menu.studio-menu").boundingBox();
+      expect(menu && menu.x >= 8 && menu.x + menu.width <= 390 - 8, `The menu runs off the screen: ${JSON.stringify(menu)}`);
+      await shot(page, "next-recovery-shell-menu-390");
+      await page.locator(".studio-menu [data-act='disconnect']").click();
+      await page.locator("dialog[data-dialog='disconnect'] [data-act='confirm-disconnect']").click();
+      await page.waitForSelector(".connect[data-state='disconnected']");
+      await page.locator(".connect [data-act='retry']").click();
+      await ready(page);
+    },
+  },
   {
     name: "next-recovery-shell-view-url",
     query: `${FIXTURE}&view=plan`,

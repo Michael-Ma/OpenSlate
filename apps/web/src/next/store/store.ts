@@ -29,6 +29,8 @@ export interface StoreDeps {
 }
 
 const LAST_PROJECT_KEY = "openslate.next.project";
+/** The press id of Disconnect while the logout is being sent. */
+export const DISCONNECT_PRESS = "session:disconnect";
 const path = (projectId: string, rest = "") => `/api/projects/${encodeURIComponent(projectId)}${rest}`;
 
 /** Definite refusals: the request was answered and will not succeed by resending it. */
@@ -385,7 +387,7 @@ export class StudioStore {
     }, toast, options?.timeoutMs);
   }
 
-  // ---- installation recovery -------------------------------------------------
+  // ---- installation recovery and the session -------------------------------------------------
 
   /** Read the installation's recovery status. Never throws: an older server without the route, or a failed read, keeps what was known. */
   async readRecovery(): Promise<void> {
@@ -457,6 +459,26 @@ export class StudioStore {
 
   /** Put away what the review said after it was finished. */
   dismissRecovery = () => this.dispatch({ type: "recovery", recovery: { released: false, stale: false } });
+
+  /**
+   * End this window's session (POST /api/session/logout). Resolves null once the studio confirmed it and the store
+   * stopped (the page then shows Connect), or the error code when it refused or did not answer (the page stays and
+   * the dialog that asked says why). It is not a studio write, so a studio in recovery review still allows it.
+   */
+  async disconnect(): Promise<string | null> {
+    if (this.#state.pending[DISCONNECT_PRESS]) return "PENDING";
+    this.dispatch({ type: "pending", pressId: DISCONNECT_PRESS, pending: true });
+    try {
+      await this.#deps.client.request("/api/session/logout", { method: "POST" });
+      this.stop();
+      return null;
+    } catch (error) {
+      this.#deps.onError?.(error);
+      return error instanceof ApiError ? error.code : "NETWORK_ERROR";
+    } finally {
+      this.dispatch({ type: "pending", pressId: DISCONNECT_PRESS, pending: false });
+    }
+  }
 
   // ---- plain UI state ----------------------------------------------------------
 

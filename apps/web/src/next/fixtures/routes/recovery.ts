@@ -4,7 +4,8 @@ import type { FixtureWorld } from "../fixture-port.ts";
 import { DECLINE, type Decline } from "./types.ts";
 
 /**
- * The installation's recovery review in the sample studio. The sample studio is never really restored: a `?recovery=` preset makes it look as if it had just been restored from a backup.
+ * The installation's recovery review in the sample studio, and the session's logout. The sample studio is never
+ * really restored: a `?recovery=` preset makes it look as if it had just been restored from a backup.
  *
  * - `quarantined`: in review. Reads work, every other request is refused with INSTALLATION_QUARANTINED (as the
  *   server does), the film is stopped under the restore's authority, and Finish recovery review releases it.
@@ -134,12 +135,13 @@ function release(world: FixtureWorld, fixture: RecoveryFixture, body: unknown, k
 }
 
 /**
- * The recovery status and release, and the quarantine's refusal of every write. DECLINE passes the request
+ * The recovery status and release, the logout, and the quarantine's refusal of every write. DECLINE passes the request
  * on to the views' routes and the Keyframes commands.
  */
 export function recoveryRequest(world: FixtureWorld, method: string, path: string, options: RequestOptions): unknown | Decline {
   const fixture = recoveryOf(world);
   if (method === "GET" && path === RECOVERY_PATH) return snapshot(fixture);
+  if (method === "POST" && path === "/api/session/logout") return { disconnected: true };
   if (method === "POST" && path === RELEASE_PATH) return release(world, fixture, options.body, options.key);
   if (method !== "GET" && fixture.state === "quarantined") throw new ApiError("INSTALLATION_QUARANTINED", 409);
   return DECLINE;
