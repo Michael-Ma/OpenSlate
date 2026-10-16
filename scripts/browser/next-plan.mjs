@@ -103,7 +103,7 @@ export const scenarios = [
       await expectText(page, '[data-impact] .txt', /^No changes yet\.$/);
       expect(await page.locator('[data-act="save-shot"]').isDisabled(), "Save is on with nothing changed");
       await page.fill('[data-field="purpose"]', "Mara buys the last ticket of the season.");
-      await expectText(page, '[data-impact="cost"] .txt', /Purpose and framing are written into the picture prompt\. Saving outdates 1\.2's keyframe and clip; remaking both costs about \$0\.54\. The current ones stay in Assets as earlier takes\./);
+      await expectText(page, '[data-impact="cost"] .txt', /Purpose, action and framing are written into both prompts\. Saving outdates 1\.2's keyframe and clip; remaking both costs about \$0\.54\. The current ones stay in Assets as earlier takes\./);
       await expectText(page, '[data-note="line"]', /^Voice line 2\.1 s · fits 5 s$/);
       await page.fill('[data-field="line"]', "One for the morning boat, please.");
       await expectText(page, '[data-note="line"]', /About 1\.8 s \(estimate, 0\.3 s a word; measured once the voice line is made\) · fits 5 s/);
@@ -169,19 +169,19 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await openPlan(page);
-      // Two fields are two commands, and the server undoes only its latest: the hint, the toast and the header say so.
+      // The shot's fields save as one command (shotFields), so one Undo restores them all; no "only the last" hint.
       await page.click(`[data-act="edit-shot"][data-shot="${shot("3.1")}"]`);
       await page.fill('[data-field="purpose"]', "The ferry leaves the pier.");
       await page.fill('[data-field="motion"]', "Slow pan left");
-      await expectText(page, '[data-hint="multi"]', /^Saves as 2 changes; Undo reverts only the last one \(3\.1 purpose\)\.$/);
+      expect(!(await page.locator('[data-hint="multi"]').count()), "Two shot fields are said to save as two changes");
       await page.click('[data-act="save-shot"]');
-      await expectText(page, ".toast", /^Saved 3\.1\. Undo reverts only the last change: 3\.1 purpose\./);
-      await expectText(page, '[data-act="plan-undo"]', /^Undo: 3\.1 purpose$/);
+      await expectText(page, ".toast", /^Saved 3\.1\./);
+      await expectText(page, '[data-act="plan-undo"]', /^Undo: edit 3\.1$/);
       await expectText(page, `[data-shot="${shot("3.1")}"]`, /The ferry leaves the pier\.[\s\S]*slow pan left/);
       await page.click('[data-act="plan-undo"]');
-      await expectText(page, ".toast", /Undone: 3\.1 purpose\./);
+      await expectText(page, ".toast", /Undone: edit 3\.1\./);
       const row = await rowText(page, "3.1");
-      expect(!/The ferry leaves the pier\./.test(row) && /slow pan left/.test(row), `Undo did not revert only the purpose: ${JSON.stringify(row)}`);
+      expect(!/The ferry leaves the pier\./.test(row) && !/slow pan left/.test(row) && /slow pull-back/.test(row), `Undo did not restore both fields: ${JSON.stringify(row)}`);
       // A quick second edit right after a save does not trip over the head version the studio has not re-read yet.
       await page.click(`[data-act="scene-down"][data-scene="${scene(1)}"]`);
       await page.click(`[data-act="scene-down"][data-scene="${scene(1)}"]`);
@@ -270,7 +270,7 @@ export const scenarios = [
       await expectText(page, '[data-editing="true"] .thumb', /3\.3\s*Needs direction/);
       await expectText(page, ".toast", /Added 3\.3\. It needs a purpose and a picture before a keyframe can be made\./);
       await page.fill('[data-field="purpose"]', "The harbour lights go out one by one.");
-      await page.selectOption('[data-field="framing"]', "Wide");
+      await page.fill('[data-field="framing"]', "Wide");
       await page.fill('[data-field="prompt"]', "The harbour at dawn, its lamps going dark.");
       await expectText(page, '[data-impact] .txt', /Nothing has been made for 3\.3 yet, so nothing goes out of date\./);
       await page.click('[data-act="save-shot"]');
@@ -431,7 +431,7 @@ export const scenarios = [
       await expectText(page, ".view-head .line", /^3 场 · 8 个镜头 · 48 秒，上限 6:00$/);
       await page.click(`[data-act="edit-shot"][data-shot="${shot("1.2")}"]`);
       await page.fill('[data-field="purpose"]', "Mara buys the last ticket of the season.");
-      await expectText(page, '[data-impact="cost"] .txt', /目的和景别会写进画面描述。保存后，1\.2 的关键帧和视频会过期，重做两者约 \$0\.54。现有的会作为旧版本保留在素材里。/);
+      await expectText(page, '[data-impact="cost"] .txt', /目的、动作和景别会写进画面和视频描述。保存后，1\.2 的关键帧和视频会过期，重做两者约 \$0\.54。现有的会作为旧版本保留在素材里。/);
       await noSidewaysScroll(page, 1440);
       await screenshot(page, "zh-editing-1440");
       await page.setViewportSize({ width: 390, height: 844 });
