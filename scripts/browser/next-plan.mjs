@@ -323,6 +323,22 @@ export const scenarios = [
       const row = page.locator(".shot-row").filter({ hasText: "The harbour lights go out one by one." });
       await row.waitFor();
       expect(/No keyframe yet/.test(await row.innerText()), "The directed shot still needs direction");
+      // The saved row's ring is drawn inside its scene's card, never over or past the card's border.
+      const added = await row.getAttribute("data-shot");
+      await page.waitForSelector(`.shot-row.flash[data-shot="${added}"]`, { timeout: 3000 });
+      const ring = await page.evaluate((id) => {
+        const flashed = document.querySelector(`.shot-row.flash[data-shot="${id}"]`);
+        const card = flashed.closest(".scene").getBoundingClientRect();
+        const box = flashed.getBoundingClientRect();
+        const style = getComputedStyle(flashed), after = getComputedStyle(flashed, "::after");
+        const inset = parseFloat(after.left);
+        return {
+          drawn: after.content !== "none" && after.borderTopStyle === "solid",
+          outline: style.outlineStyle === "none" ? 0 : parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset),
+          ring: [box.left + inset, box.right - inset], card: [card.left + 1, card.right - 1],
+        };
+      }, added);
+      expect(ring.drawn && ring.outline <= 0 && ring.ring[0] >= ring.card[0] && ring.ring[1] <= ring.card[1], `The saved row's ring is not inside its card: ${JSON.stringify(ring)}`);
       // Add a scene: its title opens for naming.
       await page.click('[data-act="add-scene"]');
       await page.waitForSelector('[data-form="title"] input');

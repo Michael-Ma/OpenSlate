@@ -132,7 +132,10 @@
 /* ---------- scenes ---------- */
 .plan .scenes{display:flex;flex-direction:column;gap:14px}
 .plan .scene{padding:0}
-.plan .scene.flash,.plan .shot-row.flash{outline:2px solid var(--select);outline-offset:2px;border-radius:var(--r-big)}
+.plan .scene.flash{outline:2px solid var(--select);outline-offset:2px;border-radius:var(--r-big)}
+/* A shot row sits inside its scene's card: its ring is drawn inside the row, 2 px clear of the card's border (an
+   outline outside the row ran past the card's edges). */
+.plan .shot-row.flash::after{content:"";position:absolute;inset:2px;border:2px solid var(--select);border-radius:12px;pointer-events:none}
 .plan .scene-top{display:flex;align-items:center;gap:10px;padding:12px 14px 4px 16px;flex-wrap:wrap}
 .plan .sno{width:24px;height:24px;border-radius:7px;background:var(--raised-2);display:grid;place-items:center;font-weight:700;font-size:12.5px;flex:none}
 .plan .scene-top h2{margin:0;font-size:16px;font-weight:700;min-width:0;overflow-wrap:anywhere}
