@@ -118,7 +118,6 @@ export const planMessages = {
   "plan.field.purpose_placeholder": { en: "What this shot does in the film", zh: "这个镜头在片中的作用" },
   "plan.field.action": { en: "Action", zh: "动作" },
   "plan.field.action_placeholder": { en: "What happens in the shot", zh: "镜头里发生了什么" },
-  "plan.framing.choose": { en: "Choose framing", zh: "选择景别" },
   "plan.field.framing": { en: "Framing", zh: "景别" },
   "plan.field.framing_placeholder": { en: "Wide, Medium, or your own words", zh: "全景、中景，或你自己的描述" },
   "plan.field.length": { en: "Length", zh: "时长" },
@@ -151,7 +150,7 @@ export const planMessages = {
 
   // ---- what a save outdates (before saving)
   "plan.impact.unchanged": { en: "No changes yet.", zh: "还没有修改。" },
-  "plan.impact.rewrites": { en: "Purpose and framing are written into the picture prompt.", zh: "目的和景别会写进画面描述。" },
+  "plan.impact.rewrites": { en: "Purpose, action and framing are written into both prompts.", zh: "目的、动作和景别会写进画面和视频描述。" },
   "plan.impact.running": { en: "Work for {shot} is still running; what it makes will be out of date.", zh: "{shot} 还有任务在进行，生成的内容会过期。" },
   "plan.impact.kf_clip": { en: "Saving outdates **{shot}'s keyframe and clip**; remaking both costs **about {price}**.", zh: "保存后，**{shot} 的关键帧和视频**会过期，重做两者**约 {price}**。" },
   "plan.impact.kf_clip_unpriced": { en: "Saving outdates **{shot}'s keyframe and clip**; remaking them has no price set.", zh: "保存后，**{shot} 的关键帧和视频**会过期，重做没有设定价格。" },

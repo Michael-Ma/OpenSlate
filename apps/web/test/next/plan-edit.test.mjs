@@ -4,7 +4,7 @@ import { lastFerryOverview, sceneId, shotId } from '../../src/next/fixtures/last
 import { catalog } from '../../src/next/i18n/messages.ts';
 import { translate } from '../../src/next/i18n/translate.ts';
 import {
-  canStep, changedFields, draftEdits, draftOf, draftProblem, editChange, FRAMINGS, lengthFloor, lengthHint, lineNote, MOTIONS, savedMessage, shotImpact, stepLength, unitPrices,
+  canStep, changedFields, draftEdits, draftOf, draftProblem, editChange, FIELD_LABEL, FRAMINGS, lengthFloor, lengthHint, lineNote, MOTIONS, savedMessage, shotImpact, stepLength, storedShot, unitPrices,
 } from '../../src/next/model/plan-edit.ts';
 
 const overview = lastFerryOverview();
@@ -17,24 +17,34 @@ const impact = (label, change, extra = {}) => {
 };
 const text = (result) => result.parts.map((part) => translate('en', part.id, part.values)).join(' ');
 
-test("the editor starts from the shot as it is now", () => {
-  assert.deepEqual(draftOf(shot('1.2'), 'generated', 30), {
-    purpose: 'Mara at the counter, sliding coins across.', framing: 'Medium', prompt: 'Mara at the counter, sliding coins across.', motion: 'Static', seconds: 5, narration: 'line', line: 'One for the morning boat.',
+test("the editor starts from the shot as it is now, with its action and video prompt from the stored shot", () => {
+  assert.deepEqual(draftOf(shot('1.2'), 'generated', 30, { action: 'She slides three coins across.', videoPrompt: 'Mara at the counter. Static.' }), {
+    purpose: 'Mara at the counter, sliding coins across.', action: 'She slides three coins across.', framing: 'Medium', prompt: 'Mara at the counter, sliding coins across.', videoPrompt: 'Mara at the counter. Static.',
+    motion: 'Static', seconds: 5, narration: 'line', line: 'One for the morning boat.',
   });
   assert.equal(draftOf(shot('2.1'), undefined, 30).narration, 'none');
   assert.equal(draftOf(shot('2.1'), 'undecided', 30).narration, 'undecided');
+  // The server's placeholders for a new shot are not written words.
+  const added = draftOf(shot('2.1'), 'none', 30, { action: 'Describe the action', videoPrompt: 'Pending direction' });
+  assert.deepEqual([added.action, added.videoPrompt], ['', '']);
 });
 
 test('prices come from the overview quotes: a keyframe and a clip, and no voice price in the sample film', () => {
   assert.deepEqual(prices('1.2'), { keyframe: 40000, clip: 500000, voice: null });
 });
 
-test('purpose or framing outdates the keyframe and the clip, and says they are written into the prompt', () => {
+test('purpose, action or framing outdates the keyframe and the clip, and says they are written into both prompts', () => {
   const result = impact('1.2', { purpose: 'Mara buys the last ticket of the season.' });
   assert.equal(result.tone, 'cost');
-  assert.equal(text(result), "Purpose and framing are written into the picture prompt. Saving outdates **1.2's keyframe and clip**; remaking both costs **about $0.54**. The current ones stay in Assets as earlier takes.");
+  assert.equal(text(result), "Purpose, action and framing are written into both prompts. Saving outdates **1.2's keyframe and clip**; remaking both costs **about $0.54**. The current ones stay in Assets as earlier takes.");
+  assert.equal(impact('1.2', { action: 'She pays.' }).parts[0].id, 'plan.impact.rewrites');
   const base = draftOf(shot('1.2'), 'generated', 30);
-  assert.deepEqual(savedMessage(shot('1.2'), base, { ...base, framing: 'Wide' }), { id: 'plan.toast.saved_kf_clip', values: { shot: '1.2' } });
+  assert.deepEqual(savedMessage(shot('1.2'), base, { ...base, framing: 'Low-angle medium over shoulder' }), { id: 'plan.toast.saved_kf_clip', values: { shot: '1.2' } });
+});
+
+test('the video prompt drives only the clip: the keyframe stays', () => {
+  assert.equal(text(impact('1.1', { videoPrompt: 'The shutters come down slowly.' })), "Saving outdates **1.1's clip** (remaking it costs **about $0.50**). The keyframe stays. The current ones stay in Assets as earlier takes.");
+  assert.equal(text(impact('2.1', { videoPrompt: 'Fog rolls in.' })), 'Nothing made goes out of date: 2.1 has no clip yet and the keyframe stays.');
 });
 
 test('a prompt change on a shot without a clip outdates only the keyframe', () => {
@@ -60,39 +70,53 @@ test('a new line outdates the voice line; the price shows only when one is set (
   assert.match(text(unpriced), /no price set/);
 });
 
-test('the commands are ordered so the server accepts them, one field each', () => {
+test("the shot's fields save as one shotFields command; narration around it, in an order the server accepts", () => {
   const base = draftOf(shot('1.2'), 'generated', 30);
-  const draft = { ...base, purpose: 'Buying the ticket.', prompt: 'Coins on the counter.', seconds: 6, line: 'One, please.' };
-  assert.deepEqual(draftEdits(base, draft, 30, 'generated').map(({ field, edit }) => [field, edit.kind, edit.field, edit.value]), [
-    ['length', 'shot', 'desiredFrames', '180'],
-    ['prompt', 'shot', 'imagePrompt', 'Coins on the counter.'],
-    ['purpose', 'shot', 'purpose', 'Buying the ticket.'],
-    ['line', 'narration', 'text', 'One, please.'],
+  const draft = { ...base, purpose: 'Buying the ticket.', framing: 'Low-angle medium over shoulder', motion: 'Slow pan left', seconds: 6, line: 'One, please.' };
+  assert.deepEqual(draftEdits(base, draft, 30, 'generated', storedShot(shot('1.2'), undefined)).map(({ fields, edit }) => [fields, edit]), [
+    [['purpose', 'framing', 'motion', 'length'], { kind: 'shotFields', fields: { purpose: 'Buying the ticket.', framing: 'Low-angle medium over shoulder', motion: 'Slow pan left', desiredFrames: 180 } }],
+    [['line'], { kind: 'narration', field: 'text', value: 'One, please.' }],
   ]);
   // Dropping the line comes first, so a shorter shot is no longer held by its voice.
-  assert.deepEqual(draftEdits(base, { ...base, narration: 'none', seconds: 3 }, 30, 'generated').map(({ edit }) => [edit.field, edit.value]), [['mode', 'none'], ['desiredFrames', '90']]);
+  assert.deepEqual(draftEdits(base, { ...base, narration: 'none', seconds: 3 }, 30, 'generated').map(({ edit }) => edit), [
+    { kind: 'narration', field: 'mode', value: 'none' }, { kind: 'shotFields', fields: { desiredFrames: 90 } },
+  ]);
   // A first line: the words, then the choice to narrate.
   const silent = draftOf(shot('2.1'), 'none', 30);
   assert.deepEqual(draftEdits(silent, { ...silent, narration: 'line', line: 'Fog.' }, 30, 'none').map(({ edit }) => [edit.field, edit.value]), [['text', 'Fog.'], ['mode', 'generated']]);
   assert.deepEqual(draftEdits(base, base, 30, 'generated'), []);
   assert.deepEqual(changedFields(base, { ...base, purpose: `${base.purpose}  ` }), [], 'surrounding spaces are not a change');
+  // An action and a video prompt are fields like the others.
+  const [both] = draftEdits(base, { ...base, action: 'She pays.', videoPrompt: 'Coins slide; she smiles.' }, 30, 'generated', storedShot(shot('1.2'), { action: '', videoPrompt: 'Mara at the counter. Static.' }));
+  assert.deepEqual(both.fields, ['action', 'videoPrompt']);
+  assert.equal(both.edit.fields.action, 'She pays.');
 });
 
-test('a prompt-only save keeps the purpose and framing the server wrote into the prompt', () => {
+test('a prompt-only save keeps the direction header the server wrote; a save that also changes the direction writes it anew', () => {
   const header = 'OpenSlate current direction:\nMara buys the last ticket. Medium\nReference details (retain only where consistent):\n';
   const edited = { ...shot('1.2'), imagePrompt: `${header}Mara at the counter, sliding coins across.` };
   const base = draftOf(edited, 'generated', 30);
   assert.equal(base.prompt, 'Mara at the counter, sliding coins across.', 'the editor shows only the words');
-  const [prompt] = draftEdits(base, { ...base, prompt: 'Coins on the counter.' }, 30, 'generated', edited.imagePrompt);
-  assert.deepEqual(prompt.edit, { kind: 'shot', field: 'imagePrompt', value: `${header}Coins on the counter.` });
+  const [prompt] = draftEdits(base, { ...base, prompt: 'Coins on the counter.' }, 30, 'generated', storedShot(edited, undefined));
+  assert.deepEqual(prompt.edit, { kind: 'shotFields', fields: { imagePrompt: `${header}Coins on the counter.` } });
   // Without a header the words are the whole prompt.
   const plain = draftOf(shot('1.2'), 'generated', 30);
-  assert.equal(draftEdits(plain, { ...plain, prompt: 'Coins.' }, 30, 'generated', shot('1.2').imagePrompt)[0].edit.value, 'Coins.');
+  assert.equal(draftEdits(plain, { ...plain, prompt: 'Coins.' }, 30, 'generated', storedShot(shot('1.2'), undefined))[0].edit.fields.imagePrompt, 'Coins.');
+  // Purpose and prompt together: the server takes a prompt as written, so it is sent with the new direction in front,
+  // joined exactly as storyboard.ts editedPrompt joins it.
+  const [both] = draftEdits(base, { ...base, purpose: 'The last ticket', prompt: 'Coins.' }, 30, 'generated', storedShot(edited, { action: 'She pays', videoPrompt: '' }));
+  assert.equal(both.edit.fields.imagePrompt, 'OpenSlate current direction:\nThe last ticket. She pays. Medium\nReference details (retain only where consistent):\nCoins.');
+  // The video prompt's header also names the camera movement.
+  const [video] = draftEdits(base, { ...base, motion: 'Slow push-in', videoPrompt: 'Coins slide.' }, 30, 'generated', storedShot(edited, { action: '', videoPrompt: 'Old.' }));
+  assert.equal(video.edit.fields.videoPrompt, 'OpenSlate current direction:\nMara at the counter, sliding coins across.. Medium. Camera movement: Slow push-in\nReference details (retain only where consistent):\nCoins slide.');
 });
 
 test('a cleared field or an empty line cannot be saved', () => {
   const base = draftOf(shot('1.2'), 'generated', 30);
   assert.deepEqual(draftProblem(base, { ...base, purpose: ' ' }), { id: 'plan.edit.required_purpose' });
+  assert.deepEqual(draftProblem(base, { ...base, framing: '' }), { id: 'plan.edit.required_framing' });
+  assert.equal(draftProblem(base, { ...base, videoPrompt: ' ' }), null, 'an empty prompt that was empty is no change');
+  assert.deepEqual(draftProblem({ ...base, videoPrompt: 'x' }, { ...base, videoPrompt: ' ' }), { id: 'plan.edit.required_video_prompt' });
   assert.deepEqual(draftProblem(base, { ...base, line: '' }), { id: 'plan.line.empty' });
   assert.equal(draftProblem(base, { ...base, purpose: 'New' }), null);
 });
@@ -138,26 +162,29 @@ test('the line shows its measured length until the words change, then a labelled
   assert.equal(lineNote(shot('1.2'), { ...base, narration: 'none' }), null);
 });
 
-test('Undo names the whole edit, or the field its last command saved', () => {
-  assert.deepEqual(editChange('1.2', ['purpose']), { id: 'plan.change.edit_shot', values: { shot: '1.2' } });
-  assert.deepEqual(editChange('1.2', ['length', 'prompt', 'purpose']), { id: 'plan.change.field.purpose', values: { shot: '1.2' } });
-  for (const field of ['purpose', 'framing', 'prompt', 'motion', 'length', 'narration', 'line']) assert.ok(Object.hasOwn(catalog, `plan.change.field.${field}`));
-  for (const field of ['purpose', 'framing', 'prompt', 'motion']) assert.ok(Object.hasOwn(catalog, `plan.edit.required_${field}`));
-  // Before saving, the hint says Undo will revert only the last field; after, the toast says the same.
-  assert.equal(translate('en', 'plan.edit.multi', { count: 2, change: '3.1 purpose' }), 'Saves as 2 changes; Undo reverts only the last one (3.1 purpose).');
-  assert.equal(translate('en', 'plan.toast.saved_undo_last', { saved: 'Saved 3.1.', change: '3.1 purpose' }), 'Saved 3.1. Undo reverts only the last change: 3.1 purpose.');
+test('Undo names the whole edit when the shot fields are one command, or what its last command saved', () => {
+  assert.deepEqual(editChange('1.2', [['purpose', 'motion', 'length']]), { id: 'plan.change.edit_shot', values: { shot: '1.2' } });
+  assert.deepEqual(editChange('1.2', [['purpose', 'prompt'], ['line']]), { id: 'plan.change.field.line', values: { shot: '1.2' } });
+  assert.deepEqual(editChange('1.2', [['narration'], ['length', 'purpose']]), { id: 'plan.change.shot_fields', values: { shot: '1.2' } });
+  assert.deepEqual(editChange('1.2', [['narration'], ['length']]), { id: 'plan.change.field.length', values: { shot: '1.2' } });
+  for (const field of ['purpose', 'action', 'framing', 'prompt', 'video_prompt', 'motion', 'length', 'narration', 'line']) assert.ok(Object.hasOwn(catalog, `plan.change.field.${field}`));
+  for (const field of ['purpose', 'action', 'framing', 'prompt', 'video_prompt', 'motion']) assert.ok(Object.hasOwn(catalog, `plan.edit.required_${field}`));
+  for (const id of Object.values(FIELD_LABEL)) assert.ok(Object.hasOwn(catalog, id), id);
+  // Before saving, the hint says Undo will revert only the last command; after, the toast says the same.
+  assert.equal(translate('en', 'plan.edit.multi', { count: 2, change: '1.2 line' }), 'Saves as 2 changes; Undo reverts only the last one (1.2 line).');
+  assert.equal(translate('en', 'plan.toast.saved_undo_last', { saved: 'Saved 1.2.', change: '1.2 line' }), 'Saved 1.2. Undo reverts only the last change: 1.2 line.');
 });
 
-test('framings and motions are shot content in the film\'s words, not translated', () => {
+test('framings and motions are suggestions in the film\'s words, not translated; framing is free text', () => {
   assert.deepEqual(FRAMINGS, ['Wide', 'Medium', 'Close-up', 'Extreme close-up']);
   assert.ok(MOTIONS.includes('Static'));
-  assert.ok(!Object.keys(catalog).some((id) => id.startsWith('plan.motion.') || /^plan\.framing\.(?!choose$)/.test(id)));
+  assert.ok(!Object.keys(catalog).some((id) => id.startsWith('plan.motion.') || id.startsWith('plan.framing.')));
 });
 
 test('the Chinese impact line reads with the price in place', () => {
   const result = impact('1.2', { purpose: 'Mara buys the last ticket of the season.' });
   const zh = result.parts.map((part) => translate('zh-CN', part.id, part.values)).join('');
-  assert.equal(zh, '目的和景别会写进画面描述。保存后，**1.2 的关键帧和视频**会过期，重做两者**约 $0.54**。现有的会作为旧版本保留在素材里。');
+  assert.equal(zh, '目的、动作和景别会写进画面和视频描述。保存后，**1.2 的关键帧和视频**会过期，重做两者**约 $0.54**。现有的会作为旧版本保留在素材里。');
   assert.equal(sceneId(1), 'scene-1');
 });
 

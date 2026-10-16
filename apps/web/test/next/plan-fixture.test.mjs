@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { fixtureCommand } from '../../src/next/fixtures/fixture-commands.ts';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { lastFerryDirector, lastFerryOverview, lastFerrySnapshot, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
-import { IMPORT_READ_MS, planRoutes } from '../../src/next/fixtures/routes/plan.ts';
+import { DIRECTOR_EDIT_MS, IMPORT_READ_MS, loseNextReply, planRoutes } from '../../src/next/fixtures/routes/plan.ts';
 import { fixtureRoute } from '../../src/next/fixtures/routes/index.ts';
 import { DECLINE } from '../../src/next/fixtures/routes/types.ts';
 
@@ -265,26 +265,126 @@ test('the fixture port serves the Plan routes before the Keyframes commands', as
   }
 });
 
-test('through the store: a multi-field save carries head versions, and a refusal keeps the server reason', async () => {
+test('through the store: a save of several commands carries head versions, and a refusal keeps the server reason', async () => {
   const { StudioStore } = await import('../../src/next/store/store.ts');
-  const { refusal, storyboardSequence } = await import('../../src/next/views/plan/commands.ts');
+  const { refusal, storyboardOutcome } = await import('../../src/next/views/plan/commands.ts');
   const port = new FixturePort();
   let n = 0;
   const store = new StudioStore({ client: port, storage: null, newKey: () => `key-${++n}` });
   try {
     await store.start();
-    const saved = await storyboardSequence(store, [
-      { pressId: 'a', input: { kind: 'shot', id: shotId('2.1'), field: 'motion', value: 'Slow pan left' } },
-      { pressId: 'b', input: { kind: 'shot', id: shotId('2.1'), field: 'purpose', value: 'The harbour, waiting.' } },
-    ]);
-    assert.deepEqual([saved.saved, saved.last.headVersion], [2, 14]);
+    // The shot's fields as one command, then its line as the next, carrying the head version the first produced.
+    const fields = await storyboardOutcome(store, 'a', { kind: 'shotFields', id: shotId('2.1'), fields: { motion: 'Slow pan left', purpose: 'The harbour, waiting.' } });
+    assert.equal(fields.kind, 'done');
+    assert.equal(fields.receipt.headVersion, 13);
+    const line = await storyboardOutcome(store, 'b', { kind: 'narration', id: shotId('2.1'), field: 'text', value: 'Nobody yet.' }, fields.receipt.headVersion);
+    assert.equal(line.kind, 'done');
+    assert.equal(line.receipt.headVersion, 14);
     await store.narrationFit(shotId('2.3'), 'extend_shot');
     await store.refresh();
-    const refusedSave = await storyboardSequence(store, [{ pressId: 'c', input: { kind: 'shot', id: shotId('2.3'), field: 'desiredFrames', value: '180' } }]);
-    assert.deepEqual([refusedSave.saved, refusedSave.last], [0, null]);
+    const refusedSave = await storyboardOutcome(store, 'c', { kind: 'shotFields', id: shotId('2.3'), fields: { desiredFrames: 180 } });
+    assert.equal(refusedSave.kind, 'refused');
     assert.deepEqual(refusal(store), { id: 'error.SHOT_SHORTER_THAN_NARRATION' });
   } finally {
     store.stop();
     port.close();
   }
+});
+
+test('shotFields saves several fields as one command, and one Undo restores them all with their media', () => {
+  const w = world();
+  const before = structuredClone(shot(w, shotId('1.1')));
+  const receipt = edit(w, { kind: 'shotFields', id: shotId('1.1'), fields: { purpose: 'Closing.', action: 'The shutter comes down.', framing: 'Low-angle wide', motion: 'Slow pan left', desiredFrames: 210 } });
+  assert.equal(receipt.headVersion, 13, 'one command, one head version');
+  const after = shot(w, shotId('1.1'));
+  assert.deepEqual([after.purpose, after.framing, after.motion, after.durationFrames], ['Closing.', 'Low-angle wide', 'Slow pan left', 210]);
+  assert.deepEqual([after.keyframe.state, after.video.state], ['outdated', 'outdated']);
+  const stored = w.snapshot.project.shots.find((s) => s.id === shotId('1.1'));
+  assert.equal(stored.action, 'The shutter comes down.');
+  assert.ok(after.imagePrompt.startsWith('OpenSlate current direction:\nClosing.. The shutter comes down.. Low-angle wide\n'), after.imagePrompt);
+  assert.ok(stored.videoPrompt.includes('Camera movement: Slow pan left'), stored.videoPrompt);
+  edit(w, { kind: 'undo', commandId: receipt.commandId });
+  assert.deepEqual(shot(w, shotId('1.1')), { ...before, label: '1.1' });
+  assert.equal(w.snapshot.project.shots.find((s) => s.id === shotId('1.1')).action, undefined);
+});
+
+test('shotFields: explicit prompts win; a video prompt alone keeps the keyframe; a length below the accepted line refuses it all', () => {
+  const w = world();
+  edit(w, { kind: 'shotFields', id: shotId('1.1'), fields: { videoPrompt: 'The lamp flickers.' } });
+  assert.deepEqual([shot(w, shotId('1.1')).keyframe.state, shot(w, shotId('1.1')).video.state], ['ready', 'outdated']);
+  assert.equal(w.snapshot.project.shots.find((s) => s.id === shotId('1.1')).videoPrompt, 'The lamp flickers.');
+  edit(w, { kind: 'shotFields', id: shotId('1.2'), fields: { purpose: 'Paying.', imagePrompt: 'Coins on wood.' } });
+  assert.equal(shot(w, shotId('1.2')).imagePrompt, 'Coins on wood.');
+  // 2.3 lengthened to hold its 7.4 s line: a shorter length refuses the whole command, nothing else changes.
+  edit(w, { kind: 'shotFields', id: shotId('2.3'), fields: { desiredFrames: 240 } });
+  w.update((x) => { x.overview.shots[shotId('2.3')] = { ...x.overview.shots[shotId('2.3')], narration: { ...x.overview.shots[shotId('2.3')].narration, fits: true, fit: 'extend_shot' } }; });
+  const head = w.snapshot.project.headVersion;
+  assert.throws(() => edit(w, { kind: 'shotFields', id: shotId('2.3'), fields: { purpose: 'Ticket.', desiredFrames: 180 } }), refused('SHOT_SHORTER_THAN_NARRATION'));
+  assert.equal(w.snapshot.project.headVersion, head);
+  assert.notEqual(shot(w, shotId('2.3')).purpose, 'Ticket.');
+  for (const fields of [{}, { color: 'red' }, { purpose: ' ' }, { desiredFrames: 30 }, { desiredFrames: '180' }])
+    assert.throws(() => edit(w, { kind: 'shotFields', id: shotId('1.1'), fields }), refused('VALIDATION_ERROR'), JSON.stringify(fields));
+});
+
+test('a lost reply: the change is made, and the same request sent again is answered with the same receipt', async () => {
+  const { StudioStore } = await import('../../src/next/store/store.ts');
+  const { storyboardOutcome } = await import('../../src/next/views/plan/commands.ts');
+  const port = new FixturePort();
+  let n = 0;
+  const store = new StudioStore({ client: port, storage: null, newKey: () => `key-${++n}` });
+  try {
+    await store.start();
+    loseNextReply(port.world);
+    const input = { kind: 'shotFields', id: shotId('3.1'), fields: { purpose: 'The ferry leaves.' } };
+    const lost = await storyboardOutcome(store, `shotFields:${shotId('3.1')}`, input);
+    assert.equal(lost.kind, 'lost');
+    assert.equal(store.getState().toast, null, 'the view says it in place, not as an error toast');
+    assert.equal(store.unconfirmed(`plan:shotFields:${shotId('3.1')}`), true);
+    assert.equal(port.world.snapshot.project.headVersion, 13, 'the change was made');
+    const again = await lost.resend();
+    assert.equal(again.kind, 'done');
+    assert.equal(again.receipt.headVersion, 13, 'answered, not applied twice');
+    assert.equal(port.world.snapshot.project.headVersion, 13);
+    assert.equal(store.unconfirmed(`plan:shotFields:${shotId('3.1')}`), false);
+    // A refusal is definite: nothing is kept to resend.
+    const refusedOnce = await storyboardOutcome(store, 'x', { kind: 'shotFields', id: shotId('3.1'), fields: { purpose: ' ' } });
+    assert.equal(refusedOnce.kind, 'refused');
+  } finally {
+    store.stop();
+    port.close();
+  }
+});
+
+test("the director-edits preset: the Director rewrites 1.2's purpose and motion and the story a moment after the Plan opens", () => {
+  const w = world();
+  // Off unless the preset is set; the preset arms it, the Plan's first read schedules it.
+  call(w, 'GET', '/plan-imports');
+  w.advance(DIRECTOR_EDIT_MS);
+  assert.equal(shot(w, shotId('1.2')).purpose, 'Mara at the counter, sliding coins across.');
+  const location = globalThis.location;
+  globalThis.location = { search: '?plan=director-edits' };
+  try {
+    const armed = world();
+    call(armed, 'GET', '/plan-imports');
+    call(armed, 'GET', '/plan-imports');
+    armed.advance(DIRECTOR_EDIT_MS);
+    assert.equal(shot(armed, shotId('1.2')).purpose, 'Mara counts out her coins for the last ticket.');
+    assert.equal(shot(armed, shotId('1.2')).motion, 'Slow push-in');
+    assert.match(armed.snapshot.project.story, /season's last ferry/);
+    assert.equal(armed.snapshot.project.headVersion, 14);
+  } finally {
+    globalThis.location = location;
+  }
+});
+
+test("the sample proposal rewrites the story and the narration script, and keeps the brief", () => {
+  const w = world();
+  const { requestId } = call(w, 'POST', '/plan-imports', { name: 'draft.md', text: 'Plan.', expectedHeadVersion: 12 });
+  w.advance(IMPORT_READ_MS);
+  const { pending } = call(w, 'GET', '/plan-imports');
+  assert.equal(pending.text, 'Plan.');
+  assert.equal(pending.draft.project.brief, w.snapshot.project.brief);
+  assert.notEqual(pending.draft.project.story, w.snapshot.project.story);
+  assert.match(pending.draft.project.narration.script, /last boat of the season/);
+  call(w, 'POST', `/plan-imports/${requestId}/discard`, {});
 });
