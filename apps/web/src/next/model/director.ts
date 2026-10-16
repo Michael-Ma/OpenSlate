@@ -234,6 +234,30 @@ export function resolveRef(ref: RefLink, overview: GenerationOverview | null): R
 
 // ---- thread -------------------------------------------------------------------
 
+/** Within this many pixels of its bottom, the thread counts as at its bottom: new content keeps it there. */
+export const THREAD_STICK_PX = 40;
+
+/** The thread's scroll box: its offset, its content's height and its own height. */
+export interface ThreadBox {
+  top: number;
+  height: number;
+  client: number;
+}
+
+/**
+ * What a scroll event on the Director thread means. follow: the reader is at the bottom, and new content keeps them
+ * there. pin: the thread was pinned to its bottom and its content or its room changed since, so the event is the
+ * layout's, not the reader's: a scroll event arrives a frame after the offset moved (a pin, or the browser pulling the
+ * offset in when the content shrank), and by then a note, a held edit or the other language's longer text may have
+ * grown under it; the thread goes back to its bottom. away: the reader scrolled up, and new content waits for them.
+ * `pinned` is the box when the thread was last pinned to its bottom, or null once the reader has scrolled away.
+ */
+export function threadScrolled(box: ThreadBox, pinned: Pick<ThreadBox, "height" | "client"> | null): "follow" | "pin" | "away" {
+  if (box.height - box.top - box.client < THREAD_STICK_PX) return "follow";
+  if (pinned && (pinned.height !== box.height || pinned.client !== box.client)) return "pin";
+  return "away";
+}
+
 /** Where a note's Open pill goes: the anchored shot, or the scene when the note has no shot. */
 export interface NoteOpen {
   kind: "shot" | "scene";

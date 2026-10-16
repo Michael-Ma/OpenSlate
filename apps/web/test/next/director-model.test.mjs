@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   canStop, modeLine, scriptedTag, scopeLabel, bylineTime, userText, paragraphs, threadView, pendingQuestions,
   composeAnswer, composerView, pickerItems, filterPicker, mentionAt, removeMention, MESSAGE_LIMIT,
-  threadNotes, noteOpens, byLetter,
+  threadNotes, noteOpens, byLetter, threadScrolled, THREAD_STICK_PX,
 } from '../../src/next/model/director.ts';
 import { noteViews } from '../../src/next/model/notes.ts';
 import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, sceneId, shotId, PROJECT_ID } from '../../src/next/fixtures/last-ferry.ts';
@@ -340,4 +340,24 @@ test('turn status shows what a running turn does and how a turn ended without a 
   const question = { id: 'q', items: [{ id: 'i1', header: 'Coat', question: 'Which?', options: [{ label: 'Red', description: '' }, { label: 'Maroon', description: '' }] }] };
   assert.deepEqual(structuredAnswers(question, { i1: 'Maroon' }), [{ questionId: 'i1', optionIndex: 1 }]);
   assert.deepEqual(structuredAnswers(question, {}), []);
+});
+
+test('the thread stays at its bottom unless the reader scrolls away, even when content grows before the scroll event', () => {
+  const pinned = { height: 806, client: 650 };
+  // At the bottom, or within the stick distance of it: the reader follows new content.
+  assert.equal(threadScrolled({ top: 156, height: 806, client: 650 }, pinned), 'follow');
+  assert.equal(threadScrolled({ top: 156 - THREAD_STICK_PX + 1, height: 806, client: 650 }, null), 'follow');
+  // The reader scrolled up a box that had not changed since its pin: they are away, and new content waits.
+  assert.equal(threadScrolled({ top: 0, height: 806, client: 650 }, pinned), 'away');
+  assert.equal(threadScrolled({ top: 40, height: 806, client: 650 }, null), 'away');
+  // The event for a pin (or for the offset pulled in when the content shrank) arrives a frame late; a held edit or a
+  // longer language grew under it meanwhile. The layout moved, not the reader: back to the bottom.
+  assert.equal(threadScrolled({ top: 156, height: 980, client: 650 }, pinned), 'pin');
+  assert.equal(threadScrolled({ top: 0, height: 980, client: 650 }, pinned), 'pin');
+  // The thread got shorter under it (a taller composer): also the layout.
+  assert.equal(threadScrolled({ top: 156, height: 806, client: 560 }, pinned), 'pin');
+  // A thread that has not been pinned yet counts as pinned to nothing: the first late event pins it.
+  assert.equal(threadScrolled({ top: 0, height: 806, client: 650 }, { height: 0, client: 0 }), 'pin');
+  // Once away, a growing thread leaves the reader where they are.
+  assert.equal(threadScrolled({ top: 0, height: 980, client: 650 }, null), 'away');
 });

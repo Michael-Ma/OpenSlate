@@ -45,6 +45,27 @@ async function chipsShareARow(page) {
   const boxes = await page.$$eval(".composer .pic-chip, .composer .chips .atchip-wrap", (nodes) => nodes.map((node) => { const box = node.getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; }));
   if (boxes.length < 2 || new Set(boxes.map(([top]) => top)).size !== 1 || new Set(boxes.map(([, height]) => height)).size !== 1) fail(`The composer's chips are not one row of one size: ${JSON.stringify(boxes)}`);
 }
+/** The thread rests at its bottom, on its newest message (a smooth scroll there is given time to land). */
+async function threadAtBottom(page, where) {
+  await page.waitForFunction(() => { const node = document.querySelector(".thread"); return node.scrollHeight - node.scrollTop - node.clientHeight < 2; }, null, { timeout: 3000 })
+    .catch(async () => fail(`The thread is not at its bottom ${where}: ${JSON.stringify(await page.evaluate(() => { const node = document.querySelector(".thread"); return [node.scrollTop, node.scrollHeight, node.clientHeight]; }))}`));
+}
+/**
+ * A pin's scroll event arrives a frame late; content that grows under it meanwhile (a held edit, a note, the other
+ * language's longer text) must not read as the reader scrolling away: the thread goes back to its bottom.
+ */
+async function threadKeepsBottomUnderGrowth(page, where) {
+  await page.evaluate(() => new Promise((done) => {
+    const thread = document.querySelector(".thread");
+    const body = thread.querySelector(".thread-body");
+    thread.scrollTop = thread.scrollTop - 30;
+    thread.scrollTop = thread.scrollHeight;
+    body.style.paddingBottom = "160px";
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(done)));
+  }));
+  await threadAtBottom(page, `after content grew under a pin ${where}`);
+  await page.evaluate(() => { document.querySelector(".thread .thread-body").style.paddingBottom = ""; });
+}
 /** No image role without a name (decorative thumbnails and their placeholders are hidden instead). */
 async function noNamelessImages(page) {
   const nameless = await page.$$eval('.director [role="img"]', (nodes) => nodes.filter((node) => !(node.getAttribute("aria-label") ?? "").trim()).length);
@@ -416,6 +437,7 @@ export const scenarios = [
       await ready(page);
       const card = page.locator('[data-entry="held"]');
       await card.waitFor();
+      await threadAtBottom(page, "on load");
       const title = (await card.locator("b").textContent()).trim();
       if (title !== "An unfinished Director edit is holding 3.1 and 3.2") fail(`The card reads ${title}`);
       if (!(await card.locator("p").textContent()).includes("their waiting keyframes and clips start right away, as already approved")) fail("The card does not say letting go starts the waiting work");
@@ -452,9 +474,20 @@ export const scenarios = [
       if (marker !== "这条回复需要处理") fail(`The marker reads ${marker}`);
       const detail = (await page.locator(".dir-attention b + span").textContent()).trim();
       if (detail !== "导演出错停止了。发送一条消息重试。") fail(`The failure reads ${detail}`);
+      // The thread opens on its newest message (the held edit), and stays there when the layout moves under it.
+      await threadAtBottom(page, "on load in Chinese");
+      await threadKeepsBottomUnderGrowth(page, "in Chinese");
       await page.locator('.preview [data-act="show-director"]').click();
       await toast(page, /^示例导演看不了图片/);
+      await threadAtBottom(page, "in Chinese");
       await page.screenshot({ path: shot("parity-zh-1440"), clip: column });
+      // English runs longer: the switch keeps the newest message in view, and back again.
+      await page.locator(".topbar [data-act='language']").click();
+      await page.waitForFunction(() => document.querySelector(".dir-attention b")?.textContent?.trim() === "This reply needs attention");
+      await threadAtBottom(page, "after switching to English");
+      await page.locator(".topbar [data-act='language']").click();
+      await page.waitForFunction(() => document.querySelector(".dir-attention b")?.textContent?.trim() === "这条回复需要处理");
+      await threadAtBottom(page, "after switching back to Chinese");
     },
   },
 ];
