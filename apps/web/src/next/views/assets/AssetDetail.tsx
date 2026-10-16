@@ -3,7 +3,9 @@ import { useI18n } from "../../i18n/I18n.tsx";
 import { downloadName, type AssetDetailView, type AssetTile } from "../../model/assets.ts";
 import { clock, motionKind, motionTransform } from "../../model/motion.ts";
 import { msg } from "../../model/types.ts";
-import { useMode, useStore } from "../../store/react.tsx";
+import { useMode, useStore, useStudio } from "../../store/react.tsx";
+import { pictureFromAsset } from "../../model/director.ts";
+import { ShowDirectorButton } from "../../director/ShowDirector.tsx";
 import { AssetFace, AssetPicture, Wave } from "./AssetTile.tsx";
 import { useAssetFile } from "./media.ts";
 
@@ -182,9 +184,12 @@ function DownloadAction({ detail, title }: { detail: AssetDetailView; title: str
 }
 
 /** The detail panel: preview, Kind / Shot / Take / In use / Source / Made / Length, and the actions. */
-export function AssetDetail({ detail, tile, headingId, onPoint, onOpen }: { detail: AssetDetailView; tile: AssetTile; headingId: string; onPoint(): void; onOpen(): void }) {
+export function AssetDetail({ detail, tile, headingId, onPoint, onOpen, onShown }: { detail: AssetDetailView; tile: AssetTile; headingId: string; onPoint(): void; onOpen(): void; onShown?(): void }) {
   const { t, tm } = useI18n();
   const title = tm(detail.title);
+  // A picture (an imported one, or a shot's keyframe) can be shown to the Director in the next message.
+  const overview = useStudio((s) => s.overview);
+  const picture = pictureFromAsset(detail.item, overview);
   return (
     <>
       <AssetPreview key={detail.key} detail={detail} tile={tile} title={title} />
@@ -199,6 +204,7 @@ export function AssetDetail({ detail, tile, headingId, onPoint, onOpen }: { deta
       </dl>
       <div className="acts">
         <DownloadAction key={detail.key} detail={detail} title={title} />
+        {picture && <ShowDirectorButton candidate={picture} {...(onShown ? { onShown } : {})} />}
         {detail.point && <button type="button" className="pill" data-act="point-director" onClick={onPoint}>{t("assets.point", { target: tm(detail.point.name) })}</button>}
         {detail.open && <button type="button" className="pill" data-act="open-in" data-target-view={detail.open.view} onClick={onOpen}>{tm(detail.open.label)}</button>}
       </div>
