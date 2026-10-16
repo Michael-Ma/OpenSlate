@@ -1,0 +1,72 @@
+{
+  "at": "2026-10-16T22:54:43.691Z",
+  "project": {
+    "activePlanId": null,
+    "artifacts": [],
+    "brief": "",
+    "capabilityLockId": "ba20bd51-7d1c-416a-9001-ee2128ec7f0b",
+    "cues": [],
+    "headVersion": 0,
+    "id": "fc557239-6519-4cf2-bda4-738c2c9543f2",
+    "maxFrames": 10800,
+    "name": "Harbour LIVE-2",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "3e96e527-c4fc-4d14-ae66-073ffb208ea4",
+    "scenes": [],
+    "shots": [],
+    "story": ""
+  },
+  "plan": null,
+  "attempts": [],
+  "turns": [],
+  "generation": {
+    "projectId": "fc557239-6519-4cf2-bda4-738c2c9543f2",
+    "revisionId": "3e96e527-c4fc-4d14-ae66-073ffb208ea4",
+    "headVersion": 0,
+    "cursor": 2,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [],
+    "shots": {},
+    "restartCasualties": []
+  },
+  "exports": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 0,
+      "blockers": [
+        {
+          "code": "empty_film"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  },
+  "director": {
+    "mode": "native",
+    "status": "idle",
+    "activeRequestId": null,
+    "turn": null,
+    "message": null,
+    "imageAttachmentsAvailable": true
+  },
+  "setup": {
+    "modelCalls": 0,
+    "selection": {
+      "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+      "mode": "native",
+      "model": "gpt-6-astra"
+    },
+    "modelCatalogStatus": "ready"
+  }
+}

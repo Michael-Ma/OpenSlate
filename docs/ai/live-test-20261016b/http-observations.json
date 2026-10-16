@@ -1,0 +1,66 @@
+[
+  {
+    "at": "2026-10-16T22:54:33.078Z",
+    "requestId": "req-2f",
+    "method": "POST",
+    "path": "/api/projects/fc557239-6519-4cf2-bda4-738c2c9543f2/director/setup",
+    "status": 200,
+    "responseMs": 10381.177666000003
+  },
+  {
+    "at": "2026-10-16T22:54:55.361Z",
+    "requestId": "req-3l",
+    "method": "POST",
+    "path": "/api/projects/fc557239-6519-4cf2-bda4-738c2c9543f2/messages",
+    "status": 200,
+    "responseMs": 328.04404200000135
+  },
+  {
+    "at": "2026-10-16T22:55:59.136Z",
+    "requestId": "req-9w",
+    "method": "POST",
+    "path": "/api/projects/fc557239-6519-4cf2-bda4-738c2c9543f2/storyboard",
+    "status": 200,
+    "responseMs": 3.3753750000032596
+  },
+  {
+    "at": "2026-10-16T22:55:59.319Z",
+    "requestId": "req-a7",
+    "method": "POST",
+    "path": "/api/projects/fc557239-6519-4cf2-bda4-738c2c9543f2/storyboard",
+    "status": 200,
+    "responseMs": 3.085416999994777
+  },
+  {
+    "at": "2026-10-16T22:56:13.194Z",
+    "requestId": "req-b7",
+    "method": "POST",
+    "path": "/api/projects/fc557239-6519-4cf2-bda4-738c2c9543f2/scenes/4cbfd354-42f0-45c5-9003-649237313bfe/generate",
+    "status": 200,
+    "responseMs": 67.1811250000028
+  },
+  {
+    "at": "2026-10-16T22:58:17.481Z",
+    "requestId": "req-lq",
+    "method": "POST",
+    "path": "/api/projects/fc557239-6519-4cf2-bda4-738c2c9543f2/scenes/4cbfd354-42f0-45c5-9003-649237313bfe/confirm",
+    "status": 200,
+    "responseMs": 8.428249999997206
+  },
+  {
+    "at": "2026-10-16T23:01:00.565Z",
+    "requestId": "req-zj",
+    "method": "POST",
+    "path": "/api/projects/fc557239-6519-4cf2-bda4-738c2c9543f2/exports",
+    "status": 202,
+    "responseMs": 25.34450000000652
+  },
+  {
+    "at": "2026-10-16T22:54:12.149Z",
+    "requestId": "req-10",
+    "method": "POST",
+    "path": "/api/projects/49c4c9a0-3982-4fc2-a5c8-45924a674dd9/director/setup",
+    "status": 200,
+    "responseMs": 0.2624580000001515
+  }
+]

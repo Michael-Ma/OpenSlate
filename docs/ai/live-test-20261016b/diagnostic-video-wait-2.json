@@ -1,0 +1,373 @@
+{
+  "at": "2026-10-16T23:00:11.763Z",
+  "project": {
+    "activePlanId": "d90d3d3d-3cc1-4b68-a06e-ba50974742db",
+    "artifacts": [],
+    "brief": "A 12-second scene of a paper boat floating in a rain puddle at dusk: two 6-second shots, close-up then wide. Simple prompts, gentle motion. No narration or music. Save planning only; do not generate media.",
+    "capabilityLockId": "ba20bd51-7d1c-416a-9001-ee2128ec7f0b",
+    "cues": [],
+    "headVersion": 6,
+    "id": "fc557239-6519-4cf2-bda4-738c2c9543f2",
+    "maxFrames": 10800,
+    "name": "Harbour LIVE-2",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "02014cbe-9310-475f-96e6-22408fea7d93",
+    "scenes": [
+      {
+        "id": "4cbfd354-42f0-45c5-9003-649237313bfe",
+        "purpose": "Paper boat in a rain puddle at dusk; close-up then wide, six seconds each.",
+        "revisionId": "9e4e52dc-b747-4bde-ae38-72ef5a55aa74"
+      }
+    ],
+    "shots": [
+      {
+        "action": "A white paper boat floats in a rain puddle at dusk.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Close-up at puddle level.",
+        "id": "757f838c-26de-439b-a4bc-c174b7ca60d6",
+        "imagePrompt": "Close-up of a white paper boat in a rain puddle at dusk, soft blue light, small ripples.",
+        "motion": "Gentle bobbing; locked camera.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "a1ad556cf1ea5e71259d85e39aeb3ee9155e315d22280d85ccaad346cfdf4e76",
+          "video": "dcd2a9ec9aa28210cadabd52518a4a63420c215d3f09209cd68bb2e22e396a68"
+        },
+        "purpose": "Observe the paper boat up close.",
+        "referenceArtifactIds": [],
+        "revisionId": "423ed5ff-f8f9-489d-900e-2f4775700a43",
+        "sceneId": "4cbfd354-42f0-45c5-9003-649237313bfe",
+        "videoPrompt": "The paper boat gently bobs on small rain ripples. Camera stays still."
+      },
+      {
+        "action": "The same white paper boat floats in the rain puddle on wet pavement at dusk.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Wide view of the puddle and surrounding wet pavement.",
+        "id": "124459eb-678e-4288-8cc4-df33fbc71585",
+        "imagePrompt": "Wide view of a white paper boat in a rain puddle on wet pavement at dusk, soft blue light, small ripples.",
+        "motion": "Slow gentle drift; locked camera.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "586768814e2aa61a25e09f20ed0f97941e7e284788fa1fc805dc19eaf4d6d719",
+          "video": "ff63859d8072940067ea47ba5e7f105e5fe66647704420852aa1b3a5c485e89e"
+        },
+        "purpose": "Reveal the boat's puddle setting.",
+        "referenceArtifactIds": [],
+        "revisionId": "ddb8dc8a-ba31-401e-ad83-a5d9bcd4dec8",
+        "sceneId": "4cbfd354-42f0-45c5-9003-649237313bfe",
+        "videoPrompt": "The paper boat drifts slowly across the puddle as gentle rain ripples spread. Camera stays still."
+      }
+    ],
+    "story": "A close-up observes a paper boat gently bobbing in a dusk rain puddle. A cut to a wide view reveals the same small boat drifting in the puddle amid wet pavement."
+  },
+  "plan": {
+    "id": "d90d3d3d-3cc1-4b68-a06e-ba50974742db",
+    "nodes": [
+      {
+        "id": "3649d2a6-d409-4ba1-ba35-1832ec1df69b",
+        "shotId": "757f838c-26de-439b-a4bc-c174b7ca60d6",
+        "kind": "image"
+      },
+      {
+        "id": "b77f1bb7-597e-40d8-a215-4128f7d2b851",
+        "shotId": "124459eb-678e-4288-8cc4-df33fbc71585",
+        "kind": "image"
+      },
+      {
+        "id": "185c28d8-d4ba-417d-b5d5-3c5d9ed8ec37",
+        "shotId": "757f838c-26de-439b-a4bc-c174b7ca60d6",
+        "kind": "video"
+      },
+      {
+        "id": "5746fd98-0778-4a10-929e-83fc5d62e92e",
+        "shotId": "124459eb-678e-4288-8cc4-df33fbc71585",
+        "kind": "video"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "id": "0cd24d05-0e9a-4ea4-9e92-d0065147ef9a",
+      "nodeId": "3649d2a6-d409-4ba1-ba35-1832ec1df69b",
+      "ordinal": 1,
+      "phase": "succeeded",
+      "taskId": null,
+      "createdAt": "2026-10-16T22:56:13.595Z",
+      "failure": null,
+      "kind": "image",
+      "adapter": "codex-image"
+    },
+    {
+      "id": "9c7d406e-68b4-4634-925f-c8222387ca57",
+      "nodeId": "b77f1bb7-597e-40d8-a215-4128f7d2b851",
+      "ordinal": 1,
+      "phase": "succeeded",
+      "taskId": null,
+      "createdAt": "2026-10-16T22:56:49.723Z",
+      "failure": null,
+      "kind": "image",
+      "adapter": "codex-image"
+    },
+    {
+      "id": "479efb2d-2034-4295-98b5-545755bdb032",
+      "nodeId": "185c28d8-d4ba-417d-b5d5-3c5d9ed8ec37",
+      "ordinal": 1,
+      "phase": "succeeded",
+      "taskId": "vid_8f504d6f-951c-48d3-a85b-eb99f25f3796",
+      "createdAt": "2026-10-16T22:58:18.019Z",
+      "failure": null,
+      "kind": "video",
+      "adapter": "viggle-h3",
+      "durationFrames": 180
+    },
+    {
+      "id": "987f8bae-4417-4b5d-9f40-9c431086d00a",
+      "nodeId": "5746fd98-0778-4a10-929e-83fc5d62e92e",
+      "ordinal": 1,
+      "phase": "remote_pending",
+      "taskId": "vid_4f4a13a2-bd9f-4dab-9bd2-411ecb053520",
+      "createdAt": "2026-10-16T22:59:14.479Z",
+      "failure": null,
+      "kind": "video",
+      "adapter": "viggle-h3",
+      "durationFrames": 180
+    }
+  ],
+  "turns": [
+    {
+      "id": "24851fe8-5462-49c8-9a0d-cfaf8d83d67e",
+      "requestId": "a2b462a0-dea6-43be-9f95-35f42d45cfa3",
+      "state": "completed",
+      "at": "2026-10-16T22:54:55.365Z",
+      "updatedAt": "2026-10-16T22:55:39.118Z",
+      "runtime": "live",
+      "action": "conversation",
+      "reason": null
+    },
+    {
+      "id": "aad42361-93c2-4477-91ee-f18bee3b4fe2",
+      "requestId": "8a70d482-ee49-40ed-8771-351915cc90c0",
+      "state": "completed",
+      "at": "2026-10-16T22:57:19.785Z",
+      "updatedAt": "2026-10-16T22:57:42.332Z",
+      "runtime": "live",
+      "action": "keyframe_review",
+      "reason": null
+    }
+  ],
+  "generation": {
+    "projectId": "fc557239-6519-4cf2-bda4-738c2c9543f2",
+    "revisionId": "02014cbe-9310-475f-96e6-22408fea7d93",
+    "headVersion": 6,
+    "cursor": 325,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [
+      {
+        "sceneId": "4cbfd354-42f0-45c5-9003-649237313bfe",
+        "ordinal": 1,
+        "title": "Paper boat in a rain puddle at dusk; close-up then wide, six seconds each.",
+        "purpose": "Paper boat in a rain puddle at dusk; close-up then wide, six seconds each.",
+        "state": "making_video",
+        "shotIds": [
+          "757f838c-26de-439b-a4bc-c174b7ca60d6",
+          "124459eb-678e-4288-8cc4-df33fbc71585"
+        ],
+        "counts": {
+          "shots": 2,
+          "keyframesReady": 2,
+          "opened": 2,
+          "videosReady": 1
+        },
+        "videoTargets": [
+          "124459eb-678e-4288-8cc4-df33fbc71585"
+        ],
+        "keyframeTargets": [],
+        "quotes": {
+          "makeKeyframes": {
+            "micros": "0",
+            "units": 0,
+            "unitMicros": "0",
+            "priceUnknown": false
+          },
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          },
+          "confirmVideo": {
+            "micros": "100000",
+            "units": 1,
+            "unitMicros": "100000",
+            "priceUnknown": false
+          },
+          "voice": {
+            "micros": "0",
+            "units": 0,
+            "unitMicros": "0",
+            "priceUnknown": false
+          }
+        },
+        "confirmation": {
+          "confirmationId": "52e4e68a-e159-4df9-8b9c-ee839de629b2",
+          "state": "done"
+        },
+        "blockers": [],
+        "confirmationDigest": "6696b19625498746ae1b48ad88b2d5419aa3c304400b47a531a25daa289a97ac"
+      }
+    ],
+    "shots": {
+      "757f838c-26de-439b-a4bc-c174b7ca60d6": {
+        "shotId": "757f838c-26de-439b-a4bc-c174b7ca60d6",
+        "sceneId": "4cbfd354-42f0-45c5-9003-649237313bfe",
+        "label": "1.1",
+        "framing": "Close-up at puddle level.",
+        "purpose": "Observe the paper boat up close.",
+        "imagePrompt": "Close-up of a white paper boat in a rain puddle at dusk, soft blue light, small ripples.",
+        "motion": "Gentle bobbing; locked camera.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "ready",
+          "takeCount": 1,
+          "artifact": {
+            "artifactId": "d2fb47efcade6f2f6189089d9275e7447c4fb1320c57f1b5998e01b66026a6a8",
+            "sha256": "5f8b98a67e88109736c93391fcb804bda453121b9685809e10e1644e21e5f9ec",
+            "kind": "image"
+          },
+          "opened": true
+        },
+        "video": {
+          "state": "ready",
+          "takeCount": 1,
+          "artifact": {
+            "artifactId": "a9fd229ecd49535ff28031eefd53b5588c39e2b4ff0b01f95b72c2e380e7b7e0",
+            "sha256": "d77ad6881099b6c261e8eeb3298fa1a85f6e132fe980e5d7dfee387c4de1cb3a",
+            "kind": "video"
+          }
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          }
+        }
+      },
+      "124459eb-678e-4288-8cc4-df33fbc71585": {
+        "shotId": "124459eb-678e-4288-8cc4-df33fbc71585",
+        "sceneId": "4cbfd354-42f0-45c5-9003-649237313bfe",
+        "label": "1.2",
+        "framing": "Wide view of the puddle and surrounding wet pavement.",
+        "purpose": "Reveal the boat's puddle setting.",
+        "imagePrompt": "Wide view of a white paper boat in a rain puddle on wet pavement at dusk, soft blue light, small ripples.",
+        "motion": "Slow gentle drift; locked camera.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "ready",
+          "takeCount": 1,
+          "artifact": {
+            "artifactId": "4a91f4a32554c1e6ab953aae0d0a8a5996e1ece2761b677898d9586bffa78b42",
+            "sha256": "7eeb371024bb50c6640827301e3709a120ee3718043b5a4f1f5cee640a80edb0",
+            "kind": "image"
+          },
+          "opened": true
+        },
+        "video": {
+          "state": "running",
+          "takeCount": 0,
+          "phase": "remote_pending",
+          "startedAt": "2026-10-16T22:59:14.479Z",
+          "attemptId": "987f8bae-4417-4b5d-9f40-9c431086d00a"
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          }
+        }
+      }
+    },
+    "restartCasualties": []
+  },
+  "exports": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 12,
+      "blockers": [
+        {
+          "code": "no_clip",
+          "shotId": "124459eb-678e-4288-8cc4-df33fbc71585"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  },
+  "director": {
+    "mode": "native",
+    "status": "idle",
+    "activeRequestId": "8a70d482-ee49-40ed-8771-351915cc90c0",
+    "turn": {
+      "createdAt": "2026-10-16T22:57:19.785Z",
+      "dispatched": true,
+      "epochId": "a6b90fe1-6c41-48b2-82b3-e2a82ea626b3",
+      "errorCode": null,
+      "id": "aad42361-93c2-4477-91ee-f18bee3b4fe2",
+      "leaseExpiresAt": 0,
+      "nativeThreadId": "01a146ef-25bb-7140-956b-4ebcf9f9d7db",
+      "nativeTurnId": "01a146ef-273b-7720-af1f-9756c0b82326",
+      "owner": "db753b62-f85b-4b5b-bd23-b1a6ca5788b3",
+      "projectId": "fc557239-6519-4cf2-bda4-738c2c9543f2",
+      "requestId": "8a70d482-ee49-40ed-8771-351915cc90c0",
+      "runtimeId": "codex-app-server",
+      "state": "completed",
+      "updatedAt": "2026-10-16T22:57:42.332Z"
+    },
+    "message": null,
+    "imageAttachmentsAvailable": true
+  },
+  "setup": {
+    "modelCalls": 2,
+    "selection": {
+      "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+      "mode": "native",
+      "model": "gpt-6-astra"
+    },
+    "modelCatalogStatus": "ready"
+  }
+}

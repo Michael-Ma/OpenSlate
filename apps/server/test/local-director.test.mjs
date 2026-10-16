@@ -40,15 +40,73 @@ test('authenticated project setup persists choices without starting a model',asy
   assert.equal((await f.req('POST',path,{mode:'fake'},'configure')).statusCode,409,'a reused identity cannot choose a different director');
   assert.equal(f.director.mode(project.id),'native');
 });
-test('authenticated model listing inspects existing native defaults without configuring a demo project or writing domain state',async t=>{
+test('authenticated model listing retains only diagnostic evidence without configuring a demo project or writing domain state',async t=>{
   const f=fixture(t,{setup:async input=>({readiness:{status:'ready',model:input.model,checkedAt:'2026-10-03T12:00:00.000Z',modelChoices:[{id:'test-model',label:'Fixture model'}]},runtimeOptions:{}})}),project=f.service.createProject('Models'),path=`/api/projects/${project.id}/director/models`;
-  const before=()=>JSON.stringify(['projects','entities','events','commands'].map(table=>f.store.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())),saved=before();
+  const before=()=>JSON.stringify(['projects','entities','events','commands'].map(table=>f.store.db.prepare(`SELECT * FROM ${table}${table==='entities'?" WHERE kind!='director_local_check'":''} ORDER BY rowid`).all())),saved=before();
   assert.equal((await f.app.inject({method:'GET',url:path,headers:{host:'127.0.0.1'}})).statusCode,403);
   const response=await f.req('GET',path);assert.equal(response.statusCode,200,response.body);
   assert.deepEqual(response.json().modelChoices,[{id:'test-model',label:'Fixture model'}]);assert.equal(response.json().modelCatalogStatus,'ready');assert.equal(response.json().selection.mode,'fake');
   assert.equal(response.json().modelCatalogCheckedAt,'2026-10-03T12:00:00.000Z');assert.equal(before(),saved);assert.equal(f.calls.length,0);
+  assert.equal(f.store.list('director_local_check',project.id).length,1);
   assert.deepEqual(f.director.settings(project.id).modelChoices,response.json().modelChoices);assert.equal(f.provider.acceptedCount(),0);
   const detached=f.director.settings(project.id);detached.modelChoices[0].id='caller-supplied';assert.equal(f.director.settings(project.id).modelChoices[0].id,'test-model');
+});
+
+test('successful local check survives controller restart with exact program, pinned version and original time, without a model turn',async t=>{
+  let checks=0;const checkedAt='2026-10-16T12:34:56.000Z';
+  const f=fixture(t,{setup:async input=>{checks++;return{readiness:{status:'ready',model:input.model,checkedAt,modelChoices:[{id:input.model,label:'Fixture'}]},runtimeOptions:{}};}}),project=f.service.createProject('Restarted check');
+  const initial=f.director.settings(project.id);assert.equal(initial.modelCatalogStatus,'unchecked');assert.equal(initial.lastSuccessfulCheck,null);
+  await f.director.configure(project.id,f.native,'setup');
+  await f.director.close();const restarted=new LocalDirectorController(f.service,f.config);t.after(()=>restarted.close());
+  const restored=restarted.settings(project.id);
+  assert.equal(restored.modelCatalogStatus,'ready');assert.equal(restored.modelCatalogCheckedAt,checkedAt);
+  assert.deepEqual(restored.lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.153.4',checkedAt});
+  assert.deepEqual(restored.modelChoices,[{id:f.native.model,label:'Fixture'}]);
+  restored.lastSuccessfulCheck.binaryPath='caller-supplied';assert.equal(restarted.settings(project.id).lastSuccessfulCheck.binaryPath,f.native.binaryPath);
+  assert.equal(checks,1);assert.equal(f.calls.length,0);assert.equal(f.store.list('native_model_start',project.id).length,0);
+  const rows=f.store.list('director_local_check',project.id);assert.equal(rows.length,1);
+  assert.deepEqual(Object.keys(rows[0]).sort(),['checkedAt','diagnostic','id','lastSuccessfulCheck','modelChoices','projectId','status']);
+  const reopenedStore=new Store(join(f.root,'app.sqlite')),reopenedService=new ProductionService(reopenedStore,new Engine(reopenedStore,f.provider,{artifactDir:join(f.root,'artifacts')}));
+  const reopened=new LocalDirectorController(reopenedService,f.config);
+  try { assert.deepEqual(reopened.settings(project.id).lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.153.4',checkedAt}); }
+  finally { await reopened.close();reopenedStore.close(); }
+});
+
+test('restored successful evidence never bypasses the full setup check before another native turn',async t=>{
+  const f=fixture(t),project=f.service.createProject('Preflight after restart');await f.director.configure(project.id,f.native,'setup');
+  await f.director.close();const restarted=new LocalDirectorController(f.service,f.config);t.after(()=>restarted.close());
+  assert.ok(restarted.settings(project.id).lastSuccessfulCheck);assert.equal(f.setups.length,1);
+  restarted.enqueue(project.id,f.service.beginRequest(project.id,'human','Continue the film'));restarted.tick();await restarted.settle();
+  assert.equal(f.setups.length,2);assert.equal(f.calls.length,1);
+});
+
+test('a failed latest local check survives restart and never turns older successful evidence into readiness',async t=>{
+  let failure=false;const checkedAt='2026-10-16T12:34:56.000Z';
+  const f=fixture(t,{setup:async input=>({readiness:failure?{status:'blocked',checkedAt:'2026-10-16T13:00:00.000Z',issues:[{code:'SETUP_AUTH_REQUIRED',message:'fixture account unavailable'}]}:
+    {status:'ready',model:input.model,checkedAt,modelChoices:[{id:input.model,label:'Fixture'}]},...(failure?{}:{runtimeOptions:{}})})}),project=f.service.createProject('Failed refresh');
+  await f.director.configure(project.id,f.native,'setup');failure=true;await f.director.models(project.id);
+  const replay=await f.director.configure(project.id,f.native,'setup');assert.equal(replay.modelCatalogStatus,'blocked');
+  assert.equal(replay.lastSuccessfulCheck.checkedAt,checkedAt,'older command replay must not publish a new successful check');
+  await f.director.close();
+  const restarted=new LocalDirectorController(f.service,f.config);t.after(()=>restarted.close());const settings=restarted.settings(project.id);
+  assert.equal(settings.modelCatalogStatus,'blocked');assert.equal(settings.modelCatalogCheckedAt,'2026-10-16T13:00:00.000Z');
+  assert.deepEqual(settings.lastSuccessfulCheck,{binaryPath:f.native.binaryPath,version:'0.153.4',checkedAt});assert.equal(f.calls.length,0);
+});
+
+test('failed first check remains blocked after restart and has no fabricated successful check',async t=>{
+  const f=fixture(t,{setup:async()=>({readiness:{status:'blocked',checkedAt:'2026-10-16T13:00:00.000Z'}})}),project=f.service.createProject('Never passed');
+  await f.director.models(project.id);await f.director.close();const restarted=new LocalDirectorController(f.service,f.config);t.after(()=>restarted.close());
+  const settings=restarted.settings(project.id);assert.equal(settings.modelCatalogStatus,'blocked');assert.equal(settings.lastSuccessfulCheck,null);assert.equal(f.calls.length,0);
+});
+
+test('historical checks do not transfer to another program, model, native home or runtime setup configuration',async t=>{
+  const f=fixture(t),project=f.service.createProject('Exact check identity');await f.director.models(project.id);
+  for(const changes of [{defaults:{...f.config.defaults,binaryPath:'/some/other/codex'}},{defaults:{...f.config.defaults,model:'other-model'}},
+    {defaults:{...f.config.defaults,codexHome:join(f.root,'other-native-home')}},{runTimeoutMs:360000}]){
+    const restarted=new LocalDirectorController(f.service,{...f.config,...changes});t.after(()=>restarted.close());
+    const settings=restarted.settings(project.id);assert.equal(settings.modelCatalogStatus,'unchecked');assert.equal(settings.lastSuccessfulCheck,null);
+  }
+  assert.equal(f.setups.length,1);assert.equal(f.calls.length,0);
 });
 test('model choices from setup are cached only for the exact native selection and active conversations do not launch model checks',async t=>{
   let checks=0;const f=fixture(t,{setup:async input=>{checks++;return{readiness:{status:'ready',model:input.model,checkedAt:'2026-10-03T12:00:00.000Z',modelChoices:[{id:input.model,label:input.model}]},runtimeOptions:{}};}}),project=f.service.createProject('Cached choices');
@@ -99,6 +157,29 @@ test('unknown native completion remains recorded and never automatically replays
   const project=f.service.createProject('Unknown');await f.director.configure(project.id,f.native,'config');
   f.director.enqueue(project.id,f.service.beginRequest(project.id,'human','Try once'));f.director.tick();await f.director.settle();
   f.director.tick();await f.director.settle();assert.equal(starts,1);assert.equal(f.store.list('director_turn',project.id)[0].state,'unknown');assert.equal(f.store.list('native_model_start',project.id).length,1);
+});
+test('host shutdown closes the active native runtime concurrently with its supervisor abort', {timeout:4000}, async t=>{
+  const entered=gate(),release=gate();let closed=0;
+  const f=fixture(t,{makeRuntime:()=>({id:'codex-app-server',start:async(input,options)=>{
+    await options.onEvent({...input,kind:'runtime_started',nativeThreadId:'closing-thread'});entered.resolve();await release.promise;return done(input,'unknown');
+  },close:async()=>{closed++;release.resolve();}})}),project=f.service.createProject('Shutdown');
+  await f.director.configure(project.id,f.native,'setup');f.director.enqueue(project.id,f.service.beginRequest(project.id,'human','Write once'));f.director.tick();
+  await entered.promise;await f.director.close();assert.equal(closed,1);assert.equal(f.store.list('director_turn',project.id)[0].state,'unknown');
+  assert.equal(f.provider.acceptedCount(),0);assert.equal(f.store.list('native_model_start',project.id).length,1);
+});
+test('host shutdown cancels a local setup check without replacing the last successful diagnostic', {timeout:4000}, async t=>{
+  const entered=gate(),cleanup=gate();let wait=false,aborted=false;
+  const f=fixture(t,{setup:async(input,options)=>{
+    if(!wait)return{readiness:{status:'ready',model:input.model,checkedAt:'2026-10-16T12:34:56.000Z'},runtimeOptions:{}};
+    entered.resolve();await new Promise(resolve=>options.signal.addEventListener('abort',()=>{aborted=true;resolve();},{once:true}));await cleanup.promise;
+    return{readiness:{status:'blocked',checkedAt:'2026-10-16T13:00:00.000Z'}};
+  }}),project=f.service.createProject('Cancelled check');
+  await f.director.configure(project.id,f.native,'setup');const before=f.store.list('director_local_check',project.id);wait=true;
+  const checking=f.director.models(project.id),refused=assert.rejects(checking,{code:'DIRECTOR_SHUTTING_DOWN'});
+  await entered.promise;let closed=false;const closing=f.director.close().then(()=>{closed=true;});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(aborted,true);assert.equal(closed,false,'shutdown waits for setup native cleanup even when no supervisor turn is active');
+  cleanup.resolve();await closing;await refused;
+  assert.equal(aborted,true);assert.deepEqual(f.store.list('director_local_check',project.id),before);assert.equal(f.calls.length,0);
 });
 test('conflicting configuration identity is rejected before any setup or binary invocation',async t=>{
   const f=fixture(t),project=f.service.createProject('Identity');

@@ -1,0 +1,17 @@
+[
+  {
+    "at": "2026-10-16T22:58:17.452Z",
+    "seconds": 12,
+    "shots": [
+      {
+        "shotId": "757f838c-26de-439b-a4bc-c174b7ca60d6",
+        "seconds": 6
+      },
+      {
+        "shotId": "124459eb-678e-4288-8cc4-df33fbc71585",
+        "seconds": 6
+      }
+    ],
+    "outcome": "press-intent; reconcile actual attempts"
+  }
+]

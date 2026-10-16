@@ -230,6 +230,24 @@ test("noncooperative process is killed after the bounded cleanup grace", async t
   assert.throws(() => process.kill(launch.pid, 0), error => error.code === "ESRCH");
 });
 
+test("host close cleans up a noncooperative process while interruption is still waiting and fences new turns", async t => {
+  const f = await fixture(t, "ignore-shutdown", { limits: { ...PROTOCOL_FIXTURE_LIMITS, interruptGraceMs: 3000, shutdownGraceMs: 100 } }), started = deferred();
+  const work = f.runtime.start(f.input, { onEvent: event => { if (event.kind === "turn_started") started.resolve(); } });
+  await deadline(Promise.race([started.promise, work.then(result => { throw new Error(`Fixture ended before dispatch: ${result.status}`); })]));
+  const start = Date.now(), closing = f.runtime.close(); assert.equal(f.runtime.close(), closing); await deadline(closing);
+  assert.ok(Date.now() - start < 1500, "owned process cleanup does not wait for the three-second interrupt grace");
+  const launch = (await f.records()).find(row => row.kind === "launch");
+  assert.throws(() => process.kill(launch.pid, 0), error => error.code === "ESRCH");
+  const result = await deadline(work); assert.equal(result.status, "unknown"); assert.equal(result.dispatched, true);
+  await assert.rejects(f.runtime.start({ ...f.input, turnId: "later-turn" }), code("RUNTIME_CLOSED"));
+  assert.equal((await f.records()).filter(row => row.method === "turn/start").length, 1);
+});
+
+test("host close before the first turn launches no native process", async t => {
+  const f = await fixture(t); await f.runtime.close();
+  await assert.rejects(f.runtime.start(f.input), code("RUNTIME_CLOSED")); assert.deepEqual(await f.records(), []);
+});
+
 test("cleanup includes a native subprocess descendant", async t => {
   const f = await fixture(t, "descendant"), result = await deadline(f.runtime.start(f.input));
   assert.equal(result.status, "completed");

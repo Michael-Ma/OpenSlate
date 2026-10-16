@@ -21,6 +21,7 @@ export class CodexTransport {
   #resolveFailure!: (error: RuntimeFault) => void;
   #resolveExit!: () => void;
   #closed = false;
+  #closing: Promise<void> | undefined;
   #nextId = 0;
   #pending = new Map<number, Pending>();
   #abandoned = new Set<number>();
@@ -137,7 +138,8 @@ export class CodexTransport {
       this.signalGroup("SIGTERM");
     }
   }
-  async close(): Promise<void> {
+  close(): Promise<void> { return this.#closing ??= this.closeOwnedGroup(); }
+  private async closeOwnedGroup(): Promise<void> {
     if (!this.#closed) {
       this.child.stdin.end();
       await timeout(this.exited, this.#limits.shutdownGraceMs, "RUNTIME_SHUTDOWN_TIMEOUT").catch(() => {});

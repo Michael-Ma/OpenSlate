@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-10-16T23:07:39.998Z",
+  "reportLinksMissing": [],
+  "filesScanned": 34,
+  "secretPatternFileMatches": 0,
+  "phaseClipCount": 13,
+  "screenshotCount": 31,
+  "ports3001And3199Free": true,
+  "ownedLauncherAndDriverPidsAbsent": true,
+  "independentClipAudit": {
+    "codec": "vp8",
+    "width": 1440,
+    "height": 900,
+    "fps": 25,
+    "fullDecodeErrors": 0,
+    "totalSeconds": 148.64,
+    "totalBytes": 13045653,
+    "maxSeconds": 28.6
+  }
+}

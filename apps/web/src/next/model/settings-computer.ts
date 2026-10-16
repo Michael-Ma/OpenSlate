@@ -57,7 +57,10 @@ function codexRow(setup: DirectorSetup | null, setupError: string | null, contex
   if (failure) return { ...base, status: msg("set.computer.check_failed"), detail: msg("set.computer.codex_check_failed") };
   if (!setup) return { ...base, status: msg("set.computer.checking"), detail: msg("set.computer.codex_uses") };
   switch (codexState(setup)) {
-    case "ready": return { ...base, tone: "ok", status: msg("set.computer.found"), detail: msg("set.computer.codex_ready") };
+    case "found": return { ...base, tone: "ok", status: msg("set.computer.found"), detail: msg("set.computer.codex_version_only", { version: setup.codexVersion!, binaryPath: setup.selection.binaryPath ?? setup.defaults.binaryPath }) };
+    case "ready": return setup.lastSuccessfulCheck
+      ? { ...base, tone: "ok", status: msg("set.computer.checked"), detail: msg("set.computer.codex_last_check", setup.lastSuccessfulCheck) }
+      : { ...base, tone: "ok", status: msg("set.computer.found"), detail: msg("set.computer.codex_ready") };
     case "blocked": return { ...base, tone: "missing", status: msg("set.computer.needs_attention"), detail: msg("set.computer.codex_blocked") };
     case "missing": return { ...base, tone: "missing", status: msg("set.computer.not_found"), detail: msg("set.computer.codex_missing") };
     default: return { ...base, tone: "unknown", status: msg("set.computer.not_checked"), detail: msg("set.computer.codex_unchecked") };

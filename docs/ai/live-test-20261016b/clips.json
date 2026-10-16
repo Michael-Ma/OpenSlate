@@ -1,0 +1,67 @@
+[
+  {
+    "name": "phase-01-start.webm",
+    "startedAt": "2026-10-16T22:54:05.338Z",
+    "endedAt": "2026-10-16T22:54:17.800Z"
+  },
+  {
+    "name": "phase-02-start-director.webm",
+    "startedAt": "2026-10-16T22:54:32.354Z",
+    "endedAt": "2026-10-16T22:54:44.916Z"
+  },
+  {
+    "name": "phase-03-director-request.webm",
+    "startedAt": "2026-10-16T22:54:54.946Z",
+    "endedAt": "2026-10-16T22:54:55.587Z"
+  },
+  {
+    "name": "phase-04-director-progress.webm",
+    "startedAt": "2026-10-16T22:55:26.618Z",
+    "endedAt": "2026-10-16T22:55:36.159Z"
+  },
+  {
+    "name": "phase-05-plan.webm",
+    "startedAt": "2026-10-16T22:55:44.901Z",
+    "endedAt": "2026-10-16T22:55:59.555Z"
+  },
+  {
+    "name": "phase-06-keyframes-submit.webm",
+    "startedAt": "2026-10-16T22:56:12.649Z",
+    "endedAt": "2026-10-16T22:56:13.487Z"
+  },
+  {
+    "name": "phase-07-keyframes-progress.webm",
+    "startedAt": "2026-10-16T22:56:40.997Z",
+    "endedAt": "2026-10-16T22:56:48.490Z"
+  },
+  {
+    "name": "phase-08-keyframe-one.webm",
+    "startedAt": "2026-10-16T22:57:21.880Z",
+    "endedAt": "2026-10-16T22:57:36.499Z"
+  },
+  {
+    "name": "phase-09-keyframes-review.webm",
+    "startedAt": "2026-10-16T22:57:42.795Z",
+    "endedAt": "2026-10-16T22:57:43.978Z"
+  },
+  {
+    "name": "phase-10-video-submit-reload.webm",
+    "startedAt": "2026-10-16T22:58:16.885Z",
+    "endedAt": "2026-10-16T22:58:33.188Z"
+  },
+  {
+    "name": "phase-11-film-export.webm",
+    "startedAt": "2026-10-16T23:00:36.791Z",
+    "endedAt": "2026-10-16T23:01:04.857Z"
+  },
+  {
+    "name": "phase-12-restart.webm",
+    "startedAt": "2026-10-16T23:02:26.509Z",
+    "endedAt": "2026-10-16T23:02:27.581Z"
+  },
+  {
+    "name": "phase-13-assets-settings.webm",
+    "startedAt": "2026-10-16T23:02:38.749Z",
+    "endedAt": "2026-10-16T23:03:04.801Z"
+  }
+]
