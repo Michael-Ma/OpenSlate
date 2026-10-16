@@ -100,7 +100,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
                   </span>
                 ))}
                 {card.callouts.map(({ letter, check }) => (
-                  <span key={letter} className="anno check" data-check={check.shotId}>
+                  <span key={check.shotId} className="anno check" data-check={check.shotId}>
                     <span className="letter">{letter}</span>
                     <span className="anno-text">{tm(checkCallout(check))}</span>
                   </span>

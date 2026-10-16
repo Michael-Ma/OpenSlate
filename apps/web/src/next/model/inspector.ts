@@ -1,6 +1,6 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
-import { confirmationStop, isWorking, seconds, shotStatus, type CardTone } from "./keyframes.ts";
+import { confirmationStop, heldByEdit, isWorking, seconds, shotStatus, type CardTone } from "./keyframes.ts";
 import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
 import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
@@ -146,7 +146,10 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   const take = costFrom(unit, "regenerate", locale);
   const first = costFrom(unit, "make", locale);
   const base = { clipNote: null, reason: null, working: false };
+  // Held by an unfinished Director edit: nothing is being made; the button and its note say what it waits for.
+  if (heldByEdit(keyframe)) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: msg("media.waiting.edit_pending"), cost: null, primary: false, enabled: false, reason: msg("inspector.held") };
   if (isWorking(keyframe)) return { ...base, kind: "regenerate", label: msg("card.keyframe.making"), cost: null, primary: false, enabled: false, working: true };
+  if (heldByEdit(shot.video)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("inspector.held") };
   if (isWorking(shot.video)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("inspector.wait_for_clip") };
   switch (keyframe.state) {
     case "ready": return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: take, primary: false, enabled: !!unit, clipNote };

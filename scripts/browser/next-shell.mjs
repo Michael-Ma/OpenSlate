@@ -412,6 +412,9 @@ export const scenarios = [
       // The sent clip finishes; then the scene's video says it waits for Continue.
       await until(page, () => text(page, ".vpanel .why"), (value) => value === "Stopped. Continue to make video", "The Video panel does not say it is stopped", 10000);
       expect(await page.locator(".vpanel .go").isDisabled(), "The Video panel's button is on while stopped");
+      // With 2.1's clip saved, the scene line counts clips and the panel says which frames its count is of.
+      await until(page, () => text(page, ".scene-head"), (value) => /Scene 2 · 3 shots · 1 of 3 clips saved/.test(value), "The scene line does not count the saved clip");
+      expect(/2 of 2\s*frames opened\s+1 clip is saved\. Both frames still needing video are opened\./.test(await text(page, ".vpanel")), `The Video panel reads ${JSON.stringify(await text(page, ".vpanel"))}`);
       await noSidewaysScroll(page);
       const height = await page.evaluate(() => document.documentElement.scrollHeight);
       expect(height <= 900, `The stopped Keyframes view scrolls: ${height}px`);
@@ -546,6 +549,10 @@ export const scenarios = [
       expect(title === `OpenSlate restarted while 1 clip was being sent (${casualty}).`, `The restart strip reads ${JSON.stringify(title)}`);
       expect((await text(page, ".film-strip[data-strip='restart'] .txt span")) === "The service never confirmed it. It may still arrive and be charged; nothing is resent by itself.", "The restart strip does not say what may still happen");
       await noSidewaysScroll(page);
+      // The other clips wait for the person's confirm: the screen tells one story. The scene is not "making video",
+      // no card says it waits for a confirm the screen does not offer, the panel offers that confirm, and no Stop.
+      const story = { head: await text(page, ".scene-head"), cards: await page.locator(".card .stl").allInnerTexts(), action: await page.locator(".vpanel").getAttribute("data-action"), stop: await page.locator(".topbar [data-act='stop-film']").count() };
+      expect(!/making video/.test(story.head) && !story.cards.some((card) => /Waiting for your confirm/.test(card)) && story.action === "confirm" && story.stop === 0, `The restarted scene contradicts itself: ${JSON.stringify(story)}`);
       await shot(page, "next-shell-restart-1440");
 
       // Show takes the person to the shot in Keyframes, from any view.

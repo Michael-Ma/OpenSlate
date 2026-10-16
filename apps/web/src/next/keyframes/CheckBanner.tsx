@@ -1,6 +1,6 @@
 import type { GenerationOverview } from "@openslate/core/public";
 import { useI18n } from "../i18n/I18n.tsx";
-import { checkActions, checkTimeline, checkTitle, settledTimeline, type AppCheck } from "../model/checks.ts";
+import { checkActions, checkBody, checkTimeline, checkTitle, settledTimeline, type AppCheck } from "../model/checks.ts";
 import { filmMeta, seconds } from "../model/keyframes.ts";
 import { clock } from "../model/motion.ts";
 import type { Msg } from "../model/types.ts";
@@ -101,7 +101,7 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, o
       letter={letter}
       eyebrow={checks.length > 1 ? `${t("check.eyebrow")} · ${t("check.of", { index: 1, total: checks.length })}` : t("check.eyebrow")}
       title={tm(checkTitle(check))}
-      sub={t("check.narration.body", { label: check.label })}
+      sub={tm(checkBody(check))}
       timeline={{ now: timeline.now, after: actions.extend ? timeline.after : null }}
       anchor={{ attribute: "data-check", value: check.shotId }}
       actions={

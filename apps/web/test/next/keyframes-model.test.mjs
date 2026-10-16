@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { keyframesView, cardStatus, filmMeta } from '../../src/next/model/keyframes.ts';
-import { narrationChecks, estimateNarrationSeconds } from '../../src/next/model/checks.ts';
+import { keyframesView, cardStatus, filmMeta, sceneStateOf, sceneStatus } from '../../src/next/model/keyframes.ts';
+import { narrationChecks, estimateNarrationSeconds, checkBody } from '../../src/next/model/checks.ts';
+import { inspectorView } from '../../src/next/model/inspector.ts';
+import { canStop } from '../../src/next/model/director.ts';
+import { planOutline, clipPill } from '../../src/next/model/plan.ts';
 import { priceMsg, formatMicros } from '../../src/next/model/price.ts';
 import { lastFerryOverview, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
@@ -20,7 +23,10 @@ test('the Last Ferry golden state opens on Scene 2 with the design\'s cards, che
   assert.equal(view.checks.length, 1);
   assert.equal(view.checks[0].check.label, '2.3');
   assert.equal(view.checks[0].check.fitSeconds, 8);
-  assert.equal(view.cards[2].callouts[0].letter, 'a');
+  // An app check is marked "!", never a letter a Director's note on the same screen could also carry.
+  assert.equal(view.cards[2].callouts[0].letter, '!');
+  assert.deepEqual(view.checks.map(c => c.letter), ['!']);
+  assert.equal(en(checkBody(view.checks[0].check)), 'The line in 2.3 is longer than the shot. Settle it before making video.');
   const panel = view.panel;
   assert.equal(panel.action, 'confirm');
   assert.equal(panel.enabled, false);
@@ -111,6 +117,94 @@ test('a scene whose keyframes are being made says so instead of offering a confi
   assert.equal(en(panel.label), 'Making keyframes…');
   const cards = keyframesView(overview, sceneId(3), null, 'en-US').cards;
   assert.deepEqual(cards.map(c => [c.workingOn, c.working]), [['keyframe', true], ['keyframe', true]]);
+});
+
+test('a too-long line in a shot whose clip is saved is settled before exporting, not before making video', () => {
+  const overview = lastFerryOverview();
+  const shot = overview.shots[shotId('1.1')];
+  overview.shots[shot.shotId] = { ...shot, narration: { state: 'ready', text: 'A long line', measuredSeconds: 7.4, fits: false } };
+  const view = keyframesView(overview, sceneId(1), null, 'en-US');
+  assert.deepEqual(view.checks.map(c => [c.letter, c.check.hasClip]), [['!', true]]);
+  assert.equal(en(checkBody(view.checks[0].check)), 'The line in 1.1 is longer than its clip. Settle it before exporting the film.');
+  assert.equal(zh(checkBody(view.checks[0].check)), '1.1 的旁白比视频长。导出影片前需要先处理。');
+});
+
+/** Scene 2 as the studio reports a clip that waits for the person's confirm: queued, waiting code "review". */
+function awaitingConfirm(opened) {
+  const overview = lastFerryOverview();
+  const scene = overview.scenes[1];
+  for (const id of scene.shotIds) {
+    overview.shots[id].video = { state: 'queued', takeCount: 0, waiting: { code: 'review', since: 'x' } };
+    overview.shots[id].keyframe.opened = opened;
+  }
+  // The server counts those queued clips as being made.
+  overview.scenes[1] = { ...scene, state: 'making_video', videoTargets: [...scene.shotIds], blockers: opened ? [] : scene.shotIds.map(shotId => ({ code: 'frame_not_opened', shotId })),
+    quotes: { ...scene.quotes, confirmVideo: { micros: '1500000', units: 3, unitMicros: '500000', priceUnknown: false } } };
+  return overview;
+}
+
+test('a clip waiting for the person\'s confirm is not being made: one story, and the confirm is on screen', () => {
+  const overview = awaitingConfirm(false);
+  const scene = overview.scenes[1];
+  assert.equal(sceneStateOf(overview, scene), 'keyframes_back');
+  const view = keyframesView(overview, sceneId(2), null, 'en-US');
+  assert.equal(en(view.header.status), 'keyframes back, no video yet');
+  assert.equal(view.pills[1].status, null, 'the current scene\'s pill drops its suffix as for any scene not busy');
+  // Cards, preview and inspector say what the keyframe needs, as before any confirm; no card shows work.
+  assert.deepEqual(view.cards.map(c => [en(c.status), c.working, c.workingOn]), [['Not opened', false, null], ['Not opened', false, null], ['Not opened', false, null]]);
+  // The panel offers the confirm those clips wait for, and says what it needs first.
+  assert.deepEqual([view.panel.action, en(view.panel.label), en(view.panel.reason)], ['confirm', 'Confirm frames & generate video', 'Open 2.1, 2.2, and 2.3 first']);
+  const insp = inspectorView(overview, overview.shots[shotId('2.1')], 'en-US');
+  assert.deepEqual([en(insp.status), en(insp.regenerate.label), insp.regenerate.enabled, insp.regenerate.reason], ['Not opened', 'Regenerate keyframe', true, null]);
+  assert.equal(canStop(overview, { mode: 'fake', status: 'idle', activeRequestId: null }), false, 'nothing runs, so no Stop');
+  // Opened: the confirm is on, with its price.
+  const ready = keyframesView(awaitingConfirm(true), sceneId(2), null, 'en-US');
+  assert.deepEqual([ready.panel.enabled, en(ready.panel.priceTotal), en(ready.cards[0].status)], [true, 'about $1.50', 'Opened']);
+  // Plan tells the same story.
+  assert.equal(en(clipPill(overview.shots[shotId('2.1')]).text), 'No clip');
+  assert.equal(en(sceneStatus(scene, overview)), 'keyframes back, no video yet');
+  // A shot whose clip has no answer makes the scene need attention, as the studio would say.
+  overview.shots[shotId('2.1')].video = { state: 'no_answer', attemptId: 'a', takeCount: 0 };
+  assert.equal(sceneStateOf(overview, scene), 'needs_attention');
+  // Real work keeps the studio's "making video".
+  overview.shots[shotId('2.2')].video = { state: 'running', takeCount: 0, attemptId: 'b' };
+  assert.equal(sceneStateOf(overview, scene), 'making_video');
+});
+
+test('shots held by an unfinished Director edit wait for it everywhere: no "making", no "keep working"', () => {
+  const overview = lastFerryOverview();
+  for (const label of ['3.1', '3.2']) overview.shots[shotId(label)].keyframe = { state: 'queued', takeCount: 0, opened: false, waiting: { code: 'edit_pending', since: 'x', requestId: 'r' } };
+  overview.scenes[2].keyframeTargets = [];
+  const view = keyframesView(overview, sceneId(3), null, 'en-US');
+  assert.deepEqual(view.cards.map(c => en(c.status)), ['Waiting for an edit to finish', 'Waiting for an edit to finish']);
+  const panel = view.panel;
+  assert.deepEqual([panel.action, panel.enabled, en(panel.eyebrow), en(panel.label)], [null, false, 'Scene 3 keyframes', 'Waiting for an edit to finish']);
+  assert.equal(en(panel.note), 'An unfinished Director edit holds 3.1 and 3.2.');
+  assert.equal(en(panel.reason), 'See the Director column to let it go.');
+  assert.equal(zh(panel.label), '等待编辑完成');
+  const insp = inspectorView(overview, overview.shots[shotId('3.1')], 'en-US');
+  assert.deepEqual([en(insp.regenerate.label), insp.regenerate.enabled, insp.regenerate.working], ['Waiting for an edit to finish', false, false]);
+  assert.match(en(insp.regenerate.reason), /^An unfinished Director edit holds this shot/);
+  // Once one keyframe is really being made, the panel says so again.
+  overview.shots[shotId('3.1')].keyframe = { state: 'running', takeCount: 0, opened: false };
+  assert.equal(en(keyframesView(overview, sceneId(3), null, 'en-US').panel.label), 'Making keyframes…');
+});
+
+test('after a Stop with some clips saved, the scene line counts clips and the panel says which frames it counts', () => {
+  const overview = lastFerryOverview();
+  const scene = overview.scenes[1];
+  overview.shots[shotId('2.1')].video = { state: 'ready', takeCount: 1, artifact: { artifactId: 'clip', sha256: 'a'.repeat(64), kind: 'video' } };
+  for (const id of scene.shotIds) overview.shots[id].keyframe.opened = true;
+  overview.scenes[1] = { ...scene, counts: { ...scene.counts, videosReady: 1 }, videoTargets: [shotId('2.2'), shotId('2.3')], blockers: [{ code: 'stopped' }] };
+  const view = keyframesView(overview, sceneId(2), null, 'en-US');
+  assert.equal(en(view.header.status), '1 of 3 clips saved');
+  assert.equal(zh(view.header.status), '已保存 1/3 段视频');
+  assert.equal(en(view.panel.headline.value), '2 of 2');
+  assert.equal(en(view.panel.note), '1 clip is saved. Both frames still needing video are opened.');
+  overview.shots[shotId('2.3')].keyframe.opened = false;
+  assert.equal(en(keyframesView(overview, sceneId(2), null, 'en-US').panel.note), '1 clip is saved. Open 2.3 to confirm the rest.');
+  // Another scene's pill names the clips too.
+  assert.equal(en(keyframesView(overview, sceneId(3), null, 'en-US').pills[1].status), '1 of 3 clips saved');
 });
 
 test('a queued clip shows its place in line but no progress bar', () => {

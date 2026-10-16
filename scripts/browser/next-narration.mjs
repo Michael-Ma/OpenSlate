@@ -204,6 +204,10 @@ export const scenarios = [
       // The existing fit choices settle it.
       await page.waitForSelector('.banner.check[data-state="open"]');
       await expectText(page, ".banner.check h2", /^Narration 7\.4 s, shot 6 s$/);
+      // The app's check is marked "!", never a letter the Director's notes on screen also use; 1.1 already has its clip.
+      const marks = await page.$$eval(".banner.check .letter, .card .anno.check .letter", (nodes) => nodes.map((node) => node.textContent));
+      expect(marks.length === 2 && marks.every((mark) => mark === "!"), `The check is marked ${JSON.stringify(marks)}`);
+      await expectText(page, ".banner.check .sub", /^The line in 1\.1 is longer than its clip\. Settle it before exporting the film\.$/);
       await screenshot(page, "recording-too-long-1440");
       await page.click(`[data-act="keep-fit"][data-shot="${shot("1.1")}"]`);
       await page.waitForSelector('.banner.check[data-state="settled"]');

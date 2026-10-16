@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { checkActions, lineEstimate, type AppCheck } from "../model/checks.ts";
+import { CHECK_MARK, checkActions, lineEstimate, type AppCheck } from "../model/checks.ts";
 import { inspectorView } from "../model/inspector.ts";
 import { keyframesView } from "../model/keyframes.ts";
 import { takeOrigin, wordsOf } from "../model/narration.ts";
@@ -275,9 +275,9 @@ function Workspace() {
         settled={settled}
         quiet={notes.allSettled ? msg("note.all_settled") : null}
         busy={Object.keys(pending).some((key) => key.startsWith("edit:") || key.startsWith("fit:"))}
-        onExtend={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a", "extended")}
-        onKeep={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a", "cut")}
-        onEditNarration={(check) => editNarration(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? "a")}
+        onExtend={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? CHECK_MARK, "extended")}
+        onKeep={(check) => void fit(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? CHECK_MARK, "cut")}
+        onEditNarration={(check) => editNarration(check, sceneOrdinalChecks.find((c) => c.check.shotId === check.shotId)?.letter ?? CHECK_MARK)}
         onNext={() => setSettled(null)}
         onUndo={(commandId) => { setSettled(null); void store.undo(commandId); }}
       />

@@ -1,7 +1,7 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneBlocker, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { errorMsg } from "../i18n/translate.ts";
 import { msg, type Msg } from "./types.ts";
-import { narrationChecks, type AppCheck } from "./checks.ts";
+import { CHECK_MARK, narrationChecks, type AppCheck } from "./checks.ts";
 import { formatMicros, priceMsg } from "./price.ts";
 
 export const seconds = (frames: number, fps: number) => Math.round((frames / fps) * 10) / 10;
@@ -36,7 +36,7 @@ export interface ShotCard {
    */
   workingOn: "keyframe" | "video" | "voice" | null;
   selected: boolean;
-  /** App-computed checks attached to this card (letters come from the banner order). */
+  /** App-computed checks attached to this card, each with the neutral check mark (never a Director's letter). */
   callouts: { letter: string; check: AppCheck }[];
 }
 
@@ -173,32 +173,79 @@ export interface KeyframesView {
 /** The scene to show: the requested one if it exists, else the first scene that needs attention, else the first. */
 export function currentScene(overview: GenerationOverview, sceneId: string | null): SceneOverview | null {
   return overview.scenes.find((scene) => scene.sceneId === sceneId)
-    ?? overview.scenes.find((scene) => scene.state === "keyframes_back" || scene.state === "keyframes_partial" || scene.state === "needs_attention")
+    ?? overview.scenes.find((scene) => ["keyframes_back", "keyframes_partial", "needs_attention"].includes(sceneStateOf(overview, scene)))
     ?? overview.scenes[0]
     ?? null;
 }
 
-export function sceneStatus(scene: SceneOverview): Msg {
-  switch (scene.state) {
+/**
+ * A slot waiting for the person's confirm (waiting code "review"): for a clip, the scene's "Confirm frames & generate
+ * video" in the video panel. Nothing is being made, and nothing is sent until that confirm.
+ */
+export const awaitsConfirm = (slot: MediaSlot) => slot.state === "queued" && slot.waiting?.code === "review";
+
+/** A slot an unfinished Director edit holds (waiting code "edit_pending", card B13): it starts once the edit ends or is let go. */
+export const heldByEdit = (slot: MediaSlot) => slot.state === "queued" && slot.waiting?.code === "edit_pending";
+
+/**
+ * A slot is busy while it is made or queued to be made, or while a replacement take is made behind the current one
+ * (card B15). A slot waiting for the person's confirm is not: it waits for them, not for the studio.
+ */
+export const isWorking = (slot: MediaSlot) =>
+  slot.state === "running" || (slot.state === "queued" && !awaitsConfirm(slot)) || slot.replacement?.state === "running" || slot.replacement?.state === "queued";
+
+const ATTENTION = new Set(["failed", "no_answer", "outdated", "choose_take", "direction_required"]);
+
+/**
+ * The scene's state as the screen tells it. The server counts a clip that waits for the person's confirm as being made
+ * (SceneOverview.state "making_video" for a queued slot whose waiting code is "review"); until that confirm nothing is
+ * made, so such a scene reads as its shots do (by the server's own order: attention, saved, keyframes) and its video
+ * panel offers the confirm. Every other state is the server's.
+ */
+export function sceneStateOf(overview: GenerationOverview, scene: SceneOverview): SceneOverview["state"] {
+  if (scene.state !== "making_video" || scene.confirmation?.state === "running") return scene.state;
+  const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
+  if (!shots.some((shot) => awaitsConfirm(shot.video)) || shots.some((shot) => isWorking(shot.video))) return scene.state;
+  const states = shots.flatMap((shot) => [shot.keyframe.state, shot.video.state, shot.keyframe.replacement?.state, shot.video.replacement?.state]);
+  if (states.some((state) => state && ATTENTION.has(state))) return "needs_attention";
+  const ready = shots.filter((shot) => shot.keyframe.state === "ready").length;
+  return ready === shots.length ? "keyframes_back" : ready ? "keyframes_partial" : "not_started";
+}
+
+/**
+ * The scene line, in the header and the pills. With the overview it follows what the shots show (sceneStateOf), and
+ * a scene whose keyframes are back counts its clips once some are saved (after a Stop, say), never "no video yet".
+ */
+export function sceneStatus(scene: SceneOverview, overview?: GenerationOverview): Msg {
+  const state = overview ? sceneStateOf(overview, scene) : scene.state;
+  switch (state) {
     case "video_saved": return msg("scene.state.video_saved");
-    case "making_video": return msg("scene.state.making_video");
-    case "keyframes_back": return msg("scene.state.keyframes_back");
+    case "making_video": return scene.confirmation?.state === "running" || !overview || !heldOnly(overview, scene) ? msg("scene.state.making_video") : msg("scene.state.held");
+    case "keyframes_back": return scene.counts.videosReady > 0 ? msg("scene.state.clips_saved", { ready: scene.counts.videosReady, total: scene.counts.shots }) : msg("scene.state.keyframes_back");
     case "keyframes_partial": return msg("scene.state.keyframes_partial", { ready: scene.counts.keyframesReady, total: scene.counts.shots });
     case "needs_attention": return msg("scene.state.needs_attention");
     default: return msg("scene.state.not_started");
   }
 }
 
-function pillStatus(scene: SceneOverview, selected: boolean): Msg | null {
+function pillStatus(overview: GenerationOverview, scene: SceneOverview, selected: boolean): Msg | null {
+  const state = sceneStateOf(overview, scene);
   // The current scene's pill drops its suffix unless the scene is finished or busy (DESIGN.md deviation 11).
-  if (selected && scene.state !== "video_saved" && scene.state !== "making_video") return null;
-  if (scene.state === "keyframes_back") return msg("scene.pill.keyframes_back");
-  return sceneStatus(scene);
+  if (selected && state !== "video_saved" && state !== "making_video") return null;
+  if (state === "keyframes_back" && !scene.counts.videosReady) return msg("scene.pill.keyframes_back");
+  return sceneStatus(scene, overview);
 }
 
-/** A slot is busy while it is made, or while a replacement take is made behind the current one (card B15). */
-export const isWorking = (slot: MediaSlot) =>
-  slot.state === "running" || slot.state === "queued" || slot.replacement?.state === "running" || slot.replacement?.state === "queued";
+/**
+ * Everything waiting in this scene waits for an unfinished Director edit: nothing is being made, queued for the
+ * studio, or running a confirm, and at least one keyframe or clip is held.
+ */
+export function heldOnly(overview: GenerationOverview, scene: SceneOverview): boolean {
+  if (scene.confirmation?.state === "running") return false;
+  const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
+  const slots = shots.flatMap((shot) => [shot.keyframe, shot.video]);
+  return slots.some(heldByEdit) && !slots.some((slot) => isWorking(slot) && !heldByEdit(slot));
+}
 
 /** The status of a replacement take while the current output stays shown, or null when none is in progress. */
 export function replacementStatus(slot: MediaSlot): { status: Msg; tone: CardTone } | null {
@@ -233,7 +280,9 @@ export function waitingMsg(slot: MediaSlot): Msg {
 export function cardStatus(shot: ShotOverview): { status: Msg; tone: CardTone } {
   const { keyframe, video } = shot;
   if (keyframe.state === "running") return { status: msg("card.keyframe.making"), tone: "working" };
-  if (video.state === "running" || video.state === "queued") return { status: video.state === "queued" ? waitingMsg(video) : msg("card.video.making"), tone: "working" };
+  // A clip waiting for the person's confirm is not being made: the card says what its keyframe needs (opened or not),
+  // as before any confirm, and the video panel offers the confirm itself.
+  if (video.state === "running" || (video.state === "queued" && !awaitsConfirm(video))) return { status: video.state === "queued" ? waitingMsg(video) : msg("card.video.making"), tone: "working" };
   if (video.state === "ready" && keyframe.state === "ready") return { status: msg("card.video.saved"), tone: "opened" };
   if (video.state === "failed") return { status: msg(video.failure?.charged ? "card.video.failed_charged" : "card.video.failed"), tone: "attention" };
   if (video.state === "no_answer") return { status: msg("card.no_answer"), tone: "attention" };
@@ -304,7 +353,8 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   const base = { sceneOrdinal: scene.ordinal, segments, openedCount, targetCount: targets.length, eyebrow: msg("panel.title", { scene: scene.ordinal }), stopped: null };
   const keyframeHeadline = { value: msg("panel.count", { value: scene.counts.keyframesReady, total: shots.length }), unit: msg("panel.unit.keyframes", { count: shots.length }) };
 
-  if (scene.state === "video_saved") {
+  const state = sceneStateOf(overview, scene);
+  if (state === "video_saved") {
     const total = shots.reduce((sum, shot) => sum + shot.durationFrames, 0);
     return {
       ...base, ...noPrice, segments: segmentsOf(shots),
@@ -315,7 +365,19 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   }
   // A confirm that stopped partway says so, even while the studio still lists its clips as waiting.
   const stopped = confirmationStop(overview, scene);
-  if (!stopped && (scene.confirmation?.state === "running" || scene.state === "making_video")) {
+  // Nothing moves until an unfinished Director edit ends: the panel says it waits for that edit, not that work runs.
+  if (!stopped && heldOnly(overview, scene)) {
+    const held = shots.filter((shot) => heldByEdit(shot.keyframe) || heldByEdit(shot.video));
+    const clips = !held.some((shot) => heldByEdit(shot.keyframe));
+    return {
+      ...base, ...noPrice, segments: segmentsOf(clips && targets.length ? targets : shots),
+      ...(clips ? {} : { eyebrow: msg("panel.title_keyframes", { scene: scene.ordinal }) }),
+      action: null, enabled: false, label: msg("panel.held"), reason: msg("panel.held_reason"),
+      note: msg("panel.held_note", { shots: listLabels(held.map((shot) => shot.label), locale) }),
+      headline: clips ? { value: msg("panel.held_headline"), unit: null } : keyframeHeadline,
+    };
+  }
+  if (!stopped && (scene.confirmation?.state === "running" || state === "making_video")) {
     const making = shots.filter((shot) => isWorking(shot.video));
     const current = (scene.confirmation?.currentShotId ? overview.shots[scene.confirmation.currentShotId] : undefined) ?? shots.find((shot) => shot.video.state === "running") ?? making[0];
     const run = targets.length ? targets : shots;
@@ -349,6 +411,9 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   const unexplained = stopped ? blockers.filter((blocker) => !stopExplains(stopped, blocker)) : blockers;
   // Only frames that can be opened now; a keyframe still to make is named by the reason instead.
   const unopened = targets.filter((t) => t.keyframe.state === "ready" && !t.keyframe.opened).map((t) => t.label);
+  // Clips already saved (a confirm stopped partway): the count and segments are of the frames still needing video,
+  // and the note says so, so "2 of 2" in a scene of three shots reads true.
+  const saved = shots.filter((shot) => shot.video.state === "ready" && !targets.includes(shot)).length;
   return {
     ...base,
     ...(enabled ? prices(scene.quotes.confirmVideo, "clips", locale) : noPrice),
@@ -357,7 +422,8 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     label: msg("panel.confirm"),
     reason: blockerMsg(unexplained, overview, locale),
     note: unopened.length > NAMED ? msg("panel.open_to_confirm_many", { count: unopened.length })
-      : unopened.length ? msg("panel.open_to_confirm", { shots: listLabels(unopened, locale) }) : msg("panel.all_opened"),
+      : unopened.length ? (saved ? msg("panel.rest_open_to_confirm", { saved, shots: listLabels(unopened, locale) }) : msg("panel.open_to_confirm", { shots: listLabels(unopened, locale) }))
+      : saved ? msg("panel.rest_opened", { saved, count: targets.length }) : msg("panel.all_opened"),
     headline: stopped
       ? { value: msg("panel.stopped_headline"), unit: stopped.label ? msg("panel.stopped_at", { shot: stopped.label }) : null }
       : { value: msg("panel.count", { value: openedCount, total: targets.length }), unit: msg("panel.unit.frames_opened", { count: targets.length }) },
@@ -384,7 +450,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
   const scene = currentScene(overview, sceneId);
   if (!scene) return null;
   const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
-  const checks = narrationChecks(shots, overview.fps).map((check, index) => ({ letter: String.fromCharCode(97 + index), check }));
+  const checks = narrationChecks(shots, overview.fps).map((check) => ({ letter: CHECK_MARK, check }));
   const selected = shots.find((shot) => shot.shotId === shotId) ?? shots[0] ?? null;
   const cards = shots.map((shot): ShotCard => {
     const voiceStep = voiceStepOf(overview, scene, shot.shotId);
@@ -412,8 +478,8 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
   });
   return {
     scene,
-    header: { title: scene.title, ordinal: scene.ordinal, status: sceneStatus(scene), shots: shots.length },
-    pills: [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal).map((s) => ({ sceneId: s.sceneId, ordinal: s.ordinal, title: s.title, status: pillStatus(s, s.sceneId === scene.sceneId), selected: s.sceneId === scene.sceneId })),
+    header: { title: scene.title, ordinal: scene.ordinal, status: sceneStatus(scene, overview), shots: shots.length },
+    pills: [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal).map((s) => ({ sceneId: s.sceneId, ordinal: s.ordinal, title: s.title, status: pillStatus(overview, s, s.sceneId === scene.sceneId), selected: s.sceneId === scene.sceneId })),
     checks,
     cards,
     selected,

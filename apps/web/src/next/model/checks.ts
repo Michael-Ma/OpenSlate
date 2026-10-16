@@ -15,7 +15,15 @@ export type AppCheck = {
   shotSeconds: number;
   /** The whole-second length that would fit the line (within the 3–15 s shot range). */
   fitSeconds: number;
+  /** The shot's clip is saved: the line is settled before exporting the film, not before making video. */
+  hasClip: boolean;
 };
+
+/**
+ * The mark an app check carries in the banner and on its card: a neutral "!", as Plan's check chip. Never a letter,
+ * so it cannot be read as the Director's lettered note (a, b…) shown on the same screen.
+ */
+export const CHECK_MARK = "!";
 
 export const MIN_SHOT_SECONDS = 3;
 export const MAX_SHOT_SECONDS = 15;
@@ -40,6 +48,7 @@ export function narrationChecks(shots: readonly ShotOverview[], fps: number): Ap
       estimated: line.measuredSeconds === undefined,
       shotSeconds,
       fitSeconds: Math.min(MAX_SHOT_SECONDS, Math.max(MIN_SHOT_SECONDS, Math.ceil(lineSeconds + 0.3))),
+      hasClip: shot.video.state === "ready",
     });
   }
   return checks;
@@ -208,6 +217,11 @@ export function checkActions(check: AppCheck, fps: number): CheckActions {
     keep: { seconds: check.shotSeconds, cutSeconds: round1(check.lineSeconds - check.shotSeconds), label: msg("check.narration.keep", { seconds: check.shotSeconds }) },
     edit: { label: msg("check.narration.edit") },
   };
+}
+
+/** The banner's line under the title: what the line does, and what settling it comes before. */
+export function checkBody(check: AppCheck): Msg {
+  return msg(check.hasClip ? "check.narration.body_clip" : "check.narration.body", { label: check.label });
 }
 
 export function checkTitle(check: AppCheck): Msg {
