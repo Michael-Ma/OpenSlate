@@ -495,8 +495,10 @@ export const scenarios = [
       });
       expect(done.below <= 16, `The done banner leaves an empty band: ${JSON.stringify(done)}`);
       // 2.2's note link is off while its clip is made: a solid backing (the picture never shows through) and a reason.
-      const link = await page.locator("[data-card='shot-2-2'] [data-act='note-regenerate']").evaluate((element) => ({ disabled: element.disabled, title: element.title, background: getComputedStyle(element).backgroundColor, opacity: getComputedStyle(element).opacity }));
+      const link = await page.locator("[data-card='shot-2-2'] [data-act='note-regenerate']").evaluate((element) => ({ disabled: element.disabled, title: element.title, background: getComputedStyle(element).backgroundColor, opacity: getComputedStyle(element).opacity, underline: getComputedStyle(element).textDecorationLine }));
       expect(link.disabled && link.title === "Wait for 2.2's clip to finish." && /^rgb\(/.test(link.background) && link.opacity === "1", `The held note link is not legible or does not say why: ${JSON.stringify(link)}`);
+      // Off, it is not drawn as a link (no underline): only a link that works is underlined.
+      expect(!/underline/.test(link.underline), `The held note link is still underlined: ${JSON.stringify(link)}`);
       // The settled note's chip keeps its letter, its check and its point however narrow the card.
       for (const width of [1440, 1100, 900]) {
         await page.setViewportSize({ width, height: 900 });

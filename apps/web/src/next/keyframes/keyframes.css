@@ -67,8 +67,9 @@
 .card .callout .anno[data-fit="tail"] .anno-tail { margin-left: 0; }
 .card .callout .anno[data-fit="none"] .anno-words { display: none; }
 .card .callout .anno[data-fit="none"]:not(.done) { padding-right: 2px; }
-/* Off, the link keeps a solid backing over the picture and greys its words; its tooltip says why. */
-.callout .link:disabled { background: var(--ground); color: var(--muted); text-decoration-color: var(--track); cursor: not-allowed; }
+/* Off, the link keeps a solid backing over the picture and greys its words, without the underline of a link that
+   works; its tooltip says why. */
+.callout .link:disabled { background: var(--ground); color: var(--muted); text-decoration: none; cursor: not-allowed; }
 
 /* ---------- neutral check chips on cards ---------- */
 .anno.check { background: var(--raised-2); color: var(--text); border: 1px solid var(--track); }
