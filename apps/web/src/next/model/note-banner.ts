@@ -3,7 +3,7 @@ import type { TimelineSegment } from "./checks.ts";
 import { isWorking, shotHasNoAnswer, unresolvedQueue, waitingMsg } from "./keyframes.ts";
 import { regenerationState, regenerationSummary, type NoteAction, type NoteView } from "./notes.ts";
 import { pendingAutomaticRetry } from "./media-state.ts";
-import { formatMicros, keyframeEstimate } from "./price.ts";
+import { formatMicros, keyframeEstimate, priceMsg } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -91,7 +91,7 @@ export function proposalTimeline(preview: ProposalPreview, overview: GenerationO
 export function regeneratePrice(shotIds: readonly string[], overview: GenerationOverview, locale: string): Msg | null {
   const quote = keyframeEstimate(shotIds, overview);
   if (!quote) return msg("price.unknown");
-  return quote.priceUnknown ? msg("price.unknown") : msg("price.about", { total: formatMicros(quote.micros, locale) });
+  return priceMsg({ ...quote, units: 1, unitMicros: "0" }, locale);
 }
 
 /** Neutral waiting still guards the inputs of a bound purchase; it is separate from visible running progress. */
@@ -228,7 +228,11 @@ export function noteCallout(note: NoteView, shotId: string, overview: Generation
   const estimate = keyframeEstimate(ids, overview);
   const unique = [...new Set(ids)];
   const shots = unique.map((id) => overview.shots[id]?.label ?? "?").join(", ");
-  const priced = !!estimate && !estimate.priceUnknown;
+  const priced = !!estimate && !estimate.priceUnknown && Number(estimate.micros) > 0;
+  const price = estimate ? formatMicros(estimate.micros, locale) : "";
+  const label = estimate?.subscription
+    ? msg(estimate.priceUnknown ? "note.choice.regenerate_codex_unknown" : priced ? "note.choice.regenerate_codex_about" : "note.choice.regenerate_codex", { shots, price })
+    : msg(priced ? "note.choice.regenerate_priced" : "note.choice.regenerate_unpriced", { shots, price });
   // A job on one of its shots holds the link; its tooltip says which one to wait for.
   const wait = unique.map((id) => overview.shots[id]).flatMap((shot) => shot ? [regenerationBlock(shot)] : []).find((reason) => !!reason) ?? null;
   return {
@@ -242,7 +246,7 @@ export function noteCallout(note: NoteView, shotId: string, overview: Generation
       ? {
         choiceIndex: regenerateIndex,
         // Keep the price in the link's own label: this purchase remains priced when another note fills the banner.
-        label: priced ? msg("note.choice.regenerate_priced", { shots, price: formatMicros(estimate!.micros, locale) }) : msg("note.choice.regenerate_unpriced", { shots }),
+        label,
         take: unique.length > 1 ? msg("note.callout.take_many", { count: unique.length }) : msg("note.callout.take_one"),
         shots,
         price: regeneratePrice(ids, overview, locale),

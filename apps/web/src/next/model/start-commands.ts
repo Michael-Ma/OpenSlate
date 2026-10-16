@@ -36,6 +36,22 @@ export interface Film {
   name: string;
 }
 
+/**
+ * Creation can add the first film while Start was only being forced by the empty library. Pin Start
+ * before publishing or selecting it, so its in-flight/failed sheet survives every store notification.
+ * Selection starts now; opening Plan is still the person's explicit choice after a failed step.
+ */
+export function selectCreatedFilm(store: {
+  dispatch(action: Action): void;
+  getState(): Pick<StudioState, "projectId" | "projects">;
+  selectProject(projectId: string): Promise<void>;
+}, film: Film): Promise<void> {
+  store.dispatch({ type: "view", view: "start" });
+  const projects = store.getState().projects;
+  if (!projects.some(project => project.id === film.id)) store.dispatch({ type: "projects", projects: [{ id: film.id, name: film.name }, ...projects] });
+  return store.getState().projectId === film.id ? Promise.resolve() : store.selectProject(film.id);
+}
+
 export function readFilms(store: Pick<StartStore, "read">, signal?: AbortSignal): Promise<ProjectListItem[]> {
   return store.read<{ projects: ProjectListItem[] }>(FILMS_PATH, signal).then((result) => result.projects);
 }
@@ -50,6 +66,7 @@ export function shownRefusal(store: Pick<StartStore, "getState">, toastBefore: T
   const toast = store.getState().toast;
   if (!toast || toast === toastBefore || toast.tone !== "error") return null;
   const { id, values } = toast.message;
+  if (id === "error.DIRECTOR_CODEX_VERSION_DETAILS" || id === "error.DIRECTOR_CODEX_VERSION_UNREADABLE") return "DIRECTOR_CODEX_VERSION_MISMATCH";
   if (id === "error.unknown") return typeof values?.code === "string" ? values.code : null;
   return id.startsWith("error.") ? id.slice("error.".length) : null;
 }
@@ -99,7 +116,7 @@ function takeBack(store: Pick<StartStore, "dispatch">, shown: Toast, before: Toa
   } else store.dispatch({ type: "toastDismiss" });
 }
 
-const refused = (code: string): Done => ({ ok: false, code, message: errorMsg(code) });
+const refused = (code: string, details?: Readonly<Record<string, unknown>>): Done => ({ ok: false, code, message: errorMsg(code, details) });
 
 /** POST /rename needs the film's head version, which the list does not carry: read it when the press is built. */
 export async function renameFilm(store: StartStore, id: string, name: string): Promise<boolean> {
@@ -186,7 +203,7 @@ export async function setUpDirector(store: StartStore, film: Film, codex: Codex)
   try {
     setup = await read();
   } catch (error) {
-    return refused(codeOf(error));
+    return refused(codeOf(error), error instanceof ApiError ? error.details : undefined);
   }
   if (setup.selection.mode === "native") return { ok: true };
   const body = codex.state === "found" ? codex.setup : directorSetupBody(setup);

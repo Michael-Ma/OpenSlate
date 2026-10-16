@@ -14,8 +14,13 @@ export function formatMicros(micros: string | number, locale: string): string {
   return new Intl.NumberFormat(locale, { ...base, minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(dollars);
 }
 
-/** Prices are host-configured estimates (plan decision D15): "about $1.50", or "no price set". Never "$0.00". */
+/** Host estimates and subscription use can coexist (Codex frames plus a per-call voice line). Never "$0.00". */
 export function priceMsg(quote: PriceQuote, locale: string): Msg {
+  if (quote.subscription === "codex") {
+    if (quote.priceUnknown) return msg("price.codex_unknown");
+    if (Number(quote.micros) > 0) return msg("price.codex_about", { total: formatMicros(quote.micros, locale) });
+    return msg("price.codex");
+  }
   if (quote.priceUnknown || Number(quote.micros) === 0) return msg("price.unknown");
   // A mixed quote (clips plus voice lines) has no single unit price; show only the total.
   if (quote.units > 1 && Number(quote.unitMicros) > 0) return msg("price.about_each", { total: formatMicros(quote.micros, locale), count: quote.units, each: formatMicros(quote.unitMicros, locale) });
@@ -23,10 +28,11 @@ export function priceMsg(quote: PriceQuote, locale: string): Msg {
 }
 
 /** The same selected-shot total for a regeneration label and its expected-price fence. */
-export function keyframeEstimate(shotIds: readonly string[], overview: GenerationOverview): { micros: string; priceUnknown: boolean } | null {
+export function keyframeEstimate(shotIds: readonly string[], overview: GenerationOverview): Pick<PriceQuote, "micros" | "priceUnknown" | "subscription"> | null {
   if (!shotIds.length) return null;
   let total = 0n;
   let priceUnknown = false;
+  let subscription = false;
   for (const id of new Set(shotIds)) {
     const shot = overview.shots[id];
     if (!shot) return null;
@@ -36,7 +42,8 @@ export function keyframeEstimate(shotIds: readonly string[], overview: Generatio
     if (!quote || !/^\d+$/.test(quote.micros)) return null;
     const micros = BigInt(quote.micros);
     total += micros;
-    priceUnknown ||= quote.priceUnknown || micros === 0n;
+    priceUnknown ||= quote.priceUnknown || (micros === 0n && !quote.subscription);
+    subscription ||= quote.subscription === "codex";
   }
-  return { micros: String(total), priceUnknown };
+  return { micros: String(total), priceUnknown, ...(subscription ? { subscription: "codex" as const } : {}) };
 }

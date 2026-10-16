@@ -52,6 +52,31 @@ test('a prompt change on a shot without a clip outdates only the keyframe', () =
   assert.equal(text(result), "Saving outdates **2.1's keyframe** (remaking it costs **about $0.04**). The current ones stay in Assets as earlier takes.");
 });
 
+test('B22: Plan keyframe impact keeps subscription usage distinct from an unset per-call price in both languages', () => {
+  const overview = lastFerryOverview(), shot = overview.shots[shotId('2.1')], scene = overview.scenes.find(scene => scene.sceneId === shot.sceneId);
+  scene.quotes.regenerateKeyframe = { micros: '0', unitMicros: '0', units: 1, priceUnknown: false, subscription: 'codex' };
+  const prices = unitPrices(overview, shot.sceneId);
+  assert.deepEqual(prices, { keyframe: null, clip: 500000, voice: null, keyframeSubscription: 'codex' });
+  const base = draftOf(shot, 'none', 30), result = shotImpact(shot, base, { ...base, prompt: 'The harbour at dawn.' }, prices, 'en-US');
+  assert.match(text(result), /remaking it uses your Codex plan/);
+  assert.doesNotMatch(text(result), /no price set|\$0\.00/);
+  assert.match(result.parts.map(part => translate('zh-CN', part.id, part.values)).join(' '), /重做使用你的 Codex 订阅/);
+});
+
+test('B22: Plan impact states Codex subscription and only the clip price, retaining an unset clip price', () => {
+  const overview = lastFerryOverview(), shot = overview.shots[shotId('1.1')], scene = overview.scenes.find(scene => scene.sceneId === shot.sceneId);
+  scene.quotes.regenerateKeyframe = { micros: '0', unitMicros: '0', units: 1, priceUnknown: false, subscription: 'codex' };
+  const base = draftOf(shot, 'none', 30), draft = { ...base, prompt: 'The counter at dawn.' };
+  const prices = unitPrices(overview, shot.sceneId);
+  const priced = shotImpact(shot, base, draft, prices, 'en-US');
+  assert.match(text(priced), /keyframe uses your Codex plan, and the clip costs \*\*about \$0\.50\*\*/);
+  assert.doesNotMatch(text(priced), /no price set|\$0\.00|\$0\.54/);
+  assert.match(priced.parts.map(part => translate('zh-CN', part.id, part.values)).join(' '), /关键帧使用你的 Codex 订阅，视频\*\*约 \$0\.50\*\*/);
+  const unpriced = shotImpact(shot, base, draft, { ...prices, clip: null }, 'en-US');
+  assert.match(text(unpriced), /keyframe uses your Codex plan, and no price is set for the clip/);
+  assert.match(unpriced.parts.map(part => translate('zh-CN', part.id, part.values)).join(' '), /关键帧使用你的 Codex 订阅，视频未设置价格/);
+});
+
 test('motion or length outdates only the clip; with no clip yet nothing goes out of date', () => {
   assert.equal(text(impact('1.1', { motion: 'Slow pan left' })), "Saving outdates **1.1's clip** (remaking it costs **about $0.50**). The keyframe stays. The current ones stay in Assets as earlier takes.");
   const none = impact('2.1', { motion: 'Slow pan left' });

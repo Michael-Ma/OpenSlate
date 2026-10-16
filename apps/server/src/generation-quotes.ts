@@ -28,8 +28,10 @@ export function quote(lock: QuoteLock, rows: readonly QuoteRow[], kind: QuoteKin
       row.narration?.mode === "generated" && !row.narration.ready && !row.narration.recordingCurrent)
       units.push(profile("speech", row.narration.profileId));
   }
+  const subscription = units.some(p => p?.adapter === "codex-image");
   const costs = units.map(p => p ? moneyMicros(p.unitCostMicros) : 0n);
   return { micros: costs.reduce((a, b) => a + b, 0n).toString(), units: units.length,
     unitMicros: costs.length && costs.every(c => c === costs[0]) ? costs[0]!.toString() : "0",
-    priceUnknown: units.some(p => !p || moneyMicros(p.unitCostMicros) === 0n || p.adapter === "codex-image") };
+    priceUnknown: units.some(p => !p || (p.adapter !== "codex-image" && moneyMicros(p.unitCostMicros) === 0n)),
+    ...(subscription ? { subscription: "codex" as const } : {}) };
 }

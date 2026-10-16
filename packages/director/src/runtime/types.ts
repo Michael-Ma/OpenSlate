@@ -39,6 +39,8 @@ export type DirectorRuntimeEvent = DirectorRunIdentity & (
   | { kind: "runtime_started"; nativeThreadId: string }
   | { kind: "turn_started"; nativeThreadId: string; nativeTurnId: string }
   | { kind: "assistant_message"; text: string; phase: "commentary" | "final" | "unknown" }
+  /** Phase metadata only: no reasoning text, tool arguments or native diagnostics. */
+  | { kind: "activity"; phase: "reasoning" | "tool"; state: "started" | "completed" }
   | { kind: "pending_input"; nativeRequestId: string; questions: readonly DirectorQuestion[] }
   | { kind: "diagnostic"; code: string; message: string }
 );

@@ -6,7 +6,7 @@ import { errorMsg } from "../../i18n/translate.ts";
 import {
   demoRetryable, filmsView, livePendingDemo, parsePendingDemo, pickerProjects, runningJobs, sameProjects, PENDING_DEMO_KEY, type FilmRow as Row, type OpenView, type PendingDemo,
 } from "../../model/start.ts";
-import { openDemo, showDemoFilm, renameFilm, setArchived, DEMO_UNAVAILABLE, type Film } from "../../model/start-commands.ts";
+import { openDemo, showDemoFilm, renameFilm, selectCreatedFilm, setArchived, DEMO_UNAVAILABLE, type Film } from "../../model/start-commands.ts";
 import { createdMsg, planOffReason, setupStatus, type CreatedOutcome, type FirstStep } from "../../model/start-new.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
@@ -105,12 +105,11 @@ export function StartView() {
 
   /**
    * The film exists as soon as Create answers, even if its Director setup or plan send then fails: list
-   * it now (nothing else moves the list's cursor when another film is made), so closing the sheet never
-   * hides it and invites a second one.
+   * and select it now while retaining Start and its sheet until the person opens it or closes the sheet.
    */
   const onMade = (film: Film) => {
+    void selectCreatedFilm(store, film);
     void films.reload();
-    remember(film);
   };
 
   const onCreated = (film: Film, outcome: CreatedOutcome) => {

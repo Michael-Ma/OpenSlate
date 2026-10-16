@@ -303,6 +303,9 @@ export const keyframes = {
 
   // ---- prices
   "price.unknown": { en: "no price set", zh: "未设置价格" },
+  "price.codex": { en: "uses your Codex plan", zh: "使用你的 Codex 订阅" },
+  "price.codex_about": { en: "about {total} · uses your Codex plan", zh: "约 {total} · 使用你的 Codex 订阅" },
+  "price.codex_unknown": { en: "no price set for other models · uses your Codex plan", zh: "其他模型未设置价格 · 使用你的 Codex 订阅" },
   "price.about": { en: "about {total}", zh: "约 {total}" },
   "price.about_each": { en: "about {total} · {count} at about {each}", zh: "约 {total} · {count} 个，每个约 {each}" },
   "price.estimate_note": { en: "Prices are estimates set on this computer.", zh: "价格是本机设置的估算值。" },

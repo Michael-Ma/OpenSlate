@@ -210,6 +210,16 @@ export class DirectorSupervisor {
           if (event.kind === "runtime_started") this.save({ ...turn, nativeThreadId: event.nativeThreadId });
           if (event.kind === "turn_started") this.save({ ...turn, nativeThreadId: event.nativeThreadId, nativeTurnId: event.nativeTurnId });
           if (event.kind === "assistant_message") this.output(turn, event.text.replaceAll(bridge.token, "[redacted]"), event.phase);
+          if (event.kind === "activity") {
+            invariant(["reasoning", "tool"].includes(event.phase) && ["started", "completed"].includes(event.state), "RUNTIME_PROTOCOL_INVALID", "Invalid Director activity");
+            const activity = { phase: event.phase, state: event.state, at: new Date(this.now()).toISOString() };
+            service.store.put("director_activity", turn.id, turn.projectId, { id: turn.id, turnId: turn.id, ...activity });
+            service.store.appendEvent(turn.projectId, "director.activity", { turnId: turn.id, ...activity });
+          }
+          if (event.kind === "diagnostic" && /^[A-Z][A-Z0-9_]{0,99}$/.test(event.code)) {
+            // Native stderr can contain private context. Retain only the bounded diagnostic code.
+            service.store.appendEvent(turn.projectId, "director.diagnostic", { turnId: turn.id, code: event.code });
+          }
           if (event.kind === "pending_input") {
             invariant(!service.store.get("keyframe_review_request", turn.requestId), "ACTOR_DENIED", "Application frame reviews cannot ask blocking questions");
             invariant(canonical(event.questions).length <= 32_000 && event.questions.length <= 8, "DIRECTOR_OUTPUT_LIMIT", "Too many pending questions");

@@ -141,7 +141,7 @@ export function modelName(option: ProviderOption): Msg {
 }
 
 /**
- * The host-configured estimate per operation (D15): "about $0.04 a keyframe", "no price set (Codex plan)" or
+ * The host-configured estimate per operation (D15): "about $0.04 a keyframe", "uses your Codex plan" or
  * "free stand-in". Never "$0.00".
  */
 export function estimateMsg(option: ProviderOption, locale: string): Msg {

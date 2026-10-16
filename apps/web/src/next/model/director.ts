@@ -371,11 +371,29 @@ export function turnStatus(turns: readonly TurnView[] | undefined): { activity: 
   if (!latest) return { activity: null, ending: null };
   if (latest.state === "running" || latest.state === "queued") {
     if (latest.action === "keyframe_review") return { activity: msg("director.activity.review"), ending: null };
-    const id = latest.progress ? TOOL_ACTIVITY[latest.progress.tool] : undefined;
-    return { activity: id ? msg(id) : null, ending: null };
+    const id = latest.progress?.state === "started" ? TOOL_ACTIVITY[latest.progress.tool] : undefined;
+    const phase = latest.activity?.state === "started" ? latest.activity.phase : null;
+    return { activity: id ? msg(id) : phase ? msg(phase === "reasoning" ? "director.activity.thinking" : "director.activity.tool")
+      : latest.progress || latest.activity ? msg("director.activity.waiting") : null, ending: null };
   }
   const reason = latest.reason ?? "";
+  if (reason === "timeout") return { activity: null, ending: timeoutEnding(latest) };
   return { activity: null, ending: ENDINGS.has(reason) ? msg(`director.ending.${reason as "no_reply" | "failed" | "timeout" | "superseded" | "interrupted" | "owner_lost"}`) : null };
+}
+
+function timeoutEnding(turn: TurnView): Msg {
+  const effects = turn.effects;
+  if (!effects) return msg("director.ending.timeout");
+  return effects.changesApplied + effects.notesCreated + effects.proposalsHeld === 0 ? msg("director.ending.timeout_empty")
+    : msg("director.ending.timeout_saved", { changes: effects.changesApplied, notes: effects.notesCreated, proposals: effects.proposalsHeld });
+}
+
+/** Elapsed time is a clock, never an invented completion percentage or heartbeat. */
+export function directorElapsed(turns: readonly TurnView[] | undefined, now: Date): Msg | null {
+  const turn = turns?.at(-1);
+  if (!turn || !["queued", "running"].includes(turn.state) || !turn.at) return null;
+  const started = Date.parse(turn.at);
+  return Number.isFinite(started) ? msg("director.activity.elapsed", { seconds: Math.max(0, Math.floor((now.getTime() - started) / 1000)) }) : null;
 }
 
 /** The chosen options as structured answers (DC-17), alongside the readable text. */
@@ -512,6 +530,7 @@ export function failedTurns(turns: readonly TurnView[] | undefined, director: Di
   for (const turn of turns ?? []) latest.set(turn.requestId, turn);
   const out = new Map<string, Attention>();
   for (const [requestId, turn] of latest) {
+    if (turn.reason === "timeout") { out.set(requestId, { detail: timeoutEnding(turn), text: null }); continue; }
     if (!FAILED_STATES.has(turn.state)) continue;
     const current = director?.turn?.requestId === requestId ? director : director?.activeRequestId === requestId && !director.turn ? director : null;
     // An unconfirmed ending is one the catalog words exactly (the server's own sentence for it is English).

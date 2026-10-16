@@ -376,6 +376,35 @@ export const scenarios = [
     },
   },
   {
+    name: "next-start-first-run-setup-refusal",
+    query: `${FIXTURE}&start=first-run-setup-required`,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await openStart(page);
+      await page.click(".welcome [data-act='new-film']");
+      await page.fill("dialog.start-sheet [data-act='film-name']", "First crossing");
+      await page.click("dialog.start-sheet [data-step='director']");
+      await page.click("dialog.start-sheet [data-act='create-film']");
+      await expectText(page, "dialog.start-sheet .sheet-head h2", /^Film created$/);
+      await expectText(page, "dialog.start-sheet .impact.cost", /First crossing was created/);
+      await expectText(page, "dialog.start-sheet [data-act='create-film']", /^Try again$/);
+      await expectText(page, "dialog.start-sheet [data-act='open-created']", /^Open the film$/);
+      await expectText(page, "dialog.start-sheet .sheet-foot .grow", /^First crossing is in your films\.$/);
+      await page.waitForSelector("main[data-view='start'] .film-row[data-film='film-1']");
+      expect(await row(page, "film-1").locator("[data-act='open-film']").evaluate(el => el.classList.contains("primary")), "The created film was not selected while its setup failed");
+      expect(await page.locator(".app[data-view='start']").count() === 1, "Creating the first film unmounted Start and its sheet");
+      await noErrorToast(page, "Setup refusal was hidden behind its sheet");
+      await inFront(page, "dialog.start-sheet [data-act='create-film']", "Try again is not in front");
+      await shot(page, "start-first-run-setup-refusal-1440");
+      await page.click("dialog.start-sheet [data-act='create-film']");
+      await page.waitForSelector("dialog.start-sheet", { state: "detached" });
+      await page.waitForSelector("main[data-view='plan']");
+      await topFilm(page, "First crossing");
+      await openStart(page);
+      expect(JSON.stringify(await filmNames(page)) === JSON.stringify(["First crossing"]), "Try again created another film");
+    },
+  },
+  {
     // Codex is here, but each new film's first setup check answers "busy": the sheet says the check is
     // still running, Try again finishes the same film, a failed sheet that is closed leaves its film
     // listed; an empty outline opens at once and sets its Director up afterwards, quietly.

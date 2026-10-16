@@ -303,3 +303,68 @@ test('turn effects count an idempotently replayed apply receipt once',async t=>{
  assert.equal(f.service.snapshot(f.project.id).turns[0].effects.changesApplied,1);
  assert.equal(f.store.getProject(f.project.id).headVersion,1);
 });
+
+test('long turn publishes bounded phase metadata and retains diagnostic codes without private text', async t => {
+  const started = deferred(), release = deferred();
+  const f = fixture(t, async (input, { onEvent }) => {
+    await onEvent({ ...identity(input), kind: 'activity', phase: 'reasoning', state: 'started' });
+    await onEvent({ ...identity(input), kind: 'diagnostic', code: 'RUNTIME_STDERR', message: `private ${input.bridge.credential}` });
+    started.resolve(); await release.promise;
+    await onEvent({ ...identity(input), kind: 'activity', phase: 'reasoning', state: 'completed' });
+    return { ...completed(input, ''), status: 'interrupted', error: { code: 'RUNTIME_RUN_TIMEOUT', message: 'limit' } };
+  });
+  f.enqueue(); f.supervisor.tick(); await started.promise;
+  const running = f.service.snapshot(f.project.id).turns[0];
+  assert.equal(running.activity.phase, 'reasoning'); assert.equal(running.activity.state, 'started');
+  assert.ok(Number.isFinite(Date.parse(running.activity.at)));
+  release.resolve(); await f.supervisor.settle();
+  const ended = f.service.snapshot(f.project.id).turns[0];
+  assert.equal(ended.reason, 'timeout'); assert.equal(ended.activity.state, 'completed');
+  const events = f.store.readEvents(f.project.id), diagnostic = events.find(e => e.kind === 'director.diagnostic');
+  assert.equal(diagnostic.payload.code, 'RUNTIME_STDERR'); assert.equal(diagnostic.payload.message, undefined);
+  assert.ok(!JSON.stringify(events).includes('private'));
+});
+
+test('timeout preserves the first small saved change and never automatically replays it', async t => {
+  let calls = 0;
+  const f = fixture(t, async input => {
+    calls++;
+    const actor = f.service.actorForBridge(input.projectId, input.bridge.credential), tools = new ToolInvocationService(f.service);
+    const prepared = await tools.invoke(input.projectId, actor, 'early-prepare', 'prepare_change', { variant: 'project', expectedHeadVersion: 0, creative: { brief: 'Synthetic small first draft' } });
+    await tools.invoke(input.projectId, actor, 'early-save', 'apply_change', { preparedId: prepared.preparedId });
+    return { ...completed(input, ''), status: 'unknown', error: { code: 'RUNTIME_RUN_TIMEOUT', message: 'limit' } };
+  });
+  f.enqueue(); f.supervisor.tick(); await f.supervisor.settle();
+  assert.equal(f.store.getProject(f.project.id).brief, 'Synthetic small first draft');
+  const turn = f.service.snapshot(f.project.id).turns[0];
+  assert.equal(turn.reason, 'timeout'); assert.equal(turn.effects.changesApplied, 1);
+  for (let i = 0; i < 3; i++) f.supervisor.tick();
+  await f.supervisor.settle(); assert.equal(calls, 1);
+  assert.equal(f.store.list('attempt', f.project.id).length, 0);
+});
+
+test('no-op apply receipts do not count as saved Plan changes in timeout feedback', async t => {
+  const f = fixture(t, async input => {
+    const actor = f.service.actorForBridge(input.projectId, input.bridge.credential), tools = new ToolInvocationService(f.service);
+    const prepared = await tools.invoke(input.projectId, actor, 'noop-prepare', 'prepare_change', { variant: 'project', expectedHeadVersion: 0, creative: { brief: '' } });
+    await tools.invoke(input.projectId, actor, 'noop-apply', 'apply_change', { preparedId: prepared.preparedId });
+    return { ...completed(input, ''), status: 'interrupted', error: { code: 'RUNTIME_RUN_TIMEOUT', message: 'limit' } };
+  });
+  f.enqueue(); f.supervisor.tick(); await f.supervisor.settle();
+  assert.equal(f.store.getProject(f.project.id).headVersion, 0);
+  assert.equal(f.service.snapshot(f.project.id).turns[0].effects.changesApplied, 0);
+});
+
+test('an older running application tool stays visible when a newer concurrent call finishes', async t => {
+  const started = deferred(), release = deferred();
+  const f = fixture(t, async input => { started.resolve(input); await release.promise; return completed(input); });
+  const turn = f.enqueue(); f.supervisor.tick(); const input = await started.promise;
+  try {
+    f.store.put('tool_invocation', 'older-running', f.project.id, { id: 'older-running', projectId: f.project.id, requestId: input.requestId, epochId: input.epochId, tool: 'prepare_change', state: 'started' });
+    f.store.put('tool_invocation', 'newer-done', f.project.id, { id: 'newer-done', projectId: f.project.id, requestId: input.requestId, epochId: input.epochId, tool: 'read_context', state: 'succeeded' });
+    assert.deepEqual(f.service.snapshot(f.project.id).turns[0].progress, { tool: 'prepare_change', state: 'started' });
+    f.store.put('tool_invocation', 'older-running', f.project.id, { id: 'older-running', projectId: f.project.id, requestId: input.requestId, epochId: input.epochId, tool: 'prepare_change', state: 'succeeded' });
+  } finally { release.resolve(); }
+  await f.supervisor.settle();
+  assert.equal(f.store.get('director_turn', turn.id).state, 'completed');
+});

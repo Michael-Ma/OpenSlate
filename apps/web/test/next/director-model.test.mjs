@@ -349,6 +349,27 @@ test('turn status shows what a running turn does and how a turn ended without a 
   assert.deepEqual(structuredAnswers(question, {}), []);
 });
 
+test('long Director turns show observed work, elapsed time, and exact retained effects after timeout in both languages', async () => {
+  const { directorElapsed, turnStatus, failedTurns } = await import('../../src/next/model/director.ts');
+  const { translateMsg } = await import('../../src/next/i18n/translate.ts');
+  const turn = { id: 't', requestId: 'r', at: '2026-10-16T17:51:03.000Z', state: 'running', progress: { tool: 'read_context', state: 'succeeded' } };
+  assert.equal(translateMsg('en', turnStatus([turn]).activity), "Waiting for the Director's next step");
+  assert.equal(translateMsg('zh-CN', turnStatus([turn]).activity), '正在等待导演的下一步');
+  assert.equal(translateMsg('en', directorElapsed([turn], new Date('2026-10-16T17:53:03.000Z'))), '120s elapsed');
+  assert.equal(translateMsg('zh-CN', directorElapsed([turn], new Date('2026-10-16T17:53:03.000Z'))), '已用时 120 秒');
+  assert.equal(directorElapsed([{ ...turn, at: 'bad' }], new Date()), null);
+  assert.equal(directorElapsed([{ ...turn, state: 'completed' }], new Date()), null);
+  assert.equal(translateMsg('en', turnStatus([{ ...turn, activity: { phase: 'reasoning', state: 'started' } }]).activity), 'Thinking about the film');
+  for (const state of ['interrupted', 'unknown', 'failed']) {
+    const empty = { ...turn, state, reason: 'timeout', effects: { changesApplied: 0, notesCreated: 0, proposalsHeld: 0 } };
+    assert.match(translateMsg('en', turnStatus([empty]).ending), /No Plan changes, notes or change proposals were confirmed/);
+    assert.match(translateMsg('zh-CN', failedTurns([empty], null).get('r').detail), /未确认任何方案修改/);
+    const saved = { ...empty, effects: { changesApplied: 1, notesCreated: 2, proposalsHeld: 3 } };
+    assert.match(translateMsg('en', failedTurns([saved], null).get('r').detail), /1 saved changes, 2 notes and 3 proposals/);
+    assert.match(translateMsg('zh-CN', turnStatus([saved]).ending), /1 项已保存的修改、2 条备注和 3 项/);
+  }
+});
+
 test('the thread stays at its bottom unless the reader scrolls away, even when content grows before the scroll event', () => {
   const pinned = { height: 806, client: 650 };
   // At the bottom, or within the stick distance of it: the reader follows new content.

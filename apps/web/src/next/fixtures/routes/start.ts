@@ -20,6 +20,7 @@ import type { FixtureRoute } from "./types.ts";
  * film's Director step is where it finds out.
  * `?start=setup-busy` has keys and Codex, but each new film's first Codex setup answers
  * DIRECTOR_SETUP_BUSY (the check is still running), so Try again shows.
+ * `?start=first-run-setup-required` has no films; the first setup refuses DIRECTOR_SETUP_REQUIRED.
  * `?start=refusals` shows refusals inside the modal dialogs: this computer's models change once, just
  * before the first Create that names them (PROVIDER_CATALOG_CHANGED), and Night bus has a keyframe
  * running, so archiving it is refused (ATTEMPTS_RUNNING).
@@ -42,6 +43,7 @@ interface StartWorld {
   films: Film[];
   /** Films whose next Codex setup answers DIRECTOR_SETUP_BUSY (setup-busy). */
   busyOnce: Set<string> | null;
+  setupRequiredOnce: Set<string> | null;
   next: number;
   /** The world cursor last seen, so The Last Ferry's "changed" follows its edits. */
   seenCursor: number;
@@ -120,7 +122,7 @@ function draftFilm(id: string, name: string, title: string, rows: { framing: str
 function initial(world: FixtureWorld): StartWorld {
   const now = new Date();
   const start = startPreset();
-  const firstRun = start === "first-run";
+  const firstRun = start === "first-run" || start === "first-run-setup-required";
   const ferry: Film = { id: PROJECT_ID, name: world.snapshot.project.name, archived: firstRun, updatedAt: daysAgo(now, 0, 10, 44), director: "fake", data: null, planImport: null };
   const others: Film[] = firstRun ? [] : [
     { id: "demo-ferry", name: "Demo: The Last Ferry", archived: false, updatedAt: daysAgo(now, 1, 18, 10), director: "fake", data: demoFilm("demo-ferry", "Demo: The Last Ferry"), planImport: null },
@@ -137,7 +139,8 @@ function initial(world: FixtureWorld): StartWorld {
     const [first] = Object.keys(bus.overview.shots);
     bus.overview.shots[first!] = { ...bus.overview.shots[first!]!, keyframe: { state: "running", takeCount: 0, opened: false } };
   }
-  return { films: [ferry, ...others], busyOnce: start === "setup-busy" ? new Set() : null, next: 1, seenCursor: world.overview.cursor };
+  return { films: [ferry, ...others], busyOnce: start === "setup-busy" ? new Set() : null,
+    setupRequiredOnce: start === "first-run-setup-required" ? new Set() : null, next: 1, seenCursor: world.overview.cursor };
 }
 
 function state(world: FixtureWorld): StartWorld {
@@ -256,6 +259,7 @@ export const startRoutes: FixtureRoute[] = [
       const data = emptyFilm(id, name);
       start.films.push({ id, name, archived: false, updatedAt: new Date().toISOString(), director: "fake", data, planImport: null });
       start.busyOnce?.add(id);
+      start.setupRequiredOnce?.add(id);
       return { ...data.snapshot.project };
     },
   },
@@ -307,6 +311,7 @@ export const startRoutes: FixtureRoute[] = [
       const input = asObject(body);
       const busy = state(world).busyOnce;
       if (busy?.delete(item.id)) throw new ApiError("DIRECTOR_SETUP_BUSY", 409);
+      if (state(world).setupRequiredOnce?.delete(item.id)) throw new ApiError("DIRECTOR_SETUP_REQUIRED", 409);
       if (input.mode === "native") {
         if (!computer(world).codex || typeof input.binaryPath !== "string" || !input.binaryPath) throw new ApiError("VALIDATION_ERROR", 400);
         item.director = "native";

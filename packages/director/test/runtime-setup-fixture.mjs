@@ -5,7 +5,7 @@ const scenario = process.env.SETUP_FIXTURE_SCENARIO ?? "ready";
 const log = value => appendFileSync(process.env.SETUP_FIXTURE_LOG, JSON.stringify({ pid: process.pid, ...value }) + "\n");
 if (process.argv.includes("--version")) {
   log({ kind: "version" });
-  process.stdout.write(`codex-cli ${scenario === "version" ? "0.0.1" : "0.153.4"}\n`);
+  process.stdout.write(scenario === "version-private" ? "PRIVATE_VERSION_OUTPUT\n" : `codex-cli ${scenario === "version" ? "0.0.1" : scenario === "version-alpha" ? "0.162.0-alpha.4" : "0.153.4"}\n`);
   process.exit(0);
 }
 const config = {

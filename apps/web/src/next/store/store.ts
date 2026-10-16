@@ -248,7 +248,7 @@ export class StudioStore {
   #fail(error: unknown, unconfirmedPaid = false, quiet = false): Msg {
     this.#deps.onError?.(error);
     const code = error instanceof ApiError || error instanceof CommandRefused ? error.code : "NETWORK_ERROR";
-    const refusal = unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code);
+    const refusal = unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code, error instanceof ApiError ? error.details : undefined);
     if (!quiet) this.dispatch({ type: "toast", message: refusal, tone: "error" });
     // The studio says it is in recovery review while this page did not know: read the status, so the page turns read-only.
     if (code === "INSTALLATION_QUARANTINED") void this.readRecovery();

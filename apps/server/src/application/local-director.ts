@@ -1,8 +1,8 @@
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { digest, invariant, newId } from "@openslate/core";
+import { digest, DomainError, invariant, newId } from "@openslate/core";
 import { CODEX_PROTOCOL_VERSION, CodexDirectorRuntime, setupLocalCodex, verifySkillLock } from "@openslate/director";
 import { toolVersion } from "../installation-status.js";
 import type { DirectorRunInput, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
@@ -21,14 +21,19 @@ import type { ProductionService } from "./service.js";
 import { createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
 import type { SkillCapabilityLock } from "@openslate/director";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
+import { readDirectorRunTimeout } from "./director-run-config.js";
+import { findLocalCodexBinary, supportedCodexInstall } from "./codex-binary.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
 interface SavedSelection { id: string; projectId: string; selection: LocalDirectorSelection; digest: string }
 interface SelectionCommand { id: string; projectId: string; selectionDigest: string; state: "pending" | "completed" }
 type Setup = typeof setupLocalCodex;
 type Ready = Awaited<ReturnType<Setup>>;
+interface CodexVersionDiagnostic { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string }
 export interface LocalDirectorOptions {
   repositoryRoot: string; dataDirectory: string; endpoint: string;
+  /** Finite trusted host turn deadline; defaults to the runtime's three minutes. */
+  runTimeoutMs?: number;
   /** Test/deployment injection points are trusted host code, never browser arguments. */
   setup?: Setup;
   makeRuntime?: (result: Ready) => DirectorRuntime;
@@ -46,12 +51,15 @@ export class LocalDirectorController {
   private readonly configuring = new Set<string>();
   private readonly modelReadiness = new Map<string, Ready["readiness"]>();
   private readonly modelChecks = new Map<string, Promise<Ready["readiness"]>>();
+  private readonly binaryDiagnostics = new Map<string, CodexVersionDiagnostic>();
+  private readonly setupEpoch = new Map<string, number>();
   readonly defaults: NonNullable<LocalDirectorOptions["defaults"]>;
   private readonly toolSettings: DirectorToolSettings;
   private readonly imageProjector: DirectorImageProjector | null;
   constructor(readonly service: ProductionService, readonly config: LocalDirectorOptions) {
+    if (config.runTimeoutMs !== undefined) readDirectorRunTimeout({ OPENSLATE_DIRECTOR_RUN_TIMEOUT_MS: String(config.runTimeoutMs) });
     this.setup = config.setup ?? setupLocalCodex;
-    this.defaults = config.defaults ?? { binaryPath: this.findBinary(), model: "gpt-6-astra" };
+    this.defaults = config.defaults ?? { binaryPath: findLocalCodexBinary(), model: "gpt-6-astra" };
     try { this.imageProjector = config.ffmpegPath ? new KeyframeProjector(service, { ffmpegPath: config.ffmpegPath }) : null; }
     catch (error) { if (!['ENOENT', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; this.imageProjector = null; }
     this.toolSettings = new DirectorToolSettings(service, projectId => this.mode(projectId) === "native"
@@ -69,23 +77,31 @@ export class LocalDirectorController {
         return this.imageProjector.prepare(input, bridge.actor, join(config.dataDirectory, "native", turn.projectId, "workspace"), preparation);
       } });
   }
-  private findBinary(): string {
-    // Prefer bundled native executables over optional npm launchers that may lack platform binaries.
-    // This is a UI suggestion only: setup still checks the selected executable's exact version.
-    const candidates = [process.env.OPENSLATE_CODEX_BINARY, "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
-      "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex", "/Applications/ChatGPT.app/Contents/Resources/codex",
-      "/Applications/Codex.app/Contents/Resources/codex", ...((process.env.PATH ?? "").split(":").filter(Boolean).map(path => join(path, "codex")))];
-    for (const candidate of candidates) if (candidate && isAbsolute(candidate) && existsSync(candidate)) {
-      try { return realpathSync(candidate); } catch { /* A disappeared suggestion must not prevent server startup. */ }
-    }
-    return "";
-  }
   mode(projectId: string): "fake" | "native" { return this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection.mode ?? "fake"; }
   /** No account discovery or model call; sign-in remains unknown on this version-only read. */
   async codexStatus(projectId?: string) {
     const binary = projectId ? this.modelSelection(projectId).binaryPath : this.defaults.binaryPath;
     const version = await toolVersion(binary, "codex");
     return { found: version !== null, version, pinnedVersion: CODEX_PROTOCOL_VERSION, signedIn: null };
+  }
+  /** Version-only Settings read, including an actionable mismatch before any setup session. */
+  async inspectSettings(projectId: string) {
+    this.service.store.getProject(projectId);
+    const selection = this.modelSelection(projectId), identity = this.modelKey(projectId, selection);
+    const version = await toolVersion(selection.binaryPath, "codex");
+    const settings = this.settings(projectId), unchanged = identity === this.modelKey(projectId, this.modelSelection(projectId));
+    return { ...settings, codexVersion: unchanged ? version : null, codexDiagnostic: settings.codexDiagnostic ??
+      (unchanged && version && version !== CODEX_PROTOCOL_VERSION ? this.versionDiagnostic(selection, version) : null) };
+  }
+  private versionDiagnostic(selection: LocalDirectorSelection, foundVersion: string | null): CodexVersionDiagnostic {
+    return { code: "DIRECTOR_CODEX_VERSION_MISMATCH", expectedVersion: CODEX_PROTOCOL_VERSION, foundVersion,
+      binaryPath: selection.binaryPath!, installPath: supportedCodexInstall() };
+  }
+  private recordVersionDiagnostic(projectId: string, selection: LocalDirectorSelection, readiness: Ready["readiness"]) {
+    const diagnostic = readiness.issues?.some(issue => issue.code === "SETUP_VERSION_MISMATCH")
+      ? this.versionDiagnostic(selection, readiness.binaryVersion?.foundVersion ?? null) : null;
+    if (diagnostic) this.binaryDiagnostics.set(projectId, diagnostic); else this.binaryDiagnostics.delete(projectId);
+    return diagnostic;
   }
   private controller(projectId: string) { return this.mode(projectId) === "native" ? this.native : this.fake; }
   status(projectId: string) {
@@ -124,7 +140,8 @@ export class LocalDirectorController {
       busy, changeAvailable: !busy, changeAppliesTo: "next_turn" as const, defaults: this.defaults, locked: this.locked(projectId),
       modelCalls: this.service.store.list("native_model_start", projectId).length,
       modelChoices: structuredClone(catalog?.modelChoices ?? []), modelCatalogStatus: !catalog || catalog.status === "ready" && catalog.modelChoices === undefined ? "unchecked" as const
-        : catalog.status === "ready" ? "ready" as const : "blocked" as const, modelCatalogCheckedAt: catalog?.checkedAt ?? null };
+        : catalog.status === "ready" ? "ready" as const : "blocked" as const, modelCatalogCheckedAt: catalog?.checkedAt ?? null,
+      codexDiagnostic: this.binaryDiagnostics.has(projectId) ? structuredClone(this.binaryDiagnostics.get(projectId)!) : null };
   }
   private modelSelection(projectId: string): LocalDirectorSelection {
     const selection = this.service.store.get<SavedSelection>("project_director_selection", projectId)?.selection;
@@ -136,12 +153,16 @@ export class LocalDirectorController {
   async models(projectId: string) {
     this.service.store.getProject(projectId); this.service.recovery.assertWritable(projectId);
     if (this.configuring.has(projectId) || this.conversationBusy(projectId)) return this.settings(projectId);
-    const selection = this.modelSelection(projectId), identity = this.modelKey(projectId, selection);
+    const selection = this.modelSelection(projectId), identity = this.modelKey(projectId, selection), setupEpoch = this.setupEpoch.get(projectId) ?? 0;
     let pending = this.modelChecks.get(identity);
     if (!pending) {
       pending = this.checkLocal(projectId, selection).then(result => {
         this.service.recovery.assertWritable(projectId);
-        if (this.modelKey(projectId, this.modelSelection(projectId)) === identity) this.modelReadiness.set(identity, structuredClone(result.readiness));
+        if (this.modelKey(projectId, this.modelSelection(projectId)) === identity && !this.configuring.has(projectId)
+          && setupEpoch === (this.setupEpoch.get(projectId) ?? 0)) {
+          this.modelReadiness.set(identity, structuredClone(result.readiness));
+          this.recordVersionDiagnostic(projectId, selection, result.readiness);
+        }
         return result.readiness;
       });
       this.modelChecks.set(identity, pending);
@@ -275,11 +296,15 @@ export class LocalDirectorController {
   private prepare(projectId: string, selection: LocalDirectorSelection) {
     this.service.recovery.assertWritable(projectId);
     const key = digest({ projectId, selection }); const existing = this.prepared.get(key); if (existing) return existing;
+    this.setupEpoch.set(projectId, (this.setupEpoch.get(projectId) ?? 0) + 1);
     const pending = (async () => {
       const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace"), snapshots = join(projection, ".agents", "skills"), storage = join(root, "runtime");
       for (const path of [projection, snapshots, storage]) mkdirSync(path, { recursive: true, mode: 0o700 });
       const result = await this.checkLocal(projectId, selection);
       this.modelReadiness.set(this.modelKey(projectId, selection), structuredClone(result.readiness));
+      const diagnostic = this.recordVersionDiagnostic(projectId, selection, result.readiness);
+      if (diagnostic && result.readiness.issues?.some(issue => issue.code === "SETUP_VERSION_MISMATCH"))
+        throw new DomainError(diagnostic.code, `Codex ${diagnostic.expectedVersion} is required; found ${diagnostic.foundVersion ?? "an unrecognized version"} at ${diagnostic.binaryPath}. The supported installation is ${diagnostic.installPath}.`, diagnostic);
       invariant(result.readiness.status === "ready" && result.runtimeOptions, "DIRECTOR_SETUP_REQUIRED", "Codex setup checks did not pass. Verify the selected binary, model and existing Codex sign-in.");
       const runtime = this.config.makeRuntime?.(result) ?? new CodexDirectorRuntime(result.runtimeOptions);
       const input = createDirectorInput(this.service, { repositoryRoot: this.config.repositoryRoot, snapshotRoot: snapshots, endpoint: this.config.endpoint, runtimeId: "codex-app-server", freshTurnGuidance: this.toolSettings });
@@ -287,11 +312,13 @@ export class LocalDirectorController {
     })();
     this.prepared.set(key, pending); void pending.catch(() => this.prepared.delete(key)); return pending;
   }
-  private checkLocal(projectId: string, selection: LocalDirectorSelection): Promise<Ready> {
+  private async checkLocal(projectId: string, selection: LocalDirectorSelection): Promise<Ready> {
     const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace");
-    return this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
+    const result = await this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
+      ...(this.config.runTimeoutMs === undefined ? {} : { limits: { runTimeoutMs: this.config.runTimeoutMs } }),
       env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", NO_COLOR: "1", CI: "1" },
       directories: { projection, snapshots: join(projection, ".agents", "skills"), storage: join(root, "runtime") } });
+    return result;
   }
   private async startNative(input: DirectorRunInput, options: DirectorStartOptions = {}) {
     this.service.recovery.assertWritable(input.projectId, input.requestId);

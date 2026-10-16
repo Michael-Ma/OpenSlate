@@ -84,6 +84,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     let interruptionRequested = false;
     let delivery: Promise<void> = Promise.resolve(); let queued = 0; let deliveryFailed = false;
     const messages: { text: string; phase: string }[] = []; const early: RpcMessage[] = [];
+    const activeItems = new Map<string, "reasoning" | "tool">();
     const cancellation = new AbortController();
     let resolveTerminal!: () => void; const terminal = new Promise<void>(resolve => { resolveTerminal = resolve; });
     let resolveStop!: () => void; const stopping = new Promise<void>(resolve => { resolveStop = resolve; });
@@ -133,6 +134,19 @@ export class CodexDirectorRuntime implements DirectorRuntime {
         }
         const eventTurnId = params.turnId ?? object(params.turn).id;
         if (eventTurnId !== nativeTurnId) return;
+        if (message.method === "item/started" || message.method === "item/completed") {
+          const item = object(params.item), type = item.type;
+          const phase = type === "reasoning" ? "reasoning"
+            : ["mcpToolCall", "dynamicToolCall", "codeModeToolCall"].includes(String(type)) ? "tool" : null;
+          if (phase && typeof item.id === "string" && item.id.length <= 300) {
+            if (message.method === "item/started") {
+              requireRuntime(activeItems.size < config.limits.eventQueue || activeItems.has(item.id), "RUNTIME_EVENT_LIMIT", "Too many simultaneous native items");
+              activeItems.set(item.id, phase);
+            } else activeItems.delete(item.id);
+            const activePhase = [...activeItems.values()].includes("tool") ? "tool" : activeItems.size ? "reasoning" : null;
+            emit({ ...base, kind: "activity", phase: activePhase ?? phase, state: activePhase ? "started" : "completed" });
+          }
+        }
         if (message.method === "item/completed") {
           const item = object(params.item);
           if (item.type === "agentMessage" && typeof item.text === "string") {

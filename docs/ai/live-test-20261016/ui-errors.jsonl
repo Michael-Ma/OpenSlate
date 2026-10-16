@@ -1,0 +1,5 @@
+{"seconds":21,"method":"POST","path":"/api/projects/740e060f-c6c9-49ac-9421-dfd87ae658fd/director/setup","status":409,"code":"DIRECTOR_SETUP_REQUIRED"}
+{"seconds":54,"method":"POST","path":"/api/projects/740e060f-c6c9-49ac-9421-dfd87ae658fd/director/setup","status":409,"code":"DIRECTOR_SETUP_REQUIRED"}
+{"seconds":14799,"method":"POST","path":"/api/projects/740e060f-c6c9-49ac-9421-dfd87ae658fd/scenes/04ee1139-128b-4d47-a94c-bb9a54914caa/generate","status":409,"code":"SCENE_REVIEW_STALE"}
+{"seconds":14833,"method":"POST","path":"/api/projects/740e060f-c6c9-49ac-9421-dfd87ae658fd/scenes/04ee1139-128b-4d47-a94c-bb9a54914caa/generate","status":409,"code":"SCENE_REVIEW_STALE"}
+{"seconds":14857,"method":"POST","path":"/api/projects/740e060f-c6c9-49ac-9421-dfd87ae658fd/scenes/04ee1139-128b-4d47-a94c-bb9a54914caa/generate","status":409,"code":"SCENE_REVIEW_STALE"}

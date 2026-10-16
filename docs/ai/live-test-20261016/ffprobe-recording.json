@@ -1,0 +1,23 @@
+{
+    "programs": [
+
+    ],
+    "stream_groups": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "vp8",
+            "width": 1440,
+            "height": 900,
+            "r_frame_rate": "25/1"
+        }
+    ],
+    "format": {
+        "duration": "14857.480000",
+        "size": "736504167",
+        "tags": {
+            "creation_time": "2026-10-16T17:48:34.824000Z"
+        }
+    }
+}

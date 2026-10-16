@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chmodSync,existsSync,mkdirSync,mkdtempSync,readdirSync,realpathSync,rmSync,symlinkSync} from 'node:fs';
+import {chmodSync,mkdirSync,mkdtempSync,readdirSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -147,16 +147,50 @@ test('legacy completed setup receipts return the current selection and its own r
   assert.equal(replay.selection.model,f.native.model);assert.equal(replay.readiness.model,f.native.model);
   assert.equal(replay.selectionMatchesCommand,false);assert.equal(f.setups.length,1);
 });
-test('binary suggestions preserve explicit overrides and prefer installed app binaries over PATH launchers',async t=>{
-  const f=fixture(t),binaryDirectory=join(f.root,'bin');mkdirSync(binaryDirectory);symlinkSync(process.execPath,join(binaryDirectory,'codex'));
-  const priorPath=process.env.PATH,priorOverride=process.env.OPENSLATE_CODEX_BINARY;
-  t.after(()=>{if(priorPath===undefined)delete process.env.PATH;else process.env.PATH=priorPath;
-    if(priorOverride===undefined)delete process.env.OPENSLATE_CODEX_BINARY;else process.env.OPENSLATE_CODEX_BINARY=priorOverride;});
-  process.env.PATH=binaryDirectory;process.env.OPENSLATE_CODEX_BINARY=process.execPath;
-  const explicit=new LocalDirectorController(f.service,{...f.config,defaults:undefined});t.after(()=>explicit.close());
-  assert.equal(explicit.defaults.binaryPath,realpathSync(process.execPath));
-  delete process.env.OPENSLATE_CODEX_BINARY;
+test('default binary suggestions honor the image worker configuration without probing any account',async t=>{
+  const f=fixture(t),priorOverride=process.env.OPENSLATE_CODEX_BINARY,priorImage=process.env.OPENSLATE_CODEX_IMAGE_BINARY;
+  t.after(()=>{for(const [name,value] of [['OPENSLATE_CODEX_BINARY',priorOverride],['OPENSLATE_CODEX_IMAGE_BINARY',priorImage]])
+    if(value===undefined)delete process.env[name];else process.env[name]=value;});
+  delete process.env.OPENSLATE_CODEX_BINARY;process.env.OPENSLATE_CODEX_IMAGE_BINARY=process.execPath;
   const suggested=new LocalDirectorController(f.service,{...f.config,defaults:undefined});t.after(()=>suggested.close());
-  const installed=['/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex','/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex','/Applications/ChatGPT.app/Contents/Resources/codex','/Applications/Codex.app/Contents/Resources/codex'].find(existsSync);
-  assert.equal(suggested.defaults.binaryPath,realpathSync(installed??process.execPath));assert.equal(f.setups.length,0);
+  assert.equal(suggested.defaults.binaryPath,realpathSync(process.execPath));assert.equal(f.setups.length,0);assert.equal(f.calls.length,0);
+});
+test('version mismatch errors and Settings name expected, found, selected path and supported install without saving the failed choice',async t=>{
+  let matches=false;
+  const f=fixture(t,{setup:async input=>matches?{readiness:{status:'ready',model:input.model},runtimeOptions:{}}:
+    {readiness:{status:'blocked',binaryVersion:{expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4'},issues:[{code:'SETUP_VERSION_MISMATCH',message:'local issue'}]}}});
+  const project=f.service.createProject('Pinned runtime'),path=`/api/projects/${project.id}/director/setup`;
+  const response=await f.req('POST',path,f.native,'version-setup');assert.equal(response.statusCode,409,response.body);
+  const details=response.json().error.details;
+  assert.deepEqual({code:response.json().error.code,expectedVersion:details.expectedVersion,foundVersion:details.foundVersion,binaryPath:details.binaryPath},
+    {code:'DIRECTOR_CODEX_VERSION_MISMATCH',expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4',binaryPath:f.native.binaryPath});
+  assert.ok(details.installPath.endsWith('/.local/share/openslate-codex/node_modules/.bin/codex'));
+  for(const value of [details.expectedVersion,details.foundVersion,details.binaryPath,details.installPath])assert.ok(response.json().error.message.includes(value));
+  assert.deepEqual((await f.req('GET',path)).json().codexDiagnostic,details);assert.equal(f.director.mode(project.id),'fake');assert.equal(f.calls.length,0);
+  assert.equal(f.store.list('director_selection_command',project.id)[0].state,'pending');
+  matches=true;const retried=await f.req('POST',path,f.native,'version-setup');assert.equal(retried.statusCode,200,retried.body);
+  assert.equal(retried.json().codexDiagnostic,null);assert.equal(retried.json().selection.mode,'native');assert.equal(f.calls.length,0);
+});
+test('read-only model checks expose the same version diagnosis without configuring or starting a turn',async t=>{
+  const f=fixture(t,{setup:async()=>({readiness:{status:'blocked',issues:[{code:'SETUP_VERSION_MISMATCH',message:'local issue'}],
+    binaryVersion:{expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4'}}})}),project=f.service.createProject('Models blocked');
+  const result=await f.director.models(project.id);assert.equal(result.modelCatalogStatus,'blocked');
+  assert.equal(result.codexDiagnostic.foundVersion,'0.162.0-alpha.4');assert.equal(result.codexDiagnostic.binaryPath,f.native.binaryPath);
+  assert.equal(result.selection.mode,'fake');assert.equal(f.calls.length,0);assert.equal(f.store.list('project_director_selection',project.id).length,0);
+});
+
+test('an older version inspection cannot replace the successful setup diagnosis for the same program',async t=>{
+  const entered=gate(),release=gate();let checks=0;
+  const f=fixture(t,{setup:async input=>{if(++checks===1){entered.resolve();await release.promise;return{readiness:{status:'blocked',issues:[{code:'SETUP_VERSION_MISMATCH',message:'local issue'}],
+    binaryVersion:{expectedVersion:'0.153.4',foundVersion:'0.162.0-alpha.4'}}};}
+    return{readiness:{status:'ready',model:input.model,modelChoices:[{id:input.model,label:input.model}]},runtimeOptions:{}};}});
+  const project=f.service.createProject('Racing version check'),older=f.director.models(project.id);await entered.promise;
+  await f.director.configure(project.id,f.native,'newer-check');release.resolve();const current=await older;
+  assert.equal(current.modelCatalogStatus,'ready');assert.equal(current.codexDiagnostic,null);assert.equal(current.selection.mode,'native');assert.equal(f.calls.length,0);
+});
+
+test('a host-configured Director turn limit reaches local Codex setup without changing model selection',async t=>{
+  const f=fixture(t,{runTimeoutMs:360000}),project=f.service.createProject('Configured turn limit');
+  await f.director.configure(project.id,f.native,'configured-timeout');
+  assert.equal(f.setups.length,1);assert.equal(f.setups[0].limits.runTimeoutMs,360000);assert.equal(f.calls.length,0);
 });
