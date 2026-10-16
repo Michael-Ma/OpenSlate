@@ -189,8 +189,9 @@ async function cardsFit(page, where) {
 
 /**
  * The banner's Now / After strip fits its row: every segment inside it, a label that does not fit ends with "…"
- * (never cut through a glyph), and the title keeps each number with its unit on one line. The strip refits a frame
- * after its row resizes, so a new window size gets a moment to settle.
+ * (never cut through a glyph), the change and the same shot in the Now row keep their whole labels, and the title
+ * keeps each number with its unit on one line. The strip refits a frame after its row resizes, so a new window size
+ * gets a moment to settle.
  */
 async function stripFits(page, where) {
   const problems = await until(page, () => stripProblems(page), (list) => !list.length, `The banner's strip breaks at ${where}`, 2000).catch((error) => [error.message]);
@@ -206,7 +207,17 @@ function stripProblems(page) {
         const r = seg.getBoundingClientRect();
         if (r.right > row.right + 0.5) out.push(`"${seg.textContent}" runs past the strip (${Math.round(r.right)} > ${Math.round(row.right)})`);
         if (seg.scrollWidth > seg.clientWidth + 1 && getComputedStyle(seg).textOverflow !== "ellipsis") out.push(`"${seg.textContent}" is cut without an ellipsis`);
+        // A segment showing its whole label shows all of it ("Scene 3 · 2 s la…" read as whole).
+        if (!seg.dataset.fit && seg.scrollWidth > seg.clientWidth) out.push(`"${seg.textContent}" ends in "…"`);
       }
+    }
+    // The change keeps its whole label, and so does the same shot in the Now row: "2.3 · 8 s" and "2.3 · 6 s".
+    for (const strip of document.querySelectorAll(".banner .tl")) {
+      const rows = [...strip.querySelectorAll(":scope > .segs")].map((segs) => [...segs.querySelectorAll(":scope > .seg:not(.dash)")]);
+      rows.forEach((segs) => segs.forEach((seg, index) => {
+        if (!seg.classList.contains("hot")) return;
+        for (const other of rows.map((list) => list[index]).filter(Boolean)) if (other.dataset.fit) out.push(`"${other.title}" shows only "${other.firstChild.textContent}" although it is the change`);
+      }));
     }
     for (const keep of document.querySelectorAll(".banner h2 .keep, .banner .sub .keep")) if (keep.getClientRects().length > 1) out.push(`"${keep.textContent}" breaks across lines`);
     return out;
