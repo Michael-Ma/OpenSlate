@@ -16,7 +16,6 @@ export const shell = {
   "shell.offline": { en: "Offline", zh: "离线" },
   "shell.director_toggle": { en: "Director", zh: "导演" },
   "shell.close": { en: "Close", zh: "关闭" },
-  "shell.classic": { en: "Classic studio", zh: "经典界面" },
   "shell.language": { en: "中文", zh: "English" },
   "shell.language_label": { en: "Switch to Chinese", zh: "切换到英文" },
   "shell.project": { en: "Film", zh: "影片" },

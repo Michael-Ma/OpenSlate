@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { showStop } from "../model/shell-states.ts";
-import { classicHref, connectionPill, filmHeading, otherLocale, searchWithLocale, shownView, showProjectPicker, tabKeyTarget, topBarMode, viewTabs } from "../model/shell.ts";
+import { connectionPill, filmHeading, otherLocale, searchWithLocale, shownView, showProjectPicker, tabKeyTarget, topBarMode, viewTabs } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { DisconnectDialog } from "./DisconnectDialog.tsx";
 import { StopDialog } from "./StopDialog.tsx";
@@ -201,7 +201,6 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
         <button type="button" className="lang" data-act="language" lang={nextLocale} title={t("shell.language_label")} onClick={switchLanguage}>
           {t("shell.language")}
         </button>
-        <a className="classic-link" data-act="classic" href={classicHref(window.location.search, view)}>{t("shell.classic")}</a>
         <button
           type="button"
           className="icon-btn settings-btn"

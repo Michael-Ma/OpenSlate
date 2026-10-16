@@ -91,20 +91,6 @@ export function tabKeyTarget(key: string, index: number, count: number): number 
   }
 }
 
-/** The classic studio names its views differently. */
-const CLASSIC_VIEW: Record<ViewName, string> = { plan: "plan", keyframes: "frames", assets: "assets", film: "cut", settings: "plan", start: "plan" };
-
-/**
- * The same page in the classic studio at the matching view. Keeps the language; drops the sample-film
- * switch because the classic studio has no sample film. The session cookie carries over, so no new link is needed.
- */
-export function classicHref(search: string, view: ViewName): string {
-  const params = new URLSearchParams(search);
-  params.delete("fixture");
-  params.set("ui", "classic");
-  params.set("view", CLASSIC_VIEW[view]);
-  return `?${params.toString()}`;
-}
 
 export const otherLocale = (locale: Locale): Locale => (locale === "en" ? "zh-CN" : "en");
 

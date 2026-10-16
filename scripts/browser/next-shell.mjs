@@ -135,7 +135,6 @@ export const scenarios = [
       expect(layout.strip === "none", `A film-wide strip shows on a quiet film: ${layout.strip}`);
       expect(layout.described === 0, "A tab still says it opens in the classic studio");
       expect((await tab(page, "keyframes").getAttribute("aria-selected")) === "true", "Keyframes is not the selected tab");
-      expect((await page.locator(".topbar [data-act='classic']").getAttribute("href")) === "?ui=classic&view=frames", "The classic link does not open the classic Keyframes view");
       await shot(page, "next-shell-layout-1440");
     },
   },
@@ -218,13 +217,12 @@ export const scenarios = [
     async run({ page }) {
       await ready(page);
       const shown = () => page.evaluate(() => document.querySelector(".app")?.getAttribute("data-view"));
-      // Every tab opens its own view in the new studio; the classic studio stays one link away.
+      // Every tab opens its own view.
       for (const view of VIEWS) {
         await tab(page, view).click();
         await until(page, shown, (value) => value === view, `The ${view} tab did not open its view`);
         expect((await tab(page, view).getAttribute("aria-selected")) === "true", `${view} is not the selected tab`);
       }
-      expect((await page.locator(".topbar [data-act='classic']").getAttribute("href")) === "?ui=classic&view=cut", "The classic link does not follow the view");
 
       // Keyboard: arrows move along the tabs, Enter opens one.
       await tab(page, "plan").click();

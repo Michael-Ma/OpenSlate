@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  classicHref, codeSegments, connectionPill, connectScreen, directorHasFilm, escClosesDrawer, filmHeading, hasNoFilms, noteOpenView, otherLocale,
+  codeSegments, connectionPill, connectScreen, directorHasFilm, escClosesDrawer, filmHeading, hasNoFilms, noteOpenView, otherLocale,
   pauseCountdown, resumeCountdown, searchWithLocale, searchWithView, shownView, showProjectPicker, startCountdown, tabKeyTarget, viewFromSearch,
   toastLifetime, topBarMode, viewTabs, TOAST_INFO_MS, TOAST_RESUME_MIN_MS, VIEWS,
 } from '../../src/next/model/shell.ts';
@@ -72,10 +72,6 @@ test('arrow keys move focus around the tab row and wrap', () => {
 });
 
 test('the classic link opens the matching classic view, keeps the language and drops the sample film', () => {
-  assert.equal(classicHref('?ui=next&fixture=last-ferry', 'plan'), '?ui=classic&view=plan');
-  assert.equal(classicHref('', 'keyframes'), '?ui=classic&view=frames');
-  assert.equal(classicHref('?lang=zh-CN&ui=next', 'film'), '?lang=zh-CN&ui=classic&view=cut');
-  assert.equal(classicHref('?view=cut', 'assets'), '?view=assets&ui=classic');
 });
 
 test('switching language flips between English and Chinese and updates an explicit ?lang', () => {

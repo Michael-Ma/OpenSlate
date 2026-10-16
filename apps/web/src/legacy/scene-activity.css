@@ -1,6 +1,0 @@
-.scene-activity { display:flex; align-items:flex-start; gap:1rem; margin:0 1.25rem 1rem; padding:1rem; border:1px solid var(--gray-6); border-radius:var(--radius-3); background:var(--gray-2); }
-.scene-activity-copy { min-width:0; flex:1; }
-.scene-activity-copy p { margin:.25rem 0; overflow-wrap:anywhere; }
-.scene-activity-copy small { display:block; margin-top:.4rem; color:var(--gray-11); line-height:1.45; }
-.scene-activity-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
-@media(max-width:900px) { .scene-activity { flex-direction:column; margin:0 .75rem .75rem; } }
