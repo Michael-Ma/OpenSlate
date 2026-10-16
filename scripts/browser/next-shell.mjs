@@ -713,7 +713,7 @@ export const scenarios = [
       expect(fits["2.1 1366x768 en"] === "pinned" && fits["2.1 390x844 en"] === null, `The fits are ${JSON.stringify(fits)}`);
       // Compact puts the two edits side by side, shortened only when the words cannot fit, to words that still name the
       // duration; the name keeps them all. Chinese has the room for the whole label.
-      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.setViewportSize({ width: 1024, height: 900 });
       const readPair = () => page.evaluate(() => {
         const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
         const motion = document.querySelector(".insp-actions [data-act='edit-motion']");
@@ -721,6 +721,7 @@ export const scenarios = [
       });
       const zhPair = await readPair();
       expect(zhPair.fit === "compact" && zhPair.prompt === zhPair.motion && zhPair.text === "编辑运动和时长" && zhPair.name === null, `The compact edits in Chinese are ${JSON.stringify(zhPair)}`);
+      await page.setViewportSize({ width: 1440, height: 900 });
       await page.locator(".topbar [data-act='language']").click();
       await page.waitForFunction(() => document.documentElement.lang === "en");
       const pair = await readPair();

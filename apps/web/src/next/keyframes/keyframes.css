@@ -266,6 +266,8 @@
   pointer-events: none;
 }
 .insp:is([data-fit="pinned"], [data-fit="scroll"]) [data-cut] { clip-path: inset(0 0 100% 0); }
+/* The rows list has no bottom margin of its own (a dl's 1em): the fit spends that room on rows and actions. */
+.insp .rows { margin-bottom: 0; }
 .insp .rows .row-pair { display: contents; }
 .insp .rows dd { min-width: 0; overflow-wrap: anywhere; }
 /* A long line is clamped so its length and fit notes stay in view; the full line is in the editor and the title. */
