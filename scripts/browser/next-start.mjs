@@ -360,6 +360,9 @@ export const scenarios = [
       expect(await page.locator("dialog.start-sheet [data-act='create-film']").count() === 0, "Try again is offered although it cannot find Codex");
       const open = page.locator("dialog.start-sheet [data-act='open-created']");
       expect(await open.evaluate((el) => el.classList.contains("primary") && el === document.activeElement), "Open the film is not the focused primary action");
+      // Every model is a free stand-in: the line under them says where to change them, and nothing about prices.
+      const note = await page.locator("dialog.start-sheet [data-note='models']").innerText();
+      expect(note === "Change any of them later in Settings.", `The note under the free models reads ${JSON.stringify(note)}`);
       await shot(page, "start-first-run-no-codex-1440");
       // Close: the film made before the Director step is in the list (and the first run is over).
       await page.click("dialog.start-sheet [data-act='sheet-close']");

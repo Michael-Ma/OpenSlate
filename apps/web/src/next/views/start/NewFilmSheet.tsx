@@ -5,7 +5,7 @@ import { numberLocale } from "../../i18n/translate.ts";
 import { FILM_NAME_MAX } from "../../model/start.ts";
 import { runCreation, setUpDirector, type CreationResult, type Film } from "../../model/start-commands.ts";
 import {
-  afterFailure, createBody, createdOutcome, creationSteps, directorAfterOpen, effectiveStep, failedMsg, failureNeedsReason, sheetFootMsg, isPlanFileName, madePlan, modelPlan, modelSummaryText,
+  afterFailure, createBody, createdOutcome, creationSteps, directorAfterOpen, effectiveStep, failedMsg, failureNeedsReason, sheetFootMsg, isPlanFileName, madePlan, modelPlan, modelsNote, modelSummaryText,
   nameRuns, planFileName, planTextProblem, retryMsg, sheetTitleMsg, stepAvailable, JOB_LABEL, PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep, type ProviderCatalog,
 } from "../../model/start-new.ts";
 import type { Msg } from "../../model/types.ts";
@@ -277,7 +277,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
                       </div>
                     ))}
                   </dl>
-                  <span className="hint">{t("start.models.later")}</span>
+                  <span className="hint" data-note="models">{t(modelsNote(shown))}</span>
                 </div>
               )}
             </>

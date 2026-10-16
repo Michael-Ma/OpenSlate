@@ -244,8 +244,22 @@ export function modelSummaryText(plan: ModelPlan, say: (message: Msg) => string)
     .filter((row) => row.ok && row.model)
     .map((row) => say(msg("start.models.item", { job: say(msg(JOB_INLINE[row.job])), model: row.model!, price: say(row.price) })))
     .join(say(msg("start.models.sep")));
-  if (plan.ready === plan.total) return say(msg("start.models.all_ready", { models }));
+  if (plan.ready === plan.total) return say(msg(hasEstimates(plan) ? "start.models.all_ready" : "start.models.all_ready_unpriced", { models }));
   return say(msg("start.models.some_ready", { ready: plan.ready, total: plan.total, models }));
+}
+
+/** The prices this computer's host set as estimates ("about $0.04 a keyframe", "under $0.001 a line"). */
+const ESTIMATES: ReadonlySet<MessageId> = new Set(JOBS.flatMap(({ price }) => [price.about, price.under]));
+
+/** Some row shows a price estimate; free stand-ins, the Codex plan and "no price set" are not estimates. */
+const hasEstimates = (plan: Pick<ModelPlan, "rows">) => plan.rows.some((row) => ESTIMATES.has(row.price.id));
+
+/**
+ * The line under the listed models: where to change them, and, only when a row shows a price, that the prices are
+ * estimates set on this computer. A list of free stand-ins has no price to explain.
+ */
+export function modelsNote(plan: Pick<ModelPlan, "rows">): MessageId {
+  return hasEstimates(plan) ? "start.models.later" : "start.models.later_unpriced";
 }
 
 /**
