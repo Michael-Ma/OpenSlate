@@ -26,11 +26,15 @@ export function RefChip({ label, target, children }: { label: string; target: Ta
   );
 }
 
-/** A small verified thumbnail of a picture shown to the Director (the shared artifact cache; nothing remote). */
+/**
+ * A small verified thumbnail of a picture shown to the Director (the shared artifact cache; nothing remote). With an
+ * empty `alt` it is decorative (the chip beside it names the picture), so its placeholders are hidden too.
+ */
 export function PictureThumb({ picture, alt }: { picture: { artifactId: string; sha256: string }; alt: string }) {
   const { t } = useI18n();
   const source = usePictureUrl({ artifactId: picture.artifactId, sha256: picture.sha256, kind: "image" });
   if (source.status === "ready") return <img className="pic-thumb" src={source.url} alt={alt} draggable={false} />;
-  if (source.status === "failed") return <span className="pic-thumb failed" role="img" aria-label={alt} title={t("director.picture.failed", { code: source.code })} />;
-  return <span className="pic-thumb loading" role="img" aria-label={alt} />;
+  const named = alt ? { role: "img", "aria-label": alt } : { "aria-hidden": true as const };
+  if (source.status === "failed") return <span className="pic-thumb failed" {...named} title={t("director.picture.failed", { code: source.code })} />;
+  return <span className="pic-thumb loading" {...named} />;
 }

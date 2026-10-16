@@ -33,6 +33,16 @@ async function showAsset(page, key) {
   await page.locator(`[data-asset*="${key}"]`).first().click();
   await page.locator('.detail [data-act="show-director"]').click();
 }
+/** Every × in the composer is at least 24 px square (WCAG 2.5.8). */
+async function removeTargets(page) {
+  const sizes = await page.$$eval('.composer [data-act="remove-picture"], .composer [data-act="unpoint"]', (nodes) => nodes.map((node) => { const box = node.getBoundingClientRect(); return [Math.round(box.width), Math.round(box.height)]; }));
+  if (!sizes.length || sizes.some(([w, h]) => w < 24 || h < 24)) fail(`Remove targets: ${JSON.stringify(sizes)}`);
+}
+/** No image role without a name (decorative thumbnails and their placeholders are hidden instead). */
+async function noNamelessImages(page) {
+  const nameless = await page.$$eval('.director [role="img"]', (nodes) => nodes.filter((node) => !(node.getAttribute("aria-label") ?? "").trim()).length);
+  if (nameless) fail(`${nameless} image role(s) without a name in the Director column`);
+}
 async function noSidewaysScroll(page, width) {
   const widths = await page.evaluate(() => [document.documentElement.scrollWidth, document.querySelector(".director").scrollWidth - document.querySelector(".director").clientWidth]);
   if (widths[0] > width || widths[1] > 0) fail(`The page scrolls sideways: ${widths}`);
@@ -64,6 +74,8 @@ export const scenarios = [
       await page.waitForFunction(() => [...document.querySelectorAll(".composer .pic-chip img")].length === 2, null, { timeout: 4000 }).catch(() => fail("The picture chips have no thumbnails"));
       const box = page.locator('[data-field="message"]');
       await box.fill("Use the red from this reference for Mara's coat");
+      await removeTargets(page);
+      await noNamelessImages(page);
       await page.screenshot({ path: shot("pictures-composer-1440"), clip: column });
       // Removing a picture by its button.
       await page.getByRole("button", { name: "Remove picture 2.1 keyframe" }).click();
