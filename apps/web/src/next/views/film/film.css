@@ -176,23 +176,42 @@
 }
 @container (max-width: 46px) {
   .film-work .blk .letter { top: 24px; left: 3px; right: auto; }
-  .film-work .blk .lack { display: none; }
+  .film-work .blk .lack .words { display: none; }
+  .film-work .blk .lack { padding: 2px; }
+  .film-work .blk .lack .mark { display: grid; }
 }
 @container (max-width: 34px) { .film-work .blk .dur { display: none; } }
-@container (max-width: 24px) { .film-work .blk .badge, .film-work .blk .letter { display: none; } }
+@container (max-width: 24px) { .film-work .blk .badge, .film-work .blk .letter, .film-work .blk .lack { display: none; } }
+/* What a block lacks, as its mark when the words do not fit (data-form, set by the view as it measures). */
+.film-work .blk .lack[data-form="mark"] { padding: 2px; }
+.film-work .blk .lack[data-form="mark"] .words { display: none; }
+.film-work .blk .lack[data-form="mark"] .mark { display: grid; }
+/*
+ * A state in one mark: the system's small ring (P5 status icons), neutral; empty while nothing is made yet, and filled
+ * white for a failure. Never amber, never red.
+ */
+.film-work .mark { display: none; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; place-items: center; font-size: 8.5px; font-weight: 800; font-style: normal; line-height: 1; }
+.film-work .mark[data-mark="failed"] { background: var(--text); border-color: var(--text); color: var(--surface); }
 .film-work .voices { height: 30px; overflow: visible; }
 .film-work .vblk { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--raised-2); border: 1px solid var(--track); font-size: 11px; padding: 0; display: flex; align-items: center; overflow: hidden; color: var(--text); container-type: inline-size; }
 /* Words wrap to a second line, then end in an ellipsis; a block too narrow for even its number keeps it for screen readers. */
 .film-work .vblk .vtext { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; line-height: 12.5px; word-break: keep-all; overflow-wrap: anywhere; min-width: 0; margin: 0 3px 0 5px; }
 .film-work .vblk b { font-weight: 700; white-space: nowrap; }
 /*
- * Too narrow for a placed line's quote (the player shows it as a subtitle), its number stays alone; a line that is not
- * placed keeps its state as long as the number fits. Too narrow for the number, the block is empty. Screen readers
- * keep both.
+ * Too narrow for a placed line's quote (the player shows it as a subtitle), its number stays alone; the block is never
+ * narrower than its number while its shot has the room. A line that is not placed never shows its state cut: the
+ * view measures it (data-form) and shortens it, then puts its mark beside the number, then the mark alone. Screen
+ * readers keep the number and the whole state.
  */
 @container (max-width: 26px) { .film-work .vblk .vtext { margin: 0 1px; } }
 @container (max-width: 42px) { .film-work .vblk:not(.loose) .vwords { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
-@container (max-width: 19px) { .film-work .vblk .vtext { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+@container (max-width: 19px) { .film-work .vblk:not(.loose) .vtext { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+.film-work .vblk .vshort { display: none; }
+.film-work .vblk .mark { vertical-align: text-top; }
+.film-work .vtext:is([data-form="short"], [data-form="mark"], [data-form="bare"]) .vwords,
+.film-work .vtext[data-form="bare"] b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.film-work .vtext[data-form="short"] .vshort { display: inline; }
+.film-work .vtext:is([data-form="mark"], [data-form="bare"]) .mark { display: inline-grid; }
 .film-work .vblk.loose { background: none; border-style: dashed; color: var(--text-2); }
 .film-work .musicl { height: 36px; }
 .film-work .mblk { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--raised); border: 1px solid var(--track); overflow: hidden; padding: 0; color: var(--text); text-align: left; font: inherit; }

@@ -1,5 +1,6 @@
 import type { DirectorNote, GenerationOverview, MediaSlot, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
+import type { MessageId } from "../i18n/messages.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
 /**
@@ -41,6 +42,13 @@ export function libraryRecordings(first: AudioLibraryView, rest: readonly MusicR
 /** What the picture lane and the player show for a shot. */
 export type PictureKind = "clip" | "keyframe" | "none";
 
+/**
+ * The compact stand-in for a block's or a line's state words where they do not fit, drawn as the system's small
+ * ring (P5 status icons): empty while nothing is made yet, … while it is made, ! for a failure (filled) or a line too
+ * long for its shot, ? for no answer. The title and the accessible name keep the words.
+ */
+export type StateMark = "none" | "making" | "failed" | "no_answer" | "too_long";
+
 export interface FilmLine {
   shotId: string;
   label: string;
@@ -58,6 +66,8 @@ export interface FilmLine {
   state: "placed" | "too_long" | "no_voice" | "making" | "failed" | "no_answer";
   /** A placed line cut at the shot's end. */
   cut: boolean;
+  /** An unplaced line's state in one mark, for a block too narrow for its words; null for a placed line. */
+  mark: StateMark | null;
 }
 
 export interface FilmShot {
@@ -79,6 +89,8 @@ export interface FilmShot {
   clip: StudioArtifactRef | null;
   /** What is missing, on the block ("no clip", "nothing yet", "failed", "no answer"). */
   lack: Msg | null;
+  /** The same in one mark, for a block too narrow for the words. */
+  mark: StateMark | null;
   /** The letter of an open Director note on this shot (amber: the Director's content). */
   letter: string | null;
   line: FilmLine | null;
@@ -114,18 +126,41 @@ export function making(slot: MediaSlot): boolean {
   return slot.state === "running" || (slot.state === "queued" && slot.waiting?.code !== "review" && slot.waiting?.code !== "stopped");
 }
 
-/** The neutral words on a picture block for what the shot still lacks. Failures are words, never a colour. */
-export function lackOf(shot: ShotOverview): Msg | null {
+type Lack = "no_answer" | "failed" | "making_clip" | "making_keyframe" | "clip_outdated" | "no_clip" | "nothing";
+
+function lackKind(shot: ShotOverview): Lack | null {
   const video = shot.video.state;
   const keyframe = shot.keyframe.state;
   if (video === "ready" && shot.video.artifact) return null;
-  if (video === "no_answer" || keyframe === "no_answer") return msg("film.lack.no_answer");
-  if (video === "failed" || keyframe === "failed") return msg("film.lack.failed");
-  if (making(shot.video)) return msg("film.lack.making_clip");
-  if (making(shot.keyframe)) return msg("film.lack.making_keyframe");
-  if (video === "outdated") return msg("film.lack.clip_outdated");
-  if (keyframe === "ready" || keyframe === "outdated" || keyframe === "choose_take") return msg("film.lack.no_clip");
-  return msg("film.lack.nothing");
+  if (video === "no_answer" || keyframe === "no_answer") return "no_answer";
+  if (video === "failed" || keyframe === "failed") return "failed";
+  if (making(shot.video)) return "making_clip";
+  if (making(shot.keyframe)) return "making_keyframe";
+  if (video === "outdated") return "clip_outdated";
+  if (keyframe === "ready" || keyframe === "outdated" || keyframe === "choose_take") return "no_clip";
+  return "nothing";
+}
+
+const LACKS = {
+  no_answer: { text: "film.lack.no_answer", mark: "no_answer" },
+  failed: { text: "film.lack.failed", mark: "failed" },
+  making_clip: { text: "film.lack.making_clip", mark: "making" },
+  making_keyframe: { text: "film.lack.making_keyframe", mark: "making" },
+  clip_outdated: { text: "film.lack.clip_outdated", mark: "none" },
+  no_clip: { text: "film.lack.no_clip", mark: "none" },
+  nothing: { text: "film.lack.nothing", mark: "none" },
+} as const satisfies Record<Lack, { text: MessageId; mark: StateMark }>;
+
+/** The neutral words on a picture block for what the shot still lacks. Failures are words, never a colour. */
+export function lackOf(shot: ShotOverview): Msg | null {
+  const kind = lackKind(shot);
+  return kind ? msg(LACKS[kind].text) : null;
+}
+
+/** What the shot lacks in one mark (a block too narrow for the words): no current clip, making, failed, no answer. */
+export function lackMarkOf(shot: ShotOverview): StateMark | null {
+  const kind = lackKind(shot);
+  return kind ? LACKS[kind].mark : null;
 }
 
 function lineOf(shot: ShotOverview, start: number, seconds: number): FilmLine | null {
@@ -135,14 +170,14 @@ function lineOf(shot: ShotOverview, start: number, seconds: number): FilmLine | 
   if (n.state === "ready" && n.measuredSeconds !== undefined) {
     const measured = round1(n.measuredSeconds);
     const settled = n.fits !== false || !!n.fit;
-    if (!settled) return { ...base, laneSeconds: measured, lineSeconds: measured, state: "too_long", cut: false };
+    if (!settled) return { ...base, laneSeconds: measured, lineSeconds: measured, state: "too_long", cut: false, mark: "too_long" };
     const cut = measured > seconds + 1e-9;
-    return { ...base, laneSeconds: Math.min(measured, seconds), lineSeconds: measured, state: "placed", cut };
+    return { ...base, laneSeconds: Math.min(measured, seconds), lineSeconds: measured, state: "placed", cut, mark: null };
   }
   const estimate = n.estimatedSeconds !== undefined ? round1(n.estimatedSeconds) : null;
-  const state: FilmLine["state"] = n.state === "making" ? "making" : n.state === "failed" ? "failed" : n.state === "no_answer" ? "no_answer" : "no_voice";
+  const state = n.state === "making" ? "making" : n.state === "failed" ? "failed" : n.state === "no_answer" ? "no_answer" : "no_voice";
   // An unplaced line is drawn at least 3 s wide so its label can be read.
-  return { ...base, laneSeconds: Math.max(estimate ?? 0, 3), lineSeconds: estimate, state, cut: false };
+  return { ...base, laneSeconds: Math.max(estimate ?? 0, 3), lineSeconds: estimate, state, cut: false, mark: state === "no_voice" ? "none" : state };
 }
 
 /** Open Director notes anchored to one shot, by letter (the Director's amber on the picture block). */
@@ -181,6 +216,7 @@ export function filmTimeline(overview: GenerationOverview, notes?: readonly Dire
         motion: shot.motion,
         ...pictureOf(shot),
         lack: lackOf(shot),
+        mark: lackMarkOf(shot),
         letter: letters.get(shot.shotId) ?? null,
         line: lineOf(shot, round1(at), seconds),
       });
@@ -277,6 +313,17 @@ export interface LineBox { top: number; bottom: number }
 export function separatorShown(before: LineBox | null, own: LineBox, after: LineBox | null): boolean {
   const sameLine = (a: LineBox, b: LineBox) => a.top < b.bottom - 1 && b.top < a.bottom - 1;
   return !!before && !!after && sameLine(before, own) && sameLine(own, after);
+}
+
+/** A box's content against its own size, as the DOM reports them (scrollWidth/Height, clientWidth/Height). */
+export interface OverflowBox { scrollWidth: number; clientWidth: number; scrollHeight: number; clientHeight: number }
+
+/**
+ * Words in a lane block are cut when they need more room than the box gives them: wider than it, or more lines than it
+ * shows (its line clamp hides the rest behind an ellipsis). A cut state is replaced by its mark, never shown cut.
+ */
+export function wordsCut(box: OverflowBox): boolean {
+  return box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1;
 }
 
 // ---- music ---------------------------------------------------------------------------

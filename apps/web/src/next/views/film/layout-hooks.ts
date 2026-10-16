@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { alignedEndPadding, coverHeight, rowsBelow } from "../../model/film-export.ts";
-import { separatorShown } from "../../model/film.ts";
+import { separatorShown, wordsCut } from "../../model/film.ts";
 
 /**
  * An element's width in px, followed as it resizes: pass the returned ref to the element. Null until measured (or
@@ -120,3 +120,31 @@ export function useLineSeparators(selector: string): (node: HTMLElement | null) 
   return setNode;
 }
 
+/**
+ * Gives each element under the returned ref that lists `data-forms` (its forms, fullest first, e.g. "words mark") the
+ * first form whose contents are not cut (model/film.ts wordsCut), as `data-form`; CSS draws each form. Measured before
+ * paint, and again as the lanes resize or their contents change.
+ */
+export function useFittedForms(): (node: HTMLElement | null) => void {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!node) return;
+    const fit = () => {
+      const all = [...node.querySelectorAll<HTMLElement>("[data-forms]")].map((element) => ({ element, forms: (element.dataset.forms ?? "").split(" ").filter(Boolean) }));
+      // One layout per round: every element still cut tries its next form together.
+      let pending = all.filter((item) => item.forms.length);
+      for (let round = 0; pending.length; round++) {
+        for (const { element, forms } of pending) if (element.dataset.form !== forms[round]) element.dataset.form = forms[round];
+        pending = pending.filter(({ element, forms }) => round < forms.length - 1 && wordsCut(element));
+      }
+    };
+    fit();
+    const resized = typeof ResizeObserver === "function" ? new ResizeObserver(fit) : null;
+    resized?.observe(node);
+    // New words, or blocks that moved or changed width. The forms this sets are other attributes, so they do not come back here.
+    const changed = new MutationObserver(fit);
+    changed.observe(node, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["style", "data-forms"] });
+    return () => { resized?.disconnect(); changed.disconnect(); };
+  }, [node]);
+  return setNode;
+}

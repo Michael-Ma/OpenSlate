@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, type MouseEvent, type ReactNode } from "rea
 import { useRecoveryLock, useWriteGuard } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { FilmClock } from "../../model/film-clock.ts";
-import { musicSpan, rulerTicks, tickLabels, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
+import { musicSpan, rulerTicks, tickLabels, type FilmMusic, type FilmShot, type FilmTimeline, type StateMark } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { useClockPaint } from "./clock-hooks.ts";
-import { useElementWidth, useLineSeparators } from "./layout-hooks.ts";
+import { useElementWidth, useFittedForms, useLineSeparators } from "./layout-hooks.ts";
 import { Still } from "./Player.tsx";
 
 export type Selection = { kind: "shot"; id: string } | { kind: "music" } | null;
@@ -38,6 +38,12 @@ function waveBars(seed: string, count: number): number[] {
   return bars;
 }
 
+/** The glyph in a state's ring (model/film.ts StateMark); nothing made yet is an empty ring. */
+const MARK_GLYPH: Record<StateMark, string> = { none: "", making: "…", failed: "!", no_answer: "?", too_long: "!" };
+
+/** A state in one mark, for a block too narrow for its words; the words stay in the title and the accessible name. */
+const Mark = ({ mark }: { mark: StateMark }) => <i className="mark" data-mark={mark} aria-hidden="true">{MARK_GLYPH[mark]}</i>;
+
 const MuteIcon = ({ muted }: { muted: boolean }) => (
   <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
     <path d="M1 4h2.5L7 1v10L3.5 8H1z" fill="currentColor" />
@@ -63,6 +69,8 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
   const places = useMemo(() => tickLabels(ticks, timeline.total, pps ? timeline.total * pps : rulerWidth), [ticks, timeline.total, pps, rulerWidth]);
   // The tool row wraps on a narrow screen: its separators never end or start a line.
   const tools = useLineSeparators(":scope > .sep");
+  // A lack or a line state that does not fit its block is shown as its mark, never cut.
+  const lanes = useFittedForms();
   const bars = useMemo(() => waveBars(music?.audioId ?? "", 90), [music?.audioId]);
 
   useClockPaint(clock, (time) => { if (head.current) head.current.style.left = X(Math.min(time, timeline.total)); });
@@ -92,8 +100,8 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
     const lack = shot.lack ? tm(shot.lack) : null;
     const kind = shot.picture === "clip" ? "" : shot.picture === "keyframe" ? " kfonly" : " empty";
     const label = blockLabel(shot, lack);
-    // A narrow block drops what cannot fit (the lack, then the length, then the number); the title and the
-    // accessible name keep all of it.
+    // A narrow block drops what cannot fit (the lack's words for its mark, then the length, then the number); the
+    // title and the accessible name keep all of it.
     return (
       <button
         key={shot.shotId}
@@ -112,7 +120,12 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
         {shot.letter ? <span className="letter">{shot.letter}</span> : null}
         <span className="blk-foot">
           <span className="dur">{t("film.block.seconds", { seconds: shot.seconds })}</span>
-          {lack ? <span className="lack">{lack}</span> : null}
+          {lack ? (
+            <span className="lack" data-forms={shot.mark ? "words mark" : undefined}>
+              <span className="words">{lack}</span>
+              {shot.mark ? <Mark mark={shot.mark} /> : null}
+            </span>
+          ) : null}
         </span>
       </button>
     );
@@ -127,14 +140,26 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
       : line.state === "failed" ? t("film.line.failed")
       : line.state === "no_answer" ? t("film.line.no_answer")
       : t("film.line.no_voice");
-    // The block may be too narrow for its words: they wrap to two lines and then end in an ellipsis, and the title
-    // keeps the whole line with its state.
+    // The block may be too narrow for its words. A placed line's quote wraps to two lines and then ends in an ellipsis;
+    // an unplaced line's state is never cut: it shortens ("no voice"; a too-long line keeps its length), then becomes
+    // its mark beside the number, then the mark alone. The title keeps the whole line with its state.
     const title = line.state !== "placed" ? t("film.line.title_state", { state: text, text: line.text })
       : line.lineSeconds !== null ? t("film.line.title", { text: line.text, seconds: line.lineSeconds })
       : t("film.player.quote", { text: line.text });
+    const short = line.state === "too_long" ? t("film.line.too_long_short", { seconds: line.lineSeconds ?? 0 })
+      : line.state === "no_voice" ? t("film.line.no_voice_short")
+      : line.state === "making" ? t("film.line.making_short")
+      : line.state === "failed" ? t("film.line.failed_short")
+      : null;
+    // Never narrower than its number while its shot has the room: a chip is never blank.
+    const minWidth = `min(calc(${line.label.length}ch + 8px), ${W(shot.seconds)})`;
     return [(
-      <span key={shot.shotId} className={`vblk${line.state === "placed" ? "" : " loose"}`} data-state={line.state} data-shot={shot.shotId} style={{ left: X(line.start), width: W(line.laneSeconds) }} title={`${line.label} ${title}`}>
-        <span className="vtext"><b>{line.label}</b> <span className="vwords">{text}</span></span>
+      <span key={shot.shotId} className={`vblk${line.state === "placed" ? "" : " loose"}`} data-state={line.state} data-shot={shot.shotId} style={{ left: X(line.start), width: W(line.laneSeconds), minWidth }} title={`${line.label} ${title}`}>
+        <span className="vtext" data-forms={line.mark ? `words${short ? " short" : ""} mark bare` : undefined}>
+          <b>{line.label}</b> <span className="vwords">{text}</span>
+          {short ? <span className="vshort" aria-hidden="true">{short}</span> : null}
+          {line.mark ? <Mark mark={line.mark} /> : null}
+        </span>
       </span>
     )];
   });
@@ -156,7 +181,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
         <span className="dim tl-note" data-act="timeline-note">{note}</span>
       </div>
       <div className="tl-scroll" ref={scroller}>
-        <div className="tl-grid" style={pps ? { width: `${timeline.total * pps + keyWidth + 12}px` } : undefined}>
+        <div className="tl-grid" ref={lanes} style={pps ? { width: `${timeline.total * pps + keyWidth + 12}px` } : undefined}>
           <span className="lane-k" />
           <div className="lane ruler" aria-hidden="true" onClick={seekOnRuler} ref={ruler}>
             {ticks.map((s, i) => (

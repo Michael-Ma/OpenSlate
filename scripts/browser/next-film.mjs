@@ -94,10 +94,23 @@ async function lanesReadable(page) {
       }
       if (block.getAttribute("title") !== block.getAttribute("aria-label")) out.push(`${block.dataset.shot} has no title with its whole label`);
     }
+    for (const block of document.querySelectorAll(".pics .blk")) {
+      // A block that shows its number shows what it lacks too: its words whole, or its mark, never nothing.
+      const lack = block.querySelector(".lack");
+      if (!lack || !shown(block.querySelector(".badge"))) continue;
+      if (!shown(lack)) out.push(`${block.dataset.shot} drops what it lacks`);
+      else if (shown(lack.querySelector(".words") ?? lack) && (lack.scrollHeight > lack.clientHeight + 1 || lack.scrollWidth > lack.clientWidth + 1)) out.push(`${block.dataset.shot}'s lack is cut`);
+    }
     for (const line of document.querySelectorAll(".voices .vblk")) {
       const text = line.querySelector(".vtext");
       if (shown(text) && text.scrollWidth > text.clientWidth + 1) out.push(`${line.dataset.shot}'s narration is cut off sideways`);
       if (!line.title.startsWith(line.querySelector("b")?.textContent ?? "?")) out.push(`${line.dataset.shot}'s narration has no title`);
+      // Never a blank chip: its number shows (or, too narrow for that, its mark).
+      const number = line.querySelector("b");
+      if (!(shown(number) && number.scrollWidth <= number.clientWidth + 1 && rect(number).right <= rect(text).right + 0.5) && !shown(line.querySelector(".mark"))) out.push(`${line.dataset.shot}'s narration block is blank`);
+      // A line that is not placed never shows its state cut ("no…"): whole words, or its mark.
+      const state = [".vwords", ".vshort"].some((part) => shown(line.querySelector(part)));
+      if (line.classList.contains("loose") && state && text.scrollHeight > text.clientHeight + 1) out.push(`${line.dataset.shot}'s narration state is cut`);
     }
     const ruler = rect(document.querySelector(".ruler"));
     for (const tick of document.querySelectorAll(".ruler .tick")) {
@@ -594,6 +607,11 @@ export const scenarios = [
       await inView(page, ".tl-tools");
       await noSidewaysScroll(page, 1366);
       await screenshot(page, "short-1366x768");
+      // 1024 x 768: the stage stacks; a block too narrow for "no clip" shows its mark like its neighbours show the words.
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.waitForTimeout(300);
+      await noSidewaysScroll(page, 1024);
+      await lanesReadable(page);
     },
   },
   {
