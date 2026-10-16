@@ -159,3 +159,14 @@ test('prices never print $0.00 and keep sub-cent amounts', () => {
 test('film meta sums every shot', () => {
   assert.deepEqual(filmMeta(lastFerryOverview()), { seconds: 48, scenes: 3, shots: 8, fps: 30 });
 });
+
+test('a replacement take in progress keeps the current keyframe and says how the new one is going (card B15)', async () => {
+  const { cardStatus, isWorking } = await import('../../src/next/model/keyframes.ts');
+  const shot = lastFerryOverview().shots[shotId('2.2')];
+  const withReplacement = (replacement) => ({ ...shot, keyframe: { ...shot.keyframe, replacement } });
+  assert.equal(en(cardStatus(withReplacement({ state: 'running', attemptId: 'a1' })).status), 'Making a new take · current kept');
+  assert.equal(isWorking(withReplacement({ state: 'queued' }).keyframe), true);
+  assert.equal(en(cardStatus(withReplacement({ state: 'failed', failure: { code: 'X', technical: true, retryAllowed: false, autoRetriesLeft: 0, charged: true, at: 'x' } })).status), 'New take failed · counted as spent · current kept');
+  assert.equal(cardStatus(withReplacement({ state: 'no_answer', attemptId: 'a2' })).tone, 'attention');
+  assert.equal(en(cardStatus(shot).status), 'Not opened');
+});

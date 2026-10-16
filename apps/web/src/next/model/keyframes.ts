@@ -196,7 +196,20 @@ function pillStatus(scene: SceneOverview, selected: boolean): Msg | null {
   return sceneStatus(scene);
 }
 
-export const isWorking = (slot: MediaSlot) => slot.state === "running" || slot.state === "queued";
+/** A slot is busy while it is made, or while a replacement take is made behind the current one (card B15). */
+export const isWorking = (slot: MediaSlot) =>
+  slot.state === "running" || slot.state === "queued" || slot.replacement?.state === "running" || slot.replacement?.state === "queued";
+
+/** The status of a replacement take while the current output stays shown, or null when none is in progress. */
+export function replacementStatus(slot: MediaSlot): { status: Msg; tone: CardTone } | null {
+  const replacement = slot.state === "ready" ? slot.replacement : undefined;
+  if (!replacement) return null;
+  switch (replacement.state) {
+    case "running": case "queued": return { status: msg("card.replacement.making"), tone: "working" };
+    case "failed": return { status: msg(replacement.failure?.charged ? "card.replacement.failed_charged" : "card.replacement.failed"), tone: "attention" };
+    case "no_answer": return { status: msg("card.replacement.no_answer"), tone: "attention" };
+  }
+}
 
 /** The voice step a running scene confirm is on for this shot (make, save, fit its line), else null. */
 export function voiceStepOf(overview: GenerationOverview, scene: SceneOverview | undefined, shotId: string): "speech" | "attach" | "accept" | null {
@@ -224,6 +237,8 @@ export function cardStatus(shot: ShotOverview): { status: Msg; tone: CardTone } 
   if (video.state === "ready" && keyframe.state === "ready") return { status: msg("card.video.saved"), tone: "opened" };
   if (video.state === "failed") return { status: msg(video.failure?.charged ? "card.video.failed_charged" : "card.video.failed"), tone: "attention" };
   if (video.state === "no_answer") return { status: msg("card.no_answer"), tone: "attention" };
+  const newTake = replacementStatus(keyframe);
+  if (newTake) return newTake;
   switch (keyframe.state) {
     case "ready": return keyframe.opened ? { status: msg("card.opened"), tone: "opened" } : { status: msg("card.not_opened"), tone: "not_opened" };
     case "queued": return { status: waitingMsg(keyframe), tone: "working" };
@@ -376,7 +391,8 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
     const { status, tone } = shotStatus(overview, scene, shot);
     const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact ?? null : null;
     const previous = current ? null : shot.keyframe.previous ?? null;
-    const workingOn = shot.keyframe.state === "running" ? "keyframe" : shot.video.state === "running" ? "video" : voiceStep ? "voice" : null;
+    const remaking = shot.keyframe.replacement?.state === "running" || shot.keyframe.replacement?.state === "queued";
+    const workingOn = shot.keyframe.state === "running" || remaking ? "keyframe" : shot.video.state === "running" ? "video" : voiceStep ? "voice" : null;
     return {
       shotId: shot.shotId,
       label: shot.label,

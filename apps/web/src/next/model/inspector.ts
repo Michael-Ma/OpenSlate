@@ -187,7 +187,9 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
       retryVideo: canRetry(shot.video) ? { enabled: !!scene && scene.blockers.length === 0, price: priceFrom(clip?.unitMicros, clip?.unknown ?? false, locale) } : null,
     };
   }
+  // A replacement take with no answer can be given up too, while the current keyframe stays (card B15).
   const noAnswerSlot = shot.keyframe.state === "no_answer" && shot.keyframe.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.attemptId }
+    : shot.keyframe.replacement?.state === "no_answer" && shot.keyframe.replacement.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.replacement.attemptId }
     : shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId } : null;
 
   // An outdated keyframe is explained next to its Regenerate button; an outdated clip here.
