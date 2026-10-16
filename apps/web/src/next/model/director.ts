@@ -243,8 +243,11 @@ export interface NoteOpen {
 /** A lettered Director note under the reply that wrote it (DC-18). Choices live in the banner, not here. */
 export interface ThreadNote {
   view: NoteView;
-  /** open: amber; done: settled, neutral with a green line; stale: neutral, says it is out of date. */
-  tone: "open" | "done" | "stale";
+  /**
+   * open: amber; done: settled, neutral with a green line; making: settled by a regenerate still being made, neutral
+   * and without a check; stale: neutral, says what changed.
+   */
+  tone: "open" | "done" | "making" | "stale";
   opens: NoteOpen[];
 }
 
@@ -399,7 +402,7 @@ function replyBlocks(text: string): Block[] {
   return blocks;
 }
 
-const noteTone = (state: NoteView["state"]): ThreadNote["tone"] => (state === "resolved" ? "done" : state === "stale" ? "stale" : "open");
+const noteTone = (view: NoteView): ThreadNote["tone"] => (view.state === "resolved" ? (view.making ? "making" : "done") : view.state === "stale" ? "stale" : "open");
 
 export function threadView(
   snapshot: ProjectSnapshot | null,
@@ -414,7 +417,7 @@ export function threadView(
   const notesFor = (entryId: string): ThreadNote[] => {
     const list = placed.get(entryId);
     if (!list || !overview) return [];
-    return noteViews(list, overview, proposals).map((view) => ({ view, tone: noteTone(view.state), opens: noteOpens(view, overview) }));
+    return noteViews(list, overview, proposals).map((view) => ({ view, tone: noteTone(view), opens: noteOpens(view, overview) }));
   };
   const noWords: UserMessage = { pictures: [], segments: [] };
   const entries: ThreadEntry[] = conversation.map((entry) => {

@@ -1,4 +1,5 @@
 import type { DirectorNote, DirectorProposal, GenerationOverview, NoteChoice } from "@openslate/core/public";
+import { isWorking } from "./keyframes.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -35,8 +36,13 @@ export interface NoteView {
   /** "2.2", "2.2, 2.3" or "Scene 2". */
   anchor: Msg;
   choices: NoteChoiceView[];
-  /** How it was settled, for a resolved note. */
+  /** How it was settled, for a resolved note; what changed since, for a stale one. */
   settled: Msg | null;
+  /**
+   * Settled by a regenerate whose new keyframe is still being made: the line says so ("Regenerating 2.2…"), neutral
+   * and without a check, until the new take arrives.
+   */
+  making: boolean;
 }
 
 const labels = (overview: GenerationOverview, shotIds: readonly string[]) => shotIds.map((id) => overview.shots[id]?.label ?? "?").join(", ");
@@ -56,10 +62,14 @@ function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals
   }
 }
 
+/** Some of these shots' new keyframes are still being made (or wait their turn). */
+export const regenerating = (overview: GenerationOverview, shotIds: readonly string[]) =>
+  shotIds.some((id) => { const shot = overview.shots[id]; return !!shot && isWorking(shot.keyframe); });
+
 function settledMsg(choice: NoteChoice, overview: GenerationOverview): Msg {
   switch (choice.kind) {
     case "accept": return msg("note.settled.accepted", { choice: choice.label });
-    case "regenerate_keyframe": return msg("note.settled.regenerated", { shots: labels(overview, choice.shotIds) });
+    case "regenerate_keyframe": return msg(regenerating(overview, choice.shotIds) ? "note.settled.regenerating" : "note.settled.regenerated", { shots: labels(overview, choice.shotIds) });
     case "edit_field": return msg("note.settled.edited", { shot: labels(overview, [choice.shotId]) });
     case "proposal": return msg("note.settled.applied");
     case "reply": return msg("note.settled.replied");
@@ -85,10 +95,26 @@ function anchorOf(note: DirectorNote, overview: GenerationOverview): { sceneId: 
   return { sceneId, shotIds, anchor: msg("note.anchor.scene", { scene: ordinal }) };
 }
 
+/**
+ * What made a stale note out of date, as far as the overview tells: the keyframe the Director looked at was replaced
+ * (a new take), or else its shots (or its scene) changed after it was written.
+ */
+function staleMsg(note: DirectorNote, overview: GenerationOverview, where: { sceneId: string | null; shotIds: string[] }): Msg {
+  const seen = note.seenKeyframe;
+  const shot = seen ? overview.shots[seen.shotId] : undefined;
+  const current = shot?.keyframe.artifact;
+  if (shot && current && (current.artifactId !== seen!.artifactId || current.sha256 !== seen!.sha256))
+    return msg("note.settled.stale_keyframe", { shot: shot.label });
+  if (where.shotIds.length) return msg("note.settled.stale_shots", { shots: labels(overview, where.shotIds) });
+  const ordinal = overview.scenes.find((s) => s.sceneId === where.sceneId)?.ordinal;
+  return ordinal !== undefined ? msg("note.settled.stale_scene", { scene: ordinal }) : msg("note.settled.stale");
+}
+
 export function noteViews(notes: readonly DirectorNote[], overview: GenerationOverview, proposals: readonly DirectorProposal[] = []): NoteView[] {
   return notes.map((note) => {
     const where = anchorOf(note, overview);
     const resolvedChoice = note.state === "resolved" && note.resolution ? note.choices[note.resolution.choiceIndex] : undefined;
+    const making = resolvedChoice?.kind === "regenerate_keyframe" && regenerating(overview, resolvedChoice.shotIds);
     return {
       noteId: note.noteId,
       letter: note.letter,
@@ -103,7 +129,8 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
         chosen: note.resolution?.choiceIndex === index,
         paid: choice.kind === "regenerate_keyframe",
       })),
-      settled: note.state === "stale" ? msg("note.settled.stale") : resolvedChoice ? settledMsg(resolvedChoice, overview) : null,
+      settled: note.state === "stale" ? staleMsg(note, overview, where) : resolvedChoice ? settledMsg(resolvedChoice, overview) : null,
+      making,
     };
   });
 }

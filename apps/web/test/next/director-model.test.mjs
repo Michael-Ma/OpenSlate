@@ -322,7 +322,7 @@ test('the thread shows notes under the Director\'s reply: open amber, settled ne
   assert.deepEqual(you.notes, []);
   assert.deepEqual(director.notes.map(n => [n.view.letter, n.tone, n.opens.map(o => en(o.label)), n.view.settled && en(n.view.settled)]), [
     ['a', 'done', ['Open 2.2'], 'Settled: Keep maroon'],
-    ['b', 'stale', ['Open 2.3'], 'Out of date: the shot changed since'],
+    ['b', 'stale', ['Open 2.3'], 'Out of date: 2.3 changed after this note.'],
     ['c', 'open', ['Open 2.1'], null],
   ]);
   assert.equal(threadView(snapshot, null, idle, 'en', NOW).entries[1].notes.length, 0, 'no overview, no labels: nothing to show yet');

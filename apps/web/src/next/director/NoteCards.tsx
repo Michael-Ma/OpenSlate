@@ -4,7 +4,7 @@ import { useOpenTarget } from "./useOpenTarget.ts";
 
 /**
  * The Director's lettered notes under the reply that wrote them (DC-18): an amber card per open note,
- * neutral once settled (a green "✓ …" line) or out of date. The only action here is Open: the note's
+ * neutral once settled (a green "✓ …" line; a plain line while a regenerate it chose is still being made) or out of date. The only action here is Open: the note's
  * choices live in the banner, so they are never offered twice. Open acts in the current view when it shows
  * shots (Plan scrolls to the row, Film selects and seeks, Assets scrolls to the shot's set, Keyframes selects
  * the card); from Settings and Start it goes to Keyframes (P5-DESIGN shell item 9).
@@ -20,7 +20,7 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
   return (
     <div className="notes">
       {notes.map(({ view, tone, opens }) => (
-        <article key={view.noteId} className={`note${tone === "open" ? "" : " done"}`} data-note={view.letter} data-state={view.state}>
+        <article key={view.noteId} className={`note${tone === "open" ? "" : " done"}`} data-note={view.letter} data-state={view.state} data-tone={tone}>
           <span className="letter" aria-hidden="true">{view.letter}</span>
           <span className="sr">{t("note.thread.label", { letter: view.letter })}</span>
           <div className="note-text">{view.text}</div>

@@ -232,6 +232,10 @@ export const scenarios = [
       await page.waitForSelector('[data-card="shot-2-2"] [data-act="note-regenerate"]', { timeout: 20000 });
       await page.click('[data-card="shot-2-2"] [data-act="note-regenerate"]');
       await page.waitForSelector('[data-card="shot-2-2"] .making');
+      // Note a is settled, but its new keyframe is still being made: no green "regenerated" yet.
+      const making = page.locator('#director .note[data-note="a"]');
+      await expectText(page, '#director .note[data-note="a"] .handled', /^Regenerating 2\.2…$/);
+      expect(await making.getAttribute("data-tone") === "making" && (await making.locator(".handled").evaluate((node) => getComputedStyle(node).color)) !== "rgb(95, 196, 138)", "Note a claims its new keyframe while it is being made");
       await openPlan(page);
       await page.click(`[data-act="scene-menu"][data-scene="${scene(2)}"]`);
       await page.click('[role="menu"] [data-act="delete-scene"]');

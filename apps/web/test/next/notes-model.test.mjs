@@ -37,9 +37,40 @@ test('settled and stale notes say how they ended and leave the banner', () => {
   assert.equal(en(views[0].settled), 'Settled: Keep maroon');
   assert.equal(views[0].choices[0].chosen, true);
   assert.equal(en(views[1].settled), 'Settled: 2.2 regenerated');
-  assert.equal(en(views[2].settled), 'Out of date: the shot changed since');
+  assert.equal(en(views[2].settled), 'Out of date: 2.2 changed after this note.');
+  assert.deepEqual(views.map(v => v.making), [false, false, false]);
   assert.equal(sceneOpenNotes(views, sceneId(2)).length, 0);
   assert.deepEqual(shotCallouts(views, shotId('2.2')).map(v => v.letter), ['a', 'b']);
+});
+
+test('a note settled by a regenerate says so while the new keyframe is being made, and "regenerated" only once it is back', () => {
+  const overview = lastFerryOverview();
+  const settled = note({ state: 'resolved', resolution: { choiceIndex: 1, at: 'x' } });
+  const shot = overview.shots[shotId('2.2')];
+  // The keyframe is being made again (its old picture kept as previous), or a replacement take runs behind it.
+  for (const keyframe of [{ ...shot.keyframe, state: 'running', previous: shot.keyframe.artifact, artifact: undefined }, { ...shot.keyframe, replacement: { state: 'queued' } }]) {
+    const making = { ...overview, shots: { ...overview.shots, [shot.shotId]: { ...shot, keyframe } } };
+    const [view] = noteViews([settled], making);
+    assert.equal(en(view.settled), 'Regenerating 2.2…');
+    assert.equal(translateMsg('zh-CN', view.settled), '正在重新生成 2.2…');
+    assert.equal(view.making, true);
+  }
+  const [back] = noteViews([settled], overview);
+  assert.deepEqual([en(back.settled), back.making], ['Settled: 2.2 regenerated', false]);
+});
+
+test('an out-of-date note says what changed: a new keyframe of the shot it looked at, or its shots or scene', () => {
+  const overview = lastFerryOverview();
+  const seen = { shotId: shotId('2.2'), artifactId: 'older', sha256: 'f'.repeat(64) };
+  const [replaced, current, scene] = noteViews([
+    note({ state: 'stale', seenKeyframe: seen }),
+    note({ noteId: 'n2', state: 'stale', seenKeyframe: { ...seen, ...overview.shots[shotId('2.2')].keyframe.artifact } }),
+    note({ noteId: 'n3', state: 'stale', anchor: { sceneId: sceneId(3) } }),
+  ], overview);
+  assert.equal(en(replaced.settled), 'Out of date: 2.2 has a new keyframe since this note.');
+  assert.equal(translateMsg('zh-CN', replaced.settled), '已过期：写这条备注后，2.2 有了新的关键帧。');
+  assert.equal(en(current.settled), 'Out of date: 2.2 changed after this note.');
+  assert.equal(en(scene.settled), 'Out of date: Scene 3 changed after this note.');
 });
 
 test('a scene-anchored note names its scene', () => {
