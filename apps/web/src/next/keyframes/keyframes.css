@@ -157,3 +157,68 @@
   .insp-note { flex: 1 1 100%; }
   .kf-state { min-height: 60vh; }
 }
+
+/* ---------- preview head: badge and status at the left; Keyframe / Video and the film position at the right ---------- */
+/* One wrapping row, so on a narrow preview the right group drops below the left one instead of covering it. */
+.kf .preview .pv-head { position: absolute; left: 12px; right: 12px; top: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px; z-index: 3; pointer-events: none; }
+.kf .preview .pv-head > * { pointer-events: auto; }
+.kf .preview .pv-head .pv-top { position: static; flex-wrap: wrap; min-width: 0; }
+.kf .pv-side { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.kf .pv-media { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--hairline); background: rgba(20, 21, 23, .86); border-radius: var(--r-pill); }
+.kf .pv-media button { border: 0; background: none; color: var(--text-2); font-weight: 600; font-size: 12px; padding: 3px 10px; border-radius: var(--r-pill); white-space: nowrap; }
+.kf .pv-media button:hover:not(:disabled) { color: var(--text); }
+.kf .pv-media button[aria-pressed="true"] { background: var(--raised-2); color: var(--text); }
+.kf .pv-media button:disabled { opacity: .5; }
+.kf .pv-media button:focus-visible { outline-offset: -2px; }
+.kf .pv-nav { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--hairline); background: rgba(20, 21, 23, .86); border-radius: var(--r-pill); }
+.kf .pv-step { width: 24px; height: 24px; border-radius: 50%; border: 0; background: none; color: var(--text); display: grid; place-items: center; padding: 0; }
+.kf .pv-step:hover:not(:disabled) { background: var(--raised-2); }
+.kf .pv-step:disabled { color: var(--muted); opacity: .55; }
+.kf .pv-step:focus-visible { outline-offset: -1px; }
+.kf .pv-pos { min-width: 42px; padding: 0 3px; text-align: center; font-size: 12px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.kf .preview:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* The Video side: one clip with the browser's own controls; the head stays above it. */
+.pv-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--ground); z-index: 1; }
+.pv-sample { margin: 6px 0 0; font-size: 11.5px; color: var(--text-2); }
+@media (max-width: 899px) {
+  .kf .preview .pv-head { left: 8px; right: 8px; top: 8px; gap: 6px; }
+}
+
+/* ---------- the scene confirm stopped partway; a paid press whose reply was lost ---------- */
+.vpanel p.vstop { color: var(--text); }
+.vpanel .vstop-act { align-self: flex-start; margin: 6px 0 8px; }
+.insp-note.lost, .vpanel .why.lost, .insp-alert .lost { color: var(--text); font-weight: 600; }
+.insp-alert p b { color: var(--text); }
+
+/* ---------- inspector: the Takes row and the prompts open in place ---------- */
+.insp .insp-link { border: 0; background: none; padding: 0; color: var(--text); font: inherit; font-weight: 600; text-align: left; text-decoration: underline; text-decoration-color: var(--track); text-underline-offset: 3px; }
+.insp .insp-link:hover { text-decoration-color: var(--text); }
+.insp-note.left { text-align: left; }
+.insp .st { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.insp .st .insp-link { font-size: 12.5px; font-weight: 500; color: var(--text-2); }
+.insp .st .insp-link:hover { color: var(--text); }
+.insp-alert.stopped { margin: 0 0 8px; }
+.insp-prompts { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12.5px; }
+.insp-prompts .takes-head { margin-bottom: 4px; }
+.insp-prompts .lbl { margin-top: 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.insp-prompts .prompt-list { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.insp-prompts .prompt-text { margin: 0 0 4px; max-height: 8.6em; overflow-y: auto; padding: 6px 8px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--raised); color: var(--text); font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.insp-prompts > .pill { align-self: flex-start; }
+
+/* ---------- takes strip (card B8) ---------- */
+.takes { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.takes-head { display: flex; align-items: center; gap: 8px; }
+.takes-head h4 { margin: 0; font-size: 13.5px; font-weight: 700; }
+.takes-head h4:focus { outline: none; }
+.takes-head .pill { margin-left: auto; }
+.takes-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 8px; }
+.take { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.take-pic { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; border: 1px solid var(--hairline); background: var(--surface-stripe); }
+.take.current .take-pic { border: 2px solid var(--select); }
+.take-pic .pic-note { font-size: 11px; }
+.take-meta { display: flex; flex-direction: column; font-size: 12px; line-height: 1.3; min-width: 0; }
+.take-meta span { color: var(--muted); font-size: 11px; }
+.take .status { align-self: flex-start; }
+.take .pill { justify-content: center; padding: 3px 6px; font-size: 11.5px; line-height: 1.25; text-align: center; white-space: normal; }
+/* A stopped confirm's headline sits where the segments were. */
+.vpanel[data-stopped] .vcount { margin-top: 6px; }

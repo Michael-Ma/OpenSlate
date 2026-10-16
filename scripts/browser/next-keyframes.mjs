@@ -223,7 +223,7 @@ export const scenarios = [
       await screenshot(page, "regenerating-1440");
       await page.waitForSelector('.insp [data-row="takes"]', { timeout: 10000 });
       await expectText(page, '.insp [data-row="takes"]', /Takes\s*2/);
-      await expectText(page, ".insp .st", /^Not opened$/);
+      await expectText(page, ".insp .st .status", /^Not opened$/);
       await expectText(page, '[data-card="shot-2-2"] .stl', /Not opened/);
       // The new take stays not opened until the person opens it.
       await page.waitForTimeout(800);

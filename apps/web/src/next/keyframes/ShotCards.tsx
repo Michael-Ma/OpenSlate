@@ -48,6 +48,8 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoi
     <div className={`cards${cards.length > VISIBLE ? " scrolls" : ""}`} ref={row} role="list" aria-label={t("cards.label", { scene: sceneOrdinal })} data-count={cards.length}>
       {cards.map((card) => {
         const motion = card.motion ? card.motion.charAt(0).toLocaleLowerCase(locale) + card.motion.slice(1) : "";
+        // A clip, or the voice line the scene's confirm is making for this shot: a bar over the picture.
+        const bar = card.workingOn === "video" || card.workingOn === "voice";
         return (
           <article key={card.shotId} className={`card${card.selected ? " sel" : ""}`} role="listitem" data-card={card.shotId} data-tone={card.tone}>
             <button
@@ -59,7 +61,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoi
               aria-label={t("card.select", { shot: card.label, framing: card.framing })}
               onClick={() => onOpen(card.shotId)}
             />
-            <div className={`pic${card.pictureDimmed ? " dim" : ""}${card.workingOn === "video" ? " vp" : ""}`}>
+            <div className={`pic${card.pictureDimmed ? " dim" : ""}${bar ? " vp" : ""}`}>
               {card.picture ? (
                 <>
                   <Picture artifact={card.picture} alt="" />
@@ -72,7 +74,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoi
                 </div>
               ) : null}
               <span className="badge">{card.label}</span>
-              {card.workingOn === "video" ? <div className="vprog indeterminate" role="progressbar" aria-label={t("card.progress", { shot: card.label })}><i /></div> : null}
+              {bar ? <div className="vprog indeterminate" role="progressbar" aria-label={t("card.progress", { shot: card.label })} data-working={card.workingOn ?? undefined}><i /></div> : null}
             </div>
             {notes[card.shotId]?.length || card.callouts.length ? (
               <div className="callout">

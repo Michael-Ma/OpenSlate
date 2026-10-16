@@ -1,11 +1,13 @@
 import type { ShotOverview } from "@openslate/core/public";
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { lineEstimate, lineEstimateMsg, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
 import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../model/inspector.ts";
 import type { EditDraft } from "../store/state.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { StatusPill } from "./parts.tsx";
+import { PromptsPanel } from "./PromptsPanel.tsx";
+import { TakesStrip } from "./TakesStrip.tsx";
 
 /** Common camera moves offered as suggestions in the interface language; motion stays free text. */
 const MOTION_SUGGESTIONS = ["static", "breath", "push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down"] as const;
@@ -16,6 +18,8 @@ interface Props {
   fps: number;
   draft: EditDraft | null;
   busy: { regenerate: boolean; edit: boolean; release: boolean; video: boolean };
+  /** A paid press here lost its reply: pressing again resends the same request and never charges twice. */
+  unconfirmed: { regenerate: boolean; video: boolean };
   onPoint(): void;
   onRegenerate(): void;
   onRetryVideo(): void;
@@ -23,6 +27,8 @@ interface Props {
   onSaveDraft(draft: EditDraft): void;
   onSaveMotion(motion: string, seconds: number): void;
   onRelease(attemptId: string): void;
+  /** Open Plan on this shot's row (the prompts are edited there). */
+  onEditInPlan(): void;
 }
 
 /**
@@ -30,14 +36,35 @@ interface Props {
  * Edits follow the shell's write guard (off while offline or expired); paid makes also stop while the film is
  * stopped. A control the guard turns off says why in its title.
  */
-export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease }: Props) {
+export function Inspector({ view, shot, fps, draft, busy, unconfirmed, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease, onEditInPlan }: Props) {
   const { t, tm } = useI18n();
   const server = useGuarded("server");
   const run = useGuarded("run");
   const editing = draft && draft.shotId === shot.shotId ? draft : null;
   const regen = view.regenerate;
+  const aside = useRef<HTMLElement>(null);
+  // The takes strip and the prompts open in place of the rows and the actions, with Close and Esc.
+  const [open, setOpen] = useState<"takes" | "prompts" | null>(null);
+  const backTo = useRef<string | null>(null);
+  const takeCount = shot.keyframe.takeCount;
+  const strip = open === "takes" && takeCount > 1 && !editing;
+  const prompts = open === "prompts" && !editing;
+  const sub = strip || prompts;
+  // Another shot, or an edit form, closes them.
+  useEffect(() => { setOpen(null); }, [shot.shotId]);
+  useEffect(() => { if (editing) setOpen(null); }, [editing]);
+  // Closing puts focus back on the button that opened it.
+  useEffect(() => {
+    if (sub || !backTo.current) return;
+    const act = backTo.current;
+    backTo.current = null;
+    aside.current?.querySelector<HTMLElement>(`[data-act="${act}"]`)?.focus({ preventScroll: true });
+  }, [sub]);
+  const close = () => { backTo.current = open; setOpen(null); };
+  const lostRegen = unconfirmed.regenerate && regen.enabled && !busy.regenerate;
+  const regenNotes = [lostRegen ? t("error.PAID_UNCONFIRMED") : null, ...[regen.reason, regen.cost, regen.clipNote].filter((note) => note !== null).map((note) => tm(note!))].filter(Boolean);
   return (
-    <aside className="insp" aria-label={t("inspector.label")} data-shot={shot.shotId}>
+    <aside ref={aside} className="insp" aria-label={t("inspector.label")} data-shot={shot.shotId}>
       <div className="insp-title">
         <div>
           <h3>{tm(view.title)}</h3>
@@ -47,18 +74,47 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
           {t("inspector.point", { shot: view.label })}
         </button>
       </div>
-      <div className="st"><StatusPill status={view.status} tone={view.tone} /></div>
+      <div className="st">
+        <StatusPill status={view.status} tone={view.tone} />
+        {!editing && !sub ? (
+          <button type="button" className="insp-link" data-act="prompts" data-shot={shot.shotId} aria-label={t("inspector.prompts_show_label", { shot: view.label })} onClick={() => setOpen("prompts")}>
+            {t("inspector.prompts_show")}
+          </button>
+        ) : null}
+      </div>
 
       <div className="insp-body">
       {editing ? (
         <EditForm key={`${editing.shotId}:${editing.field}`} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} onEdit={onEdit} onSaveDraft={onSaveDraft} onSaveMotion={onSaveMotion} />
+      ) : strip ? (
+        <TakesStrip shot={shot} onClose={close} />
+      ) : prompts ? (
+        <PromptsPanel shotId={shot.shotId} label={view.label} prompts={view.prompts} onClose={close} onEditInPlan={onEditInPlan} />
       ) : (
+        <>
+        {view.stopped ? (
+          // The scene's confirm stopped at this shot: said first, before the rows.
+          <div className="insp-alert stopped" role="status" data-act="stopped-here">
+            <p><b>{t("inspector.stopped")}</b> {tm(view.stopped.reason)} {tm(view.stopped.next)}</p>
+          </div>
+        ) : null}
         <dl className="rows">
           {view.rows.map((row) => (
             <div key={row.key} className="row-pair" data-row={row.key}>
               <dt>{tm(row.label)}</dt>
               <dd>
-                {typeof row.value === "string"
+                {row.key === "takes" ? (
+                  <button
+                    type="button"
+                    className="insp-link"
+                    data-act="takes"
+                    data-shot={shot.shotId}
+                    aria-label={t("inspector.takes_show_label", { count: takeCount, shot: view.label })}
+                    onClick={() => setOpen("takes")}
+                  >
+                    {t("inspector.takes_show", { count: takeCount })}
+                  </button>
+                ) : typeof row.value === "string"
                   ? (row.quoted ? <span className="quote" title={row.value}>{`“${row.value}”`}</span> : row.value)
                   : tm(row.value)}
                 {row.notes.length ? (
@@ -69,10 +125,11 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
             </div>
           ))}
         </dl>
+        </>
       )}
 
-      {!editing && view.notes.length ? <div className="insp-notes">{view.notes.map((note, index) => <p key={index} className="stale">{tm(note)}</p>)}</div> : null}
-      {!editing && view.failure ? (
+      {!editing && !sub && view.notes.length ? <div className="insp-notes">{view.notes.map((note, index) => <p key={index} className="stale">{tm(note)}</p>)}</div> : null}
+      {!editing && !sub && view.failure ? (
         <div className="insp-alert" role="status">
           <p>{tm(view.failure.message)}</p>
           {view.failure.retryVideo ? (
@@ -80,12 +137,13 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
               {t("inspector.retry_video")}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
             </button>
           ) : null}
+          {view.failure.retryVideo && unconfirmed.video && !busy.video ? <p className="lost" data-unconfirmed="true">{t("error.PAID_UNCONFIRMED")}</p> : null}
         </div>
       ) : null}
-      {!editing && view.noAnswer ? <GiveUp attemptId={view.noAnswer.attemptId} busy={busy.release} onRelease={onRelease} /> : null}
+      {!editing && !sub && view.noAnswer ? <GiveUp attemptId={view.noAnswer.attemptId} busy={busy.release} onRelease={onRelease} /> : null}
       </div>
 
-      {editing ? null : (
+      {editing || sub ? null : (
         <div className="insp-actions">
           <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}>{t("inspector.edit_prompt")}</button>
           <button type="button" className="pill" data-act="edit-motion" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "motion", value: shot.motion })}>{t("inspector.edit_motion")}</button>
@@ -97,14 +155,14 @@ export function Inspector({ view, shot, fps, draft, busy, onPoint, onRegenerate,
             data-kind={regen.kind}
             {...run}
             disabled={!regen.enabled || busy.regenerate || run.disabled}
-            aria-describedby={regen.cost || regen.clipNote || regen.reason ? `regen-note-${shot.shotId}` : undefined}
+            aria-describedby={regenNotes.length ? `regen-note-${shot.shotId}` : undefined}
             onClick={onRegenerate}
           >
             {tm(regen.label)}
           </button>
-          {regen.cost || regen.clipNote || regen.reason ? (
-            <p className="insp-note" id={`regen-note-${shot.shotId}`}>
-              {[regen.reason, regen.cost, regen.clipNote].filter((note) => note !== null).map((note) => tm(note!)).join(" ")}
+          {regenNotes.length ? (
+            <p className={`insp-note${lostRegen ? " lost" : ""}`} id={`regen-note-${shot.shotId}`} data-unconfirmed={lostRegen ? "true" : undefined}>
+              {regenNotes.join(" ")}
             </p>
           ) : null}
         </div>
