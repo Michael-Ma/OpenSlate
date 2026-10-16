@@ -394,6 +394,9 @@ export const scenarios = [
       if (order.join() !== "request-held,ending,held") fail(`The thread ends ${order}`);
       await page.locator('.scene-pills [aria-pressed]').nth(2).click();
       await page.waitForSelector('.card[data-card="shot-3-1"]');
+      // The held status is long: Prompts goes onto its own line, and stays at the right as on the pill's line.
+      const status = await page.evaluate(() => ({ line: document.querySelector(".insp .st").getBoundingClientRect().right, prompts: document.querySelector('.insp .st [data-act="prompts"]').getBoundingClientRect().right }));
+      if (Math.abs(status.line - status.prompts) > 1) fail(`Prompts is not at the right of the status line: ${JSON.stringify(status)}`);
       await page.screenshot({ path: shot("held-1440") });
       await card.locator('[data-act="release-holds"]').click();
       await toast(page, /^Let go\. 3\.1 and 3\.2 can go ahead\.$/);

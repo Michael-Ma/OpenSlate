@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatMicros } from "../../apps/web/src/next/model/price.ts";
+import { inspectorWhole } from "./inspector-whole.mjs";
 
 const query = "ui=next&fixture=last-ferry";
 const shot = (label) => `shot-${label.replace(".", "-")}`;
@@ -273,6 +274,11 @@ export const scenarios = [
       // The video prompt has no editor of its own: it says how it changes. Edit in Plan names the shot.
       await expectText(page, '.insp [data-act="video-prompt-note"]', /^Rewritten when the shot's purpose, framing or motion changes\.$/);
       await expectText(page, '.insp [data-act="edit-in-plan"]', /^Edit 2\.3 in Plan$/);
+      // Read-only prompts are quoted with a rule, never boxed like a field that could be typed in.
+      for (const kind of ["image", "video"]) {
+        const look = await page.locator(`.insp [data-prompt="${kind}"]`).evaluate((element) => { const style = getComputedStyle(element); return [style.borderTopWidth, style.borderLeftWidth, style.backgroundColor]; });
+        expect(look[0] === "0px" && look[1] !== "0px" && look[2] === "rgba(0, 0, 0, 0)", `The ${kind} prompt looks like a text field: ${look}`);
+      }
       await screenshot(page, "prompts-1440");
       // Both prompts, the note and Edit in Plan are on screen inside the inspector.
       const insp = await page.locator(".insp").boundingBox();
@@ -325,15 +331,18 @@ export const scenarios = [
       await screenshot(page, "confirm-stopped-1440");
       // (A row's label stretches to its row's height, so the narration row is checked by its line.)
       for (const selector of ['[data-row="motion"] dd', '[data-row="duration"] dd', '[data-row="narration"] dd .quote']) await inView(page, `.insp ${selector}`, ".insp .insp-body");
-      // What is below the fold (the line's length note) is a scroll away, and the body's lower edge fades to say so.
-      const body = await page.locator(".insp .insp-body").evaluate((element) => ({ scrolls: element.scrollHeight > element.clientHeight + 1, fade: getComputedStyle(element).getPropertyValue("--kf-fade-b").trim() }));
-      expect(!body.scrolls || body.fade === "16px", `The inspector scrolls with no cue: ${JSON.stringify(body)}`);
+      // Nothing is cut mid-height: the line's length note is read in full, and no row is half under the actions.
+      await inspectorWhole(page, "with the stop line at 1440");
       // Why opens the reason and the next step in place, and closes again.
       const why = page.locator('.insp [data-act="stopped-why"]');
       expect((await why.getAttribute("aria-label")) === "Why the scene's video stopped at 3.2", `Why is not labelled: ${await why.getAttribute("aria-label")}`);
       await why.click();
       expect((await why.getAttribute("aria-expanded")) === "true", "Why is not expanded");
       await expectText(page, ".insp .insp-stop-why", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
+      // The reason is read-only words, quoted with a rule, not boxed like a field; the rows below it stay whole.
+      const quote = await page.locator(".insp .insp-stop-why").evaluate((element) => { const style = getComputedStyle(element); return [style.borderTopWidth, style.borderLeftWidth, style.backgroundColor]; });
+      expect(quote[0] === "0px" && quote[1] !== "0px" && quote[2] === "rgba(0, 0, 0, 0)", `The reason looks like a text field: ${quote}`);
+      await inspectorWhole(page, "with Why open at 1440");
       await screenshot(page, "confirm-stopped-why-1440");
       await why.click();
       expect(!(await page.locator(".insp .insp-stop-why").count()), "Why did not close");
@@ -552,6 +561,9 @@ export const scenarios = [
       expect(Math.abs((await player.evaluate((video) => video.currentTime)) - 1) < 0.1, "The clip did not seek");
       expect(duration > 0, "No duration");
       await headClear(page);
+      // The head has its own row above the clip: the clip's top edge never runs through the badges and the toggle.
+      const seam = await page.evaluate(() => ({ head: document.querySelector(".preview .pv-head").getBoundingClientRect().bottom, clip: document.querySelector('.preview video[data-act="clip-player"]').getBoundingClientRect().top }));
+      expect(seam.head <= seam.clip + 0.5, `The preview head straddles the clip: ${JSON.stringify(seam)}`);
       await screenshot(page, "live-clip-player-1440");
       // The arrow keys stay with the player while it has focus.
       const first = await page.locator(".preview").getAttribute("data-shot");

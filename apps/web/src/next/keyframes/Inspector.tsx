@@ -1,5 +1,5 @@
 import type { ShotOverview } from "@openslate/core/public";
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { displayedHead } from "../model/displayed-baseline.ts";
 import { editConflict, editSaveReason, motionForm } from "../model/edit-conflict.ts";
@@ -12,11 +12,13 @@ import type { EditDraft } from "../store/state.ts";
 import type { Resource } from "../store/useResource.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { useNarrow } from "../app/useNarrow.ts";
 import { useSustained } from "../app/useSustained.ts";
 import { NarrationPanel } from "./NarrationPanel.tsx";
 import { StatusPill } from "./parts.tsx";
 import { PromptsPanel } from "./PromptsPanel.tsx";
 import { TakesStrip } from "./TakesStrip.tsx";
+import { useInspectorFit } from "./useInspectorFit.ts";
 
 /** Common camera moves offered as suggestions in the interface language; motion stays free text. */
 const MOTION_SUGGESTIONS = ["static", "breath", "push_in", "pull_back", "pan_left", "pan_right", "tilt_up", "tilt_down"] as const;
@@ -109,8 +111,23 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
   const close = () => { backTo.current = open; setOpen(null); };
   const lostRegen = unconfirmed.regenerate && regen.enabled && !busy.regenerate;
   const regenNotes = [lostRegen ? t("error.PAID_UNCONFIRMED") : null, ...[regen.reason, regen.cost, regen.clipNote].filter((note) => note !== null).map((note) => tm(note!))].filter(Boolean);
+  // The rows view fits its room a step at a time (roomy, compact, then scrolling as one unit), so no row or button is
+  // ever cut mid-height. A panel or an edit form has its own scrolling body; a phone's inspector is as tall as it needs.
+  const narrow = useNarrow();
+  const rowsView = !editing && !sub;
+  const fitting = rowsView && !narrow;
+  const layout = useInspectorFit(aside, fitting, JSON.stringify([shot.shotId, view, why, regenNotes, busy, locale]));
+  // A new shot, panel or form starts at its top: a scroll kept from what was shown before would hide its first rows.
+  const shown = editing ? `edit:${editing.field}` : open ?? "rows";
+  useLayoutEffect(() => {
+    const root = aside.current;
+    if (!root) return;
+    root.scrollTop = 0;
+    const body = root.querySelector<HTMLElement>(".insp-body");
+    if (body) body.scrollTop = 0;
+  }, [shot.shotId, shown]);
   return (
-    <aside ref={aside} className="insp" aria-label={t("inspector.label")} data-shot={shot.shotId} data-editing={editing?.field}>
+    <aside ref={aside} className="insp" aria-label={t("inspector.label")} data-shot={shot.shotId} data-editing={editing?.field} data-sub={(sub && open) || undefined} data-fit={fitting ? layout.fit : undefined} data-short={fitting && layout.short ? "true" : undefined}>
       <div className="insp-title">
         <div>
           <h3>{tm(view.title)}</h3>
@@ -189,7 +206,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
                   // Narration is edited and heard in its own panel (the line or a recording, the voice, the current take).
                   // Its two controls sit under the label, so the row is no taller than the line and its notes.
                   <span className="narr-acts">
-                    <button type="button" className="pill sm" data-act="narration-edit" data-shot={shot.shotId} aria-label={t("narr.row.edit_label", { shot: view.label })} onClick={() => openNarration(false)}>{t("narr.row.edit")}</button>
+                    <button type="button" className="pill sm" data-act="narration-edit" data-shot={shot.shotId} aria-label={t("narr.row.edit_label", { shot: view.label })} {...server} onClick={() => openNarration(false)}>{t("narr.row.edit")}</button>
                     {shot.narration.state === "ready" ? (
                       <button type="button" className="play sm" data-act="narration-listen" data-shot={shot.shotId} aria-label={t("narr.row.listen_label", { shot: view.label })} title={t("narr.row.listen")} onClick={() => openNarration(true)}>
                         <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>
@@ -241,8 +258,20 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
 
       {editing || sub ? null : (
         <div className="insp-actions">
-          <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}>{t("inspector.edit_prompt")}</button>
-          <button type="button" className="pill" data-act="edit-motion" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "motion", value: shot.motion })}>{t("inspector.edit_motion")}</button>
+          <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}><span className="lbl">{t("inspector.edit_prompt")}</span></button>
+          {/* Side by side in a compact inspector, its words are shortened only when they cannot fit; its name keeps them all. */}
+          <button
+            type="button"
+            className="pill"
+            data-act="edit-motion"
+            data-shot={shot.shotId}
+            aria-label={fitting && layout.short ? t("inspector.edit_motion") : undefined}
+            {...server}
+            title={server.title ?? (fitting && layout.short ? t("inspector.edit_motion") : undefined)}
+            onClick={() => onEdit({ shotId: shot.shotId, field: "motion", value: shot.motion })}
+          >
+            <span className="lbl">{t(fitting && layout.short ? "inspector.edit_motion_short" : "inspector.edit_motion")}</span>
+          </button>
           <button
             type="button"
             className={`pill${regen.primary ? " primary" : ""}`}

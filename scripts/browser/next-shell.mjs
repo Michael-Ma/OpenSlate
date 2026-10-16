@@ -1,9 +1,11 @@
 // Next studio shell checks: top bar, tabs, Settings and All films, language, the narrow drawer, Connect,
 // the film-wide strip (stopped, offline, restart casualties), Stop and its confirm, the session-expired dialog,
-// and no sideways scroll from 900 to 1366 px in every view.
+// and no sideways scroll from 900 to 1366 px in every view. The Keyframes inspector draws every row and action whole
+// at common window sizes, and the preview shows the whole frame on a narrow stage.
 // Set BROWSER_CHECK_SHOTS=/some/dir to also save screenshots of each scenario.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { inspectorWhole, previewWholeFrame } from "./inspector-whole.mjs";
 
 const FIXTURE = "ui=next&fixture=last-ferry";
 const LIVE = "ui=next";
@@ -428,6 +430,8 @@ export const scenarios = [
       await noSidewaysScroll(page);
       const height = await page.evaluate(() => document.documentElement.scrollHeight);
       expect(height <= 900, `The stopped Keyframes view scrolls: ${height}px`);
+      // Under the strip the inspector has less room: its rows and actions are still whole.
+      await inspectorWhole(page, "under the stopped strip at 1440");
       await shot(page, "next-shell-stopped-1440");
 
       // The same strip in every view.
@@ -531,6 +535,9 @@ export const scenarios = [
         // Priced actions show their price, stay inside their card or panel, and keep clear of the badge and caption.
         await pricedActionsFit(page, width);
         expect(await page.evaluate(() => document.documentElement.scrollHeight) <= 900, `Priced actions make Keyframes scroll the page at ${width}`);
+        // The inspector's rows and actions are whole; below 1100 the preview shows the whole frame.
+        await inspectorWhole(page, `at ${width}`);
+        if (width < 1100) await previewWholeFrame(page, `at ${width}`);
         await noSidewaysScroll(page, `priced actions at ${width}`);
         await shot(page, `next-shell-keyframes-${width}`);
       }
@@ -542,6 +549,70 @@ export const scenarios = [
       await page.waitForFunction(() => document.documentElement.lang === "zh-CN");
       await pricedActionsFit(page, "390 zh-CN");
       await noSidewaysScroll(page, "priced actions at 390 in Chinese");
+    },
+  },
+  {
+    // The inspector fits its room a step at a time (roomy, compact, then scrolling as one unit): at laptop and narrow
+    // sizes, with a short and a long narration row, in both languages, no row or action is ever cut mid-height. On a
+    // narrow stage the preview keeps the whole frame; on a phone its head is one row and its caption one line.
+    name: "next-shell-inspector-fit",
+    query: FIXTURE,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await page.waitForSelector("main.work[data-view='keyframes'] .preview .pic-img", { timeout: 20000 });
+      const sizes = [[1440, 900], [1366, 768], [1280, 800], [1024, 900], [900, 900], [390, 844]];
+      const fits = {};
+      for (const language of ["en", "zh-CN"]) {
+        if (language === "zh-CN") {
+          await page.locator(".topbar [data-act='language']").click();
+          await page.waitForFunction(() => document.documentElement.lang === "zh-CN");
+        }
+        for (const label of ["2.1", "2.3"]) {
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await page.click(`.card [data-act='open-shot'][data-shot='shot-${label.replace(".", "-")}']`);
+          await page.waitForSelector(`.insp[data-shot='shot-${label.replace(".", "-")}']`);
+          for (const [width, height] of sizes) {
+            await page.setViewportSize({ width, height });
+            await page.waitForTimeout(150);
+            const where = `for ${label} at ${width} x ${height} (${language})`;
+            if (width >= 900) {
+              const scrolled = await page.evaluate(() => document.documentElement.scrollHeight);
+              expect(scrolled <= height, `Keyframes scrolls the page ${where}: ${scrolled}px`);
+            } else await page.locator(".insp").scrollIntoViewIfNeeded();
+            const report = await inspectorWhole(page, where);
+            fits[`${label} ${width}x${height} ${language}`] = report.fit;
+            if (width >= 900 && width < 1100) await previewWholeFrame(page, where);
+            await noSidewaysScroll(page, where);
+          }
+        }
+      }
+      // The design's layout where it has room; a phone's inspector is as tall as it needs.
+      expect(fits["2.1 1440x900 en"] === "roomy", `2.1 at 1440 is not in the design's layout: ${JSON.stringify(fits)}`);
+      expect(fits["2.3 1440x900 en"] === "compact", `2.3's longer narration at 1440 does not tighten to compact: ${JSON.stringify(fits)}`);
+      expect(fits["2.1 1366x768 en"] === "scroll" && fits["2.1 390x844 en"] === null, `The fits are ${JSON.stringify(fits)}`);
+      // Compact puts the two edits side by side, shortened only when the words cannot fit; the name keeps them all.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.locator(".topbar [data-act='language']").click();
+      await page.waitForFunction(() => document.documentElement.lang === "en");
+      const pair = await page.evaluate(() => {
+        const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
+        const motion = document.querySelector(".insp-actions [data-act='edit-motion']");
+        return { prompt: top(".insp-actions [data-act='edit-prompt']"), motion: top(".insp-actions [data-act='edit-motion']"), text: motion.textContent, name: motion.getAttribute("aria-label") };
+      });
+      expect(pair.prompt === pair.motion && pair.text === "Edit motion" && pair.name === "Edit motion & duration", `The compact edits are ${JSON.stringify(pair)}`);
+      // A phone: the preview's head is one row (Previous and Next without the position), and its caption one line.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.click(".card [data-act='open-shot'][data-shot='shot-2-1']");
+      await page.locator(".preview").scrollIntoViewIfNeeded();
+      const head = await page.evaluate(() => {
+        const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+        const caption = document.querySelector(".preview .pv-caption");
+        return { top: box(".preview .pv-top").top, side: box(".preview .pv-side").top, caption: caption.getBoundingClientRect().height, line: parseFloat(getComputedStyle(caption).lineHeight) || parseFloat(getComputedStyle(caption).fontSize) * 1.3, position: document.querySelector(".preview .pv-pos").getAttribute("aria-label") };
+      });
+      expect(Math.abs(head.top - head.side) < 4, `The preview's head takes two rows at 390: ${JSON.stringify(head)}`);
+      expect(head.caption <= head.line * 1.5 && head.position === "Shot 4 of 8 in the film", `The caption or the position at 390: ${JSON.stringify(head)}`);
+      await shot(page, "next-shell-inspector-fit-390");
     },
   },
   {
@@ -568,6 +639,7 @@ export const scenarios = [
       expect(title === `OpenSlate restarted while 1 clip was being sent (${casualty}).`, `The restart strip reads ${JSON.stringify(title)}`);
       expect((await text(page, ".film-strip[data-strip='restart'] .txt span")) === "The service never confirmed it. It may still arrive and be charged; nothing is resent by itself.", "The restart strip does not say what may still happen");
       await noSidewaysScroll(page);
+      await inspectorWhole(page, "under the restart strip at 1440");
       await shot(page, "next-shell-restart-1440");
 
       // Show takes the person to the shot in Keyframes, from any view.
@@ -614,6 +686,8 @@ export const scenarios = [
       const guarded = await page.evaluate(() => [...document.querySelectorAll("main.work [data-needs]")].map((node) => ({ act: node.getAttribute("data-act"), needs: node.getAttribute("data-needs"), disabled: node.disabled, title: node.getAttribute("title") })));
       const why = "Can’t reach the studio. This works again once it’s back.";
       expect(guarded.some((control) => control.needs === "run") && guarded.some((control) => control.act === "edit-prompt"), `Keyframes has no guarded paid or edit control: ${JSON.stringify(guarded)}`);
+      // The narration row's Edit opens an editor like the actions under it, so it is off too.
+      expect(guarded.some((control) => control.act === "narration-edit"), `The narration row's Edit is not guarded: ${JSON.stringify(guarded)}`);
       expect(guarded.every((control) => control.disabled && control.title === why), `A write stays on offline: ${JSON.stringify(guarded.filter((control) => !control.disabled || control.title !== why))}`);
       expect((await text(page, "#director [data-hint]")) === "Offline · your draft is kept", `The composer hint reads ${JSON.stringify(await text(page, "#director [data-hint]"))}`);
       await page.locator("#director [data-field='message']").fill("Keep the fog");

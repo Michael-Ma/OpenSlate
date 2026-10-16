@@ -164,103 +164,110 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
       data-shot={shot.shotId}
       data-opened={keyframe.opened ? "true" : "false"}
       data-media={showVideo ? "video" : "keyframe"}
+      data-player={player ? "true" : undefined}
       onKeyDown={onKeyDown}
     >
-      {player ? (
-        <ClipPlayer key={artifactKey(clip.artifact)} artifact={clip.artifact} label={shot.label} />
-      ) : picture ? (
-        <div className={`pic${card.pictureDimmed && !showVideo ? " dim" : ""}`}>
-          <div className="pv-anim" ref={anim}>
-            <Picture artifact={picture} alt={caption} onDecoded={(key) => setLoaded(key)} />
-          </div>
-        </div>
-      ) : !making ? (
-        <div className="dashed-frame"><div><b>{t("preview.no_keyframe")}</b>{shot.imagePrompt}</div></div>
-      ) : null}
-      {playing === "clip" && shot.video.state === "ready" && shot.video.artifact ? <Clip shot={shot} onEnded={onEnded} bar={bar} time={time} /> : null}
-      {making && !player ? (
-        <div className={`making${picture ? " over" : ""}`}>
-          <div>{t("preview.making", { shot: shot.label })}<div className="bar indeterminate" role="progressbar" aria-label={t("card.progress", { shot: shot.label })}><i /></div></div>
-        </div>
-      ) : null}
-      <div className="pv-head">
-        <div className="pv-top">
-          <span className="badge">{shot.label}</span>
-          {showVideo ? (
-            <span className={clip.earlier ? "status" : "status ok"} data-clip={clip.earlier ? "earlier" : "current"}>
-              {clip.earlier ? null : <span aria-hidden="true">✓</span>}
-              {t(clip.earlier ? "preview.clip.earlier" : "preview.clip.current")}
-            </span>
-          ) : (
-            <>
-              {picture && !making ? <StatusPill status={card.status} tone={card.tone} /> : null}
-              {card.pictureDimmed && !making ? <span className="status">{t("preview.earlier_take")}</span> : null}
-              {canOpen ? <button type="button" className="pill sm" data-act="open-frame" data-shot={shot.shotId} {...openGuard} onClick={() => onOpen(shot.shotId)}>{t("preview.open", { shot: shot.label })}</button> : null}
-            </>
-          )}
-        </div>
-        <div className="pv-side">
-          {/* Keep the picture action in the same wrapping row as navigation, so neither covers the other. */}
-          {current && !making && !card.pictureDimmed && keyframeVisible && !showVideo ? <ShowDirectorButton candidate={() => checkedShotPicture(shot, (offset) => store.read<AssetPage>(shotKeyframesPath(shot.shotId, offset)))} className="pill sm pv-show" label={t("director.picture.show_shot", { shot: shot.label })} /> : null}
-          {clip ? (
-            <div className="pv-media" role="group" aria-label={t("preview.media_label")}>
-              <button type="button" aria-pressed={!showVideo} data-act="media-keyframe" onClick={() => setMedia("keyframe")}>{t("preview.media.keyframe")}</button>
-              <button type="button" aria-pressed={showVideo} data-act="media-video" disabled={!!playing} onClick={() => setMedia("video")}>{t("preview.media.video")}</button>
+      {/* The frame, the head and the caption with the scrubber: over the picture, or (a narrow stage, the Video side)
+          one under the other (keyframes.css). */}
+      <div className="pv-stage">
+        <div className="pv-frame">
+          {player ? (
+            <ClipPlayer key={artifactKey(clip.artifact)} artifact={clip.artifact} label={shot.label} />
+          ) : picture ? (
+            <div className={`pic${card.pictureDimmed && !showVideo ? " dim" : ""}`}>
+              <div className="pv-anim" ref={anim}>
+                <Picture artifact={picture} alt={caption} onDecoded={(key) => setLoaded(key)} />
+              </div>
+            </div>
+          ) : !making ? (
+            <div className="dashed-frame"><div><b>{t("preview.no_keyframe")}</b>{shot.imagePrompt}</div></div>
+          ) : null}
+          {playing === "clip" && shot.video.state === "ready" && shot.video.artifact ? <Clip shot={shot} onEnded={onEnded} bar={bar} time={time} /> : null}
+          {making && !player ? (
+            <div className={`making${picture ? " over" : ""}`}>
+              <div>{t("preview.making", { shot: shot.label })}<div className="bar indeterminate" role="progressbar" aria-label={t("card.progress", { shot: shot.label })}><i /></div></div>
             </div>
           ) : null}
-          {position ? (
-            <nav className="pv-nav" aria-label={t("preview.nav_label")} data-held={held ? "true" : undefined}>
-              <button
-                type="button"
-                className="pv-step"
-                data-act="prev-shot"
-                aria-label={position.previous ? t("preview.prev_shot", { shot: position.previous.label }) : t("preview.prev_none")}
-                title={held ? tm(held) : position.previous ? t("preview.prev_shot", { shot: position.previous.label }) : t("preview.prev_none")}
-                disabled={!position.previous || !!held}
-                onClick={() => step(position.previous, position.index === 2)}
-              >
-                <PrevIcon />
-              </button>
-              <span className="pv-pos" role="status" aria-label={t("preview.position_label", { index: position.index, total: position.total })} data-index={position.index} data-total={position.total}>
-                {t("preview.position", { index: position.index, total: position.total })}
+        </div>
+        <div className="pv-head">
+          <div className="pv-top">
+            <span className="badge">{shot.label}</span>
+            {showVideo ? (
+              <span className={clip.earlier ? "status" : "status ok"} data-clip={clip.earlier ? "earlier" : "current"}>
+                {clip.earlier ? null : <span aria-hidden="true">✓</span>}
+                {t(clip.earlier ? "preview.clip.earlier" : "preview.clip.current")}
               </span>
-              <button
-                type="button"
-                className="pv-step"
-                data-act="next-shot"
-                aria-label={position.next ? t("preview.next_shot", { shot: position.next.label }) : t("preview.next_none")}
-                title={held ? tm(held) : position.next ? t("preview.next_shot", { shot: position.next.label }) : t("preview.next_none")}
-                disabled={!position.next || !!held}
-                onClick={() => step(position.next, position.index === position.total - 1)}
-              >
-                <NextIcon />
-              </button>
-            </nav>
-          ) : null}
+            ) : (
+              <>
+                {picture && !making ? <StatusPill status={card.status} tone={card.tone} /> : null}
+                {card.pictureDimmed && !making ? <span className="status">{t("preview.earlier_take")}</span> : null}
+                {canOpen ? <button type="button" className="pill sm" data-act="open-frame" data-shot={shot.shotId} {...openGuard} onClick={() => onOpen(shot.shotId)}>{t("preview.open", { shot: shot.label })}</button> : null}
+              </>
+            )}
+          </div>
+          <div className="pv-side">
+            {/* Keep the picture action in the same wrapping row as navigation, so neither covers the other. */}
+            {current && !making && !card.pictureDimmed && keyframeVisible && !showVideo ? <ShowDirectorButton candidate={() => checkedShotPicture(shot, (offset) => store.read<AssetPage>(shotKeyframesPath(shot.shotId, offset)))} className="pill sm pv-show" label={t("director.picture.show_shot", { shot: shot.label })} /> : null}
+            {clip ? (
+              <div className="pv-media" role="group" aria-label={t("preview.media_label")}>
+                <button type="button" aria-pressed={!showVideo} data-act="media-keyframe" onClick={() => setMedia("keyframe")}>{t("preview.media.keyframe")}</button>
+                <button type="button" aria-pressed={showVideo} data-act="media-video" disabled={!!playing} onClick={() => setMedia("video")}>{t("preview.media.video")}</button>
+              </div>
+            ) : null}
+            {position ? (
+              <nav className="pv-nav" aria-label={t("preview.nav_label")} data-held={held ? "true" : undefined}>
+                <button
+                  type="button"
+                  className="pv-step"
+                  data-act="prev-shot"
+                  aria-label={position.previous ? t("preview.prev_shot", { shot: position.previous.label }) : t("preview.prev_none")}
+                  title={held ? tm(held) : position.previous ? t("preview.prev_shot", { shot: position.previous.label }) : t("preview.prev_none")}
+                  disabled={!position.previous || !!held}
+                  onClick={() => step(position.previous, position.index === 2)}
+                >
+                  <PrevIcon />
+                </button>
+                <span className="pv-pos" role="status" aria-label={t("preview.position_label", { index: position.index, total: position.total })} data-index={position.index} data-total={position.total}>
+                  {t("preview.position", { index: position.index, total: position.total })}
+                </span>
+                <button
+                  type="button"
+                  className="pv-step"
+                  data-act="next-shot"
+                  aria-label={position.next ? t("preview.next_shot", { shot: position.next.label }) : t("preview.next_none")}
+                  title={held ? tm(held) : position.next ? t("preview.next_shot", { shot: position.next.label }) : t("preview.next_none")}
+                  disabled={!position.next || !!held}
+                  onClick={() => step(position.next, position.index === position.total - 1)}
+                >
+                  <NextIcon />
+                </button>
+              </nav>
+            ) : null}
+          </div>
         </div>
-      </div>
-      {player ? null : (
-      <div className="pv-bottom">
-        {picture && !making ? <p className="pv-caption">{caption}</p> : null}
-        <div className="scrub">
-          <button
-            type="button"
-            className="play"
-            data-act="play"
-            data-shot={shot.shotId}
-            aria-label={playing ? t("preview.pause") : t("preview.play")}
-            disabled={!picture || making}
-            onClick={onTogglePlay}
-          >
-            {playing ? <StopIcon /> : <PlayIcon />}
-          </button>
-          <span ref={time}>{clock(0)}</span>
-          <div className="track" role="progressbar" aria-label={t("preview.progress")} aria-valuemin={0} aria-valuemax={durationSeconds}><i ref={bar} /></div>
-          <span>{clock(durationSeconds)}</span>
+        {player ? null : (
+        <div className="pv-bottom">
+          {picture && !making ? <p className="pv-caption">{caption}</p> : null}
+          <div className="scrub">
+            <button
+              type="button"
+              className="play"
+              data-act="play"
+              data-shot={shot.shotId}
+              aria-label={playing ? t("preview.pause") : t("preview.play")}
+              disabled={!picture || making}
+              onClick={onTogglePlay}
+            >
+              {playing ? <StopIcon /> : <PlayIcon />}
+            </button>
+            <span ref={time}>{clock(0)}</span>
+            <div className="track" role="progressbar" aria-label={t("preview.progress")} aria-valuemin={0} aria-valuemax={durationSeconds}><i ref={bar} /></div>
+            <span>{clock(durationSeconds)}</span>
+          </div>
+          {showVideo && !live ? <p className="pv-sample" data-act="clip-stand-in">{t("preview.clip.sample")}</p> : null}
         </div>
-        {showVideo && !live ? <p className="pv-sample" data-act="clip-stand-in">{t("preview.clip.sample")}</p> : null}
+        )}
       </div>
-      )}
     </section>
   );
 }

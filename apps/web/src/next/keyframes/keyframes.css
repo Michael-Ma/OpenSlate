@@ -134,14 +134,15 @@
 .vpanel .vsegs i { flex: 0 1 22px; min-width: 4px; }
 
 /* ---------- inspector ---------- */
-/* The rows scroll when they run long; the stacked actions always stay in view. */
+/* A panel or an edit form scrolls in the body under the title; the rows view fits its room instead (below). */
 .insp { overflow: hidden; }
 /* Every purchase includes its full quote. Let long labels wrap inside the inspector instead of being clipped. */
 .insp-actions .pill { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; line-height: 1.3; }
 .insp-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 2px; }
 .insp-body > form { margin-top: 10px; }
-/* When the rows run past the inspector's room, the edge with more behind it fades, so the body says it scrolls (the
-   fade follows the scroll where the browser can; a body that fits has no fade). */
+/* When a panel or form runs past the inspector's room, the edge with more behind it fades, so the body says it scrolls
+   (the fade follows the scroll where the browser can; a body that fits has no fade). A panel with a sticky foot (the
+   narration's Save, the prompts' Edit in Plan) fades only at the top, so the foot is never painted over. */
 @property --kf-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --kf-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @keyframes kf-body-edges {
@@ -155,7 +156,47 @@
     animation: kf-body-edges linear both;
     animation-timeline: scroll(self block);
   }
+  .insp:is([data-editing="narration"], [data-sub="prompts"]) .insp-body { mask-image: linear-gradient(to bottom, transparent, #000 var(--kf-fade-t)); }
 }
+
+/* ---------- inspector: the rows view fits its room (useInspectorFit, model/inspector-fit.ts) ---------- */
+/* Compact, when the rows would not fit above the stacked actions: the framing beside the title, tighter spacing, and
+   Edit prompt and Edit motion & duration side by side (shortened only when the words cannot fit). */
+.insp:is([data-fit="compact"], [data-fit="scroll"]) { padding: 13px 13px 12px; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-title > div { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .framing { margin-top: 0; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .st { margin: 8px 0 4px; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .rows { gap: 5px 8px; margin-top: 4px; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions { flex-flow: row wrap; gap: 6px; padding-top: 8px; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions > * { flex: 1 1 100%; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions .pill { padding: 6px 8px; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) { flex: 1 1 0; }
+.insp:is([data-fit="compact"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) .lbl { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Scroll, when even compact does not fit: the whole inspector scrolls as one column, the actions after the rows (never
+   painted over them). A unit only partly in view is not drawn until it is scrolled fully in, so the padding at each
+   edge stays clear; a small chevron there says there is more (the solid bands that scroll with the content cover it
+   at either end). */
+.insp[data-fit="scroll"] {
+  --insp-stroke: transparent calc(50% - .75px), var(--muted) calc(50% - .75px) calc(50% + .75px), transparent calc(50% + .75px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track) transparent;
+  scroll-padding: 13px 0 12px;
+  background:
+    linear-gradient(var(--surface), var(--surface)) top / 100% 13px no-repeat local,
+    linear-gradient(var(--surface), var(--surface)) bottom / 100% 12px no-repeat local,
+    linear-gradient(to top left, var(--insp-stroke)) calc(50% - 3.5px) 5px / 7px 4px no-repeat scroll,
+    linear-gradient(to top right, var(--insp-stroke)) calc(50% + 3.5px) 5px / 7px 4px no-repeat scroll,
+    linear-gradient(to top right, var(--insp-stroke)) calc(50% - 3.5px) calc(100% - 4px) / 7px 4px no-repeat scroll,
+    linear-gradient(to top left, var(--insp-stroke)) calc(50% + 3.5px) calc(100% - 4px) / 7px 4px no-repeat scroll,
+    var(--surface);
+}
+/* The rows view's body never scrolls by itself (roomy and compact fit; scroll moves the whole inspector): no fade. */
+.insp[data-fit] .insp-body { mask-image: none; animation: none; }
+.insp[data-fit="scroll"] .insp-body { flex: none; overflow: visible; }
+.insp[data-fit="scroll"] .insp-actions { margin-top: 0; }
+.insp[data-fit="scroll"] [data-cut] { clip-path: inset(0 0 100% 0); }
 .insp .rows .row-pair { display: contents; }
 .insp .rows dd { min-width: 0; overflow-wrap: anywhere; }
 /* A long line is clamped so its length and fit notes stay in view; the full line is in the editor and the title. */
@@ -199,8 +240,48 @@
 /* The Video side: one clip with the browser's own controls; the head stays above it. */
 .pv-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--ground); z-index: 1; }
 .pv-sample { margin: 6px 0 0; font-size: 11.5px; color: var(--text-2); }
+/* The frame and the stage it sits in fill the preview; the head and the caption with the scrubber lie over the frame. */
+.kf .pv-stage, .kf .pv-frame { position: absolute; inset: 0; }
+/* The live Video side: the head takes its own row and the clip sits under it, so the clip's top edge never runs
+   through the badges and the toggle (the keyframe side has the head over the picture instead). */
+.kf .preview[data-player] .pv-stage { display: flex; flex-direction: column; }
+.kf .preview[data-player] .pv-head { position: relative; inset: auto; order: -1; flex: none; margin: 12px 12px 8px; }
+.kf .preview[data-player] .pv-frame { position: relative; inset: auto; flex: 1 1 0; min-height: 0; }
+/* The caption over the picture is clamped, so it never covers more than the lower part of the frame. */
+.kf .preview .pv-caption { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 899px) {
   .kf .preview .pv-head { left: 8px; right: 8px; top: 8px; gap: 6px; }
+  .kf .preview[data-player] .pv-head { margin: 8px 8px 6px; }
+  .kf .preview .pv-caption { -webkit-line-clamp: 1; }
+}
+
+/* ---------- preview: the whole frame on a narrow stage ---------- */
+/* Where the preview is much taller than the 16:9 frame (the stage between 900 and 1099 px), the frame keeps 16:9 at
+   the top and the controls follow under it instead of lying over the picture: a portrait crop would cut off the frame
+   the person is asked to open. Only the shot's badge and status stay on the picture, as small as in the design. The
+   frame gives way (letterboxed, never cropped) before the controls do, and the caption shows the lines it has room
+   for, or none. */
+.kf .preview { container: kf-preview / size; }
+@container kf-preview (max-aspect-ratio: 7 / 5) {
+  .kf .preview:not([data-player]) .pv-stage { display: flex; flex-direction: column; }
+  .kf .preview:not([data-player]) .pv-frame { position: relative; inset: auto; flex: none; height: min(calc(100cqw * 9 / 16), calc(100cqh - 86px)); }
+  .kf .preview:not([data-player]) .pv-frame :is(.pic-img, .pv-clip) { object-fit: contain; }
+  .kf .preview:not([data-player]) .pv-head { display: contents; }
+  .kf .preview:not([data-player]) .pv-head .pv-top { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 3; }
+  .kf .preview:not([data-player]) .pv-head .pv-side { flex: none; max-width: calc(100% - 28px); margin: 8px 14px 0 auto; }
+  .kf .preview .pv-bottom { container: kf-band / size; position: relative; inset: auto; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; padding: 8px 14px 10px; background: none; }
+  .kf .preview .pv-caption { flex: none; margin: 0; font-size: 13.5px; line-height: 1.35; text-shadow: none; -webkit-line-clamp: 3; }
+  .kf .preview .pv-bottom .scrub { margin-top: auto; }
+}
+/* (Heights of the band's content box: the scrubber is 30 px, each caption line about 18 px and a gap of 8 px.) */
+@container kf-band (max-height: 92px) { .kf .preview .pv-caption { -webkit-line-clamp: 2; } }
+@container kf-band (max-height: 74px) { .kf .preview .pv-caption { -webkit-line-clamp: 1; } }
+@container kf-band (max-height: 56px) { .kf .preview .pv-caption { display: none; } }
+/* A narrow preview (a phone, the narrowest stage) keeps its controls to one row: Previous and Next lose the film
+   position between them (a screen reader still hears it). */
+@container kf-preview (max-width: 380px) {
+  .kf .pv-side { gap: 6px; }
+  .kf .pv-pos { position: absolute; width: 1px; height: 1px; min-width: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
 /* ---------- the scene confirm stopped partway; a paid press whose reply was lost ---------- */
@@ -224,20 +305,22 @@
 .insp-stop b { color: var(--text); font-weight: 600; }
 .insp-stop .insp-link { font-weight: 500; color: var(--text-2); }
 .insp-stop .insp-link:hover { color: var(--text); }
-.insp-stop p.insp-stop-why { margin-top: 4px; padding: 7px 9px; border: 1px solid var(--track); border-radius: 8px; background: var(--raised); }
+/* Read-only words are quoted with a rule, never boxed like a field that could be typed in. */
+.insp-stop p.insp-stop-why { margin-top: 6px; padding: 1px 0 1px 10px; border-left: 2px solid var(--track); }
 
 /* ---------- inspector: the Takes row and the prompts open in place ---------- */
 .insp .insp-link { border: 0; background: none; padding: 0; color: var(--text); font: inherit; font-weight: 600; text-align: left; text-decoration: underline; text-decoration-color: var(--track); text-underline-offset: 3px; }
 .insp .insp-link:hover { text-decoration-color: var(--text); }
 .insp-note.left { text-align: left; }
-.insp .st { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
-.insp .st .insp-link { font-size: 12.5px; font-weight: 500; color: var(--text-2); }
+.insp .st { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; }
+/* A long status pill (a held shot's) pushes Prompts onto its own line: it stays at the right, as on the pill's line. */
+.insp .st .insp-link { margin-left: auto; font-size: 12.5px; font-weight: 500; color: var(--text-2); }
 .insp .st .insp-link:hover { color: var(--text); }
 .insp-prompts { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12.5px; }
 .insp-prompts .takes-head { margin-bottom: 4px; }
 .insp-prompts .lbl { margin-top: 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .insp-prompts .prompt-list { display: flex; flex-direction: column; gap: 4px; margin: 0; }
-.insp-prompts .prompt-text { margin: 0 0 4px; max-height: 8.6em; overflow-y: auto; padding: 6px 8px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--raised); color: var(--text); font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.insp-prompts .prompt-text { margin: 0 0 4px; max-height: 8.6em; overflow-y: auto; padding: 1px 0 1px 10px; border-left: 2px solid var(--track); color: var(--text); font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
 .insp-prompts .prompt-list .insp-note { margin: -2px 0 2px; }
 .insp-prompts .prompts-foot { position: sticky; bottom: -2px; padding: 6px 0 2px; background: var(--surface); border-top: 1px solid var(--hairline); }
 
