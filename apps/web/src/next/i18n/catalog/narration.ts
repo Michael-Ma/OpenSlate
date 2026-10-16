@@ -16,6 +16,8 @@ export const narrationMessages = {
   "narr.row.recording": { en: "Your recording", zh: "你的录音" },
   "narr.row.recording_measured": { en: "{seconds} s", zh: "{seconds} 秒" },
   "narr.row.recording_missing": { en: "not added yet", zh: "还没有添加" },
+  "narr.row.recording_voice": { en: "not added yet · the voice line plays ({seconds} s)", zh: "还没有添加 · 目前播放配音（{seconds} 秒）" },
+  "narr.row.recording_take": { en: "{seconds} s take", zh: "{seconds} 秒的音频" },
   "narr.row.no_answer": { en: "no answer from the voice service", zh: "配音服务没有回应" },
   "narr.row.edit": { en: "Edit", zh: "编辑" },
   "narr.row.edit_label": { en: "Edit narration for {shot}", zh: "编辑 {shot} 的旁白" },
@@ -40,6 +42,9 @@ export const narrationMessages = {
   "narr.voice.impact.new": { en: "The voice line of {shot} will be made in this voice.", zh: "{shot} 的配音会用这个声音生成。" },
   "narr.none.impact": { en: "{shot} will have no narration.", zh: "{shot} 将没有旁白。" },
   "narr.none.impact.voiced": { en: "{shot} will have no narration. Its voice line stays in Assets.", zh: "{shot} 将没有旁白，配音会保留在素材里。" },
+  "narr.none.impact.recording": { en: "{shot} will have no narration. Your recording stops being used; it stays in Assets.", zh: "{shot} 将没有旁白。你的录音不再使用，仍保留在素材里。" },
+  "narr.line.impact.recording": { en: "Your recording stops being used (it stays in Assets). A voice line will be made, about {price}, with the scene's next keyframes or video.", zh: "你的录音将不再使用（仍保留在素材里）。会生成一句配音，约 {price}，随这一场下次的关键帧或视频一起生成。" },
+  "narr.line.impact.recording_unpriced": { en: "Your recording stops being used (it stays in Assets). A voice line will be made with the scene's next keyframes or video; no price is set for it.", zh: "你的录音将不再使用（仍保留在素材里）。会随这一场下次的关键帧或视频生成一句配音，没有设定价格。" },
 
   // ---- the current take
   "narr.take.voice": { en: "Voice line · {seconds} s · {voice}", zh: "配音 · {seconds} 秒 · {voice}" },
@@ -51,6 +56,9 @@ export const narrationMessages = {
   "narr.take.loading": { en: "Loading the recording…", zh: "正在加载录音…" },
   "narr.take.failed": { en: "The recording could not be played ({code}).", zh: "无法播放这段录音（{code}）。" },
   "narr.take.retry": { en: "Try again", zh: "重试" },
+  "narr.take.seek": { en: "Position: {name}", zh: "播放位置：{name}" },
+  "narr.take.position": { en: "{at} s of {length} s", zh: "{at} 秒，共 {length} 秒" },
+  "narr.take.recovery": { en: "The take cannot be played while the studio is in recovery review.", zh: "工作室正在恢复检查，暂时无法播放这段音频。" },
 
   // ---- the voice line's state (the overview's narration slot)
   "narr.state.making": { en: "The voice line is being made…", zh: "正在生成配音…" },
@@ -58,6 +66,7 @@ export const narrationMessages = {
   "narr.state.no_answer": { en: "The voice service has not answered. The line may still arrive.", zh: "配音服务还没有回应，这句配音之后仍可能返回。" },
   "narr.state.not_voiced": { en: "Not voiced yet. It is made with the scene's next keyframes or video.", zh: "还没有配音，会随这一场下次的关键帧或视频一起生成。" },
   "narr.state.no_recording": { en: "No recording yet. Choose one below.", zh: "还没有录音，请在下面选择。" },
+  "narr.state.voice_until_recording": { en: "No recording yet. Until you add one, the voice line below plays.", zh: "还没有录音。添加之前，播放的是下面的配音。" },
 
   // ---- recordings
   "narr.recording_label": { en: "Recording", zh: "录音" },
@@ -76,14 +85,23 @@ export const narrationMessages = {
   "narr.sending": { en: "Sending {sent} of {total}", zh: "已发送 {sent}，共 {total}" },
   "narr.checking": { en: "Sent. The studio is checking the recording…", zh: "已发送，工作室正在检查录音…" },
   "narr.stop": { en: "Stop sending", zh: "停止发送" },
-  "narr.stopped": { en: "Sending stopped. Nothing was added.", zh: "已停止发送，没有添加任何内容。" },
+  "narr.stopped": { en: "Sending stopped. The recording was not added.", zh: "已停止发送，录音没有添加。" },
+  "narr.words.restored": { en: "The words are back as they were.", zh: "文字已恢复原样。" },
+  "narr.words.kept": { en: "The new words were saved, though the recording was not added.", zh: "新文字已保存，但录音没有添加。" },
   "narr.try_again": { en: "Try again", zh: "重试" },
   "narr.done": { en: "Done", zh: "完成" },
   "narr.toast.recording": { en: "{shot} now uses your recording ({seconds} s).", zh: "{shot} 现在使用你的录音（{seconds} 秒）。" },
   "narr.toast.recording_long": { en: "{shot} now uses your recording ({seconds} s), longer than the {length} s shot. Choose how to fit it.", zh: "{shot} 现在使用你的录音（{seconds} 秒），比 {length} 秒的镜头长，请选择处理方式。" },
+  "narr.toast.recording_words": { en: "{shot} now uses your recording ({seconds} s) with its new words. Undo takes back the recording; the words stay.", zh: "{shot} 现在使用你的录音（{seconds} 秒）和新的文字。撤销只撤回录音，文字保留。" },
+  "narr.toast.recording_long_words": { en: "{shot} now uses your recording ({seconds} s) with its new words, longer than the {length} s shot. Choose how to fit it. Undo takes back the recording; the words stay.", zh: "{shot} 现在使用你的录音（{seconds} 秒）和新的文字，比 {length} 秒的镜头长，请选择处理方式。撤销只撤回录音，文字保留。" },
+  "narr.toast.stopped": { en: "Sending the recording for {shot} stopped; nothing was added.", zh: "已停止发送 {shot} 的录音，没有添加任何内容。" },
+  "narr.toast.stopped_words": { en: "Sending the recording for {shot} stopped; it was not added, but its new words were saved.", zh: "已停止发送 {shot} 的录音，录音没有添加，但新文字已保存。" },
+  "narr.toast.not_added_words": { en: "The recording for {shot} was not added, but its new words were saved.", zh: "{shot} 的录音没有添加，但新文字已保存。" },
   "narr.toast.voice": { en: "{shot} has a new voice for its line.", zh: "{shot} 的旁白换了声音。" },
   "narr.toast.none": { en: "{shot} has no narration now.", zh: "{shot} 现在没有旁白。" },
   "narr.toast.line": { en: "{shot} has a line to voice now.", zh: "{shot} 现在有一句要配音的旁白。" },
+  "narr.toast.line_more": { en: "{shot} has a line to voice now. Undo takes back only that choice; the line and voice stay as saved.", zh: "{shot} 现在有一句要配音的旁白。撤销只撤回这个选择，台词和声音保持已保存的样子。" },
+  "narr.toast.voice_more": { en: "{shot} has a new line and voice. Undo takes back only the voice; the new line stays.", zh: "{shot} 的台词和声音都已更新。撤销只撤回声音，新台词保留。" },
   "narr.toast.recording_mode": { en: "{shot} will use your recording.", zh: "{shot} 将使用你的录音。" },
 
   // ---- recording refusals: neutral, an icon and words
@@ -108,6 +126,13 @@ export const narrationMessages = {
   // ---- the Plan shot editor
   "narr.plan.recording_add": { en: "Add the recording on {shot} in Keyframes.", zh: "请在关键帧里为 {shot} 添加录音。" },
   "narr.plan.recording_has": { en: "Your recording, {seconds} s. Replace it in Keyframes.", zh: "你的录音，{seconds} 秒。可在关键帧里替换。" },
+  "narr.plan.recording_voice": { en: "Still the voice line ({seconds} s): add your recording on {shot} in Keyframes.", zh: "目前仍是配音（{seconds} 秒）：请在关键帧里为 {shot} 添加你的录音。" },
+  "narr.plan.recording_unknown": { en: "A {seconds} s take is in use. Add or replace the recording on {shot} in Keyframes.", zh: "目前使用一段 {seconds} 秒的音频。请在关键帧里为 {shot} 添加或替换录音。" },
   "narr.plan.impact.add": { en: "{shot} will use your recording; add it in Keyframes.", zh: "{shot} 将使用你的录音，请在关键帧里添加。" },
-  "narr.plan.impact.replaces": { en: "{shot} will use your recording instead of its voice line, which stays in Assets; add it in Keyframes.", zh: "{shot} 将用你的录音代替配音，配音保留在素材里；请在关键帧里添加录音。" },
+  "narr.plan.impact.replaces": { en: "{shot} will use your recording instead of its voice line once you add it in Keyframes (until then the voice line plays; it stays in Assets).", zh: "在关键帧里添加录音后，{shot} 将用你的录音代替配音（在那之前仍播放配音，配音也会保留在素材里）。" },
+  "narr.plan.impact.recording_none": { en: "{shot} will have no narration: **your recording stops being used** (it stays in Assets).", zh: "{shot} 将没有旁白：**你的录音不再使用**（仍保留在素材里）。" },
+  "narr.plan.impact.recording_line": { en: "{shot} **stops using your recording** (it stays in Assets); a voice line will be made, **about {price}**.", zh: "{shot} **不再使用你的录音**（仍保留在素材里），会生成一句配音，**约 {price}**。" },
+  "narr.plan.impact.recording_line_unpriced": { en: "{shot} **stops using your recording** (it stays in Assets); a voice line will be made (no price set).", zh: "{shot} **不再使用你的录音**（仍保留在素材里），会生成一句配音（没有设定价格）。" },
+  "narr.plan.row.take": { en: "My recording chosen · {seconds} s take", zh: "已选“我的录音” · {seconds} 秒音频" },
+  "narr.plan.row.missing": { en: "My recording chosen · not added yet", zh: "已选“我的录音” · 还没有添加" },
 } satisfies Record<string, Entry>;

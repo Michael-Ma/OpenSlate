@@ -1,7 +1,7 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { cardStatus, isWorking, seconds, type CardTone } from "./keyframes.ts";
-import { narrationRow, type NarrationMode } from "./narration.ts";
+import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -156,14 +156,17 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   }
 }
 
-/** `narrationMode` is the shot's stored narration mode (the project snapshot), so a recording reads as one. */
-export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string, narrationMode?: NarrationMode): InspectorView {
+/**
+ * `narrationMode` is the shot's stored narration mode (the project snapshot), so a recording reads as one;
+ * `narrationOrigin` is its current take's (takeOrigin), so a voice line is never called the person's recording.
+ */
+export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string, narrationMode?: NarrationMode, narrationOrigin: TakeOrigin | null = null): InspectorView {
   const scene = overview.scenes.find((s) => s.sceneId === shot.sceneId);
   const { status, tone } = cardStatus(shot);
   const rows: InspectorRow[] = [
     { key: "motion", label: msg("inspector.motion"), value: shot.motion, quoted: false, notes: [] },
     { key: "duration", label: msg("inspector.duration"), value: msg("inspector.duration_value", { seconds: seconds(shot.durationFrames, overview.fps) }), quoted: false, notes: [] },
-    narrationRow(shot, overview.fps, narrationMode),
+    narrationRow(shot, overview.fps, narrationMode, narrationOrigin),
   ];
   const takes = shot.keyframe.takeCount;
   if (takes > 1)

@@ -1,7 +1,7 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { clipUnit } from "./inspector.ts";
-import { modeEdit, narrationChoiceOf, planRecordingImpact, wordsOf, type NarrationChoice as Choice } from "./narration.ts";
+import { modeEdit, narrationChoiceOf, planLeaveRecordingImpact, planRecordingImpact, wordsOf, type NarrationChoice as Choice, type TakeOrigin } from "./narration.ts";
 import { promptText, promptToSave, secondsOf, written, type NarrationMode } from "./plan.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
@@ -197,26 +197,36 @@ export interface DraftEffects {
   voiceDropped: boolean;
   /** "My recording" was chosen; it is added on the shot in Keyframes. */
   recording: boolean;
+  /** The person's recording, in use now, stops being used (for no narration, or a line the studio voices). */
+  recordingDropped: boolean;
   /** A keyframe or clip the change touches is being made right now. */
   running: boolean;
   promptLike: boolean;
   clipLike: boolean;
 }
 
-export function draftEffects(shot: ShotOverview, base: ShotDraft, draft: ShotDraft): DraftEffects {
+/**
+ * `origin` is the current take's (model/narration.ts takeOrigin), read for the shot being edited: a shot set to
+ * "My recording" may still be using its voice line. Unknown (null), the take counts as the person's recording.
+ */
+export function draftEffects(shot: ShotOverview, base: ShotDraft, draft: ShotDraft, origin: TakeOrigin | null = null): DraftEffects {
   const fields = changedFields(base, draft);
   const has = (field: DraftField) => fields.includes(field);
   const promptLike = has("purpose") || has("framing") || has("prompt");
   const clipLike = promptLike || has("motion") || has("length");
   const voiceReady = shot.narration.state === "ready";
+  const leaving = base.narration === "recording" && has("narration") && voiceReady;
+  const recordingDropped = leaving && origin !== "voice";
   return {
     fields,
     rewrites: (has("purpose") || has("framing")) && !has("prompt"),
     keyframe: promptLike && shot.keyframe.state === "ready",
     clip: clipLike && shot.video.state === "ready",
-    voice: voiceReady && draft.narration === "line" && has("line"),
-    voiceDropped: voiceReady && draft.narration === "none" && base.narration === "line",
+    // Leaving a recording for a line says the voice line's price once, with the recording it replaces.
+    voice: voiceReady && draft.narration === "line" && has("line") && !recordingDropped,
+    voiceDropped: voiceReady && draft.narration === "none" && (base.narration === "line" || (leaving && origin === "voice")),
     recording: draft.narration === "recording" && has("narration"),
+    recordingDropped,
     running: (promptLike && inFlight(shot.keyframe)) || (clipLike && inFlight(shot.video)),
     promptLike,
     clipLike,
@@ -229,8 +239,8 @@ export interface Impact {
   parts: Msg[];
 }
 
-export function shotImpact(shot: ShotOverview, base: ShotDraft, draft: ShotDraft, prices: UnitPrices, locale: string): Impact {
-  const effects = draftEffects(shot, base, draft);
+export function shotImpact(shot: ShotOverview, base: ShotDraft, draft: ShotDraft, prices: UnitPrices, locale: string, origin: TakeOrigin | null = null): Impact {
+  const effects = draftEffects(shot, base, draft, origin);
   if (!effects.fields.length) return { tone: "none", parts: [msg("plan.impact.unchanged")] };
   const money = (micros: number) => formatMicros(micros, locale);
   const label = shot.label;
@@ -243,9 +253,10 @@ export function shotImpact(shot: ShotOverview, base: ShotDraft, draft: ShotDraft
   else if (effects.clip) parts.push(prices.clip !== null ? msg("plan.impact.clip", { shot: label, price: money(prices.clip) }) : msg("plan.impact.clip_unpriced", { shot: label }));
   if (effects.voice) parts.push(prices.voice !== null ? msg("plan.impact.voice", { price: money(prices.voice) }) : msg("plan.impact.voice_unpriced"));
   if (effects.voiceDropped) parts.push(msg("plan.impact.voice_dropped", { shot: label }));
+  if (effects.recordingDropped && draft.narration !== "undecided" && draft.narration !== "recording") parts.push(planLeaveRecordingImpact(draft.narration, shot, prices.voice, locale));
   const recording = effects.recording ? planRecordingImpact(shot) : null;
   if (recording) parts.push(recording.message);
-  const any = effects.keyframe || effects.clip || effects.voice || effects.voiceDropped || !!recording?.replaces;
+  const any = effects.keyframe || effects.clip || effects.voice || effects.voiceDropped || effects.recordingDropped || !!recording?.replaces;
   if (!any && !effects.running) {
     const nothingMade = !shot.keyframe.previous && (shot.keyframe.state === "none" || shot.keyframe.state === "direction_required") && shot.video.state === "none" && shot.narration.state !== "ready";
     if (nothingMade) parts.push(msg("plan.impact.nothing_made", { shot: label }));

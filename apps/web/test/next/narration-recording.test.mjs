@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  afterRecordingFailure, checkRecording, checkRecordingLength, isRecordingReceipt, RECORDING_MAX_BYTES, recordingDone, recordingFileMsg,
-  recordingFitNote, recordingIdentity, recordingPath, recordingRefusal, recordingRetryable, sendingMsg,
+  afterRecordingFailure, checkRecording, checkRecordingLength, isRecordingReceipt, notAddedToast, RECORDING_MAX_BYTES, recordingDone, recordingFileMsg,
+  recordingFitNote, recordingIdentity, recordingPath, recordingRefusal, recordingRetryable, sendingMsg, wordsNote,
 } from '../../src/next/model/narration-recording.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
@@ -42,6 +42,22 @@ test('the receipt and its toast: a fitting recording, and one that still needs f
   assert.equal(en(recordingDone('2.3', receipt, 6)), '2.3 now uses your recording (4.2 s).');
   assert.equal(en(recordingDone('2.3', { ...receipt, fits: false, measuredSeconds: 7.4 }, 6)), '2.3 now uses your recording (7.4 s), longer than the 6 s shot. Choose how to fit it.');
   assert.equal(zh(recordingDone('2.3', receipt, 6)), '2.3 现在使用你的录音（4.2 秒）。');
+  // New words were saved first as their own command: the recording's Undo leaves them.
+  assert.equal(en(recordingDone('2.3', receipt, 6, true)), '2.3 now uses your recording (4.2 s) with its new words. Undo takes back the recording; the words stay.');
+  assert.match(zh(recordingDone('2.3', { ...receipt, fits: false }, 6, true)), /撤销只撤回录音，文字保留。$/);
+});
+
+test('a recording not added: what became of the words saved for it, in place and in a toast once the panel is closed', () => {
+  assert.equal(wordsNote('none'), null);
+  assert.equal(en(wordsNote('restored')), 'The words are back as they were.');
+  assert.equal(en(wordsNote('kept')), 'The new words were saved, though the recording was not added.');
+  const refusal = recordingRefusal('MEDIA_INVALID_INPUT');
+  assert.equal(en(notAddedToast('2.2', true, 'none', refusal)), 'Sending the recording for 2.2 stopped; nothing was added.');
+  assert.equal(en(notAddedToast('2.2', true, 'restored', refusal)), 'Sending the recording for 2.2 stopped; nothing was added.');
+  assert.equal(en(notAddedToast('2.2', true, 'kept', refusal)), 'Sending the recording for 2.2 stopped; it was not added, but its new words were saved.');
+  assert.equal(notAddedToast('2.2', false, 'restored', refusal), refusal);
+  assert.equal(en(notAddedToast('2.2', false, 'kept', refusal)), 'The recording for 2.2 was not added, but its new words were saved.');
+  assert.equal(zh(notAddedToast('2.2', true, 'none', refusal)), '已停止发送 2.2 的录音，没有添加任何内容。');
 });
 
 test('refusals are said in place, neutral; unknown codes still name themselves', () => {

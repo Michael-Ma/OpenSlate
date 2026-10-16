@@ -70,10 +70,36 @@ export function isRecordingReceipt(value: unknown): value is RecordingReceipt {
   return !!receipt && typeof receipt.shotId === "string" && typeof receipt.fits === "boolean" && typeof receipt.measuredSeconds === "number";
 }
 
-/** The toast after a recording is added: its measured length, and whether it still needs fitting. */
-export function recordingDone(label: string, receipt: Pick<RecordingReceipt, "fits" | "measuredSeconds">, shotSeconds: number): Msg {
+/**
+ * The toast after a recording is added: its measured length, and whether it still needs fitting. `newWords`: its
+ * words were saved first as their own command, so the toast's Undo (the recording's) leaves them as they are now.
+ */
+export function recordingDone(label: string, receipt: Pick<RecordingReceipt, "fits" | "measuredSeconds">, shotSeconds: number, newWords = false): Msg {
   const values = { shot: label, seconds: round1(receipt.measuredSeconds) };
-  return receipt.fits ? msg("narr.toast.recording", values) : msg("narr.toast.recording_long", { ...values, length: shotSeconds });
+  if (receipt.fits) return msg(newWords ? "narr.toast.recording_words" : "narr.toast.recording", values);
+  return msg(newWords ? "narr.toast.recording_long_words" : "narr.toast.recording_long", { ...values, length: shotSeconds });
+}
+
+/**
+ * The words of a recording are saved before its bytes are sent (the studio keeps the shot's words as the
+ * recording's subtitle). When the recording is then not added (stopped, refused, failed), that save is undone;
+ * `restored` says it was, `kept` that it could not be (the words stay saved), `none` that no words were saved.
+ */
+export type WordsAfterFailure = "none" | "restored" | "kept";
+
+/** Said with the panel's stopped or refused state: what happened to the words saved for the recording. */
+export function wordsNote(words: WordsAfterFailure): Msg | null {
+  return words === "restored" ? msg("narr.words.restored") : words === "kept" ? msg("narr.words.kept") : null;
+}
+
+/**
+ * The toast when the panel was closed before a recording finished: sending stopped (closing it stops the bytes),
+ * or the studio's refusal, unless the words saved for it could not be undone: then that is what it says.
+ */
+export function notAddedToast(label: string, stopped: boolean, words: WordsAfterFailure, refusal: Msg): Msg {
+  const values = { shot: label };
+  if (stopped) return msg(words === "kept" ? "narr.toast.stopped_words" : "narr.toast.stopped", values);
+  return words === "kept" ? msg("narr.toast.not_added_words", values) : refusal;
 }
 
 /** What to do with a saved request after a failure (keep the key for an unknown answer, a fresh one after a stale resend). */

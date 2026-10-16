@@ -110,9 +110,19 @@ export function voiceImpact(shot: ShotOverview, unitMicros: number | null, local
   return msg("narr.voice.impact.new", { shot: shot.label });
 }
 
-/** Said before saving no narration. */
-export function noneImpact(shot: ShotOverview): Msg {
-  return msg(shot.narration.state === "ready" ? "narr.none.impact.voiced" : "narr.none.impact", { shot: shot.label });
+/** Said before saving no narration: the person's recording, or the voice line, stops being used (both stay in Assets). */
+export function noneImpact(shot: ShotOverview, mode?: NarrationMode, origin: TakeOrigin | null = null): Msg {
+  const values = { shot: shot.label };
+  if (recordingInUse(shot, mode, origin)) return msg("narr.none.impact.recording", values);
+  return msg(shot.narration.state === "ready" ? "narr.none.impact.voiced" : "narr.none.impact", values);
+}
+
+/**
+ * Said before going from the person's recording back to a line: the recording stops being used (it stays in
+ * Assets) and a voice line is made, at the voice-line price (or "no price set", never $0.00).
+ */
+export function lineFromRecordingImpact(unitMicros: number | null, locale: string): Msg {
+  return unitMicros !== null ? msg("narr.line.impact.recording", { price: formatMicros(unitMicros, locale) }) : msg("narr.line.impact.recording_unpriced");
 }
 
 // ---- the shot's current take -----------------------------------------------------------------------------
@@ -169,11 +179,28 @@ export function takeView(shot: ShotOverview, read: ShotNarrationRead | null): Ta
   return { audio: ref, seconds: length, origin: "voice", label, name: msg("narr.take.voice_name", { shot: shot.label, seconds: length }) };
 }
 
+/** Where the shot's current take came from: the person's own recording, or a voice line the studio made. */
+export type TakeOrigin = TakeView["origin"];
+
+/** The current take's origin, from the shot's narration section; null while it is not known (not read yet, unreadable, not voiced). */
+export const takeOrigin = (shot: ShotOverview, read: ShotNarrationRead | null): TakeOrigin | null => takeView(shot, read)?.origin ?? null;
+
 /**
- * The voice line's state from the overview's narration slot, said when there is no take to play: being made,
- * failed, no answer from the service, not voiced yet, or no recording yet.
+ * The person's recording is what the shot uses now: set to "My recording", voiced, and the take is not a voice
+ * line. A shot set to "My recording" keeps its voice line until a recording is added (the studio then still uses
+ * that voice line), so a take known to be a voice line is not the person's recording. An unknown take counts as
+ * the recording, so leaving it is never said to be free.
  */
-export function slotNote(shot: ShotOverview, mode: NarrationMode | undefined): { message: Msg; tone: "plain" | "warn" } | null {
+export function recordingInUse(shot: ShotOverview, mode: NarrationMode | undefined, origin: TakeOrigin | null): boolean {
+  return mode === "uploaded" && shot.narration.state === "ready" && origin !== "voice";
+}
+
+/**
+ * The voice line's state from the overview's narration slot: being made, failed, no answer from the service,
+ * not voiced yet, or no recording yet. A voiced shot says nothing (its take plays), unless "My recording" is the
+ * choice and the take is still a voice line: then it says the voice line plays until a recording is added.
+ */
+export function slotNote(shot: ShotOverview, mode: NarrationMode | undefined, origin: TakeOrigin | null = null): { message: Msg; tone: "plain" | "warn" } | null {
   const line = shot.narration;
   switch (line.state) {
     case "making": return { message: msg("narr.state.making"), tone: "plain" };
@@ -181,7 +208,7 @@ export function slotNote(shot: ShotOverview, mode: NarrationMode | undefined): {
     case "no_answer": return { message: msg("narr.state.no_answer"), tone: "warn" };
     case "text_only": return { message: msg(mode === "uploaded" ? "narr.state.no_recording" : "narr.state.not_voiced"), tone: "plain" };
     case "none": return mode === "uploaded" ? { message: msg("narr.state.no_recording"), tone: "plain" } : null;
-    case "ready": return null;
+    case "ready": return mode === "uploaded" && origin === "voice" ? { message: msg("narr.state.voice_until_recording"), tone: "plain" } : null;
   }
 }
 
@@ -190,8 +217,10 @@ export function slotNote(shot: ShotOverview, mode: NarrationMode | undefined): {
 /**
  * The inspector's Narration row: the line (or "Your recording"), its measured or estimated length, its state
  * (being made, failed, no answer), and how a too-long line was settled. Drawn neutral; "warn" is bold text.
+ * `origin` is the current take's (takeOrigin): a shot set to "My recording" whose take is still a voice line says
+ * so, and a take not read yet is given only its length, never called the person's recording.
  */
-export function narrationRow(shot: ShotOverview, fps: number, mode?: NarrationMode): InspectorRow {
+export function narrationRow(shot: ShotOverview, fps: number, mode?: NarrationMode, origin: TakeOrigin | null = null): InspectorRow {
   const line = shot.narration;
   const label = msg("inspector.narration");
   const notes: InspectorRow["notes"] = [];
@@ -199,8 +228,11 @@ export function narrationRow(shot: ShotOverview, fps: number, mode?: NarrationMo
   if (!recording && (line.state === "none" || !line.text.trim()))
     return { key: "narration", label, value: msg(mode === "undecided" ? "narr.row.undecided" : "inspector.narration.none"), quoted: false, notes: [] };
   if (recording) {
-    if (line.state === "ready" && line.measuredSeconds !== undefined) notes.push({ message: msg("narr.row.recording_measured", { seconds: round1(line.measuredSeconds) }), tone: "plain" });
-    else notes.push({ message: msg("narr.row.recording_missing"), tone: "plain" });
+    if (line.state === "ready" && line.measuredSeconds !== undefined) {
+      const seconds = round1(line.measuredSeconds);
+      const said = origin === "recording" ? "narr.row.recording_measured" : origin === "voice" ? "narr.row.recording_voice" : "narr.row.recording_take";
+      notes.push({ message: msg(said, { seconds }), tone: "plain" });
+    } else notes.push({ message: msg("narr.row.recording_missing"), tone: "plain" });
   } else if (line.measuredSeconds !== undefined) notes.push({ message: msg("inspector.narration.measured", { seconds: round1(line.measuredSeconds) }), tone: "plain" });
   else if (line.estimatedSeconds !== undefined) notes.push({ message: msg("inspector.narration.estimated", { seconds: round1(line.estimatedSeconds) }), tone: "plain" });
   if (line.state === "making") notes.push({ message: msg("inspector.narration.making"), tone: "plain" });
@@ -215,10 +247,19 @@ export function narrationRow(shot: ShotOverview, fps: number, mode?: NarrationMo
 
 // ---- the Plan shot editor ------------------------------------------------------------------------------
 
-/** Under the Plan editor's narration choice when it is "My recording": recordings are added on the shot in Keyframes. */
-export function planRecordingNote(shot: ShotOverview, mode: NarrationMode | undefined): Msg {
-  if (mode === "uploaded" && shot.narration.state === "ready" && shot.narration.measuredSeconds !== undefined)
-    return msg("narr.plan.recording_has", { seconds: round1(shot.narration.measuredSeconds) });
+/**
+ * Under the Plan editor's narration choice when it is "My recording": recordings are added on the shot in
+ * Keyframes. `origin` is the current take's (takeOrigin): only a take known to be the person's own is called
+ * their recording; a voice line still in use is named as one.
+ */
+export function planRecordingNote(shot: ShotOverview, mode: NarrationMode | undefined, origin: TakeOrigin | null = null): Msg {
+  const line = shot.narration;
+  if (mode === "uploaded" && line.state === "ready" && line.measuredSeconds !== undefined) {
+    const values = { seconds: round1(line.measuredSeconds), shot: shot.label };
+    if (origin === "recording") return msg("narr.plan.recording_has", values);
+    if (origin === "voice") return msg("narr.plan.recording_voice", values);
+    return msg("narr.plan.recording_unknown", values);
+  }
   return msg("narr.plan.recording_add", { shot: shot.label });
 }
 
@@ -226,4 +267,28 @@ export function planRecordingNote(shot: ShotOverview, mode: NarrationMode | unde
 export function planRecordingImpact(shot: ShotOverview): { message: Msg; replaces: boolean } {
   const replaces = shot.narration.state === "ready";
   return { message: msg(replaces ? "narr.plan.impact.replaces" : "narr.plan.impact.add", { shot: shot.label }), replaces };
+}
+
+/**
+ * The impact line's part for leaving "My recording" in the Plan editor while the recording is in use: it stops
+ * being used (it stays in Assets); for a line, a voice line is made at the voice-line price (never $0.00).
+ */
+export function planLeaveRecordingImpact(target: "none" | "line", shot: ShotOverview, voiceMicros: number | null, locale: string): Msg {
+  const values = { shot: shot.label };
+  if (target === "none") return msg("narr.plan.impact.recording_none", values);
+  return voiceMicros !== null ? msg("narr.plan.impact.recording_line", { ...values, price: formatMicros(voiceMicros, locale) }) : msg("narr.plan.impact.recording_line_unpriced", values);
+}
+
+/**
+ * A Plan row's narration when the shot is set to "My recording": the words given for it (the studio's stand-in
+ * for none hidden) and what is there now. The row reads no take, so a voiced shot is given the take's length and
+ * the choice, not called the person's recording.
+ */
+export function planRowRecording(shot: ShotOverview): { text: string; detail: Msg } {
+  const line = shot.narration;
+  const text = line.state === "none" ? "" : wordsOf(line.text).trim();
+  if (line.state === "ready" && line.measuredSeconds !== undefined) {
+    return { text, detail: msg("narr.plan.row.take", { seconds: round1(line.measuredSeconds) }) };
+  }
+  return { text, detail: msg("narr.plan.row.missing") };
 }
