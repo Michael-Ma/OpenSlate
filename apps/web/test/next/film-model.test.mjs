@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, filmMusic, musicSpan, musicOn,
+  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, filmMusic, musicSpan, musicOn, musicLostAt,
   lengthLimits, lengthEdit, moveEdit, musicStartEdit, musicGainEdit, musicMuteEdit, musicChoiceEdit, editPressId, soundtrackOf, lengthToast,
 } from '../../src/next/model/film.ts';
 import { FilmClock } from '../../src/next/model/film-clock.ts';
@@ -92,7 +92,7 @@ test('the music library reads every page without repeats', async () => {
 test('music: one track from the soundtrack and the music library', () => {
   const library = [{ id: 'a', label: 'low-tide.mp3', sha256: 'x', durationSeconds: 72 }];
   const music = filmMusic({ audioId: 'a', gainMilliDb: -18000, startFrame: 120 }, library, 30);
-  assert.deepEqual(music, { audioId: 'a', label: 'low-tide.mp3', sha256: 'x', seconds: 72, start: 4, gainDb: -18, muted: false });
+  assert.deepEqual(music, { audioId: 'a', label: 'low-tide.mp3', sha256: 'x', seconds: 72, start: 4, gainDb: -18, muted: false, missing: false });
   assert.deepEqual(musicSpan(music, 48), { start: 4, seconds: 44 });
   assert.equal(musicOn(music, 3.9, 48), false);
   assert.equal(musicOn(music, 4, 48), true);
@@ -100,6 +100,12 @@ test('music: one track from the soundtrack and the music library', () => {
   assert.deepEqual(musicSpan({ ...music, seconds: 10 }, 48), { start: 4, seconds: 10 });
   assert.equal(filmMusic(null, library, 30), null);
   assert.equal(filmMusic({ audioId: 'gone', gainMilliDb: 0 }, library, 30).label, null, 'unknown recordings are still shown');
+  const gone = filmMusic({ audioId: 'gone', gainMilliDb: -18000 }, library, 30, true);
+  assert.equal(gone.missing, true);
+  assert.equal(musicOn(gone, 10, 48), false, 'unavailable music is never shown as playing');
+  assert.deepEqual([musicLostAt(gone, 0, 48), musicLostAt(gone, 47.9, 48), musicLostAt(music, 10, 48)], [true, true, false], 'the player says so instead');
+  assert.equal(musicLostAt({ ...gone, muted: true }, 10, 48), false, 'muted music is not heard either way');
+  assert.equal(musicLostAt({ ...gone, start: 4 }, 3, 48), false, 'not before its start');
   assert.deepEqual(soundtrackOf({ ...lastFerrySnapshot(), project: { ...lastFerrySnapshot().project, soundtrack: { audioId: 'a', gainMilliDb: 0 } } }), { audioId: 'a', gainMilliDb: 0 });
   assert.equal(soundtrackOf(lastFerrySnapshot()), null);
 });

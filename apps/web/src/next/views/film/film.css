@@ -77,6 +77,7 @@
 .film-work .fv-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--ground); z-index: 1; }
 .film-work .player .dashed-frame { background: var(--surface); }
 .film-work .music-on { display: inline-flex; align-items: center; gap: 6px; background: rgba(20,21,23,.78); border-radius: var(--r-pill); padding: 2px 9px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.film-work .music-on.lost { color: var(--text-2); font-weight: 500; }
 .film-work .meter { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; }
 .film-work .meter i { width: 2px; height: 3px; background: var(--text); border-radius: 1px; animation: fv-level .9s ease-in-out infinite; }
 .film-work .meter i:nth-child(2) { animation-delay: .2s; }
@@ -195,6 +196,8 @@
 .film-work .mblk .wave i { flex: 1; background: var(--text-2); border-radius: 1px; min-width: 2px; opacity: .75; }
 .film-work .mblk .mname { position: relative; z-index: 1; font-size: 11px; font-weight: 600; padding: 0 7px; line-height: 34px; white-space: nowrap; }
 .film-work .mblk.muted .wave { opacity: .12; }
+/* Missing music: an empty dashed block with its words, nothing that looks like sound. */
+.film-work .mblk.missing { background: none; border: 1.5px dashed var(--track); color: var(--text-2); }
 .film-work .mblk:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .film-work .none-music { font-size: 12px; color: var(--muted); line-height: 36px; white-space: nowrap; }
 .film-work .none-music .pill { line-height: 1.45; }

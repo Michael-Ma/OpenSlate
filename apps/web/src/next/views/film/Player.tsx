@@ -4,7 +4,7 @@ import { useI18n } from "../../i18n/I18n.tsx";
 import { useArtifactUrl } from "../../media/useArtifactUrl.ts";
 import { clipTarget, syncMedia } from "../../model/film-audio.ts";
 import type { FilmClock } from "../../model/film-clock.ts";
-import { lineAt, musicOn, nextTime, previousTime, shotAt, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
+import { lineAt, musicLostAt, musicOn, nextTime, previousTime, shotAt, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
 import { clock as formatClock, motionKind, motionTransform } from "../../model/motion.ts";
 import { useClockPaint, useClockValue, useReducedMotion } from "./clock-hooks.ts";
 
@@ -41,6 +41,8 @@ export function Player({ timeline, clock, music, demo, live }: Props) {
   const playing = useClockValue(clock, (_time, isPlaying) => isPlaying);
   const lineShot = useClockValue(clock, (time) => lineAt(timeline, time)?.shotId ?? "");
   const musicHeard = useClockValue(clock, (time) => musicOn(music, time, timeline.total));
+  // Music that is missing is never heard: where it would play, the player says it is unavailable instead.
+  const musicLost = useClockValue(clock, (time) => musicLostAt(music, time, timeline.total));
   const shot = index >= 0 ? timeline.shots[index] ?? null : null;
   const line = lineShot ? timeline.shots.find((s) => s.shotId === lineShot)?.line ?? null : null;
 
@@ -96,6 +98,7 @@ export function Player({ timeline, clock, music, demo, live }: Props) {
         {status}
         <span className="end">
           {demo ? <span className="demo-mark" title={t("film.player.demo_title")} data-act="demo-mark">{t("film.player.demo_mark")}</span> : null}
+          {musicLost ? <span className="music-on lost" data-act="music-missing">{t("film.player.music_missing")}</span> : null}
           {musicHeard && music ? (
             <span className="music-on" data-act="music-on">
               {playing && !reduced ? <span className="meter" aria-hidden="true"><i /><i /><i /></span> : <span aria-hidden="true">♪</span>}

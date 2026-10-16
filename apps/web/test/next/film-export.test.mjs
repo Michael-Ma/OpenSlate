@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readinessOf, readinessRows, whyNotReady, panelState, lastExport, failureMsg, changeMsg, whenMsg, elapsedSeconds,
-  filmFingerprint, changedSince, unavailableMsg, rowsBelow, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
+  filmFingerprint, changedSince, unavailableMsg, musicMissing, rowsBelow, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
 } from '../../src/next/model/film-export.ts';
 import { lastFerryOverview, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
@@ -137,6 +137,7 @@ test('a readiness read that fails on the film\'s music says so and offers Change
   }
   const older = unavailableMsg('NOT_FOUND');
   assert.deepEqual([older.music, en(older.text)], [false, 'This studio can\'t export from the storyboard yet (NOT_FOUND).']);
+  assert.deepEqual(['MEDIA_ARTIFACT_UNAVAILABLE', 'MEDIA_SOURCE_UNAVAILABLE', 'NOT_FOUND', null].map(musicMissing), [true, true, false, false], 'the music lane and player follow the same read');
 });
 
 test('the last export stays downloadable and says what changed since', () => {

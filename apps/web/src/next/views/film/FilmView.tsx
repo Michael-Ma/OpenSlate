@@ -8,7 +8,7 @@ import { currentPlacements, type PlaybackView } from "../../model/film-audio.ts"
 import { displayedHead } from "../../model/displayed-baseline.ts";
 import { displayedGain, musicGainSession, submitGain, type GainDraft } from "../../model/film-gain.ts";
 import { FilmClock } from "../../model/film-clock.ts";
-import { changeMsg, lastExport, whenMsg, type MediaView } from "../../model/film-export.ts";
+import { changeMsg, lastExport, musicMissing, whenMsg, type MediaView } from "../../model/film-export.ts";
 import {
   editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicMuteEdit, musicStartEdit,
   soundtrackOf, type FilmEdit,
@@ -85,7 +85,9 @@ function FilmWorkspace() {
   const timeline = useMemo(() => filmTimeline(overview, snapshot?.notes), [overview, snapshot?.notes]);
   const soundtrack = soundtrackOf(snapshot);
   const recordings = useMusicLibrary();
-  const music = useMemo(() => filmMusic(soundtrack, recordings ?? [], overview.fps), [soundtrack, recordings, overview.fps]);
+  // The export read fails on music that is missing or unmeasured: the lane and the player say so too.
+  const lost = musicMissing(exportsRes.error);
+  const music = useMemo(() => filmMusic(soundtrack, recordings ?? [], overview.fps, lost), [soundtrack, recordings, overview.fps, lost]);
   const gainSession = useMemo(() => musicGainSession(store, projectId ?? ""), [store, projectId]);
   const gainBaseline = useMemo(() => displayedGain(projectId, snapshot, overview), [projectId, snapshot, overview]);
   const demo = !!exportsRes.data?.readiness.demo;

@@ -165,9 +165,12 @@ export function failureMsg(code: string | undefined): ExportFailure {
 /** Codes GET /exports fails with when the chosen music is missing or was never measured (storyboard-capture.ts). */
 const MUSIC_CODES = new Set(["MEDIA_ARTIFACT_UNAVAILABLE", "MEDIA_SOURCE_UNAVAILABLE"]);
 
+/** The film's music is missing from its assets or was never measured: it cannot play or go into an export. */
+export const musicMissing = (code: string | null | undefined): boolean => !!code && MUSIC_CODES.has(code);
+
 /** Why the panel has no readiness: the film's music, or a studio without storyboard export. */
 export function unavailableMsg(code: string): { text: Msg; music: boolean } {
-  if (MUSIC_CODES.has(code)) return { text: msg("film.export.music_unavailable"), music: true };
+  if (musicMissing(code)) return { text: msg("film.export.music_unavailable"), music: true };
   return { text: msg("film.export.unavailable", { code }), music: false };
 }
 

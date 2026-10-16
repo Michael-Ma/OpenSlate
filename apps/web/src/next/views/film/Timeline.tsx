@@ -139,6 +139,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
 
   const span = music ? musicSpan(music, timeline.total) : null;
   const musicName = music ? music.label ?? t("film.music.unnamed") : "";
+  const musicLabel = music?.label ? t("film.music.label", { name: music.label }) : t("film.music.unnamed");
   const keyWidth = pps ? KEY_WIDTH.narrow : KEY_WIDTH.wide;
   const locked = useRecoveryLock();
   const offline = writable ? undefined : locked ?? t("film.offline");
@@ -195,15 +196,20 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
             {music && span ? (
               <button
                 type="button"
-                className={`mblk${music.muted ? " muted" : ""}${selection?.kind === "music" ? " sel" : ""}`}
+                className={`mblk${music.muted ? " muted" : ""}${music.missing ? " missing" : ""}${selection?.kind === "music" ? " sel" : ""}`}
                 style={{ left: X(span.start), width: W(Math.max(span.seconds, 0.5), 2) }}
                 data-act="sel-music"
                 aria-pressed={selection?.kind === "music"}
-                aria-label={t("film.music.label", { name: musicName })}
+                aria-label={music.missing ? t("film.music.label_missing", { name: musicLabel }) : musicLabel}
                 onClick={onSelectMusic}
               >
-                <span className="wave" aria-hidden="true">{bars.map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}</span>
-                <span className="mname">{music.muted ? t("film.music.block_muted", { name: musicName }) : t("film.music.block", { name: musicName, gain: music.gainDb })}</span>
+                {/* Music that is missing has nothing to draw: no waveform, only the words. */}
+                {music.missing ? null : <span className="wave" aria-hidden="true">{bars.map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}</span>}
+                <span className="mname">
+                  {music.missing ? t("film.music.block_missing", { name: musicName })
+                    : music.muted ? t("film.music.block_muted", { name: musicName })
+                    : t("film.music.block", { name: musicName, gain: music.gainDb })}
+                </span>
               </button>
             ) : (
               <span className="none-music">

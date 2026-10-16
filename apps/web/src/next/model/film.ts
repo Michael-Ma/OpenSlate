@@ -279,6 +279,8 @@ export interface FilmMusic {
   start: number;
   gainDb: number;
   muted: boolean;
+  /** The recording is missing from the film's assets or was never measured: it cannot play or be exported. */
+  missing: boolean;
 }
 
 export function soundtrackOf(snapshot: ProjectSnapshot | null): Soundtrack | null {
@@ -286,7 +288,8 @@ export function soundtrackOf(snapshot: ProjectSnapshot | null): Soundtrack | nul
   return project?.soundtrack ?? null;
 }
 
-export function filmMusic(soundtrack: Soundtrack | null, library: readonly MusicRecording[], fps: number): FilmMusic | null {
+/** `missing`: the studio says the chosen recording is unavailable (the export read fails on it, film-export.ts). */
+export function filmMusic(soundtrack: Soundtrack | null, library: readonly MusicRecording[], fps: number, missing = false): FilmMusic | null {
   if (!soundtrack) return null;
   const recording = library.find((r) => r.id === soundtrack.audioId) ?? null;
   return {
@@ -297,6 +300,7 @@ export function filmMusic(soundtrack: Soundtrack | null, library: readonly Music
     start: round1((soundtrack.startFrame ?? 0) / fps),
     gainDb: Math.round(soundtrack.gainMilliDb / 1000),
     muted: !!soundtrack.muted,
+    missing,
   };
 }
 
@@ -307,9 +311,16 @@ export function musicSpan(music: FilmMusic, total: number): { start: number; sec
   return { start, seconds: Math.max(0, end - start) };
 }
 
-/** The music is heard at t: not muted and inside its span. */
+/** Missing music where it would be heard at t (not muted, inside its span): the player says it is unavailable. */
+export function musicLostAt(music: FilmMusic | null, t: number, total: number): boolean {
+  if (!music?.missing || music.muted) return false;
+  const span = musicSpan(music, total);
+  return t >= span.start - 1e-9 && t < span.start + Math.max(span.seconds, 1e-6) - 1e-9;
+}
+
+/** The music is heard at t: available, not muted and inside its span. */
 export function musicOn(music: FilmMusic | null, t: number, total: number): boolean {
-  if (!music || music.muted) return false;
+  if (!music || music.muted || music.missing) return false;
   const span = musicSpan(music, total);
   return span.seconds > 0 && t >= span.start - 1e-9 && t < span.start + span.seconds - 1e-9;
 }

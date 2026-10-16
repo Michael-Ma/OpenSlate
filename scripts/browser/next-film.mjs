@@ -564,7 +564,12 @@ export const scenarios = [
     async run({ page }) {
       await openFilm(page);
       await expectText(page, "[data-act='export-unavailable']", /^The film's music is unavailable, so the film can't be checked for export\. Change music\.$/);
-      await expectText(page, ".mblk", /^Music · -18 dB$/);
+      // The lane and the player say the music is unavailable: no waveform, nothing shown as playing.
+      await expectText(page, ".mblk", /^Music · unavailable$/);
+      expect(await page.locator(".mblk .wave").count() === 0, "Missing music still draws a waveform");
+      await page.locator("[data-act='scrub']").fill("10");
+      await expectText(page, "[data-act='music-missing']", /^Music unavailable$/);
+      expect(await page.locator("[data-act='music-on']").count() === 0, "Missing music is shown as playing");
       await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · /);
       await screenshot(page, "music-missing-1440");
       await page.click("[data-act='export-music']");
@@ -573,6 +578,8 @@ export const scenarios = [
       await toastSays(page, /^Music is low-tide\.mp3\./);
       await expectText(page, "[data-act='why-not']", /^5 shots need a clip/);
       expect(await page.locator("[data-act='export-music']").count() === 0, "Change music stays in the panel once the music is back");
+      await expectText(page, ".mblk", /^low-tide\.mp3 · -18 dB$/);
+      expect(await page.locator("[data-act='music-missing']").count() === 0, "The player still says the music is unavailable");
     },
   },
   {

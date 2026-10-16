@@ -40,6 +40,7 @@ export const filmMessages = {
   "film.player.narration": { en: "Narration", zh: "旁白" },
   "film.player.quote": { en: "“{text}”", zh: "“{text}”" },
   "film.player.music": { en: "{name} · {gain} dB", zh: "{name} · {gain} dB" },
+  "film.player.music_missing": { en: "Music unavailable", zh: "音乐不可用" },
   // The mark is the one burned into a demo export's frames, which spells "Demo" in both languages.
   "film.player.demo_mark": { en: "DEMO", zh: "DEMO" },
   "film.player.demo_title": { en: "Burned into every frame of a demo export", zh: "示例导出的每一帧都带有这个“Demo”水印" },
@@ -151,8 +152,10 @@ export const filmMessages = {
   "film.line.title_state": { en: "{state} · “{text}”", zh: "{state} · “{text}”" },
   "film.music.block": { en: "{name} · {gain} dB", zh: "{name} · {gain} dB" },
   "film.music.block_muted": { en: "{name} · muted", zh: "{name} · 已静音" },
+  "film.music.block_missing": { en: "{name} · unavailable", zh: "{name} · 不可用" },
   "film.music.unnamed": { en: "Music", zh: "音乐" },
   "film.music.label": { en: "Music {name}", zh: "音乐 {name}" },
+  "film.music.label_missing": { en: "{name}, unavailable", zh: "{name}，不可用" },
   "film.music.none": { en: "No music.", zh: "没有音乐。" },
   "film.music.choose": { en: "Choose music", zh: "选择音乐" },
   "film.music.mute": { en: "Mute music", zh: "静音" },
