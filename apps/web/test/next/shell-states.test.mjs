@@ -129,13 +129,19 @@ test('the Stop confirm counts sent jobs, queued jobs and the Director the way th
   assert.deepEqual(stopLines(released).map(en), ['3 jobs already sent will finish and be charged.']);
 });
 
-test('Stop can detach input and unknown queues without treating a review-only film as active', () => {
-  for (const code of ['input_pending', 'unknown']) {
-    const overview = film({ 'shot-2-1': { video: { state: 'queued', takeCount: 0, waiting: { code, since: '' } } } });
-    assert.equal(showStop(overview, null, true, 'keyframes'), true, code);
-    assert.deepEqual(stopPreview(overview, null), { sent: 0, queued: 1, director: false });
-    assert.deepEqual(stopLines(stopPreview(overview, null)).map(en), ['1 queued job will be taken off; it needs a new confirm later.']);
-  }
+test('Stop can detach unknown queues and clips whose input is being made, without treating an idle film as active', () => {
+  const unknown = film({ 'shot-2-1': { video: { state: 'queued', takeCount: 0, waiting: { code: 'unknown', since: '' } } } });
+  assert.equal(showStop(unknown, null, true, 'keyframes'), true);
+  assert.deepEqual(stopPreview(unknown, null), { sent: 0, queued: 1, director: false });
+  assert.deepEqual(stopLines(stopPreview(unknown, null)).map(en), ['1 queued job will be taken off; it needs a new confirm later.']);
+  // A clip waiting for an input nobody is making is not running work: no Stop on an idle film (GR-13). If Stop is
+  // opened for other work, it detaches this clip too.
+  const input = film({ 'shot-2-1': { video: { state: 'queued', takeCount: 0, waiting: { code: 'input_pending', since: '' } } } });
+  assert.equal(showStop(input, null, true, 'keyframes'), false);
+  assert.deepEqual(stopPreview(input, null), { sent: 0, queued: 1, director: false });
+  // Once its keyframe is being made, the clip will go out after it: Stop shows.
+  const making = film({ 'shot-2-1': { keyframe: running('k-2-1'), video: { state: 'queued', takeCount: 0, waiting: { code: 'input_pending', since: '' } } } });
+  assert.equal(showStop(making, null, true, 'keyframes'), true);
   const review = film({ 'shot-2-1': { video: { state: 'queued', takeCount: 0, waiting: { code: 'review', since: '' } } } });
   assert.equal(showStop(review, null, true, 'keyframes'), false);
   assert.equal(stopPreview(review, null).queued, 1, 'if Stop is opened for other work, it also detaches this bound review candidate');

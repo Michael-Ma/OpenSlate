@@ -5,10 +5,10 @@
 import { unitRuns } from "./keyframes-layout.ts";
 
 /**
- * A chip's words as a head and its last word, which usually carries the point: "Mara's coat came out" + "maroon",
- * "Make 2.3" + "8 s" (a number keeps its unit). One word, or words without spaces, is all head. `cuts` are where the
- * head may end early: after each of its words but the last ("Mara's", "Mara's coat", "Mara's coat came"), and between
- * the characters of a language written without spaces ("玛拉的外套…"), once at least a word's worth shows.
+ * A chip's words, and where they may end early with "…": after each word but the last ("Mara's", "Mara's coat", …),
+ * and between the characters of a language written without spaces ("玛拉的外套…"), once at least a word's worth shows.
+ * A chip only ever shows its words from the start: a word picked from the end ("6 s" of "The 2.3 line runs 7.4 s but
+ * the shot is 6 s") can say something the note does not. `tail` is always empty (kept for the markup's shape).
  */
 export interface ChipParts {
   head: string;
@@ -33,7 +33,7 @@ export function chipParts(text: string): ChipParts {
     });
   }
   if (current) words.push(current);
-  const heads = words.length < 2 ? words : words.slice(0, -1);
+  const heads = words;
   const cuts = new Set<number>();
   let at = 0;
   heads.forEach((word, index) => {
@@ -54,13 +54,13 @@ export function chipParts(text: string): ChipParts {
     const letters = [...head.slice(0, cut).replace(/\s/g, "")];
     return letters.length >= 4 || (letters.length >= 2 && letters.some((letter) => UNSPACED.test(letter)));
   };
-  return { head, tail: words.length < 2 ? "" : words.at(-1)!, cuts: [...cuts].filter(enough).sort((a, b) => a - b) };
+  return { head, tail: "", cuts: [...cuts].filter(enough).sort((a, b) => a - b) };
 }
 
 /**
- * whole: every word shows. cut: the head ends early with "…" and the last word shows whole after it ("Mara's coat…
- * maroon"). tail: the last word alone. none: no words at all, only the chip's letter (and a settled chip's check),
- * never a lone "…" or a word cut in the middle.
+ * whole: every word shows. cut: the words end early at a word with "…" ("Mara's coat came…"). none: no words at all,
+ * only the chip's letter (and a settled chip's check), never a lone "…" or a word cut in the middle. (tail is no
+ * longer chosen: see chipParts.)
  */
 export type ChipFit = "whole" | "cut" | "tail" | "none";
 

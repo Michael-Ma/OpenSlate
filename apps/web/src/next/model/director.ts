@@ -5,6 +5,7 @@ import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "
 import { noteViews, type NoteView } from "./notes.ts";
 import { isMessageId, type MessageId } from "../i18n/messages.ts";
 import { formatList } from "../i18n/typeset.ts";
+import { queuedToRun } from "./media-state.ts";
 import { msg, type ComposerImage, type ConversationEntry, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target, type TurnView } from "./types.ts";
 
 /**
@@ -18,10 +19,16 @@ export const MESSAGE_LIMIT = 16000;
 
 // ---- Stop -------------------------------------------------------------------
 
-// Review alone offers no Stop. Other bound queues, including an unclassified wait, can be detached by Stop;
-// this is not evidence that they are currently being made. Already-stopped slots have nothing left to detach.
-const stoppableQueue = (slot: Pick<MediaSlot, "state" | "waiting">) => slot.state === "queued" && slot.waiting?.code !== "review" && slot.waiting?.code !== "stopped";
-const busySlot = (slot: MediaSlot) => slot.state === "running" || stoppableQueue(slot) || slot.replacement?.state === "running" || !!slot.replacement && stoppableQueue(slot.replacement);
+// Review alone offers no Stop, and neither does a clip waiting for an input that nobody is making (a Scene 3 clip
+// before its keyframes exist): an idle film shows no Stop (GR-13). Other bound queues, including an unclassified
+// wait, can be detached by Stop; this is not evidence that they are currently being made. Already-stopped slots have
+// nothing left to detach.
+const stoppableQueue = (slot: Pick<MediaSlot, "state" | "waiting">, inputMaking: boolean) => slot.state === "queued"
+  && slot.waiting?.code !== "review" && slot.waiting?.code !== "stopped" && (slot.waiting?.code !== "input_pending" || inputMaking);
+const busySlot = (slot: MediaSlot, inputMaking: boolean) => slot.state === "running" || stoppableQueue(slot, inputMaking)
+  || slot.replacement?.state === "running" || !!slot.replacement && stoppableQueue(slot.replacement, inputMaking);
+/** A clip's inputs being made: its keyframe (running or queued to run) or its voice line. */
+const clipInputMaking = (shot: ShotOverview) => shot.keyframe.state === "running" || queuedToRun(shot.keyframe) || shot.narration.state === "making";
 
 /**
  * Whether Stop has something to stop (GR-13): a running or waiting Director turn, a running or
@@ -32,7 +39,7 @@ export function canStop(overview: GenerationOverview | null, director: DirectorS
   if (!overview || overview.stopped) return false;
   if (director?.status === "running" || director?.status === "waiting_user") return true;
   if (overview.director.state === "working" || overview.director.state === "waiting_user") return true;
-  if (Object.values(overview.shots).some((shot) => busySlot(shot.keyframe) || busySlot(shot.video) || shot.narration.state === "making")) return true;
+  if (Object.values(overview.shots).some((shot) => busySlot(shot.keyframe, shot.narration.state === "making") || busySlot(shot.video, clipInputMaking(shot)) || shot.narration.state === "making")) return true;
   return overview.scenes.some((scene) => scene.confirmation?.state === "running");
 }
 

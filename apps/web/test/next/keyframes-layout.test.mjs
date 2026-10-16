@@ -35,13 +35,14 @@ test('on a narrow row both rows share one smaller scale, so Now and After stay c
   // The After tail gets exactly its whole text; the Now tail the rest of its row, up to 150 px.
   assert.equal(Math.round(plain.rows[1].tail), 113);
   assert.equal(Math.round(plain.rows[0].tail), Math.round(252 - 9 - (5 + 4 + 6) * plain.scale));
-  // With real labels the scale is still one for both rows: the same shots line up, and 2.3 grows by its 2 s.
+  // With real labels the strip stays to scale (no label is worth more than the allowance): the same shots line up,
+  // and 2.3 grows by its 2 s.
   const fit = fitStrip(rows(), 252, 3);
-  assert.ok(fit.scale < plain.scale);
+  assert.equal(fit.scale, plain.scale);
   assert.deepEqual(fit.rows[0].shots.slice(0, 2).map((s) => s.width), fit.rows[1].shots.slice(0, 2).map((s) => s.width));
   assert.equal(Math.round(fit.rows[1].shots[2].width - fit.rows[0].shots[2].width), Math.round(2 * fit.scale));
-  // Too narrow for "2.1 · 5 s", wide enough for "2.1".
-  assert.deepEqual(fit.rows[1].shots.slice(0, 2).map((s) => s.label), ['short', 'short']);
+  // Too narrow for "2.1 · 5 s", wide enough for "2.1"; with no change marked every shot reads alike.
+  assert.deepEqual(fit.rows.map((row) => row.shots.map((s) => s.label)), [['short', 'short', 'short'], ['short', 'short', 'short']]);
 });
 
 // The same strip with the change marked: After's 2.3 is the hot segment, Now's 2.3 its counterpart.
@@ -50,11 +51,12 @@ const changed = (full = 61) => [
   { shots: [shot(5, full), shot(4, full), { ...shot(8, full), hot: true }], tail: 113 },
 ];
 
-test('on a narrow row the changed shot and its Now counterpart keep their whole labels; the other shots give up room', () => {
+test('on a narrow row the strip stays to scale: the change shows its whole label where its length allows', () => {
   const fit = fitStrip(changed(), 252, 3);
-  assert.deepEqual(fit.rows.map((row) => row.shots.map((s) => s.label)), [['short', 'short', 'full'], ['short', 'short', 'full']]);
-  // Now's 2.3 · 6 s is as wide as its label; After's 8 s stays longer by its 2 s at the shared scale.
-  assert.equal(Math.round(fit.rows[0].shots[2].width), 61);
+  // After's 8 s has room for "2.3 · 8 s"; Now's 6 s is too short for its label within the allowance, so it shows "2.3".
+  assert.deepEqual(fit.rows.map((row) => row.shots.map((s) => s.label)), [['short', 'short', 'short'], ['short', 'short', 'full']]);
+  // Every shot is its length at the shared scale, give or take the allowance; After's 8 s is longer by its 2 s.
+  for (const [r, row] of fit.rows.entries()) row.shots.forEach((s, i) => assert.ok(s.width <= changed()[r].shots[i].seconds * fit.scale + 8 + 1e-6));
   assert.equal(Math.round(fit.rows[1].shots[2].width - fit.rows[0].shots[2].width), Math.round(2 * fit.scale));
   // 2.1 and 2.2 are the same in both rows and stay aligned, each still showing its shot label.
   assert.deepEqual(fit.rows[0].shots.slice(0, 2).map((s) => s.width), fit.rows[1].shots.slice(0, 2).map((s) => s.width));
@@ -62,9 +64,10 @@ test('on a narrow row the changed shot and its Now counterpart keep their whole 
   // Both rows still fit, the After tail with its whole text.
   for (const row of fit.rows) assert.ok(row.shots.reduce((sum, s) => sum + s.width, 0) + 9 + row.tail <= 252 + 0.01);
   assert.ok(fit.rows[1].tail >= 113 - 0.01);
-  // Chinese labels are wider ("2.3 · 8 秒"): the same order holds.
-  const zh = fitStrip(changed(66), 253, 3);
-  assert.deepEqual(zh.rows.map((row) => row.shots[2].label), ['full', 'full']);
+  // Chinese labels are wider ("2.3 · 8 秒"): where even the change's label is past the allowance, it shows "2.3",
+  // and a little more room shows it whole.
+  assert.deepEqual(fitStrip(changed(66), 253, 3).rows.map((row) => row.shots[2].label), ['short', 'short']);
+  assert.equal(fitStrip(changed(66), 310, 3).rows[1].shots[2].label, 'full');
 });
 
 test('a label the row has spare room for is never dropped, in a roomy strip as in a narrow one', () => {
@@ -77,28 +80,29 @@ test('a label the row has spare room for is never dropped, in a roomy strip as i
   assert.ok(done.rows[0].shots.every((s) => s.label === 'full'));
 });
 
-test('a shortened shot stays shorter than its Now, even when its label widens it', () => {
+test('a shortened shot stays shorter than its Now, and shows its label only when its length has room', () => {
   const fit = fitStrip([
     { shots: [shot(5), shot(4), shot(8)], tail: 62 },
     { shots: [shot(5), shot(4), { ...shot(5), hot: true }], tail: 113 },
   ], 252, 3);
   const [now, after] = fit.rows.map((row) => row.shots[2]);
-  assert.equal(after.label, 'full');
   assert.equal(now.label, 'full');
+  assert.equal(after.label, 'short');
   assert.equal(Math.round(now.width - after.width), Math.round(3 * fit.scale));
 });
 
-test('labels never squeeze the strip below half its plain scale', () => {
-  // A phone-sized row of five shots: the change keeps its label, the rest shrink no further than half the scale.
+test('labels never squeeze the strip below 90% of its plain scale', () => {
+  // A phone-sized row of five shots: too short for the change's whole label within the allowance, the strip keeps its
+  // scale and the change shows "2.3".
   const five = (hot) => [shot(5), shot(4), hot ? { ...shot(8), hot: true } : shot(6), shot(5), shot(4)];
   const plain = fitStrip([{ shots: five(false).map(({ seconds, full, short }) => ({ seconds, full, short })), tail: 62 }, { shots: five(false).map((s, i) => (i === 2 ? shot(8) : s)), tail: 113 }], 270, 3);
   const fit = fitStrip([{ shots: five(false), tail: 62 }, { shots: five(true), tail: 113 }], 270, 3);
-  assert.ok(fit.scale >= plain.scale / 2 - 1e-6 && fit.scale < plain.scale);
-  assert.equal(fit.rows[1].shots[2].label, 'full');
+  assert.ok(fit.scale >= plain.scale * 0.9 - 1e-6 && fit.scale <= plain.scale);
+  assert.equal(fit.rows[1].shots[2].label, 'short');
   // With a whole label needing more than that, the change shows its shot label alone.
   const wide = fitStrip([{ shots: five(false), tail: 62 }, { shots: five(true).map((s) => (s.hot ? { ...s, full: 140 } : s)), tail: 113 }], 270, 3);
   assert.notEqual(wide.rows[1].shots[2].label, 'full');
-  assert.ok(wide.scale >= plain.scale / 2 - 1e-6);
+  assert.ok(wide.scale >= plain.scale * 0.9 - 1e-6);
 });
 
 test('a sliver too narrow even for its shot label is cut with an ellipsis, and a tail longer than the row ends in one', () => {
@@ -112,12 +116,12 @@ test('a sliver too narrow even for its shot label is cut with an ellipsis, and a
   assert.equal(Math.round(done.scale * 100) / 100, Math.round(((200 - 6) / 17) * 100) / 100);
 });
 
-test("the other shots' whole labels take room only while every label that shows keeps showing", () => {
-  // 1024 px in Chinese: at 15 px a second "2.2 · 4 秒" needs 64 of 60 px and the row has nothing to spare; the strip
-  // gives up a little of its scale for it, and 2.1 and 2.3 keep their whole labels.
+test("the unchanged shots read alike: when one cannot show its length, none does", () => {
+  // 1024 px in Chinese: "2.2 · 4 秒" needs 64 of 60 px and the row has nothing to spare within the allowance; 2.1 and
+  // 2.2 show their shot labels alike, the change and its Now counterpart keep their whole labels.
   const fit = fitStrip(changed(64), 376, 3);
-  assert.ok(fit.scale < 15 && fit.scale > 12);
-  assert.ok(fit.rows.every((row) => row.shots.every((s) => s.label === 'full')));
+  assert.ok(fit.scale <= 15 && fit.scale > 13.4);
+  assert.deepEqual(fit.rows.map((row) => row.shots.map((s) => s.label)), [['short', 'short', 'full'], ['short', 'short', 'full']]);
   assert.ok(fit.rows.every((row) => row.shots.reduce((sum, s) => sum + s.width, 0) + 9 + row.tail <= 376 + 0.01));
 });
 

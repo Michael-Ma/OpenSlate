@@ -188,10 +188,10 @@
 .film-work .blk .lack[data-form="mark"] .mark { display: grid; }
 /*
  * A state in one mark: the system's small ring (P5 status icons), neutral; empty while nothing is made yet, and filled
- * white for a failure. Never amber, never red.
+ * grey for a failure (white is the selection's, amber the Director's). Never red.
  */
 .film-work .mark { display: none; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; place-items: center; font-size: 8.5px; font-weight: 800; font-style: normal; line-height: 1; }
-.film-work .mark[data-mark="failed"] { background: var(--text); border-color: var(--text); color: var(--surface); }
+.film-work .mark[data-mark="failed"] { background: var(--muted); border-color: var(--muted); color: var(--surface); }
 .film-work .voices { height: 30px; overflow: visible; }
 .film-work .vblk { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--raised-2); border: 1px solid var(--track); font-size: 11px; padding: 0; display: flex; align-items: center; overflow: hidden; color: var(--text); container-type: inline-size; }
 /* Words wrap to a second line, then end in an ellipsis; a block too narrow for even its number keeps it for screen readers. */
