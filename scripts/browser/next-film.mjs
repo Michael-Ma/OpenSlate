@@ -85,6 +85,23 @@ async function toastSays(page, pattern, timeout = 8000) {
   await expectText(page, ".toast", pattern, timeout);
 }
 
+/**
+ * The toast never lands on the tool row it reports on (it sat across Move earlier / later and the Volume slider),
+ * and it is opaque from its first frame. On a tall enough screen it sits over the top of the player.
+ */
+async function toastClearOfTools(page, { overPlayer = true } = {}) {
+  const spot = await page.evaluate(async () => {
+    const toast = document.querySelector(".toast");
+    await Promise.all(toast.getAnimations().map((a) => a.finished));
+    const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
+    return { toast: box(".toast"), tools: box(".tl-tools"), player: box(".player"), opacity: getComputedStyle(toast).opacity };
+  });
+  const { toast, tools, player } = spot;
+  const overlaps = toast.bottom > tools.top && toast.top < tools.bottom && toast.right > tools.left && toast.left < tools.right;
+  expect(!overlaps && spot.opacity === "1", `The toast covers the tool row or shows through: ${JSON.stringify(spot)}`);
+  if (overPlayer) expect(toast.top >= player.top && toast.bottom <= player.bottom && toast.left >= player.left && toast.right <= player.right, `The toast is not over the top of the player: ${JSON.stringify(spot)}`);
+}
+
 async function undo(page) {
   await page.click(".toast [data-act='undo']");
   await toastSays(page, /^Undone\./, 15000);
@@ -201,6 +218,7 @@ export const scenarios = [
       // Length: free and undoable; the film gets longer.
       await page.click("[data-act='len'][data-d='1']");
       await toastSays(page, /^2\.1 is 6 s\. The film is 49 s\./);
+      await toastClearOfTools(page);
       await expectText(page, "[data-act='film-line']", /^49 s · /);
       await expectText(page, ".stepper output", /^6 s$/);
       await undo(page);
@@ -410,6 +428,7 @@ export const scenarios = [
       await inView(page, "[data-act='move'][data-d='1']");
       await page.click("[data-act='len'][data-d='1']");
       await toastSays(page, /^2\.1 is 6 s\./);
+      await toastClearOfTools(page, { overPlayer: false });
       await undo(page);
       await page.click(".mblk");
       await expectText(page, "[data-act='tools-music']", /^Music · low-tide\.mp3$/);

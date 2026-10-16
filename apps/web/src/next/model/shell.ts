@@ -200,6 +200,61 @@ export function resumeCountdown(countdown: Countdown, now: number): Countdown {
   return { remaining: Math.max(countdown.remaining, TOAST_RESUME_MIN_MS), since: now };
 }
 
+/** A box on screen, in viewport pixels (the fields of a DOMRect the toast's placement reads). */
+export interface ScreenBox {
+  top: number;
+  bottom: number;
+  left: number;
+  width: number;
+}
+
+/** Where the toast's top edge and horizontal centre go, and how wide it may grow. */
+export interface ToastSpot {
+  top: number;
+  centre: number;
+  maxWidth: number;
+}
+
+/** The toast's distance from what it sits under (and from the workspace's foot), and its widest. */
+const TOAST_GAP = 12;
+const TOAST_FOOT = 22;
+const TOAST_MAX_WIDTH = 640;
+
+/** What the toast's placement reads from the page, in viewport pixels. */
+export interface ToastPlace {
+  /** The view's main area, below the top bar and any film-wide strip. */
+  workspace: ScreenBox;
+  /** The view's picture (the Keyframes preview, the Film player), if it has one, and the row of pills along its top. */
+  picture: ScreenBox | null;
+  pictureHead: ScreenBox | null;
+  /** The view opens with a title row (Plan, Assets, Settings, Start, Film) whose middle is free. */
+  titled: boolean;
+  viewportHeight: number;
+  toastHeight: number;
+}
+
+/**
+ * From 900 px the toast sits over the top of the view's picture (DESIGN.md), just under the picture's own row of
+ * pills, centred on it, so it stays clear of the shot cards and the Film tool row at the foot of the workspace, the
+ * controls a toast usually reports on. When that spot is off screen, and in views with no picture but a title row
+ * (Plan, Assets, Settings, Start), it sits at the top of the workspace, over the title row's free middle. A view with
+ * neither (the recovery review, one card at the top) keeps it at the workspace's foot.
+ */
+export function toastSpot({ workspace, picture, pictureHead, titled, viewportHeight, toastHeight }: ToastPlace): ToastSpot {
+  const width = (box: ScreenBox) => Math.max(0, Math.min(TOAST_MAX_WIDTH, box.width - 2 * TOAST_GAP));
+  const centre = workspace.left + workspace.width / 2;
+  const top = Math.max(0, workspace.top) + TOAST_GAP;
+  if (picture && picture.width > 0) {
+    const over = Math.max(picture.top + TOAST_GAP, pictureHead ? pictureHead.bottom + TOAST_GAP / 2 : -Infinity);
+    // The spot must be on screen, under the workspace's top, and leave the toast inside the picture.
+    if (over >= top && over + toastHeight <= Math.min(viewportHeight, picture.bottom) - TOAST_GAP) {
+      return { top: over, centre: picture.left + picture.width / 2, maxWidth: width(picture) };
+    }
+  }
+  if (picture || titled) return { top, centre, maxWidth: width(workspace) };
+  return { top: Math.max(top, Math.min(viewportHeight, workspace.bottom) - TOAST_FOOT - toastHeight), centre, maxWidth: width(workspace) };
+}
+
 // ---- drawer ------------------------------------------------------------------
 
 /** Esc closes the Director drawer on narrow screens, unless something inside already used the key (an open @ picker). */

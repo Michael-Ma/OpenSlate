@@ -217,9 +217,11 @@ export const scenarios = [
       // Download says what the studio would do in the sample film.
       await page.locator("aside.detail [data-act='download']").click();
       await expectText(page, ".toast", /The sample film has no files to download/);
-      // The toast sits at the bottom of the workspace (as in the study), not over the tiles.
+      // Assets has no picture to sit over, so the toast sits at the top of the workspace, centred in it (never at the
+      // foot, over the tiles or the detail's buttons).
+      await page.locator(".toast").evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       const toastBox = await box(page, ".toast");
-      near("toast bottom", toastBox.bottom, 878, 4);
+      near("toast top", toastBox.top, 64, 4);
       near("toast centre", toastBox.left + toastBox.width / 2, 916, 4);
       // Point the Director at the asset's shot (assets cannot be named in a message yet).
       await expectText(page, "aside.detail [data-act='point-director']", /^Point the Director at 1\.2$/);

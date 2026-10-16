@@ -277,8 +277,10 @@ export const scenarios = [
       expect((await narrator.inputValue()) === "cedar", "The narrator is not Cedar");
       await narrator.selectOption("marin");
       await expectText(page, ".toast", /New voice lines use Marin\./);
+      // Settings has no picture to sit over, so the toast sits at the top of the workspace.
+      await page.locator(".toast").evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       const toast = await box(page, ".toast");
-      expect(toast.bottom > 900 - 40, `The toast sits at ${Math.round(toast.top)}-${Math.round(toast.bottom)}, not at the foot of the workspace`);
+      expect(Math.abs(toast.top - 64) <= 4, `The toast sits at ${Math.round(toast.top)}-${Math.round(toast.bottom)}, not at the top of the workspace`);
       // The toast carries the Undo, as in the study.
       await page.click(".toast [data-act='undo']");
       await page.waitForFunction(() => document.querySelector("#set-voice [data-act='narrator']")?.value === "cedar");

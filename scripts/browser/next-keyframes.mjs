@@ -37,6 +37,29 @@ function near(name, actual, expected, tolerance = 10) {
   if (Math.abs(actual - expected) > tolerance) throw new Error(`${name} is ${Math.round(actual)}, expected ${expected} ± ${tolerance}`);
 }
 
+/**
+ * The toast sits over the top of the preview, under its pills (DESIGN.md), opaque from its first frame: never on the
+ * shot cards or the video panel at the foot of the workspace, where it hid a card's seconds and title.
+ */
+async function toastOverPreview(page) {
+  const spot = await page.evaluate(async () => {
+    const rect = (element) => { const r = element.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
+    const toast = document.querySelector(".toast");
+    await Promise.all(toast.getAnimations().map((a) => a.finished));
+    return {
+      toast: rect(toast),
+      preview: rect(document.querySelector(".preview")),
+      head: rect(document.querySelector(".preview .pv-head")),
+      below: [...document.querySelectorAll(".card, .vpanel")].map(rect),
+      opacity: getComputedStyle(toast).opacity,
+    };
+  });
+  const { toast, preview, head } = spot;
+  const covers = (r) => toast.bottom > r.top && toast.top < r.bottom && toast.right > r.left && toast.left < r.right;
+  if (spot.opacity !== "1" || covers(head) || spot.below.some(covers) || toast.top < preview.top || toast.bottom > preview.bottom || toast.left < preview.left || toast.right > preview.right)
+    throw new Error(`The toast is not over the top of the preview: ${JSON.stringify(spot)}`);
+}
+
 async function noPageScroll(page, width, { vertical = true } = {}) {
   const size = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight, viewport: innerHeight }));
   if (size.width > width) throw new Error(`The page scrolls sideways: ${size.width}px wide at ${width}px`);
@@ -320,6 +343,7 @@ export const scenarios = [
       if (await page.locator('[data-act="edit-conflict"]').count()) throw new Error("An unrelated head change produced an inspector conflict");
       await page.click('.insp [data-act="save-edit"]');
       await expectText(page, '.toast[data-tone="info"]', /^Saved\.\s*Undo$/);
+      await toastOverPreview(page);
       await page.waitForSelector('.insp form[data-form="prompt"]', { state: "detached" });
       if (await page.locator('[data-act="edit-conflict"]').count()) throw new Error("Saving the rebased prompt produced a conflict");
       const saved = await inspectorFixtureState(page);
