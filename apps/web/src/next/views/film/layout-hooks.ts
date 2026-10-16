@@ -1,0 +1,76 @@
+import { useEffect, useState } from "react";
+import { rowsBelow } from "../../model/film-export.ts";
+import { separatorShown } from "../../model/film.ts";
+
+/**
+ * An element's width in px, followed as it resizes: pass the returned ref to the element. Null until measured (or
+ * without ResizeObserver).
+ */
+export function useElementWidth(): [(node: HTMLElement | null) => void, number | null] {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  useEffect(() => {
+    if (!node || typeof ResizeObserver !== "function") return;
+    const measure = () => setWidth(node.getBoundingClientRect().width);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node]);
+  return [setNode, width];
+}
+
+/**
+ * How many rows of a scrolling table are still to come below what can be read (model/film-export.ts rowsBelow),
+ * followed as it scrolls and resizes: pass the returned ref to the scrolling element. Each row is measured by its
+ * `rowSelector` cell; `cover` is how much of the bottom is drawn over; `rows` changes when the rows do.
+ */
+export function useRowsBelow(rowSelector: string, cover: number, rows: string): [(node: HTMLElement | null) => void, number] {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [below, setBelow] = useState(0);
+  useEffect(() => {
+    if (!node) { setBelow(0); return; }
+    const measure = () => {
+      const visibleBottom = node.getBoundingClientRect().top + node.clientTop + node.clientHeight;
+      const atEnd = node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
+      setBelow(rowsBelow([...node.querySelectorAll<HTMLElement>(rowSelector)].map((cell) => cell.getBoundingClientRect().bottom), visibleBottom, cover, atEnd));
+    };
+    measure();
+    node.addEventListener("scroll", measure, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(node);
+    return () => { node.removeEventListener("scroll", measure); observer?.disconnect(); };
+  }, [node, rowSelector, cover, rows]);
+  return [setNode, below];
+}
+
+/**
+ * In a row that wraps, hides each `selector` separator that would end or start a line (model/film.ts
+ * separatorShown). It keeps its space, so nothing reflows. Followed as the row resizes and its contents change: pass
+ * the returned ref to the row.
+ */
+export function useLineSeparators(selector: string): (node: HTMLElement | null) => void {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!node) return;
+    let frame = 0;
+    const box = (element: Element | null) => element ? element.getBoundingClientRect() : null;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        for (const separator of node.querySelectorAll<HTMLElement>(selector)) {
+          const shown = separatorShown(box(separator.previousElementSibling), separator.getBoundingClientRect(), box(separator.nextElementSibling));
+          separator.style.visibility = shown ? "" : "hidden";
+        }
+      });
+    };
+    measure();
+    const resized = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    resized?.observe(node);
+    // Only content changes: the separators' own style changes are attribute changes, so they do not come back here.
+    const changed = new MutationObserver(measure);
+    changed.observe(node, { childList: true, subtree: true, characterData: true });
+    return () => { cancelAnimationFrame(frame); resized?.disconnect(); changed.disconnect(); };
+  }, [node, selector]);
+  return setNode;
+}

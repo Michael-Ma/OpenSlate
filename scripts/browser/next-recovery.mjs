@@ -151,6 +151,9 @@ export const scenarios = [
       await page.locator("[data-act='sel-shot']").first().click();
       await off(page, "[data-act='len']", "Film's shot tools");
       await off(page, "[data-act='move'][data-d='1']", "Film's shot tools");
+      // Nothing on the timeline promises edits that take effect while they are paused.
+      expect((await text(page, "[data-act='timeline-note']")) === "storyboard order · edits are paused until you finish the recovery review", `The timeline note reads ${JSON.stringify(await text(page, "[data-act='timeline-note']"))}`);
+      expect(await page.locator(".tl-tools .hint").count() === 0, "The tool row says what a length change would do while edits are paused");
       await shot(page, "next-recovery-film-1440");
 
       await tab(page, "assets").click();

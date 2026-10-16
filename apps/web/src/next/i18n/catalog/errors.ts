@@ -63,6 +63,16 @@ export const errors = {
   "error.MEDIA_HELD": { en: "An edit is still being applied. Export again in a moment.", zh: "还有修改正在生效，请稍后再导出。" },
   "error.MEDIA_PAUSED": { en: "The film is stopped. Continue, then export.", zh: "影片已停止。请先继续，再导出。" },
   "error.MEDIA_STALE_TARGET": { en: "The film changed while the export was prepared. Export again.", zh: "准备导出时影片有改动，请重新导出。" },
+  // Why a render stopped (an export's failure code). MEDIA_RENDER_FAILED is also the words for a code without its own.
+  "error.MEDIA_RENDER_FAILED": { en: "FFmpeg could not finish rendering the film.", zh: "FFmpeg 没能完成影片渲染。" },
+  "error.MEDIA_TOOL_FAILED": { en: "FFmpeg ended with an error.", zh: "FFmpeg 运行出错。" },
+  "error.MEDIA_TOOL_UNAVAILABLE": { en: "FFmpeg could not be started on this computer.", zh: "本机无法启动 FFmpeg。" },
+  "error.MEDIA_TIMEOUT": { en: "FFmpeg took longer than its time limit.", zh: "FFmpeg 超过了时间上限。" },
+  "error.MEDIA_TOOLCHAIN_CHANGED": { en: "FFmpeg on this computer changed. Restart OpenSlate, then try again.", zh: "本机的 FFmpeg 有变化。请重启 OpenSlate 后重试。" },
+  "error.MEDIA_WRITE_FAILED": { en: "A file could not be written on this computer. Check that the disk has space.", zh: "无法在本机写入文件，请确认磁盘有空间。" },
+  "error.MEDIA_INTEGRITY_ERROR": { en: "A media file changed or did not match its record.", zh: "有媒体文件被改动，或与记录不一致。" },
+  "error.MEDIA_SOURCE_UNAVAILABLE": { en: "A media file it needs is missing or can't be read.", zh: "需要的媒体文件丢失或无法读取。" },
+  "error.MEDIA_ARTIFACT_UNAVAILABLE": { en: "A media file it needs is missing or can't be read.", zh: "需要的媒体文件丢失或无法读取。" },
   // Films, the demo and Codex.
   "error.DEMO_PROVIDER_MISMATCH": { en: "The demo needs a film that uses the stand-in models. Open the demo film again to make a new one.", zh: "示例需要使用替身模型的影片。请重新打开示例影片来新建一部。" },
   "error.DEMO_REQUIRES_EMPTY_PROJECT": { en: "The demo can only fill an empty film.", zh: "示例只能填充空白影片。" },

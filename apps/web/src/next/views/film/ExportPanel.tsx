@@ -1,9 +1,14 @@
 import type { ExportView, GenerationOverview } from "@openslate/core/public";
+import { useCallback, useRef } from "react";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { EXPORT_SIZE, MAX_FILM_SECONDS, elapsedSeconds, filmSeconds, panelState, readinessRows, unavailableMsg, whenMsg, whyNotReady, type MediaView } from "../../model/film-export.ts";
 import { clock as formatClock } from "../../model/motion.ts";
-import { useNow } from "./clock-hooks.ts";
+import { useNow, useReducedMotion } from "./clock-hooks.ts";
+import { useRowsBelow } from "./layout-hooks.ts";
+
+/** The "n more" footer drawn over the bottom of a readiness table cut short (film.css .checks-more), in px. */
+const CHECKS_COVER_PX = 22;
 
 interface Props {
   overview: GenerationOverview;
@@ -38,6 +43,16 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
   // Exports render on this computer and spend nothing, so Stop does not turn them off (card B12).
   const startOff = offline;
   const size = { width: EXPORT_SIZE.width, height: EXPORT_SIZE.height };
+  const reduced = useReducedMotion();
+  const rows = state.kind === "idle" ? readinessRows(overview, demo) : [];
+  // A long film's rows scroll inside the table: say how many are still below, and scroll to them on a press.
+  const [table, below] = useRowsBelow("[role='rowheader']", CHECKS_COVER_PX, rows.map((row) => row.shotId).join());
+  const tableRef = useRef<HTMLDivElement | null>(null);
+  const setTable = useCallback((node: HTMLDivElement | null) => { tableRef.current = node; table(node); }, [table]);
+  const showMore = () => {
+    const node = tableRef.current;
+    if (node) node.scrollBy({ top: Math.max(20, node.clientHeight - 40), behavior: reduced ? "auto" : "smooth" });
+  };
 
   let body;
   if (state.kind === "rendering") {
@@ -47,7 +62,7 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
         <div className="big">{t("film.export.exporting")}<small>{t(state.record.demo ? "film.export.exporting_sub_demo" : "film.export.exporting_sub", { seconds, ...size })}</small></div>
         <div className="rendering">
           {/* Only the words are a live region: the elapsed time changes every second and is read on demand. */}
-          <span><span role="status">{t("film.export.rendering")}</span> · <b data-act="elapsed">{t("film.export.elapsed", { elapsed: formatClock(elapsedSeconds(state.record.startedAt, now)) })}</b></span>
+          <span><span role="status">{t("film.export.rendering")}</span> · <b className="elapsed" data-act="elapsed">{t("film.export.elapsed", { elapsed: formatClock(elapsedSeconds(state.record.startedAt, now)) })}</b></span>
           <div className="progress indet" role="progressbar" aria-label={t("film.export.progress")}><i /></div>
           <span>{t("film.export.no_percent")}</span>
         </div>
@@ -67,7 +82,6 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
       </>
     );
   } else {
-    const rows = readinessRows(overview, demo);
     const ready = !!readiness?.ready;
     const reasons = readiness && !ready ? whyNotReady(readiness, overview, locale) : [];
     const unavailable = !readiness && error ? unavailableMsg(error) : null;
@@ -88,21 +102,33 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
         {unavailable?.music ? (
           <button type="button" className="pill sm" data-act="export-music" aria-haspopup="menu" disabled={!writable} title={offline} onClick={(event) => onChangeMusic(event.currentTarget)}>{t("film.tools.change_music")}</button>
         ) : null}
-        {state.failed ? <div className="impact cost" role="status" data-act="export-failed"><span className="ic" aria-hidden="true">!</span><span>{tm(state.failed)}</span></div> : null}
-        {state.cancelled ? <div className="hint" role="status" data-act="export-cancelled">{t("film.export.cancelled")}</div> : null}
-        <div className="checks" role="table" aria-label={t("film.checks.label")}>
-          <div role="row" className="checks-row">
-            <span role="columnheader" className="h">{t("film.checks.shot")}</span>
-            <span role="columnheader" className="h">{t("film.checks.clip")}</span>
-            <span role="columnheader" className="h">{t("film.checks.voice")}</span>
+        {state.failed ? (
+          <div className="impact cost" role="status" data-act="export-failed" data-code={state.failed.code ?? undefined} title={state.failed.code ? t("film.export.failed_code", { code: state.failed.code }) : undefined}>
+            <span className="ic" aria-hidden="true">!</span>
+            <span>{state.failed.reason ? t(state.failed.text.id, { ...state.failed.text.values, reason: tm(state.failed.reason) }) : tm(state.failed.text)}</span>
           </div>
-          {rows.map((row) => (
-            <div role="row" className="checks-row" key={row.shotId} data-shot={row.shotId}>
-              <b role="rowheader">{row.label}</b>
-              <span role="cell" className={row.clip.tone === "ok" ? "y" : "n"}>{row.clip.tone === "ok" ? <span aria-hidden="true">✓ </span> : null}{tm(row.clip.text)}</span>
-              <span role="cell" className={row.voice.tone === "ok" ? "y" : row.voice.text.id === "film.cell.no_line" ? "" : "n"}>{row.voice.tone === "ok" ? <span aria-hidden="true">✓ </span> : null}{tm(row.voice.text)}</span>
+        ) : null}
+        {state.cancelled ? <div className="hint" role="status" data-act="export-cancelled">{t("film.export.cancelled")}</div> : null}
+        <div className="checks-box">
+          <div className="checks" role="table" aria-label={t("film.checks.label")} ref={setTable}>
+            <div role="row" className="checks-row">
+              <span role="columnheader" className="h">{t("film.checks.shot")}</span>
+              <span role="columnheader" className="h">{t("film.checks.clip")}</span>
+              <span role="columnheader" className="h">{t("film.checks.voice")}</span>
             </div>
-          ))}
+            {rows.map((row) => (
+              <div role="row" className="checks-row" key={row.shotId} data-shot={row.shotId}>
+                <b role="rowheader">{row.label}</b>
+                <span role="cell" className={row.clip.tone === "ok" ? "y" : "n"}>{row.clip.tone === "ok" ? <span aria-hidden="true">✓ </span> : null}{tm(row.clip.text)}</span>
+                <span role="cell" className={row.voice.tone === "ok" ? "y" : row.voice.text.id === "film.cell.no_line" ? "" : "n"}>{row.voice.tone === "ok" ? <span aria-hidden="true">✓ </span> : null}{tm(row.voice.text)}</span>
+              </div>
+            ))}
+          </div>
+          {below ? (
+            <button type="button" className="checks-more" data-act="checks-more" aria-label={t("film.checks.more_label", { count: below })} onClick={showMore}>
+              <span aria-hidden="true">↓</span> {t("film.checks.more", { count: below })}
+            </button>
+          ) : null}
         </div>
         <div className="hint" data-act="export-size">{seconds <= MAX_FILM_SECONDS ? t("film.export.length", { seconds, ...size }) : t("film.export.free", size)}</div>
         <button

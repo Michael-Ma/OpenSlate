@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, filmMusic, musicSpan, musicOn,
+  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, separatorShown, filmMusic, musicSpan, musicOn, musicLostAt,
   lengthLimits, lengthEdit, moveEdit, musicStartEdit, musicGainEdit, musicMuteEdit, musicChoiceEdit, editPressId, soundtrackOf, lengthToast,
 } from '../../src/next/model/film.ts';
 import { FilmClock } from '../../src/next/model/film-clock.ts';
@@ -67,6 +67,27 @@ test('ruler marks stay readable on short and long films', () => {
   assert.deepEqual(rulerTicks(12, 14), [0, 5, 10]);
 });
 
+test('the last ruler label is never cut off at the lane\'s end', () => {
+  // 36 s on an 880 px lane: 0:35 sits 24 px from the end, too little for its label, so it goes before its mark.
+  assert.deepEqual(tickLabels(rulerTicks(36, null), 36, 880, 32), ['after', 'after', 'after', 'after', 'after', 'after', 'after', 'before']);
+  // 48 s: 0:45 has 55 px left, enough to sit after its mark.
+  assert.ok(tickLabels(rulerTicks(48, null), 48, 880, 32).every(place => place === 'after'));
+  // Too crowded to move it back without running into 0:30: it is left out (the mark stays).
+  assert.deepEqual(tickLabels([0, 30, 35], 36, 200, 32), ['after', 'after', 'none']);
+  assert.deepEqual(tickLabels([0, 5, 10], 12, null), ['after', 'after', 'after'], 'unmeasured: as before');
+  // Phone: 14 px a second, the lane is the film's length.
+  assert.deepEqual(tickLabels(rulerTicks(12, 14), 12, 12 * 14, 32), ['after', 'after', 'before']);
+});
+
+test('a separator in the tool row never ends or starts a line', () => {
+  const line1 = { top: 100, bottom: 130 }, line2 = { top: 140, bottom: 170 }, sep = { top: 105, bottom: 125 };
+  assert.equal(separatorShown(line1, sep, line1), true);
+  assert.equal(separatorShown(line1, sep, line2), false, 'the next item wrapped: it would end line 1');
+  assert.equal(separatorShown(line1, { top: 145, bottom: 165 }, line2), false, 'it wrapped itself: it would start line 2');
+  assert.equal(separatorShown(null, sep, line1), false);
+  assert.equal(separatorShown({ top: 100, bottom: 160 }, sep, line1), true, 'a tall item beside it is on the same line');
+});
+
 test('the music library reads every page without repeats', async () => {
   const { libraryRecordings } = await import('../../src/next/model/film.ts');
   const rec = id => ({ id, label: `${id}.wav`, sha256: 'a'.repeat(64), durationSeconds: 30, role: 'music' });
@@ -80,7 +101,7 @@ test('the music library reads every page without repeats', async () => {
 test('music: one track from the soundtrack and the music library', () => {
   const library = [{ id: 'a', label: 'low-tide.mp3', sha256: 'x', durationSeconds: 72 }];
   const music = filmMusic({ audioId: 'a', gainMilliDb: -18000, startFrame: 120 }, library, 30);
-  assert.deepEqual(music, { audioId: 'a', label: 'low-tide.mp3', sha256: 'x', seconds: 72, start: 4, gainDb: -18, muted: false });
+  assert.deepEqual(music, { audioId: 'a', label: 'low-tide.mp3', sha256: 'x', seconds: 72, start: 4, gainDb: -18, muted: false, missing: false });
   assert.deepEqual(musicSpan(music, 48), { start: 4, seconds: 44 });
   assert.equal(musicOn(music, 3.9, 48), false);
   assert.equal(musicOn(music, 4, 48), true);
@@ -88,6 +109,12 @@ test('music: one track from the soundtrack and the music library', () => {
   assert.deepEqual(musicSpan({ ...music, seconds: 10 }, 48), { start: 4, seconds: 10 });
   assert.equal(filmMusic(null, library, 30), null);
   assert.equal(filmMusic({ audioId: 'gone', gainMilliDb: 0 }, library, 30).label, null, 'unknown recordings are still shown');
+  const gone = filmMusic({ audioId: 'gone', gainMilliDb: -18000 }, library, 30, true);
+  assert.equal(gone.missing, true);
+  assert.equal(musicOn(gone, 10, 48), false, 'unavailable music is never shown as playing');
+  assert.deepEqual([musicLostAt(gone, 0, 48), musicLostAt(gone, 47.9, 48), musicLostAt(music, 10, 48)], [true, true, false], 'the player says so instead');
+  assert.equal(musicLostAt({ ...gone, muted: true }, 10, 48), false, 'muted music is not heard either way');
+  assert.equal(musicLostAt({ ...gone, start: 4 }, 3, 48), false, 'not before its start');
   assert.deepEqual(soundtrackOf({ ...lastFerrySnapshot(), project: { ...lastFerrySnapshot().project, soundtrack: { audioId: 'a', gainMilliDb: 0 } } }), { audioId: 'a', gainMilliDb: 0 });
   assert.equal(soundtrackOf(lastFerrySnapshot()), null);
 });

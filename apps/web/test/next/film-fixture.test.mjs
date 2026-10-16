@@ -176,7 +176,7 @@ test('presets: a demo film is stamped Demo; a failed export says so', () => {
   assert.equal(call(demo, 'POST', '/exports', { expectedHeadVersion: head(demo) }).demo, true);
   const failed = world();
   applyFilmPreset(failed, 'failed');
-  assert.deepEqual(call(failed, 'GET', '/exports').current.failure, { code: 'RENDER_FAILED' });
+  assert.deepEqual(call(failed, 'GET', '/exports').current.failure, { code: 'MEDIA_TOOL_FAILED' });
   assert.equal(failed.overview.scenes.every(s => s.state === 'video_saved'), true);
   assert.equal(sceneId(3), failed.overview.scenes[2].sceneId);
 });

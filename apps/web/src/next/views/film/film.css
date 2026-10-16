@@ -77,6 +77,7 @@
 .film-work .fv-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--ground); z-index: 1; }
 .film-work .player .dashed-frame { background: var(--surface); }
 .film-work .music-on { display: inline-flex; align-items: center; gap: 6px; background: rgba(20,21,23,.78); border-radius: var(--r-pill); padding: 2px 9px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.film-work .music-on.lost { color: var(--text-2); font-weight: 500; }
 .film-work .meter { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; }
 .film-work .meter i { width: 2px; height: 3px; background: var(--text); border-radius: 1px; animation: fv-level .9s ease-in-out infinite; }
 .film-work .meter i:nth-child(2) { animation-delay: .2s; }
@@ -84,11 +85,13 @@
 @keyframes fv-level { 0%, 100% { height: 3px; } 50% { height: 10px; } }
 .film-work .subtitle { text-align: center; font-size: 16px; font-weight: 600; margin: 0 0 10px; min-height: 23px; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
 .film-work .subtitle small { display: block; font-size: 11px; font-weight: 600; color: var(--text-2); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 2px; }
-.film-work .player .scrub .scrubber { flex: 1; min-width: 60px; accent-color: var(--text); height: 16px; margin: 0; }
+/* The caption drops under the track before the track gets too short to seek with. */
+.film-work .player .scrub { flex-wrap: wrap; row-gap: 2px; }
+.film-work .player .scrub .scrubber { flex: 1 1 160px; min-width: 160px; accent-color: var(--text); height: 16px; margin: 0; }
 .film-work .player .scrub .skip { width: 26px; height: 26px; border-radius: 50%; border: 0; background: none; color: var(--text-2); display: grid; place-items: center; flex: none; padding: 0; }
 .film-work .player .scrub .skip:hover { color: var(--text); background: var(--raised); }
 .film-work .player .scrub .play:focus-visible, .film-work .player .scrub .skip:focus-visible { outline-offset: 1px; }
-.film-work .approx { font-size: 11px; color: var(--muted); margin-left: 4px; white-space: nowrap; }
+.film-work .approx { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; }
 
 /* export panel */
 /* The panel scrolls only as a last resort, once the table is down to its three rows. */
@@ -99,13 +102,20 @@
 .film-work .export .big small { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-2); letter-spacing: 0; margin-top: 2px; }
 /*
  * A long film's rows scroll inside the table, so Export and its size line stay in view. Rows keep their height
- * (cells clip, so auto rows could shrink to nothing) and the table keeps its header and three rows.
+ * (cells clip, so auto rows could shrink to nothing) and the table keeps its header and three rows. The header stays
+ * put while the rows scroll; while rows are still below, a footer over the table's bottom counts them and scrolls to
+ * them (it covers only rows it counts).
  */
-.film-work .export .checks { display: grid; grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; gap: 0 8px; font-size: 12px; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); padding: 4px 0; flex: 0 1 auto; min-height: 86px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.film-work .export .checks-box { position: relative; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 86px; }
+.film-work .export .checks { display: grid; grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; font-size: 12px; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); padding: 0 0 4px; flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
 .film-work .checks .checks-row { display: contents; }
-.film-work .checks .h { color: var(--muted); font-size: 11px; padding: 2px 0 3px; }
-.film-work .checks span, .film-work .checks b { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.film-work .checks [role="rowheader"], .film-work .checks [role="cell"], .film-work .checks [role="columnheader"] { padding: 1px 8px 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.film-work .checks .h { position: sticky; top: 0; z-index: 1; background: var(--surface); color: var(--muted); font-size: 11px; padding: 6px 8px 3px 0; box-shadow: 0 1px 0 var(--hairline); margin-bottom: 1px; }
 .film-work .checks b { font-weight: 700; color: var(--text); }
+.film-work .checks-more { position: absolute; left: 0; right: 0; bottom: 1px; height: 21px; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 4px; border: 0; border-top: 1px solid var(--hairline); border-radius: 0; background: var(--surface); color: var(--text-2); font-size: 11.5px; font-weight: 600; padding: 0 2px 0 0; }
+.film-work .checks-more::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 10px; background: linear-gradient(to bottom, transparent, var(--surface)); pointer-events: none; }
+.film-work .checks-more:hover { color: var(--text); }
+.film-work .checks-more:focus-visible { outline-offset: -2px; }
 .film-work .checks .y { color: var(--green); }
 .film-work .checks .n { color: var(--text); }
 .film-work .export .go { justify-content: center; padding: 8px 12px; border-radius: 14px; white-space: normal; text-align: center; line-height: 1.3; flex: none; }
@@ -113,19 +123,22 @@
 .film-work .export .why { font-size: 11.5px; color: var(--muted); text-align: center; margin-top: -3px; line-height: 1.35; }
 .film-work .rendering { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--track); background: var(--raised); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; color: var(--text-2); }
 .film-work .rendering b { color: var(--text); }
+.film-work .rendering .elapsed { white-space: nowrap; }
 .film-work .last-line { font-size: 12.5px; color: var(--text-2); }
 .film-work .last-line b { color: var(--text); font-weight: 600; }
 
 /* ---------- timeline ---------- */
 .film-work .timeline { flex: 1 0 340px; min-height: 0; display: flex; flex-direction: column; padding: 12px 14px 10px; gap: 6px; overflow: hidden; }
 .film-work .tl-note { font-size: 12.5px; }
-.film-work .tl-scroll { flex: 1; min-height: 0; overflow-x: auto; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+/* The padding leaves room for a focus ring around a block at the lanes' right or bottom edge. */
+.film-work .tl-scroll { flex: 1; min-height: 0; overflow-x: auto; overflow-y: auto; padding: 0 6px 6px 0; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
 .film-work .tl-grid { display: grid; grid-template-columns: 92px minmax(0, 1fr); grid-template-rows: 18px 20px minmax(78px, 1fr) 30px 36px; row-gap: 6px; position: relative; min-width: 0; height: 100%; min-height: 212px; }
 .film-work .lane-k { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; position: sticky; left: 0; background: var(--surface); z-index: 3; padding-right: 8px; }
 .film-work .lane { position: relative; min-width: 0; }
 .film-work .ruler { height: 18px; cursor: pointer; }
 .film-work .ruler .tick { position: absolute; top: 0; bottom: 0; font-size: 10.5px; color: var(--muted); padding-left: 4px; font-variant-numeric: tabular-nums; border-left: 1px solid var(--track); white-space: nowrap; }
-.film-work .ruler .tick i { display: none; }
+/* A mark too near the lane's end has its label before it (model/film.ts tickLabels). */
+.film-work .ruler .tick.end { border-left: 0; border-right: 1px solid var(--track); padding: 0 4px 0 0; transform: translateX(-100%); }
 .film-work .bands { height: 20px; }
 .film-work .band { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--raised); border: 1px solid var(--hairline); font-size: 11px; font-weight: 600; color: var(--text-2); padding: 1px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .film-work .pics { min-height: 78px; }
@@ -135,16 +148,49 @@
 .film-work .blk.kfonly .blk-pic { opacity: .55; }
 .film-work .blk.kfonly { border-style: dashed; border-color: var(--text-2); }
 .film-work .blk.empty { background: none; border: 1.5px dashed var(--track); }
-.film-work .blk.sel { outline: 2px solid var(--select); outline-offset: -1px; z-index: 2; }
-.film-work .blk:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; z-index: 3; }
-.film-work .blk .badge { position: absolute; left: 5px; top: 5px; font-size: 11px; padding: 1px 5px; z-index: 1; }
-.film-work .blk .dur { position: absolute; right: 5px; bottom: 4px; font-size: 11px; font-weight: 600; background: rgba(20,21,23,.8); border-radius: 5px; padding: 0 5px; z-index: 1; }
-.film-work .blk .lack { position: absolute; left: 5px; bottom: 4px; font-size: 10.5px; font-weight: 600; color: var(--text-2); background: rgba(20,21,23,.8); border-radius: 5px; padding: 0 5px; z-index: 1; white-space: nowrap; max-width: calc(100% - 34px); overflow: hidden; text-overflow: clip; }
-@container (max-width: 64px) { .film-work .blk .lack { display: none; } }
+/*
+ * Selection is a white border drawn inside the block; keyboard focus is the system's ring, outside the block with a
+ * gap, so a focused block never looks selected.
+ */
+.film-work .blk.sel { z-index: 2; }
+.film-work .blk.sel .badge { background: var(--select); color: var(--select-ink); }
+.film-work .blk.sel::after, .film-work .mblk.sel::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--select); border-radius: 7px; z-index: 3; pointer-events: none; }
+.film-work .mblk.sel::after { border-radius: 5px; }
+.film-work .blk:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; z-index: 3; }
+.film-work .blk .badge { position: absolute; left: 5px; top: 5px; font-size: 11px; padding: 1px 5px; z-index: 1; white-space: nowrap; }
 .film-work .blk .letter { position: absolute; right: 5px; top: 5px; width: 16px; height: 16px; font-size: 10.5px; z-index: 1; }
+/* The bottom row: the length at the right and what the shot lacks at the left, or above the length when both cannot fit. */
+.film-work .blk .blk-foot { position: absolute; left: 5px; right: 5px; bottom: 4px; display: flex; flex-direction: row-reverse; flex-wrap: wrap-reverse; align-items: center; gap: 3px 4px; z-index: 1; }
+.film-work .blk .dur { flex: none; font-size: 11px; font-weight: 600; background: rgba(20,21,23,.8); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
+.film-work .blk .lack { margin-right: auto; min-width: 0; font-size: 10.5px; font-weight: 600; line-height: 13px; color: var(--text-2); background: rgba(20,21,23,.8); border-radius: 5px; padding: 0 5px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/*
+ * A narrow block makes room in this order: a tighter top row, the Director's letter under the number, no lack, no
+ * length, and at last no number. Its title and accessible name keep all of it.
+ */
+@container (max-width: 60px) {
+  .film-work .blk .badge { left: 3px; padding: 1px 3px; }
+  .film-work .blk .letter { right: 3px; }
+  .film-work .blk .blk-foot { left: 3px; right: 3px; }
+}
+@container (max-width: 46px) {
+  .film-work .blk .letter { top: 24px; left: 3px; right: auto; }
+  .film-work .blk .lack { display: none; }
+}
+@container (max-width: 34px) { .film-work .blk .dur { display: none; } }
+@container (max-width: 24px) { .film-work .blk .badge, .film-work .blk .letter { display: none; } }
 .film-work .voices { height: 30px; overflow: visible; }
-.film-work .vblk { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--raised-2); border: 1px solid var(--track); font-size: 11px; padding: 0 6px; display: flex; align-items: center; white-space: nowrap; overflow: hidden; color: var(--text); }
-.film-work .vblk b { font-weight: 700; margin-right: 4px; }
+.film-work .vblk { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--raised-2); border: 1px solid var(--track); font-size: 11px; padding: 0; display: flex; align-items: center; overflow: hidden; color: var(--text); container-type: inline-size; }
+/* Words wrap to a second line, then end in an ellipsis; a block too narrow for even its number keeps it for screen readers. */
+.film-work .vblk .vtext { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; line-height: 12.5px; word-break: keep-all; overflow-wrap: anywhere; min-width: 0; margin: 0 3px 0 5px; }
+.film-work .vblk b { font-weight: 700; white-space: nowrap; }
+/*
+ * Too narrow for a placed line's quote (the player shows it as a subtitle), its number stays alone; a line that is not
+ * placed keeps its state as long as the number fits. Too narrow for the number, the block is empty. Screen readers
+ * keep both.
+ */
+@container (max-width: 26px) { .film-work .vblk .vtext { margin: 0 1px; } }
+@container (max-width: 42px) { .film-work .vblk:not(.loose) .vwords { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
+@container (max-width: 19px) { .film-work .vblk .vtext { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
 .film-work .vblk.loose { background: none; border-style: dashed; color: var(--text-2); }
 .film-work .musicl { height: 36px; }
 .film-work .mblk { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--raised); border: 1px solid var(--track); overflow: hidden; padding: 0; color: var(--text); text-align: left; font: inherit; }
@@ -152,8 +198,9 @@
 .film-work .mblk .wave i { flex: 1; background: var(--text-2); border-radius: 1px; min-width: 2px; opacity: .75; }
 .film-work .mblk .mname { position: relative; z-index: 1; font-size: 11px; font-weight: 600; padding: 0 7px; line-height: 34px; white-space: nowrap; }
 .film-work .mblk.muted .wave { opacity: .12; }
-.film-work .mblk.sel { outline: 2px solid var(--select); outline-offset: -1px; }
-.film-work .mblk:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* Missing music: an empty dashed block with its words, nothing that looks like sound. */
+.film-work .mblk.missing { background: none; border: 1.5px dashed var(--track); color: var(--text-2); }
+.film-work .mblk:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .film-work .none-music { font-size: 12px; color: var(--muted); line-height: 36px; white-space: nowrap; }
 .film-work .none-music .pill { line-height: 1.45; }
 .film-work .lane-k .mute-btn { width: 22px; height: 22px; }

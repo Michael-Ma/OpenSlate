@@ -206,7 +206,7 @@ function applyPreset(world: FixtureWorld, fixture: FilmFixture, name: string): v
     ? { film, interrupted: true, record: { exportId, state: "rendering", headVersion: head, demo: false, startedAt, outdatedBy: [] } }
     : name === "stalled"
       ? { film, interrupted: false, stalled: true, record: { exportId, state: "rendering", headVersion: head, demo: false, startedAt, outdatedBy: [] } }
-      : { film, interrupted: false, record: { exportId, state: "failed", headVersion: head, demo: false, startedAt, finishedAt: nowIso(-3 * 60_000), failure: { code: "RENDER_FAILED" }, outdatedBy: [] } };
+      : { film, interrupted: false, record: { exportId, state: "failed", headVersion: head, demo: false, startedAt, finishedAt: nowIso(-3 * 60_000), failure: { code: "MEDIA_TOOL_FAILED" }, outdatedBy: [] } };
   fixture.exports = [current, ...earlier];
 }
 

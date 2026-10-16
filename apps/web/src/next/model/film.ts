@@ -245,6 +245,40 @@ export function rulerTicks(total: number, pixelsPerSecond: number | null): numbe
   return ticks;
 }
 
+/** The widest ruler label ("10:00" at 10.5 px, with its 4 px of padding), in px. */
+export const RULER_LABEL_PX = 32;
+
+/** Where a ruler mark's time label sits: after its mark, before it (end-aligned), or left out. */
+export type TickLabel = "after" | "before" | "none";
+
+/**
+ * Ruler labels on a lane `width` px wide. A label sits after its mark; one too near the lane's end to fit there sits
+ * before its mark instead, so it is never cut off, unless that would run into the label before it. Unmeasured
+ * (width null), every label sits after its mark.
+ */
+export function tickLabels(ticks: readonly number[], total: number, width: number | null, labelWidth = RULER_LABEL_PX): TickLabel[] {
+  if (!width || total <= 0) return ticks.map(() => "after");
+  let previousEnd = -Infinity;
+  return ticks.map((seconds) => {
+    const at = (seconds / total) * width;
+    if (at + labelWidth <= width + 0.5) { previousEnd = at + labelWidth; return "after"; }
+    if (at - labelWidth >= previousEnd - 0.5) { previousEnd = at; return "before"; }
+    return "none";
+  });
+}
+
+/** A box's vertical extent on screen. */
+export interface LineBox { top: number; bottom: number }
+
+/**
+ * A separator in a row that wraps shows only between two items on its own line: at the end or the start of a line it
+ * would separate nothing.
+ */
+export function separatorShown(before: LineBox | null, own: LineBox, after: LineBox | null): boolean {
+  const sameLine = (a: LineBox, b: LineBox) => a.top < b.bottom - 1 && b.top < a.bottom - 1;
+  return !!before && !!after && sameLine(before, own) && sameLine(own, after);
+}
+
 // ---- music ---------------------------------------------------------------------------
 
 export interface FilmMusic {
@@ -257,6 +291,8 @@ export interface FilmMusic {
   start: number;
   gainDb: number;
   muted: boolean;
+  /** The recording is missing from the film's assets or was never measured: it cannot play or be exported. */
+  missing: boolean;
 }
 
 export function soundtrackOf(snapshot: ProjectSnapshot | null): Soundtrack | null {
@@ -264,7 +300,8 @@ export function soundtrackOf(snapshot: ProjectSnapshot | null): Soundtrack | nul
   return project?.soundtrack ?? null;
 }
 
-export function filmMusic(soundtrack: Soundtrack | null, library: readonly MusicRecording[], fps: number): FilmMusic | null {
+/** `missing`: the studio says the chosen recording is unavailable (the export read fails on it, film-export.ts). */
+export function filmMusic(soundtrack: Soundtrack | null, library: readonly MusicRecording[], fps: number, missing = false): FilmMusic | null {
   if (!soundtrack) return null;
   const recording = library.find((r) => r.id === soundtrack.audioId) ?? null;
   return {
@@ -275,6 +312,7 @@ export function filmMusic(soundtrack: Soundtrack | null, library: readonly Music
     start: round1((soundtrack.startFrame ?? 0) / fps),
     gainDb: Math.round(soundtrack.gainMilliDb / 1000),
     muted: !!soundtrack.muted,
+    missing,
   };
 }
 
@@ -285,9 +323,16 @@ export function musicSpan(music: FilmMusic, total: number): { start: number; sec
   return { start, seconds: Math.max(0, end - start) };
 }
 
-/** The music is heard at t: not muted and inside its span. */
+/** Missing music where it would be heard at t (not muted, inside its span): the player says it is unavailable. */
+export function musicLostAt(music: FilmMusic | null, t: number, total: number): boolean {
+  if (!music?.missing || music.muted) return false;
+  const span = musicSpan(music, total);
+  return t >= span.start - 1e-9 && t < span.start + Math.max(span.seconds, 1e-6) - 1e-9;
+}
+
+/** The music is heard at t: available, not muted and inside its span. */
 export function musicOn(music: FilmMusic | null, t: number, total: number): boolean {
-  if (!music || music.muted) return false;
+  if (!music || music.muted || music.missing) return false;
   const span = musicSpan(music, total);
   return span.seconds > 0 && t >= span.start - 1e-9 && t < span.start + span.seconds - 1e-9;
 }

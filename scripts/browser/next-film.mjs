@@ -70,6 +70,46 @@ async function readableChecks(page, { scrolls }) {
   expect(go.top >= panel.top && go.bottom <= panel.bottom, `Export is outside its panel: ${go.top}-${go.bottom} in ${panel.top}-${panel.bottom}`);
 }
 
+/**
+ * Nothing in the lanes is cut off or covered: on every picture block the number, the Director's letter, the lack and
+ * the length do not overlap and stay inside the block; narration words wrap and end in an ellipsis instead of being
+ * cut; every ruler label is inside the ruler.
+ */
+async function lanesReadable(page) {
+  const problems = await page.evaluate(() => {
+    const out = [];
+    const rect = (el) => el.getBoundingClientRect();
+    const shown = (el) => !!el && getComputedStyle(el).display !== "none" && getComputedStyle(el).visibility !== "hidden" && rect(el).width > 1 && getComputedStyle(el).clipPath === "none";
+    const cross = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+    for (const block of document.querySelectorAll(".pics .blk")) {
+      const box = rect(block);
+      const parts = ["badge", "letter", "lack", "dur"].map((name) => [name, block.querySelector(`.${name}`)]).filter(([, el]) => shown(el));
+      for (const [name, el] of parts) {
+        const r = rect(el);
+        if (r.left < box.left - 0.5 || r.right > box.right + 0.5 || r.top < box.top - 0.5 || r.bottom > box.bottom + 0.5) out.push(`${block.dataset.shot} ${name} leaves its block`);
+        if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).textOverflow !== "ellipsis" && getComputedStyle(el).webkitLineClamp === "none") out.push(`${block.dataset.shot} ${name} is cut off`);
+      }
+      for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+        if (cross(rect(parts[i][1]), rect(parts[j][1]))) out.push(`${block.dataset.shot}: ${parts[i][0]} covers ${parts[j][0]}`);
+      }
+      if (block.getAttribute("title") !== block.getAttribute("aria-label")) out.push(`${block.dataset.shot} has no title with its whole label`);
+    }
+    for (const line of document.querySelectorAll(".voices .vblk")) {
+      const text = line.querySelector(".vtext");
+      if (shown(text) && text.scrollWidth > text.clientWidth + 1) out.push(`${line.dataset.shot}'s narration is cut off sideways`);
+      if (!line.title.startsWith(line.querySelector("b")?.textContent ?? "?")) out.push(`${line.dataset.shot}'s narration has no title`);
+    }
+    const ruler = rect(document.querySelector(".ruler"));
+    for (const tick of document.querySelectorAll(".ruler .tick")) {
+      if (!tick.textContent) continue;
+      const r = rect(tick);
+      if (r.right > ruler.right + 0.5 || r.left < ruler.left - 0.5) out.push(`ruler label ${tick.textContent} is cut off`);
+    }
+    return out;
+  });
+  expect(!problems.length, problems.join("; "));
+}
+
 /** The element is inside the viewport (after any scrolling the view did by itself). */
 async function inView(page, selector) {
   const value = await box(page, selector);
@@ -135,7 +175,7 @@ export const scenarios = [
       await expectText(page, "[data-act='last-export']", /^No export yet$/);
       // Only Scene 1 has clips: Export is off and says why.
       expect(await page.locator("[data-act='export']").isDisabled(), "Export is enabled before every shot has a clip");
-      await expectText(page, "[data-act='why-not']", /^5 shots need a clip and settle the voice in 2\.3 and 3\.2$/);
+      await expectText(page, "[data-act='why-not']", /^5 shots need a clip; settle the voice in 2\.3 and 3\.2$/);
       await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · 1280 × 720 · renders here, free$/);
       const noted = await page.getAttribute(`.blk[data-shot='${shot("2.2")}']`, "aria-label");
       expect(/^2\.2, Medium, \d+\ss, .+, Director note a$/.test(noted ?? ""), `2.2's label leaves out its Director note: ${noted}`);
@@ -144,7 +184,26 @@ export const scenarios = [
       const done = await page.locator(`.checks [data-shot='${shot("1.1")}'] .y`).evaluate((el) => getComputedStyle(el).color);
       expect(done === "rgb(95, 196, 138)", `A made clip is not green: ${done}`);
       // Lanes: the too-long line is not placed; the keyframe-only and empty shots say what they lack.
-      await expectText(page, `.vblk[data-shot='${shot("2.3")}']`, /^2\.3\s+7\.4 s, too long · not placed$/);
+      await expectText(page, `.vblk[data-shot='${shot("2.3")}']`, /^2\.3\s+7\.4\ss, too long · not placed$/);
+      // The unsettled line's state is read in full, not cut after "not p".
+      const unsettled = await page.locator(`.vblk[data-shot='${shot("2.3")}'] .vtext`).evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+      expect(unsettled.scroll <= unsettled.client + 1, `2.3's narration state is cut short: ${JSON.stringify(unsettled)}`);
+      await lanesReadable(page);
+      // The readiness table says that more rows follow, and scrolls to the shots the summary names.
+      await expectText(page, "[data-act='checks-more']", /^↓\s+\d more$/);
+      expect((await page.getAttribute("[data-act='checks-more']", "aria-label"))?.startsWith("Show "), "The more-rows count has no name");
+      await page.click("[data-act='checks-more']");
+      await page.waitForFunction(() => !document.querySelector("[data-act='checks-more']"), null, { timeout: 4000 })
+        .catch(() => { throw new Error("Showing more rows did not reach the end of the table"); });
+      const named = await page.evaluate(() => {
+        const table = document.querySelector(".export .checks").getBoundingClientRect();
+        const head = document.querySelector(".export .checks .h").getBoundingClientRect();
+        const row = document.querySelector(".checks [data-shot='shot-3-2'] [role='rowheader']").getBoundingClientRect();
+        return { inView: row.top >= head.bottom - 1 && row.bottom <= table.bottom + 1, headTop: head.top - table.top };
+      });
+      expect(named.inView, "3.2, which the summary names, is not in view after showing more rows");
+      expect(named.headTop <= 2, `The table's header scrolled away: ${named.headTop}px`);
+      await page.locator(".export .checks").evaluate((el) => { el.scrollTop = 0; });
       expect((await page.locator(`.vblk[data-shot='${shot("1.2")}']`).getAttribute("data-state")) === "placed", "1.2's settled line is not placed");
       expect(await page.locator(`.blk.kfonly[data-shot='${shot("2.1")}']`).count() === 1, "2.1 is not drawn as keyframe only");
       await expectText(page, `.blk.empty[data-shot='${shot("3.1")}'] .lack`, /^nothing yet$/);
@@ -241,6 +300,19 @@ export const scenarios = [
       await expectText(page, ".tl-tools .hint", /^a new length outdates its clip$/);
       await page.keyboard.press("Escape");
       await expectText(page, ".tl-tools", /^Select a shot/);
+      // 1.1 keeps keyboard focus but is no longer selected: its ring sits outside it, with no white border or badge.
+      const focusOnly = await page.locator(`.blk[data-shot='${shot("1.1")}']`).evaluate((el) => ({
+        focused: el.matches(":focus-visible"),
+        border: getComputedStyle(el, "::after").borderTopStyle,
+        offset: parseFloat(getComputedStyle(el).outlineOffset),
+        badge: getComputedStyle(el.querySelector(".badge")).backgroundColor,
+      }));
+      expect(focusOnly.focused && focusOnly.offset >= 2, `The focus ring is not set off from the block: ${JSON.stringify(focusOnly)}`);
+      expect(focusOnly.border === "none" && focusOnly.badge !== "rgb(236, 236, 238)", `A focused block looks selected: ${JSON.stringify(focusOnly)}`);
+      await page.keyboard.press("Enter");
+      const selected = await page.locator(`.blk[data-shot='${shot("1.1")}']`).evaluate((el) => ({ border: getComputedStyle(el, "::after").borderTopColor, badge: getComputedStyle(el.querySelector(".badge")).backgroundColor }));
+      expect(selected.border === "rgb(236, 236, 238)" && selected.badge === "rgb(236, 236, 238)", `A selected block is not marked white: ${JSON.stringify(selected)}`);
+      await page.keyboard.press("Escape");
       await screenshot(page, "length-order-1440");
     },
   },
@@ -336,11 +408,16 @@ export const scenarios = [
       await expectText(page, ".export .big", /^Ready to export\s*50 s · every clip current, every voice line settled$/);
       await expectText(page, "#fv-export-why", /^MP4 of the whole film$/);
       await expectText(page, "[data-act='export-size']", /^Length 50 s of 6:00 · 1280 × 720 · renders here, free$/);
+      // A 50 s film: the 0:50 mark is at the lane's end, so its label sits before it, inside the ruler.
+      await lanesReadable(page);
+      expect((await page.locator(".ruler .tick").last().getAttribute("data-label")) === "before", "The last ruler label does not sit before its mark");
       const why = await box(page, "#fv-export-why");
       expect(why.bottom <= (await box(page, ".export")).bottom, "The export size line is hidden below the panel");
       await page.click("[data-act='export']");
       await expectText(page, ".export .big", /^Exporting…\s*MP4 · 50 s · 1280 × 720$/);
       await expectText(page, "[data-act='elapsed']", /^0:0\d elapsed$/);
+      const elapsed = await page.locator("[data-act='elapsed']").evaluate((el) => el.getClientRects().length);
+      expect(elapsed === 1, `The elapsed time breaks across lines (${elapsed} pieces)`);
       expect(await page.locator("[data-act='elapsed']").evaluate((el) => !el.closest("[role='status'], [aria-live]:not([aria-live='off'])")), "The elapsed time is inside a live region and is announced every second");
       await expectText(page, ".export .rendering [role='status']", /^Rendering on this computer$/);
       expect(await page.locator(".export [role='progressbar']").count() === 1, "No progress bar while rendering");
@@ -395,8 +472,11 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await openFilm(page);
-      await expectText(page, "[data-act='export-failed']", /The last export stopped \(RENDER_FAILED\)\./);
+      await expectText(page, "[data-act='export-failed'] > span:last-child", /^The last export stopped\. FFmpeg ended with an error\. You can export again\.$/);
+      expect((await page.getAttribute("[data-act='export-failed']", "title")) === "Failure code: MEDIA_TOOL_FAILED", "The failure code is not kept as a detail");
       await readableChecks(page, { scrolls: true });
+      const bottom = await page.evaluate(() => ({ why: document.querySelector("#fv-export-why").getBoundingClientRect().bottom, panel: document.querySelector(".export").getBoundingClientRect().bottom, scrolls: document.querySelector(".export").scrollHeight > document.querySelector(".export").clientHeight + 1 }));
+      expect(!bottom.scrolls && bottom.panel - bottom.why >= 10, `The note under Export sits on the panel's edge: ${JSON.stringify(bottom)}`);
       expect(!(await page.locator("[data-act='export']").isDisabled()), "Export is off after a failed export");
       await screenshot(page, "failed-1440");
       // A 20-shot film: the table scrolls and the page does not.
@@ -404,6 +484,8 @@ export const scenarios = [
       await openFilm(page);
       await expectText(page, "[data-act='film-line']", /^108 s · 20 shots · 3 of 20 clips made$/);
       await readableChecks(page, { scrolls: true });
+      // Narrow blocks drop what cannot fit: the Director's letter never covers a shot number.
+      await lanesReadable(page);
       const size = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, viewport: innerHeight }));
       expect(size.height <= size.viewport, `The page scrolls: ${size.height}px tall in ${size.viewport}px`);
       await page.locator(".export .checks").evaluate((el) => { el.scrollTop = el.scrollHeight; });
@@ -419,6 +501,10 @@ export const scenarios = [
       await openFilm(page);
       await readableChecks(page, { scrolls: true });
       await noSidewaysScroll(page, 1280);
+      // The caption by the scrubber wraps under it rather than squeezing the track.
+      const track = await box(page, "[data-act='scrub']");
+      expect(track.width >= 150, `The scrub track is ${Math.round(track.width)}px wide at 1280`);
+      await lanesReadable(page);
       // The workspace scrolls when it is taller than the screen, and a selection brings its tools into view.
       const work = await page.locator(".film-work").evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, overflow: getComputedStyle(el).overflowY }));
       expect(work.overflow === "auto", `The workspace cannot scroll: ${JSON.stringify(work)}`);
@@ -501,7 +587,12 @@ export const scenarios = [
     async run({ page }) {
       await openFilm(page);
       await expectText(page, "[data-act='export-unavailable']", /^The film's music is unavailable, so the film can't be checked for export\. Change music\.$/);
-      await expectText(page, ".mblk", /^Music · -18 dB$/);
+      // The lane and the player say the music is unavailable: no waveform, nothing shown as playing.
+      await expectText(page, ".mblk", /^Music · unavailable$/);
+      expect(await page.locator(".mblk .wave").count() === 0, "Missing music still draws a waveform");
+      await page.locator("[data-act='scrub']").fill("10");
+      await expectText(page, "[data-act='music-missing']", /^Music unavailable$/);
+      expect(await page.locator("[data-act='music-on']").count() === 0, "Missing music is shown as playing");
       await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · /);
       await screenshot(page, "music-missing-1440");
       await page.click("[data-act='export-music']");
@@ -510,6 +601,8 @@ export const scenarios = [
       await toastSays(page, /^Music is low-tide\.mp3\./);
       await expectText(page, "[data-act='why-not']", /^5 shots need a clip/);
       expect(await page.locator("[data-act='export-music']").count() === 0, "Change music stays in the panel once the music is back");
+      await expectText(page, ".mblk", /^low-tide\.mp3 · -18 dB$/);
+      expect(await page.locator("[data-act='music-missing']").count() === 0, "The player still says the music is unavailable");
     },
   },
   {
@@ -548,6 +641,14 @@ export const scenarios = [
       await noSidewaysScroll(page, 390);
       const tools = await page.locator(".tl-tools").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
       expect(tools, "The tool row is wider than the phone");
+      await page.waitForTimeout(100);
+      const stranded = await page.locator(".tl-tools").evaluate((row) => [...row.querySelectorAll(":scope > .sep")].filter((sep) => {
+        if (getComputedStyle(sep).visibility === "hidden") return false;
+        const own = sep.getBoundingClientRect();
+        const same = (el) => { const r = el?.getBoundingClientRect(); return !!r && r.top < own.bottom && own.top < r.bottom; };
+        return !same(sep.previousElementSibling) || !same(sep.nextElementSibling);
+      }).length);
+      expect(stranded === 0, `${stranded} separators are left at the end or start of a line in the tool row`);
       await page.locator(".timeline").scrollIntoViewIfNeeded();
       await screenshot(page, "phone-390");
       await page.locator(".player").scrollIntoViewIfNeeded();
@@ -635,6 +736,7 @@ export const scenarios = [
       await expectText(page, "[data-act='film-line']", /^\d+ s · \d+ shots · \d+ of \d+ clips made$/);
       await expectText(page, ".export .big", /^(Not ready to export|Ready)/, 15000);
       await page.waitForSelector(".mblk, .none-music");
+      await lanesReadable(page);
       const first = page.locator(".pics .blk").first();
       const id = await first.getAttribute("data-shot");
       await first.click();

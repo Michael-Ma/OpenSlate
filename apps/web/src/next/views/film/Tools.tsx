@@ -1,6 +1,6 @@
 import type { ShotOverview } from "@openslate/core/public";
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
-import { useRecoveryLock } from "../../app/useWriteGuard.ts";
+import { useRecoveryLock, useWriteGuard } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { lengthLimits, shotSeconds, type FilmMusic, type FilmShot } from "../../model/film.ts";
 import { gainComparison, type GainBaseline, type GainDraft, type GainResult, type GainSession } from "../../model/film-gain.ts";
@@ -28,7 +28,9 @@ export function ShotTools({ shot, overview, fps, writable, onLength, onMove, onO
   const off = !writable;
   const locked = useRecoveryLock();
   const offline = writable ? undefined : locked ?? t("film.offline");
-  const notes = [
+  // What a new length would do is left out while the studio takes no edits (offline, or a restored studio in review).
+  const paused = useWriteGuard().serverWhy !== null;
+  const notes = paused ? "" : [
     limits.voiceFloor ? t("film.tools.voice_floor", { seconds: limits.voiceFloor }) : null,
     shot.picture === "clip" ? t("film.tools.outdates_clip") : null,
   ].filter(Boolean).join(" · ");

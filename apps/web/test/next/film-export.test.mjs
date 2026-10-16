@@ -2,13 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readinessOf, readinessRows, whyNotReady, panelState, lastExport, failureMsg, changeMsg, whenMsg, elapsedSeconds,
-  filmFingerprint, changedSince, unavailableMsg, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
+  filmFingerprint, changedSince, unavailableMsg, musicMissing, rowsBelow, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
 } from '../../src/next/model/film-export.ts';
 import { lastFerryOverview, shotId } from '../../src/next/fixtures/last-ferry.ts';
-import { translateMsg } from '../../src/next/i18n/translate.ts';
+import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
 
 const en = m => m && translateMsg('en', m);
 const zh = m => m && translateMsg('zh-CN', m);
+/** A failure as the panel says it: its words, with the code's reason put in. */
+const said = (failure, locale = 'en') => failure.reason
+  ? translate(locale, failure.text.id, { ...failure.text.values, reason: translateMsg(locale, failure.reason) })
+  : translateMsg(locale, failure.text);
 
 /** Every clip made, 2.3 lengthened for its line and 3.2 voiced: ready to export. */
 function finished() {
@@ -45,8 +49,8 @@ test('readiness follows the server rule: a current clip and a settled voice for 
 test('the panel says why Export is off in words, both languages', () => {
   const overview = lastFerryOverview();
   const why = whyNotReady(readinessOf(overview, false), overview, 'en');
-  assert.deepEqual(why.map(en), ['5 shots need a clip and settle the voice in 2.3 and 3.2']);
-  assert.deepEqual(whyNotReady(readinessOf(overview, false), overview, 'zh-CN').map(zh), ['5 个镜头需要视频，并处理 2.3 和 3.2 的配音']);
+  assert.deepEqual(why.map(en), ['5 shots need a clip; settle the voice in 2.3 and 3.2']);
+  assert.deepEqual(whyNotReady(readinessOf(overview, false), overview, 'zh-CN').map(zh), ['5 个镜头需要视频；另需处理 2.3 和 3.2 的配音']);
   const voiceOnly = finished();
   voiceOnly.shots[shotId('3.2')].narration = { state: 'text_only', text: 'x', estimatedSeconds: 1, fits: true };
   assert.deepEqual(whyNotReady(readinessOf(voiceOnly, false), voiceOnly, 'en').map(en), ['Settle the voice in 3.2']);
@@ -55,6 +59,16 @@ test('the panel says why Export is off in words, both languages', () => {
   assert.deepEqual(whyNotReady(readinessOf(one, false), one, 'en').map(en), ['1 shot needs a clip']);
   assert.deepEqual(whyNotReady({ ready: false, demo: false, seconds: 400, blockers: [{ code: 'too_long' }, { code: 'mixed_demo_media', shotId: shotId('1.1') }] }, one, 'en').map(en),
     ['Demo clips and made clips can\'t share one export', 'The film is longer than 6:00']);
+});
+
+test('a table cut short says how many rows are still below', () => {
+  const bottoms = [20, 39, 58, 77, 96, 115];
+  assert.equal(rowsBelow(bottoms, 120), 0, 'every row in view');
+  assert.equal(rowsBelow(bottoms, 77), 2);
+  assert.equal(rowsBelow(bottoms, 70), 3, 'a row cut in half is still to come');
+  assert.equal(rowsBelow(bottoms, 80, 20), 3, 'so is a row under the fade and the count');
+  assert.equal(rowsBelow(bottoms, 119, 20, true), 0, 'scrolled to the end, nothing is below');
+  assert.equal(rowsBelow([], 50), 0);
 });
 
 test('per-shot rows: Clip and Voice columns, green only when done', () => {
@@ -88,11 +102,18 @@ test('panel state: rendering, interrupted by a restart, failed, cancelled', () =
   assert.equal(panelState(view, { jobs: [{ id: 'e1', state: 'running', canRecover: false }], lastExport: null }).kind, 'rendering');
   assert.equal(panelState(view, { jobs: [{ id: 'e1', state: 'running', canRecover: true }], lastExport: null }).kind, 'interrupted', 'a render nobody owns after a restart');
   assert.equal(panelState(view, null).kind, 'rendering', 'without the media read it is shown as rendering');
-  const failed = panelState({ ...view, current: record({ state: 'failed', failure: { code: 'RENDER_FAILED' } }) }, null);
-  assert.equal(en(failed.failed), 'The last export stopped (RENDER_FAILED). Exports render on this computer and cost nothing; you can export again.');
-  assert.equal(en(failureMsg('MEDIA_NO_COMPLETION')), 'Check again found no finished file. Export again to render the film.');
+  const failed = panelState({ ...view, current: record({ state: 'failed', failure: { code: 'MEDIA_TOOL_FAILED' } }) }, null);
+  assert.equal(said(failed.failed), 'The last export stopped. FFmpeg ended with an error. You can export again.');
+  assert.equal(said(failed.failed, 'zh-CN'), '上次导出中断了。FFmpeg 运行出错。可以重新导出。');
+  assert.equal(failed.failed.code, 'MEDIA_TOOL_FAILED', 'the code stays as a detail');
+  assert.ok(!said(failed.failed).includes('MEDIA_'), 'the reason is words, not the code');
+  assert.equal(said(failureMsg('MEDIA_TIMEOUT')), 'The last export stopped. FFmpeg took longer than its time limit. You can export again.');
+  // A code without words of its own gets the general reason, still in words.
+  assert.equal(said(failureMsg('RENDER_FAILED')), 'The last export stopped. FFmpeg could not finish rendering the film. You can export again.');
+  assert.equal(said(failureMsg(undefined)), 'The last export stopped. FFmpeg could not finish rendering the film. You can export again.');
+  assert.equal(said(failureMsg('MEDIA_NO_COMPLETION')), 'Check again found no finished file. Export again to render the film.');
   assert.equal(panelState({ ...view, current: record({ state: 'cancelled' }) }, null).cancelled, true);
-  assert.equal(en(failureMsg('MEDIA_PAUSED')), 'The film was stopped before this export began. Continue, then export again.');
+  assert.equal(said(failureMsg('MEDIA_PAUSED')), 'The film was stopped before this export began. Continue, then export again.');
 });
 
 test('an export prepared and never started (a restart came first) offers Export again once it is clearly stuck', () => {
@@ -102,8 +123,8 @@ test('an export prepared and never started (a restart came first) offers Export 
   assert.equal(panelState(view, media, started + 2000).kind, 'rendering', 'just prepared: it is about to start');
   const stuck = panelState(view, media, started + STALLED_AFTER_SECONDS * 1000);
   assert.equal(stuck.kind, 'idle');
-  assert.equal(en(stuck.failed), 'The last export never started: OpenSlate restarted first. Nothing was rendered; you can export again.');
-  assert.equal(zh(stuck.failed), '上次导出还没开始 OpenSlate 就重启了，没有渲染任何内容，可以重新导出。');
+  assert.equal(said(stuck.failed), 'The last export never started: OpenSlate restarted first. Nothing was rendered; you can export again.');
+  assert.equal(said(stuck.failed, 'zh-CN'), '上次导出还没开始 OpenSlate 就重启了，没有渲染任何内容，可以重新导出。');
   const running = { jobs: [{ id: 'e1', state: 'running', canRecover: false, canRun: false, createdAt: '2026-10-15T14:00:00Z' }], lastExport: null };
   assert.equal(panelState(view, running, started + 600_000).kind, 'rendering', 'a long render that is running is not stuck');
 });
@@ -116,6 +137,7 @@ test('a readiness read that fails on the film\'s music says so and offers Change
   }
   const older = unavailableMsg('NOT_FOUND');
   assert.deepEqual([older.music, en(older.text)], [false, 'This studio can\'t export from the storyboard yet (NOT_FOUND).']);
+  assert.deepEqual(['MEDIA_ARTIFACT_UNAVAILABLE', 'MEDIA_SOURCE_UNAVAILABLE', 'NOT_FOUND', null].map(musicMissing), [true, true, false, false], 'the music lane and player follow the same read');
 });
 
 test('the last export stays downloadable and says what changed since', () => {
