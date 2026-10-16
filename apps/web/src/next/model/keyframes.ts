@@ -1,4 +1,5 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneBlocker, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { errorMsg } from "../i18n/translate.ts";
 import { msg, type Msg } from "./types.ts";
 import { narrationChecks, type AppCheck } from "./checks.ts";
 import { formatMicros, priceMsg } from "./price.ts";
@@ -29,8 +30,11 @@ export interface ShotCard {
   motion: string;
   /** Indeterminate progress while a keyframe or clip is being made. */
   working: boolean;
-  /** What is being made right now (queued work shows only its status): the keyframe (striped overlay) or the clip (bar). */
-  workingOn: "keyframe" | "video" | null;
+  /**
+   * What is being made right now (queued work shows only its status): the keyframe (striped overlay), the clip (bar),
+   * or the voice line that the scene's confirm is making, saving or fitting for this shot (bar).
+   */
+  workingOn: "keyframe" | "video" | "voice" | null;
   selected: boolean;
   /** App-computed checks attached to this card (letters come from the banner order). */
   callouts: { letter: string; check: AppCheck }[];
@@ -57,6 +61,81 @@ export interface VideoPanel {
   eyebrow: Msg;
   /** The large figure ("1 of 3", "Video saved") and its unit ("frames opened"). */
   headline: { value: Msg; unit: Msg | null };
+  /** The scene's last confirm stopped partway: why, and what to do next. Shown in place of the note. */
+  stopped: ConfirmationStop | null;
+}
+
+// ---- the scene confirm's steps and stops (SceneOverview.confirmation) -------------------------------------
+
+export type ConfirmStep = "speech" | "attach" | "accept" | "video";
+
+/** The step a running confirm is on, and for which shot (voice steps name their shot; the video step may not). */
+export function confirmationStep(overview: GenerationOverview, scene: SceneOverview): { step: ConfirmStep; shotId: string | null; label: string | null } | null {
+  const confirmation = scene.confirmation;
+  if (confirmation?.state !== "running" || !confirmation.currentStep) return null;
+  const shot = confirmation.currentShotId ? overview.shots[confirmation.currentShotId] : undefined;
+  return { step: confirmation.currentStep, shotId: shot?.shotId ?? null, label: shot?.label ?? null };
+}
+
+export interface ConfirmationStop {
+  /** The server's blocker code, e.g. NARRATION_CUE_OUT_OF_RANGE. */
+  code: string;
+  shotId: string | null;
+  label: string | null;
+  /** Why it stopped, in plain words. */
+  reason: Msg;
+  /** What to do so the scene can be confirmed again. */
+  next: Msg;
+  /** Where that is done, when it is another view: the shot's line in Plan, or the narrator voice in Settings. */
+  action: "plan" | "settings" | null;
+}
+
+/** Blocker codes said in their own words (the voice line failed, ran too long, frames changed, the film stopped…). */
+const STOP_CODES = ["NARRATION_SPEECH_FAILED", "SUBMISSION_UNKNOWN", "NARRATION_RECORDING_REQUIRED", "NARRATION_CUE_OUT_OF_RANGE", "SCENE_REVIEW_STALE", "EXECUTION_PAUSED", "NARRATION_SPEECH_UNAVAILABLE"] as const;
+type StopCode = (typeof STOP_CODES)[number] | "NARRATION_IMPORT";
+/**
+ * Codes from saving a voice line that came back (the attach and accept steps): the recording import needs attention.
+ * Classic said the same for its AUDIO_, MEDIA_ and OUTPUT_ codes (scene-confirmation-model.ts:279).
+ */
+const IMPORT_CODES = new Set(["GENERATED_NARRATION_CONFLICT", "NARRATION_GENERATED_IDENTITY_CHANGED", "NARRATION_STALE_ACCEPTANCE", "NARRATION_SESSION_STALE", "NARRATION_SPEECH_INVALID", "NARRATION_SOURCE_UNDECIDED", "NARRATION_INVALID_INPUT"]);
+const PLAN_CODES = new Set<StopCode>(["NARRATION_SPEECH_FAILED", "NARRATION_RECORDING_REQUIRED", "NARRATION_IMPORT"]);
+
+function stopCode(code: string): StopCode | null {
+  if ((STOP_CODES as readonly string[]).includes(code)) return code as StopCode;
+  if (code === "PERSONAL_VOICE_REQUIRED") return "NARRATION_SPEECH_UNAVAILABLE";
+  if (IMPORT_CODES.has(code) || /^(AUDIO|MEDIA|OUTPUT)_/.test(code)) return "NARRATION_IMPORT";
+  return null;
+}
+
+/**
+ * Why the scene's last confirm stopped partway, with the next step (the server's "blocked" confirmation and its
+ * blocker code and shot). It stays until the scene is confirmed again; nothing once its video is saved or clips are
+ * being made again.
+ */
+export function confirmationStop(overview: GenerationOverview, scene: SceneOverview): ConfirmationStop | null {
+  const confirmation = scene.confirmation;
+  const blocker = confirmation?.state === "blocked" ? confirmation.blocker : undefined;
+  if (!blocker || scene.state === "video_saved") return null;
+  const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
+  if (shots.some((shot) => shot.video.state === "running")) return null;
+  const shot = blocker.shotId ? overview.shots[blocker.shotId] : undefined;
+  const label = shot?.label ?? null;
+  const base = { code: blocker.code, shotId: shot?.shotId ?? null, label };
+  const code = stopCode(blocker.code);
+  if (!code) return { ...base, reason: errorMsg(blocker.code), next: msg("confirm.stopped.next.other"), action: null };
+  const reason = code === "NARRATION_CUE_OUT_OF_RANGE" && shot?.narration.measuredSeconds !== undefined
+    ? msg("confirm.stopped.NARRATION_CUE_OUT_OF_RANGE.measured", { shot: shot.label, line: Math.round(shot.narration.measuredSeconds * 10) / 10 })
+    : msg(`confirm.stopped.${code}.${label ? "shot" : "scene"}`, label ? { shot: label } : undefined);
+  // A too-long line settled since (the shot lengthened past its measured length, or the line cut at the shot's end)
+  // only needs the confirm again.
+  const line = shot?.narration;
+  const settled = code === "NARRATION_CUE_OUT_OF_RANGE" && !!line && (!!line.fit || (line.measuredSeconds !== undefined && line.fits === true));
+  return {
+    ...base,
+    reason,
+    next: msg(settled ? "confirm.stopped.next.settled" : `confirm.stopped.next.${code}`),
+    action: code === "NARRATION_SPEECH_UNAVAILABLE" ? "settings" : PLAN_CODES.has(code) && shot ? "plan" : null,
+  };
 }
 
 export interface KeyframesView {
@@ -96,6 +175,18 @@ function pillStatus(scene: SceneOverview, selected: boolean): Msg | null {
 }
 
 export const isWorking = (slot: MediaSlot) => slot.state === "running" || slot.state === "queued";
+
+/** The voice step a running scene confirm is on for this shot (make, save, fit its line), else null. */
+export function voiceStepOf(overview: GenerationOverview, scene: SceneOverview | undefined, shotId: string): "speech" | "attach" | "accept" | null {
+  const step = scene ? confirmationStep(overview, scene) : null;
+  return step && step.step !== "video" && step.shotId === shotId ? step.step : null;
+}
+
+/** A shot's status for its card, the preview and the inspector: the confirm's voice step for it, else its slots' state. */
+export function shotStatus(overview: GenerationOverview, scene: SceneOverview | undefined, shot: ShotOverview): { status: Msg; tone: CardTone } {
+  const voice = voiceStepOf(overview, scene, shot.shotId);
+  return voice ? { status: msg(`card.step.${voice}`), tone: "working" } : cardStatus(shot);
+}
 
 export function waitingMsg(slot: MediaSlot): Msg {
   const code = slot.waiting?.code;
@@ -173,7 +264,7 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   const segmentsOf = (list: ShotOverview[]) => list.map((shot) => ({ shotId: shot.shotId, label: shot.label, opened: shot.keyframe.opened }));
   const segments = segmentsOf(targets);
   const openedCount = segments.filter((segment) => segment.opened).length;
-  const base = { sceneOrdinal: scene.ordinal, segments, openedCount, targetCount: targets.length, eyebrow: msg("panel.title", { scene: scene.ordinal }) };
+  const base = { sceneOrdinal: scene.ordinal, segments, openedCount, targetCount: targets.length, eyebrow: msg("panel.title", { scene: scene.ordinal }), stopped: null };
   const keyframeHeadline = { value: msg("panel.count", { value: scene.counts.keyframesReady, total: shots.length }), unit: msg("panel.unit.keyframes", { count: shots.length }) };
 
   if (scene.state === "video_saved") {
@@ -185,15 +276,20 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
       headline: { value: msg("panel.video_saved_headline"), unit: null },
     };
   }
-  if (scene.confirmation?.state === "running" || scene.state === "making_video") {
+  // A confirm that stopped partway says so, even while the studio still lists its clips as waiting.
+  const stopped = confirmationStop(overview, scene);
+  if (!stopped && (scene.confirmation?.state === "running" || scene.state === "making_video")) {
     const making = shots.filter((shot) => isWorking(shot.video));
     const current = (scene.confirmation?.currentShotId ? overview.shots[scene.confirmation.currentShotId] : undefined) ?? shots.find((shot) => shot.video.state === "running") ?? making[0];
     const run = targets.length ? targets : shots;
     const order = current ? run.findIndex((shot) => shot.shotId === current.shotId) + 1 : 0;
+    // Before the clips, the confirm makes, saves and fits each missing voice line: it names the step and the shot.
+    const step = confirmationStep(overview, scene);
+    const voice = step && step.step !== "video" && step.label ? msg(`panel.step.${step.step}`, { shot: step.label }) : null;
     return {
       ...base, ...noPrice, segments: segmentsOf(run),
       action: null, enabled: false, label: msg("panel.making_video"), reason: msg("panel.keep_working"),
-      note: current && order > 0 ? msg("panel.making_video_progress", { index: order, total: run.length, shot: current.label }) : msg("panel.making_video_note"),
+      note: voice ?? (current && order > 0 ? msg("panel.making_video_progress", { index: order, total: run.length, shot: current.label }) : msg("panel.making_video_note")),
       headline: { value: msg("panel.making_video_headline"), unit: null },
     };
   }
@@ -223,7 +319,10 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     reason: blockerMsg(blockers, overview, locale),
     note: unopened.length > NAMED ? msg("panel.open_to_confirm_many", { count: unopened.length })
       : unopened.length ? msg("panel.open_to_confirm", { shots: listLabels(unopened, locale) }) : msg("panel.all_opened"),
-    headline: { value: msg("panel.count", { value: openedCount, total: targets.length }), unit: msg("panel.unit.frames_opened", { count: targets.length }) },
+    headline: stopped
+      ? { value: msg("panel.stopped_headline"), unit: stopped.label ? msg("panel.stopped_at", { shot: stopped.label }) : null }
+      : { value: msg("panel.count", { value: openedCount, total: targets.length }), unit: msg("panel.unit.frames_opened", { count: targets.length }) },
+    stopped,
   };
 }
 
@@ -249,10 +348,11 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
   const checks = narrationChecks(shots, overview.fps).map((check, index) => ({ letter: String.fromCharCode(97 + index), check }));
   const selected = shots.find((shot) => shot.shotId === shotId) ?? shots[0] ?? null;
   const cards = shots.map((shot): ShotCard => {
-    const { status, tone } = cardStatus(shot);
+    const voiceStep = voiceStepOf(overview, scene, shot.shotId);
+    const { status, tone } = shotStatus(overview, scene, shot);
     const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact ?? null : null;
     const previous = current ? null : shot.keyframe.previous ?? null;
-    const workingOn = shot.keyframe.state === "running" ? "keyframe" : shot.video.state === "running" ? "video" : null;
+    const workingOn = shot.keyframe.state === "running" ? "keyframe" : shot.video.state === "running" ? "video" : voiceStep ? "voice" : null;
     return {
       shotId: shot.shotId,
       label: shot.label,
@@ -264,7 +364,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
       status,
       tone,
       motion: shot.motion,
-      working: isWorking(shot.keyframe) || isWorking(shot.video),
+      working: isWorking(shot.keyframe) || isWorking(shot.video) || !!voiceStep,
       workingOn,
       selected: shot.shotId === selected?.shotId,
       callouts: checks.filter((entry) => entry.check.shotId === shot.shotId),

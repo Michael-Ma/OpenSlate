@@ -78,6 +78,11 @@ export class PressKeys {
     return this.#memory[pressId];
   }
 
+  /** The press ids sent with no definite answer yet (a lost reply, or still in flight). */
+  ids(): string[] {
+    return Object.keys(this.#memory);
+  }
+
   /** The server answered definitely; the next press is a new request. */
   settle(pressId: string): void {
     if (!(pressId in this.#memory)) return;

@@ -4,6 +4,7 @@ import { ApiError, type EventOptions, type RequestOptions } from "../api/client.
 import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
 import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
+import { confirmPress, keyframesPress, PAID_PRESS } from "../model/keyframes-press.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
 import { reducer, type Action } from "./reducer.ts";
@@ -163,7 +164,8 @@ export class StudioStore {
       return result;
     } catch (error) {
       if (definite(error)) keys.settle(pressId);
-      this.#fail(error);
+      // Only a request that was sent can have lost its reply; one that failed before sending says why.
+      this.#fail(error, !definite(error) && PAID_PRESS.test(pressId) && keys.saved(pressId)?.logical === canonicalJson(logical));
       if (definite(error)) void this.refresh();
       return undefined;
     } finally {
@@ -171,10 +173,24 @@ export class StudioStore {
     }
   }
 
-  #fail(error: unknown): void {
+  /** `unconfirmedPaid`: a paid press whose reply was lost; pressing again resends its saved key and body. */
+  #fail(error: unknown, unconfirmedPaid = false): void {
     this.#deps.onError?.(error);
     const code = error instanceof ApiError || error instanceof CommandRefused ? error.code : "NETWORK_ERROR";
-    this.dispatch({ type: "toast", message: errorMsg(code), tone: "error" });
+    this.dispatch({ type: "toast", message: unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code), tone: "error" });
+  }
+
+  /**
+   * True when pressing `pressId` for `logical` now would resend a saved request whose reply was lost (or that is
+   * still in flight): the same Idempotency-Key, so the studio replays its receipt and never charges twice.
+   */
+  wouldResend(pressId: string, logical: unknown): boolean {
+    return this.#keys.saved(pressId)?.logical === canonicalJson(logical);
+  }
+
+  /** The presses of this film sent with no definite answer yet (a lost reply, or still in flight). */
+  savedPressIds(): string[] {
+    return this.#keys.ids();
   }
 
   async #sceneRead(sceneId: string): Promise<SceneGenerationRead> {
@@ -195,8 +211,8 @@ export class StudioStore {
     const scene = overview?.scenes.find((s) => s.sceneId === sceneId);
     if (!overview || !scene) return Promise.resolve(undefined);
     const expected = regenerate ? scene.quotes.regenerateKeyframe : scene.quotes.makeKeyframes;
-    const logical = { kind: "image", sceneId, targets: targetShotIds ?? scene.keyframeTargets, regenerate: !!regenerate, previous: (targetShotIds ?? []).map((id) => overview.shots[id]?.keyframe.artifact?.artifactId ?? null) };
-    return this.#press(regenerate ? `regenerate:${targetShotIds?.join(",")}` : `keyframes:${sceneId}`, logical, async () => {
+    const { pressId, logical } = keyframesPress(overview, scene, targetShotIds, regenerate);
+    return this.#press(pressId, logical, async () => {
       const read = await this.#sceneRead(sceneId);
       const body = { ...keyframesBody(read, targetShotIds, regenerate), ...(expected && !expected.priceUnknown ? { expectedEstimateMicros: expected.micros } : {}) };
       return { path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(sceneId)}/generate`), body };
@@ -213,9 +229,9 @@ export class StudioStore {
     const overview = this.#state.overview;
     const scene = overview?.scenes.find((s) => s.sceneId === sceneId);
     if (!overview || !scene) return Promise.resolve(undefined);
-    const frames = scene.videoTargets.map((id) => ({ shotId: id, artifactId: overview.shots[id]?.keyframe.artifact?.artifactId ?? null }));
+    const { pressId, logical } = confirmPress(overview, scene);
     // One durable server command (P3): it survives a closed tab or a restart and never buys a step twice.
-    return this.#press(`confirm:${sceneId}`, { kind: "confirm", sceneId, frames }, async () => ({
+    return this.#press(pressId, logical, async () => ({
       path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(sceneId)}/confirm`),
       body: confirmBody(overview, scene),
     }));

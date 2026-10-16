@@ -1,6 +1,6 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
-import { cardStatus, isWorking, seconds, type CardTone } from "./keyframes.ts";
+import { confirmationStop, isWorking, seconds, shotStatus, type CardTone } from "./keyframes.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -92,6 +92,10 @@ export interface InspectorView {
   noAnswer: { slot: "keyframe" | "video"; attemptId: string } | null;
   /** An outdated keyframe or clip, and why. */
   notes: Msg[];
+  /** The scene's last confirm stopped at this shot: why, and what to do next. */
+  stopped: { reason: Msg; next: Msg } | null;
+  /** The full prompts as stored: the picture prompt and the video prompt sent to the paid models (read-only here). */
+  prompts: { image: string; video: string | null };
 }
 
 const priceFrom = (unitMicros: string | undefined, unknown: boolean, locale: string): Msg | null => {
@@ -169,9 +173,10 @@ function narrationRow(shot: ShotOverview, fps: number): InspectorRow {
   return { key: "narration", label, value: line.text, quoted: true, notes };
 }
 
-export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string): InspectorView {
+/** `videoPrompt` comes from the project snapshot (the overview does not carry it); null while it is not read yet. */
+export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string, videoPrompt: string | null = null): InspectorView {
   const scene = overview.scenes.find((s) => s.sceneId === shot.sceneId);
-  const { status, tone } = cardStatus(shot);
+  const { status, tone } = shotStatus(overview, scene, shot);
   const rows: InspectorRow[] = [
     { key: "motion", label: msg("inspector.motion"), value: shot.motion, quoted: false, notes: [] },
     { key: "duration", label: msg("inspector.duration"), value: msg("inspector.duration_value", { seconds: seconds(shot.durationFrames, overview.fps) }), quoted: false, notes: [] },
@@ -197,6 +202,7 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
   // An outdated keyframe is explained next to its Regenerate button; an outdated clip here.
   const notes: Msg[] = [];
   if (shot.video.state === "outdated" && shot.keyframe.state === "ready") notes.push(msg("inspector.clip_outdated"));
+  const stop = scene ? confirmationStop(overview, scene) : null;
 
   return {
     shotId: shot.shotId,
@@ -211,5 +217,7 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
     failure,
     noAnswer: noAnswerSlot,
     notes,
+    stopped: stop && stop.shotId === shot.shotId ? { reason: stop.reason, next: stop.next } : null,
+    prompts: { image: shot.imagePrompt, video: videoPrompt },
   };
 }

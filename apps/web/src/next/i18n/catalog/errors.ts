@@ -9,6 +9,8 @@ import type { Entry } from "./entry.ts";
 export const errors = {
   "error.unknown": { en: "Something went wrong ({code}).", zh: "出错了（{code}）。" },
   "error.NETWORK_ERROR": { en: "The studio did not answer. Check that it is still running.", zh: "工作室没有响应，请确认它仍在运行。" },
+  // A paid press whose reply was lost (client-side): pressing again resends the same request, which the studio replays.
+  "error.PAID_UNCONFIRMED": { en: "Not confirmed. Press again to check; it will not charge twice.", zh: "未确认。再按一次即可核实，不会重复计费。" },
   "error.AUTH_REQUIRED": { en: "This window is no longer connected. Open a fresh studio link.", zh: "这个窗口已断开连接，请打开新的工作室链接。" },
   "error.REVISION_CONFLICT": { en: "The film changed while you were editing. Your edit was not saved; try again.", zh: "你编辑时影片已经变化，这次修改没有保存，请重试。" },
   "error.IDEMPOTENCY_CONFLICT": { en: "This press was already used for a different request. Try again.", zh: "这次操作已用于另一个请求，请重试。" },
