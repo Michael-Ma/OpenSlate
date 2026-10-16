@@ -536,6 +536,11 @@ export const scenarios = [
       const sheet = await page.locator("dialog.start-sheet").boundingBox();
       expect(sheet.width <= 390 && sheet.x >= 0, `The sheet is ${sheet.width} wide at ${sheet.x}`);
       await shot(page, "start-new-390");
+      // Under the pointer the chosen first step keeps its white border; hover only marks the other choices.
+      const chosen = page.locator("dialog.start-sheet .choice button[aria-checked='true']");
+      await chosen.hover();
+      const border = await chosen.evaluate((el) => getComputedStyle(el).borderTopColor);
+      expect(border === "rgb(236, 236, 238)", `The chosen first step's border is ${border} under the pointer`);
       await page.keyboard.press("Escape");
       await row(page, "night-bus").locator("[data-act='film-menu']").click();
       const menu = await page.locator(".start-menu").boundingBox();
