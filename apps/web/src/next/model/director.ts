@@ -365,6 +365,19 @@ const TOOL_ACTIVITY: Record<string, MessageId> = {
   apply_change: "director.activity.changing",
 };
 
+/**
+ * Whether the Director's automatic read-only review of new keyframes is running for this scene: the latest turn is a
+ * keyframe review still going, and the Director's scope covers the scene or one of its shots (or names nothing).
+ * While it runs, the scene's check row says the review is under way rather than showing a green all-clear.
+ */
+export function reviewingScene(turns: readonly TurnView[] | undefined, overview: GenerationOverview, sceneId: string): boolean {
+  const latest = turns?.at(-1);
+  if (!latest || latest.action !== "keyframe_review" || (latest.state !== "running" && latest.state !== "queued")) return false;
+  const scope = overview.director.scopeIds;
+  const scene = overview.scenes.find((item) => item.sceneId === sceneId);
+  return !scope.length || scope.includes(sceneId) || !!scene?.shotIds.some((id) => scope.includes(id));
+}
+
 /** What the latest turn says about itself: its current activity while running, or an honest ending. */
 export function turnStatus(turns: readonly TurnView[] | undefined): { activity: Msg | null; ending: Msg | null } {
   const latest = turns?.at(-1);

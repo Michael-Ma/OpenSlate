@@ -38,6 +38,8 @@ interface Props {
   attention?: Msg | null;
   /** No keyframe has been asked for yet: there is nothing to check, and a green all-clear would read as "done". */
   idle?: boolean;
+  /** The Director is reviewing this scene's new keyframes: its notes are still to come, so no all-clear yet. */
+  reviewing?: boolean;
   onExtend(check: AppCheck): void;
   onKeep(check: AppCheck): void;
   onEditNarration(check: AppCheck): void;
@@ -50,7 +52,7 @@ interface Props {
  * the app found these, the Director did not recommend them. Each option is one free, undoable command, so each
  * follows the shell's server guard (off while offline or expired, with the reason).
  */
-export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, attention, idle, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
+export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, attention, idle, reviewing, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
   const { t, tm } = useI18n();
   const server = useGuarded("server");
 
@@ -87,6 +89,14 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, a
 
   const first = checks[0];
   // Before any keyframe there is nothing to check yet: a neutral line (no green all-clear), keeping the row in place.
+  if (!first && !attention && reviewing) {
+    return (
+      <div className="quiet" role="status" data-check="reviewing">
+        <span aria-hidden="true">·</span>
+        <span>{t("check.reviewing")}</span>
+      </div>
+    );
+  }
   if (!first && !attention && idle) {
     return (
       <div className="quiet" role="status" data-check="idle">
