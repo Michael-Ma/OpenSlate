@@ -26,29 +26,38 @@ export interface StripFit {
   rows: { shots: { width: number; label: StripLabel }[]; tail: number | null }[];
 }
 
-/** Labels may shrink the strip's scale to this share of its plain fit, never further, so lengths stay readable. */
-export const STRIP_LEAST_SCALE = 0.5;
+/** Labels may shrink the strip's scale to this share of its plain fit, never further, so lengths stay true. */
+export const STRIP_LEAST_SCALE = 0.9;
+/**
+ * A label may widen its shot by at most this many pixels past its seconds at the scale. The strip is a picture of
+ * length: a label that needs more shows the shot's label alone instead of drawing a short shot long.
+ */
+export const STRIP_LABEL_ALLOWANCE = 8;
 
 /** A shot of either row: its seconds and the width its label needs (0 while it may end with "…"). */
 interface Floor { seconds: number; need: number }
 
+/** The width a label may claim for a shot of `seconds`: its need, up to the allowance past the shot's length. */
+const claimed = (seconds: number, need: number, scale: number) => Math.min(need, seconds * scale + STRIP_LABEL_ALLOWANCE);
+
 /**
- * A shot's width at `scale`: its seconds at that scale, at least its own label's need, and at least a shorter shot's
- * need plus the difference in seconds. A longer shot is never drawn narrower than a shorter one, so a change of
- * length shows between Now and After however much a label widened them.
+ * A shot's width at `scale`: its seconds at that scale, widened for its own label (within the allowance), and at
+ * least a shorter shot's width plus the difference in seconds. A longer shot is never drawn narrower than a shorter
+ * one, so a change of length shows between Now and After, and no shot is more than the allowance off its length.
  */
 function widthAt(seconds: number, need: number, scale: number, floors: readonly Floor[]): number {
-  let width = Math.max(seconds * scale, need);
-  for (const floor of floors) if (floor.seconds < seconds) width = Math.max(width, floor.need + (seconds - floor.seconds) * scale);
+  let width = Math.max(seconds * scale, claimed(seconds, need, scale));
+  for (const floor of floors) if (floor.seconds < seconds) width = Math.max(width, Math.max(floor.seconds * scale, claimed(floor.seconds, floor.need, scale)) + (seconds - floor.seconds) * scale);
   return width;
 }
 
 /**
  * Fit the Now / After strip into `room` pixels. Shots keep the design's 15 px a second while every row fits with
- * its tail's whole text; on a narrower row the scale drops for both rows alike. Labels then claim room in order:
+ * its tail's whole text; on a narrower row the scale drops for both rows alike. The strip stays a picture of length:
+ * a label widens its shot by the allowance at most. Labels then claim room in order:
  * the changed (hot) shot's whole label and its counterpart's in the Now row first, taking it from the other shots;
  * then the other shots' own labels ("2.3") and whole labels, as far as the row holds them without losing a label
- * that already shows. No label shrinks the scale below half its plain fit, so lengths stay readable. A shot left too
+ * that already shows. No label shrinks the scale below 90% of its plain fit, so lengths stay true. A shot left too
  * narrow shows its label alone or ends with "…" (the whole label is in its tooltip). The tail takes the rest of the
  * row, up to the design's 150 px, and ends with "…" only when even a strip of slivers leaves it too little.
  */
@@ -106,8 +115,11 @@ export function fitStrip(rows: readonly StripRowInput[], room: number, gap: numb
       const before = cells.map(([r, s]) => levels[r]![s]!);
       if (before.every((value) => value >= level)) return;
       for (const [r, s] of cells) levels[r]![s] = Math.max(levels[r]![s]!, level) as 0 | 1 | 2;
-      const next = scaleFor(floorsOf());
-      if (next === null || next < floor - 1e-6) cells.forEach(([r, s], index) => { levels[r]![s] = before[index]!; });
+      const floors = floorsOf();
+      const next = scaleFor(floors);
+      // A label past the allowance would not show at that scale anyway: it claims nothing.
+      const shows = next !== null && cells.every(([r, s]) => fits(widthAt(Math.max(0, rows[r]!.shots[s]!.seconds), needOf(r, s), next, floors), needOf(r, s)));
+      if (next === null || next < floor - 1e-6 || !shows) cells.forEach(([r, s], index) => { levels[r]![s] = before[index]!; });
       // (A search result within a hair of the scale is the scale: the labels fitted in the room there was.)
       else if (next < scale - 1e-6) scale = next;
     };
@@ -126,6 +138,10 @@ export function fitStrip(rows: readonly StripRowInput[], room: number, gap: numb
     else if (locked < scale - 1e-6) scale = locked;
     for (const cells of others) claim(cells, 1, least);
     for (const cells of others) claim(cells, 2, least);
+    // The unchanged shots read alike: if one of them cannot show its length, none does ("2.1 | 2.2 | 2.3 · 8 s"
+    // rather than a row where one shot's seconds are missing). A lower label always still fits.
+    const least2 = Math.min(2, ...others.flat().map(([r, s]) => levels[r]![s]!)) as 0 | 1 | 2;
+    if (least2 > 0) for (const [r, s] of others.flat()) levels[r]![s] = Math.min(levels[r]![s]!, least2) as 0 | 1 | 2;
   }
 
   const floors = floorsOf();
@@ -134,7 +150,10 @@ export function fitStrip(rows: readonly StripRowInput[], room: number, gap: numb
     rows: rows.map((row, r) => {
       const shots = row.shots.map((shot, s) => {
         const width = widthAt(Math.max(0, shot.seconds), needOf(r, s), scale, floors);
-        return { width, label: fits(width, shot.full) ? "full" as const : fits(width, shot.short) ? "short" as const : "cut" as const };
+        // A shot shows its whole label when it was given one and it fits (the unchanged shots may all have been
+        // set to their shot labels alike); otherwise its shot label where that fits.
+        const whole = levels[r]![s] === 2 || scale === 0 ? fits(width, shot.full) : false;
+        return { width, label: whole ? "full" as const : fits(width, shot.short) ? "short" as const : "cut" as const };
       });
       if (row.tail === null) return { shots, tail: null };
       const used = shots.reduce((sum, shot) => sum + shot.width, 0) + gap * shots.length;

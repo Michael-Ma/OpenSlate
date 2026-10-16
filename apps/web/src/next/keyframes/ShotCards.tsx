@@ -15,8 +15,7 @@ const VISIBLE = 3;
 
 /**
  * A chip's words on one line, as many as its room holds (useChipFit): all of them, the first ones up to a word and
- * "…" before the last word ("Mara's coat… maroon"), the last word alone, or none. Screen readers get the chip's text
- * whole.
+ * "…" ("Mara's coat came…"), or none. Screen readers get the chip's text whole.
  */
 function ChipWords({ text }: { text: string }) {
   const { head, tail, cuts } = chipParts(text);
@@ -144,7 +143,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
                               onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}
                             >
                               {/* One line with its price where the card has room; on a narrow card the price wraps under it. */}
-                              <span className="link-words">{tm(note.regenerate.take)} ·</span>{" "}
+                              <span className="link-words">{tm(note.regenerate.take)}<span className="link-sep"> ·</span></span>{" "}
                               <span className="link-price">{note.regenerate.price ? tm(note.regenerate.price) : null}</span>
                               <span className="sr-only"> · {note.regenerate.shots}</span>
                             </button>

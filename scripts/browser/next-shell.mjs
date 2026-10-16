@@ -190,13 +190,14 @@ function cardProblems(page) {
         const a = rect(badge), b = rect(chip);
         if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) out.push(`${id}: a note chip overlaps the badge`);
         if (Math.abs(a.top - b.top) > 1.5 && chip === card.querySelector(".callout .anno")) out.push(`${id}: the chip and the badge are not aligned (${a.top} vs ${b.top})`);
-        // A chip shows whole words: all of them, the first ones up to a word with "…" and the last word whole, or
-        // the last word alone. Never a lone "…", a word cut through, or nothing where the last word would fit.
+        // A chip shows whole words from its start: all of them, or the first ones up to a word with "…"; where not
+        // even its first word and "…" fit (the two-card rows), its letter alone. Never a lone "…", a word cut through,
+        // or a word picked from the end. Where a card has the room of the three-card rows, its words show.
         const fit = chip.dataset.fit;
-        const words = chip.querySelector(".anno-words"), head = chip.querySelector(".anno-head"), tail = chip.querySelector(".anno-tail");
+        const head = chip.querySelector(".anno-head");
         if (!fit) { out.push(`${id}: a chip was never fitted`); continue; }
-        if (fit === "none") out.push(`${id}: a chip shows none of its words (${Math.round(rect(chip.closest(".callout")).width)}px of room)`);
-        if (tail && fit !== "none" && rect(tail).right > rect(words).right + 0.5) out.push(`${id}: the chip's last word "${tail.textContent}" is cut`);
+        if (fit === "none" && rect(chip.closest(".callout")).width >= 100) out.push(`${id}: a chip shows none of its words (${Math.round(rect(chip.closest(".callout")).width)}px of room)`);
+        if (fit === "tail") out.push(`${id}: a chip shows a word picked from its end`);
         if (fit === "whole" && head.scrollWidth > head.clientWidth + 1) out.push(`${id}: a whole chip cuts "${head.textContent}"`);
         if (fit === "cut" && rect(head).width < 24) out.push(`${id}: a cut chip shows a lone "…"`);
         // A cut head is as wide as its words up to the cut and the "…"; squeezed narrower, it would end mid-word.
@@ -231,12 +232,13 @@ function stripProblems(page) {
         if (!seg.dataset.fit && seg.scrollWidth > seg.clientWidth) out.push(`"${seg.textContent}" ends in "…"`);
       }
     }
-    // The change keeps its whole label, and so does the same shot in the Now row: "2.3 · 8 s" and "2.3 · 6 s".
+    // The change keeps its whole label ("2.3 · 8 s"); the strip stays to scale, so the same shot in the Now row may
+    // show "2.3" alone where its length has no room for its seconds.
     for (const strip of document.querySelectorAll(".banner .tl")) {
       const rows = [...strip.querySelectorAll(":scope > .segs")].map((segs) => [...segs.querySelectorAll(":scope > .seg:not(.dash)")]);
       rows.forEach((segs) => segs.forEach((seg, index) => {
         if (!seg.classList.contains("hot")) return;
-        for (const other of rows.map((list) => list[index]).filter(Boolean)) if (other.dataset.fit) out.push(`"${other.title}" shows only "${other.firstChild.textContent}" although it is the change`);
+        if (seg.dataset.fit) out.push(`"${seg.title}" shows only "${seg.firstChild.textContent}" although it is the change`);
       }));
     }
     for (const keep of document.querySelectorAll(".banner h2 .keep, .banner .sub .keep")) if (keep.getClientRects().length > 1) out.push(`"${keep.textContent}" breaks across lines`);
@@ -502,12 +504,13 @@ export const scenarios = [
       expect(link.disabled && link.title === "Wait for 2.2's clip to finish." && /^rgb\(/.test(link.background) && link.opacity === "1", `The held note link is not legible or does not say why: ${JSON.stringify(link)}`);
       // Off, it is not drawn as a link (no underline): only a link that works is underlined.
       expect(!/underline/.test(link.underline), `The held note link is still underlined: ${JSON.stringify(link)}`);
-      // The settled note's chip keeps its letter, its check and its point however narrow the card.
+      // The settled note's chip keeps its letter and its check however narrow the card, and its words from the start
+      // where the card has room for them (on the two-card rows the letter and check alone).
       for (const width of [1440, 1100, 900]) {
         await page.setViewportSize({ width, height: 900 });
         await cardsFit(page, `running at ${width}`);
         const settled = await page.locator("[data-card='shot-2-3'] .anno[data-note='note-b']").evaluate((chip) => ({ fit: chip.dataset.fit, check: !!chip.querySelector(".anno-check"), words: chip.querySelector(".anno-words")?.innerText.replace(/\s+/g, " ").trim() }));
-        expect(settled.check && settled.fit !== "none" && /8\s?s$/.test(settled.words), `The settled chip says nothing at ${width}: ${JSON.stringify(settled)}`);
+        expect(settled.check && (width < 1000 || settled.fit !== "none") && settled.fit !== "tail", `The settled chip says nothing at ${width}: ${JSON.stringify(settled)}`);
       }
       await page.setViewportSize({ width: 1440, height: 900 });
       await shot(page, "next-shell-running-1440");
@@ -831,10 +834,12 @@ export const scenarios = [
       expect((await text(page, ".film-strip[data-strip='restart'] .txt span")) === "The service never confirmed it. It may still arrive and be charged; nothing is resent by itself.", "The restart strip does not say what may still happen");
       await noSidewaysScroll(page);
       await inspectorWhole(page, "under the restart strip at 1440");
+      await shot(page, "next-shell-restart-1440");
       // An opened frame cannot authorize another purchase while its earlier clip may still arrive and be charged.
       // Even with older scene aggregates, the scene check and panel name the unresolved work; no green all-clear.
       const story = { head: await text(page, ".scene-head"), check: await text(page, "[data-check='attention']"), cards: await page.locator(".card .stl").allInnerTexts(), action: await page.locator(".vpanel").getAttribute("data-action"), panel: await text(page, ".vpanel"), green: await page.locator(".quiet .ck").count(), stop: await page.locator(".topbar [data-act='stop-film']").count() };
-      expect(/needs attention/.test(story.head) && !/making video/.test(story.head) && !story.cards.some((card) => /Waiting for your confirm/.test(card)) && story.action === "none" && story.stop === 0, `The restarted scene contradicts itself: ${JSON.stringify(story)}`);
+      // Nothing runs after the restart (the other clips wait for a confirm or for inputs nobody is making): no Stop.
+      expect(/needs attention/.test(story.head) && !/making video/.test(story.head) && !story.cards.some((card) => /Waiting for your confirm/.test(card)) && story.action === "none" && story.green === 0 && story.stop === 0, `The restarted scene contradicts itself: ${JSON.stringify(story)}`);
       expect(story.check.includes(casualty) && /may still arrive and be charged/.test(story.check) && story.green === 0, `The scene check hides the unresolved clip: ${JSON.stringify(story)}`);
       expect(story.panel.includes(casualty) && /No answer yet/.test(story.panel) && !/frames opened|Confirm frames & generate video/.test(story.panel), `The panel offers to redo an unresolved purchase: ${JSON.stringify(story)}`);
       expect(await page.locator(".vpanel [data-act='video-busy']").isDisabled(), "The unresolved clip's scene panel remains actionable");
