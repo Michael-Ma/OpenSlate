@@ -214,6 +214,19 @@ function stripProblems(page) {
 }
 
 /**
+ * On a phone the scene pills scroll inside their row: the selected one is always shown whole, when the view opens and
+ * after its words or the others' change (a status, the language), and only the row has scrolled for it, never the page.
+ */
+async function selectedPillWhole(page, where) {
+  const pill = await until(page, () => page.evaluate(() => {
+    const row = document.querySelector(".scene-pills").getBoundingClientRect();
+    const selected = document.querySelector(".scene-pills [aria-pressed='true']").getBoundingClientRect();
+    return { row: [row.left, row.right], selected: [selected.left, selected.right], page: document.scrollingElement.scrollLeft };
+  }), (value) => value.selected[0] >= value.row[0] - 0.5 && value.selected[1] <= value.row[1] + 0.5, `The selected scene pill is cut by its row ${where}`, 2000);
+  expect(pill.page === 0, `Revealing the selected pill scrolled the page ${where}: ${JSON.stringify(pill)}`);
+}
+
+/**
  * Scene 2 of the sample film: open its frames, settle 2.3's line through the Director's note (the proposal
  * choice) and make its three clips (one sent, two queued).
  */
@@ -542,6 +555,7 @@ export const scenarios = [
     viewport: { width: 390, height: 844 },
     async run({ page }) {
       await ready(page);
+      await selectedPillWhole(page, "when the view opens");
       await page.click("[data-act='scene'][data-scene='scene-3']");
       await page.click("[data-act='make-keyframes']");
       const stop = page.locator(".topbar [data-act='stop-film']");
@@ -559,6 +573,7 @@ export const scenarios = [
       await page.locator(".topbar [data-act='language']").click();
       await page.waitForFunction(() => document.querySelector(".topbar [data-act='stop-film']")?.textContent === "停止");
       expect(await titleFits(), "Stop squeezes the film's title in Chinese");
+      await selectedPillWhole(page, "in Chinese");
       await noSidewaysScroll(page, "running in Chinese");
       await shot(page, "next-shell-running-390-zh");
       await page.locator(".topbar [data-act='language']").click();
@@ -568,12 +583,7 @@ export const scenarios = [
       await noSidewaysScroll(page, "stopped");
       await page.evaluate(() => window.scrollTo(0, 0));
       // The scene pills scroll inside their row; the selected one is shown whole.
-      const pill = await page.evaluate(() => {
-        const row = document.querySelector(".scene-pills").getBoundingClientRect();
-        const selected = document.querySelector(".scene-pills [aria-pressed='true']").getBoundingClientRect();
-        return { row: [row.left, row.right], selected: [selected.left, selected.right] };
-      });
-      expect(pill.selected[0] >= pill.row[0] - 0.5 && pill.selected[1] <= pill.row[1] + 0.5, `The selected scene pill is cut by its row: ${JSON.stringify(pill)}`);
+      await selectedPillWhole(page, "stopped");
       await shot(page, "next-shell-stopped-390");
       // Chinese strings are the longest here; the strip wraps and nothing scrolls sideways.
       await page.locator(".topbar [data-act='language']").click();

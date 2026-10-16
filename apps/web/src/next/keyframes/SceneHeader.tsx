@@ -9,25 +9,36 @@ export function SceneHeader({ view, held, onScene }: { view: KeyframesView; held
   const { t, tm } = useI18n();
   const { header, pills } = view;
   const row = useRef<HTMLElement>(null);
-  const selected = pills.find((pill) => pill.selected);
-  const selectedId = selected?.sceneId;
-  const selectedText = selected?.status ? tm(selected.status) : "";
+  const selectedId = pills.find((pill) => pill.selected)?.sceneId;
+  const words = pills.map((pill) => `${t("scene.pill.label", { scene: pill.ordinal, title: pill.title })}${pill.status ? ` · ${tm(pill.status)}` : ""}`);
+  // Every pill's words: a new status, title or language moves the selected pill along its row.
+  const labels = pills.map((pill, index) => `${pill.sceneId}:${words[index]}`).join("|");
 
-  // On a phone the pills scroll sideways inside their row: the selected one is always shown whole. Its text changes
-  // as it is chosen (its status drops), so this runs after that render; only the row scrolls, never the page.
+  // On a phone the pills scroll sideways inside their row: the selected one is always shown whole, when the view
+  // opens, when it is chosen, and whenever a pill or the row changes width (a status, the language, the font
+  // arriving, the window). Only the row scrolls, never the page; a row the person scrolled stays put until then.
   useEffect(() => {
     const container = row.current;
-    const element = selectedId ? container?.querySelector<HTMLElement>(`[data-scene="${CSS.escape(selectedId)}"]`) : null;
-    if (!container || !element || container.scrollWidth <= container.clientWidth) return;
-    container.scrollLeft = revealScroll(container.scrollLeft, container.getBoundingClientRect(), element.getBoundingClientRect());
-  }, [selectedId, selectedText]);
+    if (!container || !selectedId) return;
+    const reveal = () => {
+      const element = container.querySelector<HTMLElement>(`[data-scene="${CSS.escape(selectedId)}"]`);
+      if (!element || container.scrollWidth <= container.clientWidth) return;
+      container.scrollLeft = revealScroll(container.scrollLeft, container.getBoundingClientRect(), element.getBoundingClientRect());
+    };
+    reveal();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(container);
+    for (const pill of container.children) observer.observe(pill);
+    return () => observer.disconnect();
+  }, [selectedId, labels]);
 
   return (
     <div className="scene-head">
       <h1>{header.title}</h1>
       <span className="line">{t("scene.header.status", { scene: header.ordinal, shots: header.shots, state: tm(header.status) })}</span>
       <nav className="scene-pills" ref={row} aria-label={t("scene.pills_label")}>
-        {pills.map((pill) => (
+        {pills.map((pill, index) => (
           <button
             key={pill.sceneId}
             type="button"
@@ -39,8 +50,7 @@ export function SceneHeader({ view, held, onScene }: { view: KeyframesView; held
             title={held && !pill.selected ? tm(held) : undefined}
             onClick={() => onScene(pill.sceneId)}
           >
-            {t("scene.pill.label", { scene: pill.ordinal, title: pill.title })}
-            {pill.status ? ` · ${tm(pill.status)}` : ""}
+            {words[index]}
           </button>
         ))}
       </nav>
