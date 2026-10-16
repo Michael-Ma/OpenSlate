@@ -1,4 +1,5 @@
 import type { GenerationOverview, PriceQuote, ShotNarration, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { lineEstimate, lineEstimateMsg } from "./checks.ts";
 import { seconds } from "./keyframes.ts";
 import type { InspectorRow } from "./inspector.ts";
 import { formatMicros } from "./price.ts";
@@ -125,6 +126,55 @@ export function lineFromRecordingImpact(unitMicros: number | null, locale: strin
   return unitMicros !== null ? msg("narr.line.impact.recording", { price: formatMicros(unitMicros, locale) }) : msg("narr.line.impact.recording_unpriced");
 }
 
+/** What the panel's "A line" form holds against what the shot stores. */
+export interface LineDraft {
+  /** The line as typed. */
+  text: string;
+  voiceChanged: boolean;
+  modeChanged: boolean;
+}
+
+export interface LineNotes {
+  /** The line's length: measured while the words are unchanged and voiced, else a labelled estimate (or a prompt to write it). */
+  length: Msg;
+  /** That length runs past the shot. */
+  long: boolean;
+  /** What saving does, in order; empty when there is nothing to save. */
+  impact: Msg[];
+}
+
+/**
+ * The two lines under the panel's Line field. With nothing changed there is nothing to save: a voiced line shows its
+ * measured length (an estimate only once the words change, SB-4) and no impact line. A changed line says what saving
+ * does: leaving the person's recording (priced); new words for a voiced line remake it, at the voice-line price
+ * (unpriced says so, never $0.00); a new voice says so with its price; nothing visual changes either way.
+ * `leave` is the "stops using your recording" line when the recording is in use; `voice` the new voice's line.
+ */
+export function lineNotes(shot: ShotOverview, fps: number, draft: LineDraft, impacts: { leave: Msg | null; voice: Msg }, unitMicros: number | null, locale: string): LineNotes {
+  const text = draft.text.trim();
+  if (!text) return { length: msg("narr.line.empty"), long: false, impact: [] };
+  const textChanged = text !== shot.narration.text;
+  const shotSeconds = round1(shot.durationFrames / fps);
+  const measured = shot.narration.state === "ready" ? shot.narration.measuredSeconds : undefined;
+  let length: Msg;
+  let long: boolean;
+  if (!textChanged && measured !== undefined) {
+    long = round1(measured) > shotSeconds + 1e-9;
+    length = msg(long ? "narr.line.measured_long" : "narr.line.measured", { seconds: round1(measured), shot: shotSeconds });
+  } else {
+    const estimate = lineEstimate(text, shot, fps);
+    long = !estimate.fits;
+    length = lineEstimateMsg(estimate);
+  }
+  if (!textChanged && !draft.voiceChanged && !draft.modeChanged) return { length, long, impact: [] };
+  if (impacts.leave) return { length, long, impact: [impacts.leave] };
+  const voiced = shot.narration.state === "ready";
+  const words = !textChanged ? (draft.voiceChanged ? null : msg(voiced ? "inspector.outdates.voice" : "inspector.outdates.nothing_visual"))
+    : draft.voiceChanged || !voiced ? msg("inspector.outdates.nothing_visual")
+    : unitMicros !== null ? msg("narr.line.impact.remake", { price: formatMicros(unitMicros, locale) }) : msg("narr.line.impact.remake_unpriced");
+  return { length, long, impact: [words, draft.voiceChanged ? impacts.voice : null].filter((part): part is Msg => part !== null) };
+}
+
 // ---- the shot's current take -----------------------------------------------------------------------------
 
 /** One narration recording as GET /narration/shots/:shotId describes it (only the fields read here). */
@@ -154,6 +204,9 @@ export interface TakeView {
   label: Msg;
   /** The player's accessible name. */
   name: Msg;
+  /** While its audio loads, and when it cannot be played ({code}): named by its kind, so a voice line is never "the recording". */
+  loading: Msg;
+  failed: Msg["id"];
 }
 
 /**
@@ -171,12 +224,12 @@ export function takeView(shot: ShotOverview, read: ShotNarrationRead | null): Ta
   const length = round1(shot.narration.measuredSeconds ?? (samples ? samples / NARRATION_SAMPLE_RATE : 0));
   const ref: StudioArtifactRef = { artifactId: audio.id, sha256: audio.media.sha256, kind: "audio" };
   if (audio.originEvidence !== "verified_generated_audio")
-    return { audio: ref, seconds: length, origin: "recording", label: msg("narr.take.recording", { seconds: length }), name: msg("narr.take.recording_name", { shot: shot.label, seconds: length }) };
+    return { audio: ref, seconds: length, origin: "recording", label: msg("narr.take.recording", { seconds: length }), name: msg("narr.take.recording_name", { shot: shot.label, seconds: length }), loading: msg("narr.take.loading_recording"), failed: "narr.take.failed_recording" };
   const voice = audio.generation?.voice;
   const label = !voice ? msg("narr.take.voice_plain", { seconds: length })
     : isPersonalId(voice) ? msg("narr.take.voice_personal", { seconds: length })
     : msg("narr.take.voice", { seconds: length, voice: stockName(voice) });
-  return { audio: ref, seconds: length, origin: "voice", label, name: msg("narr.take.voice_name", { shot: shot.label, seconds: length }) };
+  return { audio: ref, seconds: length, origin: "voice", label, name: msg("narr.take.voice_name", { shot: shot.label, seconds: length }), loading: msg("narr.take.loading_voice"), failed: "narr.take.failed_voice" };
 }
 
 /** Where the shot's current take came from: the person's own recording, or a voice line the studio made. */

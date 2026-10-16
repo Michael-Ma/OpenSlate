@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { resolveRef } from "../model/director.ts";
 import type { Block, Inline, RefLink } from "../model/markdown.ts";
@@ -8,7 +8,8 @@ import { RefChip } from "./RefChip.tsx";
 /**
  * A Director reply as Markdown (model/markdown.ts), built from React elements only: no HTML from the reply is
  * ever injected, links open in a new tab without access to this page, and pictures are links, never loaded.
- * Tables and code blocks scroll sideways inside their own box (focusable, so the keyboard can scroll them).
+ * Tables and code blocks scroll sideways inside their own box (focusable, so the keyboard can scroll them); a code
+ * block whose lines run past an edge fades at that edge, so a line cut there reads as one that goes on.
  */
 export function Markdown({ blocks }: { blocks: Block[] }) {
   return <div className="dir-text md">{blocks.map((block, index) => <BlockView key={index} block={block} />)}</div>;
@@ -27,8 +28,7 @@ function BlockView({ block }: { block: Block }): ReactNode {
       return block.ordered ? <ol start={block.start === 1 ? undefined : block.start}>{items}</ol> : <ul>{items}</ul>;
     }
     case "code":
-      // A named group, so the scroll box can take focus (long lines scroll by keyboard) and says what it is.
-      return <pre className="md-pre" role="group" tabIndex={0} aria-label={t("director.md.code")} data-lang={block.lang || undefined}><code>{block.text}</code></pre>;
+      return <CodeBlock text={block.text} lang={block.lang} label={t("director.md.code")} />;
     case "quote":
       return <blockquote>{block.blocks.map((child, index) => <BlockView key={index} block={child} />)}</blockquote>;
     case "rule":
@@ -49,6 +49,33 @@ function BlockView({ block }: { block: Block }): ReactNode {
         </div>
       );
   }
+}
+
+/** A named group, so the scroll box can take focus (long lines scroll by keyboard) and says what it is. */
+function CodeBlock({ text, lang, label }: { text: string; lang?: string; label: string }) {
+  const box = useRef<HTMLPreElement>(null);
+  const [more, setMore] = useState({ left: false, right: false });
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const measure = () => {
+      const left = element.scrollLeft > 1;
+      const right = element.scrollWidth - element.clientWidth - element.scrollLeft > 1;
+      setMore((now) => (now.left === left && now.right === right ? now : { left, right }));
+    };
+    measure();
+    element.addEventListener("scroll", measure, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => { element.removeEventListener("scroll", measure); observer?.disconnect(); };
+  }, [text]);
+  return (
+    <div className="md-scroll" data-more={more.left && more.right ? "both" : more.left ? "left" : more.right ? "right" : undefined}>
+      <pre ref={box} className="md-pre" role="group" tabIndex={0} aria-label={label} data-lang={lang || undefined}><code>{text}</code></pre>
+      {more.left && <span className="md-more left" aria-hidden="true" />}
+      {more.right && <span className="md-more right" aria-hidden="true" />}
+    </div>
+  );
 }
 
 function Inlines({ inlines }: { inlines: Inline[] }) {

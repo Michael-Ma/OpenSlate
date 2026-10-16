@@ -241,6 +241,10 @@ export const scenarios = [
       await page.waitForSelector('[data-card="shot-2-2"] [data-act="note-regenerate"]', { timeout: 20000 });
       await page.click('[data-card="shot-2-2"] [data-act="note-regenerate"]');
       await page.waitForSelector('[data-card="shot-2-2"] .making');
+      // Note a is settled, but its new keyframe is still being made: no green "regenerated" yet.
+      const making = page.locator('#director .note[data-note="a"]');
+      await expectText(page, '#director .note[data-note="a"] .handled', /^Regenerating 2\.2…$/);
+      expect(await making.getAttribute("data-tone") === "making" && (await making.locator(".handled").evaluate((node) => getComputedStyle(node).color)) !== "rgb(95, 196, 138)", "Note a claims its new keyframe while it is being made");
       await openPlan(page);
       await page.click(`[data-act="scene-menu"][data-scene="${scene(2)}"]`);
       await page.click('[role="menu"] [data-act="delete-scene"]');
@@ -308,8 +312,10 @@ export const scenarios = [
       await page.click(`[data-act="point-scene"][data-scene="${scene(2)}"]`);
       await expectText(page, ".composer", /@Scene 2|Scene 2/);
       await expectText(page, ".toast", /Pointing the Director at Scene 2\./);
+      // The header names what the message now points at, as the composer's chip does (with nothing pointed at it
+      // follows the view: "Whole film" in Plan).
+      await expectText(page, ".dir-head .scene", /^Points at Scene 2$/);
       // The Director's "Open 2.3" stays in Plan and brings the row into view (P5-DESIGN shell item 9).
-      await expectText(page, ".dir-head .scene", /^Whole film$/);
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.locator('.thread [data-act="note-open"]').filter({ hasText: "Open 2.3" }).first().click();
       await page.waitForSelector(`.shot-row.flash[data-shot="${shot("2.3")}"]`);

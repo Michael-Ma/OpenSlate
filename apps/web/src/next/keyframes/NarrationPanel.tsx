@@ -3,16 +3,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, 
 import { ApiError } from "../api/client.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { useI18n } from "../i18n/I18n.tsx";
-import { lineEstimate, lineEstimateMsg } from "../model/checks.ts";
 import type { StoryboardEdit } from "../model/commands.ts";
 import { displayedHead } from "../model/displayed-baseline.ts";
 import { editConflict } from "../model/edit-conflict.ts";
 import { runNarrationEdits } from "../model/narration-edits.ts";
 import { rollbackRecordingWords, saveRecordingWords, type RecordingWordSave } from "../model/recording-words.ts";
-import { editImpact } from "../model/inspector.ts";
 import {
   choiceLabel,
   lineFromRecordingImpact,
+  lineNotes,
   modeEdit,
   modeOf,
   NARRATION_CHOICES,
@@ -223,6 +222,7 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
           onEdit={onEdit}
           impactVoice={voiceImpact(shot, unit, locale)}
           impactLeave={leavesRecording ? lineFromRecordingImpact(unit, locale) : null}
+          unit={unit}
           onSave={async (textChanged) => {
             if (!canWrite()) return;
             const values = { shot: shot.label };
@@ -314,26 +314,27 @@ interface LineProps {
   impactVoice: Msg;
   /** The person's recording is in use now: going to a line drops it and makes a voice line (priced). */
   impactLeave: Msg | null;
+  /** One voice line's price (micros), or null when none is set. */
+  unit: number | null;
   onVoice(voice: string): void;
   onEdit(draft: EditDraft | null): void;
   onSave(textChanged: boolean): Promise<void>;
 }
 
-function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices, focusField, working, saveBlocked, impactVoice, impactLeave, onVoice, onEdit, onSave }: LineProps) {
+function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices, focusField, working, saveBlocked, impactVoice, impactLeave, unit, onVoice, onEdit, onSave }: LineProps) {
   const { t, tm, locale } = useI18n();
   const server = useGuarded("server");
   const id = (part: string) => `narr-${part}-${shot.shotId}`;
   const text = draft.value.trim();
-  const estimate = lineEstimate(draft.value, shot, fps);
   const textChanged = text !== shot.narration.text;
   const voiceChanged = voice !== currentVoice;
   const options = useMemo(() => voiceOptions(voices.data, currentVoice), [voices.data, currentVoice]);
   const modeChanged = modeEdit("line", narrationMode) !== null;
   const empty = !text;
   const canSave = !empty && (textChanged || voiceChanged || modeChanged) && !working && !server.disabled && !saveBlocked;
-  const impact = impactLeave ? [impactLeave]
-    : [textChanged || !voiceChanged ? editImpact(shot, ["narration"]) : null, voiceChanged ? impactVoice : null].filter((part): part is Msg => part !== null);
-  const impactText = impact.map((part) => tm(part)).join(sentenceGap(locale));
+  // Measured while nothing changed (and nothing said about saving); an estimate and what saving does once it has.
+  const notes = lineNotes(shot, fps, { text: draft.value, voiceChanged, modeChanged }, { leave: impactLeave, voice: impactVoice }, unit, locale);
+  const impactText = notes.impact.map((part) => tm(part)).join(sentenceGap(locale));
   // What Save will do changes with the voice or the line: when it is out of sight it is brought into view above the
   // sticky buttons, with the voice at the top where there is room, so a changed voice is never saved without its
   // result in sight (and nothing above it is left half-cut).
@@ -373,9 +374,7 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
         aria-describedby={`${id("estimate")} ${id("impact")}`}
         onChange={(event) => onEdit({ ...draft, value: event.target.value })}
       />
-      <span className={`est${!empty && !estimate.fits ? " warn" : ""}`} id={id("estimate")} aria-live="polite">
-        {empty ? t("narr.line.empty") : tm(lineEstimateMsg(estimate))}
-      </span>
+      <span className={`est${notes.long ? " warn" : ""}`} id={id("estimate")} aria-live="polite">{tm(notes.length)}</span>
       <span className="stale" id={id("impact")} ref={impactLine}>{impactText}</span>
       <div className="narr-foot two">
         <button type="button" className="pill chosen" data-act="save-edit" {...server} disabled={!canSave} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)} onClick={() => void onSave(textChanged)}>
@@ -708,11 +707,11 @@ function TakePlayer({ take, focus, onFocused, reveal, onRevealed }: { take: Take
         </>
       ) : audio.status === "failed" ? (
         <span className="narr-state warn" role="status">
-          {t("narr.take.failed", { code: audio.code })}{" "}
+          {t(take.failed, { code: audio.code })}{" "}
           <button type="button" className="pill sm" data-act="narration-audio-retry" onClick={audio.retry}>{t("narr.take.retry")}</button>
         </span>
       ) : (
-        <span className="narr-loading" role="status">{t("narr.take.loading")}</span>
+        <span className="narr-loading" role="status">{tm(take.loading)}</span>
       )}
     </div>
   );

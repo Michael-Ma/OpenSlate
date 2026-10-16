@@ -119,7 +119,8 @@ export function clipPill(shot: ShotOverview): StatusPillView | null {
     case "ready": return pill("plan.pill.clip", "ok", "✓");
     case "outdated": return pill("plan.pill.clip_outdated");
     case "running": return pill("plan.pill.clip_making", "busy");
-    case "queued": return pill("plan.pill.clip_queued", "busy");
+    // Waiting for the person's confirm is not queued work: no clip until the scene is confirmed in Keyframes.
+    case "queued": return video.waiting?.code === "review" ? pill("plan.pill.clip_none") : pill("plan.pill.clip_queued", "busy");
     case "failed": return pill(video.failure?.charged ? "plan.pill.clip_failed_charged" : "plan.pill.clip_failed", "fail", "!");
     case "no_answer": return pill("plan.pill.no_answer", "fail", "?");
     default: return pill("plan.pill.clip_none");
@@ -260,7 +261,7 @@ export function shotRow(shot: ShotOverview, snapshotShot: SnapshotShot | undefin
   };
 }
 
-const sceneState = (scene: SceneOverview, shots: number): Msg => (shots ? sceneStatus(scene) : msg("plan.scene.no_shots_state"));
+const sceneState = (scene: SceneOverview, shots: number, overview: GenerationOverview): Msg => (shots ? sceneStatus(scene, overview) : msg("plan.scene.no_shots_state"));
 
 export function planOutline(snapshot: ProjectSnapshot, overview: GenerationOverview, proposals: readonly DirectorProposal[] = []): PlanOutline {
   const fps = overview.fps;
@@ -277,7 +278,7 @@ export function planOutline(snapshot: ProjectSnapshot, overview: GenerationOverv
       title: scene.title,
       direction: written("sceneDirection", scene.purpose),
       seconds,
-      state: sceneState(scene, list.length),
+      state: sceneState(scene, list.length, overview),
       shots,
       notes: views.filter((view) => view.sceneId === scene.sceneId && !view.shotIds.length && view.state !== "stale").map(chip),
       first: position === 0,

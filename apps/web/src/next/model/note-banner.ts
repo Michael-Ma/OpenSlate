@@ -1,7 +1,7 @@
 import type { DirectorProposal, GenerationOverview, ProposalPreview } from "@openslate/core/public";
 import type { TimelineSegment } from "./checks.ts";
 import { isWorking } from "./keyframes.ts";
-import type { NoteAction, NoteView } from "./notes.ts";
+import { regenerating, type NoteAction, type NoteView } from "./notes.ts";
 import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -157,7 +157,8 @@ export function settledMsg(action: NoteAction, label: Label, overview: Generatio
   const labels = (ids: readonly string[]) => ids.map((id) => overview.shots[id]?.label ?? "?").join(", ");
   switch (action.kind) {
     case "accept": return msg("note.settled.accepted", { choice: "text" in label ? label.text : "" });
-    case "regenerate": return msg("note.settled.regenerated", { shots: labels(action.shotIds) });
+    // Not "regenerated" while the new keyframe is still being made.
+    case "regenerate": return msg(regenerating(overview, action.shotIds) ? "note.settled.regenerating" : "note.settled.regenerated", { shots: labels(action.shotIds) });
     case "edit": return msg("note.settled.edited", { shot: labels([action.shotId]) });
     case "proposal": return msg("note.settled.applied");
     case "reply": return msg("note.settled.replied");

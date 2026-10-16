@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n/I18n.tsx";
+import { headerScope, labelList } from "../model/director.ts";
 import { currentScene } from "../model/keyframes.ts";
 import { directorHasFilm, shownView } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
@@ -17,22 +18,25 @@ import "./director.css";
  * document Esc handler closes it. Close here is the only way out on phones, where the page behind is inert.
  */
 export function DirectorColumn() {
-  const { t } = useI18n();
+  const { t, tm, locale } = useI18n();
   const store = useStore();
   const overview = useStudio((s) => s.overview);
+  const composer = useStudio((s) => s.composer);
   const sceneId = useStudio((s) => s.sceneId);
   const view = useStudio(shownView);
   const hasFilm = useStudio(directorHasFilm);
   const scene = overview ? currentScene(overview, sceneId) : null;
   const draft = useComposerDraft();
+  const scope = headerScope({ hasFilm, sceneOrdinal: view === "keyframes" && scene ? scene.ordinal : null, composer, overview });
+  const scopeText = scope.kind === "message" ? t("director.scope.points", { targets: labelList(scope.labels.map(tm), locale) }) : tm(scope.label);
 
   return (
     <aside className="director" id="director" aria-label={t("director.title")} data-film={hasFilm ? "open" : "none"} data-draft-ready={draft.ready}>
       <div className="dir-head">
         <span className="avatar" aria-hidden="true">{t("director.avatar")}</span>
         <b>{t("director.title")}</b>
-        {/* The Director answers about what is on screen: the scene in Keyframes, the whole film elsewhere. */}
-        <span className="scene">{!hasFilm ? t("director.scope.no_film") : view === "keyframes" && scene ? t("director.target.scene", { scene: scene.ordinal }) : t("director.scope.film")}</span>
+        {/* What is on screen (the scene in Keyframes, the whole film elsewhere), or what the message being written points at. */}
+        <span className="scene" data-scope={scope.kind} title={scopeText}>{scopeText}</span>
         <button type="button" className="pill sm dir-close" data-act="close-director" onClick={() => store.setDirectorOpen(false)}>{t("shell.close")}</button>
       </div>
       {hasFilm ? (

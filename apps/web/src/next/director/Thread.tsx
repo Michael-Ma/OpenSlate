@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { resolveRef, threadView, type Attention, type ThreadEntry } from "../model/director.ts";
-import { useStudio } from "../store/react.tsx";
+import { resolveRef, scriptedTag, threadView, type Attention, type ThreadEntry } from "../model/director.ts";
+import { useMode, useStudio } from "../store/react.tsx";
 import { HeldEdits } from "./HeldEdits.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { NoteCards } from "./NoteCards.tsx";
@@ -174,6 +174,7 @@ function Entry({ entry }: { entry: ThreadEntry }) {
 }
 
 function ScriptedTag() {
-  const { t } = useI18n();
-  return <div className="scripted">{t("director.scripted_reply")}</div>;
+  const { tm } = useI18n();
+  const mode = useMode();
+  return <div className="scripted">{tm(scriptedTag(mode))}</div>;
 }

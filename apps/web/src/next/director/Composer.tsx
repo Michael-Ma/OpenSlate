@@ -163,32 +163,39 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
     <div className="composer-wrap" ref={wrap}>
       {picker.open && <AtPicker listId={listId} items={shown} active={active} query={query} onPick={pick} onActive={(index) => setPicker({ open: true, active: index })} />}
       <div className="composer">
-        {view.pictures.length > 0 && (
-          <ul className="pic-chips" aria-label={t("director.picture.group")}>
-            {view.pictures.map((picture, index) => {
-              const name = pictureNames[index]!;
-              return (
-                <li className={`pic-chip${picture.problem ? " problem" : ""}`} key={picture.key} data-picture={picture.image.artifactId} data-source={picture.image.source}>
-                  <PictureThumb picture={picture.image} alt="" />
-                  <span className="pic-name" title={name}>{name}</span>
-                  <button type="button" data-act="remove-picture" aria-label={t("director.picture.remove", { name })} onClick={() => { store.removePicture(picture.key); textarea.current?.focus(); }}>×</button>
-                </li>
-              );
-            })}
-          </ul>
+        {/* Pictures and @ targets share one wrapping row (and one size) while they fit. */}
+        {(view.pictures.length > 0 || view.chips.length > 0) && (
+          <div className="composer-tokens">
+            {view.pictures.length > 0 && (
+              <ul className="pic-chips" aria-label={t("director.picture.group")}>
+                {view.pictures.map((picture, index) => {
+                  const name = pictureNames[index]!;
+                  return (
+                    <li className={`pic-chip${picture.problem ? " problem" : ""}`} key={picture.key} data-picture={picture.image.artifactId} data-source={picture.image.source}>
+                      <PictureThumb picture={picture.image} alt="" />
+                      <span className="pic-name" title={name}>{name}</span>
+                      <button type="button" data-act="remove-picture" aria-label={t("director.picture.remove", { name })} onClick={() => { store.removePicture(picture.key); textarea.current?.focus(); }}>×</button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {view.chips.length > 0 && (
+              <div className="chips">
+                {view.chips.map((chip) => {
+                  const label = tm(chip.label);
+                  const gone = chip.label.id === "director.target.gone";
+                  return (
+                    <span className="atchip-wrap" key={chip.key} data-target={chip.key}>
+                      <RefChip label={label} target={gone ? null : chip.target} />
+                      <button type="button" className="atchip-x" data-act="unpoint" aria-label={t("director.composer.remove", { target: label })} onClick={() => { store.pointAt(chip.target, false); textarea.current?.focus(); }}>×</button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
-        <div className="chips">
-          {view.chips.map((chip) => {
-            const label = tm(chip.label);
-            const gone = chip.label.id === "director.target.gone";
-            return (
-              <span className="atchip-wrap" key={chip.key} data-target={chip.key}>
-                <RefChip label={label} target={gone ? null : chip.target} />
-                <button type="button" className="atchip-x" data-act="unpoint" aria-label={t("director.composer.remove", { target: label })} onClick={() => { store.pointAt(chip.target, false); textarea.current?.focus(); }}>×</button>
-              </span>
-            );
-          })}
-        </div>
         <label className="sr" htmlFor={`${id}-message`}>{t("director.composer.label")}</label>
         <textarea
           id={`${id}-message`}
