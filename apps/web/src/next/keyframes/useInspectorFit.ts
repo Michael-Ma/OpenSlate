@@ -86,10 +86,14 @@ function reveal(root: HTMLElement, target: Element): void {
   markPartlyInView(root);
 }
 
-/** A refit or a restored panel can keep focus in a row without dispatching a new focusin event. */
+/**
+ * A refit or a restored panel can keep focus in a row without dispatching a new focusin event. Never in the middle
+ * of a press: the control is under the pointer, and scrolling it away between pointerdown and click would lose the
+ * click (data-pointing, set by the effect below).
+ */
 function revealFocus(root: HTMLElement): void {
   const focused = root.ownerDocument.activeElement;
-  if (focused instanceof Element && root.contains(focused)) reveal(root, focused);
+  if (root.dataset?.pointing !== "true" && focused instanceof Element && root.contains(focused)) reveal(root, focused);
 }
 
 function clearMarks(root: HTMLElement): void {
@@ -154,7 +158,7 @@ export function useInspectorFit(root: RefObject<HTMLElement | null>, active: boo
     if (!element || !scrolls) return;
     // Scroll events come once a frame, before it is painted.
     const onScroll = () => markPartlyInView(element);
-    const onFocus = (event: FocusEvent) => { if (event.target instanceof Element) reveal(element, event.target); };
+    const onFocus = (event: FocusEvent) => { if (event.target instanceof Element && element.dataset?.pointing !== "true") reveal(element, event.target); };
     element.addEventListener("scroll", onScroll, { passive: true });
     element.addEventListener("focusin", onFocus);
     revealFocus(element);
@@ -163,6 +167,30 @@ export function useInspectorFit(root: RefObject<HTMLElement | null>, active: boo
       element.removeEventListener("focusin", onFocus);
     };
   }, [root, scrolls]);
+  // A press inside the inspector, in any layout (a refit can begin under it): no reveal until its click has happened.
+  // The press ends at its click, a lifted or cancelled pointer, a key, or after a second at most.
+  useEffect(() => {
+    const element = root.current;
+    const view = element?.ownerDocument?.defaultView;
+    if (!element || !view || !element.dataset) return;
+    let release = 0;
+    const end = () => { view.clearTimeout(release); delete element.dataset.pointing; };
+    const onDown = () => { view.clearTimeout(release); element.dataset.pointing = "true"; release = view.setTimeout(end, 1000); };
+    const later = () => { view.clearTimeout(release); release = view.setTimeout(end, 0); };
+    element.addEventListener("pointerdown", onDown);
+    view.addEventListener("click", later, true);
+    view.addEventListener("pointerup", later, true);
+    view.addEventListener("pointercancel", end, true);
+    view.addEventListener("keydown", end, true);
+    return () => {
+      end();
+      element.removeEventListener("pointerdown", onDown);
+      view.removeEventListener("click", later, true);
+      view.removeEventListener("pointerup", later, true);
+      view.removeEventListener("pointercancel", end, true);
+      view.removeEventListener("keydown", end, true);
+    };
+  }, [root]);
 
   return active ? layout : ROOMY;
 }
