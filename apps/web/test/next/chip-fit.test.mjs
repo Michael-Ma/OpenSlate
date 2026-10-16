@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chipParts, fitChip } from '../../src/next/model/chip-fit.ts';
+import { chipParts, fitChip, widestLine, wraps } from '../../src/next/model/chip-fit.ts';
 
 const cutsOf = (text) => { const parts = chipParts(text); return parts.cuts.map((cut) => parts.head.slice(0, cut)); };
 
@@ -64,4 +64,14 @@ test('a chip without a last word is whole, cut after a word or character, or non
   const chinese = { head: 99, tail: 0, gap: 0, cuts: [11, 22, 33, 44], ellipsis: 11 };
   assert.deepEqual(fitChip(50, chinese), { fit: 'cut', head: 44.25 });
   assert.deepEqual(fitChip(20, chinese), { fit: 'none', head: null });
+});
+
+test('wrapped words are as wide as their widest line, not their column', () => {
+  const lines = [{ left: 100, right: 230.4, top: 10, height: 16 }, { left: 100, right: 150, top: 26, height: 16 }];
+  assert.equal(widestLine(lines), 130.4);
+  assert.ok(wraps(lines));
+  assert.ok(!wraps([lines[0]]));
+  // Two boxes on one line (an inline element inside the words) are one line.
+  assert.ok(!wraps([{ left: 0, right: 40, top: 10, height: 16 }, { left: 40, right: 90, top: 10.5, height: 16 }]));
+  assert.equal(widestLine([]), 0);
 });

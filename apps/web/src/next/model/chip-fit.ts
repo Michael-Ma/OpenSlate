@@ -1,6 +1,6 @@
 /**
- * How a chip shows its words in the room it has: the one-line note and check chips on the Keyframes cards. Pure; the
- * components measure the page and apply the results.
+ * How a chip shows its words in the room it has: the one-line note and check chips on the Keyframes cards, and the
+ * width of a chip whose words wrap (Plan's rows). Pure; the components measure the page and apply the results.
  */
 import { unitRuns } from "./keyframes-layout.ts";
 
@@ -90,4 +90,18 @@ export function fitChip(room: number, widths: ChipWidths): { fit: ChipFit; head:
   if (cut !== undefined) return { fit: "cut", head: cut };
   if (widths.tail && fits(widths.tail)) return { fit: "tail", head: null };
   return { fit: "none", head: null };
+}
+
+/**
+ * The width a block of wrapped words really takes: its widest line (the line boxes of its text, in page pixels).
+ * A box whose words wrap is otherwise as wide as its column, with empty space after its longest line.
+ */
+export function widestLine(lines: readonly { left: number; right: number }[]): number {
+  if (!lines.length) return 0;
+  return Math.max(...lines.map((line) => line.right)) - Math.min(...lines.map((line) => line.left));
+}
+
+/** Whether the line boxes are more than one line (their tops differ by more than half a line). */
+export function wraps(lines: readonly { top: number; height: number }[]): boolean {
+  return lines.some((line) => Math.abs(line.top - lines[0]!.top) > Math.max(1, lines[0]!.height / 2));
 }
