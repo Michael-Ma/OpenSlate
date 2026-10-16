@@ -1,4 +1,5 @@
 import type { DirectorProposal, GenerationOverview, MediaSlot, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { joinPromptParts } from "@openslate/core/public";
 import { narrationChecks } from "./checks.ts";
 import { sceneStatus } from "./keyframes.ts";
 import { planRowRecording } from "./narration.ts";
@@ -62,7 +63,7 @@ export function promptText(prompt: string): string {
  * without the prompt; a save that also rewrites the prompt sends it whole, so the new direction stays in front.
  */
 export function directedPrompt(direction: readonly string[], words: string): string {
-  return `${DIRECTION_HEADER}${direction.filter(Boolean).join(". ")}${DIRECTION_SEPARATOR}${words}`;
+  return `${DIRECTION_HEADER}${joinPromptParts(direction)}${DIRECTION_SEPARATOR}${words}`;
 }
 
 /** Where the person's own words start after the server's direction header, or null when there is none. */

@@ -41,6 +41,32 @@ const refused = (code) => (error) => error.code === code;
 const labels = (w) => w.overview.scenes.map((scene) => scene.shotIds.map((id) => w.overview.shots[id].label));
 const shot = (w, id) => w.overview.shots[id];
 
+for (const kind of ['shot', 'shotFields']) test(`${kind} fixture direction matches punctuation-aware server composition`, () => {
+  const w = world(), id = shotId('1.1');
+  w.overview.shots[id] = { ...w.overview.shots[id], purpose: '灯亮。', framing: ' 广角？ ', motion: '静止…' };
+  const row = w.snapshot.project.shots.find((s) => s.id === id);
+  row.action = ' 拉下卷帘！ ';
+  const before = { image: shot(w, id).imagePrompt, video: row.videoPrompt };
+  edit(w, { kind, id, ...(kind === 'shot' ? { field: 'purpose', value: '灯亮。' } : { fields: { purpose: '灯亮。' } }) });
+  const header = 'OpenSlate current direction:\n灯亮。 拉下卷帘！ 广角？';
+  const separator = '\nReference details (retain only where consistent):\n';
+  const saved = w.snapshot.project.shots.find((s) => s.id === id);
+  assert.equal(shot(w, id).imagePrompt, `${header}${separator}${before.image}`);
+  assert.equal(saved.videoPrompt, `${header} Camera movement: 静止…${separator}${before.video}`);
+});
+
+test('the Keyframes fixture motion edit joins punctuated direction without doubling stops', () => {
+  const w = world(), id = shotId('1.1');
+  const overviewShot = shot(w, id);
+  w.overview.shots[id] = { ...overviewShot, purpose: '灯亮。', framing: ' 广角？ ' };
+  const row = w.snapshot.project.shots.find((s) => s.id === id);
+  const original = row.videoPrompt;
+  edit(w, { kind: 'shot', id, field: 'motion', value: '慢慢推近！' });
+  assert.equal(w.snapshot.project.shots.find((s) => s.id === id).videoPrompt,
+    `OpenSlate current direction:\n灯亮。 广角？ Camera movement: 慢慢推近！\nReference details (retain only where consistent):\n${original}`);
+  assert.equal(shot(w, id).imagePrompt, overviewShot.imagePrompt);
+});
+
 test('renaming a scene changes only its title, with a new head version, and Undo restores it', () => {
   const w = world();
   const receipt = edit(w, { kind: 'sceneTitle', id: sceneId(2), value: 'First light' });
@@ -301,7 +327,7 @@ test('shotFields saves several fields as one command, and one Undo restores them
   assert.deepEqual([after.keyframe.state, after.video.state], ['outdated', 'outdated']);
   const stored = w.snapshot.project.shots.find((s) => s.id === shotId('1.1'));
   assert.equal(stored.action, 'The shutter comes down.');
-  assert.ok(after.imagePrompt.startsWith('OpenSlate current direction:\nClosing.. The shutter comes down.. Low-angle wide\n'), after.imagePrompt);
+  assert.ok(after.imagePrompt.startsWith('OpenSlate current direction:\nClosing. The shutter comes down. Low-angle wide\n'), after.imagePrompt);
   assert.ok(stored.videoPrompt.includes('Camera movement: Slow pan left'), stored.videoPrompt);
   edit(w, { kind: 'undo', commandId: receipt.commandId });
   assert.deepEqual(shot(w, shotId('1.1')), { ...before, label: '1.1' });

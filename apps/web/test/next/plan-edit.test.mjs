@@ -108,7 +108,7 @@ test('a prompt-only save keeps the direction header the server wrote; a save tha
   assert.equal(both.edit.fields.imagePrompt, 'OpenSlate current direction:\nThe last ticket. She pays. Medium\nReference details (retain only where consistent):\nCoins.');
   // The video prompt's header also names the camera movement.
   const [video] = draftEdits(base, { ...base, motion: 'Slow push-in', videoPrompt: 'Coins slide.' }, 30, 'generated', storedShot(edited, { action: '', videoPrompt: 'Old.' }));
-  assert.equal(video.edit.fields.videoPrompt, 'OpenSlate current direction:\nMara at the counter, sliding coins across.. Medium. Camera movement: Slow push-in\nReference details (retain only where consistent):\nCoins slide.');
+  assert.equal(video.edit.fields.videoPrompt, 'OpenSlate current direction:\nMara at the counter, sliding coins across. Medium. Camera movement: Slow push-in\nReference details (retain only where consistent):\nCoins slide.');
 });
 
 test('a cleared field or an empty line cannot be saved', () => {

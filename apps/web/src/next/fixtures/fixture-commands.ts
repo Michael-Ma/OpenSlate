@@ -26,6 +26,7 @@ import type {
   StudioArtifactRef,
   UseTakeReceipt,
 } from "@openslate/core/public";
+import { joinPromptParts } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS, narrationPace } from "../model/checks.ts";
 import type { GenerateBody, SceneGenerationRead, StoryboardEdit } from "../model/commands.ts";
@@ -656,7 +657,7 @@ function snapshotShot(snapshot: ProjectSnapshot, shot: ShotOverview, edit: Story
         }
         // A changed motion rewrites the video prompt, as the server does; the picture prompt keeps its words.
         const videoPrompt = edit.kind === "shot" && edit.field === "motion" && shot.motion !== row.motion
-          ? directedPrompt(row.videoPrompt, `${[shot.purpose, shot.framing].filter(Boolean).join(". ")}. Camera movement: ${shot.motion}`)
+          ? directedPrompt(row.videoPrompt, joinPromptParts([shot.purpose, shot.framing, `Camera movement: ${shot.motion}`]))
           : row.videoPrompt;
         return { ...row, imagePrompt: shot.imagePrompt, motion: shot.motion, desiredFrames: shot.durationFrames, framing: shot.framing, purpose: shot.purpose, videoPrompt };
       }),

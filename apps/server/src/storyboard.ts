@@ -3,7 +3,7 @@ import { assertAcceptedNarrationDurationFloor } from "./application/publication-
 import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, restoreNarrationWorkspaceUndo, type MediaUndo } from "./storyboard-history.js";
 import { OPENAI_SPEECH_VOICES } from "@openslate/providers";
 import type { FastifyInstance } from "fastify";
-import { digest, invariant, newId, shotIntentDigest } from "@openslate/core";
+import { digest, invariant, joinPromptParts, newId, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationAudio } from "./narration/types.js";
@@ -57,14 +57,12 @@ function editedPrompt(
   const split = previous.startsWith(header) ? previous.indexOf(separator) : -1;
   const original =
     split >= 0 ? previous.slice(split + separator.length) : previous;
-  const direction = [
+  const direction = joinPromptParts([
     shot.purpose,
     shot.action,
     shot.framing,
     ...(kind === "video" ? [`Camera movement: ${shot.motion}`] : []),
-  ]
-    .filter(Boolean)
-    .join(". ");
+  ]);
   const next = `${header}${direction}${separator}${original}`;
   invariant(
     next.length <= 16000,
