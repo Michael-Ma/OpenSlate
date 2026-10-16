@@ -12,7 +12,11 @@ export interface EditDraft {
   value: string;
   /** Present while the save is in flight. */
   saving?: boolean;
-  /** Opening identity; retained while typing, never borrowed from a refresh. */
+  /** A subtitle/composite pre-save must retain its editor when an uncertain result is checked. */
+  keepOpenAfterSave?: boolean;
+  /** Exact reconciliation keeps the original internal/user feedback intent. */
+  saveFeedback?: { message: Msg | null; quiet: boolean };
+  /** Opening film and value baselines survive typing; the stored head is only a replay/recovery hint. */
   projectId?: string;
   expectedHeadVersion?: number;
   baselineValue?: string;

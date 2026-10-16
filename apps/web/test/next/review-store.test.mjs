@@ -15,12 +15,17 @@ async function setup(t, intercept = () => undefined) {
 }
 const open = store => { const shot=store.getState().overview.shots['shot-2-2']; store.setEdit({shotId:shot.shotId,field:'imagePrompt',value:shot.imagePrompt}); return store.getState().edit; };
 
-test('B17 #3 inspector saves retain their opening head and preserve text on a newer baseline', async t => {
+test('B18 inspector waits for coherent reads then preserves text when the edited field changed', async t => {
   const {store,calls}=await setup(t); open(store); store.setEdit({...store.getState().edit,value:'My unsaved prompt'});
   const snap=structuredClone(store.getState().snapshot); snap.cursor++; snap.project.headVersion++; snap.project.shots.find(s=>s.id==='shot-2-2').imagePrompt='New server prompt'; store.dispatch({type:'snapshot',snapshot:snap});
   assert.equal(await store.saveEdit(store.getState().edit),null);
   assert.equal(calls.filter(c=>c.options?.method==='POST').length,0);
   assert.equal(store.getState().edit.value,'My unsaved prompt');
+  assert.equal(store.getState().toast,null, 'mismatched projections are not a conflict');
+  const overview=structuredClone(store.getState().overview);overview.headVersion=snap.project.headVersion;overview.cursor++;
+  overview.shots['shot-2-2'].imagePrompt='New server prompt';store.dispatch({type:'overview',overview});
+  assert.equal(await store.saveEdit(store.getState().edit),null);
+  assert.equal(calls.filter(c=>c.options?.method==='POST').length,0);
   assert.equal(store.getState().toast.message.id,'error.EDIT_BASELINE_CHANGED');
 });
 
@@ -120,6 +125,7 @@ test('B17 #9/#12 an old command cannot settle the newer request after reselectin
 test('B17 #3 switching duration field to motion cannot renew an old form baseline',async t=>{
  const {store,calls}=await setup(t);const shot=store.getState().overview.shots['shot-2-2'];store.setEdit({shotId:shot.shotId,field:'desiredFrames',value:String(shot.durationFrames)});
  const draft=store.getState().edit,snapshot=structuredClone(store.getState().snapshot),overview=structuredClone(store.getState().overview);snapshot.project.headVersion++;snapshot.cursor++;overview.headVersion++;overview.cursor++;
+ overview.shots[shot.shotId].durationFrames+=30;snapshot.project.shots.find(row=>row.id===shot.shotId).desiredFrames+=30;
  store.dispatch({type:'snapshot',snapshot});store.dispatch({type:'overview',overview});store.setEdit({...draft,field:'motion',value:'My move'});
  assert.equal(store.getState().edit.expectedHeadVersion,12);assert.equal(await store.saveEdit(store.getState().edit,5),null);assert.equal(calls.filter(c=>c.options?.method==='POST').length,0);
 });
@@ -151,10 +157,13 @@ test('B17 #12 regeneration cannot bind a newer preparation to an older displayed
 });
 
 test('B17 #3 recovered inspector drafts retain their original baseline and duration text',async t=>{
- const {carryFrom,storedCarry,parseStoredCarry}=await import('../../src/next/model/shell-states.ts');const {store}=await setup(t);
+ const {carryFrom,storedCarry,parseStoredCarry}=await import('../../src/next/model/shell-states.ts');const {store,port,calls}=await setup(t);
  open(store);store.setEdit({...store.getState().edit,value:'Recovered text',secondsText:'8'});const carry=parseStoredCarry(storedCarry(carryFrom(store.getState()),1000),1000);
  const snapshot=structuredClone(store.getState().snapshot),overview=structuredClone(store.getState().overview);snapshot.project.headVersion++;snapshot.cursor++;overview.headVersion++;overview.cursor++;
+ port.world.snapshot=snapshot;port.world.overview=overview;
  store.setEdit(null);store.dispatch({type:'snapshot',snapshot});store.dispatch({type:'overview',overview});store.setEdit(carry.edit);
  assert.equal(store.getState().edit.expectedHeadVersion,12);assert.equal(store.getState().edit.secondsText,'8');assert.equal(store.getState().edit.value,'Recovered text');
- assert.equal(await store.saveEdit(store.getState().edit),null);
+ assert.ok(await store.saveEdit(store.getState().edit));
+ assert.equal(calls.find(call=>call.options?.method==='POST').options.body.expectedHeadVersion,13);
+ assert.equal(store.getState().edit,null);
 });

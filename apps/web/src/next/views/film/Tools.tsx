@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { lengthLimits, shotSeconds, type FilmMusic, type FilmShot } from "../../model/film.ts";
-import { gainConflict, type GainBaseline, type GainDraft, type GainReceipt, type GainSession } from "../../model/film-gain.ts";
+import { gainComparison, type GainBaseline, type GainDraft, type GainResult, type GainSession } from "../../model/film-gain.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 
 interface ShotToolsProps {
@@ -89,7 +89,7 @@ interface MusicToolsProps {
   baseline: GainBaseline | null;
   session: GainSession;
   /** Saves this exact authored volume against its frozen film/head. */
-  onGain(draft: GainDraft): Promise<GainReceipt | null>;
+  onGain(draft: GainDraft): Promise<GainResult>;
   onMute(): void;
   onChange(anchor: HTMLElement): void;
 }
@@ -103,19 +103,25 @@ export function MusicTools({ music, total, writable, saving, baseline, session, 
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const slider = useRef<HTMLInputElement>(null);
   const draft = state.draft?.value ?? music.gainDb;
-  const conflict = !!state.draft && gainConflict(state.draft, baseline);
+  const comparison = state.draft ? gainComparison(state.draft, baseline) : null;
+  const conflict = comparison?.kind === "changed" && !state.unconfirmed && !state.saving;
   const locked = useRecoveryLock();
-  const offline = writable ? undefined : locked ?? t("film.offline");
+  const offline = writable ? undefined : locked ?? t(!baseline ? "error.PROJECTION_CHANGED" : "film.offline");
+  const latest = useRef({ baseline, onGain });
+  latest.current = { baseline, onGain };
   const save = useCallback(() => {
-    const submitted = session.begin(baseline);
-    if (submitted) void onGain(submitted).then((receipt) => session.complete(submitted, receipt), () => session.complete(submitted, null));
-  }, [session, baseline, onGain]);
-  // The debounce retains its draft's original head. New props can expose a conflict, never renew its authority.
+    const submitted = session.begin(latest.current.baseline);
+    if (submitted) void latest.current.onGain(submitted).then(
+      (result) => result.kind === "saved" ? session.complete(submitted, result.receipt, "refused", result.live) : session.complete(submitted, null, result.kind),
+      () => session.complete(submitted, null, "unconfirmed"),
+    );
+  }, [session]);
+  // Only changed edited values conflict. Unrelated head advances do not restart a pending debounce.
   useEffect(() => {
-    if (!state.draft || !state.ready || state.saving || state.failed || saving || !writable || conflict) return;
+    if (!state.draft || !state.ready || state.saving || state.failed || saving || !writable || comparison?.kind === "waiting" || conflict) return;
     const timer = setTimeout(save, GAIN_SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [state, saving, writable, conflict, save]);
+  }, [state, saving, writable, comparison?.kind, conflict, save]);
   useEffect(() => {
     const input = slider.current;
     if (!input) return;
@@ -124,7 +130,7 @@ export function MusicTools({ music, total, writable, saving, baseline, session, 
     return () => input.removeEventListener("change", released);
   }, [session]);
   // Leaving the slider saves at once when possible. Unmounting keeps the value above the view, without a POST.
-  const onBlur = () => { if (state.draft && !saving && !state.saving && !state.failed && writable && !conflict) save(); };
+  const onBlur = () => { if (state.draft && !saving && !state.saving && !state.failed && writable && comparison?.kind !== "waiting" && !conflict) save(); };
   const name = music.label ?? t("film.music.unnamed");
   return (
     <>
@@ -160,7 +166,7 @@ export function MusicTools({ music, total, writable, saving, baseline, session, 
         {t("film.tools.gain_conflict", { db: music.gainDb })}
         <button type="button" className="pill sm" data-act="gain-keep" disabled={!baseline || !writable || state.saving} onClick={() => { if (baseline) session.resolve(baseline, true); }}>{t("film.tools.gain_keep")}</button>
         <button type="button" className="pill sm" data-act="gain-use-saved" disabled={!baseline || !writable || state.saving} onClick={() => { if (baseline) session.resolve(baseline, false); }}>{t("film.tools.gain_use_saved")}</button>
-      </span> : state.failed ? <span className="hint" role="status" data-act="gain-failed">
+      </span> : state.failed && comparison?.kind !== "waiting" ? <span className="hint" role="status" data-act="gain-failed">
         {t("error.FILM_GAIN_SAVE_FAILED")}
         <button type="button" className="pill sm" data-act="gain-retry" disabled={!writable || saving || state.saving} onClick={save}>{t("film.tools.gain_retry")}</button>
       </span> : null}
