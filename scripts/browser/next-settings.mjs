@@ -21,7 +21,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   const deadline = Date.now() + timeout;
   let last = "";
   while (Date.now() < deadline) {
-    last = await page.locator(selector).first().innerText().catch(() => "");
+    // A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+    last = (await page.locator(selector).first().innerText().catch(() => "")).replaceAll("\u00a0", " ");
     if (pattern.test(last)) return last;
     await page.waitForTimeout(100);
   }
@@ -107,7 +108,7 @@ export const scenarios = [
       const jobs = await page.locator("#set-models .mrow .job").allInnerTexts();
       expect(jobs.join("|") === "Director|Keyframes|Video|Narration|Transcription", `Jobs read ${jobs.join("|")}`);
       const prices = await page.locator("#set-models .mrow .price").allInnerTexts();
-      expect(prices.join("|") === "uses your Codex plan|about $0.04 a keyframe|about $0.50 a clip|about $0.01 a voice line|about $0.01 a transcription", `Estimates read ${prices.join("|")}`);
+      expect(prices.join("|").replaceAll("\u00a0", " ") === "uses your Codex plan|about $0.04 a keyframe|about $0.50 a clip|about $0.01 a voice line|about $0.01 a transcription", `Estimates read ${prices.join("|")}`);
       expect(!prices.some((p) => /\$0\.00/.test(p)), "An estimate reads $0.00");
       const ready = await page.locator("#set-models .mrow .ready.y").count();
       expect(ready === 5, `${ready} of 5 models read Ready`);
@@ -276,8 +277,10 @@ export const scenarios = [
       expect((await narrator.inputValue()) === "cedar", "The narrator is not Cedar");
       await narrator.selectOption("marin");
       await expectText(page, ".toast", /New voice lines use Marin\./);
+      // Settings has no picture to sit over, so the toast sits at the top of the workspace.
+      await page.locator(".toast").evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       const toast = await box(page, ".toast");
-      expect(toast.bottom > 900 - 40, `The toast sits at ${Math.round(toast.top)}-${Math.round(toast.bottom)}, not at the foot of the workspace`);
+      expect(Math.abs(toast.top - 64) <= 4, `The toast sits at ${Math.round(toast.top)}-${Math.round(toast.bottom)}, not at the top of the workspace`);
       // The toast carries the Undo, as in the study.
       await page.click(".toast [data-act='undo']");
       await page.waitForFunction(() => document.querySelector("#set-voice [data-act='narrator']")?.value === "cedar");
@@ -394,6 +397,9 @@ export const scenarios = [
       await shot(page, "settings-390-open", { fullPage: true });
       await page.click("#set-language [data-act='set-language'][data-v='zh-CN']");
       await expectText(page, "main[data-view='settings'] .view-head h1", /^设置$/);
+      // Chinese sentences follow each other with no ASCII space after 。 or ？, and no space between Chinese words.
+      const impact = await expectText(page, `${row(page, "video")} .impact`, /视频改用示例视频？还没生成的/);
+      expect(!/[。？] /.test(impact), `The Chinese impact has a space after a full stop: ${JSON.stringify(impact)}`);
       await noSidewaysScroll(page);
       await shot(page, "settings-390-zh", { fullPage: true });
     },
@@ -415,6 +421,10 @@ export const scenarios = [
       await expectText(page, "#set-computer [data-row='key-openai']", /Used by keyframes, narration, transcription/);
       const computer = await box(page, "#set-computer");
       expect(computer.top < 300, `This computer is at ${Math.round(computer.top)}, not scrolled into view`);
+      // No film is open, so the top bar is the one on Start: the films on this computer, and no view tabs that would
+      // open a film's views with nothing in them.
+      const bar = await page.evaluate(() => ({ tabs: document.querySelectorAll(".topbar [role='tab']").length, film: document.querySelector(".topbar .film")?.innerText.replace(/\s+/g, " ") }));
+      expect(bar.tabs === 0 && bar.film === "Films on this computer", `With no film open the top bar reads ${JSON.stringify(bar)}`);
       await shot(page, "settings-1440-no-film");
       await page.click("#set-computer [data-act='recheck']");
       await expectText(page, ".toast", /Checked this computer\./);

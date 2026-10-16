@@ -32,7 +32,8 @@ async function until(page, read, test, message, timeout = 8000) {
   throw new Error(`${message}; last: ${JSON.stringify(last)}`);
 }
 
-const text = (page, selector) => page.locator(selector).first().innerText().catch(() => "");
+// A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+const text = (page, selector) => page.locator(selector).first().innerText().then((value) => value.replaceAll("\u00a0", " ")).catch(() => "");
 const focused = (page) => page.evaluate(() => document.activeElement?.getAttribute("data-act") ?? document.activeElement?.tagName.toLowerCase());
 const tab = (page, view) => page.locator(`.topbar [data-act='tab'][data-view='${view}']`);
 

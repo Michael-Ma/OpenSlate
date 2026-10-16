@@ -131,7 +131,7 @@ test('keyframes point the message at their shots: the composer says so unless a 
   assert.deepEqual(view([{ kind: 'scene', id: sceneId(2) }], [keyframe('2.1'), keyframe('2.3')]), []);
   assert.deepEqual(view([], [uploadImage]), []);
   assert.equal(labelList(['2.1', '2.3'], 'en'), '2.1 and 2.3');
-  assert.equal(labelList(['2.1', '2.2', '2.3'], 'zh-CN'), '2.1、2.2和2.3');
+  assert.equal(labelList(['2.1', '2.2', '2.3'], 'zh-CN'), '2.1、2.2 和 2.3');
   assert.equal(en({ id: 'director.picture.points_at', values: { shots: '2.1', n: 1 } }), 'This message also points at 2.1, so the Director sees its keyframe.');
   assert.equal(en({ id: 'director.picture.points_at', values: { shots: '2.1 and 2.3', n: 2 } }), 'This message also points at 2.1 and 2.3, so the Director sees their keyframes.');
   assert.equal(zh({ id: 'director.picture.points_at', values: { shots: '2.1', n: 1 } }), '这条消息也会指向 2.1，导演才能看到它的关键帧。');

@@ -163,7 +163,9 @@ export const keyframes = {
   "motion.suggest.tilt_down": { en: "Slow tilt down", zh: "缓慢下摇" },
 
   // ---- preview
-  "preview.caption": { en: "{framing}. {prompt}", zh: "{framing}。{prompt}" },
+  // Framing and prompt are the film's own words, so the stop between them follows their script, not the interface's.
+  "preview.caption": { en: "{framing}. {prompt}", zh: "{framing}. {prompt}" },
+  "preview.caption_cjk": { en: "{framing}。{prompt}", zh: "{framing}。{prompt}" },
   "preview.label": { en: "Keyframe preview {shot}", zh: "关键帧预览 {shot}" },
   "preview.play": { en: "Play motion preview", zh: "播放运动预览" },
   "preview.play_clip": { en: "Play clip", zh: "播放视频" },

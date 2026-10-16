@@ -4,6 +4,7 @@ import { readAllAssets, type AssetPage } from "./assets.ts";
 import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "./markdown.ts";
 import { noteViews, type NoteView } from "./notes.ts";
 import { isMessageId, type MessageId } from "../i18n/messages.ts";
+import { formatList } from "../i18n/typeset.ts";
 import { msg, type ComposerImage, type ConversationEntry, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target, type TurnView } from "./types.ts";
 
 /**
@@ -556,9 +557,9 @@ function keyframeScope(composer: ComposerState, overview: GenerationOverview | n
   return order.filter((id) => ids.has(id)).map((id) => overview.shots[id]!.label);
 }
 
-/** "3.1 and 3.2", "3.1、3.2和3.3": shot labels as one list in the interface language. */
+/** "3.1 and 3.2", "3.1、3.2 和 3.3": shot labels as one list in the interface language. */
 export function labelList(labels: readonly string[], locale: Locale): string {
-  try { return new Intl.ListFormat(intlLocale(locale), { type: "conjunction" }).format(labels); } catch { return labels.join(", "); }
+  return formatList(labels, intlLocale(locale));
 }
 
 /** The composer's contents (the store's `composer`). Older callers may leave out the pictures. */

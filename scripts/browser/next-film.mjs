@@ -27,7 +27,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   const deadline = Date.now() + timeout;
   let last = "";
   while (Date.now() < deadline) {
-    last = await page.locator(selector).first().innerText().catch(() => "");
+    // A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+    last = (await page.locator(selector).first().innerText().catch(() => "")).replaceAll("\u00a0", " ");
     if (pattern.test(last)) return last;
     await page.waitForTimeout(100);
   }
@@ -84,6 +85,23 @@ async function toastSays(page, pattern, timeout = 8000) {
   await expectText(page, ".toast", pattern, timeout);
 }
 
+/**
+ * The toast never lands on the tool row it reports on (it sat across Move earlier / later and the Volume slider),
+ * and it is opaque from its first frame. On a tall enough screen it sits over the top of the player.
+ */
+async function toastClearOfTools(page, { overPlayer = true } = {}) {
+  const spot = await page.evaluate(async () => {
+    const toast = document.querySelector(".toast");
+    await Promise.all(toast.getAnimations().map((a) => a.finished));
+    const box = (selector) => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
+    return { toast: box(".toast"), tools: box(".tl-tools"), player: box(".player"), opacity: getComputedStyle(toast).opacity };
+  });
+  const { toast, tools, player } = spot;
+  const overlaps = toast.bottom > tools.top && toast.top < tools.bottom && toast.right > tools.left && toast.left < tools.right;
+  expect(!overlaps && spot.opacity === "1", `The toast covers the tool row or shows through: ${JSON.stringify(spot)}`);
+  if (overPlayer) expect(toast.top >= player.top && toast.bottom <= player.bottom && toast.left >= player.left && toast.right <= player.right, `The toast is not over the top of the player: ${JSON.stringify(spot)}`);
+}
+
 async function undo(page) {
   await page.click(".toast [data-act='undo']");
   await toastSays(page, /^Undone\./, 15000);
@@ -120,7 +138,7 @@ export const scenarios = [
       await expectText(page, "[data-act='why-not']", /^5 shots need a clip and settle the voice in 2\.3 and 3\.2$/);
       await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · 1280 × 720 · renders here, free$/);
       const noted = await page.getAttribute(`.blk[data-shot='${shot("2.2")}']`, "aria-label");
-      expect(/^2\.2, Medium, \d+ s, .+, Director note a$/.test(noted ?? ""), `2.2's label leaves out its Director note: ${noted}`);
+      expect(/^2\.2, Medium, \d+\ss, .+, Director note a$/.test(noted ?? ""), `2.2's label leaves out its Director note: ${noted}`);
       await expectText(page, `.checks [data-shot='${shot("1.2")}']`, /1\.2\s+✓ clip\s+✓ 2\.1 s/);
       await expectText(page, `.checks [data-shot='${shot("3.2")}']`, /3\.2\s+no clip\s+no voice yet/);
       const done = await page.locator(`.checks [data-shot='${shot("1.1")}'] .y`).evaluate((el) => getComputedStyle(el).color);
@@ -200,6 +218,7 @@ export const scenarios = [
       // Length: free and undoable; the film gets longer.
       await page.click("[data-act='len'][data-d='1']");
       await toastSays(page, /^2\.1 is 6 s\. The film is 49 s\./);
+      await toastClearOfTools(page);
       await expectText(page, "[data-act='film-line']", /^49 s · /);
       await expectText(page, ".stepper output", /^6 s$/);
       await undo(page);
@@ -409,6 +428,7 @@ export const scenarios = [
       await inView(page, "[data-act='move'][data-d='1']");
       await page.click("[data-act='len'][data-d='1']");
       await toastSays(page, /^2\.1 is 6 s\./);
+      await toastClearOfTools(page, { overPlayer: false });
       await undo(page);
       await page.click(".mblk");
       await expectText(page, "[data-act='tools-music']", /^Music · low-tide\.mp3$/);

@@ -24,7 +24,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   const deadline = Date.now() + timeout;
   let last = "";
   while (Date.now() < deadline) {
-    last = await page.locator(selector).first().innerText().catch(() => "");
+    // A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+    last = (await page.locator(selector).first().innerText().catch(() => "")).replaceAll("\u00a0", " ");
     if (pattern.test(last)) return last;
     await page.waitForTimeout(100);
   }
@@ -91,7 +92,7 @@ export const scenarios = [
       expect(Math.abs(length - 7.4) < 0.05, `The voice line plays for ${length} s, not 7.4 s`);
       // Listen hands the player the focus: native controls, keyboard operable.
       await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "narration-audio", null, { timeout: 3000 });
-      expect(await page.locator('.insp audio[data-act="narration-audio"]').evaluate((el) => el.controls && el.getAttribute("aria-label") === "Voice line of 2.3, 7.4 s"), "The player is not the native, named one");
+      expect(await page.locator('.insp audio[data-act="narration-audio"]').evaluate((el) => el.controls && el.getAttribute("aria-label") === "Voice line of 2.3, 7.4\u00a0s"), "The player is not the native, named one");
       await page.locator('.insp audio[data-act="narration-audio"]').evaluate((el) => el.pause());
       // Keyboard: the choices are one tab stop with arrow keys; Tab goes on to the player, then the line.
       await page.focus('.insp [data-act="narr-choice"][data-choice="line"]');
@@ -117,11 +118,11 @@ export const scenarios = [
       expect(box.line[0] >= box.top && box.line[1] <= box.footTop, `The line is out of view: ${JSON.stringify(box)}`);
       const seek = page.locator('.insp input[data-act="narration-seek"]');
       expect(await seek.isVisible(), "No seek slider beside a native player without its timeline");
-      expect(await seek.getAttribute("aria-label") === "Position: Voice line of 2.3, 7.4 s", "The seek slider is not named");
+      expect(await seek.getAttribute("aria-label") === "Position: Voice line of 2.3, 7.4\u00a0s", "The seek slider is not named");
       await seek.focus();
       await page.keyboard.press("End");
       await page.waitForFunction(() => document.querySelector('.insp audio[data-act="narration-audio"]').currentTime > 7, null, { timeout: 3000 });
-      expect(/^7\.4 s of 7\.4 s$/.test(await seek.getAttribute("aria-valuetext")), `Seek position: ${await seek.getAttribute("aria-valuetext")}`);
+      expect(/^7\.4\ss of 7\.4\ss$/.test(await seek.getAttribute("aria-valuetext")), `Seek position: ${await seek.getAttribute("aria-valuetext")}`);
       await page.keyboard.press("Home");
       // The voice: following the film first, the film default marked.
       const options = await page.locator(".insp select[data-act='narr-voice'] option").allInnerTexts();
@@ -416,7 +417,7 @@ export const scenarios = [
       await page.click(".topbar [data-act='tab'][data-view='plan']");
       await page.waitForSelector('main.work[data-view="plan"] .scenes .shot-row', { timeout: 20000 });
       const row = await page.locator(`.shot-row[data-shot="${shot("2.2")}"] .shot-say`).innerText();
-      expect(/My recording chosen · 3 s take/.test(row) && !/Uploaded narration recording|voice line/.test(row), `Plan's row for the recording: ${row}`);
+      expect(/My recording chosen · 3\ss take/.test(row) && !/Uploaded narration recording|voice line/.test(row), `Plan's row for the recording: ${row}`);
       await page.click(`[data-act="edit-shot"][data-shot="${shot("2.2")}"]`);
       await page.waitForSelector('form[data-form="shot"]');
       await expectText(page, '[data-note="recording"]', /^Your recording, 3 s\. Replace it in Keyframes\.$/);
@@ -486,7 +487,7 @@ export const scenarios = [
       await page.click(".topbar [data-act='tab'][data-view='plan']");
       await page.waitForSelector('main.work[data-view="plan"] .scenes .shot-row', { timeout: 20000 });
       const row = await page.locator(`.shot-row[data-shot="${shot("2.2")}"] .shot-say`).innerText();
-      expect(row.trim() === "已选“我的录音” · 3 秒音频", `Plan's row in Chinese: ${JSON.stringify(row)}`);
+      expect(row.trim() === "已选“我的录音” · 3\u00a0秒音频", `Plan's row in Chinese: ${JSON.stringify(row)}`);
       await page.locator(`.shot-row[data-shot="${shot("2.2")}"]`).scrollIntoViewIfNeeded();
       await screenshot(page, "plan-row-recording-zh-1440");
     },

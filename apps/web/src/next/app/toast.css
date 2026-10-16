@@ -1,13 +1,21 @@
 /* Toast additions on top of ui/studio.css. This file can load before studio.css, so overrides are more specific, never later. */
 .toast .pill.toast-close{padding:5px 8px;display:inline-grid;place-items:center}
 .toast.error{border-color:var(--text-2)}
+/* It slides in, fully opaque from its first frame, so text under it never shows through. */
 .toast{animation:toast-in .16s ease-out}
-@keyframes toast-in{from{opacity:0}to{opacity:1}}
+@keyframes toast-in{from{translate:0 -6px}to{translate:0 0}}
 /*
- * From 900 px the toast sits at the foot of the workspace, centred in it, in every view (the studies' system.css),
- * so it never covers the row or the picture that just changed. The Director column's width comes from shell.css,
- * so the 320 px column below 1280 px follows by itself. Below 900 px studio.css puts it at the foot of the screen.
+ * From 900 px the toast sits over the top of the view's picture (DESIGN.md: over the top of the preview), just under
+ * the picture's own pills, and at the top of the workspace in views without one (Toast.tsx and toastSpot in
+ * model/shell.ts set the three variables), so it never lands on the shot cards or the Film tool row it usually
+ * reports on. The fallbacks are the top of the workspace, for the frame before it is measured.
+ * Below 900 px studio.css puts it at the foot of the screen.
  */
 @media (min-width:900px){
-  .toast-live .toast{top:auto;bottom:22px;left:calc(var(--shell-director-w) + (100vw - var(--shell-director-w)) / 2);max-width:min(640px,calc(100vw - var(--shell-director-w) - 32px))}
+  .toast-live .toast{top:var(--toast-top,64px);bottom:auto;left:var(--toast-x,calc(var(--shell-director-w) + (100vw - var(--shell-director-w)) / 2));max-width:var(--toast-max,min(640px,calc(100vw - var(--shell-director-w) - 32px)))}
 }
+/* At the foot of a phone screen it rises instead. */
+@media (max-width:899px){
+  .toast-live .toast{animation-name:toast-up}
+}
+@keyframes toast-up{from{translate:0 6px}to{translate:0 0}}

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
+import { keepTogether } from "../i18n/typeset.ts";
 import type { TimelineSegment } from "../model/checks.ts";
 
 const PX_PER_SECOND = 15;
@@ -50,7 +51,8 @@ export function BannerFrame({ tone, state, letter, eyebrow, title, sub, timeline
     <section className={`banner${tone === "check" ? " check" : ""}${state === "settled" ? " done" : ""}`} aria-label={eyebrow} data-state={state} {...attributes}>
       <div className="banner-main">
         <div className="eyebrow"><span className="letter">{letter}</span>{eyebrow}</div>
-        <h2>{title}</h2>
+        {/* A Director note's title is its own words, not a catalog message, so it is kept together here ("6 s"). */}
+        <h2>{keepTogether(title)}</h2>
         {sub ? <div className="sub">{sub}</div> : null}
         {timeline ? (
           <div className="tl" aria-label={t("check.timeline.label")}>

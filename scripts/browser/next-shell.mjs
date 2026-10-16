@@ -64,7 +64,8 @@ async function openView(page, view) {
   }
   await page.waitForSelector(`.app[data-view='${view}']`);
 }
-const text = (page, selector) => page.locator(selector).first().innerText().catch(() => "");
+// A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+const text = (page, selector) => page.locator(selector).first().innerText().then((value) => value.replaceAll("\u00a0", " ")).catch(() => "");
 const strip = (page) => page.locator(".film-strip-slot .film-strip");
 
 async function noSidewaysScroll(page, where = "") {
@@ -190,7 +191,8 @@ export const scenarios = [
       expect(layout.column.left === 0 && layout.column.width === 392 && layout.column.top === 52, `Director column is ${JSON.stringify(layout.column)}, expected 392 wide under the bar`);
       expect(layout.scroll.height <= layout.scroll.innerHeight && layout.scroll.width <= layout.scroll.innerWidth, `The page scrolls: ${JSON.stringify(layout.scroll)}`);
       expect(layout.title === "The Last Ferry", `Film title reads "${layout.title}"`);
-      expect(layout.meta === "48 s · 30 fps", `Film meta reads "${layout.meta}"`);
+      // A number and its unit are joined by a no-break space, so "48 s" never breaks into "48" / "s".
+      expect(layout.meta === "48\u00a0s · 30\u00a0fps", `Film meta reads ${JSON.stringify(layout.meta)}`);
       expect(layout.counts === "3 scenes · 8 shots", `Counts read "${layout.counts}"`);
       expect(layout.saved === "Synced", `Connection pill reads "${layout.saved}"`);
       expect(!layout.toggleShown, "The Director toggle shows on a wide screen");
@@ -201,6 +203,14 @@ export const scenarios = [
       expect(layout.strip === "none", `A film-wide strip shows on a quiet film: ${layout.strip}`);
       expect(layout.described === 0, "A tab still says it opens in the classic studio");
       expect((await tab(page, "keyframes").getAttribute("aria-selected")) === "true", "Keyframes is not the selected tab");
+      // One title treatment: the bold title on the meta's baseline, never a bordered control (with a picker or without).
+      const titleRow = await page.evaluate(() => {
+        const title = document.querySelector(".topbar .film b").getBoundingClientRect();
+        const meta = document.querySelector(".topbar .film-meta").getBoundingClientRect();
+        const name = getComputedStyle(document.querySelector(".topbar .film-name"));
+        return { offset: Math.abs(title.bottom - meta.bottom), border: name.borderTopWidth, background: name.backgroundColor };
+      });
+      expect(titleRow.offset < 2.5 && titleRow.border === "0px" && titleRow.background === "rgba(0, 0, 0, 0)", `The film title is not the plain title on the meta's baseline: ${JSON.stringify(titleRow)}`);
       await shot(page, "next-shell-layout-1440");
     },
   },
@@ -262,9 +272,12 @@ export const scenarios = [
       }));
       expect(zh.lang === "zh-CN", `html lang is ${zh.lang}`);
       expect(zh.saved === "已同步", `Connection pill reads "${zh.saved}"`);
-      expect(zh.counts === "3 场 · 8 个镜头", `Counts read "${zh.counts}"`);
+      expect(zh.counts === "3\u00a0场 · 8\u00a0个镜头", `Counts read ${JSON.stringify(zh.counts)}`);
       expect(zh.language === "English", `The language switch reads "${zh.language}"`);
       expect(zh.settings === "设置", `Settings is labelled "${zh.settings}"`);
+      // The film's own words keep their own stop: "Wide. The empty harbour…", never "Wide。The empty harbour…".
+      const caption = await text(page, ".preview .pv-caption");
+      expect(/^Wide\. The empty harbour/.test(caption), `The Chinese caption reads ${JSON.stringify(caption)}`);
       await shot(page, "next-shell-language-zh");
 
       await page.reload();
@@ -445,13 +458,22 @@ export const scenarios = [
       await page.click("[data-act='make-keyframes']");
       const stop = page.locator(".topbar [data-act='stop-film']");
       await stop.waitFor({ timeout: 5000 });
+      // Stop ends the tab row, so the film's title keeps its room on the first row (with Stop there it read "The La…").
       const rows = await page.evaluate(() => {
         const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
         return { stop: top(".topbar [data-act='stop-film']"), toggle: top(".topbar .dir-toggle"), tabs: top(".topbar .tabs") };
       });
-      expect(Math.abs(rows.stop - rows.toggle) < 8 && rows.tabs > rows.toggle, `Stop is not on the first row: ${JSON.stringify(rows)}`);
+      expect(Math.abs(rows.stop - rows.tabs) < 8 && rows.tabs > rows.toggle, `Stop does not end the tab row: ${JSON.stringify(rows)}`);
+      const titleFits = () => page.evaluate(() => { const title = document.querySelector(".topbar .film b"); return title.scrollWidth <= title.clientWidth; });
+      expect(await titleFits(), "Stop squeezes the film's title");
       await noSidewaysScroll(page, "running");
       await shot(page, "next-shell-running-390");
+      await page.locator(".topbar [data-act='language']").click();
+      await page.waitForFunction(() => document.querySelector(".topbar [data-act='stop-film']")?.textContent === "停止");
+      expect(await titleFits(), "Stop squeezes the film's title in Chinese");
+      await noSidewaysScroll(page, "running in Chinese");
+      await shot(page, "next-shell-running-390-zh");
+      await page.locator(".topbar [data-act='language']").click();
       await stop.click();
       await page.locator("dialog[data-dialog='stop'] [data-act='confirm-stop']").click();
       await page.waitForSelector(".film-strip[data-strip='stopped']");

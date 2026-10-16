@@ -31,8 +31,8 @@ function Gear() {
 /**
  * 52 px bar: the mark (all films), the film, view tabs, Stop while something runs, counts, connection (Synced,
  * Reconnecting, Offline), language, the classic studio, Settings, the studio menu (Disconnect this studio) and
- * (narrow) the Director toggle. On Start no film is open, so the bar names the films on this computer and drops the
- * tabs, counts and Stop. `onNavigate` runs on every tab, mark or Settings press, even for the view already shown
+ * (narrow) the Director toggle. On Start, and in Settings with no film chosen, no film is open, so the bar names the
+ * films on this computer and drops the tabs, counts and Stop. `onNavigate` runs on every tab, mark or Settings press, even for the view already shown
  * (the shell puts the recovery review away so the view shows); `onDisconnected` once the session was ended.
  */
 export function TopBar({ inert = false, expired = false, offline = false, onNavigate, onDisconnected }: {
@@ -58,7 +58,7 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
   const narrow = useNarrow();
   const reachable = useWriteGuard().server;
   const heading = useMemo(() => filmHeading(name, projects, projectId, overview), [name, projects, projectId, overview]);
-  const mode = topBarMode(view);
+  const mode = topBarMode(view, !!projectId);
   const pill = connectionPill(connection, offline);
   const tabs = viewTabs(view);
   const stop = mode === "film" && showStop(overview, director, reachable, view);
@@ -143,20 +143,23 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
             <b>{t("shell.films")}</b>
             <span className="film-meta">{t("shell.films_meta")}</span>
           </>
-        ) : showProjectPicker(projects) ? (
-          <div className="film-pick-wrap">
-            <select
-              className="pill sm film-pick"
-              data-act="project"
-              aria-label={t("shell.project")}
-              value={projectId ?? ""}
-              onChange={(event) => void store.selectProject(event.target.value)}
-            >
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
-          </div>
         ) : (
-          <b>{heading.title}</b>
+          // One title treatment whether or not there are other films: the bold title, and with other films a small
+          // chevron and an invisible native picker over both, so the title never turns into a bordered control.
+          <div className="film-name" data-switch={showProjectPicker(projects) || undefined}>
+            <b>{heading.title}</b>
+            {showProjectPicker(projects) && (
+              <select
+                className="film-pick"
+                data-act="project"
+                aria-label={t("shell.project")}
+                value={projectId ?? ""}
+                onChange={(event) => void store.selectProject(event.target.value)}
+              >
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            )}
+          </div>
         )}
         {mode === "film" && heading.meta && <span className="film-meta">{tm(heading.meta)}</span>}
       </div>

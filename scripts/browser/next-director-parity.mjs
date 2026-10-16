@@ -65,7 +65,7 @@ async function previewActionsReachable(page) {
         || Math.min(rect.right, other.right) - Math.max(rect.left, other.left) <= 1
         || Math.min(rect.bottom, other.bottom) - Math.max(rect.top, other.top) <= 1);
     });
-  }, null, { timeout: 4000 }).catch(() => fail("The preview's Show the Director, media or navigation controls cover each other or cannot be reached"));
+  }, null, { timeout: 4000 }).catch(() => fail("The preview's Add to message, media or navigation controls cover each other or cannot be reached"));
 }
 
 export const scenarios = [
@@ -170,7 +170,7 @@ export const scenarios = [
       // Clips and audio are not offered; a demo-free imported picture is, and refused for the same reason.
       await openAssets(page);
       await page.locator('[data-asset*="art-music-low-tide"]').first().click();
-      if (await page.locator('.detail [data-act="show-director"]').count()) fail("Show the Director is offered for music");
+      if (await page.locator('.detail [data-act="show-director"]').count()) fail("Add to message is offered for music");
       await closeToast(page);
       await showAsset(page, "art-timetable");
       await toast(page, /scripted Director/);
@@ -407,7 +407,8 @@ export const scenarios = [
     async run({ page }) {
       await ready(page);
       const held = (await page.locator('[data-entry="held"] b').textContent()).trim();
-      if (held !== "导演有一项未完成的修改占用着 3.1和3.2") fail(`The held card reads ${held}`);
+      // The shots are set apart from 和 as the catalogs write "第 2 场".
+      if (held !== "导演有一项未完成的修改占用着 3.1 和 3.2") fail(`The held card reads ${held}`);
       if (!(await page.locator('[data-entry="held"] [data-act="release-holds"]').textContent()).includes("放弃这项修改")) fail("Let it go is not in Chinese");
       const marker = (await page.locator(".dir-attention b").textContent()).trim();
       if (marker !== "这条回复需要处理") fail(`The marker reads ${marker}`);

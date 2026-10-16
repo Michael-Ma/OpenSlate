@@ -1,9 +1,46 @@
-import { useCallback, useEffect, useRef, type FocusEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type FocusEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { pauseCountdown, resumeCountdown, startCountdown, toastLifetime, type Countdown } from "../model/shell.ts";
+import { NARROW_QUERY, pauseCountdown, resumeCountdown, startCountdown, toastLifetime, toastSpot, type Countdown, type ScreenBox } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "./useWriteGuard.ts";
 import "./toast.css";
+
+const screenBox = (element: Element): ScreenBox => {
+  const { top, bottom, left, width } = element.getBoundingClientRect();
+  return { top, bottom, left, width };
+};
+
+/**
+ * From 900 px, puts the toast where `toastSpot` says: over the top of the view's picture, else at the top (or, in a
+ * view with neither a picture nor a title row, the foot) of the workspace. Below 900 px the stylesheet keeps it at
+ * the foot of the screen.
+ */
+function placeToast(toast: HTMLElement): void {
+  const narrow = window.matchMedia(NARROW_QUERY).matches;
+  const main = narrow ? null : document.querySelector("main.work");
+  if (!main) {
+    for (const name of ["--toast-top", "--toast-x", "--toast-max"]) toast.style.removeProperty(name);
+    return;
+  }
+  const picture = main.querySelector(".preview");
+  const head = picture?.querySelector(".pv-head, .pv-top") ?? null;
+  const spot = toastSpot({
+    workspace: screenBox(main),
+    picture: picture ? screenBox(picture) : null,
+    pictureHead: head ? screenBox(head) : null,
+    titled: !!main.querySelector(".view-head"),
+    viewportHeight: window.innerHeight,
+    toastHeight: toast.offsetHeight,
+  });
+  // Only what moved is written, so a page that keeps changing under it (a playing clock) costs no style work.
+  const set = (name: string, value: number) => {
+    const px = `${Math.round(value)}px`;
+    if (toast.style.getPropertyValue(name) !== px) toast.style.setProperty(name, px);
+  };
+  set("--toast-top", spot.top);
+  set("--toast-x", spot.centre);
+  set("--toast-max", spot.maxWidth);
+}
 
 /**
  * One toast at a time. Info leaves after about 6 s unless the pointer or focus is on it; errors stay
@@ -53,6 +90,29 @@ export function Toast() {
     countdown.current = hovered.current || focused.current ? pauseCountdown(current, now) : resumeCountdown(current, now);
     arm(id);
   };
+
+  // Placed before it paints, then kept in place while the page under it moves: a scroll, a resize, a banner that
+  // changed height with the same action, a strip that came or went, another view.
+  useLayoutEffect(() => {
+    const toast = box.current;
+    if (id === undefined || !toast) return;
+    placeToast(toast);
+    let frame = 0;
+    const later = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { if (box.current) placeToast(box.current); });
+    };
+    const observer = new MutationObserver(later);
+    observer.observe(document.querySelector(".app") ?? document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", later);
+    window.addEventListener("scroll", later, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", later);
+      window.removeEventListener("scroll", later, true);
+    };
+  }, [id]);
 
   const close = (after?: () => void) => {
     const back = focused.current ? returnFocus.current : null;

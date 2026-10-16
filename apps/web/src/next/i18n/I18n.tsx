@@ -4,6 +4,7 @@ import type { Msg } from "../model/types.ts";
 import type { MessageValues } from "./format.ts";
 import type { MessageId } from "./messages.ts";
 import { translate, translateMsg } from "./translate.ts";
+import { keepTogether } from "./typeset.ts";
 
 interface I18nValue {
   locale: Locale;
@@ -21,11 +22,13 @@ export function I18nProvider({ initialLocale, children }: { initialLocale: Local
     document.documentElement.lang = next;
     try { persistLocalePreference(window.localStorage, next); } catch { /* storage unavailable */ }
   }, []);
+  // Every string the interface shows comes through here, so this is where a number is kept on the line of its unit
+  // and "about" on the line of its price (`keepTogether`); `translate` itself stays the plain catalog text.
   const value = useMemo<I18nValue>(() => ({
     locale,
     setLocale,
-    t: (id, values) => translate(locale, id, values),
-    tm: (message) => translateMsg(locale, message),
+    t: (id, values) => keepTogether(translate(locale, id, values)),
+    tm: (message) => keepTogether(translateMsg(locale, message)),
   }), [locale, setLocale]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

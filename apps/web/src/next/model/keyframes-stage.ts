@@ -1,4 +1,5 @@
 import type { GenerationOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { isCjk } from "../i18n/typeset.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -64,4 +65,13 @@ export function editHold(edit: { shotId: string } | null, overview: GenerationOv
   if (!edit || edit.shotId === targetShotId) return null;
   const label = overview.shots[edit.shotId]?.label;
   return label ? msg("kf.edit_held", { shot: label }) : null;
+}
+
+/**
+ * The preview caption: the shot's framing, then its picture prompt. Both are the film's own words, so the stop between
+ * them is "。" after Chinese and ". " after anything else, whatever the interface language ("Wide. The empty
+ * harbour…", never "Wide。The empty harbour…").
+ */
+export function previewCaption(framing: string, prompt: string): Msg {
+  return msg(isCjk(framing.trimEnd().at(-1)) ? "preview.caption_cjk" : "preview.caption", { framing: framing.trimEnd(), prompt });
 }

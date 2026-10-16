@@ -7,6 +7,7 @@ import { msg, type Msg } from "../model/types.ts";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../model/checks.ts";
 import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../model/inspector.ts";
 import { wordsOf, type ShotNarrationRead } from "../model/narration.ts";
+import { sentenceGap } from "../model/shell-states.ts";
 import type { EditDraft } from "../store/state.ts";
 import type { Resource } from "../store/useResource.ts";
 import { useStore, useStudio } from "../store/react.tsx";
@@ -47,7 +48,7 @@ interface Props {
  * stopped. A control the guard turns off says why in its title.
  */
 export function Inspector({ view, shot, fps, draft, narrationDetail, busy, unconfirmed, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease, onEditInPlan }: Props) {
-  const { t, tm } = useI18n();
+  const { t, tm, locale } = useI18n();
   const store = useStore();
   const snapshot = useStudio(s => s.snapshot);
   const overview = useStudio(s => s.overview);
@@ -257,7 +258,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
           </button>
           {regenNotes.length ? (
             <p className={`insp-note${lostRegen ? " lost" : ""}`} id={`regen-note-${shot.shotId}`} data-unconfirmed={lostRegen ? "true" : undefined}>
-              {regenNotes.join(" ")}
+              {regenNotes.join(sentenceGap(locale))}
             </p>
           ) : null}
         </div>
