@@ -118,11 +118,13 @@
 .card .stl > .status { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .card .stl > .status > [aria-hidden] { margin-right: 4px; }
 .card .stl > span:last-child { flex: 1 1 0; min-width: min(4.5em, 40%); }
-/* A card too narrow for a pill and a word of motion side by side (the two-card rows just above 900 px): the motion
-   takes its own line under the pill, on every card of the row alike, and the footer's gaps give up the room (the
-   picture keeps its height, so the note link stays clear of the prompt). */
+/* A card too narrow for a pill and a word of motion side by side (the two-card rows just above 900 px, the three-card
+   rows just above 1100 px): the motion takes its own line under the pill, on every card of the row alike, and the
+   footer's gaps and the picture give up the room (the picture is 106 px tall, as on every two-card row, so the
+   footer stays inside the card and the note link still clears the prompt). */
 .kf-row .card { container: kf-card / inline-size; }
 @container kf-card (max-width: 160px) {
+  .kf-row .card .pic { height: 106px; }
   /* The note link takes two lines here; it keeps clear of the prompt under it. */
   .kf-row .card .callout .callout-note { gap: 3px; }
   .kf-row .card .ttl { margin-top: 6px; }

@@ -122,6 +122,7 @@ async function pricedActionsFit(page, width) {
         ],
         scroll: [button.scrollWidth, button.clientWidth, button.scrollHeight, button.clientHeight],
         hit: hit === button || button.contains(hit),
+        card: button.closest(".card")?.getBoundingClientRect().width ?? null,
       };
     });
     const where = `${layout.callout ? "note link" : "inspector action"} at ${width}`;
@@ -134,9 +135,10 @@ async function pricedActionsFit(page, width) {
     expect(layout.scroll[0] <= layout.scroll[1] + 1 && layout.scroll[2] <= layout.scroll[3] + 1, `A priced ${where} hides overflowing text: ${detail}`);
     expect(layout.blockers.every((blocker) => !overlaps(layout.rect, blocker.rect)), `A priced ${where} overlaps a badge or caption: ${detail}`);
     expect(layout.hit, `A priced ${where} is not clickable: ${detail}`);
-    // A card's link is one line where the card has room (two lines would cover the picture it is about); on the
-    // two-card rows below 1100 the price may take a second line, never more.
-    const lineLimit = typeof width === "number" && width >= 1100 ? 24 : 42;
+    // A card's link is one line where the card has room (two lines would cover the picture it is about); on a narrow
+    // card (the two-card rows below 1100, the three-card rows just above it, a phone) the price may take a second
+    // line, never more.
+    const lineLimit = typeof width === "number" && width >= 1100 && layout.card > 160 ? 24 : 42;
     expect(!layout.callout || layout.rect.bottom - layout.rect.top <= lineLimit, `A note's link wraps onto the picture at ${width}: ${detail}`);
   }
 }
@@ -638,7 +640,7 @@ export const scenarios = [
     viewport: { width: 1366, height: 900 },
     async run({ page }) {
       await ready(page);
-      for (const width of [1440, 1366, 1280, 1024, 900]) {
+      for (const width of [1440, 1366, 1280, 1100, 1024, 900]) {
         await page.setViewportSize({ width, height: 900 });
         const column = width < 1280 ? 320 : 392;
         for (const view of [...VIEWS, "settings", "start"]) {
