@@ -2,6 +2,7 @@ import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOver
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { confirmationStop, heldByEdit, isWorking, seconds, shotHasNoAnswer, shotStatus, unresolvedQueue, videoPanel, waitingMsg, type CardTone } from "./keyframes.ts";
 import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
+import { pendingAutomaticRetry } from "./media-state.ts";
 import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -149,7 +150,9 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   const first = costFrom(unit, "make", locale);
   const base = { clipNote: null, reason: null, working: false };
   if (shotHasNoAnswer(shot)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("scene.unknown_outcome", { shots: shot.label }) };
-  const wait = unresolvedQueue(keyframe) ?? unresolvedQueue(shot.video);
+  const retrying = pendingAutomaticRetry(keyframe);
+  if (retrying) return { ...base, kind: keyframe.state === "failed" ? "make" : "regenerate", label: msg(keyframe.state === "failed" ? "inspector.make_again" : "inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("inspector.failed.retrying", { count: retrying.autoRetriesLeft }) };
+  const wait = unresolvedQueue(keyframe) ?? unresolvedQueue(shot.video, true);
   if (wait) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: waitingMsg(wait), cost: null, primary: false, enabled: false, reason: waitingMsg(wait) };
   // Held by an unfinished Director edit: nothing is being made; the button and its note say what it waits for.
   if (heldByEdit(keyframe)) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: msg("media.waiting.edit_pending"), cost: null, primary: false, enabled: false, reason: msg("media.held_reason") };
@@ -161,7 +164,7 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
     case "outdated": return { ...base, kind: "make", label: msg("inspector.regenerate"), cost: take, primary: true, enabled: !!unit, reason: msg("inspector.keyframe_outdated") };
     case "failed": {
       // retryAllowed describes the old candidate's automatic retry, never a new human purchase.
-      const fresh = !!unit && !(keyframe.failure?.technical && keyframe.failure.autoRetriesLeft > 0);
+      const fresh = !!unit;
       return { ...base, kind: "make", label: msg("inspector.make_again"), cost: fresh ? (keyframe.previous ? take : first) : null, primary: fresh, enabled: fresh };
     }
     case "direction_required": return { ...base, kind: "make", label: msg("inspector.make_keyframe"), cost: null, primary: false, enabled: false, reason: msg("card.direction_required") };

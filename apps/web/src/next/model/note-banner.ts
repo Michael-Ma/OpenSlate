@@ -1,7 +1,8 @@
 import type { DirectorProposal, GenerationOverview, ProposalPreview, ShotOverview } from "@openslate/core/public";
 import type { TimelineSegment } from "./checks.ts";
 import { isWorking, shotHasNoAnswer, unresolvedQueue, waitingMsg } from "./keyframes.ts";
-import { regenerationSummary, type NoteAction, type NoteView } from "./notes.ts";
+import { regenerationState, regenerationSummary, type NoteAction, type NoteView } from "./notes.ts";
+import { pendingAutomaticRetry } from "./media-state.ts";
 import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -96,7 +97,9 @@ export function regeneratePrice(shotIds: readonly string[], overview: Generation
 /** Neutral waiting still guards the inputs of a bound purchase; it is separate from visible running progress. */
 function regenerationBlock(shot: ShotOverview): Msg | null {
   if (shotHasNoAnswer(shot)) return msg("scene.unknown_outcome", { shots: shot.label });
-  const wait = unresolvedQueue(shot.keyframe) ?? unresolvedQueue(shot.video);
+  const retrying = pendingAutomaticRetry(shot.keyframe);
+  if (retrying) return msg("inspector.failed.retrying", { count: retrying.autoRetriesLeft });
+  const wait = unresolvedQueue(shot.keyframe) ?? unresolvedQueue(shot.video, true);
   if (wait) return waitingMsg(wait);
   return isWorking(shot.keyframe) || isWorking(shot.video) ? msg(isWorking(shot.video) ? "note.callout.wait_clip" : "note.callout.wait_keyframe", { shot: shot.label }) : null;
 }
@@ -115,7 +118,7 @@ function choiceAction(note: NoteView, index: number, overview: GenerationOvervie
     case "regenerate": {
       const busy = action.shotIds.some((id) => { const shot = overview.shots[id]; return !shot || !!regenerationBlock(shot); });
       // A stale note can still be carried out by a regenerate (the server accepts it); only an in-flight job stops it.
-      return { ...base, price: regeneratePrice(action.shotIds, overview, locale), enabled: note.state !== "resolved" && !busy && keyframeEstimate(action.shotIds, overview) !== null };
+      return { ...base, price: regeneratePrice(action.shotIds, overview, locale), enabled: (note.state !== "resolved" || note.regeneration === "failed") && !busy && keyframeEstimate(action.shotIds, overview) !== null };
     }
     case "edit": return { ...base, enabled: note.state !== "resolved" };
     default: return base;
@@ -131,8 +134,9 @@ export function noteBanner(note: NoteView, overview: GenerationOverview, proposa
   const proposal = noteProposal(note, proposals);
   const base = { noteId: note.noteId, letter: note.letter, kind: note.kind, title: note.text };
   const chosenIndex = settledChoice ?? note.choices.findIndex((choice) => choice.chosen);
-  if (settledChoice !== undefined || note.state === "resolved") {
-    const chosen = note.choices[chosenIndex];
+  const chosen = note.choices[chosenIndex];
+  const failed = chosen?.action.kind === "regenerate" && regenerationState(overview, chosen.action.shotIds) === "failed";
+  if (!failed && (settledChoice !== undefined || note.state === "resolved")) {
     const applied = chosen?.action.kind === "proposal" && proposal;
     return {
       ...base,
@@ -143,7 +147,7 @@ export function noteBanner(note: NoteView, overview: GenerationOverview, proposa
       actions: [],
     };
   }
-  const sub: Msg[] = [note.anchor];
+  const sub: Msg[] = failed && chosen ? [settledMsg(chosen.action, chosen.label, overview)] : [note.anchor];
   if (note.blocking) sub.push(msg("note.blocking"));
   if (proposal && proposal.state === "held") {
     if (proposal.preview.filmSecondsNow !== proposal.preview.filmSecondsAfter)
@@ -216,7 +220,7 @@ export function firstClause(text: string, max = Infinity): string {
 }
 
 export function noteCallout(note: NoteView, shotId: string, overview: GenerationOverview, locale: string): NoteCallout {
-  const done = note.state === "resolved";
+  const done = note.state === "resolved" && (note.regeneration === null || note.regeneration === "complete");
   const chosen = note.choices.find((choice) => choice.chosen) ?? null;
   const regenerateIndex = note.choices.findIndex((choice) => choice.action.kind === "regenerate" && choice.action.shotIds.includes(shotId));
   const regenerate = !done && regenerateIndex >= 0 ? note.choices[regenerateIndex]! : null;

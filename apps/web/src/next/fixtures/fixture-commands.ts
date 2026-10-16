@@ -30,6 +30,8 @@ import { joinPromptParts } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS, narrationPace } from "../model/checks.ts";
 import type { GenerateBody, SceneGenerationRead, StoryboardEdit } from "../model/commands.ts";
+import { isWorking as mediaWorking, shotHasNoAnswer, unresolvedQueue } from "../model/keyframes.ts";
+import { pendingAutomaticRetry } from "../model/media-state.ts";
 import type { ProjectSnapshot } from "../model/types.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
 import { artifactFor } from "./last-ferry.ts";
@@ -342,7 +344,11 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
   const candidates = body.targetShotIds ?? scene.shotIds;
   const targets = candidates.filter((id) => body.regenerate || world.overview.shots[id]!.keyframe.state !== "ready");
   if (!targets.length) throw new ApiError("ALREADY_COMPLETE", 409);
-  if (targets.some((id) => { const shot = world.overview.shots[id]!; return isWorking(shot.keyframe) || isWorking(shot.video) || shot.keyframe.state === "no_answer"; }))
+  if (targets.some((id) => {
+    const shot = world.overview.shots[id]!;
+    return mediaWorking(shot.keyframe) || mediaWorking(shot.video) || shotHasNoAnswer(shot)
+      || pendingAutomaticRetry(shot.keyframe) || unresolvedQueue(shot.keyframe) || unresolvedQueue(shot.video, true);
+  }))
     throw new ApiError("ATTEMPT_EXISTS", 409);
   assertEstimate(body, targets.length, FIXTURE_PRICES.keyframe);
   extra(world).undo = null;

@@ -228,7 +228,8 @@ export interface PlanOutline {
 /** A shot as the snapshot stores it. The server sends the whole shot record, `action` included. */
 export type SnapshotShot = ProjectSnapshot["project"]["shots"][number] & { action?: string };
 
-const chip = (view: NoteView): NoteChip => ({ noteId: view.noteId, letter: view.letter, text: firstClause(view.text), full: view.text, done: view.state === "resolved" });
+const chip = (view: NoteView): NoteChip => ({ noteId: view.noteId, letter: view.letter, text: firstClause(view.text), full: view.text,
+  done: view.state === "resolved" && (view.regeneration === null || view.regeneration === "complete") });
 
 function thumbOf(shot: ShotOverview): Pick<ShotRowView, "picture" | "pictureDimmed" | "emptyThumb"> {
   const keyframe = shot.keyframe;

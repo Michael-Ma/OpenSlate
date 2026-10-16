@@ -23,6 +23,7 @@ export const keyframes = {
   "scene.state.held": { en: "held by an edit", zh: "被修改占用" },
   "scene.state.keyframes_partial": { en: "{ready} of {total} keyframes back", zh: "已回来 {ready}/{total} 张关键帧" },
   "scene.state.needs_attention": { en: "needs attention", zh: "需要处理" },
+  "scene.narration_failed": { en: "The voice line failed for {shots}.", zh: "{shots} 的配音失败。" },
   "scene.unknown_outcome": { en: "No answer from the service for {shots}. The work may still arrive and be charged.", zh: "服务还未回应 {shots} 的生成任务。结果可能稍后返回并产生费用。" },
   "scene.unknown_outcome_unassigned": { en: "No answer from the service for work in this scene. It may still arrive and be charged.", zh: "服务还未回应这一场的生成任务。结果可能稍后返回并产生费用。" },
   "panel.unknown_headline": { en: "No answer yet", zh: "尚未回应" },

@@ -1,6 +1,7 @@
 import type { EditDraft } from "../store/state.ts";
 import type { StudioStore } from "../store/store.ts";
 import { displayedHead } from "./displayed-baseline.ts";
+import type { Msg } from "./types.ts";
 
 export interface RecordingWordSave {
   commandId: string;
@@ -21,12 +22,15 @@ const owns = (store: WordsStore, owner: Owner): boolean => {
 };
 
 /** Save recording subtitles through the same field comparison and retained baseline as a typed voice line. */
-export async function saveRecordingWords(store: WordsStore, draft: EditDraft, words: string): Promise<RecordingWordSave | null> {
+export async function saveRecordingWords(store: WordsStore, draft: EditDraft, words: string, onRefused?: (message: Msg) => void): Promise<RecordingWordSave | null> {
   if (!draft.projectId || draft.revision === undefined || draft.baselineValue === undefined) return null;
   const owner = { projectId: draft.projectId, projectEpoch: store.getState().projectEpoch, shotId: draft.shotId, revision: draft.revision };
   if (!owns(store, owner)) return null;
   const value = words.trim(), beforeText = draft.baselineValue;
-  const commandId = await store.saveEdit({ ...store.getState().edit!, value }, undefined, true, false, { quiet: true });
+  const commandId = await store.saveEdit({ ...store.getState().edit!, value }, undefined, true, false, {
+    quiet: true,
+    onRefused: (message) => { if (owns(store, owner)) onRefused?.(message); },
+  });
   return commandId && owns(store, owner) ? { ...owner, commandId, beforeText, words: value } : null;
 }
 

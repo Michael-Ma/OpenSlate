@@ -125,7 +125,7 @@ export function useLineSeparators(selector: string): (node: HTMLElement | null) 
  * first form whose contents are not cut (model/film.ts wordsCut), as `data-form`; CSS draws each form. Measured before
  * paint, and again as the lanes resize or their contents change.
  */
-export function useFittedForms(): (node: HTMLElement | null) => void {
+export function useFittedForms(locale: string): (node: HTMLElement | null) => void {
   const [node, setNode] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
     if (!node) return;
@@ -138,13 +138,42 @@ export function useFittedForms(): (node: HTMLElement | null) => void {
         pending = pending.filter(({ element, forms }) => round < forms.length - 1 && wordsCut(element));
       }
     };
-    fit();
     const resized = typeof ResizeObserver === "function" ? new ResizeObserver(fit) : null;
-    resized?.observe(node);
-    // New words, or blocks that moved or changed width. The forms this sets are other attributes, so they do not come back here.
-    const changed = new MutationObserver(fit);
-    changed.observe(node, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["style", "data-forms"] });
-    return () => { resized?.disconnect(); changed.disconnect(); };
-  }, [node]);
+    const observed = new Set<Element>();
+    const styles = new MutationObserver(fit);
+    let styled = new Set<Element>();
+    const observeInputs = () => {
+      const lanes = new Set<Element>([node, ...node.querySelectorAll(".lane")]);
+      for (const lane of observed) if (!lanes.has(lane)) { resized?.unobserve(lane); observed.delete(lane); }
+      for (const lane of lanes) if (!observed.has(lane)) { resized?.observe(lane); observed.add(lane); }
+      // Observe styles only on chips, their contents and their containing boxes. In particular, the sibling
+      // playhead's per-frame style is not a subscription at all.
+      const next = new Set<Element>();
+      for (const form of node.querySelectorAll("[data-forms]")) {
+        for (let parent: Element | null = form; parent && node.contains(parent); parent = parent.parentElement) next.add(parent);
+        for (const content of form.querySelectorAll("*")) next.add(content);
+      }
+      if (next.size === styled.size && [...next].every((element) => styled.has(element))) return;
+      styles.disconnect();
+      for (const element of next) styles.observe(element, { attributes: true, attributeFilter: ["style"] });
+      styled = next;
+    };
+    observeInputs();
+    fit();
+    const withinForm = (target: Node) => !!(target instanceof Element ? target : target.parentElement)?.closest("[data-forms]");
+    const containsForm = (target: Node) => target instanceof Element && (target.matches("[data-forms]") || !!target.querySelector("[data-forms]"));
+    const changesFit = (change: MutationRecord) => {
+      if (change.type === "attributes") return true; // data-forms is the only observed attribute here.
+      if (withinForm(change.target)) return true;
+      return change.type === "childList" && [...change.addedNodes, ...change.removedNodes].some(containsForm);
+    };
+    // Only fitting inputs: chip words/forms and their geometry. data-form is our output and is never observed.
+    const changed = new MutationObserver((changes) => {
+      if (changes.some((change) => change.type !== "characterData")) observeInputs();
+      if (changes.some(changesFit)) fit();
+    });
+    changed.observe(node, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["data-forms"] });
+    return () => { resized?.disconnect(); styles.disconnect(); changed.disconnect(); };
+  }, [node, locale]);
   return setNode;
 }

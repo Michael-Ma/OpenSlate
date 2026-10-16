@@ -75,6 +75,22 @@ async function noSidewaysScroll(page, where = "") {
   expect(scrollWidth <= innerWidth, `The page scrolls sideways${where ? ` (${where})` : ""}: ${scrollWidth}px content in a ${innerWidth}px window`);
 }
 
+/** Refitting and closing an inspector panel reveal the complete focused unit without taking focus elsewhere. */
+async function inspectorFocusWhole(page, expected, where) {
+  return until(page, () => page.evaluate(() => {
+    const root = document.querySelector(".insp"), active = document.activeElement;
+    if (!root?.contains(active)) return null;
+    const row = active.closest(".row-pair");
+    const parts = row ? [...row.children] : [active];
+    if (!row && active.nextElementSibling?.matches(".insp-note")) parts.push(active.nextElementSibling);
+    const rects = parts.map((part) => part.getBoundingClientRect()).filter((rect) => rect.height > 0);
+    const box = root.getBoundingClientRect(), style = getComputedStyle(root);
+    const top = box.top + root.clientTop + parseFloat(style.paddingTop);
+    const bottom = root.dataset.fit === "pinned" ? root.querySelector(".insp-actions").getBoundingClientRect().top : box.top + root.clientTop + root.clientHeight - parseFloat(style.paddingBottom);
+    return { act: active.getAttribute("data-act"), whole: rects.length > 0 && rects.every((rect) => rect.top >= top - 0.5 && rect.bottom <= bottom + 0.5), drawn: parts.every((part) => getComputedStyle(part).clipPath === "none"), fit: root.dataset.fit, top, bottom, unit: rects.map((rect) => ({ top: rect.top, bottom: rect.bottom })) };
+  }), (report) => report?.act === expected && report.whole && report.drawn, `The focused inspector unit is not wholly shown ${where}`, 3000);
+}
+
 /** The scene pills scroll inside their row; the selected one is shown whole (also after the other pills' words change). */
 /** Measure actual rendered text and hit targets: a priced action may wrap, but every line must stay visible. */
 async function pricedActionsFit(page, width) {
@@ -743,6 +759,7 @@ export const scenarios = [
             await page.setViewportSize({ width, height });
             await page.waitForTimeout(150);
             const where = `for ${label} at ${width} x ${height} (${language})`;
+            if (label === "2.1" && width === 1366) await inspectorFocusWhole(page, "narration-edit", `after the roomy inspector refits ${where}`);
             if (width >= 900) {
               const scrolled = await page.evaluate(() => document.documentElement.scrollHeight);
               expect(scrolled <= height, `Keyframes scrolls the page ${where}: ${scrolled}px`);
@@ -750,6 +767,8 @@ export const scenarios = [
             const report = await inspectorWhole(page, where);
             fits[`${label} ${width}x${height} ${language}`] = report.fit;
             if (width >= 900 && width < 1100) await previewWholeFrame(page, where);
+            // Keep the existing focus while the next viewport tightens roomy through compact to pinned.
+            if (label === "2.1" && width === 1440) await page.focus(".insp [data-act='narration-edit']");
             // Pinned, a row's control that takes the focus from the keyboard is scrolled whole into view above the actions.
             if (label === "2.1" && width === 1366) {
               await page.focus(".insp [data-act='prompts']");
@@ -803,6 +822,24 @@ export const scenarios = [
       expect(Math.abs(head.top - head.side) < 4, `The preview's head takes two rows at 390: ${JSON.stringify(head)}`);
       expect(head.caption <= head.line * 1.5 && head.position === "Shot 4 of 8 in the film", `The caption or the position at 390: ${JSON.stringify(head)}`);
       await shot(page, "next-shell-inspector-fit-390");
+      // A fixture-only replacement provides Takes. Closing it restores focus before the rows' focus listener is
+      // installed; its entire row must already be above the pinned actions, in both languages.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.click(".card [data-act='open-shot'][data-shot='shot-2-1']");
+      await page.click(".insp [data-act='regen']");
+      await page.waitForSelector(".insp [data-act='takes']", { timeout: 10000 });
+      for (const language of ["en", "zh-CN"]) {
+        if (language === "zh-CN") {
+          await page.locator(".topbar [data-act='language']").click();
+          await page.waitForFunction(() => document.documentElement.lang === "zh-CN");
+        }
+        await page.setViewportSize({ width: 1366, height: 768 });
+        await page.click(".insp [data-act='takes']");
+        await page.waitForSelector(".insp[data-sub='takes'] .takes");
+        await page.keyboard.press("Escape");
+        await page.waitForSelector(".insp .rows");
+        await inspectorFocusWhole(page, "takes", `after closing Takes (${language})`);
+      }
     },
   },
   {

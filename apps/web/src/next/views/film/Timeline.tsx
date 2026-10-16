@@ -57,7 +57,7 @@ const MuteIcon = ({ muted }: { muted: boolean }) => (
  * a block or the music changes the tool row below.
  */
 export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: pps, writable, saving, onSelectShot, onSelectMusic, onToggleMute, onChooseMusic, children }: Props) {
-  const { t, tm } = useI18n();
+  const { t, tm, locale } = useI18n();
   const total = Math.max(timeline.total, 0.001);
   const head = useRef<HTMLSpanElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -70,7 +70,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
   // The tool row wraps on a narrow screen: its separators never end or start a line.
   const tools = useLineSeparators(":scope > .sep");
   // A lack or a line state that does not fit its block is shown as its mark, never cut.
-  const lanes = useFittedForms();
+  const lanes = useFittedForms(locale);
   const bars = useMemo(() => waveBars(music?.audioId ?? "", 90), [music?.audioId]);
 
   useClockPaint(clock, (time) => { if (head.current) head.current.style.left = X(Math.min(time, timeline.total)); });

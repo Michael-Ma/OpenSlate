@@ -20,6 +20,69 @@ async function studio(t, intercept = () => undefined) {
 }
 const comparison = store => { const state = store.getState(); return editConflict(state.edit, state.overview, displayedHead(state.projectId, state.snapshot, state.overview)); };
 
+test('B21 refused recording subtitle pre-save returns its server reason without a toast, upload, or retry', async t => {
+  const { saveRecordingWords } = await import('../../src/next/model/recording-words.ts');
+  const { store, errors, posts } = await studio(t, (_path, options) => options?.method === 'POST'
+    ? Promise.reject(new ApiError('VALIDATION_ERROR', 400)) : undefined);
+  const before = store.getState().toast, refusals = [];
+  let uploaded = false;
+  const words = 'x'.repeat(16001);
+  const saved = await saveRecordingWords(store, store.getState().edit, words, refusal => refusals.push(refusal));
+  if (saved) uploaded = true;
+  assert.equal(saved, null);
+  assert.deepEqual(refusals, [{ id: 'error.VALIDATION_ERROR' }], 'the recording panel needs the actual subtitle refusal');
+  assert.equal(uploaded, false);
+  assert.equal(posts.length, 1, 'one explicit attempt, no automatic retry');
+  assert.equal(store.getState().toast, before, 'the recording panel owns refusal feedback');
+  assert.equal(store.getState().edit.saving, false);
+  assert.equal(errors[0].code, 'VALIDATION_ERROR');
+  assert.equal(await saveRecordingWords(store, store.getState().edit, words, refusal => refusals.push(refusal)), null);
+  assert.equal(posts.length, 2, 'only the next human press retries a definite refusal');
+  assert.notEqual(posts[1].key, posts[0].key);
+  assert.deepEqual(refusals, [{ id: 'error.VALIDATION_ERROR' }, { id: 'error.VALIDATION_ERROR' }]);
+  assert.equal(store.getState().toast, before);
+});
+
+test('B21 recording subtitle refusal is ignored after its editor owner is superseded', async t => {
+  const { saveRecordingWords } = await import('../../src/next/model/recording-words.ts');
+  let refuse, entered;
+  const began = new Promise(resolve => { entered = resolve; });
+  const rejected = new Promise((_resolve, reject) => { refuse = reject; });
+  const { store } = await studio(t, (_path, options) => options?.method === 'POST' ? (entered(), rejected) : undefined);
+  const refusals = [];
+  const saving = saveRecordingWords(store, store.getState().edit, 'New subtitle', refusal => refusals.push(refusal));
+  await began;
+  store.setEdit(null);
+  store.setEdit({ shotId: 'shot-2-3', field: 'narration', value: 'New owner' });
+  refuse(new ApiError('VALIDATION_ERROR', 400));
+  assert.equal(await saving, null);
+  assert.deepEqual(refusals, []);
+  assert.equal(store.getState().edit.value, 'New owner');
+});
+
+test('B21 a recording subtitle baseline refusal reaches its panel without sending a request', async t => {
+  const { saveRecordingWords } = await import('../../src/next/model/recording-words.ts');
+  const { store, posts } = await studio(t);
+  await store.edit({ kind: 'narration', id: 'shot-2-3', field: 'text', value: 'A different saved line' });
+  await store.refresh();
+  const before = store.getState().toast, count = posts.length, refusals = [];
+  assert.equal(await saveRecordingWords(store, store.getState().edit, 'My recording subtitle', refusal => refusals.push(refusal)), null);
+  assert.deepEqual(refusals, [{ id: 'error.EDIT_BASELINE_CHANGED' }]);
+  assert.equal(posts.length, count);
+  assert.equal(store.getState().toast, before);
+});
+
+test('B21 recording subtitle preparation reports no refusal on success and never retains its feedback callback', async t => {
+  const { saveRecordingWords } = await import('../../src/next/model/recording-words.ts');
+  const { store, posts } = await studio(t);
+  const refusals = [], before = store.getState().toast;
+  assert.ok(await saveRecordingWords(store, store.getState().edit, 'A successful subtitle', refusal => refusals.push(refusal)));
+  assert.deepEqual(refusals, []);
+  assert.equal(store.getState().toast, before);
+  assert.deepEqual(store.getState().edit.saveFeedback, { message: { id: 'toast.saved' }, quiet: true });
+  assert.deepEqual(Object.keys(posts[0].body).sort(), ['expectedHeadVersion', 'field', 'id', 'kind', 'value']);
+});
+
 test('B18 recording subtitle Save updates its own retained narration baseline without a self-conflict', async t => {
   const { saveRecordingWords } = await import('../../src/next/model/recording-words.ts');
   const { store } = await studio(t);

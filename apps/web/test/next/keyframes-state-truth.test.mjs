@@ -122,7 +122,7 @@ test('B20 unclassified and stopped queues never look active or grant scene confi
 });
 
 test('B20 explicit queue reasons and proven automatic retries retain their real working state', () => {
-  for (const code of ['capacity', 'edit_pending', 'input_pending', 'voice']) {
+  for (const code of ['capacity', 'edit_pending', 'voice']) {
     const { overview, scene, first } = ready();
     first.video = { state: 'queued', takeCount: 0, waiting: { code, since: 'x' } };
     scene.state = 'making_video';

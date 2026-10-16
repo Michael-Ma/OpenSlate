@@ -237,7 +237,7 @@ test('Film names input and unknown waits in both locales without claiming that u
   const { clipCell } = await import('../../src/next/model/film-export.ts');
   const overview = lastFerryOverview(), shot = overview.shots[shotId('2.1')];
   for (const [code, english, chinese, moves] of [
-    ['input_pending', 'Waiting for required media', '等待所需素材', true],
+    ['input_pending', 'Waiting for required media', '等待所需素材', false],
     ['unknown', 'Waiting for the studio to report its status', '等待工作室报告状态', false],
     [undefined, 'Waiting for the studio to report its status', '等待工作室报告状态', false],
     ['timing', 'Waiting for narration timing', '等待确定旁白时长', false],
