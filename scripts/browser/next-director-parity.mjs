@@ -65,7 +65,7 @@ async function previewActionsReachable(page) {
         || Math.min(rect.right, other.right) - Math.max(rect.left, other.left) <= 1
         || Math.min(rect.bottom, other.bottom) - Math.max(rect.top, other.top) <= 1);
     });
-  }, null, { timeout: 4000 }).catch(() => fail("The preview's Show the Director, media or navigation controls cover each other or cannot be reached"));
+  }, null, { timeout: 4000 }).catch(() => fail("The preview's Add to message, media or navigation controls cover each other or cannot be reached"));
 }
 
 export const scenarios = [
@@ -170,7 +170,7 @@ export const scenarios = [
       // Clips and audio are not offered; a demo-free imported picture is, and refused for the same reason.
       await openAssets(page);
       await page.locator('[data-asset*="art-music-low-tide"]').first().click();
-      if (await page.locator('.detail [data-act="show-director"]').count()) fail("Show the Director is offered for music");
+      if (await page.locator('.detail [data-act="show-director"]').count()) fail("Add to message is offered for music");
       await closeToast(page);
       await showAsset(page, "art-timetable");
       await toast(page, /scripted Director/);

@@ -48,8 +48,9 @@ export const director = {
   "director.question.answer": { en: "Answer", zh: "回答" },
   "director.question.other": { en: "Or write your own answer", zh: "或者自己写回答" },
   // Pictures for the Director (an imported picture, or a shot's current keyframe).
-  "director.picture.show": { en: "Show the Director", zh: "给导演看" },
-  "director.picture.show_shot": { en: "Show the Director {shot}'s keyframe", zh: "把 {shot} 的关键帧给导演看" },
+  // It adds the picture to the message being written; the Director sees it once the message is sent.
+  "director.picture.show": { en: "Add to message", zh: "加入消息" },
+  "director.picture.show_shot": { en: "Add to message: {shot} keyframe", zh: "加入消息：{shot} 关键帧" },
   "director.picture.added": { en: "Added to your message. The Director sees it when you send.", zh: "已加入消息，发送后导演就能看到。" },
   "director.picture.name": { en: "{name}", zh: "{name}" },
   "director.picture.imported": { en: "Imported image", zh: "导入的图片" },
