@@ -203,8 +203,8 @@
 
 /* ---------- inspector: the rows view fits its room (useInspectorFit, model/inspector-fit.ts) ---------- */
 /* Compact, when the rows would not fit above the stacked actions: the framing beside the title, tighter spacing, and
-   Edit prompt and Edit motion & duration side by side (shortened only when the words cannot fit). Pinned and scroll
-   build on it. */
+   Edit prompt and Edit motion & duration side by side, Edit prompt as wide as its words and the other taking the rest
+   (shortened only when its words cannot fit, to a label that still names the duration). Pinned and scroll build on it. */
 .insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) { padding: 13px 13px 12px; }
 .insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-title > div { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
 .insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .framing { margin-top: 0; }
@@ -213,7 +213,9 @@
 .insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions { flex-flow: row wrap; gap: 6px; padding-top: 8px; }
 .insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions > * { flex: 1 1 100%; }
 .insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions .pill { padding: 6px 8px; }
-.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) { flex: 1 1 0; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) { padding-inline: 6px; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions [data-act="edit-prompt"] { flex: 0 1 auto; }
+.insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions [data-act="edit-motion"] { flex: 1 1 0; }
 .insp:is([data-fit="compact"], [data-fit="pinned"], [data-fit="scroll"]) .insp-actions :is([data-act="edit-prompt"], [data-act="edit-motion"]) .lbl { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Pinned, when even compact does not fit: the actions stay at the inspector's foot, in view at rest, and the rows
    above them scroll (Scroll, the last resort, scrolls the whole column, the actions after the rows). Either way a unit

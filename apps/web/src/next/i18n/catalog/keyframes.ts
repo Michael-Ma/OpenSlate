@@ -87,7 +87,7 @@ export const keyframes = {
   "inspector.narration_label": { en: "Narration for {shot}", zh: "{shot} 的旁白" },
   "inspector.edit_prompt": { en: "Edit prompt", zh: "编辑画面描述" },
   "inspector.edit_motion": { en: "Edit motion & duration", zh: "编辑运动和时长" },
-  "inspector.edit_motion_short": { en: "Edit motion", zh: "编辑运动" },
+  "inspector.edit_motion_short": { en: "Motion & duration", zh: "运动和时长" },
   "inspector.edit_narration": { en: "Edit narration", zh: "编辑旁白" },
   "inspector.regenerate": { en: "Regenerate keyframe", zh: "重新生成关键帧" },
   "inspector.make_keyframe": { en: "Make keyframe", zh: "生成关键帧" },

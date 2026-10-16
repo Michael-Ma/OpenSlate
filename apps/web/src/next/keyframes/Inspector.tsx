@@ -260,7 +260,8 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       {editing || sub ? null : (
         <div className="insp-actions">
           <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}><span className="lbl">{t("inspector.edit_prompt")}</span></button>
-          {/* Side by side in a compact inspector, its words are shortened only when they cannot fit; its name keeps them all. */}
+          {/* Side by side in a compact inspector, its words are shortened only when they cannot fit (the short label still
+              names the duration); its name keeps them all. */}
           <button
             type="button"
             className="pill"

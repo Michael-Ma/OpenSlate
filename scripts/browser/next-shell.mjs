@@ -698,16 +698,20 @@ export const scenarios = [
       expect(fits["2.1 1440x900 en"] === "roomy", `2.1 at 1440 is not in the design's layout: ${JSON.stringify(fits)}`);
       expect(fits["2.3 1440x900 en"] === "compact", `2.3's longer narration at 1440 does not tighten to compact: ${JSON.stringify(fits)}`);
       expect(fits["2.1 1366x768 en"] === "pinned" && fits["2.1 390x844 en"] === null, `The fits are ${JSON.stringify(fits)}`);
-      // Compact puts the two edits side by side, shortened only when the words cannot fit; the name keeps them all.
+      // Compact puts the two edits side by side, shortened only when the words cannot fit, to words that still name the
+      // duration; the name keeps them all. Chinese has the room for the whole label.
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.locator(".topbar [data-act='language']").click();
-      await page.waitForFunction(() => document.documentElement.lang === "en");
-      const pair = await page.evaluate(() => {
+      const readPair = () => page.evaluate(() => {
         const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
         const motion = document.querySelector(".insp-actions [data-act='edit-motion']");
-        return { prompt: top(".insp-actions [data-act='edit-prompt']"), motion: top(".insp-actions [data-act='edit-motion']"), text: motion.textContent, name: motion.getAttribute("aria-label") };
+        return { fit: document.querySelector(".insp").getAttribute("data-fit"), prompt: top(".insp-actions [data-act='edit-prompt']"), motion: top(".insp-actions [data-act='edit-motion']"), text: motion.textContent, name: motion.getAttribute("aria-label") };
       });
-      expect(pair.prompt === pair.motion && pair.text === "Edit motion" && pair.name === "Edit motion & duration", `The compact edits are ${JSON.stringify(pair)}`);
+      const zhPair = await readPair();
+      expect(zhPair.fit === "compact" && zhPair.prompt === zhPair.motion && zhPair.text === "编辑运动和时长" && zhPair.name === null, `The compact edits in Chinese are ${JSON.stringify(zhPair)}`);
+      await page.locator(".topbar [data-act='language']").click();
+      await page.waitForFunction(() => document.documentElement.lang === "en");
+      const pair = await readPair();
+      expect(pair.prompt === pair.motion && pair.text === "Motion & duration" && pair.name === "Edit motion & duration", `The compact edits are ${JSON.stringify(pair)}`);
       // A phone: the preview's head is one row (Previous and Next without the position), and its caption one line.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.click(".card [data-act='open-shot'][data-shot='shot-2-1']");
