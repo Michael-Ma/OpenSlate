@@ -6,6 +6,7 @@ import { useI18n } from "../i18n/I18n.tsx";
 import type { StoryboardEdit } from "../model/commands.ts";
 import { displayedHead } from "../model/displayed-baseline.ts";
 import { editConflict } from "../model/edit-conflict.ts";
+import { scrollToTop } from "../model/inspector-fit.ts";
 import { runNarrationEdits } from "../model/narration-edits.ts";
 import { rollbackRecordingWords, saveRecordingWords, type RecordingWordSave } from "../model/recording-words.ts";
 import {
@@ -337,7 +338,8 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
   const impactText = notes.impact.map((part) => tm(part)).join(sentenceGap(locale));
   // What Save will do changes with the voice or the line: when it is out of sight it is brought into view above the
   // sticky buttons, with the voice at the top where there is room, so a changed voice is never saved without its
-  // result in sight (and nothing above it is left half-cut).
+  // result in sight. The voice goes clear of the body's top fade (its scroll margin); when the end of the panel comes
+  // first, room before the buttons lets it get there, so the player above it is never left half in view.
   const voiceRow = useRef<HTMLDivElement>(null);
   const impactLine = useRef<HTMLSpanElement>(null);
   const shownImpact = useRef(impactText);
@@ -345,13 +347,24 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
     if (shownImpact.current === impactText) return;
     shownImpact.current = impactText;
     const line = impactLine.current;
-    const foot = line?.parentElement?.querySelector(".narr-foot");
-    const body = line?.closest(".insp-body");
+    const foot = line?.parentElement?.querySelector<HTMLElement>(".narr-foot");
+    const body = line?.closest<HTMLElement>(".insp-body");
+    const voice = voiceRow.current;
     if (!line || !foot || !body) return;
     const inSight = () => line.getBoundingClientRect().bottom <= foot.getBoundingClientRect().top + 1 && line.getBoundingClientRect().top >= body.getBoundingClientRect().top - 1;
     if (inSight()) return;
-    voiceRow.current?.scrollIntoView?.({ block: "start" });
-    if (!inSight()) line.scrollIntoView?.({ block: "nearest" });
+    foot.style.marginTop = "";
+    if (voice) {
+      const margin = parseFloat(getComputedStyle(voice).scrollMarginTop) || 0;
+      const target = body.scrollTop + voice.getBoundingClientRect().top - body.getBoundingClientRect().top - margin;
+      const { scrollTop, slack } = scrollToTop(target, body.scrollHeight, body.clientHeight);
+      if (slack) foot.style.marginTop = `${parseFloat(getComputedStyle(foot).marginTop) + slack}px`;
+      body.scrollTop = scrollTop;
+    }
+    if (!inSight()) {
+      foot.style.marginTop = "";
+      line.scrollIntoView?.({ block: "nearest" });
+    }
   }, [impactText]);
 
   return (

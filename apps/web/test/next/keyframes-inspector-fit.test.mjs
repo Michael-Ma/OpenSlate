@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ROOMY, partlyInView, scrolls, tighten } from '../../src/next/model/inspector-fit.ts';
+import { ROOMY, partlyInView, scrolls, scrollToTop, tighten } from '../../src/next/model/inspector-fit.ts';
 
 const fits = { overflows: false, labelCut: false, cramped: false };
 const over = { overflows: true, labelCut: false, cramped: false };
@@ -62,4 +62,15 @@ test('a unit taller than the view is drawn, or it could never be read', () => {
   assert.deepEqual(partlyInView([{ top: 0, bottom: 300 }, { top: 20, bottom: 229.6 }], { top: 12, bottom: 221 }), [false, false]);
   // Sub-pixel edges count as inside.
   assert.deepEqual(partlyInView([{ top: 11.6, bottom: 221.4 }], { top: 12, bottom: 221 }), [false]);
+});
+
+test('a body brings a unit to its top, with room added after its content when the end comes first', () => {
+  // The scroll reaches the target: nothing to add.
+  assert.deepEqual(scrollToTop(60, 445, 333), { scrollTop: 60, slack: 0 });
+  // The end comes first (at most 112): 43 px of room after the content let the unit reach the top.
+  assert.deepEqual(scrollToTop(155, 445, 333), { scrollTop: 155, slack: 43 });
+  // Fractions round up, so the unit is never left a sliver short.
+  assert.deepEqual(scrollToTop(112.4, 445, 333), { scrollTop: 112.4, slack: 1 });
+  // A target above the start is the start.
+  assert.deepEqual(scrollToTop(-8, 445, 333), { scrollTop: 0, slack: 0 });
 });

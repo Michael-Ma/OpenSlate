@@ -24,8 +24,9 @@
 .insp .narr-panel .segctl button[aria-checked="true"] { background: var(--raised-2); color: var(--text); }
 .insp .narr-panel .segctl button:disabled { cursor: not-allowed; }
 .insp .narr-panel .stale { margin-top: 0; line-height: 1.4; }
-/* The voice on one row with its label, so the line stays in view with it in a short inspector. */
-.insp .narr-voice { display: flex; align-items: center; gap: 8px; }
+/* The voice on one row with its label, so the line stays in view with it in a short inspector. Brought to the top, it
+   stops clear of the body's 16 px top fade. */
+.insp .narr-voice { display: flex; align-items: center; gap: 8px; scroll-margin-top: 16px; }
 .insp .narr-voice label { flex: none; }
 .insp .narr-voice select { appearance: auto; flex: 1 1 auto; min-width: 0; font-size: 12.5px; padding: 7px 6px; }
 .insp .narr-voice select option { background: var(--raised); color: var(--text); }

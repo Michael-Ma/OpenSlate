@@ -62,3 +62,13 @@ export function partlyInView(units: readonly Span[], view: Span): boolean[] {
     return !inside && unit.bottom - unit.top <= room + 0.5;
   });
 }
+
+/**
+ * Where a scrolling body moves to bring a unit to its top (`target`, in the body's scroll coordinates), and how much
+ * room to add after its content when the end comes first. Without that room the scroll stops short, and the part of
+ * the unit above the target is left half in view at the top edge.
+ */
+export function scrollToTop(target: number, scrollHeight: number, clientHeight: number): { scrollTop: number; slack: number } {
+  const scrollTop = Math.max(0, target);
+  return { scrollTop, slack: Math.max(0, Math.ceil(scrollTop - (scrollHeight - clientHeight))) };
+}
