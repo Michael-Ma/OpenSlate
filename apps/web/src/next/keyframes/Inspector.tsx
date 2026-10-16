@@ -243,22 +243,24 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       )}
 
       {!editing && !sub && view.notes.length ? <div className="insp-notes">{view.notes.map((note, index) => <p key={index} className="stale">{tm(note)}</p>)}</div> : null}
-      {!editing && !sub && view.failure ? (
-        <div className="insp-alert" role="status">
-          <p>{tm(view.failure.message)}</p>
-          {view.failure.retryVideo ? (
-            <button type="button" className="pill sm" data-act="retry-video" data-shot={shot.shotId} {...run} disabled={!view.failure.retryVideo.enabled || busy.video || run.disabled} onClick={onRetryVideo}>
-              {t("inspector.retry_video")}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
-            </button>
-          ) : null}
-          {view.failure.retryVideo && unconfirmed.video && !busy.video ? <p className="lost" data-unconfirmed="true">{t("error.PAID_UNCONFIRMED")}</p> : null}
-        </div>
-      ) : null}
-      {!editing && !sub && view.noAnswer ? <GiveUp attemptId={view.noAnswer.attemptId} busy={busy.release} onRelease={onRelease} /> : null}
       </div>
 
       {editing || sub ? null : (
         <div className="insp-actions">
+          {/* A failure or an unanswered job carries its own recovery action, so it sits with the actions: when the rows
+              scroll above the pinned actions it never scrolls out of sight. */}
+          {view.failure ? (
+            <div className="insp-alert" role="status">
+              <p>{tm(view.failure.message)}</p>
+              {view.failure.retryVideo ? (
+                <button type="button" className="pill sm" data-act="retry-video" data-shot={shot.shotId} {...run} disabled={!view.failure.retryVideo.enabled || busy.video || run.disabled} onClick={onRetryVideo}>
+                  {t("inspector.retry_video")}{view.failure.retryVideo.price ? ` · ${tm(view.failure.retryVideo.price)}` : ""}
+                </button>
+              ) : null}
+              {view.failure.retryVideo && unconfirmed.video && !busy.video ? <p className="lost" data-unconfirmed="true">{t("error.PAID_UNCONFIRMED")}</p> : null}
+            </div>
+          ) : null}
+          {view.noAnswer ? <GiveUp attemptId={view.noAnswer.attemptId} busy={busy.release} onRelease={onRelease} /> : null}
           <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}><span className="lbl">{t("inspector.edit_prompt")}</span></button>
           {/* Side by side in a compact inspector, its words are shortened only when they cannot fit (the short label still
               names the duration); its name keeps them all. */}
