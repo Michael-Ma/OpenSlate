@@ -137,6 +137,22 @@
 .insp { overflow: hidden; }
 .insp-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 2px; }
 .insp-body > form { margin-top: 10px; }
+/* When the rows run past the inspector's room, the edge with more behind it fades, so the body says it scrolls (the
+   fade follows the scroll where the browser can; a body that fits has no fade). */
+@property --kf-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --kf-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes kf-body-edges {
+  0% { --kf-fade-t: 0px; --kf-fade-b: 16px; }
+  10%, 90% { --kf-fade-t: 16px; --kf-fade-b: 16px; }
+  100% { --kf-fade-t: 16px; --kf-fade-b: 0px; }
+}
+@supports (animation-timeline: scroll()) {
+  .insp-body {
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--kf-fade-t), #000 calc(100% - var(--kf-fade-b)), transparent);
+    animation: kf-body-edges linear both;
+    animation-timeline: scroll(self block);
+  }
+}
 .insp .rows .row-pair { display: contents; }
 .insp .rows dd { min-width: 0; overflow-wrap: anywhere; }
 /* A long line is clamped so its length and fit notes stay in view; the full line is in the editor and the title. */
@@ -185,10 +201,27 @@
 }
 
 /* ---------- the scene confirm stopped partway; a paid press whose reply was lost ---------- */
-.vpanel p.vstop { color: var(--text); }
-.vpanel .vstop-act { align-self: flex-start; margin: 6px 0 8px; }
+/* The stop's message flows on with its next step's view as a link, so the panel keeps room for the segments, the
+   button and the reason under it. */
+.vpanel[data-stopped] .vhead { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.vpanel[data-stopped] .vhead .eyebrow { flex: none; }
+.vpanel[data-stopped] .vhead .vsegs { flex: 0 1 auto; min-width: 0; margin: 0 0 0 auto; }
+.vpanel[data-stopped] .vcount { margin-top: 4px; }
+.vpanel[data-stopped] .vcount b { font-size: 18px; }
+.vpanel .vstop-box { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--text-2); }
+.vpanel .vstop-box p.vstop { display: inline; margin: 0; color: var(--text); }
+.vpanel .vstop-act { display: inline; border: 0; background: none; padding: 0; color: var(--text); font: inherit; font-weight: 600; white-space: nowrap; text-decoration: underline; text-decoration-color: var(--track); text-underline-offset: 3px; }
+.vpanel .vstop-act:hover:not(:disabled) { text-decoration-color: var(--text); }
+.vpanel .vstop-act:disabled { color: var(--muted); cursor: not-allowed; }
 .insp-note.lost, .vpanel .why.lost, .insp-alert .lost { color: var(--text); font-weight: 600; }
 .insp-alert p b { color: var(--text); }
+/* The inspector says it in one line before the rows; Why opens the reason in place. */
+.insp-stop { margin: 0 0 8px; font-size: 12.5px; line-height: 1.4; color: var(--text-2); }
+.insp-stop p { margin: 0; }
+.insp-stop b { color: var(--text); font-weight: 600; }
+.insp-stop .insp-link { font-weight: 500; color: var(--text-2); }
+.insp-stop .insp-link:hover { color: var(--text); }
+.insp-stop p.insp-stop-why { margin-top: 4px; padding: 7px 9px; border: 1px solid var(--track); border-radius: 8px; background: var(--raised); }
 
 /* ---------- inspector: the Takes row and the prompts open in place ---------- */
 .insp .insp-link { border: 0; background: none; padding: 0; color: var(--text); font: inherit; font-weight: 600; text-align: left; text-decoration: underline; text-decoration-color: var(--track); text-underline-offset: 3px; }
@@ -197,7 +230,6 @@
 .insp .st { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
 .insp .st .insp-link { font-size: 12.5px; font-weight: 500; color: var(--text-2); }
 .insp .st .insp-link:hover { color: var(--text); }
-.insp-alert.stopped { margin: 0 0 8px; }
 .insp-prompts { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12.5px; }
 .insp-prompts .takes-head { margin-bottom: 4px; }
 .insp-prompts .lbl { margin-top: 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -220,5 +252,3 @@
 .take-meta span { color: var(--muted); font-size: 11px; }
 .take .status { align-self: flex-start; }
 .take .pill { justify-content: center; padding: 3px 6px; font-size: 11.5px; line-height: 1.25; text-align: center; white-space: normal; }
-/* A stopped confirm's headline sits where the segments were. */
-.vpanel[data-stopped] .vcount { margin-top: 6px; }

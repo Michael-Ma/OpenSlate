@@ -3,7 +3,7 @@
 // was lost.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { confirmationStep, confirmationStop, keyframesView, shotStatus, videoPanel } from '../../src/next/model/keyframes.ts';
+import { confirmationStep, confirmationStop, keyframesView, shotStatus, stopExplains, videoPanel } from '../../src/next/model/keyframes.ts';
 import { ARROW_OWNERS, filmShotOrder, shotClip, shotPosition, stageStep } from '../../src/next/model/keyframes-stage.ts';
 import { takeBlocked, takeImpact, takesPath, takesStrip, takeUsedToast, useTakeCommand } from '../../src/next/model/keyframes-takes.ts';
 import { confirmPress, keyframesPress, lostReplyHolds, pressFromId, PAID_PRESS } from '../../src/next/model/keyframes-press.ts';
@@ -88,6 +88,8 @@ test('a stopped confirm says why, at which shot, and what to do next, for each b
   ];
   for (const [code, reason, next, action] of cases) {
     const overview = stoppedScene3({ code, shotId: shotId('3.2') });
+    // The film is still stopped (once it runs again, the next step is only to confirm again).
+    overview.stopped = { stopId: 'stop-1', at: '2026-10-15T10:00:00Z', sentJobs: 0, detachedJobs: 1 };
     const stop = confirmationStop(overview, scene(overview, 3));
     assert.deepEqual([stop.code, stop.shotId, stop.label, en(stop.reason), en(stop.next), stop.action], [code, shotId('3.2'), '3.2', reason, next, action], code);
   }
@@ -153,6 +155,51 @@ test('the stop shows in the panel and on its shot in the inspector, until clips 
     scene(other, 3).confirmation.state = state;
     assert.equal(confirmationStop(other, scene(other, 3)), null, state);
   }
+});
+
+test('under a stopped confirm the disabled button still says why, less what the stop itself already says', () => {
+  const reason = (overview) => { const panel = videoPanel(overview, scene(overview, 3), 'en-US'); return panel.reason && en(panel.reason); };
+  // The too-long line at the stop's shot is the stop's own blocker: nothing to add under the button.
+  let overview = stoppedScene3({ code: 'NARRATION_CUE_OUT_OF_RANGE', shotId: shotId('3.2') });
+  scene(overview, 3).blockers = [{ code: 'narration_too_long', shotId: shotId('3.2') }];
+  assert.equal(reason(overview), null);
+  // Frames still to open are not: the reason names them (and leaves out the line the stop explains).
+  scene(overview, 3).blockers = [{ code: 'frame_not_opened', shotId: shotId('3.1') }, { code: 'narration_too_long', shotId: shotId('3.2') }];
+  assert.equal(reason(overview), 'Open 3.1 first');
+  // A failed voice line explains nothing about unopened frames or a working Director: both are said.
+  overview = stoppedScene3({ code: 'NARRATION_SPEECH_FAILED', shotId: shotId('3.1') });
+  scene(overview, 3).blockers = [{ code: 'frame_not_opened', shotId: shotId('3.1') }, { code: 'frame_not_opened', shotId: shotId('3.2') }];
+  assert.equal(reason(overview), 'Open 3.1 and 3.2 first');
+  scene(overview, 3).blockers = [{ code: 'director_working' }];
+  assert.equal(reason(overview), 'The Director is working on this scene');
+  // A too-long line at another shot than the stop's is still said.
+  overview = stoppedScene3({ code: 'NARRATION_CUE_OUT_OF_RANGE', shotId: shotId('3.2') });
+  scene(overview, 3).blockers = [{ code: 'narration_too_long', shotId: shotId('3.1') }];
+  assert.equal(reason(overview), 'Settle the narration in 3.1 first');
+  // The opened-frame segments stay next to the stop.
+  assert.deepEqual(videoPanel(overview, scene(overview, 3), 'en-US').segments.map((segment) => segment.opened), [true, true]);
+  // Which blockers each stop explains.
+  const stop = (code, shot = shotId('3.2')) => ({ code, shotId: shot });
+  assert.ok(stopExplains(stop('EXECUTION_PAUSED'), { code: 'stopped' }));
+  assert.ok(stopExplains(stop('SUBMISSION_UNKNOWN'), { code: 'no_answer_in_scene', shotId: shotId('3.2') }));
+  assert.ok(!stopExplains(stop('SUBMISSION_UNKNOWN'), { code: 'no_answer_in_scene', shotId: shotId('3.1') }));
+  assert.ok(stopExplains(stop('NARRATION_CUE_OUT_OF_RANGE', null), { code: 'narration_too_long', shotId: shotId('3.1') }), 'a stop with no shot covers any too-long line');
+  assert.ok(!stopExplains(stop('NARRATION_SPEECH_FAILED'), { code: 'frame_not_opened', shotId: shotId('3.2') }));
+  assert.ok(!stopExplains(stop('EXECUTION_PAUSED'), { code: 'director_working' }));
+});
+
+test('a confirm the stopped film cut short says to continue the film, and only to confirm again once it runs', () => {
+  const overview = stoppedScene3({ code: 'EXECUTION_PAUSED', shotId: shotId('3.2') });
+  overview.stopped = { stopId: 'stop-1', at: '2026-10-15T10:00:00Z', sentJobs: 0, detachedJobs: 1 };
+  scene(overview, 3).blockers = [{ code: 'stopped' }];
+  let panel = videoPanel(overview, scene(overview, 3), 'en-US');
+  assert.deepEqual([en(panel.stopped.next), panel.reason], ['Continue the film, then confirm again.', null], 'the stopped film is the stop\'s own blocker');
+  // Continued: confirm again; a Director now working on the scene is said under the button.
+  overview.stopped = null;
+  scene(overview, 3).blockers = [{ code: 'director_working' }];
+  panel = videoPanel(overview, scene(overview, 3), 'en-US');
+  assert.deepEqual([en(panel.stopped.next), en(panel.reason)], ['The film runs again: confirm again.', 'The Director is working on this scene']);
+  assert.equal(zh(panel.stopped.next), '影片已继续，请再确认一次。');
 });
 
 // ---- moving through the whole film ----------------------------------------------------------------------

@@ -45,13 +45,15 @@ export function Inspector({ view, shot, fps, draft, busy, unconfirmed, onPoint, 
   const aside = useRef<HTMLElement>(null);
   // The takes strip and the prompts open in place of the rows and the actions, with Close and Esc.
   const [open, setOpen] = useState<"takes" | "prompts" | null>(null);
+  // A stopped confirm is one line here (the scene's video panel has the details); Why shows them in place.
+  const [why, setWhy] = useState(false);
   const backTo = useRef<string | null>(null);
   const takeCount = shot.keyframe.takeCount;
   const strip = open === "takes" && takeCount > 1 && !editing;
   const prompts = open === "prompts" && !editing;
   const sub = strip || prompts;
   // Another shot, or an edit form, closes them.
-  useEffect(() => { setOpen(null); }, [shot.shotId]);
+  useEffect(() => { setOpen(null); setWhy(false); }, [shot.shotId]);
   useEffect(() => { if (editing) setOpen(null); }, [editing]);
   // Closing puts focus back on the button that opened it.
   useEffect(() => {
@@ -93,9 +95,24 @@ export function Inspector({ view, shot, fps, draft, busy, unconfirmed, onPoint, 
       ) : (
         <>
         {view.stopped ? (
-          // The scene's confirm stopped at this shot: said first, before the rows.
-          <div className="insp-alert stopped" role="status" data-act="stopped-here">
-            <p><b>{t("inspector.stopped")}</b> {tm(view.stopped.reason)} {tm(view.stopped.next)}</p>
+          // The scene's confirm stopped at this shot: one line before the rows, so they keep their room; Why opens
+          // the reason and the next step in place (they are also in the scene's video panel).
+          <div className="insp-stop" data-act="stopped-here">
+            <p role="status">
+              <b>{t("inspector.stopped")}</b>{" "}
+              <button
+                type="button"
+                className="insp-link"
+                data-act="stopped-why"
+                aria-expanded={why}
+                aria-controls={`stopped-why-${shot.shotId}`}
+                aria-label={t("inspector.stopped_why_label", { shot: view.label })}
+                onClick={() => setWhy((value) => !value)}
+              >
+                {t("inspector.stopped_why")}
+              </button>
+            </p>
+            {why ? <p className="insp-stop-why" id={`stopped-why-${shot.shotId}`}>{tm(view.stopped.reason)} {tm(view.stopped.next)}</p> : null}
           </div>
         ) : null}
         <dl className="rows">

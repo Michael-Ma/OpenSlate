@@ -55,13 +55,19 @@ export interface VideoPanel {
   priceTotal: Msg | null;
   /** The breakdown under the enabled button ("3 clips at about $0.50"). */
   priceEach: Msg | null;
-  /** Why the button is disabled; shown under it. */
+  /**
+   * Why the button is disabled; shown under it. While a stopped confirm shows, the blockers its message already
+   * explains (its too-long line, the stopped film, its job with no answer) are left out; any other one is said.
+   */
   reason: Msg | null;
   note: Msg | null;
   eyebrow: Msg;
   /** The large figure ("1 of 3", "Video saved") and its unit ("frames opened"). */
   headline: { value: Msg; unit: Msg | null };
-  /** The scene's last confirm stopped partway: why, and what to do next. Shown in place of the note. */
+  /**
+   * The scene's last confirm stopped partway: why, and what to do next. Shown in place of the note; the opened-frame
+   * segments and the reason under a disabled button stay.
+   */
   stopped: ConfirmationStop | null;
 }
 
@@ -127,15 +133,31 @@ export function confirmationStop(overview: GenerationOverview, scene: SceneOverv
     ? msg("confirm.stopped.NARRATION_CUE_OUT_OF_RANGE.measured", { shot: shot.label, line: Math.round(shot.narration.measuredSeconds * 10) / 10 })
     : msg(`confirm.stopped.${code}.${label ? "shot" : "scene"}`, label ? { shot: label } : undefined);
   // A too-long line settled since (the shot lengthened past its measured length, or the line cut at the shot's end)
-  // only needs the confirm again.
+  // only needs the confirm again; so does a film that was stopped and runs again.
   const line = shot?.narration;
   const settled = code === "NARRATION_CUE_OUT_OF_RANGE" && !!line && (!!line.fit || (line.measuredSeconds !== undefined && line.fits === true));
+  const resumed = code === "EXECUTION_PAUSED" && !overview.stopped;
   return {
     ...base,
     reason,
-    next: msg(settled ? "confirm.stopped.next.settled" : `confirm.stopped.next.${code}`),
+    next: msg(settled ? "confirm.stopped.next.settled" : resumed ? "confirm.stopped.next.resumed" : `confirm.stopped.next.${code}`),
     action: code === "NARRATION_SPEECH_UNAVAILABLE" ? "settings" : PLAN_CODES.has(code) && shot ? "plan" : null,
   };
+}
+
+/**
+ * Whether a stopped confirm's message already explains this blocker: its too-long line (NARRATION_CUE_OUT_OF_RANGE),
+ * the stopped film (EXECUTION_PAUSED), or its voice job with no answer (SUBMISSION_UNKNOWN). Any other blocker keeps
+ * the Confirm button off for a reason the stop does not say.
+ */
+export function stopExplains(stop: ConfirmationStop, blocker: SceneBlocker): boolean {
+  const atStop = !stop.shotId || blocker.shotId === stop.shotId;
+  switch (stop.code) {
+    case "NARRATION_CUE_OUT_OF_RANGE": return blocker.code === "narration_too_long" && atStop;
+    case "EXECUTION_PAUSED": return blocker.code === "stopped";
+    case "SUBMISSION_UNKNOWN": return blocker.code === "no_answer_in_scene" && atStop;
+    default: return false;
+  }
 }
 
 export interface KeyframesView {
@@ -308,6 +330,8 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   }
   const blockers = scene.blockers;
   const enabled = blockers.length === 0;
+  // Under the disabled button: what keeps it off, less what the stop's own message already says.
+  const unexplained = stopped ? blockers.filter((blocker) => !stopExplains(stopped, blocker)) : blockers;
   // Only frames that can be opened now; a keyframe still to make is named by the reason instead.
   const unopened = targets.filter((t) => t.keyframe.state === "ready" && !t.keyframe.opened).map((t) => t.label);
   return {
@@ -316,7 +340,7 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     action: "confirm",
     enabled,
     label: msg("panel.confirm"),
-    reason: blockerMsg(blockers, overview, locale),
+    reason: blockerMsg(unexplained, overview, locale),
     note: unopened.length > NAMED ? msg("panel.open_to_confirm_many", { count: unopened.length })
       : unopened.length ? msg("panel.open_to_confirm", { shots: listLabels(unopened, locale) }) : msg("panel.all_opened"),
     headline: stopped

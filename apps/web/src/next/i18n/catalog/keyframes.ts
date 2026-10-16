@@ -122,7 +122,9 @@ export const keyframes = {
   "inspector.close": { en: "Close", zh: "关闭" },
   "inspector.edit_in_plan": { en: "Edit in Plan", zh: "在计划里编辑" },
   "inspector.edit_in_plan_label": { en: "Edit {shot} in Plan", zh: "在计划里编辑 {shot}" },
-  "inspector.stopped": { en: "The scene's video stopped here.", zh: "这一场的视频在这里中断了。" },
+  "inspector.stopped": { en: "The video stopped here.", zh: "视频在这里中断了。" },
+  "inspector.stopped_why": { en: "Why", zh: "原因" },
+  "inspector.stopped_why_label": { en: "Why the scene's video stopped at {shot}", zh: "这一场视频停在 {shot} 的原因" },
 
   // ---- takes strip (card B8)
   "takes.title": { en: "Takes of {shot}", zh: "{shot} 的版本" },
@@ -260,6 +262,7 @@ export const keyframes = {
   "confirm.stopped.next.NARRATION_SPEECH_UNAVAILABLE": { en: "Choose a narrator voice in Settings, then confirm again.", zh: "在设置里选择配音声音后再确认一次。" },
   "confirm.stopped.next.NARRATION_IMPORT": { en: "Check the shot's narration in Plan, then confirm again.", zh: "在计划里检查这个镜头的旁白，然后再确认一次。" },
   "confirm.stopped.next.settled": { en: "It fits now: confirm again.", zh: "现在已经合适，请再确认一次。" },
+  "confirm.stopped.next.resumed": { en: "The film runs again: confirm again.", zh: "影片已继续，请再确认一次。" },
   "confirm.stopped.next.other": { en: "Check the scene, then confirm again.", zh: "检查这一场后再确认一次。" },
   "panel.stopped.edit_in_plan": { en: "Edit {shot} in Plan", zh: "在计划里编辑 {shot}" },
   "panel.stopped.open_settings": { en: "Open Settings", zh: "打开设置" },

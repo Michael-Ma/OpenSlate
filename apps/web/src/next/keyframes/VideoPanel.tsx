@@ -36,29 +36,39 @@ export function VideoPanel({ panel, sceneId, pending, playing, unconfirmed, onCo
   const price = panel.enabled && panel.priceTotal && panel.action !== "play" ? ` · ${tm(panel.priceTotal)}` : "";
   const stop = panel.stopped;
   const lost = unconfirmed && panel.enabled && guarded;
-  // A stopped confirm's note already says what to do next; the reason under a disabled button would repeat it.
-  const under = lost ? t("error.PAID_UNCONFIRMED") : panel.enabled ? (panel.priceEach ? tm(panel.priceEach) : "") : panel.reason && !stop ? tm(panel.reason) : "";
+  // A disabled button always says why; the model leaves out what a stopped confirm's message already says.
+  const under = lost ? t("error.PAID_UNCONFIRMED") : panel.enabled ? (panel.priceEach ? tm(panel.priceEach) : "") : panel.reason ? tm(panel.reason) : "";
   const stopId = `stopped-${sceneId}`;
   const press = panel.action === "confirm" ? onConfirm : panel.action === "make_keyframes" ? onMakeKeyframes : panel.action === "play" ? onPlay : undefined;
   return (
     <section className="vpanel" aria-label={tm(panel.eyebrow)} data-scene={sceneId} data-action={panel.action ?? "none"} data-stopped={stop?.code}>
-      <div className="eyebrow">{tm(panel.eyebrow)}</div>
-      {stop ? null : (
+      {/* While stopped, the segments share the eyebrow's line so the stop, the button and its reason keep their room. */}
+      <div className="vhead">
+        <div className="eyebrow">{tm(panel.eyebrow)}</div>
         <div className="vsegs" aria-hidden="true">
           {panel.segments.map((segment) => <i key={segment.shotId} className={segment.opened ? "on" : undefined} />)}
         </div>
-      )}
+      </div>
       <div className="vcount"><b>{tm(panel.headline.value)}</b>{panel.headline.unit ? tm(panel.headline.unit) : null}</div>
       {stop ? (
-        // The last confirm stopped partway (SceneOverview.confirmation "blocked"): why, where, and what to do next.
-        <>
+        // The last confirm stopped partway (SceneOverview.confirmation "blocked"): why, where, and what to do next,
+        // with the next step's view as a link right after it.
+        <div className="vstop-box">
           <p className="vstop" id={stopId} role="status" data-shot={stop.shotId ?? undefined}>{tm(stop.reason)} {tm(stop.next)}</p>
           {stop.action === "settings" ? (
-            <button type="button" className="pill sm vstop-act" data-act="stop-open-settings" onClick={onOpenSettings}>{t("panel.stopped.open_settings")}</button>
+            <>{" "}<button type="button" className="vstop-act" data-act="stop-open-settings" onClick={onOpenSettings}>{t("panel.stopped.open_settings")}</button></>
           ) : stop.action === "plan" && stop.shotId && stop.label ? (
-            <button type="button" className="pill sm vstop-act" data-act="stop-edit-in-plan" data-shot={stop.shotId} onClick={() => onEditInPlan(stop.shotId!)}>{t("panel.stopped.edit_in_plan", { shot: stop.label })}</button>
+            <>{" "}<button
+              type="button"
+              className="vstop-act"
+              data-act="stop-edit-in-plan"
+              data-shot={stop.shotId}
+              onClick={() => onEditInPlan(stop.shotId!)}
+            >
+              {t("panel.stopped.edit_in_plan", { shot: stop.label })}
+            </button></>
           ) : null}
-        </>
+        </div>
       ) : panel.note ? <p>{tm(panel.note)}</p> : null}
       <button
         type="button"
