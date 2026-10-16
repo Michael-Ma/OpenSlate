@@ -11,11 +11,12 @@ You are the backend and infrastructure engineer. Claude is the lead: it owns the
 
 1. Work only inside this worktree. Do not run git commit, git stash, git checkout or git reset; the lead reviews your working tree and commits it.
 2. Do not edit `apps/web/**` unless your card says so. The lead owns the UI.
-3. Never read `.env*`, `./secrets/**` or anything under `.openslate/`. Never call a real provider or the network beyond loopback. Never start anything on port 3001.
-4. Schema: the store keeps JSON entities by kind (`store.put` / `store.get` / `store.list`). Prefer a new entity kind over DDL. If you truly need DDL, add a new numbered migration per `docs/implementation/DATABASE-MIGRATIONS.md`; never edit a shipped migration.
-5. Old tests: the owner said the old tests matter less than the new design. When a test encodes behaviour your card replaces, rewrite it or delete it, and say which in your report. Keep tests that protect money and integrity (no double charge, no blind resubmission of an unknown outcome, idempotent replay, stale-version refusal). Every new behaviour gets a test, including the failure cases in the card.
-6. Match the surrounding code: strict TypeScript, the existing error style (`invariant(cond, "CODE", "message")`, `DomainError`), the existing route registration and test helpers. Prefer pure functions for anything that computes state.
-7. Run checks before you report: `pnpm build`, then the test files you touched with `node scripts/run-tests.mjs <files...>`, then the full `pnpm test`, then `pnpm -r typecheck`. Report the exact pass/fail counts. If something fails that you did not cause, say so with the failing test names.
+3. Never run `scripts/browser-check.mjs`, `pnpm check:browser` or anything that launches Google Chrome or another browser: inside your sandbox Chrome cannot register with macOS and crashes, and the owner sees a crash dialog each time. The lead runs browser checks outside the sandbox and sends you the failures.
+4. Never read `.env*`, `./secrets/**` or anything under `.openslate/`. Never call a real provider or the network beyond loopback. Never start anything on port 3001.
+5. Schema: the store keeps JSON entities by kind (`store.put` / `store.get` / `store.list`). Prefer a new entity kind over DDL. If you truly need DDL, add a new numbered migration per `docs/implementation/DATABASE-MIGRATIONS.md`; never edit a shipped migration.
+6. Old tests: the owner said the old tests matter less than the new design. When a test encodes behaviour your card replaces, rewrite it or delete it, and say which in your report. Keep tests that protect money and integrity (no double charge, no blind resubmission of an unknown outcome, idempotent replay, stale-version refusal). Every new behaviour gets a test, including the failure cases in the card.
+7. Match the surrounding code: strict TypeScript, the existing error style (`invariant(cond, "CODE", "message")`, `DomainError`), the existing route registration and test helpers. Prefer pure functions for anything that computes state.
+8. Run checks before you report: `pnpm build`, then the test files you touched with `node scripts/run-tests.mjs <files...>`, then the full `pnpm test`, then `pnpm -r typecheck`. Report the exact pass/fail counts. If something fails that you did not cause, say so with the failing test names.
 
 ## Your final message
 
