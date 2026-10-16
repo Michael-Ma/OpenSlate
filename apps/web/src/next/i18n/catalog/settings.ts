@@ -8,6 +8,7 @@ export const settingsMessages = {
   "set.scope_line_no_film": { en: "No film is open. The first three are set for each film; the last two apply to every film on this computer.", zh: "没有打开的影片。前三项按影片分别设置；后两项对本机所有影片生效。" },
   "set.index": { en: "Settings sections", zh: "设置分区" },
   "set.index.film": { en: "This film", zh: "这部影片" },
+  "set.index.each_film": { en: "Each film", zh: "每部影片" },
   "set.index.everywhere": { en: "Everywhere", zh: "全局" },
   "set.section.models": { en: "Models", zh: "模型" },
   "set.section.director": { en: "Director", zh: "导演" },

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
 import { errorMsg } from "../../i18n/translate.ts";
@@ -66,9 +66,12 @@ export function ReadyMark({ ready, reason, unchecked }: { ready: boolean; reason
   return <span className="ready n">{reason ? tm(reason) : null}</span>;
 }
 
-/** A message with `backticks` around command names, which render as code. */
+/**
+ * A message with `backticks` around command names, which render as code. A command never wraps inside, so a line
+ * may always break before one: in Chinese a full stop is followed by no space ("…--restart`。`./start.sh…").
+ */
 export function CodeText({ text }: { text: string }) {
-  return <>{codeSegments(text).map((part, index) => (part.code ? <code key={index} className="mono cmd">{part.text}</code> : <span key={index}>{part.text}</span>))}</>;
+  return <>{codeSegments(text).map((part, index) => (part.code ? <Fragment key={index}><wbr /><code className="mono cmd">{part.text}</code></Fragment> : <span key={index}>{part.text}</span>))}</>;
 }
 
 /**

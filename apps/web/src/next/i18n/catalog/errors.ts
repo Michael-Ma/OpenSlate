@@ -70,7 +70,7 @@ export const errors = {
   "error.ACTOR_DENIED": { en: "The studio did not allow this request from here.", zh: "工作室不允许从这里发出这个请求。" },
   "error.CODEX_NOT_FOUND": { en: "Codex was not found on this computer, so the Director could not be set up.", zh: "本机没有找到 Codex，无法设置导演。" },
   // Settings (model and Director setup, personal voices).
-  "error.MODEL_SETTINGS_STALE": { en: "The model settings changed. Check the switch again.", zh: "模型设置已变化，请重新检查这次切换。" },
+  "error.MODEL_SETTINGS_STALE": { en: "The film or its settings changed since this check. Check the switch again.", zh: "检查之后影片或设置有变化，请重新检查这次切换。" },
   "error.MODEL_SETTINGS_LIMIT": { en: "This film has too much planned work to switch models here.", zh: "这部影片计划中的工作太多，不能在这里切换模型。" },
   "error.MODEL_SETTINGS_CANCELLED": { en: "The model switch was cancelled. Nothing changed.", zh: "模型切换已取消，没有任何改动。" },
   "error.LOCAL_EXECUTION_UPGRADE_REQUIRED": { en: "This film's pending video can't switch to H3. Start a new film to use H3 video.", zh: "这部影片待生成的视频不能切换到 H3。要使用 H3 视频，请新建影片。" },
