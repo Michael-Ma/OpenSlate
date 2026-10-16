@@ -51,7 +51,7 @@ export function noteProposal(note: NoteView, proposals: readonly DirectorProposa
 }
 
 function shotSegment(label: string, seconds: number, hot: boolean): TimelineSegment {
-  return { kind: "shot", text: msg("check.segment.shot", { label, seconds }), seconds, hot };
+  return { kind: "shot", text: msg("check.segment.shot", { label, seconds }), seconds, hot, label };
 }
 
 /** The scene after the note's scene, for the dashed tail of the strip. */
@@ -169,8 +169,10 @@ export function settledMsg(action: NoteAction, label: Label, overview: Generatio
 export interface NoteCallout {
   noteId: string;
   letter: string;
-  /** The note's first clause, short enough for a chip on a 246 px card. */
+  /** The note's first clause, whole: a card shows it on one line (cut by CSS), with the full note as its tooltip. */
   text: string;
+  /** The whole note, for the card's tooltip and accessible description. */
+  full: string;
   done: boolean;
   /** For a settled note: the choice that settled it ("Keep maroon"). */
   doneLabel: Label | null;
@@ -185,13 +187,18 @@ export interface NoteCallout {
     shots: string;
     price: Msg | null;
     enabled: boolean;
+    /** Why it is off while a job on its shots runs (the link's tooltip then); null when it is on. */
+    wait: Msg | null;
   } | null;
 }
 
 const CLAUSE_END = /[,;:，。；：！？!?]|\.(?=\s|$)|\s[—–]\s/;
 
-/** "Mara's coat came out maroon, not red." → "Mara's coat came out maroon"; long clauses end at a word with "…". */
-export function firstClause(text: string, max = 28): string {
+/**
+ * "Mara's coat came out maroon, not red." → "Mara's coat came out maroon". The clause is kept whole unless a `max` is
+ * given; then a longer one ends at a word with "…". (Chips cut it where their room ends, so no meaning is cut early.)
+ */
+export function firstClause(text: string, max = Infinity): string {
   const clause = text.split(CLAUSE_END)[0]!.trim();
   if (clause.length <= max) return clause;
   const cut = clause.slice(0, max);
@@ -209,10 +216,14 @@ export function noteCallout(note: NoteView, shotId: string, overview: Generation
   const unique = [...new Set(ids)];
   const shots = unique.map((id) => overview.shots[id]?.label ?? "?").join(", ");
   const priced = !!estimate && !estimate.priceUnknown;
+  // A job on one of its shots holds the link; its tooltip says which one to wait for.
+  const working = unique.map((id) => overview.shots[id]).find((shot) => !!shot && (isWorking(shot.keyframe) || isWorking(shot.video)));
+  const wait = working ? msg(isWorking(working.video) ? "note.callout.wait_clip" : "note.callout.wait_keyframe", { shot: working.label }) : null;
   return {
     noteId: note.noteId,
     letter: note.letter,
     text: firstClause(note.text),
+    full: note.text,
     done,
     doneLabel: done ? chosen?.label ?? null : null,
     regenerate: regenerate && regenerate.action.kind === "regenerate"
@@ -224,6 +235,7 @@ export function noteCallout(note: NoteView, shotId: string, overview: Generation
         shots,
         price: regeneratePrice(ids, overview, locale),
         enabled: choiceAction(note, regenerateIndex, overview, [], locale).enabled,
+        wait,
       }
       : null,
   };

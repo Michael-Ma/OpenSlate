@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { checkCallout } from "../model/checks.ts";
 import type { ShotCard } from "../model/keyframes.ts";
+import { revealScroll } from "../model/keyframes-layout.ts";
 import type { Label, NoteCallout } from "../model/note-banner.ts";
 import type { Msg } from "../model/types.ts";
 import { Picture, StatusPill } from "./parts.tsx";
@@ -13,7 +14,8 @@ const VISIBLE = 3;
 /**
  * One card per shot: picture (or the dashed prompt), badge, prompt over the picture, title and seconds,
  * status pill and motion. Checks attach as neutral chips. Work in progress shows an indeterminate bar
- * (plan item GR-17: providers report no percentage).
+ * (plan item GR-17: providers report no percentage). The footer never grows: the title and the pills end with "…",
+ * and the card's tooltip and description carry the full title and notes.
  */
 interface Props {
   cards: ShotCard[];
@@ -34,6 +36,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
   // A note's regenerate link is a paid make: off while offline, expired or stopped, with the reason.
   const run = useGuarded("run");
   const selectedId = cards.find((card) => card.selected)?.shotId;
+  const idBase = useId();
 
   // Keep the selected card in view when the row scrolls sideways (many shots, or the narrow layout).
   // Only the row scrolls; the page never moves.
@@ -41,10 +44,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
     const container = row.current;
     const element = selectedId ? container?.querySelector<HTMLElement>(`[data-card="${CSS.escape(selectedId)}"]`) : null;
     if (!container || !element || container.scrollWidth <= container.clientWidth) return;
-    const outer = container.getBoundingClientRect();
-    const inner = element.getBoundingClientRect();
-    if (inner.left < outer.left) container.scrollLeft -= outer.left - inner.left + 8;
-    else if (inner.right > outer.right) container.scrollLeft += inner.right - outer.right + 8;
+    container.scrollLeft = revealScroll(container.scrollLeft, container.getBoundingClientRect(), element.getBoundingClientRect());
   }, [selectedId]);
 
   return (
@@ -53,8 +53,17 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
         const motion = card.motion ? card.motion.charAt(0).toLocaleLowerCase(locale) + card.motion.slice(1) : "";
         // A clip, or the voice line the scene's confirm is making for this shot: a bar over the picture.
         const bar = card.workingOn === "video" || card.workingOn === "voice";
+        const cardNotes = notes[card.shotId] ?? [];
+        const title = `${card.label} ${card.framing}`;
+        const state = [tm(card.status), motion].filter(Boolean).join(" · ");
+        // An open inspector edit holds every other card, its note link included, until Save or Cancel.
+        const isHeld = !!held && !card.selected;
+        // The footer and the chips show one line each; the card's tooltip carries them whole, and its description
+        // each note in full.
+        const describedBy = cardNotes.length ? `${idBase}-${card.shotId}-notes` : undefined;
+        const fullNotes = cardNotes.map((note) => `${note.letter} · ${note.full}`).join("\n");
         return (
-          <article key={card.shotId} className={`card${card.selected ? " sel" : ""}`} role="listitem" data-card={card.shotId} data-tone={card.tone}>
+          <article key={card.shotId} className={`card${card.selected ? " sel" : ""}${isHeld ? " held" : ""}`} role="listitem" data-card={card.shotId} data-tone={card.tone}>
             <button
               type="button"
               className="hit"
@@ -62,10 +71,12 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
               data-shot={card.shotId}
               aria-pressed={card.selected}
               aria-label={t("card.select", { shot: card.label, framing: card.framing })}
-              disabled={!!held && !card.selected}
-              title={held && !card.selected ? tm(held) : undefined}
+              aria-describedby={describedBy}
+              disabled={isHeld}
+              title={held && isHeld ? tm(held) : [title, state, fullNotes].filter(Boolean).join("\n")}
               onClick={() => onOpen(card.shotId)}
             />
+            {describedBy ? <span id={describedBy} hidden>{fullNotes}</span> : null}
             <div className={`pic${card.pictureDimmed ? " dim" : ""}${bar ? " vp" : ""}`}>
               {card.picture ? (
                 <>
@@ -78,36 +89,49 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
                   <div>{t("card.making")}<div className="bar indeterminate"><i /></div></div>
                 </div>
               ) : null}
-              <span className="badge">{card.label}</span>
+              {/* The badge and the chips share one row at the picture's top: the chips start after the badge. */}
+              <div className="pic-head">
+                <span className="badge">{card.label}</span>
+                {cardNotes.length || card.callouts.length ? (
+                  <div className="callout">
+                    {cardNotes.map((note) => (
+                      <span key={note.noteId} className="callout-note">
+                        <span className={`anno${note.done ? " done" : ""}`} data-note={note.noteId} data-state={note.done ? "settled" : "open"}>
+                          <span className="letter">{note.letter}</span>
+                          <span className="anno-text">{note.done && note.doneLabel ? t("note.callout.done", { choice: label(note.doneLabel) }) : note.text}</span>
+                        </span>
+                        {note.regenerate ? (
+                          <button
+                            type="button"
+                            className="link"
+                            data-act="note-regenerate"
+                            data-note={note.noteId}
+                            data-shot={card.shotId}
+                            {...run}
+                            title={held && isHeld ? tm(held) : run.title ?? (note.regenerate.wait ? tm(note.regenerate.wait) : label(note.regenerate.label))}
+                            disabled={isHeld || busy || run.disabled || !note.regenerate.enabled}
+                            onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}
+                          >
+                            {/* One line with its price where the card has room; on a narrow card the price wraps under it. */}
+                            <span className="link-words">{tm(note.regenerate.take)} ·</span>{" "}
+                            <span className="link-price">{note.regenerate.price ? tm(note.regenerate.price) : null}</span>
+                            <span className="sr-only"> · {note.regenerate.shots}</span>
+                          </button>
+                        ) : null}
+                      </span>
+                    ))}
+                    {card.callouts.map(({ letter, check }) => (
+                      <span key={letter} className="anno check" data-check={check.shotId}>
+                        <span className="letter">{letter}</span>
+                        <span className="anno-text">{tm(checkCallout(check))}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               {bar ? <div className="vprog indeterminate" role="progressbar" aria-label={t("card.progress", { shot: card.label })} data-working={card.workingOn ?? undefined}><i /></div> : null}
             </div>
-            {notes[card.shotId]?.length || card.callouts.length ? (
-              <div className="callout">
-                {(notes[card.shotId] ?? []).map((note) => (
-                  <span key={note.noteId} className="callout-note">
-                    <span className={`anno${note.done ? " done" : ""}`} data-note={note.noteId} data-state={note.done ? "settled" : "open"}>
-                      <span className="letter">{note.letter}</span>
-                      <span className="anno-text">{note.done && note.doneLabel ? t("note.callout.done", { choice: label(note.doneLabel) }) : note.text}</span>
-                    </span>
-                    {note.regenerate ? (
-                      <button type="button" className="link" data-act="note-regenerate" data-note={note.noteId} data-shot={card.shotId} {...run} title={run.title ?? label(note.regenerate.label)} disabled={busy || run.disabled || !note.regenerate.enabled} onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}>
-                        {/* One line with its price where the card has room; on a narrow card the price wraps under it. */}
-                        <span className="link-words">{tm(note.regenerate.take)} ·</span>{" "}
-                        <span className="link-price">{note.regenerate.price ? tm(note.regenerate.price) : null}</span>
-                        <span className="sr-only"> · {note.regenerate.shots}</span>
-                      </button>
-                    ) : null}
-                  </span>
-                ))}
-                {card.callouts.map(({ letter, check }) => (
-                  <span key={letter} className="anno check" data-check={check.shotId}>
-                    <span className="letter">{letter}</span>
-                    <span className="anno-text">{tm(checkCallout(check))}</span>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <div className="ttl"><b>{card.label} {card.framing}</b><span>{t("card.seconds", { seconds: card.seconds })}</span></div>
+            <div className="ttl"><b>{title}</b><span>{t("card.seconds", { seconds: card.seconds })}</span></div>
             <div className="stl"><StatusPill status={card.status} tone={card.tone} /><span>{motion}</span></div>
           </article>
         );

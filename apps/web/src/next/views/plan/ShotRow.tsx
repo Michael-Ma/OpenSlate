@@ -37,13 +37,16 @@ export function Pill({ pill }: { pill: StatusPillView }) {
   );
 }
 
-/** The Director's lettered notes, the same amber chips as on the Keyframes cards; settled ones turn grey. */
+/**
+ * The Director's lettered notes, the same amber chips as on the Keyframes cards; settled ones turn grey. A row has
+ * room, so a chip shows the note's first clause whole, wrapping if it must; the full note is its tooltip.
+ */
 export function NoteChips({ notes }: { notes: NoteChip[] }) {
   const { t } = useI18n();
   return (
     <>
       {notes.map((note) => (
-        <span key={note.noteId} className={`anno note-chip${note.done ? " done" : ""}`} title={note.text} data-note={note.noteId}>
+        <span key={note.noteId} className={`anno note-chip${note.done ? " done" : ""}`} title={note.full} data-note={note.noteId}>
           <span className="letter" aria-hidden="true">{note.letter}</span>
           <span className="sr">{t("plan.note.label", { letter: note.letter })}</span>
           <span className="txt">{note.text}</span>

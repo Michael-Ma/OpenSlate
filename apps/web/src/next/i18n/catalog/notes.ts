@@ -13,6 +13,8 @@ export const notes = {
   "note.callout.done": { en: "✓ {choice}", zh: "✓ {choice}" },
   "note.callout.take_one": { en: "New take", zh: "新版本" },
   "note.callout.take_many": { en: "{count} new takes", zh: "{count} 个新版本" },
+  "note.callout.wait_clip": { en: "Wait for {shot}'s clip to finish.", zh: "请等 {shot} 的视频生成完。" },
+  "note.callout.wait_keyframe": { en: "Wait for {shot}'s keyframe to finish.", zh: "请等 {shot} 的关键帧生成完。" },
   "note.blocking": { en: "Settle before making video", zh: "生成视频前需要处理" },
   "note.anchor.shots": { en: "{shots}", zh: "{shots}" },
   "note.anchor.scene": { en: "Scene {scene}", zh: "第 {scene} 场" },

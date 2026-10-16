@@ -2,6 +2,7 @@ import type { DirectorProposal, GenerationOverview, MediaSlot, SceneOverview, Sh
 import { narrationChecks } from "./checks.ts";
 import { sceneStatus } from "./keyframes.ts";
 import { planRowRecording } from "./narration.ts";
+import { firstClause } from "./note-banner.ts";
 import { noteViews, shotCallouts, type NoteView } from "./notes.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
@@ -159,7 +160,9 @@ export function narrationView(shot: ShotOverview, mode: NarrationMode | undefine
 export interface NoteChip {
   noteId: string;
   letter: string;
+  /** The note's first clause, whole (the chip wraps rather than cut it); the full note is its tooltip. */
   text: string;
+  full: string;
   /** Settled notes turn grey. */
   done: boolean;
 }
@@ -222,7 +225,7 @@ export interface PlanOutline {
 /** A shot as the snapshot stores it. The server sends the whole shot record, `action` included. */
 export type SnapshotShot = ProjectSnapshot["project"]["shots"][number] & { action?: string };
 
-const chip = (view: NoteView): NoteChip => ({ noteId: view.noteId, letter: view.letter, text: view.text, done: view.state === "resolved" });
+const chip = (view: NoteView): NoteChip => ({ noteId: view.noteId, letter: view.letter, text: firstClause(view.text), full: view.text, done: view.state === "resolved" });
 
 function thumbOf(shot: ShotOverview): Pick<ShotRowView, "picture" | "pictureDimmed" | "emptyThumb"> {
   const keyframe = shot.keyframe;

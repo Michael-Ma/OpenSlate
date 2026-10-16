@@ -74,11 +74,12 @@ test('card callouts: the first clause on an amber chip, the regenerate link, and
   const notes = lastFerryNotes();
   const views = noteViews(notes, overview, proposals);
   const a = noteCallout(shotCallouts(views, shotId('2.2'))[0], shotId('2.2'), overview, 'en-US');
-  assert.deepEqual([a.letter, a.text, a.done, label(a.regenerate.label), en(a.regenerate.price), a.regenerate.choiceIndex], ['a', "Mara's coat came out maroon", false, 'Regenerate 2.2 · about $0.04', 'about $0.04', 1]);
+  assert.deepEqual([a.letter, a.text, a.full, a.done, label(a.regenerate.label), en(a.regenerate.price), a.regenerate.choiceIndex], ['a', "Mara's coat came out maroon", "Mara's coat came out maroon, not red.", false, 'Regenerate 2.2 · about $0.04', 'about $0.04', 1]);
   // On the card the link is one short line with its price; the card already names the shot (read out after it).
-  assert.deepEqual([en(a.regenerate.take), en(a.regenerate.price), a.regenerate.shots], ['New take', 'about $0.04', '2.2']);
+  assert.deepEqual([en(a.regenerate.take), en(a.regenerate.price), a.regenerate.shots, a.regenerate.wait], ['New take', 'about $0.04', '2.2', null]);
+  // The clause is whole: the chip ends where its room does (CSS), never at a fixed count of characters.
   const b = noteCallout(shotCallouts(views, shotId('2.3'))[0], shotId('2.3'), overview, 'en-US');
-  assert.deepEqual([b.letter, b.text, b.regenerate], ['b', 'The 2.3 line runs 7.4 s but…', null]);
+  assert.deepEqual([b.letter, b.text, b.full, b.regenerate], ['b', 'The 2.3 line runs 7.4 s but the shot is 6 s', 'The 2.3 line runs 7.4 s but the shot is 6 s.', null]);
   notes[0] = { ...notes[0], state: 'resolved', version: 2, resolution: { choiceIndex: 0, at: 'x' } };
   const done = noteCallout(shotCallouts(noteViews(notes, overview, proposals), shotId('2.2'))[0], shotId('2.2'), overview, 'en-US');
   assert.deepEqual([done.done, label(done.doneLabel), done.regenerate], [true, 'Keep maroon', null]);
@@ -89,7 +90,22 @@ test('the first clause keeps decimals and stops at Chinese punctuation', () => {
   assert.equal(firstClause('The line runs 7.4 s. Shorten it.'), 'The line runs 7.4 s');
   assert.equal(firstClause('大衣出来是酱红色，不是红色。'), '大衣出来是酱红色');
   assert.equal(firstClause('Short'), 'Short');
+  assert.equal(firstClause('A long clause with no punctuation that goes on and on'), 'A long clause with no punctuation that goes on and on');
   assert.equal(firstClause('Supercalifragilisticexpialidociously long word here', 20), 'Supercalifragilistic…');
+});
+
+test("a card's note link is off while a job on its shot runs, and its tooltip says what to wait for", () => {
+  const { overview, proposals } = golden();
+  const working = (slot) => {
+    const next = lastFerryOverview();
+    next.shots[shotId('2.2')][slot] = { ...next.shots[shotId('2.2')][slot], state: 'queued' };
+    return noteCallout(shotCallouts(noteViews(lastFerryNotes(), next, proposals), shotId('2.2'))[0], shotId('2.2'), next, 'en-US').regenerate;
+  };
+  const clip = working('video');
+  assert.deepEqual([clip.enabled, en(clip.wait), zh(clip.wait)], [false, "Wait for 2.2's clip to finish.", '请等 2.2 的视频生成完。']);
+  const keyframe = working('keyframe');
+  assert.deepEqual([keyframe.enabled, en(keyframe.wait)], [false, "Wait for 2.2's keyframe to finish."]);
+  assert.equal(noteCallout(shotCallouts(noteViews(lastFerryNotes(), overview, proposals), shotId('2.2'))[0], shotId('2.2'), overview, 'en-US').regenerate.wait, null);
 });
 
 test('a proposal strip ends at the film when its scene is the last one', () => {

@@ -102,6 +102,8 @@ export interface TimelineSegment {
   seconds: number;
   /** The segment the change touches (drawn as the chosen option). */
   hot: boolean;
+  /** A shot's own label ("2.3"): all a segment too narrow for its seconds shows (the seconds go to its tooltip). */
+  label?: string;
 }
 
 export interface CheckTimeline {
@@ -153,7 +155,7 @@ function tailSegment(tail: Tail, mode: "now" | "later" | "from", value: number |
 }
 
 function shotSegment(shot: ShotOverview, secondsValue: number, hot: boolean): TimelineSegment {
-  return { kind: "shot", text: msg("check.segment.shot", { label: shot.label, seconds: secondsValue }), seconds: secondsValue, hot };
+  return { kind: "shot", text: msg("check.segment.shot", { label: shot.label, seconds: secondsValue }), seconds: secondsValue, hot, label: shot.label };
 }
 
 /**

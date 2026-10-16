@@ -52,7 +52,7 @@ test('a running confirm names its step and shot: the voice steps on their shot\'
     const view = keyframesView(overview, sceneId(3), null, 'en-US');
     const [c31, c32] = view.cards;
     assert.deepEqual([en(c32.status), c32.tone, c32.working, c32.workingOn], [card, 'working', true, 'voice']);
-    assert.deepEqual([en(c31.status), c31.workingOn], ['Waiting for the voice line', null], 'the other clip waits without a voice step of its own');
+    assert.deepEqual([en(c31.status), c31.workingOn], ['Waiting for voice', null], 'the other clip waits without a voice step of its own');
     assert.equal(en(view.panel.note), panel);
     assert.equal(en(shotStatus(overview, s3, shot(overview, '3.2')).status), card);
     assert.equal(en(inspectorView(overview, shot(overview, '3.2'), 'en-US').status), card);

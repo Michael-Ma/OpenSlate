@@ -162,8 +162,11 @@
 .plan .shot-say .none{color:var(--muted)}
 .plan .shot-state{display:flex;flex-direction:column;gap:5px;align-items:flex-start;min-width:0}
 .plan .shot-acts{display:flex;gap:4px;align-items:center}
-.plan .note-chip{max-width:100%;min-width:0}
-.plan .note-chip .txt{overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* A Director's chip shows its note's first clause whole: it wraps (the letter stays on the first line) instead of
+   cutting the words that carry the point; only a clause past three lines ends with "…" (the tooltip has the note). */
+.plan .note-chip{max-width:100%;min-width:0;white-space:normal;align-items:flex-start;border-radius:10px;line-height:1.35}
+.plan .note-chip .letter{flex:none}
+.plan .note-chip .txt{min-width:0;padding-top:1px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 
 /* ---------- the shot editor ---------- */
 .plan .shot-edit{display:grid;grid-template-columns:112px minmax(0,1fr);gap:14px;padding:14px 14px 14px 16px;border-top:1px solid var(--hairline);background:var(--bar)}
