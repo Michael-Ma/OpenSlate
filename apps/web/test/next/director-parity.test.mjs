@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   pictureRefusal, pictureFromAsset, pictureFromShot, addPicture, pictureChips, composerView, messageBody, messageText,
-  userMessage, resolveRef, sentPictureName, labelList, draftToSave, readDraft, draftKey, failedTurns, heldEdits, threadView, PICTURE_LIMIT, MESSAGE_LIMIT,
+  userMessage, resolveRef, sentPictureName, labelList, draftToSave, readDraft, draftKey, failedTurns, heldEdits, threadView, afterSend,
+  PICTURE_LIMIT, MESSAGE_LIMIT,
 } from '../../src/next/model/director.ts';
 import { refLink } from '../../src/next/model/markdown.ts';
 import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, artifactFor, sceneId, shotId, PROJECT_ID } from '../../src/next/fixtures/last-ferry.ts';
@@ -187,6 +188,16 @@ test('the reducer keeps pictures with the composer, restores a draft, and emptie
   assert.deepEqual(state.composer, { text: '', targets: [], sending: false, images: [] });
 });
 
+test('sending takes away only what was sent: a picture or @ target added meanwhile stays for the next message', () => {
+  const sent = { text: 'Colder', targets: [{ kind: 'scene', id: sceneId(2) }], images: [uploadImage] };
+  const meanwhile = { text: 'Colder', targets: [{ kind: 'scene', id: sceneId(2) }, { kind: 'shot', id: shotId('2.3') }], sending: true, images: [uploadImage, keyframe22] };
+  assert.deepEqual(afterSend(meanwhile, sent), { text: '', targets: [{ kind: 'shot', id: shotId('2.3') }], sending: false, images: [keyframe22] });
+  let state = reducer(initialState, { type: 'project', projectId: PROJECT_ID });
+  state = reducer(state, { type: 'composerRestore', ...meanwhile });
+  state = reducer(state, { type: 'composerSent', sent });
+  assert.deepEqual(state.composer, { text: '', targets: [{ kind: 'shot', id: shotId('2.3') }], sending: false, images: [keyframe22] });
+});
+
 test('a failed turn marks the last entry of its request, with the catalog\'s words or the Director\'s own', () => {
   const snapshot = lastFerrySnapshot(NOW);
   const conversation = [...snapshot.conversation, { id: 'u2', role: 'user', text: 'Colder', requestId: 'r2', at: '2026-10-14T11:00:00' }];
@@ -315,6 +326,30 @@ test('a message that finishes sending after another film opened leaves that film
   release();
   assert.equal(await sending, true);
   assert.deepEqual(store.getState().composer, { text: 'For the bus', targets: [], sending: false, images: [] });
+});
+
+test('a picture shown while a message is sending is not lost: it waits in the composer for the next one', async t => {
+  const port = new FixturePort();
+  applyDirectorPresets(port.world, ['codex']);
+  let release;
+  const bodies = [];
+  const request = port.request.bind(port);
+  port.request = async (path, options = {}) => {
+    if (options.method === 'POST' && path.endsWith('/messages')) { bodies.push(options.body); await new Promise(done => { release = done; }); }
+    return request(path, options);
+  };
+  const store = new StudioStore({ client: port, storage: null, newKey: (() => { let n = 0; return () => `key-${++n}`; })() });
+  t.after(() => { store.stop(); port.close(); });
+  await store.start();
+  store.showPicture({ image: uploadImage });
+  store.setComposerText('Use this red');
+  const sending = store.sendMessage();
+  await new Promise(done => setTimeout(done, 20));
+  assert.equal(store.showPicture({ image: keyframe22 }), null);
+  release();
+  assert.equal(await sending, true);
+  assert.deepEqual(bodies[0].images, [{ artifactId: ref.artifactId, sha256: ref.sha256 }]);
+  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [keyframe22] });
 });
 
 test('Let it go: release-holds takes no body and a key, refuses while the Director works, and frees the shots', async t => {

@@ -1,5 +1,6 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
+import { afterSend } from "../model/director.ts";
 import type { ComposerImage, DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 import type { Connection, EditDraft, StudioState } from "./state.ts";
 
@@ -25,7 +26,8 @@ export type Action =
   | { type: "composerImages"; images: ComposerImage[] }
   /** A film's unsent draft, read back from this browser after a reload or a film switch. */
   | { type: "composerRestore"; text: string; targets: Target[]; images: ComposerImage[] }
-  | { type: "composerSent" }
+  /** A message was sent: what it carried leaves the composer (all of it when `sent` is left out). */
+  | { type: "composerSent"; sent?: { text: string; targets: readonly Target[]; images: readonly ComposerImage[] } }
   | { type: "edit"; edit: EditDraft | null }
   | { type: "pending"; pressId: string; pending: boolean }
   | { type: "toast"; message: Msg; tone: "info" | "error"; undoCommandId?: string; undoKey?: number }
@@ -97,7 +99,8 @@ export function reducer(state: StudioState, action: Action): StudioState {
     case "composerRestore":
       return { ...state, composer: { text: action.text, targets: action.targets, images: action.images, sending: false } };
     case "composerSent":
-      return { ...state, composer: { text: "", targets: [], sending: false, images: [] } };
+      // A picture or @ target added while the message was sending stays for the next one.
+      return { ...state, composer: action.sent ? afterSend(state.composer, action.sent) : { text: "", targets: [], sending: false, images: [] } };
     case "edit":
       return { ...state, edit: action.edit };
     case "pending": {

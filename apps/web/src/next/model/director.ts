@@ -557,6 +557,21 @@ export interface ComposerState {
   images?: readonly ComposerImage[];
 }
 
+/**
+ * The composer once its message was sent: only what was sent goes. The words go (the box is read-only while
+ * sending); an @ target or a picture added while it was sending stays for the next message.
+ */
+export function afterSend(composer: ComposerState, sent: Pick<ComposerState, "text" | "targets" | "images">): { text: string; targets: Target[]; sending: false; images: ComposerImage[] } {
+  const sentTargets = new Set(sent.targets.map(targetKey));
+  const sentImages = new Set((sent.images ?? []).map(pictureKey));
+  return {
+    text: composer.text === sent.text ? "" : composer.text,
+    targets: composer.targets.filter((target) => !sentTargets.has(targetKey(target))),
+    sending: false,
+    images: (composer.images ?? []).filter((image) => !sentImages.has(pictureKey(image))),
+  };
+}
+
 // ---- pictures for the Director ------------------------------------------------------------
 
 /** The most pictures one message can show (the server's limit for attached images). */
