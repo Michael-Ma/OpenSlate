@@ -2,6 +2,24 @@ import { useEffect, useState } from "react";
 import { rowsBelow } from "../../model/film-export.ts";
 
 /**
+ * An element's width in px, followed as it resizes: pass the returned ref to the element. Null until measured (or
+ * without ResizeObserver).
+ */
+export function useElementWidth(): [(node: HTMLElement | null) => void, number | null] {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  useEffect(() => {
+    if (!node || typeof ResizeObserver !== "function") return;
+    const measure = () => setWidth(node.getBoundingClientRect().width);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node]);
+  return [setNode, width];
+}
+
+/**
  * How many rows of a scrolling table are still to come below what can be read (model/film-export.ts rowsBelow),
  * followed as it scrolls and resizes: pass the returned ref to the scrolling element. Each row is measured by its
  * `rowSelector` cell; `cover` is how much of the bottom is drawn over; `rows` changes when the rows do.

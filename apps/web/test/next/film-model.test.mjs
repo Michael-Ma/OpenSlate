@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, filmMusic, musicSpan, musicOn,
+  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, filmMusic, musicSpan, musicOn,
   lengthLimits, lengthEdit, moveEdit, musicStartEdit, musicGainEdit, musicMuteEdit, musicChoiceEdit, editPressId, soundtrackOf, lengthToast,
 } from '../../src/next/model/film.ts';
 import { FilmClock } from '../../src/next/model/film-clock.ts';
@@ -65,6 +65,18 @@ test('ruler marks stay readable on short and long films', () => {
   assert.deepEqual(rulerTicks(48, null), [0, 5, 10, 15, 20, 25, 30, 35, 40, 45]);
   assert.equal(rulerTicks(360, null).length, 13);
   assert.deepEqual(rulerTicks(12, 14), [0, 5, 10]);
+});
+
+test('the last ruler label is never cut off at the lane\'s end', () => {
+  // 36 s on an 880 px lane: 0:35 sits 24 px from the end, too little for its label, so it goes before its mark.
+  assert.deepEqual(tickLabels(rulerTicks(36, null), 36, 880, 32), ['after', 'after', 'after', 'after', 'after', 'after', 'after', 'before']);
+  // 48 s: 0:45 has 55 px left, enough to sit after its mark.
+  assert.ok(tickLabels(rulerTicks(48, null), 48, 880, 32).every(place => place === 'after'));
+  // Too crowded to move it back without running into 0:30: it is left out (the mark stays).
+  assert.deepEqual(tickLabels([0, 30, 35], 36, 200, 32), ['after', 'after', 'none']);
+  assert.deepEqual(tickLabels([0, 5, 10], 12, null), ['after', 'after', 'after'], 'unmeasured: as before');
+  // Phone: 14 px a second, the lane is the film's length.
+  assert.deepEqual(tickLabels(rulerTicks(12, 14), 12, 12 * 14, 32), ['after', 'after', 'before']);
 });
 
 test('the music library reads every page without repeats', async () => {

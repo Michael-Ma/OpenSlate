@@ -245,6 +245,28 @@ export function rulerTicks(total: number, pixelsPerSecond: number | null): numbe
   return ticks;
 }
 
+/** The widest ruler label ("10:00" at 10.5 px, with its 4 px of padding), in px. */
+export const RULER_LABEL_PX = 32;
+
+/** Where a ruler mark's time label sits: after its mark, before it (end-aligned), or left out. */
+export type TickLabel = "after" | "before" | "none";
+
+/**
+ * Ruler labels on a lane `width` px wide. A label sits after its mark; one too near the lane's end to fit there sits
+ * before its mark instead, so it is never cut off, unless that would run into the label before it. Unmeasured
+ * (width null), every label sits after its mark.
+ */
+export function tickLabels(ticks: readonly number[], total: number, width: number | null, labelWidth = RULER_LABEL_PX): TickLabel[] {
+  if (!width || total <= 0) return ticks.map(() => "after");
+  let previousEnd = -Infinity;
+  return ticks.map((seconds) => {
+    const at = (seconds / total) * width;
+    if (at + labelWidth <= width + 0.5) { previousEnd = at + labelWidth; return "after"; }
+    if (at - labelWidth >= previousEnd - 0.5) { previousEnd = at; return "before"; }
+    return "none";
+  });
+}
+
 // ---- music ---------------------------------------------------------------------------
 
 export interface FilmMusic {

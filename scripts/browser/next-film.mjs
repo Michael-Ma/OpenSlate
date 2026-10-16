@@ -69,6 +69,46 @@ async function readableChecks(page, { scrolls }) {
   expect(go.top >= panel.top && go.bottom <= panel.bottom, `Export is outside its panel: ${go.top}-${go.bottom} in ${panel.top}-${panel.bottom}`);
 }
 
+/**
+ * Nothing in the lanes is cut off or covered: on every picture block the number, the Director's letter, the lack and
+ * the length do not overlap and stay inside the block; narration words wrap and end in an ellipsis instead of being
+ * cut; every ruler label is inside the ruler.
+ */
+async function lanesReadable(page) {
+  const problems = await page.evaluate(() => {
+    const out = [];
+    const rect = (el) => el.getBoundingClientRect();
+    const shown = (el) => !!el && getComputedStyle(el).display !== "none" && getComputedStyle(el).visibility !== "hidden" && rect(el).width > 1 && getComputedStyle(el).clipPath === "none";
+    const cross = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+    for (const block of document.querySelectorAll(".pics .blk")) {
+      const box = rect(block);
+      const parts = ["badge", "letter", "lack", "dur"].map((name) => [name, block.querySelector(`.${name}`)]).filter(([, el]) => shown(el));
+      for (const [name, el] of parts) {
+        const r = rect(el);
+        if (r.left < box.left - 0.5 || r.right > box.right + 0.5 || r.top < box.top - 0.5 || r.bottom > box.bottom + 0.5) out.push(`${block.dataset.shot} ${name} leaves its block`);
+        if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).textOverflow !== "ellipsis" && getComputedStyle(el).webkitLineClamp === "none") out.push(`${block.dataset.shot} ${name} is cut off`);
+      }
+      for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+        if (cross(rect(parts[i][1]), rect(parts[j][1]))) out.push(`${block.dataset.shot}: ${parts[i][0]} covers ${parts[j][0]}`);
+      }
+      if (block.getAttribute("title") !== block.getAttribute("aria-label")) out.push(`${block.dataset.shot} has no title with its whole label`);
+    }
+    for (const line of document.querySelectorAll(".voices .vblk")) {
+      const text = line.querySelector(".vtext");
+      if (shown(text) && text.scrollWidth > text.clientWidth + 1) out.push(`${line.dataset.shot}'s narration is cut off sideways`);
+      if (!line.title.startsWith(line.querySelector("b")?.textContent ?? "?")) out.push(`${line.dataset.shot}'s narration has no title`);
+    }
+    const ruler = rect(document.querySelector(".ruler"));
+    for (const tick of document.querySelectorAll(".ruler .tick")) {
+      if (!tick.textContent) continue;
+      const r = rect(tick);
+      if (r.right > ruler.right + 0.5 || r.left < ruler.left - 0.5) out.push(`ruler label ${tick.textContent} is cut off`);
+    }
+    return out;
+  });
+  expect(!problems.length, problems.join("; "));
+}
+
 /** The element is inside the viewport (after any scrolling the view did by itself). */
 async function inView(page, selector) {
   const value = await box(page, selector);
@@ -126,7 +166,11 @@ export const scenarios = [
       const done = await page.locator(`.checks [data-shot='${shot("1.1")}'] .y`).evaluate((el) => getComputedStyle(el).color);
       expect(done === "rgb(95, 196, 138)", `A made clip is not green: ${done}`);
       // Lanes: the too-long line is not placed; the keyframe-only and empty shots say what they lack.
-      await expectText(page, `.vblk[data-shot='${shot("2.3")}']`, /^2\.3\s+7\.4 s, too long · not placed$/);
+      await expectText(page, `.vblk[data-shot='${shot("2.3")}']`, /^2\.3\s+7\.4\ss, too long · not placed$/);
+      // The unsettled line's state is read in full, not cut after "not p".
+      const unsettled = await page.locator(`.vblk[data-shot='${shot("2.3")}'] .vtext`).evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+      expect(unsettled.scroll <= unsettled.client + 1, `2.3's narration state is cut short: ${JSON.stringify(unsettled)}`);
+      await lanesReadable(page);
       // The readiness table says that more rows follow, and scrolls to the shots the summary names.
       await expectText(page, "[data-act='checks-more']", /^↓\s+\d more$/);
       expect((await page.getAttribute("[data-act='checks-more']", "aria-label"))?.startsWith("Show "), "The more-rows count has no name");
@@ -237,6 +281,19 @@ export const scenarios = [
       await expectText(page, ".tl-tools .hint", /^a new length outdates its clip$/);
       await page.keyboard.press("Escape");
       await expectText(page, ".tl-tools", /^Select a shot/);
+      // 1.1 keeps keyboard focus but is no longer selected: its ring sits outside it, with no white border or badge.
+      const focusOnly = await page.locator(`.blk[data-shot='${shot("1.1")}']`).evaluate((el) => ({
+        focused: el.matches(":focus-visible"),
+        border: getComputedStyle(el, "::after").borderTopStyle,
+        offset: parseFloat(getComputedStyle(el).outlineOffset),
+        badge: getComputedStyle(el.querySelector(".badge")).backgroundColor,
+      }));
+      expect(focusOnly.focused && focusOnly.offset >= 2, `The focus ring is not set off from the block: ${JSON.stringify(focusOnly)}`);
+      expect(focusOnly.border === "none" && focusOnly.badge !== "rgb(236, 236, 238)", `A focused block looks selected: ${JSON.stringify(focusOnly)}`);
+      await page.keyboard.press("Enter");
+      const selected = await page.locator(`.blk[data-shot='${shot("1.1")}']`).evaluate((el) => ({ border: getComputedStyle(el, "::after").borderTopColor, badge: getComputedStyle(el.querySelector(".badge")).backgroundColor }));
+      expect(selected.border === "rgb(236, 236, 238)" && selected.badge === "rgb(236, 236, 238)", `A selected block is not marked white: ${JSON.stringify(selected)}`);
+      await page.keyboard.press("Escape");
       await screenshot(page, "length-order-1440");
     },
   },
@@ -332,6 +389,9 @@ export const scenarios = [
       await expectText(page, ".export .big", /^Ready to export\s*50 s · every clip current, every voice line settled$/);
       await expectText(page, "#fv-export-why", /^MP4 of the whole film$/);
       await expectText(page, "[data-act='export-size']", /^Length 50 s of 6:00 · 1280 × 720 · renders here, free$/);
+      // A 50 s film: the 0:50 mark is at the lane's end, so its label sits before it, inside the ruler.
+      await lanesReadable(page);
+      expect((await page.locator(".ruler .tick").last().getAttribute("data-label")) === "before", "The last ruler label does not sit before its mark");
       const why = await box(page, "#fv-export-why");
       expect(why.bottom <= (await box(page, ".export")).bottom, "The export size line is hidden below the panel");
       await page.click("[data-act='export']");
@@ -405,6 +465,8 @@ export const scenarios = [
       await openFilm(page);
       await expectText(page, "[data-act='film-line']", /^108 s · 20 shots · 3 of 20 clips made$/);
       await readableChecks(page, { scrolls: true });
+      // Narrow blocks drop what cannot fit: the Director's letter never covers a shot number.
+      await lanesReadable(page);
       const size = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, viewport: innerHeight }));
       expect(size.height <= size.viewport, `The page scrolls: ${size.height}px tall in ${size.viewport}px`);
       await page.locator(".export .checks").evaluate((el) => { el.scrollTop = el.scrollHeight; });
@@ -420,6 +482,7 @@ export const scenarios = [
       await openFilm(page);
       await readableChecks(page, { scrolls: true });
       await noSidewaysScroll(page, 1280);
+      await lanesReadable(page);
       // The workspace scrolls when it is taller than the screen, and a selection brings its tools into view.
       const work = await page.locator(".film-work").evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, overflow: getComputedStyle(el).overflowY }));
       expect(work.overflow === "auto", `The workspace cannot scroll: ${JSON.stringify(work)}`);
@@ -635,6 +698,7 @@ export const scenarios = [
       await expectText(page, "[data-act='film-line']", /^\d+ s · \d+ shots · \d+ of \d+ clips made$/);
       await expectText(page, ".export .big", /^(Not ready to export|Ready)/, 15000);
       await page.waitForSelector(".mblk, .none-music");
+      await lanesReadable(page);
       const first = page.locator(".pics .blk").first();
       const id = await first.getAttribute("data-shot");
       await first.click();

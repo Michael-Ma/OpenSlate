@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, type MouseEvent, type ReactNode } from "rea
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { FilmClock } from "../../model/film-clock.ts";
-import { musicSpan, rulerTicks, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
+import { musicSpan, rulerTicks, tickLabels, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { useClockPaint } from "./clock-hooks.ts";
+import { useElementWidth } from "./layout-hooks.ts";
 import { Still } from "./Player.tsx";
 
 export type Selection = { kind: "shot"; id: string } | { kind: "music" } | null;
@@ -57,6 +58,9 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
   const X = (s: number) => (pps ? `${s * pps}px` : `${(s / total) * 100}%`);
   const W = (d: number, gap = 3) => `calc(${pps ? `${d * pps}px` : `${(d / total) * 100}%`} - ${gap}px)`;
   const ticks = useMemo(() => rulerTicks(timeline.total, pps), [timeline.total, pps]);
+  // A label too near the lane's end to fit after its mark sits before it, so the last one is never cut off.
+  const [ruler, rulerWidth] = useElementWidth();
+  const places = useMemo(() => tickLabels(ticks, timeline.total, pps ? timeline.total * pps : rulerWidth), [ticks, timeline.total, pps, rulerWidth]);
   const bars = useMemo(() => waveBars(music?.audioId ?? "", 90), [music?.audioId]);
 
   useClockPaint(clock, (time) => { if (head.current) head.current.style.left = X(Math.min(time, timeline.total)); });
@@ -85,6 +89,9 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
     const selected = selectedShot === shot.shotId;
     const lack = shot.lack ? tm(shot.lack) : null;
     const kind = shot.picture === "clip" ? "" : shot.picture === "keyframe" ? " kfonly" : " empty";
+    const label = blockLabel(shot, lack);
+    // A narrow block drops what cannot fit (the lack, then the length, then the number); the title and the
+    // accessible name keep all of it.
     return (
       <button
         key={shot.shotId}
@@ -94,14 +101,17 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
         data-act="sel-shot"
         data-shot={shot.shotId}
         aria-pressed={selected}
-        aria-label={blockLabel(shot, lack)}
+        aria-label={label}
+        title={label}
         onClick={() => onSelectShot(shot.shotId)}
       >
         {shot.keyframe ? <span className="blk-pic"><Still artifact={shot.keyframe} alt="" /></span> : null}
         <span className="badge">{shot.label}</span>
-        {shot.letter ? <span className="letter" title={t("film.block.note", { letter: shot.letter })}>{shot.letter}</span> : null}
-        {lack && shot.seconds >= 4 ? <span className="lack">{lack}</span> : null}
-        <span className="dur">{t("film.block.seconds", { seconds: shot.seconds })}</span>
+        {shot.letter ? <span className="letter">{shot.letter}</span> : null}
+        <span className="blk-foot">
+          <span className="dur">{t("film.block.seconds", { seconds: shot.seconds })}</span>
+          {lack ? <span className="lack">{lack}</span> : null}
+        </span>
       </button>
     );
   };
@@ -115,10 +125,14 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
       : line.state === "failed" ? t("film.line.failed")
       : line.state === "no_answer" ? t("film.line.no_answer")
       : t("film.line.no_voice");
-    const title = line.lineSeconds !== null ? t("film.line.title", { text: line.text, seconds: line.lineSeconds }) : t("film.player.quote", { text: line.text });
+    // The block may be too narrow for its words: they wrap to two lines and then end in an ellipsis, and the title
+    // keeps the whole line with its state.
+    const title = line.state !== "placed" ? t("film.line.title_state", { state: text, text: line.text })
+      : line.lineSeconds !== null ? t("film.line.title", { text: line.text, seconds: line.lineSeconds })
+      : t("film.player.quote", { text: line.text });
     return [(
-      <span key={shot.shotId} className={`vblk${line.state === "placed" ? "" : " loose"}`} data-state={line.state} data-shot={shot.shotId} style={{ left: X(line.start), width: W(line.laneSeconds) }} title={title}>
-        <b>{line.label}</b> {text}
+      <span key={shot.shotId} className={`vblk${line.state === "placed" ? "" : " loose"}`} data-state={line.state} data-shot={shot.shotId} style={{ left: X(line.start), width: W(line.laneSeconds) }} title={`${line.label} ${title}`}>
+        <span className="vtext"><b>{line.label}</b> <span className="vwords">{text}</span></span>
       </span>
     )];
   });
@@ -138,8 +152,12 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
       <div className="tl-scroll" ref={scroller}>
         <div className="tl-grid" style={pps ? { width: `${timeline.total * pps + keyWidth + 12}px` } : undefined}>
           <span className="lane-k" />
-          <div className="lane ruler" aria-hidden="true" onClick={seekOnRuler}>
-            {ticks.map((s) => <span key={s} className="tick" style={{ left: X(s) }}><i />{formatClock(s)}</span>)}
+          <div className="lane ruler" aria-hidden="true" onClick={seekOnRuler} ref={ruler}>
+            {ticks.map((s, i) => (
+              <span key={s} className={`tick${places[i] === "before" ? " end" : ""}`} style={{ left: X(s) }} data-label={places[i]}>
+                {places[i] === "none" ? null : formatClock(s)}
+              </span>
+            ))}
           </div>
           <span className="lane-k">{t("film.lane.scenes")}</span>
           <div className="lane bands">
