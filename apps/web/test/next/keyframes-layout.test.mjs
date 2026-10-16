@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitStrip, revealScroll, sameStripFit, unitRuns } from '../../src/next/model/keyframes-layout.ts';
+import { fitStrip, previewNeedsReveal, revealScroll, sameStripFit, unitRuns } from '../../src/next/model/keyframes-layout.ts';
 
 // Scene 2's strip as the page measures it in English: shots 5, 4 and 6 s (8 s after), labels "2.1 · 5 s" ≈ 61 px
 // with their inset and "2.1" ≈ 26 px, the tails "Scene 3" ≈ 62 px and "Scene 3 · 2 s later" ≈ 113 px.
@@ -66,4 +66,17 @@ test('a scrolling row moves just far enough to show an item whole', () => {
   assert.equal(revealScroll(100, view, { left: -20, right: 60 }), 100 - 36 - 8);
   // Already whole: unchanged.
   assert.equal(revealScroll(100, view, { left: 40, right: 200 }), 100);
+});
+
+test('on a phone an opened shot brings its preview on screen only when less than half of it shows', () => {
+  // 390 × 844: the preview is 201 px tall.
+  assert.equal(previewNeedsReveal({ top: 267, bottom: 468, height: 201 }, 844), false);
+  // Scrolled down to the shot cards: the preview is above the screen.
+  assert.equal(previewNeedsReveal({ top: -137, bottom: 64, height: 201 }, 844), true);
+  // Half of it shows: left where it is.
+  assert.equal(previewNeedsReveal({ top: -100, bottom: 101, height: 201 }, 844), false);
+  // Below the screen.
+  assert.equal(previewNeedsReveal({ top: 760, bottom: 961, height: 201 }, 844), true);
+  // Not laid out (no height): nothing to bring in.
+  assert.equal(previewNeedsReveal({ top: 0, bottom: 0, height: 0 }, 844), false);
 });

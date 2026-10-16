@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import type { KeyframesView } from "../model/keyframes.ts";
+import type { KeyframesView, ScenePill } from "../model/keyframes.ts";
 import { revealScroll } from "../model/keyframes-layout.ts";
 import type { Msg } from "../model/types.ts";
 
@@ -9,18 +9,19 @@ export function SceneHeader({ view, held, onScene }: { view: KeyframesView; held
   const { t, tm } = useI18n();
   const { header, pills } = view;
   const row = useRef<HTMLElement>(null);
-  const selected = pills.find((pill) => pill.selected);
-  const selectedId = selected?.sceneId;
-  const selectedText = selected?.status ? tm(selected.status) : "";
+  const pillText = (pill: ScenePill) => `${t("scene.pill.label", { scene: pill.ordinal, title: pill.title })}${pill.status ? ` · ${tm(pill.status)}` : ""}`;
+  const selectedId = pills.find((pill) => pill.selected)?.sceneId;
+  const rowText = pills.map(pillText).join("\n");
 
-  // On a phone the pills scroll sideways inside their row: the selected one is always shown whole. Its text changes
-  // as it is chosen (its status drops), so this runs after that render; only the row scrolls, never the page.
+  // On a phone the pills scroll sideways inside their row: the selected one is always shown whole. The pills' words
+  // change as one is chosen (its status drops), as a scene's state moves on and with the language (the pills before
+  // it get wider or narrower), so this runs after that render; only the row scrolls, never the page.
   useEffect(() => {
     const container = row.current;
     const element = selectedId ? container?.querySelector<HTMLElement>(`[data-scene="${CSS.escape(selectedId)}"]`) : null;
     if (!container || !element || container.scrollWidth <= container.clientWidth) return;
     container.scrollLeft = revealScroll(container.scrollLeft, container.getBoundingClientRect(), element.getBoundingClientRect());
-  }, [selectedId, selectedText]);
+  }, [selectedId, rowText]);
 
   return (
     <div className="scene-head">
@@ -39,8 +40,7 @@ export function SceneHeader({ view, held, onScene }: { view: KeyframesView; held
             title={held && !pill.selected ? tm(held) : undefined}
             onClick={() => onScene(pill.sceneId)}
           >
-            {t("scene.pill.label", { scene: pill.ordinal, title: pill.title })}
-            {pill.status ? ` · ${tm(pill.status)}` : ""}
+            {pillText(pill)}
           </button>
         ))}
       </nav>
