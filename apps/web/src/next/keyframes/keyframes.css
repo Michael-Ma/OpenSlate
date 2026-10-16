@@ -301,8 +301,8 @@
 /* Where the preview is much taller than the 16:9 frame (the stage between 900 and 1099 px), the frame keeps 16:9 at
    the top and the controls follow under it instead of lying over the picture: a portrait crop would cut off the frame
    the person is asked to open. Only the shot's badge and status stay on the picture, as small as in the design. The
-   frame gives way (letterboxed, never cropped) before the controls do, and the caption shows the lines it has room
-   for, or none. */
+   frame gives way (letterboxed, never cropped) before the controls do. The caption sits on the scrubber at the foot,
+   as it does over the picture, with the lines it has room for, or none; the room left over is under the controls. */
 .kf .preview { container: kf-preview / size; }
 @container kf-preview (max-aspect-ratio: 7 / 5) {
   .kf .preview:not([data-player]) .pv-stage { display: flex; flex-direction: column; }
@@ -311,17 +311,19 @@
   .kf .preview:not([data-player]) .pv-head { display: contents; }
   .kf .preview:not([data-player]) .pv-head .pv-top { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 3; }
   .kf .preview:not([data-player]) .pv-head .pv-side { flex: none; max-width: calc(100% - 28px); margin: 8px 14px 0 auto; }
-  .kf .preview .pv-bottom { container: kf-band / size; position: relative; inset: auto; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; padding: 8px 14px 10px; background: none; }
+  .kf .preview .pv-bottom { container: kf-band / size; position: relative; inset: auto; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; overflow: hidden; padding: 8px 14px; background: none; }
   .kf .preview .pv-caption { flex: none; margin: 0; font-size: 13.5px; line-height: 1.35; text-shadow: none; -webkit-line-clamp: 3; }
-  .kf .preview .pv-bottom .scrub { margin-top: auto; }
+  /* The phone's smaller play button, so a second caption line fits on the 1024 px stage. */
+  .kf .preview .pv-bottom .scrub .play { width: 26px; height: 26px; }
 }
-/* (Heights of the band's content box: the scrubber is 30 px, each caption line about 18 px and a gap of 8 px.) */
-@container kf-band (max-height: 92px) { .kf .preview .pv-caption { -webkit-line-clamp: 2; } }
-@container kf-band (max-height: 74px) { .kf .preview .pv-caption { -webkit-line-clamp: 1; } }
-@container kf-band (max-height: 56px) { .kf .preview .pv-caption { display: none; } }
-/* A narrow preview (a phone, the narrowest stage) keeps its controls to one row: Previous and Next lose the film
-   position between them (a screen reader still hears it). */
-@container kf-preview (max-width: 380px) {
+/* (Heights of the band's content box: the scrubber is 26 px, each caption line 18.2 px and a gap of 6 px.) */
+@container kf-band (max-height: 86.7px) { .kf .preview .pv-caption { -webkit-line-clamp: 2; } }
+@container kf-band (max-height: 68.5px) { .kf .preview .pv-caption { -webkit-line-clamp: 1; } }
+@container kf-band (max-height: 50.3px) { .kf .preview .pv-caption { display: none; } }
+/* A narrow preview with its controls over the picture (a phone) keeps them to one row: Previous and Next lose the
+   film position between them (a screen reader still hears it). Under the frame of a narrow stage the controls have
+   the preview's width to themselves, and the position stays. */
+@container kf-preview (max-width: 380px) and (aspect-ratio > 7 / 5) {
   .kf .pv-side { gap: 6px; }
   .kf .pv-pos { position: absolute; width: 1px; height: 1px; min-width: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }

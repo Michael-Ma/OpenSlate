@@ -67,7 +67,8 @@ export async function inspectorWhole(page, where) {
 
 /**
  * The preview shows the whole 16:9 frame: where its box is taller than that, the frame keeps 16:9 and the caption
- * and the controls sit under it (only the shot's badge and status lie on the picture).
+ * and the controls sit under it (only the shot's badge and status lie on the picture). There the caption sits on the
+ * scrubber, and Previous and Next keep the film position between them.
  */
 export async function previewWholeFrame(page, where) {
   const layout = await page.evaluate(() => {
@@ -78,6 +79,7 @@ export async function previewWholeFrame(page, where) {
     return {
       preview: rect(preview), frame: rect(frame), fit: image ? getComputedStyle(image).objectFit : null,
       caption: rect(preview?.querySelector(".pv-caption")), side: rect(preview?.querySelector(".pv-side")), scrub: rect(preview?.querySelector(".scrub")),
+      position: rect(preview?.querySelector(".pv-pos")),
     };
   });
   const detail = JSON.stringify(layout);
@@ -91,6 +93,9 @@ export async function previewWholeFrame(page, where) {
       const box = layout[part];
       if (box && (box.top < layout.frame.bottom - 0.5 || box.bottom > layout.preview.bottom + 0.5)) throw new Error(`The preview's ${part} is not under the frame ${where}: ${detail}`);
     }
+    // The room the band does not need is under the controls, never between the caption and its scrubber.
+    if (layout.caption && layout.caption.height > 0 && layout.scrub && layout.scrub.top - layout.caption.bottom > 10) throw new Error(`The preview's caption is apart from its scrubber ${where}: ${detail}`);
+    if (layout.position && layout.position.width < 20) throw new Error(`The preview's film position is hidden under the frame ${where}: ${detail}`);
   }
   return layout;
 }

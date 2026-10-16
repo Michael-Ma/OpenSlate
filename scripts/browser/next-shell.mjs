@@ -684,6 +684,11 @@ export const scenarios = [
             const report = await inspectorWhole(page, where);
             fits[`${label} ${width}x${height} ${language}`] = report.fit;
             if (width >= 900 && width < 1100) await previewWholeFrame(page, where);
+            // At 1024 the band under the frame has the room for 2.1's caption in full (two lines).
+            if (label === "2.1" && width === 1024 && language === "en") {
+              const caption = await page.locator(".preview .pv-caption").evaluate((element) => [element.scrollHeight, element.clientHeight]);
+              expect(caption[0] <= caption[1] + 1 && caption[1] > 30, `2.1's caption is cut ${where}: ${JSON.stringify(caption)}`);
+            }
             await noSidewaysScroll(page, where);
           }
         }
