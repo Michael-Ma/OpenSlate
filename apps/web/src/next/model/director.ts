@@ -718,7 +718,8 @@ export function readDraft(raw: string | null): Draft | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const draft = value as Record<string, unknown>;
   const { text, targets, images } = draft;
-  if (typeof text !== "string" || text.length > MESSAGE_LIMIT * 2) return null;
+  // A long draft comes back as it was (the composer then says it is too long and holds Send); only its shape is checked.
+  if (typeof text !== "string") return null;
   if (!Array.isArray(targets) || targets.length > 400 || !Array.isArray(images) || images.length > PICTURE_LIMIT) return null;
   const goodTargets = targets.every((target) => !!target && typeof target === "object" && ["scene", "shot"].includes((target as Target).kind) && isId((target as Target).id));
   const goodImages = images.every((item) => {

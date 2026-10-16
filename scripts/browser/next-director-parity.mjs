@@ -196,6 +196,16 @@ export const scenarios = [
       await ready(page);
       await page.waitForTimeout(300);
       if (await box.inputValue() !== "" || await page.locator(".composer .pic-chip").count()) fail("A sent draft came back after a reload");
+      // A long pasted script survives a reload too; the composer says it is too long and holds Send.
+      const script = "The ferry leaves at dawn. ".repeat(1400);
+      await box.fill(script);
+      await page.waitForTimeout(200);
+      await page.reload();
+      await ready(page);
+      await page.waitForFunction((length) => document.querySelector('[data-field="message"]')?.value.length === length, script.length, { timeout: 4000 })
+        .catch(async () => fail(`The long draft came back with ${(await box.inputValue()).length} characters, not ${script.length}`));
+      if ((await texts(page, ".composer-note"))[0] !== "Keep the message under 16,000 characters.") fail("The too-long note is missing");
+      if (!(await page.locator('[data-act="send"]').isDisabled())) fail("Send is on for a message that is too long");
     },
   },
   {

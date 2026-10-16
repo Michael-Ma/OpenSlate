@@ -165,6 +165,11 @@ test('the unsent draft round-trips through storage; malformed or empty drafts re
     assert.equal(readDraft(bad), null, String(bad));
   // Extra fields are not carried along.
   assert.deepEqual(readDraft(JSON.stringify({ ...saved, images: [{ ...uploadImage, evil: '<b>' }] })).images, [uploadImage]);
+  // A long pasted script comes back whole; the composer then says it is too long and holds Send.
+  const long = { ...saved, text: 'x'.repeat(MESSAGE_LIMIT * 3) };
+  assert.equal(readDraft(JSON.stringify(long)).text.length, MESSAGE_LIMIT * 3);
+  const tooLong = composerView({ ...readDraft(JSON.stringify(long)), sending: false }, true, lastFerryOverview(), { open: true, stopped: false }, codex);
+  assert.deepEqual([tooLong.canSend, tooLong.problem.id], [false, 'director.composer.too_long']);
   assert.equal(draftKey('film-1'), 'openslate.next.draft.film-1');
   assert.equal(draftKey('last-ferry', 'fixture'), 'openslate.next.sample-draft.last-ferry');
 });
