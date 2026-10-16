@@ -1,7 +1,7 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { clipUnit } from "./inspector.ts";
-import { modeEdit, narrationChoiceOf, planRecordingImpact, type NarrationChoice as Choice } from "./narration.ts";
+import { modeEdit, narrationChoiceOf, planRecordingImpact, wordsOf, type NarrationChoice as Choice } from "./narration.ts";
 import { promptText, promptToSave, secondsOf, written, type NarrationMode } from "./plan.ts";
 import { formatMicros } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
@@ -48,7 +48,8 @@ export function draftOf(shot: ShotOverview, mode: NarrationMode | undefined, fps
     motion: written("motion", shot.motion),
     seconds: secondsOf(shot.durationFrames, fps),
     narration: narrationChoiceOf(mode, shot.narration),
-    line: shot.narration.text,
+    // A recording added without words carries the studio's stand-in text; it is not a line to voice.
+    line: wordsOf(shot.narration.text),
   };
 }
 

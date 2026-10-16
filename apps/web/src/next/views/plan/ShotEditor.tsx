@@ -2,6 +2,7 @@ import type { ShotOverview } from "@openslate/core/public";
 import { useId, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { canStep, draftEdits, draftOf, draftProblem, editChange, FRAMINGS, lengthFloor, lengthHint, lineNote, MOTIONS, shotImpact, stepLength, type ShotDraft, type UnitPrices } from "../../model/plan-edit.ts";
+import { choiceLabel, planRecordingNote } from "../../model/narration.ts";
 import type { NarrationMode, ShotRowView } from "../../model/plan.ts";
 import type { Msg } from "../../model/types.ts";
 import { Rich } from "./Rich.tsx";
@@ -93,7 +94,9 @@ export function ShotEditor({ shot, row, mode, fps, prices, saving, guard, error,
           <span className="segctl" role="radiogroup" aria-labelledby={field("narr")}>
             <button type="button" role="radio" aria-checked={draft.narration === "none"} data-act="narr-none" onClick={() => set("narration", "none")}>{t("plan.narr.choice_none")}</button>
             <button type="button" role="radio" aria-checked={draft.narration === "line"} data-act="narr-line" onClick={() => set("narration", "line")}>{t("plan.narr.choice_line")}</button>
+            <button type="button" role="radio" aria-checked={draft.narration === "recording"} data-act="narr-recording" onClick={() => set("narration", "recording")}>{tm(choiceLabel("recording"))}</button>
           </span>
+          {draft.narration === "recording" ? <span className="hint" data-note="recording">{tm(planRecordingNote(shot, mode))}</span> : null}
         </div>
         {draft.narration === "line" ? (
           <div className="field wide">
