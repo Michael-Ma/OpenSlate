@@ -109,7 +109,7 @@ export const keyframes = {
   "inspector.clip_will_redo": { en: "Its clip will need redoing, about {price}.", zh: "它的视频需要重做，约 {price}。" },
   "inspector.clip_will_redo_unpriced": { en: "Its clip will need redoing.", zh: "它的视频需要重做。" },
   "inspector.wait_for_clip": { en: "Wait for this shot's clip to finish.", zh: "请等这个镜头的视频生成完。" },
-  "inspector.held": { en: "An unfinished Director edit holds this shot. See the Director column to let it go.", zh: "导演有一项未完成的修改占用着这个镜头。可在导演栏里放弃这项修改。" },
+  "inspector.held": { en: "An unfinished Director edit holds this shot; see the Director column.", zh: "导演有一项未完成的修改占用着这个镜头，请看导演栏。" },
   "inspector.keyframe_outdated": { en: "The prompt changed; the earlier keyframe is shown.", zh: "画面描述已修改，显示的是之前的关键帧。" },
   "inspector.clip_outdated": { en: "The clip is out of date and will be made again with the scene's video.", zh: "视频已过期，会随这一场的视频重新生成。" },
   "inspector.failed.retrying": { en: "Failed; it will retry by itself ({count} left).", zh: "失败了，会自动重试（还剩 {count} 次）。" },
