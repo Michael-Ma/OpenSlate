@@ -1,4 +1,4 @@
-import { secondsOf } from "./plan.ts";
+import { secondsOf, written } from "./plan.ts";
 import { msg, type ConversationEntry, type Msg, type ProjectSnapshot } from "./types.ts";
 
 /**
@@ -11,7 +11,9 @@ export const IMPORT_MAX_CHARS = 12000;
 export const IMPORT_NAME_MAX = 160;
 export const DEFAULT_IMPORT_NAME = "plan.md";
 
-type Project = ProjectSnapshot["project"] & { maxFrames?: number };
+/** The film as the server stores it: the snapshot's fields, plus the narration script and each shot's action. */
+type Project = ProjectSnapshot["project"] & { maxFrames?: number; narration?: { script?: string; source?: string } };
+type ProjectShot = Project["shots"][number] & { action?: string };
 
 /** GET /api/projects/:projectId/plan-imports */
 export interface PlanImportsRead {
@@ -78,9 +80,19 @@ export interface ReviewScene {
   rows: ReviewRow[];
 }
 
+/** The film's own words the proposal may rewrite: the brief, the story and the narration script. */
+export interface ReviewText {
+  field: "brief" | "story" | "script";
+  now: string;
+  proposed: string;
+  changed: boolean;
+}
+
 export interface ImportReview {
   now: Totals;
   proposed: Totals;
+  /** Brief and story always; the narration script when either side has one. */
+  texts: ReviewText[];
   scenes: ReviewScene[];
   /** Shots of the current outline the proposal leaves out. */
   removed: { label: string; purpose: string }[];
@@ -105,7 +117,10 @@ function labels(project: Project): Map<string, string> {
   return out;
 }
 
-function changes(before: Project["shots"][number], after: Project["shots"][number], fps: number): Msg[] {
+const actionOf = (shot: ProjectShot) => written("action", shot.action);
+
+/** What a proposed shot changes, with the new words in full (prompts included: they drive the paid models). */
+function changes(before: ProjectShot, after: ProjectShot, fps: number): Msg[] {
   const details: Msg[] = [];
   const line = lineOf(after);
   if (lineOf(before) !== line) details.push(line ? msg("plan.import.detail.line", { text: line }) : msg("plan.import.detail.no_line"));
@@ -113,11 +128,41 @@ function changes(before: Project["shots"][number], after: Project["shots"][numbe
   if (before.framing.trim() !== after.framing.trim()) details.push(msg("plan.import.detail.framing", { from: before.framing, to: after.framing }));
   if (before.motion.trim() !== after.motion.trim()) details.push(msg("plan.import.detail.motion", { from: before.motion, to: after.motion }));
   if (before.purpose.trim() !== after.purpose.trim()) details.push(msg("plan.import.detail.purpose", { from: before.purpose }));
-  if (before.imagePrompt.trim() !== after.imagePrompt.trim()) details.push(msg("plan.import.detail.prompt"));
+  if (actionOf(before) !== actionOf(after)) details.push(actionOf(after) ? msg("plan.import.detail.action", { text: actionOf(after) }) : msg("plan.import.detail.no_action"));
+  if (before.imagePrompt.trim() !== after.imagePrompt.trim()) details.push(promptDetail("plan.import.detail.prompt", after.imagePrompt));
+  if ((before.videoPrompt ?? "").trim() !== (after.videoPrompt ?? "").trim()) details.push(promptDetail("plan.import.detail.video_prompt", after.videoPrompt));
   return details;
 }
 
-/** Now vs proposed, with every proposed shot tagged Same / Changed / New. Media effects are not previewed (lead decision 5). */
+const promptDetail = (id: "plan.import.detail.prompt" | "plan.import.detail.video_prompt", prompt: string | undefined): Msg => {
+  const text = written(id === "plan.import.detail.prompt" ? "imagePrompt" : "videoPrompt", prompt);
+  return text ? msg(id, { text }) : msg("plan.import.detail.prompt_none");
+};
+
+/** A new shot: its framing, length and line, then what happens and both prompts. */
+function newDetails(shot: ProjectShot, fps: number): Msg[] {
+  const line = lineOf(shot);
+  const seconds = secondsOf(shot.desiredFrames, fps);
+  const details = [line ? msg("plan.import.detail.new_line", { framing: shot.framing, seconds, text: line }) : msg("plan.import.detail.new_silent", { framing: shot.framing, seconds })];
+  if (actionOf(shot)) details.push(msg("plan.import.detail.action", { text: actionOf(shot) }));
+  details.push(promptDetail("plan.import.detail.prompt", shot.imagePrompt), promptDetail("plan.import.detail.video_prompt", shot.videoPrompt));
+  return details;
+}
+
+const scriptOf = (project: Project) => project.narration?.script?.trim() ?? "";
+
+/** The brief, the story and the narration script, now and proposed. */
+export function reviewTexts(current: Project, proposed: Project): ReviewText[] {
+  const text = (field: ReviewText["field"], now: string, next: string): ReviewText => ({ field, now: now.trim(), proposed: next.trim(), changed: now.trim() !== next.trim() });
+  const out = [text("brief", current.brief, proposed.brief), text("story", current.story, proposed.story)];
+  if (scriptOf(current) || scriptOf(proposed)) out.push(text("script", scriptOf(current), scriptOf(proposed)));
+  return out;
+}
+
+/**
+ * Now vs proposed: the brief, story and narration script, then every proposed shot tagged Same / Changed / New with
+ * what changes. Media effects are not previewed (lead decision 5).
+ */
 export function importReview(current: Project, proposed: Project, fps: number): ImportReview {
   const before = new Map(current.shots.map((shot) => [shot.id, shot]));
   const sceneIds = new Set(current.scenes.map((scene) => scene.id));
@@ -131,10 +176,7 @@ export function importReview(current: Project, proposed: Project, fps: number): 
     isNew: !sceneIds.has(scene.id),
     rows: proposed.shots.filter((shot) => shot.sceneId === scene.id).map((shot): ReviewRow => {
       const old = before.get(shot.id);
-      const line = lineOf(shot);
-      const seconds = secondsOf(shot.desiredFrames, fps);
-      const details = old ? changes(old, shot, fps)
-        : [line ? msg("plan.import.detail.new_line", { framing: shot.framing, seconds, text: line }) : msg("plan.import.detail.new_silent", { framing: shot.framing, seconds })];
+      const details = old ? changes(old, shot, fps) : newDetails(shot, fps);
       const tag: RowTag = !old ? "new" : details.length ? "changed" : "same";
       counts[tag]++;
       return { shotId: shot.id, label: nextLabels.get(shot.id) ?? "", purpose: shot.purpose, tag, details: tag === "same" ? [] : details };
@@ -142,7 +184,7 @@ export function importReview(current: Project, proposed: Project, fps: number): 
   }));
   const kept = new Set(proposed.shots.map((shot) => shot.id));
   const removed = current.shots.filter((shot) => !kept.has(shot.id)).map((shot) => ({ label: nowLabels.get(shot.id) ?? "", purpose: shot.purpose }));
-  return { now: totals(current, fps), proposed: totals(proposed, fps), scenes, removed, counts };
+  return { now: totals(current, fps), proposed: totals(proposed, fps), texts: reviewTexts(current, proposed), scenes, removed, counts };
 }
 
 /** What the Director wrote while reading this plan: its suggestions, listed apart from the outline and not applied. */

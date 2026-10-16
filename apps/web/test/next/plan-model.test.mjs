@@ -4,7 +4,7 @@ import { lastFerryOverview, lastFerrySnapshot, sceneId, shotId } from '../../src
 import { catalog } from '../../src/next/i18n/messages.ts';
 import {
   addedScene, addedShot, clipPill, clockText, deleteSceneFacts, deleteShotFacts, keyframePill, locate, mediaCountMsgs, mediaCounts,
-  narrationView, planOutline, promptText, promptToSave, sceneMove, shotMove, written,
+  directedPrompt, narrationView, planOutline, promptText, promptToSave, sceneChoices, sceneMove, shotDrop, shotMove, written,
 } from '../../src/next/model/plan.ts';
 
 const golden = () => planOutline(lastFerrySnapshot(), lastFerryOverview());
@@ -140,4 +140,48 @@ test('the shot or scene an add created is found by comparing the overview before
 test('every message the outline uses is in the catalog', () => {
   const outline = planOutline({ ...lastFerrySnapshot(), notes: [] }, lastFerryOverview());
   for (const id of ids(outline)) assert.ok(Object.hasOwn(catalog, id), `${id} is not in the catalog`);
+});
+
+test("a row shows the shot's action and keeps both prompts in full, as the models are sent them", () => {
+  const snapshot = lastFerrySnapshot();
+  const header = 'OpenSlate current direction:\nMara pays. She slides coins. Medium\nReference details (retain only where consistent):\n';
+  snapshot.project.shots[1] = { ...snapshot.project.shots[1], action: 'She slides three coins across.', videoPrompt: `${header}Coins slide. Static.` };
+  const overview = lastFerryOverview();
+  overview.shots[shotId('1.2')] = { ...overview.shots[shotId('1.2')], imagePrompt: `${header}Mara at the counter.` };
+  const r12 = row(planOutline(snapshot, overview), '1.2');
+  assert.equal(r12.action, 'She slides three coins across.');
+  assert.deepEqual([r12.prompt, r12.videoPrompt], ['Mara at the counter.', 'Coins slide. Static.']);
+  assert.deepEqual(r12.fullPrompts, { image: `${header}Mara at the counter.`, video: `${header}Coins slide. Static.` });
+  // The server's placeholders for a new shot are not written words.
+  snapshot.project.shots[0] = { ...snapshot.project.shots[0], action: 'Describe the action', videoPrompt: 'Pending direction' };
+  const r11 = row(planOutline(snapshot, overview), '1.1');
+  assert.deepEqual([r11.action, r11.videoPrompt, r11.fullPrompts.video], ['', '', '']);
+  assert.equal(directedPrompt(['Mara pays', '', 'Medium'], 'Coins.'), 'OpenSlate current direction:\nMara pays. Medium\nReference details (retain only where consistent):\nCoins.');
+});
+
+test('a shot moves to any scene: before a row, or at the end; staying put is no move', () => {
+  const outline = golden();
+  assert.deepEqual(shotDrop(outline, shotId('1.2'), sceneId(2)), { sceneId: sceneId(2), beforeId: undefined, from: '1.2', to: '2.4' });
+  assert.deepEqual(shotDrop(outline, shotId('1.2'), sceneId(3), shotId('3.1')), { sceneId: sceneId(3), beforeId: shotId('3.1'), from: '1.2', to: '3.1' });
+  assert.deepEqual(shotDrop(outline, shotId('2.1'), sceneId(2)), { sceneId: sceneId(2), beforeId: undefined, from: '2.1', to: '2.3' });
+  assert.deepEqual(shotDrop(outline, shotId('2.3'), sceneId(2), shotId('2.1')), { sceneId: sceneId(2), beforeId: shotId('2.1'), from: '2.3', to: '2.1' });
+  assert.equal(shotDrop(outline, shotId('2.2'), sceneId(2), shotId('2.2')), null, 'onto itself');
+  assert.equal(shotDrop(outline, shotId('2.2'), sceneId(2), shotId('2.3')), null, 'just before the shot after it: its own place');
+  assert.equal(shotDrop(outline, shotId('2.3'), sceneId(2)), null, 'the last shot to the end of its own scene');
+  assert.equal(shotDrop(outline, shotId('2.2'), 'gone'), null);
+  assert.equal(shotDrop(outline, shotId('2.2'), sceneId(1), 'gone'), null);
+});
+
+test('the Move dialog offers every other scene with the number the shot gets first or last there', () => {
+  const choices = sceneChoices(golden(), shotId('2.2'));
+  assert.deepEqual(choices.map((choice) => [choice.ordinal, choice.title, choice.shots, choice.first.to, choice.last.to]), [
+    [1, 'Closing time', 3, '1.1', '1.4'],
+    [3, 'Departure', 2, '3.1', '3.3'],
+  ]);
+  assert.deepEqual(choices[1].first, { sceneId: sceneId(3), beforeId: shotId('3.1'), from: '2.2', to: '3.1' });
+  // An empty scene takes it as its first shot either way.
+  const overview = lastFerryOverview();
+  overview.scenes.push({ ...overview.scenes[2], sceneId: 'scene-4', ordinal: 4, title: 'Epilogue', shotIds: [] });
+  const empty = sceneChoices(planOutline(lastFerrySnapshot(), overview), shotId('2.2')).at(-1);
+  assert.deepEqual([empty.first.to, empty.last.to, empty.first.beforeId], ['4.1', '4.1', undefined]);
 });

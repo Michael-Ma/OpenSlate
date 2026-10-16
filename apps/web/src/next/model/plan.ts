@@ -26,11 +26,13 @@ export function clockText(totalSeconds: number): string {
  * Values the server writes into a new shot or scene (storyboard.ts addShot, addScene); the outline shows them as
  * not written yet. A new scene's direction is "New scene" until the person writes one.
  */
-const PLACEHOLDERS: Record<"purpose" | "framing" | "motion" | "imagePrompt" | "sceneDirection", readonly string[]> = {
+const PLACEHOLDERS: Record<"purpose" | "action" | "framing" | "motion" | "imagePrompt" | "videoPrompt" | "sceneDirection", readonly string[]> = {
   purpose: ["New shot"],
+  action: ["Describe the action"],
   framing: ["Describe the visual direction"],
   motion: ["Describe the camera movement"],
   imagePrompt: ["Pending direction"],
+  videoPrompt: ["Pending direction"],
   sceneDirection: ["New scene"],
 };
 
@@ -44,12 +46,22 @@ const DIRECTION_HEADER = "OpenSlate current direction:\n";
 const DIRECTION_SEPARATOR = "\nReference details (retain only where consistent):\n";
 
 /**
- * The picture prompt as the person wrote it. A purpose or framing edit makes the server prepend its own
- * "current direction" header (storyboard.ts editedPrompt); the outline shows purpose and framing already.
+ * A picture or video prompt as the person wrote it. A purpose, action or framing edit (and, for the video prompt,
+ * a motion edit) makes the server prepend its own "current direction" header (storyboard.ts editedPrompt); the
+ * outline shows those fields already. Both prompts share the server's "Pending direction" placeholder.
  */
-export function promptText(imagePrompt: string): string {
-  const split = directionEnd(imagePrompt);
-  return written("imagePrompt", split === null ? imagePrompt : imagePrompt.slice(split));
+export function promptText(prompt: string): string {
+  const split = directionEnd(prompt);
+  return written("imagePrompt", split === null ? prompt : prompt.slice(split));
+}
+
+/**
+ * The server's direction header around the person's words (storyboard.ts editedPrompt): purpose, action and
+ * framing, then for the video prompt the camera movement. The server writes it itself when those fields change
+ * without the prompt; a save that also rewrites the prompt sends it whole, so the new direction stays in front.
+ */
+export function directedPrompt(direction: readonly string[], words: string): string {
+  return `${DIRECTION_HEADER}${direction.filter(Boolean).join(". ")}${DIRECTION_SEPARATOR}${words}`;
 }
 
 /** Where the person's own words start after the server's direction header, or null when there is none. */
@@ -155,9 +167,15 @@ export interface ShotRowView {
   label: string;
   /** Written values ("" when not written yet). */
   purpose: string;
+  /** What happens in the shot (the server writes it into both prompts). */
+  action: string;
   framing: string;
   motion: string;
   prompt: string;
+  /** The video prompt in the person's words. */
+  videoPrompt: string;
+  /** Both prompts exactly as saved, the direction header included: what the models are sent. */
+  fullPrompts: { image: string; video: string };
   seconds: number;
   /** The current keyframe, or the earlier one (dimmed) while it is outdated or being remade. */
   picture: StudioArtifactRef | null;
@@ -198,7 +216,8 @@ export interface PlanOutline {
   line: Msg;
 }
 
-type SnapshotShot = ProjectSnapshot["project"]["shots"][number];
+/** A shot as the snapshot stores it. The server sends the whole shot record, `action` included. */
+export type SnapshotShot = ProjectSnapshot["project"]["shots"][number] & { action?: string };
 
 const chip = (view: NoteView): NoteChip => ({ noteId: view.noteId, letter: view.letter, text: view.text, done: view.state === "resolved" });
 
@@ -217,9 +236,12 @@ export function shotRow(shot: ShotOverview, snapshotShot: SnapshotShot | undefin
     sceneId: shot.sceneId,
     label: shot.label,
     purpose: written("purpose", shot.purpose),
+    action: written("action", snapshotShot?.action),
     framing: written("framing", shot.framing),
     motion: written("motion", shot.motion),
     prompt: promptText(shot.imagePrompt),
+    videoPrompt: promptText(snapshotShot?.videoPrompt ?? ""),
+    fullPrompts: { image: written("imagePrompt", shot.imagePrompt), video: written("videoPrompt", snapshotShot?.videoPrompt) },
     seconds: secondsOf(shot.durationFrames, fps),
     ...thumbOf(shot),
     narration: narrationView(shot, snapshotShot?.narration?.mode, fps),
@@ -237,7 +259,7 @@ const sceneState = (scene: SceneOverview, shots: number): Msg => (shots ? sceneS
 export function planOutline(snapshot: ProjectSnapshot, overview: GenerationOverview, proposals: readonly DirectorProposal[] = []): PlanOutline {
   const fps = overview.fps;
   const views = noteViews(snapshot.notes ?? [], overview, proposals);
-  const byId = new Map(snapshot.project.shots.map((row) => [row.id, row]));
+  const byId = new Map<string, SnapshotShot>(snapshot.project.shots.map((row) => [row.id, row]));
   const ordered = [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal);
   const scenes = ordered.map((scene, position): SceneView => {
     const list = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
@@ -335,8 +357,16 @@ export function sceneMove(outline: PlanOutline, sceneId: string, direction: -1 |
   return { beforeId: direction < 0 ? outline.scenes[target]!.sceneId : outline.scenes[index + 2]?.sceneId, ordinal: target + 1 };
 }
 
+/** Where a moveShot command puts a shot: its scene, the shot it goes before (none = the end) and its labels. */
+export interface ShotMoveTarget {
+  sceneId: string;
+  beforeId: string | undefined;
+  from: string;
+  to: string;
+}
+
 /** moveShot within its scene: the shot it goes before (none = the end of the scene) and its new label. */
-export function shotMove(outline: PlanOutline, shotId: string, direction: -1 | 1): { sceneId: string; beforeId: string | undefined; from: string; to: string } | null {
+export function shotMove(outline: PlanOutline, shotId: string, direction: -1 | 1): ShotMoveTarget | null {
   const where = locate(outline, shotId);
   if (!where) return null;
   const { scene, row } = where;
@@ -344,6 +374,40 @@ export function shotMove(outline: PlanOutline, shotId: string, direction: -1 | 1
   if (target < 0 || target >= scene.shots.length) return null;
   const beforeId = direction < 0 ? scene.shots[target]!.shotId : scene.shots[row.index + 2]?.shotId;
   return { sceneId: scene.sceneId, beforeId, from: row.label, to: `${scene.ordinal}.${target + 1}` };
+}
+
+/**
+ * moveShot to any place: into `sceneId`, before `beforeId` (none = the end of that scene). Null when the shot
+ * would stay where it is (dropped on itself or on its own place), or the place no longer exists.
+ */
+export function shotDrop(outline: PlanOutline, shotId: string, sceneId: string, beforeId?: string): ShotMoveTarget | null {
+  const where = locate(outline, shotId);
+  const scene = outline.scenes.find((s) => s.sceneId === sceneId);
+  if (!where || !scene || beforeId === shotId) return null;
+  const others = scene.shots.filter((row) => row.shotId !== shotId);
+  const index = beforeId ? others.findIndex((row) => row.shotId === beforeId) : others.length;
+  if (index < 0 || (where.scene.sceneId === sceneId && where.row.index === index)) return null;
+  return { sceneId, beforeId: beforeId || undefined, from: where.row.label, to: `${scene.ordinal}.${index + 1}` };
+}
+
+/** The scenes a shot can move to from its •••: every other scene, with the label it would get first or last there. */
+export interface SceneChoice {
+  sceneId: string;
+  ordinal: number;
+  title: string;
+  shots: number;
+  first: ShotMoveTarget;
+  last: ShotMoveTarget;
+}
+
+export function sceneChoices(outline: PlanOutline, shotId: string): SceneChoice[] {
+  const where = locate(outline, shotId);
+  if (!where) return [];
+  return outline.scenes.filter((scene) => scene.sceneId !== where.scene.sceneId).flatMap((scene) => {
+    const last = shotDrop(outline, shotId, scene.sceneId);
+    const first = shotDrop(outline, shotId, scene.sceneId, scene.shots[0]?.shotId) ?? last;
+    return first && last ? [{ sceneId: scene.sceneId, ordinal: scene.ordinal, title: scene.title, shots: scene.shots.length, first, last }] : [];
+  });
 }
 
 /** The shot an addShot command created: in that scene now, not before. */

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { lastFerrySnapshot, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
-import { IMPORT_MAX_CHARS, importName, importNotes, importProblem, importReview, importStage } from '../../src/next/model/plan-import.ts';
+import { IMPORT_MAX_CHARS, importName, importNotes, importProblem, importReview, importStage, reviewTexts } from '../../src/next/model/plan-import.ts';
 
 const project = () => lastFerrySnapshot().project;
 
@@ -29,15 +29,32 @@ test('the review tags every proposed shot Same, Changed or New and counts Now ag
   const now = project();
   const next = structuredClone(now);
   next.shots = next.shots.map((shot) => (shot.id === shotId('2.3') ? { ...shot, narration: { ...shot.narration, text: 'It was the last boat of the season.' } } : shot));
-  next.shots.splice(6, 0, { id: 'gangway', sceneId: sceneId(2), purpose: 'The gangway is lowered; Mara steps aboard.', framing: 'Wide', motion: 'Static', desiredFrames: 120, imagePrompt: 'Gangway.', videoPrompt: 'Gangway.', narration: { mode: 'none', text: '', voice: 'stock' } });
+  next.shots.splice(6, 0, { id: 'gangway', sceneId: sceneId(2), purpose: 'The gangway is lowered; Mara steps aboard.', action: 'Mara crosses.', framing: 'Wide', motion: 'Static', desiredFrames: 120, imagePrompt: 'Gangway.', videoPrompt: 'Gangway, static.', narration: { mode: 'none', text: '', voice: 'stock' } });
   const review = importReview(now, next, 30);
   assert.deepEqual(review.now, { scenes: 3, shots: 8, seconds: 48 });
   assert.deepEqual(review.proposed, { scenes: 3, shots: 9, seconds: 52 });
   assert.deepEqual(review.counts, { same: 7, changed: 1, new: 1 });
   assert.deepEqual(review.scenes[1].rows.map((row) => [row.label, row.tag]), [['2.1', 'same'], ['2.2', 'same'], ['2.3', 'changed'], ['2.4', 'new']]);
   assert.deepEqual(review.scenes[1].rows[2].details, [{ id: 'plan.import.detail.line', values: { text: 'It was the last boat of the season.' } }]);
-  assert.deepEqual(review.scenes[1].rows[3].details, [{ id: 'plan.import.detail.new_silent', values: { framing: 'Wide', seconds: 4 } }]);
+  // A new shot shows its framing and length, what happens, and both prompts in full.
+  assert.deepEqual(review.scenes[1].rows[3].details, [
+    { id: 'plan.import.detail.new_silent', values: { framing: 'Wide', seconds: 4 } },
+    { id: 'plan.import.detail.action', values: { text: 'Mara crosses.' } },
+    { id: 'plan.import.detail.prompt', values: { text: 'Gangway.' } },
+    { id: 'plan.import.detail.video_prompt', values: { text: 'Gangway, static.' } },
+  ]);
   assert.deepEqual(review.removed, []);
+});
+
+test('a changed prompt, action or video prompt is shown with its new words, not only as "changed"', () => {
+  const now = project();
+  const next = structuredClone(now);
+  next.shots[0] = { ...next.shots[0], imagePrompt: 'The ticket office, lamp lit.', videoPrompt: 'Lamp flickers.', action: 'The clerk pulls the shutter.' };
+  assert.deepEqual(importReview(now, next, 30).scenes[0].rows[0].details, [
+    { id: 'plan.import.detail.action', values: { text: 'The clerk pulls the shutter.' } },
+    { id: 'plan.import.detail.prompt', values: { text: 'The ticket office, lamp lit.' } },
+    { id: 'plan.import.detail.video_prompt', values: { text: 'Lamp flickers.' } },
+  ]);
 });
 
 test('shots the proposal leaves out are listed, and new scenes are marked', () => {
@@ -62,4 +79,17 @@ test("the Director's words about the plan are listed apart, from that request on
   ];
   assert.deepEqual(importNotes(conversation, 'imp'), ['A two-second hold would help.']);
   assert.deepEqual(importNotes(undefined, 'imp'), []);
+});
+
+test("the review shows the proposed brief, story and narration script beside the outline", () => {
+  const now = project();
+  const next = { ...structuredClone(now), story: 'A new story.', narration: { script: 'One for the morning boat.', source: 'generated' } };
+  assert.deepEqual(reviewTexts(now, next), [
+    { field: 'brief', now: now.brief, proposed: now.brief, changed: false },
+    { field: 'story', now: now.story, proposed: 'A new story.', changed: true },
+    { field: 'script', now: '', proposed: 'One for the morning boat.', changed: true },
+  ]);
+  // Without a script on either side, only the brief and the story are listed.
+  assert.deepEqual(reviewTexts(now, now).map((text) => [text.field, text.changed]), [['brief', false], ['story', false]]);
+  assert.deepEqual(importReview(now, next, 30).texts.map((text) => text.field), ['brief', 'story', 'script']);
 });
