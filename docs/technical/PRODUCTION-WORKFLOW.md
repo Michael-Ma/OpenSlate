@@ -23,9 +23,11 @@ Preparation may represent pending outputs. Dispatch enforces the prerequisites t
 
 ## Editing and continuation
 
-A human edit fences the older director epoch and holds affected work. Direct storyboard commands save intent without starting media. The next request reads the saved state, proposes relevant prompts/plan changes and clears only the holds it legitimately continues.
+Typed new direction fences the older Director epoch. Direct storyboard edits, narration fitting and note/proposal decisions use alongside requests: they preserve the running Director and hold only their own affected scope until publication. Human field evidence, including an edit back to its former value, still prevents an older turn from overwriting the person's work.
 
-A covering request can continue multiple saved edits atomically. Scope, owner and revision-bound hold proof must match; partial or foreign coverage fails without transferring any hold. Other pauses/reviews remain active. Undo restores creative data, not spent grants or old approval authority.
+Request-owned holds transfer only through explicit valid continuation. Scope, owner and revision-bound proof must match; foreign or partial coverage fails. Terminal/superseded requests retire their unneeded holds, while pending preparations, questions and valid proposals remain protected. Human release names one eligible unfinished request and refuses active Director work. Undo restores compatible creative data/media, not spent grants or old authority.
+
+The scene overview supplies exact targets and review blockers. Durable `POST /scenes/:sceneId/confirm` binds opened frames and the current recipe; its server runner settles narration and publishes video. Stop detaches unsent work, Continue does not resend it, and release of an unknown submission keeps reconciliation active. See [current routes](APPLICATION-API.md).
 
 Completion of a director turn is not creative acceptance. A valid stage proposal does not review keyframes or actual video; saved human decisions and executor evidence remain distinct. Ordinary writing and configured-provider usage require no separate approval. Narration guidance compatibility must not be presented as a user authorization requirement. Requested audio proceeds without another generation-approval step; returned words/recordings are still content evidence rather than automatic acceptance.
 
@@ -33,7 +35,7 @@ Completion of a director turn is not creative acceptance. A valid stage proposal
 
 - [Core stages/readiness](../../packages/core/src/workflow/index.ts) and [video timing](../../packages/core/src/video-timing.ts)
 - [Request/change authority](../../apps/server/src/application/service.ts), [saved-edit continuation](../../apps/server/src/application/pending-edit-continuation.ts)
-- [Generation review](../../apps/server/src/generation-permission.ts), [storyboard commands](../../apps/server/src/storyboard.ts)
-- Tests: core workflow/video-timing suites; server service, continuation, generation-permission and shot-narration scope suites.
+- [Scene generation](../../apps/server/src/scene-generation.ts), [confirmation](../../apps/server/src/scene-confirmations.ts), [storyboard commands](../../apps/server/src/storyboard.ts)
+- Tests: core workflow/video-timing suites; server service, continuation, scene-generation/confirmation, alongside-request and shot-narration scope suites.
 
 See [current studio](../design/STORYBOARD-STUDIO.md) for the human flow. [Spending review](../implementation/SPENDING-REVIEW.md) describes the retained historical accounting implementation rather than current scene controls.

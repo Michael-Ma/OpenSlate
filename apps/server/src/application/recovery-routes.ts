@@ -29,21 +29,17 @@ export function registerRecoveryRoutes(app: FastifyInstance, service: Production
 
 const INSPECTION_ROUTES = new Set([
   RECOVERY_STATUS_PATH, "/api/installation/status", "/api/projects", "/api/providers", "/api/narration/voices", "/api/projects/:projectId",
-  "/api/projects/:projectId/providers", "/api/projects/:projectId/generation", "/api/projects/:projectId/scenes/:sceneId/generation",
+  "/api/projects/:projectId/generation", "/api/projects/:projectId/scenes/:sceneId/generation",
   "/api/projects/:projectId/director", "/api/projects/:projectId/director/proposals",
-  "/api/projects/:projectId/director/setup", "/api/projects/:projectId/director/models", "/api/projects/:projectId/director/tools",
+  "/api/projects/:projectId/director/setup", "/api/projects/:projectId/director/models",
   "/api/projects/:projectId/settings/models", "/api/projects/:projectId/settings/voice", "/api/projects/:projectId/settings/director-review",
   "/api/projects/:projectId/assets", "/api/projects/:projectId/exports", "/api/projects/:projectId/shots/:shotId/takes",
   "/api/projects/:projectId/review", "/api/projects/:projectId/events",
   "/api/projects/:projectId/artifacts/:artifactId/content", "/api/projects/:projectId/images",
   "/api/projects/:projectId/audio-library", "/api/projects/:projectId/narration/personal-voices",
-  "/api/projects/:projectId/narration", "/api/projects/:projectId/narration/playback", "/api/projects/:projectId/narration/audio/:audioId/content",
-  "/api/projects/:projectId/narration/transcription-options", "/api/projects/:projectId/narration/transcription-proposals",
-  "/api/projects/:projectId/narration/transcription-proposals/:proposalId",
-  "/api/projects/:projectId/narration/generated-recordings", "/api/projects/:projectId/narration/audio/:audioId/transcripts",
-  "/api/projects/:projectId/narration/transcripts/:candidateId/words", "/api/projects/:projectId/narration/transcripts/:candidateId/selection",
+  "/api/projects/:projectId/narration/playback", "/api/projects/:projectId/narration/audio/:audioId/content",
   "/api/projects/:projectId/media", "/api/projects/:projectId/media/renders/:jobId",
-  "/api/projects/:projectId/spending", "/api/projects/:projectId/plan-imports",
+  "/api/projects/:projectId/plan-imports",
 ]);
 
 /** Route patterns, not user-supplied URL strings. Public assets/health are handled before this check. */

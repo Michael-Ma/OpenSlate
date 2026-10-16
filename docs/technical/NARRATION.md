@@ -2,14 +2,17 @@
 
 Writing intent, measured audio, transcript evidence and human acceptance are separate records. Text in a shot card does not prove that a usable recording exists or that its words/timing were accepted.
 
-## Human paths
+## Current studio paths
 
-- **No narration:** save explicit `none`; use planned shot frames with no fabricated silent recording.
-- **Script first:** save words, choose stock or eligible personal voice, request speech with the configured model, then listen and accept the recording/range.
-- **Recording first:** upload/import owned audio, listen, save actual words or a truthful description, bind the exact range and accept it.
-- **Transcription:** review recognition of the exact owned recording; a returned transcript is candidate evidence until the human adopts words/timing.
+- **No narration:** save explicit `none`; use planned shot frames with no fabricated recording.
+- **Generated voice:** save words and a stock or eligible personal voice. Scene keyframe generation also makes missing voice lines, so measured length is available at review. A fitting line is accepted by the server; durable scene confirmation can settle any remaining missing voice.
+- **Fit an overlong line:** `POST /api/projects/:projectId/shots/:shotId/narration-fit` with `extend_shot` or `cut_to_shot`. It lengthens within the model's bounds or keeps picture length and cuts audio with a short fade. It uses existing measured audio, makes no provider call and returns an Undo command.
+- **Owned recording:** `POST /api/projects/:projectId/shots/:shotId/narration/recording?expectedHeadVersion=N` accepts raw audio with an idempotency key. It imports, normalizes, measures and attaches in one command, accepting only when it fits. An overlong recording remains attached for narration-fit; Undo restores compatible narration and media.
+- **Owned transcription:** recognition of exact owned audio remains candidate evidence until adopted; saved words alone do not prove alignment.
 
-Ordinary script writing, guidance compatibility and configured-provider usage require no separate approval. An explicit speech/transcription request executes its exact saved input without another generation-approval step. Audio acceptance is a decision about the returned recording and range rather than an API-key, spending or usage gate.
+The next UI reads `GET /narration/shots/:shotId` for the shot and `/narration/playback` for accepted Film placements. It does not coordinate narration-session POSTs in the browser. The durable scene runner owns the speech/attach/accept/video sequence and exact replay identities. Internal narration services retain source, revision, range and provenance checks.
+
+Ordinary writing, guidance compatibility and configured-provider usage need no separate approval. The human scene-video decision binds current frames, recipe and narration. Audio acceptance concerns exact measured content and timing; it is not an API-key or usage gate. Unknown speech outcomes must be reconciled before any replacement.
 
 ## Canonical state
 
@@ -27,7 +30,7 @@ The personal-voice registry stores an already-created provider identity plus exp
 
 ## Source and checks
 
-- [Narration service](../../apps/server/src/narration/service.ts), [canonical synchronization](../../apps/server/src/narration/canonical.ts), [shot routes](../../apps/server/src/narration/shot-audio-routes.ts)
+- [Narration service](../../apps/server/src/narration/service.ts), [canonical synchronization](../../apps/server/src/narration/canonical.ts), [shot reads](../../apps/server/src/narration/shot-audio-routes.ts), [recording command](../../apps/server/src/narration/shot-recording-routes.ts), [fit command](../../apps/server/src/narration-fit.ts), [scene runner](../../apps/server/src/scene-confirmations.ts)
 - [Speech proposals/reviews](../../apps/server/src/narration/narration-speech-service.ts), [owned transcription](../../apps/server/src/narration/owned-transcription-service.ts), [transcript selection](../../apps/server/src/narration/transcript-selection.ts)
 - [Audio placement](../../apps/server/src/narration/audio-placement.ts), [personal voices](../../apps/server/src/narration/personal-voices.ts)
 - Tests cover exact source/revision/range authority, cross-section/foreign-hold rejection, stale speech, canonical rebase, transcript adoption, short overlay timing and actual local FFmpeg mixing.

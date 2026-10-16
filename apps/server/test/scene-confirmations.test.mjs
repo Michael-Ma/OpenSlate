@@ -132,7 +132,7 @@ test('mixed none, uploaded and generated narration confirms to video with exact 
   await addGeneratedAfterFrames(f, 'shot-2');
   await f.call('POST', '/storyboard', { kind: 'narration', id: 'shot-1', field: 'mode', value: 'uploaded', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
   await f.call('POST', '/storyboard', { kind: 'narration', id: 'shot-1', field: 'text', value: 'Uploaded human voice', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
-  const initialized = await f.call('POST', '/narration/shots/shot-1/initialize', { mode: 'uploaded', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  const initialized = await f.setupNarration('/shots/shot-1/initialize', { mode: 'uploaded', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
   const actor = { kind: 'human', principalId: 'local-user', requestId: initialized.session.requestId };
   const path = join(f.root, 'upload.wav'); writeFileSync(path, wave(24000));
   const audio = await f.narration.importAudio(f.project.id, actor, { path, declaredOrigin: 'uploaded', key: randomUUID() });
@@ -285,7 +285,7 @@ for (const revoked of [false, true]) test(`keyframes with a pinned personal voic
     label: 'Personal narrator', provider: 'openai', providerVoiceId: 'voice_b12_pin', ownVoice: true, permitSynthesis: true }).then(f.ok);
   const personal = register.voice;
   await f.call('POST', '/settings/voice', { narratorVoice: 'coral', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
-  await f.call('POST', '/narration/shots/shot-0/initialize', { mode: 'generated', expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
+  await f.setupNarration('/shots/shot-0/initialize', { mode: 'generated', expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
     voice: personal.selector, profileId: 'offline-speech' }).then(f.ok);
   if (revoked) await f.call('POST', `/narration/personal-voices/${personal.id}/revoke`, {}).then(f.ok);
   await f.make(); await f.tick(12);

@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { fixture } from './request-fixture.mjs';
 import { ProductionService } from '../dist/application/service.js';
 import { LEGACY_APP_TEXTS } from '../dist/application/request-source.js';
-import { NarrationService, NarrationCanonicalService } from '../dist/narration/index.js';
-import { createApp } from '../dist/app.js';
+import { projectFixture } from './execution-fixture.mjs';
+import { createShotNarrationSession } from '../dist/narration/narration-scope.js';
 
 test('source separates user conversation, application actions and Director actions without losing requests',t=>{
  const f=fixture(t),user=f.service.beginRequest(f.project.id,'local-user','Stop the current conversation and new generation.');
@@ -51,13 +51,11 @@ test('controls require bounded identity, replay the same receipt and refuse chan
  const conflict=await f.request('POST','/controls',{action:'resume',expectedAuthorityId:null},key);assert.equal(conflict.statusCode,409);assert.equal(conflict.json().error.code,'IDEMPOTENCY_CONFLICT');
  assert.deepEqual(f.service.snapshot(f.project.id).conversation,[]);assert.equal(f.store.list('message',f.project.id)[0].source,'app');
 });
-test('a narration session stores app authority without adding a user message',async t=>{
- const f=fixture(t),narration=new NarrationService(f.service),canonical=new NarrationCanonicalService(narration),
-  token='offline_narration_session_012345678901234',app=createApp({service:f.service,localToken:token,logger:false,
-   narrationRoutes:{production:f.service,narration,canonical,uploadDirectory:'/tmp'}});
- t.after(()=>app.close());
- const r=await app.inject({method:'POST',url:`/api/projects/${f.project.id}/narration/sessions`,headers:{host:'127.0.0.1',authorization:`Bearer ${token}`,'idempotency-key':randomUUID()},payload:{}});
- assert.equal(r.statusCode,200,r.body);assert.equal(f.store.list('message',f.project.id)[0].source,'app');
+test('an internal narration session stores app authority without adding a user message',t=>{
+ const f=fixture(t),shape=projectFixture(f.project.id,1);
+ f.store.saveProject({...f.project,...shape,capabilityLockId:f.project.capabilityLockId},f.project.headVersion);
+ createShotNarrationSession(f.service,f.project.id,'shot-0','server-confirm-session');
+ assert.equal(f.store.list('message',f.project.id)[0].source,'app');
  assert.deepEqual(f.service.snapshot(f.project.id).conversation,[]);
 });
 

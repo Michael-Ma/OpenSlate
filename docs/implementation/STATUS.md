@@ -1,6 +1,50 @@
 # Current implementation status
 
-Reconciled October 16, 2026 (B16 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 16, 2026 (B14 retirement worktree, including the merged B1–B13/B15/B16 source). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## Current branch delivery — P0 to P6
+
+`apps/web/src/main.tsx` boots `apps/web/src/next` directly. The classic web tree is deleted; there is no classic-view fallback or `?ui=next` gate. The current UI follows the Last Ferry design with plain React controls, dark CSS tokens, local Inter and message-ID English/Chinese catalogs. Earlier Radix Day/Night and browser-saga descriptions below are dated records, not the current UI contract.
+
+| Phase | Delivered source and cards | Boundary |
+|---|---|---|
+| P0 — cleanup and safety net | Unreferenced classic modules/spending UI removed, disposable browser harness and port-3101 development proxy; B1 retired allowance/budget/spending HTTP routes | Browser launching remains a separate gate; card sandboxes must leave it to the lead |
+| P1 — authoritative state | B1 request source, paid-command keys and human-pressed audio requests; B2 generation overview, quotes and content-bound frame views; B3 scoped edits/media preservation/duration floor; B4 Stop/Continue and release of unknown submissions | Unknown outcomes keep reconciliation and possible liability; Continue does not resend detached work |
+| P2 — next workspace | `next` store/reducer/adapters/selectors, explicit @ composer, per-control availability, localized keyframes/inspector/scene panel and recovery states; B2–B4 supply shared server state | Node/fixture checks do not establish rendered usability or live-provider quality |
+| P3 — server-owned media decisions | B7 keyframes with voice, durable scene confirm and free narration-fit; B8 retained current takes, eligible take selection and media-restoring Undo | Exact frames, timing, provenance and unknown-outcome rules remain; shared unsupported conditioners are unselectable |
+| P4 — Director collaboration | B5 notes/tool contract 5.0.0/V6; B9 held proposals, app-computed Now/After and alongside human edits; B10 bounded generated-frame projection, optional automatic read-only reviews, honest activity/answers and scripted Last Ferry seed | Fake/SVG evidence makes no visual claim; no new live-model acceptance is implied |
+| P5 — remaining views | B6 storyboard-order exports/demo watermark and hold-free Film edits; B11 scene/project management, assets/music/voice; B12 installation diagnostic, personal-voice details, taken-off state, stopped local export and atomic shot edits; B13 request-hold release, quarantine reads, recording import and voice/cross-scene parity | Installer packaging, new voice enrollment and advanced editorial tools remain pending |
+| P6 — retirement and integration | Next-only Plan/Keyframes/Assets/Film/Start/Settings; B14 caller-audited HTTP retirement and current docs; B15 backend integrity fixes and B16 source/layout/recovery fixes | B14's exact checks belong in its report; B16's rendered browser replay is still reserved for the lead |
+
+### Current UI areas
+
+| Area | Current implementation | Server source/command |
+|---|---|---|
+| Start | List/create/rename/archive films, demo path and setup guidance | Project library and provider catalog |
+| Plan | Brief/story, scene titles/order, shot editing, script-import review and Undo | `/storyboard`, `/plan-imports`; B3/B8/B11/B12 |
+| Keyframes | Current preview, motion/shot fields, scene capsules, exact Opened count, quotes/blockers and scene video decision | `/generation`, `/frame-views`, scene `/generate` and `/confirm`; B2/B7 |
+| Narration/takes | Script/voice, measured recording, free fit choices and eligible earlier frames | Shot `/narration/recording`, `/narration-fit`, `/takes`; B7/B8/B13 |
+| Director | Explicit @ scope, runtime/timestamps/questions, lettered notes and held Now/After proposals | `/messages`, snapshot notes, `/director/proposals`, note resolution; B1/B5/B9/B10 |
+| Assets | Owned images/clips/audio/exports, source and scope filters, imports | `/assets`, media/image/audio-library routes; B11 |
+| Film | Storyboard-order picture/narration/music, shot timing/order, music placement/gain/mute, export readiness/history/download | `/narration/playback`, `/storyboard`, `/exports`; B6/B12 |
+| Settings | Media, Director/review, voice, computer and language sections | `/settings/*`, `/director/setup`, catalog and voice reads; B10–B13 |
+| Connection/recovery | Offline/expiry/disconnect, preserved composer/place, stopped/taken-off states and inspectable restore quarantine | Session, recovery, `/controls`, attempt/request release; B4/B13/B16 |
+
+`GET /api/installation/status` remains a film-independent authenticated diagnostic for local tool versions and provider configuration. The route audit found no direct next-UI caller; its presence alone is not a claim that the Settings page uses it.
+
+B14 keeps `GET /api/projects/:projectId/review` strictly read-only through `engine.inspectReview` (`id: null`, no persisted review snapshot). It removes standalone approvals, generation-permission and other caller-audited classic adapters. Internal review/approval and narration services remain for the durable confirmation runner and historical evidence. `/media/renders` stays for old plans; the current Film export entry uses `/exports`. The complete route/caller matrix, exact retired narration paths and final counts belong in the [B14 report](../ai/uiux-plan/codex/reports/B14-retire.md).
+
+`pnpm studio:fixture` runs the disposable fake First Light studio on port 3101. Add `--film last-ferry` for the three-scene/eight-shot Last Ferry server seed, with measured synthetic narration, scripted notes and a held proposal. The browser-only `?fixture=last-ferry` sample uses a simulated transport instead. `pnpm check:browser` builds and checks rendered next-UI scenarios in system Chrome against disposable state; it has not been run by B14 under the card rules. No fixture result is live-provider acceptance.
+
+## October 16 P6 retirement — B14 verified
+
+The route audit covers **119 baseline HTTP method/path pairs**: **37 classic adapters removed**, **82 retained**, none added. Historical `GET /review` uses read-only inspection and returns `id: null`; scene confirmation retains persisted engine review/approval. Standalone approval/permission, old provider/tool reads and browser narration saga adapters are retired. Shared narration/canonical services, distinct direct audio commands and old-plan `/media/renders` remain. README, contributor guidance and technical/design references now describe the next-only studio, fixtures and P0–P6 delivery.
+
+Pinned Node **24.15.0**, pnpm **10.33.0** and FFmpeg/ffprobe **8.1.1** passed setup/preflight without a download. Final `pnpm build` passed; all **196 tests across the 18 touched test files passed**, with zero failures/skips/todo. Final `pnpm test` passed **2,968 tests, zero failures/cancelled/todo and one optional native-probe skip (2,969 total)**. All five package typechecks and `git diff --check` passed. Independent source, test-migration, documentation and route-inventory reviews found no outstanding must-fix issue.
+
+No web source, browser contract, DDL, frozen catalog or skill package changed. Validation used disposable state, fake transports, synthetic media and loopback tests, with no live model/provider call, external-network request, personal credential/production-state access, production restart or port 3001 listener. Browser replay remains with the lead under the card rules. No commits were made. [Complete route/caller inventory, files, test changes, decisions and proposed commits](../ai/uiux-plan/codex/reports/B14-retire.md).
+
+The following dated sections preserve their actual commands, counts, limitations and review state. Their past-tense “pending” statements are historical; the delivery tables above describe current source. Older pass counts never verify later edits automatically.
 
 ## October 16 merged-branch verification — B16 source checks passed twice; browser replay reserved for lead
 
@@ -94,16 +138,16 @@ Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed preflight. Fin
 
 | Area | Implemented scope | Remaining boundary |
 |---|---|---|
-| Director | Native/fake runtime, saved context, questions, scoped changes, locked skills/tools and Stop/recovery | Complete native conversation-to-film acceptance |
-| Studio UI | English/Simplified Chinese, Day/Night Frame workbench on Radix, Inter/PingFang, project references, selected preview/inspector, Scene/Shot shelves, resizable conversation and concise plan/recovery widgets | Subjective usability acceptance and further refinements against actual production work |
-| Storyboard | Editable treatment/scenes/shots, import proposal/confirmation, reorder/delete/undo and stable IDs | More advanced editing and subjective usability acceptance |
-| Planning/execution | Restricted declarative compiler, scoped reuse, exact reviews, durable intents/attempts and unknown-outcome recovery | Longer real production and provider-specific acceptance |
-| Silence/audio | Explicit no narration, compact script/recording review, short accepted within-shot voiceover and owned library | Real speech/transcription acceptance and richer mixing |
-| Timeline/export | Synchronized preview, shot ordering/plan timing, music placement/gain/mute and local FFmpeg assembly | Advanced trimming, transitions, waveforms and streaming |
+| Director | Native/fake runtime, structured questions/notes/proposals, bounded frame evidence, alongside edits, locked tools and recovery | Complete native conversation-to-film acceptance |
+| Studio UI | Next-only dark Last Ferry workspace, English/Chinese, explicit scope, per-control state, six views and responsive Director drawer | Lead's rendered-browser replay and subjective usability acceptance |
+| Storyboard | Brief/story/scenes/shots, reviewed import, title/delete/reorder, cross-scene moves, rename/archive and media-restoring Undo | Project duplication and advanced editing |
+| Execution | Exact scene review, durable confirmation, scoped reuse, original paid identity, Stop/release and unknown-outcome recovery | Longer real production and provider-specific acceptance |
+| Audio/takes | Generated voice with keyframes, free fit, measured recording, eligible prior-frame selection and owned library | Real speech/transcription acceptance and richer mixing |
+| Film/export | Synchronized preview, storyboard order/plan timing/music, readiness/history and local FFmpeg export, Demo stamp | Source trimming, transitions, waveforms and streaming |
 | Personal voice | Consent/revocation registry and existing eligible OpenAI custom-ID dispatch | **Creating a new clone from a recording is not implemented** |
-| Local operation | Source launcher, pairing, doctor/private config, migrations and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
+| Local operation | Source launcher, pairing, diagnostics, migrations and media-inclusive same-root recovery | Installer/bundled runtime, more OS/clean-machine checks and relocation |
 
-Requested workflow items 1–5 are implemented. Item 6 is partial because provider voice-ID synthesis does not create a new voice clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 code review](V1-COMPLETION-REVIEW.md) records fixes and scope.
+Requested workflow items 1–5 are implemented. Item 6 remains partial because existing provider voice-ID synthesis does not create a new clone. Item 7 has local setup tooling; broader packaging remains separate. The [October 1 review](V1-COMPLETION-REVIEW.md) retains its original scope.
 
 ## October 9 compatibility fix and local recovery — verified
 
@@ -197,7 +241,7 @@ The October 3 integrated gate passed after the response-order and native invento
 - **September 23 real media:** one Codex keyframe, one Viggle H3 job, exact-job download recovery and a six-second 1280×720 export survived reopen without duplicate dispatch. A scripted plan was used; audio was silent.
 - Synthetic six-minute workflow/media checks cover structure, timing, reuse and recovery. They do not prove six-minute real-provider quality.
 
-The October 7 gate verifies the current Day/Night source; the October 5 gate records the preceding Light workspace; the October 3 gate retains its original UI/runtime scope. Older totals do not verify later edits automatically. [Evidence index](VALIDATION-EVIDENCE.md) preserves exact dated results and limitations.
+The October 7 gate verified the then-current Day/Night source; the October 5 gate records the preceding Light workspace; the October 3 gate retains its original UI/runtime scope. Older totals do not verify later edits automatically. [Evidence index](VALIDATION-EVIDENCE.md) preserves exact dated results and limitations.
 
 ## Next acceptance
 

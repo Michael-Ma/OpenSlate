@@ -26,7 +26,7 @@ function fixture(t){
   return{root,store,provider,engine,service,director,app,req,drain};
 }
 
-test('browser API drives a persistent offline demo, exact review, and a scoped replacement',async t=>{
+test('historical-plan diagnostics and service review preserve a persistent offline demo and scoped replacement',async t=>{
   const f=fixture(t);
   const project=(await f.req('POST','/api/projects',{name:'My boots demo'})).json(),path=`/api/projects/${project.id}`;
   assert.equal((await f.req('GET','/api/projects')).json().projects[0].id,project.id);
@@ -38,10 +38,12 @@ test('browser API drives a persistent offline demo, exact review, and a scoped r
   const review=(await f.req('GET',`${path}/review`)).json();
   assert.ok(review.members.every(member=>member.ready&&!member.approved));
   assert.ok(review.members.every(member=>member.motionPrompt&&member.durationFrames===180));
-  assert.equal((await f.req('GET',`${path}/review`)).json().id,review.id,'unchanged review is cached');
+  assert.equal(review.id,null,'inspection cannot mint an approval identity');
+  assert.deepEqual((await f.req('GET',`${path}/review`)).json(),review);
   const frame=review.members[0].keyframe,bytes=await f.req('GET',`${path}/artifacts/${frame.artifactId}/content`);
   assert.equal(bytes.statusCode,200,bytes.body);assert.equal(createHash('sha256').update(bytes.rawPayload).digest('hex'),frame.sha256);
-  const approval=await f.req('POST',`${path}/approvals`,{snapshotId:review.id,videoNodeIds:review.members.map(member=>member.videoNodeId)},'review');assert.equal(approval.statusCode,200,approval.body);
+  const snapshot=f.engine.reviewSnapshot(project.id), reviewer=f.service.beginRequest(project.id,'local-user','Review exact historical plan frames',{editing:false});
+  f.service.approve(project.id,reviewer,snapshot.id,review.members.map(member=>member.videoNodeId));
   await f.drain();assert.equal(f.provider.acceptedCount(),4);
   const current=f.store.getProject(project.id),before=f.engine.outputs(project.id),secondId=current.shots[1].id;
   const secondNodes=f.store.get('plan',current.activePlanId).compiled.nodes.filter(node=>node.shotId===secondId).map(node=>node.id);
@@ -54,7 +56,8 @@ test('browser API drives a persistent offline demo, exact review, and a scoped r
   const refreshed=(await f.req('GET',`${path}/review`)).json();
   assert.ok(!refreshed.members.find(member=>member.shotId===current.shots[0].id).approved);
   assert.ok(refreshed.members.find(member=>member.shotId===secondId).approved);
-  const stale=await f.req('POST',`${path}/approvals`,{snapshotId:review.id,videoNodeIds:[review.members[0].videoNodeId]},'stale');assert.equal(stale.statusCode,409);
+  const staleReviewer=f.service.beginRequest(project.id,'local-user','Review earlier historical plan frames',{editing:false});
+  assert.throws(()=>f.service.approve(project.id,staleReviewer,snapshot.id,[review.members[0].videoNodeId]),{code:'REVIEW_SPEC_MISMATCH'});
   const response=(await f.req('GET',path)).json();assert.equal(response.conversation.filter(item=>item.role==='assistant').length,2);
   assert.ok(response.plan.canonicalSource.includes('humanReview'));
   assert.equal(response.previousPreviews.length,1,'old completed render remains available while its logical binding is replaced');

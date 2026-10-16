@@ -53,7 +53,7 @@ test("ordinary status has no recovery authority; restored inspection stays authe
   f.quarantine(); const before = rows(f.store), files = readdirSync(f.uploads.rootDir);
   denied(await f.request("GET", statusPath, undefined, "missing", { authorization: "" }), "AUTH_REQUIRED", 403);
   denied(await f.request("GET", statusPath, undefined, "origin", { origin: "https://wrong.invalid" }), "ORIGIN_DENIED", 403);
-  for (const path of [statusPath, "/api/projects", "/api/providers", f.path, `${f.path}/providers`, `${f.path}/director`, `${f.path}/review`, `${f.path}/images`, `${f.path}/media`, `${f.path}/narration`]) {
+  for (const path of [statusPath, "/api/projects", "/api/providers", f.path, `${f.path}/director`, `${f.path}/review`, `${f.path}/images`, `${f.path}/media`]) {
     const response = await f.request("GET", path); assert.equal(response.statusCode, 200, `${path}: ${response.body}`);
   }
   const state = (await f.request("GET", statusPath)).json(); assert.equal(state.state, "quarantined"); assert.equal(state.receipt.backupCreatedAt, "2026-09-11T00:00:00.000Z");
@@ -67,7 +67,7 @@ test("quarantine permits all next studio inspection reads while keeping exact ro
   f.store.saveProject({ ...f.project, scenes: storyboard.scenes, shots: storyboard.shots, revisionId: randomUUID() }, f.project.headVersion);
   f.quarantine(); const before = rows(f.store), files = readdirSync(f.uploads.rootDir);
   for (const path of ["/api/installation/status", "/api/projects", f.path, `${f.path}/generation`, `${f.path}/director`, `${f.path}/director/proposals`,
-    `${f.path}/director/setup`, `${f.path}/director/models`, `${f.path}/director/tools`,
+    `${f.path}/director/setup`, `${f.path}/director/models`,
     `${f.path}/assets?offset=0`, `${f.path}/exports`, `${f.path}/media`, `${f.path}/settings/models`, `${f.path}/settings/voice`,
     `${f.path}/settings/director-review`, `${f.path}/shots/${storyboard.shots[0].id}/takes`, `${f.path}/scenes/${storyboard.scenes[0].id}/generation`,
     `${f.path}/audio-library?role=music`, `${f.path}/narration/personal-voices`, `${f.path}/narration/playback`, "/api/narration/voices", `/api/narration/voices?projectId=${f.project.id}`]) {
@@ -124,11 +124,10 @@ test("quarantine blocks every mutation family and future routes before body cons
   f.quarantine(); const before = rows(f.store);
   for (const [url, body] of [["/api/projects", { name: "No new project" }], [`${f.path}/messages`, { text: "New request" }], [`${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
     [`${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
-    [`${f.path}/approvals`, { snapshotId: "old", videoNodeIds: ["video"] }], [`${f.path}/director/setup`, { mode: "native" }],
-    [`${f.path}/narration/sessions`, {}], [`${f.path}/media/renders`, { expectedHeadVersion: 0, renderNodeId: "render" }],
-    [`${f.path}/spending/budget`, { expectedRevision: 0, expectedCapMicros: "100000", capMicros: "200000" }], ["/api/future/write", {}]]) denied(await f.request("POST", url, body));
+    [`${f.path}/scenes/scene-0/confirm`, { confirmationDigest: "a".repeat(64), reviewedFrames: [] }], [`${f.path}/director/setup`, { mode: "native" }], [`${f.path}/media/renders`, { expectedHeadVersion: 0, renderNodeId: "render" }],
+    ["/api/future/write", {}]]) denied(await f.request("POST", url, body));
   denied(await f.request("GET", "/api/future/reconcile"));
-  for (const suffix of ["images/uploads?expectedHeadVersion=0", "media/uploads?expectedHeadVersion=0", "narration/audio?sessionId=missing&declaredOrigin=uploaded", "shots/missing/narration/recording?expectedHeadVersion=0"])
+  for (const suffix of ["images/uploads?expectedHeadVersion=0", "media/uploads?expectedHeadVersion=0", "shots/missing/narration/recording?expectedHeadVersion=0"])
     denied(await f.request("POST", `${f.path}/${suffix}`, Buffer.from("not consumed"), randomUUID(), { "content-type": "application/octet-stream" }));
   assert.equal(futureCalls, 0); assert.deepEqual(rows(f.store), before); assert.deepEqual(readdirSync(f.uploads.rootDir), []);
   assert.equal(f.provider.acceptedCount(), 0);
@@ -152,13 +151,15 @@ test("release requires exact human review, rejects forged fields and replays one
   assert.equal(fresh.statusCode, 200, fresh.body); assert.equal(f.store.get("execution_control", f.project.id).paused, true);
 });
 
-test("restored keyframes stay visible without creating approval snapshots, and release requires a fresh snapshot", async t => {
+test("review stays read-only before, during and after recovery release; engine can create a fresh approval snapshot", async t => {
   const cleanup = [], f = setup({ after: fn => cleanup.push(fn) }, { count: 1 });
   const service = new ProductionService(f.store, f.engine), token = randomBytes(32).toString("base64url"), app = createApp({ service, localToken: token });
   t.after(async () => { await app.close(); cleanup.forEach(fn => fn()); });
   const request = url => app.inject({ url, headers: { host: "127.0.0.1", authorization: `Bearer ${token}` } });
   await f.engine.runReady(); await f.engine.reconcile();
-  const path = `/api/projects/${f.projectId}`, prior = (await request(`${path}/review`)).json(); assert.ok(prior.id); assert.equal(prior.members[0].ready, true);
+  const path = `/api/projects/${f.projectId}`, beforeRead = rows(f.store), prior = (await request(`${path}/review`)).json();
+  assert.equal(prior.id, null); assert.equal(prior.members[0].ready, true); assert.deepEqual(rows(f.store), beforeRead);
+  const oldSnapshot = f.engine.reviewSnapshot(f.projectId);
   installRecoveryQuarantine(f.store, origin(f.directory)); const before = rows(f.store);
   const inspected = await request(`${path}/review`); assert.equal(inspected.statusCode, 200, inspected.body);
   assert.equal(inspected.json().id, null); assert.deepEqual(inspected.json().members, prior.members);
@@ -168,7 +169,10 @@ test("restored keyframes stay visible without creating approval snapshots, and r
   const state = new InstallationRecoveryGuard(f.store).snapshot();
   const released = await app.inject({ method: "POST", url: releasePath, payload: exact(state), headers: { host: "127.0.0.1", authorization: `Bearer ${token}`, "idempotency-key": "reviewed" } });
   assert.equal(released.statusCode, 200, released.body);
-  const current = (await request(`${path}/review`)).json(); assert.ok(current.id); assert.notEqual(current.id, prior.id);
+  const afterRelease = rows(f.store), current = (await request(`${path}/review`)).json();
+  assert.equal(current.id, null); assert.deepEqual(current.members, prior.members); assert.deepEqual(rows(f.store), afterRelease);
+  const freshSnapshot = f.engine.reviewSnapshot(f.projectId);
+  assert.notEqual(freshSnapshot.id, oldSnapshot.id);
 });
 
 
