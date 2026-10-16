@@ -122,6 +122,7 @@ async function pricedActionsFit(page, width) {
         ],
         scroll: [button.scrollWidth, button.clientWidth, button.scrollHeight, button.clientHeight],
         hit: hit === button || button.contains(hit),
+        card: button.closest(".card")?.getBoundingClientRect().width ?? null,
       };
     });
     const where = `${layout.callout ? "note link" : "inspector action"} at ${width}`;
@@ -134,9 +135,10 @@ async function pricedActionsFit(page, width) {
     expect(layout.scroll[0] <= layout.scroll[1] + 1 && layout.scroll[2] <= layout.scroll[3] + 1, `A priced ${where} hides overflowing text: ${detail}`);
     expect(layout.blockers.every((blocker) => !overlaps(layout.rect, blocker.rect)), `A priced ${where} overlaps a badge or caption: ${detail}`);
     expect(layout.hit, `A priced ${where} is not clickable: ${detail}`);
-    // A card's link is one line where the card has room (two lines would cover the picture it is about); on the
-    // two-card rows below 1100 the price may take a second line, never more.
-    const lineLimit = typeof width === "number" && width >= 1100 ? 24 : 42;
+    // A card's link is one line where the card has room (two lines would cover the picture it is about); on a narrow
+    // card (the two-card rows below 1100, the three-card rows just above it, a phone) the price may take a second
+    // line, never more.
+    const lineLimit = typeof width === "number" && width >= 1100 && layout.card > 160 ? 24 : 42;
     expect(!layout.callout || layout.rect.bottom - layout.rect.top <= lineLimit, `A note's link wraps onto the picture at ${width}: ${detail}`);
   }
 }
@@ -144,10 +146,17 @@ async function pricedActionsFit(page, width) {
 /**
  * Every shot card holds its footer: one title line, the seconds with their unit, the status pill and the motion
  * inside the card, and the motion never squeezed below a word. The prompt over the picture shows whole lines only
- * (no slice of a clamped third line), and the badge and the note chips sit side by side, tops aligned.
+ * (no slice of a clamped third line), and the badge and the note chips sit side by side, tops aligned. A chip shows
+ * whole words, as many as fit, and never a lone "…".
  */
 async function cardsFit(page, where) {
-  const problems = await page.evaluate(() => {
+  // The chips refit a frame after their room resizes, so a new window size gets a moment to settle.
+  const problems = await until(page, () => cardProblems(page), (list) => !list.length, `Shot cards break at ${where}`, 2000).catch((error) => [error.message]);
+  expect(!problems.length, problems.join("; "));
+}
+
+function cardProblems(page) {
+  return page.evaluate(() => {
     const out = [];
     const rect = (element) => element.getBoundingClientRect();
     for (const card of document.querySelectorAll(".kf-row .card[data-card]")) {
@@ -180,17 +189,28 @@ async function cardsFit(page, where) {
         const a = rect(badge), b = rect(chip);
         if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) out.push(`${id}: a note chip overlaps the badge`);
         if (Math.abs(a.top - b.top) > 1.5 && chip === card.querySelector(".callout .anno")) out.push(`${id}: the chip and the badge are not aligned (${a.top} vs ${b.top})`);
+        // A chip shows whole words: all of them, the first ones up to a word with "…" and the last word whole, or
+        // the last word alone. Never a lone "…", a word cut through, or nothing where the last word would fit.
+        const fit = chip.dataset.fit;
+        const words = chip.querySelector(".anno-words"), head = chip.querySelector(".anno-head"), tail = chip.querySelector(".anno-tail");
+        if (!fit) { out.push(`${id}: a chip was never fitted`); continue; }
+        if (fit === "none") out.push(`${id}: a chip shows none of its words (${Math.round(rect(chip.closest(".callout")).width)}px of room)`);
+        if (tail && fit !== "none" && rect(tail).right > rect(words).right + 0.5) out.push(`${id}: the chip's last word "${tail.textContent}" is cut`);
+        if (fit === "whole" && head.scrollWidth > head.clientWidth + 1) out.push(`${id}: a whole chip cuts "${head.textContent}"`);
+        if (fit === "cut" && rect(head).width < 24) out.push(`${id}: a cut chip shows a lone "…"`);
+        // A cut head is as wide as its words up to the cut and the "…"; squeezed narrower, it would end mid-word.
+        if (fit === "cut" && rect(head).width < parseFloat(head.style.maxWidth) - 0.1) out.push(`${id}: a cut chip ends mid-word ("${head.textContent}" in ${rect(head).width}px)`);
       }
     }
     return out;
   });
-  expect(!problems.length, `Shot cards break at ${where}: ${problems.join("; ")}`);
 }
 
 /**
  * The banner's Now / After strip fits its row: every segment inside it, a label that does not fit ends with "…"
- * (never cut through a glyph), and the title keeps each number with its unit on one line. The strip refits a frame
- * after its row resizes, so a new window size gets a moment to settle.
+ * (never cut through a glyph), the change and the same shot in the Now row keep their whole labels, and the title
+ * keeps each number with its unit on one line. The strip refits a frame after its row resizes, so a new window size
+ * gets a moment to settle.
  */
 async function stripFits(page, where) {
   const problems = await until(page, () => stripProblems(page), (list) => !list.length, `The banner's strip breaks at ${where}`, 2000).catch((error) => [error.message]);
@@ -206,11 +226,34 @@ function stripProblems(page) {
         const r = seg.getBoundingClientRect();
         if (r.right > row.right + 0.5) out.push(`"${seg.textContent}" runs past the strip (${Math.round(r.right)} > ${Math.round(row.right)})`);
         if (seg.scrollWidth > seg.clientWidth + 1 && getComputedStyle(seg).textOverflow !== "ellipsis") out.push(`"${seg.textContent}" is cut without an ellipsis`);
+        // A segment showing its whole label shows all of it ("Scene 3 · 2 s la…" read as whole).
+        if (!seg.dataset.fit && seg.scrollWidth > seg.clientWidth) out.push(`"${seg.textContent}" ends in "…"`);
       }
+    }
+    // The change keeps its whole label, and so does the same shot in the Now row: "2.3 · 8 s" and "2.3 · 6 s".
+    for (const strip of document.querySelectorAll(".banner .tl")) {
+      const rows = [...strip.querySelectorAll(":scope > .segs")].map((segs) => [...segs.querySelectorAll(":scope > .seg:not(.dash)")]);
+      rows.forEach((segs) => segs.forEach((seg, index) => {
+        if (!seg.classList.contains("hot")) return;
+        for (const other of rows.map((list) => list[index]).filter(Boolean)) if (other.dataset.fit) out.push(`"${other.title}" shows only "${other.firstChild.textContent}" although it is the change`);
+      }));
     }
     for (const keep of document.querySelectorAll(".banner h2 .keep, .banner .sub .keep")) if (keep.getClientRects().length > 1) out.push(`"${keep.textContent}" breaks across lines`);
     return out;
   });
+}
+
+/**
+ * On a phone the scene pills scroll inside their row: the selected one is always shown whole, when the view opens and
+ * after its words or the others' change (a status, the language), and only the row has scrolled for it, never the page.
+ */
+async function selectedPillWhole(page, where) {
+  const pill = await until(page, () => page.evaluate(() => {
+    const row = document.querySelector(".scene-pills").getBoundingClientRect();
+    const selected = document.querySelector(".scene-pills [aria-pressed='true']").getBoundingClientRect();
+    return { row: [row.left, row.right], selected: [selected.left, selected.right], page: document.scrollingElement.scrollLeft };
+  }), (value) => value.selected[0] >= value.row[0] - 0.5 && value.selected[1] <= value.row[1] + 0.5, `The selected scene pill is cut by its row ${where}`, 2000);
+  expect(pill.page === 0, `Revealing the selected pill scrolled the page ${where}: ${JSON.stringify(pill)}`);
 }
 
 /**
@@ -454,8 +497,18 @@ export const scenarios = [
       });
       expect(done.below <= 16, `The done banner leaves an empty band: ${JSON.stringify(done)}`);
       // 2.2's note link is off while its clip is made: a solid backing (the picture never shows through) and a reason.
-      const link = await page.locator("[data-card='shot-2-2'] [data-act='note-regenerate']").evaluate((element) => ({ disabled: element.disabled, title: element.title, background: getComputedStyle(element).backgroundColor, opacity: getComputedStyle(element).opacity }));
+      const link = await page.locator("[data-card='shot-2-2'] [data-act='note-regenerate']").evaluate((element) => ({ disabled: element.disabled, title: element.title, background: getComputedStyle(element).backgroundColor, opacity: getComputedStyle(element).opacity, underline: getComputedStyle(element).textDecorationLine }));
       expect(link.disabled && link.title === "Wait for 2.2's clip to finish." && /^rgb\(/.test(link.background) && link.opacity === "1", `The held note link is not legible or does not say why: ${JSON.stringify(link)}`);
+      // Off, it is not drawn as a link (no underline): only a link that works is underlined.
+      expect(!/underline/.test(link.underline), `The held note link is still underlined: ${JSON.stringify(link)}`);
+      // The settled note's chip keeps its letter, its check and its point however narrow the card.
+      for (const width of [1440, 1100, 900]) {
+        await page.setViewportSize({ width, height: 900 });
+        await cardsFit(page, `running at ${width}`);
+        const settled = await page.locator("[data-card='shot-2-3'] .anno[data-note='note-b']").evaluate((chip) => ({ fit: chip.dataset.fit, check: !!chip.querySelector(".anno-check"), words: chip.querySelector(".anno-words")?.innerText.replace(/\s+/g, " ").trim() }));
+        expect(settled.check && settled.fit !== "none" && /8\s?s$/.test(settled.words), `The settled chip says nothing at ${width}: ${JSON.stringify(settled)}`);
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
       await shot(page, "next-shell-running-1440");
       const stop = page.locator(".topbar [data-act='stop-film']");
       expect((await stop.innerText()).trim() === "Stop", `Stop reads "${await stop.innerText()}"`);
@@ -542,6 +595,7 @@ export const scenarios = [
     viewport: { width: 390, height: 844 },
     async run({ page }) {
       await ready(page);
+      await selectedPillWhole(page, "when the view opens");
       await page.click("[data-act='scene'][data-scene='scene-3']");
       await page.click("[data-act='make-keyframes']");
       const stop = page.locator(".topbar [data-act='stop-film']");
@@ -559,6 +613,7 @@ export const scenarios = [
       await page.locator(".topbar [data-act='language']").click();
       await page.waitForFunction(() => document.querySelector(".topbar [data-act='stop-film']")?.textContent === "停止");
       expect(await titleFits(), "Stop squeezes the film's title in Chinese");
+      await selectedPillWhole(page, "in Chinese");
       await noSidewaysScroll(page, "running in Chinese");
       await shot(page, "next-shell-running-390-zh");
       await page.locator(".topbar [data-act='language']").click();
@@ -568,12 +623,7 @@ export const scenarios = [
       await noSidewaysScroll(page, "stopped");
       await page.evaluate(() => window.scrollTo(0, 0));
       // The scene pills scroll inside their row; the selected one is shown whole.
-      const pill = await page.evaluate(() => {
-        const row = document.querySelector(".scene-pills").getBoundingClientRect();
-        const selected = document.querySelector(".scene-pills [aria-pressed='true']").getBoundingClientRect();
-        return { row: [row.left, row.right], selected: [selected.left, selected.right] };
-      });
-      expect(pill.selected[0] >= pill.row[0] - 0.5 && pill.selected[1] <= pill.row[1] + 0.5, `The selected scene pill is cut by its row: ${JSON.stringify(pill)}`);
+      await selectedPillWhole(page, "stopped");
       await shot(page, "next-shell-stopped-390");
       // Chinese strings are the longest here; the strip wraps and nothing scrolls sideways.
       await page.locator(".topbar [data-act='language']").click();
@@ -590,7 +640,7 @@ export const scenarios = [
     viewport: { width: 1366, height: 900 },
     async run({ page }) {
       await ready(page);
-      for (const width of [1440, 1366, 1280, 1024, 900]) {
+      for (const width of [1440, 1366, 1280, 1100, 1024, 900]) {
         await page.setViewportSize({ width, height: 900 });
         const column = width < 1280 ? 320 : 392;
         for (const view of [...VIEWS, "settings", "start"]) {

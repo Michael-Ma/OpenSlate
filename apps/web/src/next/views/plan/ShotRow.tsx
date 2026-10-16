@@ -1,10 +1,11 @@
 import type { StudioArtifactRef } from "@openslate/core/public";
-import { useId, useState, type DragEvent, type HTMLAttributes } from "react";
+import { useId, useRef, useState, type DragEvent, type HTMLAttributes } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { Picture } from "../../keyframes/parts.tsx";
 import { actionLine, type NoteChip, type ShotRowView, type StatusPillView } from "../../model/plan.ts";
 import type { Msg } from "../../model/types.ts";
 import { Menu, type MenuItem } from "./Menu.tsx";
+import { useShrinkWrap } from "./useShrinkWrap.ts";
 
 export const rowId = (shotId: string) => `plan-row-${shotId}`;
 
@@ -39,20 +40,23 @@ export function Pill({ pill }: { pill: StatusPillView }) {
 
 /**
  * The Director's lettered notes, the same amber chips as on the Keyframes cards; settled ones turn grey. A row has
- * room, so a chip shows the note's first clause whole, wrapping if it must; the full note is its tooltip.
+ * room, so a chip shows the note's first clause whole, wrapping if it must, and ends where its words do; the full note
+ * is its tooltip.
  */
 export function NoteChips({ notes }: { notes: NoteChip[] }) {
+  return <>{notes.map((note) => <OneNoteChip key={note.noteId} note={note} />)}</>;
+}
+
+function OneNoteChip({ note }: { note: NoteChip }) {
   const { t } = useI18n();
+  const words = useRef<HTMLSpanElement>(null);
+  useShrinkWrap(words, note.text);
   return (
-    <>
-      {notes.map((note) => (
-        <span key={note.noteId} className={`anno note-chip${note.done ? " done" : ""}`} title={note.full} data-note={note.noteId}>
-          <span className="letter" aria-hidden="true">{note.letter}</span>
-          <span className="sr">{t("plan.note.label", { letter: note.letter })}</span>
-          <span className="txt">{note.text}</span>
-        </span>
-      ))}
-    </>
+    <span className={`anno note-chip${note.done ? " done" : ""}`} title={note.full} data-note={note.noteId}>
+      <span className="letter" aria-hidden="true">{note.letter}</span>
+      <span className="sr">{t("plan.note.label", { letter: note.letter })}</span>
+      <span className="txt" ref={words}>{note.text}</span>
+    </span>
   );
 }
 

@@ -37,7 +37,8 @@ function Segments({ segments, fit }: { segments: TimelineSegment[]; fit: StripFi
 
 /**
  * The Now / After strip. It is measured on the page and fitted to its row: 15 px a second where there is room,
- * a smaller shared scale where there is not, so no label is ever cut through a glyph (keyframes-layout.ts).
+ * a smaller shared scale where there is not, so no label is ever cut through a glyph; the changed shot and its Now
+ * counterpart keep their whole labels first (keyframes-layout.ts).
  */
 function Strip({ now, after }: { now: TimelineSegment[]; after: TimelineSegment[] | null }) {
   const { t, tm } = useI18n();
@@ -58,7 +59,7 @@ function Strip({ now, after }: { now: TimelineSegment[]; after: TimelineSegment[
       const widthOf = (row: number, index: number, part: string) =>
         measures.querySelector<HTMLElement>(`[data-row="${row}"][data-index="${index}"][data-part="${part}"]`)?.getBoundingClientRect().width ?? 0;
       const input: StripRowInput[] = rows.map((row, r) => ({
-        shots: row.flatMap((segment, index) => (segment.kind === "shot" ? [{ seconds: segment.seconds, full: widthOf(r, index, "full"), short: widthOf(r, index, "short") }] : [])),
+        shots: row.flatMap((segment, index) => (segment.kind === "shot" ? [{ seconds: segment.seconds, full: widthOf(r, index, "full"), short: widthOf(r, index, "short"), hot: segment.hot }] : [])),
         tail: row.some((segment) => segment.kind !== "shot") ? Math.max(...row.map((segment, index) => (segment.kind === "shot" ? 0 : widthOf(r, index, "tail")))) : null,
       }));
       const next = fitStrip(input, segs.clientWidth, parseFloat(getComputedStyle(segs).columnGap) || 0);
