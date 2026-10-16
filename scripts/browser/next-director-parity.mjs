@@ -40,10 +40,13 @@ async function removeTargets(page) {
 }
 /** The header's label, which names what the message points at once the composer points somewhere. */
 const headerScope = async (page) => (await page.locator(".dir-head .scene").textContent()).trim();
-/** The composer's picture and @ chips sit on one row at one height while they fit. */
+/** The composer's picture and @ chips sit on one row at one height while they fit, with the same × at one size. */
 async function chipsShareARow(page) {
   const boxes = await page.$$eval(".composer .pic-chip, .composer .chips .atchip-wrap", (nodes) => nodes.map((node) => { const box = node.getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; }));
   if (boxes.length < 2 || new Set(boxes.map(([top]) => top)).size !== 1 || new Set(boxes.map(([, height]) => height)).size !== 1) fail(`The composer's chips are not one row of one size: ${JSON.stringify(boxes)}`);
+  // The @ chip's × was the browser's 14 px regular (larger, and 2 px low against its label); it is the picture chip's.
+  const marks = await page.$$eval('.composer [data-act="remove-picture"], .composer [data-act="unpoint"]', (nodes) => nodes.map((node) => `${getComputedStyle(node).fontSize} ${getComputedStyle(node).fontWeight}`));
+  if (new Set(marks).size !== 1) fail(`The chips' × marks differ: ${JSON.stringify(marks)}`);
 }
 /** The thread rests at its bottom, on its newest message (a smooth scroll there is given time to land). */
 async function threadAtBottom(page, where) {
