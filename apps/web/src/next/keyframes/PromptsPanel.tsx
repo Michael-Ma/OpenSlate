@@ -12,7 +12,9 @@ interface Props {
 
 /**
  * The shot's full prompts as stored and sent to the paid models, read-only, in place of the inspector's rows: the
- * picture prompt and the video prompt. They are edited in Plan (Edit in Plan opens the shot's row there). Esc or
+ * picture prompt and the video prompt. The picture prompt is edited in Plan (Edit 2.3 in Plan opens the shot's row
+ * there) or with Edit prompt. The video prompt has no editor of its own: the studio rewrites it from the shot's
+ * purpose, framing and motion when they change (storyboard.ts editedPrompt), so the panel says so under it. Esc or
  * Close goes back to the rows.
  */
 export function PromptsPanel({ shotId, label, prompts, onClose, onEditInPlan }: Props) {
@@ -38,9 +40,13 @@ export function PromptsPanel({ shotId, label, prompts, onClose, onEditInPlan }: 
         <dd className="prompt-text" data-prompt="image">{prompts.image}</dd>
         <dt className="lbl">{t("inspector.prompt_video")}</dt>
         <dd className="prompt-text" data-prompt="video">{prompts.video ?? t("inspector.prompt_video_missing")}</dd>
+        <dd className="insp-note left" data-act="video-prompt-note">{t("inspector.prompt_video_note")}</dd>
       </dl>
       <p className="insp-note left">{t("inspector.prompts_note")}</p>
-      <button type="button" className="pill sm" data-act="edit-in-plan" data-shot={shotId} aria-label={t("inspector.edit_in_plan_label", { shot: label })} onClick={onEditInPlan}>{t("inspector.edit_in_plan")}</button>
+      {/* Kept in view at the foot while long prompts scroll above it. */}
+      <div className="prompts-foot">
+        <button type="button" className="pill sm" data-act="edit-in-plan" data-shot={shotId} onClick={onEditInPlan}>{t("inspector.edit_in_plan", { shot: label })}</button>
+      </div>
     </section>
   );
 }

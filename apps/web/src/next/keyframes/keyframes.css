@@ -235,7 +235,8 @@
 .insp-prompts .lbl { margin-top: 2px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .insp-prompts .prompt-list { display: flex; flex-direction: column; gap: 4px; margin: 0; }
 .insp-prompts .prompt-text { margin: 0 0 4px; max-height: 8.6em; overflow-y: auto; padding: 6px 8px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--raised); color: var(--text); font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-.insp-prompts > .pill { align-self: flex-start; }
+.insp-prompts .prompt-list .insp-note { margin: -2px 0 2px; }
+.insp-prompts .prompts-foot { position: sticky; bottom: -2px; padding: 6px 0 2px; background: var(--surface); border-top: 1px solid var(--hairline); }
 
 /* ---------- takes strip (card B8) ---------- */
 .takes { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }

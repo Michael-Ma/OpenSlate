@@ -630,6 +630,19 @@ function editNarration(shot: ShotOverview, text: string): ShotOverview {
   return { ...shot, narration: { state: "text_only", text: line, estimatedSeconds: estimateNarrationSeconds(line, pace.secondsPerUnit), fits: null } };
 }
 
+const DIRECTION_HEADER = "OpenSlate current direction:\n";
+const DIRECTION_SEPARATOR = "\nReference details (retain only where consistent):\n";
+
+/**
+ * The server's rewrite of a prompt after a direction edit (storyboard.ts editedPrompt): the shot's direction in
+ * front, the earlier words kept. Purpose and framing edits rewrite both prompts; a motion edit rewrites the video one.
+ */
+export function directedPrompt(previous: string, direction: string): string {
+  const split = previous.startsWith(DIRECTION_HEADER) ? previous.indexOf(DIRECTION_SEPARATOR) : -1;
+  const original = split >= 0 ? previous.slice(split + DIRECTION_SEPARATOR.length) : previous;
+  return `${DIRECTION_HEADER}${direction}${DIRECTION_SEPARATOR}${original}`;
+}
+
 function snapshotShot(snapshot: ProjectSnapshot, shot: ShotOverview, edit: StoryboardEdit): ProjectSnapshot {
   return {
     ...snapshot,
@@ -641,7 +654,11 @@ function snapshotShot(snapshot: ProjectSnapshot, shot: ShotOverview, edit: Story
           const { narration: _old, ...rest } = row;
           return shot.narration.state === "none" ? rest : { ...rest, narration: { mode: row.narration?.mode ?? "generated", voice: row.narration?.voice ?? "stock", text: shot.narration.text } };
         }
-        return { ...row, imagePrompt: shot.imagePrompt, motion: shot.motion, desiredFrames: shot.durationFrames, framing: shot.framing, purpose: shot.purpose };
+        // A changed motion rewrites the video prompt, as the server does; the picture prompt keeps its words.
+        const videoPrompt = edit.kind === "shot" && edit.field === "motion" && shot.motion !== row.motion
+          ? directedPrompt(row.videoPrompt, `${[shot.purpose, shot.framing].filter(Boolean).join(". ")}. Camera movement: ${shot.motion}`)
+          : row.videoPrompt;
+        return { ...row, imagePrompt: shot.imagePrompt, motion: shot.motion, desiredFrames: shot.durationFrames, framing: shot.framing, purpose: shot.purpose, videoPrompt };
       }),
     },
   };

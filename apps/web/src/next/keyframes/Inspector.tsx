@@ -76,14 +76,17 @@ export function Inspector({ view, shot, fps, draft, busy, unconfirmed, onPoint, 
           {t("inspector.point", { shot: view.label })}
         </button>
       </div>
-      <div className="st">
-        <StatusPill status={view.status} tone={view.tone} />
-        {!editing && !sub ? (
-          <button type="button" className="insp-link" data-act="prompts" data-shot={shot.shotId} aria-label={t("inspector.prompts_show_label", { shot: view.label })} onClick={() => setOpen("prompts")}>
-            {t("inspector.prompts_show")}
-          </button>
-        ) : null}
-      </div>
+      {/* The takes strip and the prompts take the status line's room too (the preview's badge still shows it). */}
+      {sub ? null : (
+        <div className="st">
+          <StatusPill status={view.status} tone={view.tone} />
+          {!editing ? (
+            <button type="button" className="insp-link" data-act="prompts" data-shot={shot.shotId} aria-label={t("inspector.prompts_show_label", { shot: view.label })} onClick={() => setOpen("prompts")}>
+              {t("inspector.prompts_show")}
+            </button>
+          ) : null}
+        </div>
+      )}
 
       <div className="insp-body">
       {editing ? (
