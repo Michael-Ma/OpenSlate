@@ -135,11 +135,15 @@ export const scenarios = [
       // What Save will do is in sight above the sticky buttons, with the voice; the buttons are never faded.
       const sight = await page.evaluate(() => {
         const r = (sel) => document.querySelector(sel).getBoundingClientRect();
-        const body = r(".insp .insp-body"), foot = r(".insp .narr-foot"), impact = r('.insp .stale[id^="narr-impact"]'), voice = r(".insp .narr-voice");
-        return { body: [body.top, body.bottom], foot: foot.top, impact: [impact.top, impact.bottom], voice: [voice.top, voice.bottom], mask: getComputedStyle(document.querySelector(".insp .insp-body")).maskImage };
+        const body = r(".insp .insp-body"), foot = r(".insp .narr-foot"), impact = r('.insp .stale[id^="narr-impact"]'), voice = r(".insp .narr-voice"), take = r(".insp .narr-take");
+        return { body: [body.top, body.bottom], foot: foot.top, impact: [impact.top, impact.bottom], voice: [voice.top, voice.bottom], take: [take.top, take.bottom], mask: getComputedStyle(document.querySelector(".insp .insp-body")).maskImage };
       });
       expect(sight.impact[0] >= sight.body[0] && sight.impact[1] <= sight.foot + 1, `The voice's result is out of sight: ${JSON.stringify(sight)}`);
       expect(sight.voice[0] >= sight.body[0] && sight.voice[1] <= sight.foot, `The voice is out of sight with its result: ${JSON.stringify(sight)}`);
+      // The voice stops clear of the body's 16 px top fade, and the voice line's player above it is out of view (at most
+      // its box's bottom padding shows in the fade) or wholly in it, never cut by the top edge.
+      expect(sight.voice[0] >= sight.body[0] + 15.5, `The voice is under the top fade: ${JSON.stringify(sight)}`);
+      expect(sight.take[1] <= sight.body[0] + 10 || sight.take[0] >= sight.body[0] - 0.5, `The voice line's player is cut at the top: ${JSON.stringify(sight)}`);
       expect(!/(transparent|rgba\(0, 0, 0, 0\))\)$/.test(sight.mask), `The panel's foot is under a fade: ${sight.mask}`);
       await screenshot(page, "panel-voice-1440");
       await page.click('.insp [data-act="save-edit"]');

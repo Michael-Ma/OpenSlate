@@ -199,7 +199,7 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
               </span>
             ) : (
               <>
-                {picture && !making ? <StatusPill status={card.status} tone={card.tone} /> : null}
+                {picture && !making ? <StatusPill status={card.status} tone={card.tone} reason={card.statusReason} /> : null}
                 {card.pictureDimmed && !making ? <span className="status">{t("preview.earlier_take")}</span> : null}
                 {canOpen ? <button type="button" className="pill sm" data-act="open-frame" data-shot={shot.shotId} {...openGuard} onClick={() => onOpen(shot.shotId)}>{t("preview.open", { shot: shot.label })}</button> : null}
               </>

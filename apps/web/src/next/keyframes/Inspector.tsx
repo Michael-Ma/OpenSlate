@@ -111,8 +111,9 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
   const close = () => { backTo.current = open; setOpen(null); };
   const lostRegen = unconfirmed.regenerate && regen.enabled && !busy.regenerate;
   const regenNotes = [lostRegen ? t("error.PAID_UNCONFIRMED") : null, ...[regen.reason, regen.cost, regen.clipNote].filter((note) => note !== null).map((note) => tm(note!))].filter(Boolean);
-  // The rows view fits its room a step at a time (roomy, compact, then scrolling as one unit), so no row or button is
-  // ever cut mid-height. A panel or an edit form has its own scrolling body; a phone's inspector is as tall as it needs.
+  // The rows view fits its room a step at a time (roomy, compact, then the actions pinned at the foot with the rows
+  // scrolling above them), so no row or button is ever cut mid-height and the actions stay in view. A panel or an edit
+  // form has its own scrolling body; a phone's inspector is as tall as it needs.
   const narrow = useNarrow();
   const rowsView = !editing && !sub;
   const fitting = rowsView && !narrow;
@@ -140,7 +141,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       {/* The takes strip and the prompts take the status line's room too (the preview's badge still shows it). */}
       {sub ? null : (
         <div className="st">
-          <StatusPill status={view.status} tone={view.tone} />
+          <StatusPill status={view.status} tone={view.tone} reason={view.statusReason} />
           {!editing ? (
             <button type="button" className="insp-link" data-act="prompts" data-shot={shot.shotId} aria-label={t("inspector.prompts_show_label", { shot: view.label })} onClick={() => setOpen("prompts")}>
               {t("inspector.prompts_show")}
@@ -259,7 +260,8 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       {editing || sub ? null : (
         <div className="insp-actions">
           <button type="button" className="pill" data-act="edit-prompt" data-shot={shot.shotId} {...server} onClick={() => onEdit({ shotId: shot.shotId, field: "imagePrompt", value: shot.imagePrompt })}><span className="lbl">{t("inspector.edit_prompt")}</span></button>
-          {/* Side by side in a compact inspector, its words are shortened only when they cannot fit; its name keeps them all. */}
+          {/* Side by side in a compact inspector, its words are shortened only when they cannot fit (the short label still
+              names the duration); its name keeps them all. */}
           <button
             type="button"
             className="pill"

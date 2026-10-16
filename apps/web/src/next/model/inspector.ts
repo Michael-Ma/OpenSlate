@@ -85,6 +85,8 @@ export interface InspectorView {
   framing: string;
   status: Msg;
   tone: CardTone;
+  /** The status in full where the pill says it short (a shot held by an edit): for its tooltip. */
+  statusReason: Msg | null;
   rows: InspectorRow[];
   regenerate: RegenerateAction;
   /** A failed keyframe or clip, with what was charged. */
@@ -147,9 +149,9 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   const first = costFrom(unit, "make", locale);
   const base = { clipNote: null, reason: null, working: false };
   // Held by an unfinished Director edit: nothing is being made; the button and its note say what it waits for.
-  if (heldByEdit(keyframe)) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: msg("media.waiting.edit_pending"), cost: null, primary: false, enabled: false, reason: msg("inspector.held") };
+  if (heldByEdit(keyframe)) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: msg("media.waiting.edit_pending"), cost: null, primary: false, enabled: false, reason: msg("media.held_reason") };
   if (isWorking(keyframe)) return { ...base, kind: "regenerate", label: msg("card.keyframe.making"), cost: null, primary: false, enabled: false, working: true };
-  if (heldByEdit(shot.video)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("inspector.held") };
+  if (heldByEdit(shot.video)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("media.held_reason") };
   if (isWorking(shot.video)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("inspector.wait_for_clip") };
   switch (keyframe.state) {
     case "ready": return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: take, primary: false, enabled: !!unit, clipNote };
@@ -173,7 +175,7 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
  */
 export function inspectorView(overview: GenerationOverview, shot: ShotOverview, locale: string, narrationMode?: NarrationMode, narrationOrigin: TakeOrigin | null = null, videoPrompt: string | null = null): InspectorView {
   const scene = overview.scenes.find((s) => s.sceneId === shot.sceneId);
-  const { status, tone } = shotStatus(overview, scene, shot);
+  const { status, tone, reason } = shotStatus(overview, scene, shot);
   const rows: InspectorRow[] = [
     { key: "motion", label: msg("inspector.motion"), value: shot.motion, quoted: false, notes: [] },
     { key: "duration", label: msg("inspector.duration"), value: msg("inspector.duration_value", { seconds: seconds(shot.durationFrames, overview.fps) }), quoted: false, notes: [] },
@@ -211,6 +213,7 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
     framing: shot.framing,
     status,
     tone,
+    statusReason: reason ?? null,
     rows,
     regenerate: regenerateAction(overview, shot, scene, locale),
     failure,

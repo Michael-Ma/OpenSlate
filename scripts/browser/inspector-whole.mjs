@@ -2,10 +2,12 @@
 
 /**
  * Every row and action of the inspector is drawn whole or not at all: none is cut mid-height by the inspector's
- * edge, a scroll fade or the stacked actions, and nothing drawn covers anything else. In the layout that scrolls as one
- * unit it is checked at both ends of the scroll.
+ * edge, a scroll fade or the stacked actions, and nothing drawn covers anything else. The actions are in view at rest:
+ * the last resort that scrolls them with the rows (scroll) is only for an inspector too short for its title above
+ * them, so a check meets it only when it says so (`lastResort`). In the layouts that scroll it is checked at both
+ * ends of the scroll.
  */
-export async function inspectorWhole(page, where) {
+export async function inspectorWhole(page, where, { lastResort = false } = {}) {
   const read = () => page.evaluate(() => {
     const insp = document.querySelector(".insp");
     if (!insp) return null;
@@ -35,6 +37,7 @@ export async function inspectorWhole(page, where) {
         shown: Math.max(0, Math.min(box.bottom, clip.bottom) - Math.max(box.top, clip.top)),
         // A unit the scrolling inspector leaves undrawn until it is scrolled fully in.
         undrawn: getComputedStyle(element).clipPath !== "none",
+        action: element.tagName === "BUTTON" && element.parentElement.classList.contains("insp-actions"),
       };
     });
     return { fit: insp.getAttribute("data-fit"), units };
@@ -55,7 +58,12 @@ export async function inspectorWhole(page, where) {
   // The layout settles first (a fade that follows the scroll updates on the next frame).
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   const report = check(await read(), "");
-  if (report.fit !== "scroll") return report;
+  // Edit prompt, Edit motion & duration and Regenerate keyframe are in view at rest (a phone's inspector is as tall
+  // as its content, and the last resort scrolls them with the rows).
+  const hidden = report.units.filter((unit) => unit.action && (unit.undrawn || unit.shown < unit.bottom - unit.top - 0.5));
+  if (report.fit === "scroll" && !lastResort) throw new Error(`The inspector scrolls its actions with the rows ${where}, the last resort for a room too short for them`);
+  if (report.fit && report.fit !== "scroll" && hidden.length) throw new Error(`The inspector's actions are out of view at rest ${where} (${report.fit}): ${JSON.stringify(hidden)}`);
+  if (report.fit !== "pinned" && report.fit !== "scroll") return report;
   // Scrolled to the end, then back: units are drawn whole at the other end too.
   await page.locator(".insp").evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
@@ -67,7 +75,8 @@ export async function inspectorWhole(page, where) {
 
 /**
  * The preview shows the whole 16:9 frame: where its box is taller than that, the frame keeps 16:9 and the caption
- * and the controls sit under it (only the shot's badge and status lie on the picture).
+ * and the controls sit under it (only the shot's badge and status lie on the picture). There the caption sits on the
+ * scrubber, and Previous and Next keep the film position between them.
  */
 export async function previewWholeFrame(page, where) {
   const layout = await page.evaluate(() => {
@@ -78,6 +87,7 @@ export async function previewWholeFrame(page, where) {
     return {
       preview: rect(preview), frame: rect(frame), fit: image ? getComputedStyle(image).objectFit : null,
       caption: rect(preview?.querySelector(".pv-caption")), side: rect(preview?.querySelector(".pv-side")), scrub: rect(preview?.querySelector(".scrub")),
+      position: rect(preview?.querySelector(".pv-pos")),
     };
   });
   const detail = JSON.stringify(layout);
@@ -91,6 +101,9 @@ export async function previewWholeFrame(page, where) {
       const box = layout[part];
       if (box && (box.top < layout.frame.bottom - 0.5 || box.bottom > layout.preview.bottom + 0.5)) throw new Error(`The preview's ${part} is not under the frame ${where}: ${detail}`);
     }
+    // The room the band does not need is under the controls, never between the caption and its scrubber.
+    if (layout.caption && layout.caption.height > 0 && layout.scrub && layout.scrub.top - layout.caption.bottom > 10) throw new Error(`The preview's caption is apart from its scrubber ${where}: ${detail}`);
+    if (layout.position && layout.position.width < 20) throw new Error(`The preview's film position is hidden under the frame ${where}: ${detail}`);
   }
   return layout;
 }

@@ -6,12 +6,12 @@ import { useArtifactUrl } from "../media/useArtifactUrl.ts";
 import type { CardTone } from "../model/keyframes.ts";
 import type { Msg } from "../model/types.ts";
 
-/** Status pill coloured by tone: green only for an opened frame (or saved clip). */
-export function StatusPill({ status, tone }: { status: Msg; tone: CardTone }) {
+/** Status pill coloured by tone: green only for an opened frame (or saved clip). `reason` says a short status in full. */
+export function StatusPill({ status, tone, reason }: { status: Msg; tone: CardTone; reason?: Msg | null }) {
   const { tm } = useI18n();
   const className = tone === "opened" ? "status ok" : tone === "working" ? "status busy" : tone === "attention" ? "status attn" : "status";
   return (
-    <span className={className} data-tone={tone}>
+    <span className={className} data-tone={tone} title={reason ? tm(reason) : undefined}>
       {tone === "opened" ? <span aria-hidden="true">✓</span> : null}
       {tm(status)}
     </span>

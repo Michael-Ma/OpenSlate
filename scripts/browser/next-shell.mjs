@@ -653,9 +653,10 @@ export const scenarios = [
     },
   },
   {
-    // The inspector fits its room a step at a time (roomy, compact, then scrolling as one unit): at laptop and narrow
-    // sizes, with a short and a long narration row, in both languages, no row or action is ever cut mid-height. On a
-    // narrow stage the preview keeps the whole frame; on a phone its head is one row and its caption one line.
+    // The inspector fits its room a step at a time (roomy, compact, then the actions pinned at its foot with the rows
+    // scrolling above them): at laptop and narrow sizes, with a short and a long narration row, in both languages, no
+    // row or action is ever cut mid-height and the actions are in view at rest. On a narrow stage the preview keeps the
+    // whole frame; on a phone its head is one row and its caption one line.
     name: "next-shell-inspector-fit",
     query: FIXTURE,
     viewport: { width: 1440, height: 900 },
@@ -684,6 +685,24 @@ export const scenarios = [
             const report = await inspectorWhole(page, where);
             fits[`${label} ${width}x${height} ${language}`] = report.fit;
             if (width >= 900 && width < 1100) await previewWholeFrame(page, where);
+            // Pinned, a row's control that takes the focus from the keyboard is scrolled whole into view above the actions.
+            if (label === "2.1" && width === 1366) {
+              await page.focus(".insp [data-act='prompts']");
+              await page.keyboard.press("Tab");
+              const focused = await page.evaluate(() => {
+                const active = document.activeElement;
+                const box = active.getBoundingClientRect();
+                return { act: active.getAttribute("data-act"), bottom: box.bottom, actions: document.querySelector(".insp-actions").getBoundingClientRect().top, undrawn: getComputedStyle(active.closest("dt") ?? active).clipPath !== "none" };
+              });
+              expect(focused.act === "narration-edit" && focused.bottom <= focused.actions + 0.5 && !focused.undrawn, `The focused row control is not in view above the pinned actions ${where}: ${JSON.stringify(focused)}`);
+              await page.locator(".insp").evaluate((element) => { element.scrollTop = 0; });
+              await page.locator(".insp [data-act='narration-edit']").evaluate((element) => element.blur());
+            }
+            // At 1024 the band under the frame has the room for 2.1's caption in full (two lines).
+            if (label === "2.1" && width === 1024 && language === "en") {
+              const caption = await page.locator(".preview .pv-caption").evaluate((element) => [element.scrollHeight, element.clientHeight]);
+              expect(caption[0] <= caption[1] + 1 && caption[1] > 30, `2.1's caption is cut ${where}: ${JSON.stringify(caption)}`);
+            }
             await noSidewaysScroll(page, where);
           }
         }
@@ -691,17 +710,22 @@ export const scenarios = [
       // The design's layout where it has room; a phone's inspector is as tall as it needs.
       expect(fits["2.1 1440x900 en"] === "roomy", `2.1 at 1440 is not in the design's layout: ${JSON.stringify(fits)}`);
       expect(fits["2.3 1440x900 en"] === "compact", `2.3's longer narration at 1440 does not tighten to compact: ${JSON.stringify(fits)}`);
-      expect(fits["2.1 1366x768 en"] === "scroll" && fits["2.1 390x844 en"] === null, `The fits are ${JSON.stringify(fits)}`);
-      // Compact puts the two edits side by side, shortened only when the words cannot fit; the name keeps them all.
+      expect(fits["2.1 1366x768 en"] === "pinned" && fits["2.1 390x844 en"] === null, `The fits are ${JSON.stringify(fits)}`);
+      // Compact puts the two edits side by side, shortened only when the words cannot fit, to words that still name the
+      // duration; the name keeps them all. Chinese has the room for the whole label.
+      await page.setViewportSize({ width: 1024, height: 900 });
+      const readPair = () => page.evaluate(() => {
+        const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
+        const motion = document.querySelector(".insp-actions [data-act='edit-motion']");
+        return { fit: document.querySelector(".insp").getAttribute("data-fit"), prompt: top(".insp-actions [data-act='edit-prompt']"), motion: top(".insp-actions [data-act='edit-motion']"), text: motion.textContent, name: motion.getAttribute("aria-label") };
+      });
+      const zhPair = await readPair();
+      expect(zhPair.fit === "compact" && zhPair.prompt === zhPair.motion && zhPair.text === "编辑运动和时长" && zhPair.name === null, `The compact edits in Chinese are ${JSON.stringify(zhPair)}`);
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.locator(".topbar [data-act='language']").click();
       await page.waitForFunction(() => document.documentElement.lang === "en");
-      const pair = await page.evaluate(() => {
-        const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
-        const motion = document.querySelector(".insp-actions [data-act='edit-motion']");
-        return { prompt: top(".insp-actions [data-act='edit-prompt']"), motion: top(".insp-actions [data-act='edit-motion']"), text: motion.textContent, name: motion.getAttribute("aria-label") };
-      });
-      expect(pair.prompt === pair.motion && pair.text === "Edit motion" && pair.name === "Edit motion & duration", `The compact edits are ${JSON.stringify(pair)}`);
+      const pair = await readPair();
+      expect(pair.prompt === pair.motion && pair.text === "Motion & duration" && pair.name === "Edit motion & duration", `The compact edits are ${JSON.stringify(pair)}`);
       // A phone: the preview's head is one row (Previous and Next without the position), and its caption one line.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.click(".card [data-act='open-shot'][data-shot='shot-2-1']");
