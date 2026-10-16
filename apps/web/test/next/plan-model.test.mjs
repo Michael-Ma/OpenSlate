@@ -38,7 +38,8 @@ test('rows say framing, length, narration and the media state in neutral pills (
   // The too-long line is an app fact: a neutral check. The Director's own note b about it is the amber chip (study).
   const r23 = row(outline, '2.3');
   assert.deepEqual(r23.check, { id: 'plan.check.narration', values: { line: 7.4, shot: 6 } });
-  assert.deepEqual(r23.notes, [{ noteId: 'note-b', letter: 'b', text: 'The 2.3 line runs 7.4 s but the shot is 6 s.', done: false }]);
+  // The chip shows the note's first clause whole (it wraps in the row); the full note is its tooltip.
+  assert.deepEqual(r23.notes, [{ noteId: 'note-b', letter: 'b', text: 'The 2.3 line runs 7.4 s but the shot is 6 s', full: 'The 2.3 line runs 7.4 s but the shot is 6 s.', done: false }]);
   const r31 = row(outline, '3.1');
   assert.deepEqual(r31.pills.map((pill) => pill.text.id), ['plan.pill.kf_none'], 'no clip pill before a keyframe exists');
   assert.deepEqual([r31.picture, r31.emptyThumb], [null, { id: 'plan.thumb.none' }]);
@@ -94,7 +95,7 @@ test("the Director's notes repeat on their rows and scenes; stale ones are left 
   ] };
   snapshot.notes[1].resolution = { choiceIndex: 0, at: '' };
   const outline = planOutline(snapshot, lastFerryOverview());
-  assert.deepEqual(row(outline, '2.2').notes, [{ noteId: 'n1', letter: 'a', text: 'Note a', done: false }]);
+  assert.deepEqual(row(outline, '2.2').notes, [{ noteId: 'n1', letter: 'a', text: 'Note a', full: 'Note a', done: false }]);
   assert.deepEqual(row(outline, '2.3').notes.map((n) => [n.letter, n.done]), [['b', true]]);
   assert.deepEqual(row(outline, '2.1').notes, []);
   assert.deepEqual(outline.scenes[2].notes.map((n) => n.letter), ['c']);

@@ -86,6 +86,14 @@ export const scenarios = [
       // The too-long line is an app fact: neutral, never the Director's amber.
       const check = await page.locator(`[data-shot="${shot("2.3")}"] [data-check="narration"]`).evaluate((el) => `${getComputedStyle(el).backgroundColor} ${getComputedStyle(el).color}`);
       expect(!/240, 178, 74/.test(check), `The narration check is drawn amber: ${check}`);
+      // The Director's notes repeat on their rows with the note's first clause whole: a chip wraps, it is never cut.
+      for (const [label, clause] of [["2.2", "Mara's coat came out maroon"], ["2.3", "The 2.3 line runs 7.4 s but the shot is 6 s"]]) {
+        const chip = await page.locator(`[data-shot="${shot(label)}"] .note-chip`).evaluate((el) => {
+          const text = el.querySelector(".txt");
+          return { text: text.textContent, title: el.title, cut: text.scrollWidth > text.clientWidth + 1 || text.scrollHeight > text.clientHeight + 1 };
+        });
+        expect(chip.text === clause && !chip.cut && chip.title.startsWith(clause), `${label}'s note chip is cut: ${JSON.stringify(chip)}`);
+      }
       const opened = await page.locator(`[data-shot="${shot("1.1")}"] .status.ok`).first().evaluate((el) => getComputedStyle(el).color);
       expect(/95, 196, 138/.test(opened), `Opened is not green: ${opened}`);
       await noSidewaysScroll(page, 1440);
