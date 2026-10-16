@@ -8,6 +8,8 @@ interface StudioContextValue {
   media: MediaSource;
   /** "live" talks to the studio server; "fixture" is the Last Ferry sample film with simulated actions. */
   mode: "live" | "fixture";
+  /** Shared per-film drafts this window already handed to the next session through Disconnect. */
+  relinquishedDrafts?: Set<string>;
 }
 
 const StudioContext = createContext<StudioContextValue | null>(null);
@@ -25,6 +27,8 @@ function useStudioContext(): StudioContextValue {
 export const useStore = (): StudioStore => useStudioContext().store;
 export const useMedia = (): MediaSource => useStudioContext().media;
 export const useMode = (): "live" | "fixture" => useStudioContext().mode;
+const NO_RELINQUISHED_DRAFTS = new Set<string>();
+export const useRelinquishedDrafts = (): Set<string> => useStudioContext().relinquishedDrafts ?? NO_RELINQUISHED_DRAFTS;
 
 /** Subscribe to a slice of the studio state. Selectors must return stable values (state fields or memoized results). */
 export function useStudio<T>(selector: (state: StudioState) => T): T {

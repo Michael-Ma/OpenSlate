@@ -24,10 +24,10 @@ export function DirectorColumn() {
   const view = useStudio(shownView);
   const hasFilm = useStudio(directorHasFilm);
   const scene = overview ? currentScene(overview, sceneId) : null;
-  const restored = useComposerDraft();
+  const draft = useComposerDraft();
 
   return (
-    <aside className="director" id="director" aria-label={t("director.title")} data-film={hasFilm ? "open" : "none"}>
+    <aside className="director" id="director" aria-label={t("director.title")} data-film={hasFilm ? "open" : "none"} data-draft-ready={draft.ready}>
       <div className="dir-head">
         <span className="avatar" aria-hidden="true">{t("director.avatar")}</span>
         <b>{t("director.title")}</b>
@@ -47,7 +47,7 @@ export function DirectorColumn() {
           </div>
         </div>
       )}
-      <Composer hasFilm={hasFilm} restored={restored} />
+      <Composer hasFilm={hasFilm} restored={draft.restored} />
     </aside>
   );
 }

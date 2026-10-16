@@ -200,6 +200,8 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
           )}
         </div>
         <div className="pv-side">
+          {/* Keep the picture action in the same wrapping row as navigation, so neither covers the other. */}
+          {current && !making && !card.pictureDimmed && keyframeVisible && !showVideo ? <ShowDirectorButton candidate={() => checkedShotPicture(shot, (offset) => store.read<AssetPage>(shotKeyframesPath(shot.shotId, offset)))} className="pill sm pv-show" label={t("director.picture.show_shot", { shot: shot.label })} /> : null}
           {clip ? (
             <div className="pv-media" role="group" aria-label={t("preview.media_label")}>
               <button type="button" aria-pressed={!showVideo} data-act="media-keyframe" onClick={() => setMedia("keyframe")}>{t("preview.media.keyframe")}</button>
@@ -237,8 +239,6 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
           ) : null}
         </div>
       </div>
-      {/* The current keyframe can be shown to the Director in the next message, unless a demo provider made it (checked in the library when pressed). */}
-      {current && !making && !card.pictureDimmed && keyframeVisible && !showVideo ? <ShowDirectorButton candidate={() => checkedShotPicture(shot, (offset) => store.read<AssetPage>(shotKeyframesPath(shot.shotId, offset)))} className="pill sm pv-show" label={t("director.picture.show_shot", { shot: shot.label })} /> : null}
       {player ? null : (
       <div className="pv-bottom">
         {picture && !making ? <p className="pv-caption">{caption}</p> : null}

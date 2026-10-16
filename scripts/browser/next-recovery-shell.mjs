@@ -215,7 +215,7 @@ export const scenarios = [
       await page.locator(".connect [data-act='retry']").click();
       await ready(page);
       await page.waitForSelector("main.work", { timeout: 20000 });
-      await page.waitForTimeout(500);
+      await page.waitForSelector("#director[data-draft-ready='true']");
       expect((await composer(page)) === "", `The first tab got the draft too: ${JSON.stringify(await composer(page))}`);
     },
   },

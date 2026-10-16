@@ -306,6 +306,11 @@ export const scenarios = [
     query: `${query}&film=ready`,
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
+      // The preset's last export is half an hour earlier: local noon keeps its Today assertion away from midnight.
+      // Only Date is fixed; export/recovery timers still run normally.
+      await page.clock.setFixedTime(await page.evaluate(() => new Date(2026, 9, 16, 12).getTime()));
+      // FixturePort applies presets during boot, before the scenario starts; rebuild them against this clock.
+      await page.reload();
       await openFilm(page);
       await expectText(page, "[data-act='film-line']", /^50 s · 8 shots · 8 of 8 clips made$/);
       await expectText(page, "[data-act='last-export']", /^Last export Today \d\d:\d\d · changed since: shot order, music\s*Download MP4\s*2 earlier in Assets$/);
@@ -534,6 +539,8 @@ export const scenarios = [
     query: `${query}&film=ready&lang=zh-CN`,
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
+      await page.clock.setFixedTime(await page.evaluate(() => new Date(2026, 9, 16, 12).getTime()));
+      await page.reload();
       await openFilm(page);
       await expectText(page, "[data-act='film-line']", /^50 秒 · 8 个镜头 · 已生成 8\/8 段视频$/);
       await expectText(page, "[data-act='last-export']", /^上次导出 今天 \d\d:\d\d · 之后有改动：镜头顺序、音乐\s*下载 MP4\s*素材里还有 2 个$/);
