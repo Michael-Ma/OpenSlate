@@ -327,7 +327,7 @@ interface RecordingProps {
   fps: number;
   /** The shot's words now; they become the recording's subtitle. */
   words: string;
-  /** The current take: once one exists, the panel can be closed with Done. */
+  /** The current take: once it is the person's recording, the panel is closed with Done (nothing is left to save). */
   take: TakeView | null;
   focusField: boolean;
   saving: boolean;
@@ -515,7 +515,7 @@ function RecordingPart({ shot, fps, words: savedWords, take, focusField, saving,
         </button>
         {phase.state === "sending"
           ? <button type="button" className="pill" data-act="narr-stop" onClick={stop}>{t("narr.stop")}</button>
-          : <button type="button" className="pill" data-act="cancel-edit" disabled={phase.state === "checking"} onClick={onClose}>{t(take && !file ? "narr.done" : "inspector.cancel")}</button>}
+          : <button type="button" className="pill" data-act="cancel-edit" disabled={phase.state === "checking"} onClick={onClose}>{t(take?.origin === "recording" && !file ? "narr.done" : "inspector.cancel")}</button>}
       </div>
       </div>
     </>
