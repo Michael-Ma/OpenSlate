@@ -1,6 +1,6 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
-import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
+import type { ComposerImage, DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 import type { Connection, EditDraft, StudioState } from "./state.ts";
 
 export type Action =
@@ -21,6 +21,10 @@ export type Action =
   | { type: "composerText"; text: string }
   | { type: "composerTarget"; target: Target; add: boolean }
   | { type: "composerSending"; sending: boolean }
+  /** The composer's pictures for the Director, replaced as a whole (the Director model decides what may be added). */
+  | { type: "composerImages"; images: ComposerImage[] }
+  /** A film's unsent draft, read back from this browser after a reload or a film switch. */
+  | { type: "composerRestore"; text: string; targets: Target[]; images: ComposerImage[] }
   | { type: "composerSent" }
   | { type: "edit"; edit: EditDraft | null }
   | { type: "pending"; pressId: string; pending: boolean }
@@ -38,7 +42,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, projects: action.projects };
     case "project":
       if (action.projectId === state.projectId) return state;
-      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, focus: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false } };
+      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, focus: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false, images: [] } };
     case "snapshot":
       if (action.snapshot.project.id !== state.projectId) return state;
       // A stale read (lower cursor) never replaces a newer one.
@@ -88,8 +92,12 @@ export function reducer(state: StudioState, action: Action): StudioState {
     }
     case "composerSending":
       return { ...state, composer: { ...state.composer, sending: action.sending } };
+    case "composerImages":
+      return { ...state, composer: { ...state.composer, images: action.images } };
+    case "composerRestore":
+      return { ...state, composer: { text: action.text, targets: action.targets, images: action.images, sending: false } };
     case "composerSent":
-      return { ...state, composer: { text: "", targets: [], sending: false } };
+      return { ...state, composer: { text: "", targets: [], sending: false, images: [] } };
     case "edit":
       return { ...state, edit: action.edit };
     case "pending": {

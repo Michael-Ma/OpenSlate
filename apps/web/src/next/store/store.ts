@@ -4,6 +4,7 @@ import { ApiError, type EventOptions, type RequestOptions } from "../api/client.
 import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
 import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
+import { addPicture, messageBody, pictureKey, type Draft, type PictureCandidate } from "../model/director.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
 import { reducer, type Action } from "./reducer.ts";
@@ -282,15 +283,17 @@ export class StudioStore {
   }
 
   async sendMessage(): Promise<boolean> {
-    const { composer, snapshot } = this.#state;
-    const text = composer.text.trim();
-    if (!snapshot || !text || composer.sending) return false;
-    const scopeIds = composer.targets.length ? composer.targets.map((t) => t.id) : [snapshot.project.id];
+    const { composer, snapshot, overview } = this.#state;
+    if (!snapshot || composer.sending) return false;
+    // The pictures' links lead the text; keyframes add their shots to the scope; imported pictures go as images.
+    const body = messageBody(composer, overview ?? { projectId: snapshot.project.id, shots: {} });
+    if (!body) return false;
     this.dispatch({ type: "composerSending", sending: true });
-    const body = { text, scopeIds, editing: true };
-    const receipt = await this.#press<unknown>(`message`, { text, scopeIds }, async () => ({ path: path(snapshot.project.id, "/messages"), body }));
-    if (receipt === undefined) { this.dispatch({ type: "composerSending", sending: false }); return false; }
-    this.dispatch({ type: "composerSent" });
+    const receipt = await this.#press<unknown>(`message`, { text: body.text, scopeIds: body.scopeIds, ...(body.images ? { images: body.images } : {}) }, async () => ({ path: path(snapshot.project.id, "/messages"), body }));
+    // Another film opened while this was sending: its composer is that film's, not this message's.
+    const same = this.#state.projectId === snapshot.project.id;
+    if (receipt === undefined) { if (same) this.dispatch({ type: "composerSending", sending: false }); return false; }
+    if (same) this.dispatch({ type: "composerSent" });
     return true;
   }
 
@@ -379,6 +382,15 @@ export class StudioStore {
   setDirectorOpen = (open: boolean) => this.dispatch({ type: "directorOpen", open });
   setComposerText = (text: string) => this.dispatch({ type: "composerText", text });
   pointAt = (target: Target, add = true) => this.dispatch({ type: "composerTarget", target, add });
+  /** Add a picture for the Director to the message; returns why not when it cannot (said by the caller). */
+  showPicture = (candidate: PictureCandidate): Msg | null => {
+    const result = addPicture(this.#state.composer.images, candidate, this.#state.director);
+    if ("refused" in result) return result.refused;
+    this.dispatch({ type: "composerImages", images: result.images });
+    return null;
+  };
+  removePicture = (key: string) => this.dispatch({ type: "composerImages", images: this.#state.composer.images.filter((image) => pictureKey(image) !== key) });
+  restoreDraft = (draft: Draft) => this.dispatch({ type: "composerRestore", ...draft });
   setEdit = (edit: EditDraft | null) => this.dispatch({ type: "edit", edit });
   dismissToast = () => this.dispatch({ type: "toastDismiss" });
 }

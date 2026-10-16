@@ -80,6 +80,12 @@ export interface DirectorStatus {
   mode: "offline" | "fake" | "native";
   status: "idle" | "running" | "waiting_user" | "error" | "not_connected";
   activeRequestId?: string | null;
+  /** The current turn, when the server reports it: its request, state and (once failed) error code. */
+  turn?: { requestId: string; state: string; errorCode?: string | null } | null;
+  /** The Director's own words about a turn that needs attention (English, from the server), when it has any. */
+  message?: string | null;
+  /** True when this film's Director can be shown pictures: the Codex Director with FFmpeg on this computer. */
+  imageAttachmentsAvailable?: boolean;
 }
 
 export interface ProjectSummary {
@@ -94,6 +100,21 @@ export type ViewName = "plan" | "keyframes" | "assets" | "film" | "settings" | "
 export interface Target {
   kind: "scene" | "shot";
   id: string;
+}
+
+/**
+ * A picture the composer shows the Director (at most four in one message). An imported picture is sent as an
+ * image; a keyframe is shown by pointing the message at its shot, because the Codex Director is given the current
+ * keyframe of every shot a message points at (and the server takes only imported PNGs as explicit images).
+ */
+export interface ComposerImage {
+  artifactId: string;
+  sha256: string;
+  source: "upload" | "keyframe";
+  /** The keyframe's shot; null for an imported picture. */
+  shotId: string | null;
+  /** An imported picture's name (the person's own words); empty for a keyframe, which is named by its shot. */
+  name: string;
 }
 
 export interface FilmData {

@@ -130,7 +130,9 @@ test('Stop counts only real work: Director turns, running or queued media, runni
 test('the mode line: scripted, not connected, error and unreadable; nothing for a working real Director', () => {
   assert.equal(en(modeLine(idle, undefined).message), 'Scripted Director: replies are canned and nothing in the film changes.');
   assert.equal(modeLine(idle, undefined).tone, 'info');
-  assert.match(en(modeLine({ mode: 'offline', status: 'not_connected' }, undefined).message), /Model settings/);
+  // Classic is going away: the line points to next's own Settings › Director.
+  assert.match(en(modeLine({ mode: 'offline', status: 'not_connected' }, undefined).message), /Settings › Director/);
+  assert.doesNotMatch(en(modeLine({ mode: 'offline', status: 'not_connected' }, undefined).message), /classic/);
   assert.match(en(modeLine({ mode: 'native', status: 'not_connected' }, undefined).message), /not connected/);
   assert.equal(modeLine({ mode: 'native', status: 'error' }, undefined).tone, 'attention');
   assert.equal(modeLine({ mode: 'native', status: 'idle' }, undefined), null);
@@ -222,7 +224,7 @@ test('the fixture Director records the message with its scope, works, then repli
   store.pointAt({ kind: 'shot', id: shotId('2.2') });
   store.setComposerText('Make the coat brighter');
   assert.equal(await store.sendMessage(), true);
-  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false });
+  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [] });
   const sent = port.world.snapshot.conversation.at(-1);
   assert.deepEqual([sent.role, sent.text, sent.scopeIds], ['user', 'Make the coat brighter', [shotId('2.2')]]);
   assert.equal(port.world.director.status, 'running');

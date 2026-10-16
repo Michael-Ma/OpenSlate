@@ -79,4 +79,14 @@ export const errors = {
   "error.PERSONAL_VOICE_NOT_ENROLLED": { en: "That personal voice isn't registered for this film.", zh: "这个个人声音没有为这部影片登记。" },
   "error.PERSONAL_VOICE_LIMIT": { en: "A film can have at most 32 personal voices.", zh: "一部影片最多可以有 32 个个人声音。" },
   "error.PERSONAL_VOICE_PROVIDER_UNAVAILABLE": { en: "This voice's provider isn't connected to narration.", zh: "这个声音的服务商没有接入旁白。" },
+  // Pictures for the Director and unfinished Director edits.
+  "error.DIRECTOR_IMAGES_UNAVAILABLE": { en: "This Director can't look at pictures. Showing pictures needs the Codex Director and FFmpeg on this computer.", zh: "这个导演看不了图片。给导演看图需要 Codex 导演和本机的 FFmpeg。" },
+  "error.DIRECTOR_IMAGES_INVALID": { en: "Show the Director one to four different pictures from this film.", zh: "请给导演看这部影片里的一到四张不同图片。" },
+  "error.DIRECTOR_IMAGE_SCOPE": { en: "That picture isn't one of this film's imported pictures any more.", zh: "这张图片已不在这部影片导入的图片里。" },
+  "error.DIRECTOR_IMAGE_LIMIT": { en: "A picture is too large to show the Director. Import a simpler or smaller PNG and send a new message.", zh: "有图片太大，无法给导演看。请导入更简单或更小的 PNG，再发一条新消息。" },
+  "error.DIRECTOR_IMAGE_CHANGED": { en: "A picture changed since it was imported. Import the original again and send a new message.", zh: "有图片在导入后被改动了。请重新导入原图，再发一条新消息。" },
+  "error.DIRECTOR_IMAGE_MISSING": { en: "A picture is missing or can't be read. Import it again and send a new message.", zh: "有图片丢失或无法读取。请重新导入，再发一条新消息。" },
+  "error.DIRECTOR_IMAGE_IDENTITY": { en: "The pictures saved for this message no longer match it. Send a new message with the pictures you mean.", zh: "这条消息保存的图片已对不上。请带上要给导演看的图片，重新发一条消息。" },
+  "error.DIRECTOR_IMAGE_TOOL_CHANGED": { en: "FFmpeg on this computer changed. Restart OpenSlate, then send a new message.", zh: "本机的 FFmpeg 有变化。请重启 OpenSlate，再发一条新消息。" },
+  "error.DIRECTOR_WORKING": { en: "The Director is still working on this edit. Wait for it to finish, or Stop it first.", zh: "导演还在进行这项修改。请等它完成，或先停止。" },
 } satisfies Record<string, Entry>;
