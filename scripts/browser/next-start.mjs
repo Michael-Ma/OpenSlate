@@ -387,7 +387,8 @@ export const scenarios = [
       await page.click("dialog.start-sheet [data-act='create-film']");
       await expectText(page, "dialog.start-sheet .sheet-head h2", /^Film created$/);
       await expectText(page, "dialog.start-sheet .impact.cost", /First crossing was created/);
-      await expectText(page, "dialog.start-sheet [data-act='create-film']", /^Try again$/);
+      // The retry says what it retries (the round-one Start fixes named it).
+      await expectText(page, "dialog.start-sheet [data-act='create-film']", /^Check the Director again$/);
       await expectText(page, "dialog.start-sheet [data-act='open-created']", /^Open the film$/);
       await expectText(page, "dialog.start-sheet .sheet-foot .grow", /^First crossing is in your films\.$/);
       await page.waitForSelector("main[data-view='start'] .film-row[data-film='film-1']");
