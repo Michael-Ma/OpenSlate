@@ -38,6 +38,13 @@ async function removeTargets(page) {
   const sizes = await page.$$eval('.composer [data-act="remove-picture"], .composer [data-act="unpoint"]', (nodes) => nodes.map((node) => { const box = node.getBoundingClientRect(); return [Math.round(box.width), Math.round(box.height)]; }));
   if (!sizes.length || sizes.some(([w, h]) => w < 24 || h < 24)) fail(`Remove targets: ${JSON.stringify(sizes)}`);
 }
+/** The header's label, which names what the message points at once the composer points somewhere. */
+const headerScope = async (page) => (await page.locator(".dir-head .scene").textContent()).trim();
+/** The composer's picture and @ chips sit on one row at one height while they fit. */
+async function chipsShareARow(page) {
+  const boxes = await page.$$eval(".composer .pic-chip, .composer .chips .atchip-wrap", (nodes) => nodes.map((node) => { const box = node.getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; }));
+  if (boxes.length < 2 || new Set(boxes.map(([top]) => top)).size !== 1 || new Set(boxes.map(([, height]) => height)).size !== 1) fail(`The composer's chips are not one row of one size: ${JSON.stringify(boxes)}`);
+}
 /** No image role without a name (decorative thumbnails and their placeholders are hidden instead). */
 async function noNamelessImages(page) {
   const nameless = await page.$$eval('.director [role="img"]', (nodes) => nodes.filter((node) => !(node.getAttribute("aria-label") ?? "").trim()).length);
@@ -135,10 +142,13 @@ export const scenarios = [
       // No @ target: the keyframe narrows the message; "Keep the whole film" takes the keyframe out again.
       await page.locator('.preview [data-act="show-director"]').click();
       await page.waitForSelector('[data-note="points-at"][data-scope="narrowed"]');
+      // The header says what the message now points at, as the line under the composer does.
+      if (await headerScope(page) !== "Points at 2.1") fail(`The header reads ${await headerScope(page)} while the message points only at 2.1`);
       await page.screenshot({ path: shot("pictures-narrowed-1440"), clip: column });
       await page.locator('[data-act="keep-whole-film"]').click();
       if (await page.locator('.composer .pic-chip').count() || await page.locator('[data-note="points-at"]').count()) fail("Keep the whole film left the keyframe or the line");
       if (!(await page.evaluate(() => document.activeElement?.matches('[data-field="message"]')))) fail("Focus did not go back to the reply box");
+      if (await headerScope(page) !== "Scene 2") fail(`With nothing pointed at, the header reads ${await headerScope(page)}`);
       // With an @ target the keyframe's shot joins it: "also", and no way back is offered (nothing was replaced).
       await box.pressSequentially("@2.3");
       await page.waitForSelector('.picker [role="listbox"]');
@@ -148,6 +158,8 @@ export const scenarios = [
       const line = await texts(page, '[data-note="points-at"] p');
       if (line[0] !== "This message also points at 2.1, so the Director sees its keyframe.") fail(`The scope line reads ${JSON.stringify(line)}`);
       if (await page.locator('[data-act="keep-whole-film"]').count()) fail("Keep the whole film is offered when the message has a target");
+      if (await headerScope(page) !== "Points at 2.3 and 2.1") fail(`The header reads ${await headerScope(page)}`);
+      await chipsShareARow(page);
       await removeTargets(page);
       await page.screenshot({ path: shot("pictures-also-1440"), clip: column });
       await box.fill("Match 2.3 to this frame");
@@ -259,6 +271,7 @@ export const scenarios = [
       if (await box.inputValue() !== "Keep the fog, lose the gulls") fail(`The draft text came back as ${JSON.stringify(await box.inputValue())}`);
       if ((await texts(page, ".composer .chips .atchip")).join() !== "@2.2") fail("The draft's @2.2 did not come back");
       if ((await pictureNames(page)).join() !== "2.1 keyframe") fail("The draft's picture did not come back");
+      await chipsShareARow(page);
       const line = await texts(page, '[data-draft="restored"]');
       if (line[0] !== "Unsent draft, kept in this browser until you send it.") fail(`The draft line reads ${line}`);
       await page.screenshot({ path: shot("draft-restored-1440"), clip: column });
@@ -304,6 +317,20 @@ export const scenarios = [
       if (await reply.locator("pre.md-pre code").count() !== 1) fail("The code block is missing");
       const scroll = await reply.locator("pre.md-pre").evaluate((node) => node.scrollWidth > node.clientWidth && getComputedStyle(node).overflowX === "auto");
       if (!scroll) fail("The long code line does not scroll inside its box");
+      // The block's code uses the inline code's monospace stack and size, not the browser's default monospace.
+      const fonts = await reply.evaluate((node) => [node.querySelector("pre.md-pre code"), node.querySelector("code.md-code")].map((code) => `${getComputedStyle(code).fontFamily} ${getComputedStyle(code).fontSize}`));
+      if (fonts[0] !== fonts[1]) fail(`Code block and inline code differ: ${JSON.stringify(fonts)}`);
+      // A line cut at the box's edge fades there, and the fade moves to the other edge once scrolled to the end.
+      if (await reply.locator('.md-scroll[data-more="right"] .md-more.right').count() !== 1) fail("The cut code line does not show that it scrolls");
+      await reply.locator("pre.md-pre").evaluate((node) => { node.scrollLeft = node.scrollWidth; });
+      await page.waitForSelector('[data-entry="m-markdown"] .md-scroll[data-more="left"]', { timeout: 2000 }).catch(() => fail("Scrolled to its end, the code block still fades on the right"));
+      await reply.locator("pre.md-pre").evaluate((node) => { node.scrollLeft = 0; });
+      // Scrolled content fades out at the thread's top edge, under the mode line, instead of running into it.
+      const edge = await page.evaluate(() => {
+        const thread = document.querySelector(".thread"), notices = document.querySelector(".dir-notices");
+        return { mask: getComputedStyle(thread).maskImage || getComputedStyle(thread).webkitMaskImage, gap: thread.getBoundingClientRect().top - notices.getBoundingClientRect().bottom };
+      });
+      if (!/gradient/.test(edge.mask) || edge.gap < 0) fail(`Nothing parts the mode line from the scrolled thread: ${JSON.stringify(edge)}`);
       const links = await reply.locator("a").evaluateAll((nodes) => nodes.map((node) => [node.getAttribute("href"), node.target, node.rel]));
       if (JSON.stringify(links) !== JSON.stringify([["https://example.com/ferry-timetables", "_blank", "noopener noreferrer"]])) fail(`Links: ${JSON.stringify(links)}`);
       if (await reply.locator("b, script, img").count()) fail("Raw HTML or a picture got into the reply");
@@ -351,6 +378,9 @@ export const scenarios = [
       if (words.join("|") !== "This reply needs attention|The Director stopped with an error. Send a message to try again.") fail(`The marker reads ${JSON.stringify(words)}`);
       if (await marker.locator(".words").count()) fail("The marker shows words the server never sends");
       if (await page.locator('[data-entry="ending"]').count()) fail("The ending line repeats the marker");
+      // The column's header says it once, by the marker: no second copy of the error at the top.
+      const tops = await texts(page, ".dir-notices .dir-mode");
+      if (tops.some((line) => /stopped with an error/.test(line))) fail(`The header repeats the error: ${JSON.stringify(tops)}`);
       await page.screenshot({ path: shot("failed-reply-1440"), clip: column });
     },
   },
@@ -392,8 +422,13 @@ export const scenarios = [
       // How the edit's turn ended reads right under the message, then the card says what that leaves waiting.
       const order = await page.$$eval('.thread-body > [data-entry]', (nodes) => nodes.slice(-3).map((node) => node.getAttribute("data-entry")));
       if (order.join() !== "request-held,ending,held") fail(`The thread ends ${order}`);
+      // An unfinished edit holds shots, so the header does not say nothing in the film changes.
+      if ((await texts(page, ".dir-notices .dir-mode")).join() !== "Scripted Director: its replies are scripted.") fail(`The mode line reads ${await texts(page, ".dir-notices .dir-mode")}`);
       await page.locator('.scene-pills [aria-pressed]').nth(2).click();
       await page.waitForSelector('.card[data-card="shot-3-1"]');
+      // The held shots wait for that edit everywhere: the inspector and the panel never say they are being made.
+      const waiting = { regen: (await page.locator('.insp [data-act="regen"]').textContent()).trim(), panel: (await page.locator(".vpanel").innerText()).replace(/\s+/g, " ") };
+      if (waiting.regen !== "Waiting for an edit to finish" || !/Waiting for an edit to finish/.test(waiting.panel) || /being made|Making|Keep working/.test(waiting.panel)) fail(`The held shots read ${JSON.stringify(waiting)}`);
       await page.screenshot({ path: shot("held-1440") });
       await card.locator('[data-act="release-holds"]').click();
       await toast(page, /^Let go\. 3\.1 and 3\.2 can go ahead\.$/);

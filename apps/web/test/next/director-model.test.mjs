@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  canStop, modeLine, scopeLabel, bylineTime, userText, paragraphs, threadView, pendingQuestions,
+  canStop, modeLine, scriptedTag, scopeLabel, bylineTime, userText, paragraphs, threadView, pendingQuestions,
   composeAnswer, composerView, pickerItems, filterPicker, mentionAt, removeMention, MESSAGE_LIMIT,
   threadNotes, noteOpens, byLetter,
 } from '../../src/next/model/director.ts';
@@ -128,8 +128,18 @@ test('Stop counts only real work: Director turns, running or queued media, runni
 });
 
 test('the mode line: scripted, not connected, error and unreadable; nothing for a working real Director', () => {
-  assert.equal(en(modeLine(idle, undefined).message), 'Scripted Director: replies are canned and nothing in the film changes.');
+  // Only where nothing in the film changes (the sample film, no held edit on screen) does it say so; else only that replies are scripted.
+  assert.equal(en(modeLine(idle, undefined, { filmUnchanged: true }).message), 'Scripted Director: replies are canned and nothing in the film changes.');
+  assert.equal(en(modeLine(idle, undefined).message), 'Scripted Director: its replies are scripted.');
+  assert.equal(zh(modeLine(idle, undefined).message), '示例导演：回复是预设的。');
   assert.equal(modeLine(idle, undefined).tone, 'info');
+  // An error the thread already marks under its message is said there once; the header then says what Director this is.
+  assert.equal(en(modeLine({ mode: 'fake', status: 'error' }, undefined).message), 'The Director stopped with an error. Send a message to try again.');
+  assert.equal(en(modeLine({ mode: 'fake', status: 'error' }, undefined, { errorShown: true }).message), 'Scripted Director: its replies are scripted.');
+  assert.equal(modeLine({ mode: 'native', status: 'error' }, undefined, { errorShown: true }), null);
+  // A scripted reply says nothing changed only in the sample film; the studio's scripted Director can change it.
+  assert.equal(en(scriptedTag('fixture')), 'Scripted reply; nothing in the film was changed.');
+  assert.deepEqual([en(scriptedTag('live')), zh(scriptedTag('live'))], ['Scripted reply.', '预设回复。']);
   // Classic is going away: the line points to next's own Settings › Director.
   assert.match(en(modeLine({ mode: 'offline', status: 'not_connected' }, undefined).message), /Settings › Director/);
   assert.doesNotMatch(en(modeLine({ mode: 'offline', status: 'not_connected' }, undefined).message), /classic/);

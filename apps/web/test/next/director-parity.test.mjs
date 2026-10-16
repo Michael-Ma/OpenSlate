@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   pictureRefusal, pictureFromAsset, pictureFromShot, checkedShotPicture, shotKeyframesPath, addPicture, pictureChips, composerView, messageBody, messageText,
   userMessage, resolveRef, sentPictureName, labelList, draftToSave, readDraft, draftKey, failedTurns, heldEdits, threadView, withoutKeyframes, afterSend,
+  errorInThread, headerScope,
   PICTURE_LIMIT, MESSAGE_LIMIT,
 } from '../../src/next/model/director.ts';
 import { refLink } from '../../src/next/model/markdown.ts';
@@ -317,6 +318,38 @@ test('fixture presets: codex takes pictures, held holds Scene 3, failed fails li
   assert.deepEqual(port.world.snapshot.conversation.slice(2).map(e => e.id), ['m-markdown', 'request-held', 'request-failed']);
   assert.match(port.world.snapshot.conversation[2].text, /\| Shot \| Now \| After \|/);
   port.close();
+});
+
+test('a failed turn is marked in the thread once: the header line leaves it to the marker under its message', () => {
+  const port = new FixturePort();
+  applyDirectorPresets(port.world, ['failed']);
+  const { snapshot, director } = port.world;
+  assert.equal(errorInThread(snapshot, director), true);
+  // The same error with no entry for its request (or no failed turn) still needs the header to say it.
+  assert.equal(errorInThread({ ...snapshot, conversation: snapshot.conversation.filter(e => e.requestId !== 'request-failed') }, director), false);
+  assert.equal(errorInThread({ ...snapshot, turns: [] }, director), false);
+  assert.equal(errorInThread(snapshot, { ...director, status: 'idle' }), false);
+  port.close();
+});
+
+test('the header names what the message points at once the composer points somewhere, else what the view shows', () => {
+  const overview = lastFerryOverview();
+  const label = scope => scope.kind === 'view' ? en(scope.label) : `Points at ${labelList(scope.labels.map(en), 'en')}`;
+  const base = { hasFilm: true, sceneOrdinal: 2, overview };
+  assert.equal(label(headerScope({ ...base, composer: empty })), 'Scene 2');
+  assert.equal(label(headerScope({ ...base, sceneOrdinal: null, composer: empty })), 'Whole film');
+  assert.equal(label(headerScope({ ...base, hasFilm: false, composer: empty })), 'No film open');
+  // A keyframe narrows the message to its shot: the header says so, as the composer's line does.
+  const keyframe21 = { ...keyframe22, artifactId: artifactFor('2.1').artifactId, sha256: artifactFor('2.1').sha256, shotId: shotId('2.1') };
+  assert.equal(label(headerScope({ ...base, composer: { ...empty, images: [keyframe21] } })), 'Points at 2.1');
+  // @ targets first, then the keyframes' shots, as the message sends them; a shot the targets cover is not named twice.
+  const targets = [{ kind: 'shot', id: shotId('2.3') }, { kind: 'scene', id: sceneId(1) }];
+  assert.equal(label(headerScope({ ...base, composer: { ...empty, targets, images: [keyframe21, uploadImage] } })), 'Points at 2.3, Scene 1, and 2.1');
+  assert.equal(label(headerScope({ ...base, composer: { ...empty, targets: [{ kind: 'scene', id: sceneId(2) }], images: [keyframe21] } })), 'Points at Scene 2');
+  // An imported picture alone does not narrow anything; a removed target is not named.
+  assert.equal(label(headerScope({ ...base, composer: { ...empty, images: [uploadImage], targets: [{ kind: 'shot', id: 'gone' }] } })), 'Scene 2');
+  const zhScope = headerScope({ ...base, composer: { ...empty, targets: [{ kind: 'scene', id: sceneId(1) }], images: [keyframe21] } });
+  assert.deepEqual(zhScope.labels.map(zh), ['第 1 场', '2.1']);
 });
 
 test('sending pictures through the store: the fixture Codex Director takes them; the scripted one refuses at the composer', async t => {

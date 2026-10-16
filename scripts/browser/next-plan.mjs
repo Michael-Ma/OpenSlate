@@ -299,8 +299,10 @@ export const scenarios = [
       await page.click(`[data-act="point-scene"][data-scene="${scene(2)}"]`);
       await expectText(page, ".composer", /@Scene 2|Scene 2/);
       await expectText(page, ".toast", /Pointing the Director at Scene 2\./);
+      // The header names what the message now points at, as the composer's chip does (with nothing pointed at it
+      // follows the view: "Whole film" in Plan).
+      await expectText(page, ".dir-head .scene", /^Points at Scene 2$/);
       // The Director's "Open 2.3" stays in Plan and brings the row into view (P5-DESIGN shell item 9).
-      await expectText(page, ".dir-head .scene", /^Whole film$/);
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.locator('.thread [data-act="note-open"]').filter({ hasText: "Open 2.3" }).first().click();
       await page.waitForSelector(`.shot-row.flash[data-shot="${shot("2.3")}"]`);

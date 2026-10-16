@@ -41,17 +41,43 @@ export interface ModeLine {
   message: Msg;
 }
 
+export interface ModeContext {
+  /** The thread already says the Director's error, under the request whose turn failed (errorInThread). */
+  errorShown?: boolean;
+  /**
+   * Nothing in the film changes from the Director here: the sample film's scripted Director, with no unfinished edit
+   * holding shots on screen. The studio's own scripted Director can change the film, so it only says its replies are scripted.
+   */
+  filmUnchanged?: boolean;
+}
+
 /**
  * What the header says about the Director runtime (DC-15). The scripted Director says its replies are
- * canned; an unconnected one says where to set it up; an error says what to do. A working real Director
- * needs no line.
+ * canned; an unconnected one says where to set it up; an error says what to do, once: when the thread already marks
+ * the failed turn in place, the header leaves it to that marker. A working real Director needs no line.
  */
-export function modeLine(director: DirectorStatus | null, loadError: string | undefined): ModeLine | null {
+export function modeLine(director: DirectorStatus | null, loadError: string | undefined, context: ModeContext = {}): ModeLine | null {
   if (!director) return loadError ? { tone: "attention", message: msg("director.unreachable") } : null;
-  if (director.status === "error") return { tone: "attention", message: msg("director.error") };
+  if (director.status === "error" && !context.errorShown) return { tone: "attention", message: msg("director.error") };
   if (director.mode === "offline" || director.status === "not_connected") return { tone: "attention", message: msg("director.offline") };
-  if (director.mode === "fake") return { tone: "info", message: msg("director.mode.fake") };
+  if (director.mode === "fake") return { tone: "info", message: msg(context.filmUnchanged ? "director.mode.fake" : "director.mode.scripted") };
   return null;
+}
+
+/**
+ * The tag under a scripted reply. Only the sample film's scripted Director never changes the film; the studio's own
+ * scripted Director can (it makes shots and keyframes), so there the tag says only that the reply is scripted.
+ */
+export const scriptedTag = (mode: "live" | "fixture"): Msg => msg(mode === "fixture" ? "director.scripted_reply" : "director.scripted_reply_plain");
+
+/**
+ * The Director's error is already said in the thread: its current turn failed and that request has an entry, whose
+ * "This reply needs attention" marker carries the reason.
+ */
+export function errorInThread(snapshot: ProjectSnapshot | null, director: DirectorStatus | null): boolean {
+  const requestId = director?.turn?.requestId ?? director?.activeRequestId;
+  if (director?.status !== "error" || !requestId) return false;
+  return failedTurns(snapshot?.turns, director).has(requestId) && !!snapshot?.conversation?.some((entry) => entry.requestId === requestId);
 }
 
 // ---- labels -------------------------------------------------------------------
@@ -65,6 +91,31 @@ export function scopeLabel(overview: GenerationOverview | null, id: string): Msg
   if (shot) return msg("director.target.shot", { shot: shot.label });
   return null;
 }
+
+/**
+ * The header's label. Once the composer points somewhere (its @ targets, then the shots whose keyframes it shows, in
+ * the order the message sends them), it names that, so the header and the composer's scope line say the same thing;
+ * otherwise it follows the view: the scene in Keyframes, the whole film elsewhere (P5 shell item 9).
+ */
+export function headerScope(input: {
+  hasFilm: boolean;
+  /** The scene the Keyframes view shows; null in every other view. */
+  sceneOrdinal: number | null;
+  composer: ComposerState;
+  overview: GenerationOverview | null;
+}): HeaderScope {
+  if (!input.hasFilm) return { kind: "view", label: msg("director.scope.no_film") };
+  const targets = input.composer.targets.flatMap((target) => {
+    const label = scopeLabel(input.overview, target.id);
+    return label ? [label] : [];
+  });
+  const shown = keyframeScope(input.composer, input.overview).map((shot) => msg("director.target.shot", { shot }));
+  if (targets.length || shown.length) return { kind: "message", labels: [...targets, ...shown] };
+  return { kind: "view", label: input.sceneOrdinal !== null ? msg("director.target.scene", { scene: input.sceneOrdinal }) : msg("director.scope.film") };
+}
+
+/** view: what the view shows; message: what the next message points at ("Points at 2.1 and 2.3"), each label a message. */
+export type HeaderScope = { kind: "view"; label: Msg } | { kind: "message"; labels: Msg[] };
 
 // ---- time -------------------------------------------------------------------
 
