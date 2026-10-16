@@ -110,6 +110,43 @@ async function lanesReadable(page) {
   expect(!problems.length, problems.join("; "));
 }
 
+/**
+ * The readiness table lists the shots that stop the export first (storyboard order inside each group), and its
+ * "n more" counts exactly the rows whose words are not all in view above it.
+ */
+async function checksCounted(page) {
+  const table = await page.evaluate(() => {
+    const words = (row) => {
+      const range = document.createRange();
+      let bottom = -Infinity;
+      for (const cell of row.children) { range.selectNodeContents(cell); bottom = Math.max(bottom, range.getBoundingClientRect().bottom); }
+      return bottom;
+    };
+    const rows = [...document.querySelectorAll(".export .checks [role='row'][data-shot]")];
+    const more = document.querySelector("[data-act='checks-more']");
+    const fold = more ? more.getBoundingClientRect().top : document.querySelector(".export .checks").getBoundingClientRect().bottom;
+    return {
+      order: rows.map((row) => `${row.querySelector("[role='rowheader']").textContent}${row.dataset.blocks ? "!" : ""}`),
+      hidden: rows.filter((row) => words(row) > fold + 0.5).length,
+      count: more ? Number(/\d+/.exec(more.textContent)?.[0]) : 0,
+    };
+  });
+  const blocking = table.order.filter((label) => label.endsWith("!"));
+  expect(table.order.slice(0, blocking.length).join() === blocking.join(), `The rows that stop the export are not listed first: ${table.order}`);
+  expect(table.count === table.hidden, `The table says ${table.count} more, but ${table.hidden} rows are out of view: ${table.order}`);
+  return table;
+}
+
+/** No sliver of a row shows under the readiness table's sticky header: a row is all under it or all below it. */
+async function noSliverUnderHeader(page) {
+  const slivers = await page.evaluate(() => {
+    const head = document.querySelector(".export .checks .h").getBoundingClientRect().bottom + 1;
+    return [...document.querySelectorAll(".export .checks [role='rowheader']")].map((cell) => ({ label: cell.textContent, ...cell.getBoundingClientRect().toJSON() }))
+      .filter((row) => row.top < head - 0.5 && row.bottom > head + 0.5).map((row) => `${row.label} shows ${Math.round((row.bottom - head) * 10) / 10}px`);
+  });
+  expect(!slivers.length, `A row shows a sliver under the table's header: ${slivers}`);
+}
+
 /** The element is inside the viewport (after any scrolling the view did by itself). */
 async function inView(page, selector) {
   const value = await box(page, selector);
@@ -189,20 +226,25 @@ export const scenarios = [
       const unsettled = await page.locator(`.vblk[data-shot='${shot("2.3")}'] .vtext`).evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
       expect(unsettled.scroll <= unsettled.client + 1, `2.3's narration state is cut short: ${JSON.stringify(unsettled)}`);
       await lanesReadable(page);
-      // The readiness table says that more rows follow, and scrolls to the shots the summary names.
+      // The readiness table lists the shots that stop the export first, so the ones the summary names are in view, and
+      // says how many rows follow; showing more scrolls whole rows up under the header.
       await expectText(page, "[data-act='checks-more']", /^↓\s+\d more$/);
       expect((await page.getAttribute("[data-act='checks-more']", "aria-label"))?.startsWith("Show "), "The more-rows count has no name");
-      await page.click("[data-act='checks-more']");
-      await page.waitForFunction(() => !document.querySelector("[data-act='checks-more']"), null, { timeout: 4000 })
-        .catch(() => { throw new Error("Showing more rows did not reach the end of the table"); });
+      const listed = await checksCounted(page);
+      expect(listed.order.slice(0, 5).join() === "2.1!,2.2!,2.3!,3.1!,3.2!", `The shots that stop the export are not first, in storyboard order: ${listed.order}`);
       const named = await page.evaluate(() => {
-        const table = document.querySelector(".export .checks").getBoundingClientRect();
-        const head = document.querySelector(".export .checks .h").getBoundingClientRect();
-        const row = document.querySelector(".checks [data-shot='shot-3-2'] [role='rowheader']").getBoundingClientRect();
-        return { inView: row.top >= head.bottom - 1 && row.bottom <= table.bottom + 1, headTop: head.top - table.top };
+        const fold = document.querySelector("[data-act='checks-more']").getBoundingClientRect().top;
+        return ["shot-2-3", "shot-3-2"].every((id) => document.querySelector(`.checks [data-shot='${id}'] [role='rowheader']`).getBoundingClientRect().bottom <= fold + 1);
       });
-      expect(named.inView, "3.2, which the summary names, is not in view after showing more rows");
-      expect(named.headTop <= 2, `The table's header scrolled away: ${named.headTop}px`);
+      expect(named, "2.3 and 3.2, which the summary names, are not in view");
+      for (let press = 0; press < 8 && await page.locator("[data-act='checks-more']").count(); press++) {
+        await page.click("[data-act='checks-more']");
+        await page.waitForTimeout(500);
+        await noSliverUnderHeader(page);
+      }
+      expect(!(await page.locator("[data-act='checks-more']").count()), "Showing more rows never reached the end of the table");
+      const headTop = await page.evaluate(() => document.querySelector(".export .checks .h").getBoundingClientRect().top - document.querySelector(".export .checks").getBoundingClientRect().top);
+      expect(headTop <= 2, `The table's header scrolled away: ${headTop}px`);
       await page.locator(".export .checks").evaluate((el) => { el.scrollTop = 0; });
       expect((await page.locator(`.vblk[data-shot='${shot("1.2")}']`).getAttribute("data-state")) === "placed", "1.2's settled line is not placed");
       expect(await page.locator(`.blk.kfonly[data-shot='${shot("2.1")}']`).count() === 1, "2.1 is not drawn as keyframe only");
@@ -488,8 +530,18 @@ export const scenarios = [
       await lanesReadable(page);
       const size = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, viewport: innerHeight }));
       expect(size.height <= size.viewport, `The page scrolls: ${size.height}px tall in ${size.viewport}px`);
+      await checksCounted(page);
+      // Wherever the rows come to rest, none shows a sliver under the header: part way, and at the end.
+      for (const top of [7, 13, 30]) {
+        await page.locator(".export .checks").evaluate((el, value) => { el.scrollTop = value; }, top);
+        await page.waitForTimeout(250);
+        await noSliverUnderHeader(page);
+        await checksCounted(page);
+      }
       await page.locator(".export .checks").evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      await expectText(page, `.checks [data-shot='shot-6-4']`, /6\.4\s+no clip\s+no line/);
+      await page.waitForTimeout(250);
+      await noSliverUnderHeader(page);
+      await expectText(page, `.checks [data-shot='shot-1-3']`, /1\.3\s+✓ clip\s+no line/);
       await screenshot(page, "long-1440");
     },
   },
@@ -500,6 +552,9 @@ export const scenarios = [
     async run({ page }) {
       await openFilm(page);
       await readableChecks(page, { scrolls: true });
+      // Only two rows fit: they are shots that stop the export, and the count is the rows below them.
+      const short = await checksCounted(page);
+      expect(short.count === 6 && short.order[0] === "2.1!", `At 1280 x 720 the table shows ${short.order.slice(0, 8 - short.count)} and counts ${short.count} more`);
       await noSidewaysScroll(page, 1280);
       // The caption by the scrubber wraps under it rather than squeezing the track.
       const track = await box(page, "[data-act='scrub']");
@@ -525,6 +580,7 @@ export const scenarios = [
       await page.setViewportSize({ width: 1366, height: 768 });
       await page.waitForTimeout(300);
       await readableChecks(page, { scrolls: true });
+      await checksCounted(page);
       await page.locator(".film-work").evaluate((el) => { el.scrollTop = el.scrollHeight; });
       await inView(page, ".tl-tools");
       await noSidewaysScroll(page, 1366);

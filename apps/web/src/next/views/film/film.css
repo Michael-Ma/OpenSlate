@@ -104,16 +104,18 @@
  * A long film's rows scroll inside the table, so Export and its size line stay in view. Rows keep their height
  * (cells clip, so auto rows could shrink to nothing) and the table keeps its header and three rows. The header stays
  * put while the rows scroll; while rows are still below, a footer over the table's bottom counts them and scrolls to
- * them (it covers only rows it counts).
+ * them (it covers only rows it counts). Rows are a whole 19 px apart and come to rest on a row edge (the snap below,
+ * and an end padding the panel sets), so no sliver of a row ever shows under the header.
  */
 .film-work .export .checks-box { position: relative; display: flex; flex-direction: column; flex: 0 1 auto; min-height: 86px; }
-.film-work .export .checks { display: grid; grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; font-size: 12px; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); padding: 0 0 4px; flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+.film-work .export .checks { display: grid; grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; font-size: 12px; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); padding: 0 0 4px; flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--track) transparent; scroll-snap-type: y mandatory; scroll-padding-top: 25px; }
 .film-work .checks .checks-row { display: contents; }
-.film-work .checks [role="rowheader"], .film-work .checks [role="cell"], .film-work .checks [role="columnheader"] { padding: 1px 8px 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
-.film-work .checks .h { position: sticky; top: 0; z-index: 1; background: var(--surface); color: var(--muted); font-size: 11px; padding: 6px 8px 3px 0; box-shadow: 0 1px 0 var(--hairline); margin-bottom: 1px; }
+.film-work .checks [role="rowheader"], .film-work .checks [role="cell"], .film-work .checks [role="columnheader"] { padding: 1px 8px 1px 0; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.film-work .checks [role="rowheader"] { scroll-snap-align: start; }
+.film-work .checks .h { position: sticky; top: 0; z-index: 1; height: 24px; box-sizing: border-box; background: var(--surface); color: var(--muted); font-size: 11px; line-height: 14px; padding: 6px 8px 4px 0; box-shadow: 0 1px 0 var(--hairline); margin-bottom: 1px; }
 .film-work .checks b { font-weight: 700; color: var(--text); }
-.film-work .checks-more { position: absolute; left: 0; right: 0; bottom: 1px; height: 21px; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 4px; border: 0; border-top: 1px solid var(--hairline); border-radius: 0; background: var(--surface); color: var(--text-2); font-size: 11.5px; font-weight: 600; padding: 0 2px 0 0; }
-.film-work .checks-more::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 10px; background: linear-gradient(to bottom, transparent, var(--surface)); pointer-events: none; }
+/* The count's height follows the rows (at least 21 px): its hairline sits under the last whole row, its words at the bottom. */
+.film-work .checks-more { position: absolute; left: 0; right: 0; bottom: 1px; height: 21px; z-index: 2; display: flex; align-items: flex-end; justify-content: flex-end; gap: 4px; border: 0; border-top: 1px solid var(--hairline); border-radius: 0; background: var(--surface); color: var(--text-2); font-size: 11.5px; font-weight: 600; line-height: 14px; padding: 0 2px 3px 0; }
 .film-work .checks-more:hover { color: var(--text); }
 .film-work .checks-more:focus-visible { outline-offset: -2px; }
 .film-work .checks .y { color: var(--green); }

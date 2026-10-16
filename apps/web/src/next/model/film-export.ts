@@ -44,6 +44,8 @@ export interface ReadinessRow {
   label: string;
   clip: { text: Msg; tone: Tone };
   voice: { text: Msg; tone: Tone };
+  /** The shot stops the export: no current clip, or a voice that is not settled (the server's rule, readinessOf). */
+  blocks: boolean;
 }
 
 export function clipCell(shot: ShotOverview, demo: boolean): ReadinessRow["clip"] {
@@ -86,17 +88,53 @@ export function filmSeconds(overview: GenerationOverview): number {
 }
 
 export function readinessRows(overview: GenerationOverview, demo: boolean): ReadinessRow[] {
-  return orderedShots(overview).map((shot) => ({ shotId: shot.shotId, label: shot.label, clip: clipCell(shot, demo), voice: voiceCell(shot) }));
+  return orderedShots(overview).map((shot) => {
+    const clip = clipCell(shot, demo);
+    const voice = voiceCell(shot);
+    // A shot without a line has nothing to settle; any other voice that is not done stops the export.
+    return { shotId: shot.shotId, label: shot.label, clip, voice, blocks: clip.tone !== "ok" || (voice.tone !== "ok" && shot.narration.state !== "none") };
+  });
 }
 
 /**
- * How many rows of a scrolling table are still to come below what can be read: a row reaching past `visibleBottom`, or
- * into the `cover` px over its bottom edge (where the count is drawn), counts. Scrolled to the end, none does.
- * `bottoms` are the rows' bottom edges in the same coordinates.
+ * The table lists the shots that stop the export first, so the ones its summary names are in view on a short screen;
+ * each group keeps storyboard order.
+ */
+export function blockersFirst(rows: readonly ReadinessRow[]): ReadinessRow[] {
+  return [...rows.filter((row) => row.blocks), ...rows.filter((row) => !row.blocks)];
+}
+
+/**
+ * How many rows of a scrolling table are still to come below what can be read: a row whose words reach past
+ * `visibleBottom`, or into the `cover` px over its bottom edge (where the count is drawn), counts. Scrolled to the end,
+ * none does. `bottoms` are the bottom edges of the rows' words in the same coordinates, so a row whose words are all
+ * above the count is read, even when its box runs a pixel or two under it.
  */
 export function rowsBelow(bottoms: readonly number[], visibleBottom: number, cover = 0, atEnd = false): number {
   if (atEnd) return 0;
   return bottoms.filter((bottom) => bottom > visibleBottom - cover + 0.5).length;
+}
+
+/**
+ * How tall the count over a table's bottom is drawn: at least `cover`, and up to the top edge of the first row it
+ * counts (`tops` and `bottoms` are the rows' box tops and word bottoms), so a counted row is hidden whole rather than
+ * shown cut in half above it. Zero when nothing is below.
+ */
+export function coverHeight(tops: readonly number[], bottoms: readonly number[], visibleBottom: number, cover: number, atEnd = false): number {
+  if (atEnd) return 0;
+  const first = bottoms.findIndex((bottom) => bottom > visibleBottom - cover + 0.5);
+  return first < 0 ? 0 : Math.max(cover, visibleBottom - tops[first]!);
+}
+
+/**
+ * The bottom padding that lets a scrolling table's last scroll position land on a row edge, so no sliver of a row is
+ * left showing under its header there: the room left under the last whole row that fits in `visible` (the height below
+ * the header). With rows a whole `pitch` apart, every resting place is then a row edge. Null when every row fits.
+ */
+export function alignedEndPadding(visible: number, pitch: number, count: number): number | null {
+  if (pitch <= 0 || count * pitch <= visible + 0.5) return null;
+  const whole = Math.floor((visible + 0.5) / pitch);
+  return Math.max(0, visible - whole * pitch);
 }
 
 /** Why Export is off, from the server's blockers. Labels come from the overview; a list reads naturally per language. */
