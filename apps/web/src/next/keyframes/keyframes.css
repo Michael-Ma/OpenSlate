@@ -177,7 +177,9 @@
   .app[data-ui="next"] .work.kf .scene-head h1 { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .app[data-ui="next"] .work.kf .scene-head .line { flex: 1 0 auto; max-width: 100%; }
   .app[data-ui="next"] .work.kf .scene-pills { margin-left: 0; min-width: 0; max-width: 100%; flex: 0 1 auto; flex-wrap: wrap; row-gap: 6px; }
-  .app[data-ui="next"] .work.kf .scene-pills .pill { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A scene's title can be a whole sentence (the Director writes it): a pill stops at about 24 characters of it and
+     ends with "…"; its tooltip has it whole. */
+  .app[data-ui="next"] .work.kf .scene-pills .pill { max-width: min(100%, 22em); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 @media (min-width: 900px) and (max-width: 1099px) {
   /* Two shot cards at a time; the rest scroll into view inside the row. The edge that has more cards behind it

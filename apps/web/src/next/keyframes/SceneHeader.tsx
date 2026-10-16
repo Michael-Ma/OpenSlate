@@ -47,7 +47,7 @@ export function SceneHeader({ view, held, onScene }: { view: KeyframesView; held
             data-act="scene"
             data-scene={pill.sceneId}
             disabled={!!held && !pill.selected}
-            title={held && !pill.selected ? tm(held) : undefined}
+            title={held && !pill.selected ? tm(held) : words[index]}
             onClick={() => onScene(pill.sceneId)}
           >
             {words[index]}

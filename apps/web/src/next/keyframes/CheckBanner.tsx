@@ -36,6 +36,8 @@ interface Props {
   quiet?: Msg | null;
   /** Unanswered paid work or failed narration is a neutral warning, never a green all-clear check. */
   attention?: Msg | null;
+  /** No keyframe has been asked for yet: there is nothing to check, and a green all-clear would read as "done". */
+  idle?: boolean;
   onExtend(check: AppCheck): void;
   onKeep(check: AppCheck): void;
   onEditNarration(check: AppCheck): void;
@@ -48,7 +50,7 @@ interface Props {
  * the app found these, the Director did not recommend them. Each option is one free, undoable command, so each
  * follows the shell's server guard (off while offline or expired, with the reason).
  */
-export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, attention, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
+export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, attention, idle, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
   const { t, tm } = useI18n();
   const server = useGuarded("server");
 
@@ -84,6 +86,7 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, a
   }
 
   const first = checks[0];
+  if (!first && !attention && idle) return null;
   if (!first) {
     return (
       <div className="quiet" role="status" data-check={attention ? "attention" : "none"}>
