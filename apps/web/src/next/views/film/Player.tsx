@@ -148,8 +148,10 @@ function Clip({ shot, videoRef, onFailed }: { shot: FilmShot; videoRef: RefObjec
   failed.current = onFailed;
   // A clip that cannot be loaded falls back to its keyframe with the motion preview.
   useEffect(() => { if (source.status === "failed") failed.current(); }, [source.status]);
+  // Until it plays, a clip shows its keyframe (a clip's first frame can be black, and a loading one is empty).
+  const poster = useArtifactUrl(shot.keyframe);
   if (source.status !== "ready") return null;
-  return <video ref={videoRef} className="fv-clip" src={source.url} muted playsInline preload="auto" aria-hidden="true" onError={onFailed} />;
+  return <video ref={videoRef} className="fv-clip" src={source.url} poster={poster.status === "ready" ? poster.url : undefined} muted playsInline preload="auto" aria-hidden="true" onError={onFailed} />;
 }
 
 /** Loads an artifact into the shared cache and shows nothing. */

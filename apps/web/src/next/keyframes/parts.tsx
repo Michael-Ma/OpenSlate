@@ -22,7 +22,7 @@ export function StatusPill({ status, tone, reason }: { status: Msg; tone: CardTo
  * A verified picture from the shared artifact cache. Reports once the exact artifact has loaded and decoded,
  * which is what "Opened" is based on (plan item WA-9).
  */
-export function Picture({ artifact, alt, onDecoded }: { artifact: StudioArtifactRef; alt: string; onDecoded?(key: string): void }) {
+export function Picture({ artifact, alt, onDecoded }: { artifact: StudioArtifactRef; alt: string; onDecoded?(key: string, aspect: number | null): void }) {
   const { t } = useI18n();
   const source = useArtifactUrl(artifact);
   const key = artifactKey(artifact);
@@ -37,7 +37,7 @@ export function Picture({ artifact, alt, onDecoded }: { artifact: StudioArtifact
       draggable={false}
       onLoad={(event) => {
         const image = event.currentTarget;
-        const done = () => onDecoded?.(key);
+        const done = () => onDecoded?.(key, image.naturalWidth && image.naturalHeight ? image.naturalWidth / image.naturalHeight : null);
         if (typeof image.decode === "function") image.decode().then(done, done);
         else done();
       }}

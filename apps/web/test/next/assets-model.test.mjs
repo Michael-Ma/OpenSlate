@@ -230,3 +230,14 @@ test('the load queue hands out a few slots at a time, first come first served', 
   assert.deepEqual(granted, ['a', 'b', 'c', 'e', 'f'], 'both slots are free again');
   e(); f();
 });
+
+test("a clip longer than its shot says how much of it the film uses (from the first real run: 6.6 s for a 6 s shot)", () => {
+  const overview = lastFerryOverview();
+  const shot = overview.shots[shotId('1.1')];
+  const seconds = Math.round((shot.durationFrames / overview.fps) * 10) / 10;
+  const long = clip('1.1', 1, { durationSeconds: seconds + 0.6 });
+  const length = assetDetail(long, [long], overview, now, 'en').rows.find((row) => en(row.label) === 'Length');
+  assert.equal(en(length.sub), `The film uses ${seconds} s of it, the shot's length.`);
+  const exact = clip('1.1', 1, { durationSeconds: seconds });
+  assert.equal(assetDetail(exact, [exact], overview, now, 'en').rows.find((row) => en(row.label) === 'Length').sub, undefined);
+});

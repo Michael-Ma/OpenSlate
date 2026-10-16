@@ -54,6 +54,11 @@ test('a Chinese template drops its space before or after a value that is itself 
 test('the preview caption stops between framing and prompt in their own script', () => {
   assert.deepEqual(previewCaption('Wide', 'The empty harbour at dawn.'), { id: 'preview.caption', values: { framing: 'Wide', prompt: 'The empty harbour at dawn.' } });
   assert.deepEqual(previewCaption('近景', '售票员盖章。'), { id: 'preview.caption_cjk', values: { framing: '近景', prompt: '售票员盖章。' } });
+  // From the first real run: a framing that already ends in a stop gets no second one, and a framing written as a
+  // whole sentence is left to the inspector (the caption is the prompt alone).
+  assert.deepEqual(previewCaption('Close-up.', 'A white paper boat.'), { id: 'preview.caption_plain', values: { text: 'Close-up. A white paper boat.' } });
+  assert.deepEqual(previewCaption('Wide view of the puddle and surrounding wet pavement.', 'Wide view of a white paper boat.'), { id: 'preview.caption_plain', values: { text: 'Wide view of a white paper boat.' } });
+  assert.deepEqual(previewCaption('', 'A boat.'), { id: 'preview.caption_plain', values: { text: 'A boat.' } });
   const caption = (locale, framing, prompt) => translate(locale, previewCaption(framing, prompt).id, previewCaption(framing, prompt).values);
   assert.equal(caption('zh-CN', 'Wide', 'The empty harbour at dawn.'), 'Wide. The empty harbour at dawn.');
   assert.equal(caption('en', '近景', '售票员盖章。'), '近景。售票员盖章。');
