@@ -37,15 +37,16 @@
 .plan .input::placeholder,.plan .textarea::placeholder{color:var(--muted)}
 .plan .input[aria-invalid="true"]{border-color:var(--text-2)}
 .plan .hint{font-size:12px;color:var(--text-2);line-height:1.4}
-.plan .stepper{display:inline-flex;align-items:center;border:1px solid var(--track);border-radius:var(--r-pill);background:var(--raised);overflow:hidden;align-self:stretch}
-.plan .stepper button{border:0;background:none;width:30px;height:28px;font-weight:700;color:var(--text);font-size:14px}
+.plan .stepper{display:inline-flex;align-items:stretch;border:1px solid var(--track);border-radius:var(--r-pill);background:var(--raised);overflow:hidden;align-self:flex-start;height:36px}
+.plan .stepper button{border:0;background:none;width:32px;font-weight:700;color:var(--text);font-size:14px}
 .plan .stepper button:disabled{color:var(--muted)}
 .plan .stepper button:hover:not(:disabled){background:var(--raised-2)}
 .plan .stepper button:focus-visible{outline-offset:-2px;border-radius:var(--r-pill)}
-.plan .stepper output{min-width:46px;text-align:center;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.plan .stepper output{min-width:46px;display:grid;place-items:center;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
 
 /* ---------- 8.4 segmented control ---------- */
-.plan .segctl{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--hairline);background:var(--bar);border-radius:var(--r-pill);max-width:100%;align-self:stretch}
+/* Content-width (system.css), so the options never sit at one end of an empty track. */
+.plan .segctl{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--hairline);background:var(--bar);border-radius:var(--r-pill);max-width:100%;align-self:flex-start}
 .plan .segctl button{border:0;background:none;color:var(--text-2);font-weight:600;font-size:12.5px;padding:5px 12px;border-radius:var(--r-pill);white-space:nowrap}
 .plan .segctl button:hover{color:var(--text)}
 .plan .segctl button[aria-checked="true"]{background:var(--raised-2);color:var(--text)}
@@ -167,9 +168,13 @@
 
 /* ---------- the shot editor ---------- */
 .plan .shot-edit{display:grid;grid-template-columns:112px minmax(0,1fr);gap:14px;padding:14px 14px 14px 16px;border-top:1px solid var(--hairline);background:var(--bar)}
-.plan .form-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 168px;gap:10px 12px;align-items:end}
+/*
+ * Cells line up at the top, so a hint under one control (Length's range, the recording note) never pushes the
+ * labels beside it down. One-line inputs, the stepper and the segmented control share one height.
+ */
+.plan .form-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) 168px;gap:10px 12px;align-items:start}
 .plan .form-grid .wide{grid-column:1/-1}
-.plan .form-grid .len-hint{grid-column:3;margin-top:-6px}
+.plan .form-grid .input{height:36px}
 .plan .form-grid .narr{grid-column:span 2}
 .plan .edit-foot{display:flex;gap:8px;align-items:center;margin-top:2px;flex-wrap:wrap}
 
@@ -272,8 +277,7 @@
   .plan .shot-state{flex-direction:row;flex-wrap:wrap}
   .plan .shot-acts{grid-column:3;grid-row:1}
   .plan .form-grid{grid-template-columns:1fr 1fr}
-  .plan .form-grid .len,.plan .form-grid .len-hint,.plan .form-grid .narr{grid-column:1/-1}
-  .plan .form-grid .len-hint{margin-top:0}
+  .plan .form-grid .len,.plan .form-grid .motion,.plan .form-grid .narr{grid-column:1/-1}
 }
 
 /* ---------- phone ---------- */
@@ -293,9 +297,9 @@
   .plan .shot-acts{grid-column:1/-1;justify-content:flex-end}
   .plan .shot-edit{grid-template-columns:1fr;padding:12px}
   .plan .shot-edit .thumb{display:none}
-  .plan .form-grid{grid-template-columns:1fr 1fr}
-  .plan .form-grid .len,.plan .form-grid .len-hint,.plan .form-grid .narr{grid-column:1/-1}
-  .plan .form-grid .len-hint{margin-top:0}
+  /* The editor fields stack (P5-DESIGN, phone). */
+  .plan .form-grid{grid-template-columns:minmax(0,1fr)}
+  .plan .form-grid .narr{grid-column:1/-1}
   .plan .prompts-pair{grid-template-columns:1fr}
   .plan .pending{flex-wrap:wrap}
   .plan .add-row{padding:10px 12px}
