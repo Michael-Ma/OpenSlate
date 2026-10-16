@@ -462,6 +462,15 @@ export const scenarios = [
       expect(elapsed === 1, `The elapsed time breaks across lines (${elapsed} pieces)`);
       expect(await page.locator("[data-act='elapsed']").evaluate((el) => !el.closest("[role='status'], [aria-live]:not([aria-live='off'])")), "The elapsed time is inside a live region and is announced every second");
       await expectText(page, ".export .rendering [role='status']", /^Rendering on this computer$/);
+      // The line wraps in the 300 px panel: its separator never ends or starts a line.
+      await page.waitForTimeout(100);
+      const dangling = await page.locator(".export .rendering-line > .sep").evaluate((sep) => {
+        if (getComputedStyle(sep).visibility === "hidden") return false;
+        const own = sep.getBoundingClientRect();
+        const same = (el) => { const r = el.getBoundingClientRect(); return r.top < own.bottom - 1 && own.top < r.bottom - 1; };
+        return !same(sep.previousElementSibling) || !same(sep.nextElementSibling);
+      });
+      expect(!dangling, "The rendering line's separator ends or starts a line");
       expect(await page.locator(".export [role='progressbar']").count() === 1, "No progress bar while rendering");
       expect(!/%/.test(await page.locator(".export").innerText()), "The export shows a percentage it does not have");
       await screenshot(page, "rendering-1440");

@@ -4,7 +4,7 @@ import { useI18n } from "../../i18n/I18n.tsx";
 import { EXPORT_SIZE, MAX_FILM_SECONDS, blockersFirst, elapsedSeconds, filmSeconds, panelState, readinessRows, unavailableMsg, whenMsg, whyNotReady, type MediaView } from "../../model/film-export.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { useNow, useReducedMotion } from "./clock-hooks.ts";
-import { useRowsBelow } from "./layout-hooks.ts";
+import { useLineSeparators, useRowsBelow } from "./layout-hooks.ts";
 
 /**
  * The least the "n more" footer covers of a readiness table cut short (film.css .checks-more), in px: it reaches up
@@ -50,6 +50,8 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
   const rows = state.kind === "idle" ? blockersFirst(readinessRows(overview, demo)) : [];
   // A long film's rows scroll inside the table: say how many are still below, and scroll to them on a press.
   const [table, below, showMore] = useRowsBelow("[role='row'][data-shot]", CHECKS_COVER_PX, rows.map((row) => row.shotId).join(), reduced);
+  // The rendering line wraps in a narrow panel: its separator never ends or starts a line.
+  const renderingLine = useLineSeparators(":scope > .sep");
 
   let body;
   if (state.kind === "rendering") {
@@ -59,7 +61,9 @@ export function ExportPanel({ overview, view, media, error, writable, busy, onEx
         <div className="big">{t("film.export.exporting")}<small>{t(state.record.demo ? "film.export.exporting_sub_demo" : "film.export.exporting_sub", { seconds, ...size })}</small></div>
         <div className="rendering">
           {/* Only the words are a live region: the elapsed time changes every second and is read on demand. */}
-          <span><span role="status">{t("film.export.rendering")}</span> · <b className="elapsed" data-act="elapsed">{t("film.export.elapsed", { elapsed: formatClock(elapsedSeconds(state.record.startedAt, now)) })}</b></span>
+          <span className="rendering-line" ref={renderingLine}>
+            <span role="status">{t("film.export.rendering")}</span> <span className="sep" aria-hidden="true">·</span> <b className="elapsed" data-act="elapsed">{t("film.export.elapsed", { elapsed: formatClock(elapsedSeconds(state.record.startedAt, now)) })}</b>
+          </span>
           <div className="progress indet" role="progressbar" aria-label={t("film.export.progress")}><i /></div>
           <span>{t("film.export.no_percent")}</span>
         </div>
