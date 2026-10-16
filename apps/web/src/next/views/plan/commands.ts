@@ -55,12 +55,12 @@ export async function storyboard(store: StudioStore, pressId: string, input: Sto
  * How a press ended. `lost`: the studio never answered (no reply, a timeout, a server failure), so the change may or
  * may not have been made. Its `resend` sends the very same request again: the store keeps the key and body of an
  * unanswered press and resends them when the same press repeats with the same identity, so the server replays its
- * receipt instead of applying it twice.
+ * receipt instead of applying it twice. `pressId` names the press, so its notice is its own.
  */
 export type Outcome<T> =
   | { kind: "done"; receipt: T }
   | { kind: "refused" }
-  | { kind: "lost"; resend(): Promise<Outcome<T>> };
+  | { kind: "lost"; pressId: string; resend(): Promise<Outcome<T>> };
 
 /**
  * Run a press and say how it ended. `pressId` is the store's press id; `run` must build the same request each
@@ -72,7 +72,7 @@ export async function settle<T>(store: StudioStore, pressId: string, run: () => 
   if (receipt !== undefined) return { kind: "done", receipt };
   if (!store.unconfirmed(pressId)) return { kind: "refused" };
   store.dismissToast();
-  return { kind: "lost", resend: () => settle(store, pressId, run) };
+  return { kind: "lost", pressId, resend: () => settle(store, pressId, run) };
 }
 
 /** One storyboard command, with the head version fixed now so a resend is the same request. */

@@ -30,11 +30,12 @@ import { DECLINE, type FixtureRoute } from "./types.ts";
  * Presets (`?plan=`): `lost` loses the reply to the first storyboard command (it is applied; the same request sent
  * again is answered with the same receipt, as the server's request identity does). `director-edits` has the
  * Director working alongside: 3 s after the Plan opens it rewrites 1.2's purpose and motion and the story, as if it
- * had changed them while the person had a draft open.
+ * had changed them while the person had a draft open. `director-moves`: 3 s after the Plan opens it rewrites 1.2's
+ * purpose and moves 1.2 to the start of Scene 2 (it becomes 2.1), and deletes 3.1, as if another window had.
  */
 
 export const IMPORT_READ_MS = 2600;
-/** How long after the Plan opens the Director's alongside edit lands in the `director-edits` preset. */
+/** How long after the Plan opens the Director's alongside edit lands in the `director-edits` and `director-moves` presets. */
 export const DIRECTOR_EDIT_MS = 3000;
 
 /** The `?plan=` preset of the page (null in tests and normal use). */
@@ -74,6 +75,8 @@ interface PlanState {
   replies: Map<string, unknown>;
   /** The Director's alongside edit: not scheduled, scheduled, or done. */
   directorEdit: "off" | "armed" | "scheduled";
+  /** Which alongside edit: rewrite 1.2 and the story, or move 1.2 to another scene and delete 3.1. */
+  alongside: "edits" | "moves";
 }
 
 const states = new WeakMap<FixtureWorld, PlanState>();
@@ -81,7 +84,8 @@ function state(world: FixtureWorld): PlanState {
   let value = states.get(world);
   if (!value) {
     const preset = planPreset();
-    value = { serial: 0, latest: null, known: new Set(), pending: null, loseNext: preset === "lost", replies: new Map(), directorEdit: preset === "director-edits" ? "armed" : "off" };
+    const alongside = preset === "director-moves" ? "moves" : "edits";
+    value = { serial: 0, latest: null, known: new Set(), pending: null, loseNext: preset === "lost", replies: new Map(), directorEdit: preset === "director-edits" || preset === "director-moves" ? "armed" : "off", alongside };
     states.set(world, value);
   }
   return value;
@@ -408,14 +412,7 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
     case "deleteShot": {
       const shot = world.overview.shots[body.id ?? ""];
       if (!shot) throw new ApiError("NOT_FOUND", 404);
-      change(world, (overview, project) => {
-        const shots = { ...overview.shots };
-        delete shots[shot.shotId];
-        return {
-          overview: { ...overview, shots, scenes: overview.scenes.map((s) => ({ ...s, shotIds: s.shotIds.filter((id) => id !== shot.shotId) })) },
-          project: { ...project, shots: project.shots.filter((s) => s.id !== shot.shotId) },
-        };
-      });
+      deleteShotIn(world, shot.shotId);
       break;
     }
     case "moveShot": {
@@ -423,19 +420,7 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
       const target = world.overview.scenes.find((s) => s.sceneId === body.sceneId);
       if (!shot || !target) throw new ApiError("NOT_FOUND", 404);
       if (body.beforeId && (body.beforeId === shot.shotId || !target.shotIds.includes(body.beforeId))) throw new ApiError("VALIDATION_ERROR", 400);
-      change(world, (overview, project) => ({
-        overview: {
-          ...overview,
-          scenes: overview.scenes.map((s) => {
-            const ids = s.shotIds.filter((id) => id !== shot.shotId);
-            if (s.sceneId !== target.sceneId) return { ...s, shotIds: ids };
-            const at = body.beforeId ? ids.indexOf(body.beforeId) : ids.length;
-            ids.splice(at, 0, shot.shotId);
-            return { ...s, shotIds: ids };
-          }),
-        },
-        project,
-      }));
+      moveShotIn(world, shot.shotId, target.sceneId, body.beforeId);
       break;
     }
     case "shot": {
@@ -490,6 +475,35 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
   return commit(world, "plan", commandId, before);
 }
 
+/** Delete a shot from the outline (its media stays in Assets), as one change. */
+function deleteShotIn(world: FixtureWorld, shotId: string): void {
+  change(world, (overview, project) => {
+    const shots = { ...overview.shots };
+    delete shots[shotId];
+    return {
+      overview: { ...overview, shots, scenes: overview.scenes.map((s) => ({ ...s, shotIds: s.shotIds.filter((id) => id !== shotId) })) },
+      project: { ...project, shots: project.shots.filter((s) => s.id !== shotId) },
+    };
+  });
+}
+
+/** Move a shot before `beforeId` in a scene (or to its end), as one change. */
+function moveShotIn(world: FixtureWorld, shotId: string, sceneId: string, beforeId: string | undefined): void {
+  change(world, (overview, project) => ({
+    overview: {
+      ...overview,
+      scenes: overview.scenes.map((s) => {
+        const ids = s.shotIds.filter((id) => id !== shotId);
+        if (s.sceneId !== sceneId) return { ...s, shotIds: ids };
+        const at = beforeId ? ids.indexOf(beforeId) : ids.length;
+        ids.splice(at, 0, shotId);
+        return { ...s, shotIds: ids };
+      }),
+    },
+    project,
+  }));
+}
+
 /** One-step Undo: only the latest command, only while nothing changed since (no new edit, no paid work). */
 function undo(world: FixtureWorld, body: Body): unknown {
   const plan = state(world);
@@ -542,11 +556,26 @@ function proposal(world: FixtureWorld, id: string): Project {
 /**
  * The `director-edits` preset: the Director, working alongside, rewrites 1.2's purpose and motion and the story a
  * moment after the Plan opens (its first read of /plan-imports), as a new head version with a line in the thread.
+ * `director-moves`: it rewrites 1.2's purpose, moves 1.2 to the start of Scene 2 and deletes 3.1 instead.
  */
 function armDirectorEdit(world: FixtureWorld): void {
   const plan = state(world);
   if (plan.directorEdit !== "armed") return;
   plan.directorEdit = "scheduled";
+  if (plan.alongside === "moves") {
+    world.later(DIRECTOR_EDIT_MS, (w) => {
+      const byLabel = (label: string) => Object.values(w.overview.shots).find((item) => item.label === label);
+      const moved = byLabel("1.2");
+      const deleted = byLabel("3.1");
+      const second = w.overview.scenes[1];
+      if (moved) applyShotFields(w, moved, { purpose: "Mara counts out her coins for the last ticket." });
+      if (moved && second) moveShotIn(w, moved.shotId, second.sceneId, second.shotIds[0]);
+      if (deleted) deleteShotIn(w, deleted.shotId);
+      const note: ConversationEntry = { id: "director-alongside", role: "assistant", text: "I moved the ticket purchase into the harbour scene and cut the departure's first shot.", requestId: "director-alongside", at: new Date().toISOString() };
+      w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), note] };
+    });
+    return;
+  }
   world.later(DIRECTOR_EDIT_MS, (w) => {
     const shot = Object.values(w.overview.shots).find((item) => item.label === "1.2");
     if (shot) applyShotFields(w, shot, { purpose: "Mara counts out her coins for the last ticket.", motion: "Slow push-in" });

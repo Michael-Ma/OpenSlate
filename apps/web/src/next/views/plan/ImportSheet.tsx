@@ -19,6 +19,7 @@ interface Props {
   /** A send, confirm or discard whose reply was lost. */
   unconfirmed: Unconfirmed | null;
   onRetry(): void;
+  onDismiss(): void;
   onClose(): void;
   onSend(name: string, text: string): void;
   onDiscard(): void;
@@ -50,8 +51,8 @@ function Source({ pending }: { pending: PendingImport }) {
 }
 
 /** A lost reply in the sheet: the modal covers the view's own strip, so it is said here. */
-function SheetUnconfirmed({ unconfirmed, busy, onRetry }: Pick<Props, "unconfirmed" | "busy" | "onRetry">) {
-  return unconfirmed ? <div className="sheet-note"><UnconfirmedNotice notice={unconfirmed} busy={busy} strip onRetry={onRetry} /></div> : null;
+function SheetUnconfirmed({ unconfirmed, busy, onRetry, onDismiss }: Pick<Props, "unconfirmed" | "busy" | "onRetry" | "onDismiss">) {
+  return unconfirmed ? <div className="sheet-note"><UnconfirmedNotice notice={unconfirmed} busy={busy} strip onRetry={onRetry} onDismiss={onDismiss} /></div> : null;
 }
 
 /**

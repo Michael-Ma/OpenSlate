@@ -355,6 +355,65 @@ test('a lost reply: the change is made, and the same request sent again is answe
   }
 });
 
+test('retrying a lost reply resends the very same request: the same Idempotency-Key and body, and a new press gets a new key', async () => {
+  const { StudioStore } = await import('../../src/next/store/store.ts');
+  const { storyboardOutcome } = await import('../../src/next/views/plan/commands.ts');
+  const port = new FixturePort();
+  const sent = [];
+  // What reaches the studio: the key and the body of every storyboard POST.
+  const client = {
+    get closed() { return port.closed; },
+    events: port.events.bind(port),
+    request(path, options) {
+      if (options?.method === 'POST' && path.endsWith('/storyboard')) sent.push({ key: options.key, body: JSON.stringify(options.body) });
+      return port.request(path, options);
+    },
+  };
+  let n = 0;
+  const store = new StudioStore({ client, storage: null, newKey: () => `key-${++n}` });
+  try {
+    await store.start();
+    loseNextReply(port.world);
+    const pressId = `moveScene:${sceneId(3)}`;
+    const lost = await storyboardOutcome(store, pressId, { kind: 'moveScene', id: sceneId(3), beforeId: sceneId(2) });
+    assert.equal(lost.kind, 'lost');
+    assert.equal(lost.pressId, `plan:${pressId}`, 'the outcome names its press, so its notice is its own');
+    // The studio was read again meanwhile (the head moved): the resend must not rebuild the request from it.
+    await store.refresh();
+    const again = await lost.resend();
+    assert.equal(again.kind, 'done');
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].key, sent[0].key, 'the same Idempotency-Key');
+    assert.equal(sent[1].body, sent[0].body, 'the same body, expectedHeadVersion included');
+    assert.equal(port.world.snapshot.project.headVersion, 13, 'applied once');
+    // Answered: the next press of the same thing is a new request with a new key.
+    await storyboardOutcome(store, pressId, { kind: 'moveScene', id: sceneId(3), beforeId: sceneId(1) });
+    assert.notEqual(sent[2].key, sent[0].key);
+  } finally {
+    store.stop();
+    port.close();
+  }
+});
+
+test("the director-moves preset: 1.2 is rewritten and moved to the start of Scene 2, and 3.1 is deleted", () => {
+  const location = globalThis.location;
+  globalThis.location = { search: '?plan=director-moves' };
+  try {
+    const w = world();
+    call(w, 'GET', '/plan-imports');
+    w.advance(DIRECTOR_EDIT_MS);
+    const moved = shot(w, shotId('1.2'));
+    assert.equal(moved.purpose, 'Mara counts out her coins for the last ticket.');
+    assert.equal(moved.sceneId, sceneId(2));
+    assert.equal(moved.label, '2.1');
+    assert.equal(shot(w, shotId('3.1')), undefined);
+    assert.ok(!w.snapshot.project.shots.some((row) => row.id === shotId('3.1')));
+    assert.equal(w.snapshot.project.shots.find((row) => row.id === shotId('1.2')).sceneId, sceneId(2));
+  } finally {
+    globalThis.location = location;
+  }
+});
+
 test("the director-edits preset: the Director rewrites 1.2's purpose and motion and the story a moment after the Plan opens", () => {
   const w = world();
   // Off unless the preset is set; the preset arms it, the Plan's first read schedules it.
