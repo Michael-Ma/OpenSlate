@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, separatorShown, filmMusic, musicSpan, musicOn, musicLostAt,
+  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, separatorShown, wordsCut, filmMusic, musicSpan, musicOn, musicLostAt,
   lengthLimits, lengthEdit, moveEdit, musicStartEdit, musicGainEdit, musicMuteEdit, musicChoiceEdit, editPressId, soundtrackOf, lengthToast,
 } from '../../src/next/model/film.ts';
 import { FilmClock } from '../../src/next/model/film-clock.ts';
@@ -86,6 +86,25 @@ test('a separator in the tool row never ends or starts a line', () => {
   assert.equal(separatorShown(line1, { top: 145, bottom: 165 }, line2), false, 'it wrapped itself: it would start line 2');
   assert.equal(separatorShown(null, sep, line1), false);
   assert.equal(separatorShown({ top: 100, bottom: 160 }, sep, line1), true, 'a tall item beside it is on the same line');
+});
+
+test('a block\'s state words that do not fit are cut; its mark says the same in one sign', () => {
+  assert.equal(wordsCut({ scrollWidth: 30, clientWidth: 30, scrollHeight: 25, clientHeight: 25 }), false);
+  assert.equal(wordsCut({ scrollWidth: 30.5, clientWidth: 30, scrollHeight: 25.8, clientHeight: 25 }), false, 'a pixel of rounding is not a cut');
+  assert.equal(wordsCut({ scrollWidth: 30, clientWidth: 30, scrollHeight: 38, clientHeight: 25 }), true, 'a third line under the clamp');
+  assert.equal(wordsCut({ scrollWidth: 44, clientWidth: 30, scrollHeight: 25, clientHeight: 25 }), true, 'a word wider than the block');
+  const overview = lastFerryOverview();
+  overview.shots[shotId('1.1')].video = { state: 'failed', takeCount: 1, failure: { code: 'X', technical: true, retryAllowed: true, autoRetriesLeft: 0, charged: true, at: '' } };
+  overview.shots[shotId('1.2')].video = { state: 'no_answer', takeCount: 1 };
+  overview.shots[shotId('1.3')].video = { state: 'running', takeCount: 1 };
+  const tl = filmTimeline(overview);
+  assert.deepEqual(tl.shots.map(s => s.mark), ['failed', 'no_answer', 'making', 'none', 'none', 'none', 'none', 'none']);
+  assert.deepEqual(tl.shots.map(s => en(s.lack)), ['failed', 'no answer', 'making clip', 'no clip', 'no clip', 'no clip', 'nothing yet', 'nothing yet'], 'the words stay the same');
+  // Lines: a placed line has no mark (its number stays); an unplaced one has its state's.
+  assert.deepEqual(filmTimeline(lastFerryOverview()).shots.filter(s => s.line).map(s => [s.label, s.line.mark]), [['1.2', null], ['2.3', 'too_long'], ['3.2', 'none']]);
+  const voices = lastFerryOverview();
+  voices.shots[shotId('3.2')].narration = { ...voices.shots[shotId('3.2')].narration, state: 'failed' };
+  assert.equal(filmTimeline(voices).shots.find(s => s.label === '3.2').line.mark, 'failed');
 });
 
 test('the music library reads every page without repeats', async () => {

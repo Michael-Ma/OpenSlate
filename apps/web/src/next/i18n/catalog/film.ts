@@ -150,6 +150,11 @@ export const filmMessages = {
   "film.line.making": { en: "making voice…", zh: "正在配音…" },
   "film.line.failed": { en: "voice failed", zh: "配音失败" },
   "film.line.no_answer": { en: "no answer", zh: "没有回应" },
+  // The same states, shortened for a block too narrow for the whole words (before they give way to a mark).
+  "film.line.too_long_short": { en: "{seconds}\u00a0s, too long", zh: "{seconds}\u00a0秒，太长" },
+  "film.line.no_voice_short": { en: "no voice", zh: "无配音" },
+  "film.line.making_short": { en: "making…", zh: "配音中…" },
+  "film.line.failed_short": { en: "failed", zh: "失败" },
   "film.line.title": { en: "“{text}” · {seconds} s", zh: "“{text}” · {seconds} 秒" },
   "film.line.title_state": { en: "{state} · “{text}”", zh: "{state} · “{text}”" },
   "film.music.block": { en: "{name} · {gain} dB", zh: "{name} · {gain} dB" },

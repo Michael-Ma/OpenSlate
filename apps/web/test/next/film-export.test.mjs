@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readinessOf, readinessRows, whyNotReady, panelState, lastExport, failureMsg, changeMsg, whenMsg, elapsedSeconds,
-  filmFingerprint, changedSince, unavailableMsg, musicMissing, rowsBelow, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
+  filmFingerprint, changedSince, unavailableMsg, musicMissing, rowsBelow, coverHeight, alignedEndPadding, blockersFirst, filmSeconds, EXPORT_SIZE, STALLED_AFTER_SECONDS,
 } from '../../src/next/model/film-export.ts';
 import { lastFerryOverview, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { translate, translateMsg } from '../../src/next/i18n/translate.ts';
@@ -69,6 +69,42 @@ test('a table cut short says how many rows are still below', () => {
   assert.equal(rowsBelow(bottoms, 80, 20), 3, 'so is a row under the fade and the count');
   assert.equal(rowsBelow(bottoms, 119, 20, true), 0, 'scrolled to the end, nothing is below');
   assert.equal(rowsBelow([], 50), 0);
+  // 1280 x 720: the second row's box runs 1 px under the count, but its words end above it, so it is read.
+  assert.equal(rowsBelow([259.5, 278.5, 297.5, 316.5], 301.8, 22), 2, 'a row whose words are all above the count is not counted');
+});
+
+test('the count over a cut table hides the first row it counts whole, never half of it', () => {
+  // Rows 19 px apart: tops 24, 43, 62, 81; their words end 2.25 px above each box bottom.
+  const tops = [24, 43, 62, 81];
+  const bottoms = tops.map(top => top + 16.75);
+  assert.equal(coverHeight(tops, bottoms, 84, 22), 22, 'the next row starts right at the count: the least cover');
+  assert.equal(coverHeight(tops, bottoms, 92, 22), 30, 'a row cut in half above the count: the count reaches up to its top');
+  assert.equal(coverHeight(tops, bottoms, 92, 22, true), 0, 'scrolled to the end, no count');
+  assert.equal(coverHeight(tops, bottoms, 200, 22), 0, 'every row in view');
+});
+
+test('a scrolling table\'s last scroll position lands on a row edge', () => {
+  // 20 rows 19 px apart under a 25 px header, in a table 170 px tall: 145 px of rows show, 7 whole rows and 12 px.
+  assert.equal(alignedEndPadding(145, 19, 20), 12);
+  const pad = alignedEndPadding(145, 19, 20);
+  const lastScroll = 25 + 20 * 19 + pad - 170;
+  assert.equal(lastScroll % 19, 0, 'the end is a whole number of rows down');
+  assert.equal(alignedEndPadding(145, 19, 7), null, 'every row fits: nothing scrolls');
+  assert.equal(alignedEndPadding(152, 19, 9), 0, 'the rows already end on an edge');
+  assert.equal(alignedEndPadding(100, 0, 9), null);
+});
+
+test('the shots that stop the export are listed first, each group in storyboard order', () => {
+  const rows = readinessRows(lastFerryOverview(), false);
+  assert.deepEqual(rows.map(r => `${r.label}${r.blocks ? '!' : ''}`), ['1.1', '1.2', '1.3', '2.1!', '2.2!', '2.3!', '3.1!', '3.2!']);
+  assert.deepEqual(blockersFirst(rows).map(r => r.label), ['2.1', '2.2', '2.3', '3.1', '3.2', '1.1', '1.2', '1.3']);
+  // The flag follows the server's rule: a clip made and a voice settled (or no line) does not block.
+  const voiceOnly = finished();
+  voiceOnly.shots[shotId('1.2')].narration = { state: 'text_only', text: 'x', estimatedSeconds: 1, fits: true };
+  assert.deepEqual(blockersFirst(readinessRows(voiceOnly, false)).map(r => r.label).slice(0, 2), ['1.2', '1.1']);
+  assert.deepEqual(readinessRows(finished(), false).filter(r => r.blocks), [], 'a ready film has nothing that blocks');
+  const blocked = new Set(readinessOf(lastFerryOverview(), false).blockers.map(b => b.shotId));
+  assert.deepEqual(rows.filter(r => r.blocks).map(r => r.shotId), rows.map(r => r.shotId).filter(id => blocked.has(id)), 'the same shots as the server\'s blockers');
 });
 
 test('per-shot rows: Clip and Voice columns, green only when done', () => {
