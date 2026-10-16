@@ -286,7 +286,6 @@ function FilmWorkspace() {
           media={mediaRes.data}
           error={exportsRes.error}
           writable={writable}
-          stopped={!!overview.stopped}
           busy={{ start: !!pending["export:start"], cancel: Object.keys(pending).some((k) => k.startsWith("export:cancel:")), recover: Object.keys(pending).some((k) => k.startsWith("export:recover:")) }}
           onExport={() => void startExport()}
           onCancel={(id) => void cancelExport(id)}

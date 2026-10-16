@@ -89,7 +89,6 @@ export const filmMessages = {
   "film.export.size": { en: "MP4 of the whole film", zh: "整部影片的 MP4" },
   "film.export.demo_stamp": { en: "Stamped Demo on every frame", zh: "每一帧都带“示例”水印" },
   "film.export.settle_first": { en: "Settle the shots above first", zh: "请先处理上面的镜头" },
-  "film.export.stopped": { en: "Stopped. Continue to export", zh: "已停止。继续后才能导出" },
   "film.export.exporting": { en: "Exporting…", zh: "正在导出…" },
   "film.export.exporting_sub": { en: "MP4 · {seconds} s · {width} × {height}", zh: "MP4 · {seconds} 秒 · {width} × {height}" },
   "film.export.exporting_sub_demo": { en: "MP4 · {seconds} s · stamped Demo", zh: "MP4 · {seconds} 秒 · 带“示例”水印" },

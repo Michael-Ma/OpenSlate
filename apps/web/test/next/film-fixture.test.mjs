@@ -181,12 +181,12 @@ test('presets: a demo film is stamped Demo; a failed export says so', () => {
   assert.equal(sceneId(3), failed.overview.scenes[2].sceneId);
 });
 
-test('presets: stopped refuses to start an export; a stalled export cannot be recovered', () => {
+test('presets: a stopped film still exports (local and free, card B12); a stalled export cannot be recovered', () => {
   const stopped = world();
   applyFilmPreset(stopped, 'stopped');
   assert.ok(stopped.overview.stopped);
   assert.equal(call(stopped, 'GET', '/exports').readiness.ready, true);
-  assert.throws(() => call(stopped, 'POST', '/exports', { expectedHeadVersion: head(stopped) }), refused('MEDIA_PAUSED'));
+  assert.equal(call(stopped, 'POST', '/exports', { expectedHeadVersion: head(stopped) }).state, 'rendering');
   const stalled = world();
   applyFilmPreset(stalled, 'stalled');
   const view = call(stalled, 'GET', '/exports');

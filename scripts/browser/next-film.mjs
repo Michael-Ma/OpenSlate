@@ -428,16 +428,13 @@ export const scenarios = [
     async run({ page }) {
       await openFilm(page);
       await expectText(page, ".export .big", /^Ready to export/);
-      expect(await page.locator("[data-act='export']").isDisabled(), "Export is on while the film is stopped");
-      expect((await page.getAttribute("[data-act='export']", "title")) === "Stopped. Continue to export", "Export does not say why it is off");
-      await expectText(page, "#fv-export-why", /^Stopped\. Continue to export$/);
-      expect(!(await page.locator("[data-act='export']").evaluate((el) => el.classList.contains("primary"))), "A stopped Export is still the white primary action");
-      await screenshot(page, "stopped-1440");
-      // Continue is the shell's, on the film-wide strip.
-      await page.click(".film-strip [data-act='continue-film']");
-      await page.waitForFunction(() => !document.querySelector("[data-act='export']")?.disabled, null, { timeout: 8000 })
-        .catch(() => { throw new Error("Export stayed off after Continue"); });
+      // Exports render on this computer and spend nothing, so they stay available while the film is stopped (card B12).
+      expect(!(await page.locator("[data-act='export']").isDisabled()), "Export is off while the film is stopped");
+      expect(await page.locator("[data-act='export']").evaluate((el) => el.classList.contains("primary")), "A ready Export is not the white primary action while stopped");
       await expectText(page, "#fv-export-why", /^MP4 of the whole film$/);
+      await screenshot(page, "stopped-1440");
+      await page.click("[data-act='export']");
+      await page.waitForSelector(".export[data-state='rendering']", { timeout: 8000 });
     },
   },
   {

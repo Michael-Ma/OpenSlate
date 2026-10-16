@@ -256,8 +256,7 @@ function startExport(world: FixtureWorld, body: { expectedHeadVersion?: unknown 
   assertHead(world, body);
   const readiness = readinessOf(world.overview, fixture.demo);
   if (!readiness.ready) throw new ApiError("EXPORT_BLOCKED", 409, { ...readiness });
-  // The server refuses to start a render while the film is stopped (media/application.ts assertUnpaused).
-  if (world.overview.stopped) throw new ApiError("MEDIA_PAUSED", 409);
+  // Exports render locally and spend nothing; the server allows them while the film is stopped (card B12).
   const entry: ExportEntry = {
     film: filmFingerprint(world.overview, soundtrackOf(world)),
     interrupted: false,

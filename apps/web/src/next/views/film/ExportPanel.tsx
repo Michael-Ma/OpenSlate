@@ -11,8 +11,6 @@ interface Props {
   /** The code of a failed /exports read (an older studio has no storyboard export). */
   error: string | null;
   writable: boolean;
-  /** The film is stopped: the server refuses to start an export (MEDIA_PAUSED) until Continue. */
-  stopped: boolean;
   busy: { start: boolean; cancel: boolean; recover: boolean };
   onExport(): void;
   onCancel(exportId: string): void;
@@ -26,7 +24,7 @@ interface Props {
  * whose summary says why it is off, rendering with elapsed time (no percentage exists), Cancel, and Check
  * again for an export a restart interrupted, which only looks for the finished file.
  */
-export function ExportPanel({ overview, view, media, error, writable, stopped, busy, onExport, onCancel, onRecover, onChangeMusic }: Props) {
+export function ExportPanel({ overview, view, media, error, writable, busy, onExport, onCancel, onRecover, onChangeMusic }: Props) {
   const { t, tm, locale } = useI18n();
   // The clock ticks while the record says rendering: elapsed time, and a prepared export that never started.
   const now = useNow(view?.current?.state === "rendering");
@@ -35,7 +33,8 @@ export function ExportPanel({ overview, view, media, error, writable, stopped, b
   const demo = !!readiness?.demo;
   const offline = writable ? undefined : t("film.offline");
   // Stopped turns off what would start work, and the title says why (P5-DESIGN shell change 8).
-  const startOff = offline ?? (stopped ? t("film.export.stopped") : undefined);
+  // Exports render on this computer and spend nothing, so Stop does not turn them off (card B12).
+  const startOff = offline;
   const size = { width: EXPORT_SIZE.width, height: EXPORT_SIZE.height };
 
   let body;
@@ -62,7 +61,7 @@ export function ExportPanel({ overview, view, media, error, writable, stopped, b
         <button type="button" className="pill primary go" data-act="check-again" disabled={!writable || busy.recover} title={offline} onClick={() => onRecover(state.record.exportId)}>
           {busy.recover ? t("film.export.checking") : t("film.export.check")}
         </button>
-        <button type="button" className="pill go" data-act="export-again" disabled={!writable || stopped || busy.start || !readiness?.ready} title={startOff} onClick={onExport}>{t("film.export.again")}</button>
+        <button type="button" className="pill go" data-act="export-again" disabled={!writable || busy.start || !readiness?.ready} title={startOff} onClick={onExport}>{t("film.export.again")}</button>
       </>
     );
   } else {
@@ -106,9 +105,9 @@ export function ExportPanel({ overview, view, media, error, writable, stopped, b
         <div className="hint" data-act="export-size">{seconds <= MAX_FILM_SECONDS ? t("film.export.length", { seconds, ...size }) : t("film.export.free", size)}</div>
         <button
           type="button"
-          className={`pill go${ready && !stopped ? " primary" : ""}`}
+          className={`pill go${ready ? " primary" : ""}`}
           data-act="export"
-          disabled={!ready || !writable || stopped || busy.start}
+          disabled={!ready || !writable || busy.start}
           title={startOff}
           aria-describedby="fv-export-why"
           onClick={onExport}
@@ -116,7 +115,7 @@ export function ExportPanel({ overview, view, media, error, writable, stopped, b
           {t(demo ? "film.export.button_demo" : "film.export.button")}
         </button>
         <div className="why" id="fv-export-why">
-          {!writable ? t("film.offline") : !readiness ? null : !ready ? t("film.export.settle_first") : stopped ? t("film.export.stopped") : demo ? t("film.export.demo_stamp") : t("film.export.size")}
+          {!writable ? t("film.offline") : !readiness ? null : !ready ? t("film.export.settle_first") : demo ? t("film.export.demo_stamp") : t("film.export.size")}
         </div>
       </>
     );
