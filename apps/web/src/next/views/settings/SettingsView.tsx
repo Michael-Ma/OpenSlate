@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { Locale } from "../../../shared/locale-preference.ts";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
 import { activeSection, type ModelSettingsStatus, type ProviderCatalogView } from "../../model/settings.ts";
@@ -36,7 +37,9 @@ export function SettingsView() {
   const hasFilm = useStudio((s) => !!s.projectId);
   const film = useStudio((s) => s.snapshot?.project.name ?? s.projects.find((p) => p.id === s.projectId)?.name ?? "");
   const connection = useStudio((s) => s.connection);
-  const offline = connection === "connected" ? null : t("set.offline");
+  // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one.
+  const locked = useRecoveryLock();
+  const offline = locked ?? (connection === "connected" ? null : t("set.offline"));
   // What makes each section read again. A studio restart reconnects, so every follow includes the connection.
   const head = useStudio((s) => s.snapshot?.project.headVersion ?? s.overview?.headVersion ?? 0);
   const filmChanged = `${head}|${connection === "connected"}`;

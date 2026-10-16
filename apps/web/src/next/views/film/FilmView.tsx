@@ -1,6 +1,7 @@
 import type { ExportRecord, ExportView } from "@openslate/core/public";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNarrow } from "../../app/useNarrow.ts";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { currentPlacements, type PlaybackView } from "../../model/film-audio.ts";
 import { FilmClock } from "../../model/film-clock.ts";
@@ -67,7 +68,9 @@ function FilmWorkspace() {
   const focus = useStudio((s) => s.focus);
   const narrow = useNarrow();
   const live = mode === "live";
-  const writable = connection === "connected";
+  // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one.
+  const locked = useRecoveryLock();
+  const writable = connection === "connected" && !locked;
 
   const exportsRes = useResource<ExportView>("/exports");
   const mediaRes = useResource<MediaView>("/media");

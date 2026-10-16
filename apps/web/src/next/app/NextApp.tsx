@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { carryFrom, carryReady, carryToApply, filmStrip, reconnectedToast, writeGuard, type Carry } from "../model/shell-states.ts";
+import { recoveryReadOnly, reviewMode, stoppedByRestore } from "../model/recovery.ts";
 import { msg } from "../model/types.ts";
 import { connectScreen, escClosesDrawer, NARROW_QUERY, searchWithView, shownView } from "../model/shell.ts";
 import { useStore, useStudio } from "../store/react.tsx";
@@ -8,6 +9,7 @@ import type { StudioStore } from "../store/store.ts";
 import { Connect } from "./Connect.tsx";
 import { ExpiredDialog } from "./ExpiredDialog.tsx";
 import { FilmStrip } from "./FilmStrip.tsx";
+import { RecoveryReview } from "./RecoveryReview.tsx";
 import { TopBar } from "./TopBar.tsx";
 import { Toast } from "./Toast.tsx";
 import { useNarrow } from "./useNarrow.ts";
@@ -54,9 +56,11 @@ function restoreCarry(store: StudioStore, carry: Carry, done: () => void): () =>
  * page is inert. An expired session is a dialog over the page; only a window that never loaded a film list
  * gets the full Connect screen.
  *
- * The shell also owns the film-wide write guard (offline, expired, stopped) that every view reads through
- * useWriteGuard, and carries the unsent message and the person's place into whatever session replaces this one.
- * The view on screen is kept in the address (`?view=plan`), so a reload or a link reopens it.
+ * The shell also owns the film-wide write guard (offline, expired, stopped, and the recovery review's read-only
+ * studio) that every view reads through useWriteGuard, and carries the unsent message and the person's place into
+ * whatever session replaces this one. After a restore from backup the full-width recovery review stands in place of
+ * the view until it is finished or put away (the strip brings it back). The view on screen is kept in the address
+ * (`?view=plan`), so a reload or a link reopens it.
  */
 export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
   const store = useStore();
@@ -70,14 +74,55 @@ export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
   const drawer = narrow && directorOpen;
   const { offline, check } = useOffline(store, connection === "reconnecting");
   const [dismissedRestart, setDismissedRestart] = useState<string | null>(null);
-  const strip = filmStrip({ view, offline, overview, dismissedRestart });
+  const quarantined = useStudio(recoveryReadOnly);
+  const recoveryMode = useStudio((s) => reviewMode(s.recovery));
+  const restoredStop = useStudio((s) => stoppedByRestore(s.overview, s.recovery.status));
+  // The review opens by itself on a restored studio; "Look around first" or any navigation puts it away.
+  const [reviewOpen, setReviewOpen] = useState(true);
+  useEffect(() => { if (quarantined) setReviewOpen(true); }, [quarantined]);
+  const showReview = reviewOpen && recoveryMode !== "none";
+  const putAway = useCallback(() => setReviewOpen(false), []);
+  // From the review's own buttons focus lands on what brings it back (the strip's Review), or the selected tab;
+  // from the strip's Review it lands on the review's heading.
+  const lookAround = useCallback(() => {
+    setReviewOpen(false);
+    requestAnimationFrame(() => {
+      const target = ["[data-act='review-recovery']", ".topbar [role='tab'][aria-selected='true']", ".topbar [aria-current='page']"]
+        .map((selector) => document.querySelector<HTMLElement>(selector)).find((element) => element);
+      target?.focus({ preventScroll: true });
+    });
+  }, []);
+  const openReview = useCallback(() => {
+    setReviewOpen(true);
+    // Read it again, so the summary on screen is the current one (a change is said in the review).
+    void store.readRecovery();
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(".recovery-card h1")?.focus({ preventScroll: true }));
+  }, [store]);
+  // While in review, coming back to the window reads the status again: another window may have finished it, and
+  // Start has no film whose events would say so.
+  useEffect(() => {
+    if (!quarantined) return;
+    const onVisible = () => { if (document.visibilityState === "visible") void store.readRecovery(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [quarantined, store]);
+  const focus = useStudio((s) => s.focus);
+  const navigated = useRef({ view, focus });
+  useEffect(() => {
+    // A Director note's Open, or a view another view opened, shows that view.
+    if (navigated.current.view !== view || navigated.current.focus !== focus) setReviewOpen(false);
+    navigated.current = { view, focus };
+  }, [view, focus]);
+  const strip = showReview
+    ? (offline ? { kind: "offline" as const } : null)
+    : filmStrip({ view, offline, overview, dismissedRestart, recovery: quarantined, stoppedByRestore: restoredStop });
   // An expired session stays expired for this store: the open event stream may still report "connected" for a
   // while and the store would flip back, but nothing works until a new session replaces the store.
   const [expiredFor, setExpiredFor] = useState<StudioStore | null>(null);
   useEffect(() => { if (connection === "expired") setExpiredFor(store); }, [connection, store]);
   const expired = screen === null && (connection === "expired" || expiredFor === store);
   const stopped = !!overview?.stopped;
-  const guard = useMemo(() => writeGuard({ offline, expired, stopped }), [offline, expired, stopped]);
+  const guard = useMemo(() => writeGuard({ offline, expired, stopped, quarantined }), [offline, expired, stopped, quarantined]);
   /** The unsent message and place of the store that was replaced, and which store that was. */
   const carry = useRef<{ from: StudioStore; carry: Carry } | null>(null);
 
@@ -136,7 +181,8 @@ export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
 
   if (screen) return <Connect state={screen} onRetry={() => void onReconnect()} />;
 
-  const workspace = view === "keyframes" ? <KeyframesView />
+  const workspace = showReview ? <RecoveryReview onPutAway={lookAround} />
+    : view === "keyframes" ? <KeyframesView />
     : view === "plan" ? <PlanView />
     : view === "film" ? <FilmView />
     : view === "assets" ? <AssetsView />
@@ -144,13 +190,13 @@ export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
     : <StartView />;
   return (
     <WriteGuardContext.Provider value={guard}>
-      <div className={`app${directorOpen ? " dir-open" : ""}`} data-ui="next" data-view={view}>
-        <TopBar inert={drawer} expired={expired} offline={offline} />
+      <div className={`app${directorOpen ? " dir-open" : ""}`} data-ui="next" data-view={view} data-recovery={showReview ? recoveryMode : undefined}>
+        <TopBar inert={drawer} expired={expired} offline={offline} onNavigate={putAway} />
         <DirectorColumn />
         {/* display: contents, so the strip and the view are the grid's second column. */}
         <div className="workspace-slot" inert={drawer}>
           <div className="film-strip-slot" role="status" data-strip={strip?.kind ?? "none"}>
-            {strip && <FilmStrip strip={strip} onRetry={retryNow} onDismissRestart={setDismissedRestart} />}
+            {strip && <FilmStrip strip={strip} onRetry={retryNow} onDismissRestart={setDismissedRestart} onReview={openReview} />}
           </div>
           {workspace}
         </div>

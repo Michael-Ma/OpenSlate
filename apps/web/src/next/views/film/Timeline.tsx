@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type MouseEvent, type ReactNode } from "react";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { FilmClock } from "../../model/film-clock.ts";
 import { musicSpan, rulerTicks, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
@@ -125,7 +126,8 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
   const span = music ? musicSpan(music, timeline.total) : null;
   const musicName = music ? music.label ?? t("film.music.unnamed") : "";
   const keyWidth = pps ? KEY_WIDTH.narrow : KEY_WIDTH.wide;
-  const offline = writable ? undefined : t("film.offline");
+  const locked = useRecoveryLock();
+  const offline = writable ? undefined : locked ?? t("film.offline");
 
   return (
     <section className="panel timeline" aria-label={t("film.timeline.eyebrow")}>

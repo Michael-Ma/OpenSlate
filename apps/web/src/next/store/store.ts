@@ -4,6 +4,10 @@ import { ApiError, type EventOptions, type RequestOptions } from "../api/client.
 import { errorMsg } from "../i18n/translate.ts";
 import type { RoleFilter } from "../model/assets.ts";
 import { CommandRefused, confirmBody, keyframesBody, type SceneGenerationRead, type StoryboardEdit } from "../model/commands.ts";
+import {
+  NO_RECOVERY, parseRecoveryStatus, parseSavedRelease, RECOVERY_LOCK, RECOVERY_PATH, recoveryReadOnly, RELEASE_PATH, RELEASE_PRESS, RELEASE_STORAGE_KEY,
+  recoveryChange, releaseBody, releaseOutcome, unconfirmedStillApplies, type ReleaseOutcome, type SavedRelease,
+} from "../model/recovery.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
 import { reducer, type Action } from "./reducer.ts";
@@ -43,10 +47,16 @@ export class StudioStore {
   #toastUndo: { key: number; run: () => unknown } | null = null;
   #toastUndoKey = 0;
   #refreshAgain = false;
+  /** The latest recovery read (or release answer); an older read that answers later never replaces it. */
+  #recoveryRead = 0;
 
   constructor(deps: StoreDeps) {
     this.#deps = deps;
     this.#keys = new PressKeys(null, deps.storage, deps.newKey);
+    // A release whose reply was lost in an earlier page stays on offer as Retry with the same key and body.
+    let saved: SavedRelease | null = null;
+    try { saved = parseSavedRelease(deps.storage?.getItem(RELEASE_STORAGE_KEY) ?? null); } catch { /* unavailable */ }
+    if (saved) this.#state = { ...this.#state, recovery: { ...NO_RECOVERY, unconfirmed: saved } };
   }
 
   getState = (): StudioState => this.#state;
@@ -67,7 +77,8 @@ export class StudioStore {
 
   async start(preferredProjectId?: string | null): Promise<void> {
     try {
-      const { projects } = await this.#deps.client.request<{ projects: ProjectSummary[] }>("/api/projects");
+      // The recovery status comes with the film list, so a restored studio is read-only from its first screen.
+      const [{ projects }] = await Promise.all([this.#deps.client.request<{ projects: ProjectSummary[] }>("/api/projects"), this.readRecovery()]);
       this.dispatch({ type: "projects", projects });
       this.dispatch({ type: "connection", connection: "connected" });
       let remembered: string | null = null;
@@ -131,6 +142,8 @@ export class StudioStore {
           client.request<ProposalList>(path(projectId, "/director/proposals")).then(
             ({ proposals }) => this.dispatch({ type: "proposals", proposals }),
             () => this.dispatch({ type: "proposals", proposals: [] })),
+          // A restore or a release elsewhere reaches every film as an event; the status follows it.
+          this.readRecovery(),
         ]);
       } while (this.#refreshAgain);
     })().finally(() => { this.#refreshing = null; });
@@ -151,6 +164,11 @@ export class StudioStore {
   async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg, timeoutMs?: number): Promise<T | undefined> {
     const keys = this.#keys;
     if (this.#state.pending[pressId]) return undefined;
+    // A restored studio in recovery review is read-only: nothing is sent, and the one reason is said.
+    if (recoveryReadOnly(this.#state)) {
+      this.dispatch({ type: "toast", message: RECOVERY_LOCK, tone: "error" });
+      return undefined;
+    }
     this.dispatch({ type: "pending", pressId, pending: true });
     try {
       const saved = keys.saved(pressId);
@@ -185,7 +203,8 @@ export class StudioStore {
   openFrame(shotId: string): Promise<unknown> {
     const shot = this.#state.overview?.shots[shotId];
     const artifact = shot?.keyframe.state === "ready" ? shot.keyframe.artifact : undefined;
-    if (!this.#state.projectId || !artifact || shot?.keyframe.opened) return Promise.resolve(undefined);
+    // Recorded on its own when a frame is shown; while the studio is read-only it is simply not recorded.
+    if (!this.#state.projectId || !artifact || shot?.keyframe.opened || recoveryReadOnly(this.#state)) return Promise.resolve(undefined);
     const body: FrameViewInput = { artifactId: artifact.artifactId, sha256: artifact.sha256 };
     return this.#press(`frame-view:${shotId}`, { shotId, ...body }, async () => ({ path: path(this.#state.projectId!, `/shots/${encodeURIComponent(shotId)}/frame-views`), body }));
   }
@@ -365,6 +384,79 @@ export class StudioStore {
       return { path: request.path.startsWith("/api/") ? request.path : path(this.#state.projectId ?? "", request.path), body: request.body };
     }, toast, options?.timeoutMs);
   }
+
+  // ---- installation recovery -------------------------------------------------
+
+  /** Read the installation's recovery status. Never throws: an older server without the route, or a failed read, keeps what was known. */
+  async readRecovery(): Promise<void> {
+    const read = ++this.#recoveryRead;
+    try {
+      const status = parseRecoveryStatus(await this.#deps.client.request<unknown>(RECOVERY_PATH));
+      if (!status || read !== this.#recoveryRead) return;
+      const { recovery } = this.#state;
+      const keep = unconfirmedStillApplies(recovery.unconfirmed, status);
+      if (recovery.unconfirmed && !keep) this.#saveRelease(null);
+      const same = recovery.status && canonicalJson(recovery.status) === canonicalJson(status);
+      if (same && (keep || !recovery.unconfirmed)) return;
+      this.dispatch({ type: "recovery", recovery: { status, ...(keep ? {} : { unconfirmed: null }), ...recoveryChange(recovery.status, status, recovery.unconfirmed) } });
+    } catch { /* see above */ }
+  }
+
+  #saveRelease(saved: SavedRelease | null): void {
+    try {
+      if (saved) this.#deps.storage?.setItem(RELEASE_STORAGE_KEY, JSON.stringify(saved));
+      else this.#deps.storage?.removeItem(RELEASE_STORAGE_KEY);
+    } catch { /* storage unavailable: the state still offers Retry in this page */ }
+  }
+
+  /**
+   * Finish the recovery review: release exactly the receipt and summary the person saw, with an Idempotency-Key.
+   * A lost reply keeps the decision (in state and storage) so Retry resends the same key and body; a changed summary
+   * is refused by the server, and the review is read again for the person to look over before finishing.
+   */
+  async releaseRecovery(): Promise<ReleaseOutcome | undefined> {
+    const { recovery, pending } = this.#state;
+    if (pending[RELEASE_PRESS]) return undefined;
+    const saved = unconfirmedStillApplies(recovery.unconfirmed, recovery.status) ? recovery.unconfirmed : null;
+    const body = saved?.body ?? releaseBody(recovery.status);
+    if (!body) return undefined;
+    const request: SavedRelease = saved ?? { key: this.#deps.newKey(), body };
+    this.#saveRelease(request);
+    this.dispatch({ type: "recovery", recovery: { unconfirmed: request, stale: false } });
+    this.dispatch({ type: "pending", pressId: RELEASE_PRESS, pending: true });
+    try {
+      const answer = await this.#deps.client.request<{ recovery?: unknown }>(RELEASE_PATH, { method: "POST", body: request.body, key: request.key });
+      this.#saveRelease(null);
+      const status = parseRecoveryStatus(answer?.recovery);
+      this.#recoveryRead++;
+      this.dispatch({ type: "recovery", recovery: { unconfirmed: null, stale: false, released: true, ...(status ? { status } : {}) } });
+      if (!status) void this.readRecovery();
+      void this.refresh();
+      return "released";
+    } catch (error) {
+      const outcome = releaseOutcome(error instanceof ApiError ? error : { status: 0 });
+      if (outcome === "unconfirmed") return outcome;
+      this.#saveRelease(null);
+      if (outcome === "stale") {
+        this.dispatch({ type: "recovery", recovery: { unconfirmed: null, stale: true } });
+        await this.readRecovery();
+      } else if (outcome === "already") {
+        this.dispatch({ type: "recovery", recovery: { unconfirmed: null, stale: false, released: true } });
+        this.dispatch({ type: "toast", message: msg("recovery.toast.already"), tone: "info" });
+        await this.readRecovery();
+        void this.refresh();
+      } else {
+        this.dispatch({ type: "recovery", recovery: { unconfirmed: null } });
+        this.#fail(error);
+      }
+      return outcome;
+    } finally {
+      this.dispatch({ type: "pending", pressId: RELEASE_PRESS, pending: false });
+    }
+  }
+
+  /** Put away what the review said after it was finished. */
+  dismissRecovery = () => this.dispatch({ type: "recovery", recovery: { released: false, stale: false } });
 
   // ---- plain UI state ----------------------------------------------------------
 

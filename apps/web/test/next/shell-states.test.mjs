@@ -207,3 +207,36 @@ test('strip sentences join with a space in English and nothing after Chinese ful
   const lines = stoppedLines({ sent: 1, detached: 2 });
   assert.equal(['已停止，不会再发送新任务。', ...lines.map(zh)].join(sentenceGap('zh-CN')), '已停止，不会再发送新任务。已发送的 1 个任务会完成并计费。2 个排队中的任务已撤下，需要重新确认。', 'the study\'s string');
 });
+
+// ---- installation recovery (model/recovery.ts) ------------------------------------------
+
+test('a restored studio in recovery review turns every write off with its one reason; offline and expired come first', () => {
+  const guard = writeGuard({ offline: false, expired: false, stopped: false, quarantined: true });
+  assert.equal(guard.server, false);
+  assert.equal(guard.run, false);
+  assert.equal(en(guard.serverWhy), 'This studio was restored from a backup. Finish the recovery review to make changes.');
+  assert.equal(zh(guard.serverWhy), '这个工作室是从备份恢复的。完成恢复检查后才能修改。');
+  assert.deepEqual(guardFor(guard, 'run'), { off: true, why: guard.serverWhy });
+  assert.deepEqual(guardFor(guard, 'server'), { off: true, why: guard.serverWhy });
+  assert.equal(writeGuard({ offline: true, expired: false, stopped: true, quarantined: true }).serverWhy.id, 'guard.offline');
+  assert.equal(writeGuard({ offline: false, expired: true, stopped: false, quarantined: true }).serverWhy.id, 'guard.expired');
+  // Without the flag nothing changes.
+  assert.deepEqual(writeGuard({ offline: false, expired: false, stopped: false }), OPEN_GUARD);
+});
+
+test('the recovery strip shows in every view while the review is put away, after offline and before stopped', () => {
+  const stopped = film({}, { stopped: { stopId: 'restore-1', at: 'now', sentJobs: 0, detachedJobs: 0 }, controlAuthorityId: 'restore-1' });
+  for (const view of ['plan', 'keyframes', 'assets', 'film', 'settings', 'start'])
+    assert.deepEqual(filmStrip({ view, offline: false, overview: stopped, dismissedRestart: null, recovery: true }), { kind: 'recovery' }, view);
+  assert.deepEqual(filmStrip({ view: 'plan', offline: true, overview: stopped, dismissedRestart: null, recovery: true }), { kind: 'offline' });
+});
+
+test('a film stopped by the restore says why in its stopped strip', () => {
+  const overview = film({}, { stopped: { stopId: 'restore-1', at: 'now', sentJobs: 0, detachedJobs: 0 }, controlAuthorityId: 'restore-1' });
+  const strip = filmStrip({ view: 'keyframes', offline: false, overview, dismissedRestart: null, stoppedByRestore: true });
+  assert.deepEqual(strip, { kind: 'stopped', sent: 0, detached: 0, restored: true });
+  assert.deepEqual(stoppedLines(strip).map(en), ['It was stopped when the studio was restored from a backup; continue when you’re ready.']);
+  assert.deepEqual(stoppedLines({ sent: 1, detached: 0, restored: true }).map((line) => line.id), ['strip.stopped.restored', 'strip.stopped.sent']);
+  // An ordinary stop is unchanged.
+  assert.deepEqual(filmStrip({ view: 'keyframes', offline: false, overview, dismissedRestart: null }), { kind: 'stopped', sent: 0, detached: 0 });
+});

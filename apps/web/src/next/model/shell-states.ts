@@ -53,8 +53,13 @@ export interface WriteGuard {
   runWhy: Msg | null;
 }
 
-export function writeGuard({ offline, expired, stopped }: { offline: boolean; expired: boolean; stopped: boolean }): WriteGuard {
-  const serverWhy = expired ? msg("guard.expired") : offline ? msg("guard.offline") : null;
+/**
+ * `quarantined`: the studio was restored from a backup and is in recovery review (model/recovery.ts). Reads work and
+ * every write is off with that one reason until the review is finished; offline and expired still come first,
+ * because nothing works without the studio.
+ */
+export function writeGuard({ offline, expired, stopped, quarantined = false }: { offline: boolean; expired: boolean; stopped: boolean; quarantined?: boolean }): WriteGuard {
+  const serverWhy = expired ? msg("guard.expired") : offline ? msg("guard.offline") : quarantined ? msg("guard.recovery") : null;
   const runWhy = serverWhy ?? (stopped ? msg("guard.stopped") : null);
   return { server: !serverWhy, run: !runWhy, serverWhy, runWhy };
 }
@@ -129,7 +134,8 @@ export function restartTitle(restart: RestartCasualties, join: (labels: readonly
 
 export type FilmStrip =
   | { kind: "offline" }
-  | { kind: "stopped"; sent: number; detached: number }
+  | { kind: "recovery" }
+  | { kind: "stopped"; sent: number; detached: number; restored?: boolean }
   | { kind: "restart"; restart: RestartCasualties };
 
 export interface FilmStripInput {
@@ -139,24 +145,34 @@ export interface FilmStripInput {
   overview: GenerationOverview | null;
   /** The restart key the person dismissed, if any. */
   dismissedRestart: string | null;
+  /**
+   * The studio is in recovery review and the full review is put away (the person is looking around): the strip says
+   * so in every view, Start included, and opens the review again.
+   */
+  recovery?: boolean;
+  /** The film was stopped by the restore from a backup (model/recovery.ts stoppedByRestore): the stopped strip says why. */
+  stoppedByRestore?: boolean;
 }
 
 /**
  * One strip at a time, most urgent first: offline (nothing on screen is current), then stopped (nothing new
  * is sent), then restart casualties. Start has no film open, so only offline applies there.
  */
-export function filmStrip({ view, offline, overview, dismissedRestart }: FilmStripInput): FilmStrip | null {
+export function filmStrip({ view, offline, overview, dismissedRestart, recovery = false, stoppedByRestore = false }: FilmStripInput): FilmStrip | null {
   if (offline) return { kind: "offline" };
+  if (recovery) return { kind: "recovery" };
   if (view === "start" || !overview) return null;
-  if (overview.stopped) return { kind: "stopped", sent: overview.stopped.sentJobs, detached: overview.stopped.detachedJobs };
+  if (overview.stopped)
+    return { kind: "stopped", sent: overview.stopped.sentJobs, detached: overview.stopped.detachedJobs, ...(stoppedByRestore ? { restored: true } : {}) };
   const restart = restartCasualties(overview);
   if (restart && restart.key !== dismissedRestart) return { kind: "restart", restart };
   return null;
 }
 
-/** The stopped strip's line after its bold title: what finishes and is charged, and what was taken off. */
-export function stoppedLines(strip: { sent: number; detached: number }): Msg[] {
+/** The stopped strip's line after its bold title: why (a restore), what finishes and is charged, and what was taken off. */
+export function stoppedLines(strip: { sent: number; detached: number; restored?: boolean }): Msg[] {
   return [
+    ...(strip.restored ? [msg("strip.stopped.restored")] : []),
     ...(strip.sent > 0 ? [msg("strip.stopped.sent", { count: strip.sent })] : []),
     ...(strip.detached > 0 ? [msg("strip.stopped.detached", { count: strip.detached })] : []),
   ];

@@ -1,5 +1,6 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
+import type { RecoveryState } from "../model/recovery.ts";
 import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 import type { Connection, EditDraft, StudioState } from "./state.ts";
 
@@ -25,7 +26,8 @@ export type Action =
   | { type: "edit"; edit: EditDraft | null }
   | { type: "pending"; pressId: string; pending: boolean }
   | { type: "toast"; message: Msg; tone: "info" | "error"; undoCommandId?: string; undoKey?: number }
-  | { type: "toastDismiss" };
+  | { type: "toastDismiss" }
+  | { type: "recovery"; recovery: Partial<RecoveryState> };
 
 const sameTarget = (a: Target, b: Target) => a.kind === b.kind && a.id === b.id;
 
@@ -102,5 +104,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, toast: { id: (state.toast?.id ?? 0) + 1, message: action.message, tone: action.tone, ...(action.undoCommandId ? { undoCommandId: action.undoCommandId } : {}), ...(action.undoKey ? { undoKey: action.undoKey } : {}) } };
     case "toastDismiss":
       return { ...state, toast: null };
+    case "recovery":
+      return { ...state, recovery: { ...state.recovery, ...action.recovery } };
   }
 }

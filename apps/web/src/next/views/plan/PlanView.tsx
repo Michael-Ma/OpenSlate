@@ -1,5 +1,6 @@
 import type { GenerationOverview, ShotOverview } from "@openslate/core/public";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { useReducedMotion } from "../../keyframes/parts.tsx";
 import { draftEdits, editChange, savedMessage, unitPrices, type ShotDraft } from "../../model/plan-edit.ts";
@@ -74,8 +75,11 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   // ---- guards ----------------------------------------------------------------------------------------
   const busy = Object.keys(pending).some((key) => key.startsWith("plan:") || key.startsWith("edit:"));
   const importPending = imports.data?.pending ?? null;
-  const connected = connection === "connected";
-  const guard = !connected ? t("plan.guard.offline") : importPending ? t("plan.guard.import") : undefined;
+  // A restored studio in recovery review is read-only: its one reason comes first (app/useWriteGuard.ts).
+  const locked = useRecoveryLock();
+  const connected = connection === "connected" && !locked;
+  const offlineWhy = locked ?? t("plan.guard.offline");
+  const guard = !connected ? offlineWhy : importPending ? t("plan.guard.import") : undefined;
   const runGuard = overview.stopped ? t("plan.guard.stopped") : undefined;
   const codexReady = !noCodex && (mode === "fixture" || director?.mode === "native");
   const stage = importPending ? importStage(importPending, codexReady) : justSent ? "reading" : importStage(null, codexReady);
@@ -310,7 +314,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
             className="pill"
             data-act="import-open"
             disabled={!connected || !!runGuard}
-            title={!connected ? t("plan.guard.offline") : runGuard}
+            title={!connected ? offlineWhy : runGuard}
             onClick={() => setImportOpen(true)}
           >
             {t(importPending ? "plan.import.review_open" : "plan.import.open")}
@@ -422,7 +426,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
           review={review}
           notes={notes}
           busy={busy}
-          guard={connected ? undefined : t("plan.guard.offline")}
+          guard={connected ? undefined : offlineWhy}
           runGuard={runGuard}
           onClose={() => setImportOpen(false)}
           onSend={(name, text) => void send(name, text)}
