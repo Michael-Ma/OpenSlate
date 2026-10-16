@@ -179,7 +179,8 @@ export const scenarios = [
       const line = await texts(page, '[data-note="points-at"] p');
       if (line[0] !== "This message also points at 2.1, so the Director sees its keyframe.") fail(`The scope line reads ${JSON.stringify(line)}`);
       if (await page.locator('[data-act="keep-whole-film"]').count()) fail("Keep the whole film is offered when the message has a target");
-      if (await headerScope(page) !== "Points at 2.3 and 2.1") fail(`The header reads ${await headerScope(page)}`);
+      // In storyboard order, as the chips under it read: "2.1 keyframe", then @2.3.
+      if (await headerScope(page) !== "Points at 2.1 and 2.3") fail(`The header reads ${await headerScope(page)}`);
       await chipsShareARow(page);
       await removeTargets(page);
       await page.screenshot({ path: shot("pictures-also-1440"), clip: column });

@@ -342,9 +342,13 @@ test('the header names what the message points at once the composer points somew
   // A keyframe narrows the message to its shot: the header says so, as the composer's line does.
   const keyframe21 = { ...keyframe22, artifactId: artifactFor('2.1').artifactId, sha256: artifactFor('2.1').sha256, shotId: shotId('2.1') };
   assert.equal(label(headerScope({ ...base, composer: { ...empty, images: [keyframe21] } })), 'Points at 2.1');
-  // @ targets first, then the keyframes' shots, as the message sends them; a shot the targets cover is not named twice.
+  // The @ targets and the keyframes' shots in storyboard order (a scene before its shots), whatever order they were
+  // added in, as the composer's scope line names its shots; a shot the targets cover is not named twice.
   const targets = [{ kind: 'shot', id: shotId('2.3') }, { kind: 'scene', id: sceneId(1) }];
-  assert.equal(label(headerScope({ ...base, composer: { ...empty, targets, images: [keyframe21, uploadImage] } })), 'Points at 2.3, Scene 1, and 2.1');
+  assert.equal(label(headerScope({ ...base, composer: { ...empty, targets, images: [keyframe21, uploadImage] } })), 'Points at Scene 1, 2.1, and 2.3');
+  // "2.1 keyframe" and @2.2 under it: the header reads 2.1 first too, never "2.2 and 2.1".
+  assert.equal(label(headerScope({ ...base, composer: { ...empty, targets: [{ kind: 'shot', id: shotId('2.2') }], images: [keyframe21] } })), 'Points at 2.1 and 2.2');
+  assert.equal(label(headerScope({ ...base, composer: { ...empty, targets: [{ kind: 'shot', id: shotId('3.1') }, { kind: 'scene', id: sceneId(3) }, { kind: 'shot', id: shotId('1.2') }] } })), 'Points at 1.2, Scene 3, and 3.1');
   assert.equal(label(headerScope({ ...base, composer: { ...empty, targets: [{ kind: 'scene', id: sceneId(2) }], images: [keyframe21] } })), 'Points at Scene 2');
   // An imported picture alone does not narrow anything; a removed target is not named.
   assert.equal(label(headerScope({ ...base, composer: { ...empty, images: [uploadImage], targets: [{ kind: 'shot', id: 'gone' }] } })), 'Scene 2');
