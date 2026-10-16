@@ -4,8 +4,8 @@ import type { StudioStore } from "../../store/store.ts";
 
 /**
  * The Plan view's commands, through the store's generic press (request identity, refresh, error toasts).
- * Storyboard edits: POST /api/projects/:projectId/storyboard (apps/server/src/storyboard.ts), one field per command.
- * Written plans: /plan-imports (apps/server/src/plan-imports.ts).
+ * Storyboard edits: POST /api/projects/:projectId/storyboard (apps/server/src/storyboard.ts); a shot's fields go as
+ * one shotFields command. Written plans: /plan-imports (apps/server/src/plan-imports.ts).
  */
 
 export interface StoryboardReceipt {
@@ -13,8 +13,8 @@ export interface StoryboardReceipt {
   headVersion?: number;
 }
 
-/** A storyboard command body without the head version, which is added when it is sent. */
-export type StoryboardInput = { kind: string } & Record<string, string | boolean | undefined>;
+/** A storyboard command body without the head version, which is added when it is sent (shotFields nests its fields). */
+export type StoryboardInput = { kind: string } & Record<string, string | boolean | undefined | Readonly<Record<string, string | number | undefined>>>;
 
 const clean = (input: StoryboardInput) => Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
 
@@ -49,21 +49,36 @@ export async function storyboard(store: StudioStore, pressId: string, input: Sto
   return receipt;
 }
 
+// ---- answered, refused, or not confirmed --------------------------------------------------------------
+
 /**
- * Several commands in turn (the editor saves one field per command). Each carries the head version the previous
- * one produced. Stops at the first refusal and reports how many were saved.
+ * How a press ended. `lost`: the studio never answered (no reply, a timeout, a server failure), so the change may or
+ * may not have been made. Its `resend` sends the very same request again: the store keeps the key and body of an
+ * unanswered press and resends them when the same press repeats with the same identity, so the server replays its
+ * receipt instead of applying it twice. `pressId` names the press, so its notice is its own.
  */
-export async function storyboardSequence(store: StudioStore, items: readonly { pressId: string; input: StoryboardInput }[]): Promise<{ saved: number; last: StoryboardReceipt | null }> {
-  let head: number | undefined;
-  let last: StoryboardReceipt | null = null;
-  for (const [index, item] of items.entries()) {
-    if (index > 0 && head === undefined) await store.refresh();
-    const receipt = await storyboard(store, item.pressId, item.input, head);
-    if (!receipt) return { saved: index, last };
-    last = receipt;
-    head = receipt.headVersion;
-  }
-  return { saved: items.length, last };
+export type Outcome<T> =
+  | { kind: "done"; receipt: T }
+  | { kind: "refused" }
+  | { kind: "lost"; pressId: string; resend(): Promise<Outcome<T>> };
+
+/**
+ * Run a press and say how it ended. `pressId` is the store's press id; `run` must build the same request each
+ * time it is called (fixed inputs, a fixed head version). A lost reply's error toast is taken back: the view says
+ * it in place, with the retry.
+ */
+export async function settle<T>(store: StudioStore, pressId: string, run: () => Promise<T | undefined>): Promise<Outcome<T>> {
+  const receipt = await run();
+  if (receipt !== undefined) return { kind: "done", receipt };
+  if (!store.unconfirmed(pressId)) return { kind: "refused" };
+  store.dismissToast();
+  return { kind: "lost", pressId, resend: () => settle(store, pressId, run) };
+}
+
+/** One storyboard command, with the head version fixed now so a resend is the same request. */
+export function storyboardOutcome(store: StudioStore, pressId: string, input: StoryboardInput, headVersion?: number): Promise<Outcome<StoryboardReceipt>> {
+  const expected = headVersion ?? expectedHead(store);
+  return settle(store, `plan:${pressId}`, () => storyboard(store, pressId, input, expected));
 }
 
 /** The head version a receipt produced, reading the studio again when the receipt does not say. */
@@ -100,20 +115,20 @@ export function infoToast(store: StudioStore, message: Msg): void {
 
 // ---- written plans ------------------------------------------------------------------------------------
 
-export function sendImport(store: StudioStore, name: string, text: string): Promise<{ requestId: string } | undefined> {
+export function sendImport(store: StudioStore, name: string, text: string): Promise<Outcome<{ requestId: string }>> {
   const expected = expectedHead(store);
-  if (expected === undefined) return Promise.resolve(undefined);
   const body = { name, text, expectedHeadVersion: expected };
-  return store.command<{ requestId: string }>("plan:import:send", body, () => ({ path: "/plan-imports", body }));
+  return settle(store, "plan:import:send", async () => (expected === undefined ? undefined : store.command<{ requestId: string }>("plan:import:send", body, () => ({ path: "/plan-imports", body }))));
 }
 
-export function confirmImport(store: StudioStore, pending: PendingImport): Promise<unknown> {
+export function confirmImport(store: StudioStore, pending: PendingImport): Promise<Outcome<unknown>> {
   const draft = pending.draft;
-  if (!draft) return Promise.resolve(undefined);
-  const body = { preparedId: draft.preparedId, proposalDigest: draft.proposalDigest };
-  return store.command(`plan:import:confirm:${pending.id}`, { requestId: pending.id, ...body }, () => ({ path: `/plan-imports/${encodeURIComponent(pending.id)}/confirm`, body }), msg("plan.toast.import_confirmed", { name: pending.name }));
+  const pressId = `plan:import:confirm:${pending.id}`;
+  const body = draft ? { preparedId: draft.preparedId, proposalDigest: draft.proposalDigest } : null;
+  return settle(store, pressId, async () => (body ? store.command(pressId, { requestId: pending.id, ...body }, () => ({ path: `/plan-imports/${encodeURIComponent(pending.id)}/confirm`, body }), msg("plan.toast.import_confirmed", { name: pending.name })) : undefined));
 }
 
-export function discardImport(store: StudioStore, pending: PendingImport): Promise<unknown> {
-  return store.command(`plan:import:discard:${pending.id}`, { requestId: pending.id }, () => ({ path: `/plan-imports/${encodeURIComponent(pending.id)}/discard`, body: {} }), msg("plan.toast.import_discarded"));
+export function discardImport(store: StudioStore, pending: PendingImport): Promise<Outcome<unknown>> {
+  const pressId = `plan:import:discard:${pending.id}`;
+  return settle(store, pressId, () => store.command(pressId, { requestId: pending.id }, () => ({ path: `/plan-imports/${encodeURIComponent(pending.id)}/discard`, body: {} }), msg("plan.toast.import_discarded")));
 }

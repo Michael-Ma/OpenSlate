@@ -8,15 +8,19 @@ const firstFocus = (dialog: HTMLDialogElement) =>
 
 /**
  * A native modal <dialog> (system.css 8.6): the browser contains focus; Esc asks the owner to close it; on close
- * focus returns to the element that opened it, or to the view title when that element was removed. Focus starts
+ * focus returns to `returnTo`'s element, else to the element that opened it, or to the view title when that element
+ * was removed. Focus starts
  * on the step's [data-autofocus] element. When `step` changes, focus moves to the new step's unless it is already
  * in the new step's content: the old step's element is gone, and the dialog's own chrome ([data-modal-chrome],
  * e.g. the header's Close, where the browser puts focus when a focused button turns off) is not a choice.
  */
-export function Modal({ className, labelledBy, step, onClose, children }: { className: string; labelledBy: string; step?: string; onClose(): void; children: ReactNode }) {
+export function Modal({ className, labelledBy, step, returnTo, onClose, children }: { className: string; labelledBy: string; step?: string; returnTo?: () => HTMLElement | null; onClose(): void; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   // Read during render, before the dialog takes focus.
   const [opener] = useState(() => (typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  // Where focus goes on close when the owner knows better than the opener (e.g. back into an open editor).
+  const returnRef = useRef(returnTo);
+  returnRef.current = returnTo;
 
   useEffect(() => {
     const dialog = ref.current;
@@ -26,7 +30,7 @@ export function Modal({ className, labelledBy, step, onClose, children }: { clas
     return () => {
       if (dialog.open) dialog.close();
       requestAnimationFrame(() => {
-        const back = opener?.isConnected ? opener : document.getElementById(PLAN_TITLE_ID);
+        const back = returnRef.current?.() ?? (opener?.isConnected ? opener : document.getElementById(PLAN_TITLE_ID));
         back?.focus({ preventScroll: true });
       });
     };

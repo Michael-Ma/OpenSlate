@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { DEFAULT_IMPORT_NAME, IMPORT_MAX_CHARS, importProblem, type ImportReview, type ImportStage, type PendingImport, type RowTag } from "../../model/plan-import.ts";
+import { DEFAULT_IMPORT_NAME, IMPORT_MAX_CHARS, importProblem, type ImportReview, type ImportStage, type PendingImport, type ReviewText, type RowTag } from "../../model/plan-import.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { Modal } from "./Modal.tsx";
+import { UnconfirmedNotice, type Unconfirmed } from "./Notices.tsx";
 
 interface Props {
   stage: ImportStage;
@@ -15,6 +16,10 @@ interface Props {
   guard: string | undefined;
   /** Why starting work is off (stopped). */
   runGuard: string | undefined;
+  /** A send, confirm or discard whose reply was lost. */
+  unconfirmed: Unconfirmed | null;
+  onRetry(): void;
+  onDismiss(): void;
   onClose(): void;
   onSend(name: string, text: string): void;
   onDiscard(): void;
@@ -28,9 +33,32 @@ const TAG: Record<RowTag, "plan.import.tag.same" | "plan.import.tag.changed" | "
   new: "plan.import.tag.new",
 };
 
+const TEXT_LABEL: Record<ReviewText["field"], "plan.brief" | "plan.story" | "plan.import.script"> = {
+  brief: "plan.brief",
+  story: "plan.story",
+  script: "plan.import.script",
+};
+
+/** The pending plan's own words, folded away until asked for (the review is the proposal; this is what it came from). */
+function Source({ pending }: { pending: PendingImport }) {
+  const { t } = useI18n();
+  return (
+    <details className="source" data-source="import">
+      <summary data-act="import-source">{t("plan.import.source", { name: pending.name })}</summary>
+      <pre tabIndex={0}>{pending.text}</pre>
+    </details>
+  );
+}
+
+/** A lost reply in the sheet: the modal covers the view's own strip, so it is said here. */
+function SheetUnconfirmed({ unconfirmed, busy, onRetry, onDismiss }: Pick<Props, "unconfirmed" | "busy" | "onRetry" | "onDismiss">) {
+  return unconfirmed ? <div className="sheet-note"><UnconfirmedNotice notice={unconfirmed} busy={busy} strip onRetry={onRetry} onDismiss={onDismiss} /></div> : null;
+}
+
 /**
  * Bring a written plan, in a right-hand sheet: paste or choose a .txt/.md file, the Director reads it, a review of
- * the proposed outline (Same / Changed / New, the Director's suggestions apart), then Confirm or Discard.
+ * the proposed brief, story and narration script and the outline (Same / Changed / New, the Director's suggestions
+ * apart), then Confirm or Discard. The plan's own text can be opened at every step after sending.
  */
 export function ImportSheet(props: Props) {
   const { t } = useI18n();
@@ -54,7 +82,8 @@ export function ImportSheet(props: Props) {
   );
 }
 
-function PasteStep({ busy, guard, runGuard, onClose, onSend }: Props) {
+function PasteStep(props: Props) {
+  const { busy, guard, runGuard, unconfirmed, onClose, onSend } = props;
   const { t, tm, locale } = useI18n();
   const [name, setName] = useState("");
   const [text, setText] = useState("");
@@ -101,10 +130,11 @@ function PasteStep({ busy, guard, runGuard, onClose, onSend }: Props) {
           <span className="counter" id="plan-import-count">{t("plan.import.count", { count, max })}</span>
         </div>
       </div>
+      <SheetUnconfirmed {...props} />
       <div className="sheet-foot">
         <span className="grow">{off ?? t("plan.import.uses")}</span>
         <button type="button" className="pill" data-act="import-cancel" onClick={onClose}>{t("plan.cancel")}</button>
-        <button type="button" className="pill primary" data-act="import-send" disabled={!!problem || !!off || busy} title={off} onClick={() => onSend(name, text)}>{t("plan.import.send")}</button>
+        <button type="button" className="pill primary" data-act="import-send" disabled={!!problem || !!off || busy || !!unconfirmed} title={off} onClick={() => onSend(name, text)}>{t("plan.import.send")}</button>
       </div>
     </>
   );
@@ -130,7 +160,8 @@ function NoCodexStep({ onClose, onSettings }: Props) {
   );
 }
 
-function ReadingStep({ stage, pending, busy, guard, onClose, onDiscard }: Props) {
+function ReadingStep(props: Props) {
+  const { stage, pending, busy, guard, onClose, onDiscard } = props;
   const { t } = useI18n();
   return (
     <>
@@ -143,7 +174,9 @@ function ReadingStep({ stage, pending, busy, guard, onClose, onDiscard }: Props)
         )}
         {stage === "reading" ? <div className="progress indet" aria-hidden="true"><i /></div> : null}
         <p className="hint">{t("plan.import.reading_hint")}</p>
+        {pending ? <Source pending={pending} /> : null}
       </div>
+      <SheetUnconfirmed {...props} />
       <div className="sheet-foot">
         <span className="grow" />
         <button type="button" className="pill" data-act="import-discard" disabled={!pending || busy || !!guard} title={guard} onClick={onDiscard}>{t("plan.import.discard")}</button>
@@ -153,7 +186,8 @@ function ReadingStep({ stage, pending, busy, guard, onClose, onDiscard }: Props)
   );
 }
 
-function StaleStep({ busy, guard, onDiscard }: Props) {
+function StaleStep(props: Props) {
+  const { pending, busy, guard, onDiscard } = props;
   const { t } = useI18n();
   return (
     <>
@@ -163,7 +197,9 @@ function StaleStep({ busy, guard, onDiscard }: Props) {
           <span className="ic" aria-hidden="true">!</span>
           <span>{t("plan.import.stale")}</span>
         </div>
+        {pending ? <Source pending={pending} /> : null}
       </div>
+      <SheetUnconfirmed {...props} />
       <div className="sheet-foot">
         <span className="grow" />
         <button type="button" className="pill primary" data-act="import-discard" disabled={busy || !!guard} title={guard} onClick={onDiscard}>{t("plan.import.discard")}</button>
@@ -172,7 +208,8 @@ function StaleStep({ busy, guard, onDiscard }: Props) {
   );
 }
 
-function ReviewStep({ pending, review, notes, busy, guard, onDiscard, onConfirm }: Props & { pending: PendingImport }) {
+function ReviewStep(props: Props & { pending: PendingImport }) {
+  const { pending, review, notes, busy, guard, onDiscard, onConfirm } = props;
   const { t, tm } = useI18n();
   if (!review) return null;
   const totals = (value: ImportReview["now"]) => t("plan.import.totals", { scenes: value.scenes, shots: value.shots, seconds: value.seconds });
@@ -184,6 +221,16 @@ function ReviewStep({ pending, review, notes, busy, guard, onDiscard, onConfirm 
         <div className="summary-row">
           <div><span className="muted">{t("plan.import.now")}</span><b>{totals(review.now)}</b></div>
           <div><span className="muted">{t("plan.import.from", { name: pending.name })}</span><b data-totals="proposed">{totals(review.proposed)}</b></div>
+        </div>
+        <Source pending={pending} />
+        <div className="prop-texts">
+          {review.texts.map((text) => (
+            <div className="prop-text" key={text.field} data-text={text.field} data-tag={text.changed ? "changed" : "same"}>
+              <h3>{t(TEXT_LABEL[text.field])}<span className={`tag ${text.changed ? "changed" : "same"}`}>{t(text.changed ? "plan.import.tag.changed" : "plan.import.tag.same")}</span></h3>
+              <p className={text.changed ? undefined : "muted"}>{text.proposed || <span className="muted">{t("plan.text.empty")}</span>}</p>
+              {text.changed ? <small>{t("plan.import.text_was", { text: text.now || t("plan.import.text_none") })}</small> : null}
+            </div>
+          ))}
         </div>
         {review.scenes.map((scene) => (
           <div className="prop-scene" key={scene.sceneId} data-scene={scene.sceneId}>
@@ -214,10 +261,11 @@ function ReviewStep({ pending, review, notes, busy, guard, onDiscard, onConfirm 
           </section>
         ) : null}
       </div>
+      <SheetUnconfirmed {...props} />
       <div className="sheet-foot">
         <span className="grow">{guard ?? t("plan.import.foot")}</span>
-        <button type="button" className="pill" data-act="import-discard" disabled={busy || !!guard} title={guard} onClick={onDiscard}>{t("plan.import.discard")}</button>
-        <button type="button" className="pill primary" data-act="import-confirm" disabled={busy || !!guard} title={guard} onClick={onConfirm}>{t("plan.import.confirm")}</button>
+        <button type="button" className="pill" data-act="import-discard" disabled={busy || !!guard || !!props.unconfirmed} title={guard} onClick={onDiscard}>{t("plan.import.discard")}</button>
+        <button type="button" className="pill primary" data-act="import-confirm" disabled={busy || !!guard || !!props.unconfirmed} title={guard} onClick={onConfirm}>{t("plan.import.confirm")}</button>
       </div>
     </>
   );

@@ -3,6 +3,7 @@ import { ApiError } from "../../api/client.ts";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../../model/checks.ts";
 import type { PendingImport } from "../../model/plan-import.ts";
 import type { ConversationEntry, ProjectSnapshot } from "../../model/types.ts";
+import { canonicalJson } from "../../store/press-keys.ts";
 import { fixtureCommand, recompute } from "../fixture-commands.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { DECLINE, type FixtureRoute } from "./types.ts";
@@ -12,19 +13,35 @@ import { DECLINE, type FixtureRoute } from "./types.ts";
  * charged or saved.
  *
  * - POST /storyboard handles the storyboard kinds the Plan view makes (treatment, scene, sceneTitle, addScene,
- *   deleteScene, moveScene, shot, addShot, deleteShot, moveShot, narration, undo). Shot fields the Keyframes view
- *   edits (prompt, motion, length, narration text) and their undo go to the shared Keyframes fixture so both views
- *   behave the same; the rest is simulated here, with one-step undo that restores the outline and its media.
+ *   deleteScene, moveScene, shotFields, addShot, deleteShot, moveShot, narration, undo), and `shot`. Single shot
+ *   fields the Keyframes view edits (prompt, motion, length, narration text) and their undo go to the shared
+ *   Keyframes fixture so both views behave the same; the rest is simulated here, with one-step undo that restores
+ *   the outline and its media. `shotFields` (the Plan editor's save) applies several fields as one command, as the
+ *   server does (card B12): one head version, one Undo that restores them all.
  *   This route owns the endpoint: it checks what every storyboard command must pass (a known kind, the head
  *   version, a pending written plan) and declines what other views own (the Film view's soundtrack) and the Undo
  *   of commands it never answered, which go to the next /storyboard route, then the Keyframes commands. While a
  *   written plan is pending, only treatment, scene, shot and narration edits are taken (IMPORT_PENDING), as on
  *   the server.
  * - /plan-imports: create, read, confirm and discard a written plan. The Director "reads" it for 2.6 s and proposes
- *   the sample outline (2.3 gets a shorter line, a new 2.4). The fixture stands in for a Codex Director.
+ *   the sample outline (a new story and narration script, 2.3 gets a shorter line, a new 2.4). The fixture stands in
+ *   for a Codex Director.
+ *
+ * Presets (`?plan=`): `lost` loses the reply to the first storyboard command (it is applied; the same request sent
+ * again is answered with the same receipt, as the server's request identity does). `director-edits` has the
+ * Director working alongside: 3 s after the Plan opens it rewrites 1.2's purpose and motion and the story, as if it
+ * had changed them while the person had a draft open. `director-moves`: 3 s after the Plan opens it rewrites 1.2's
+ * purpose and moves 1.2 to the start of Scene 2 (it becomes 2.1), and deletes 3.1, as if another window had.
  */
 
 export const IMPORT_READ_MS = 2600;
+/** How long after the Plan opens the Director's alongside edit lands in the `director-edits` and `director-moves` presets. */
+export const DIRECTOR_EDIT_MS = 3000;
+
+/** The `?plan=` preset of the page (null in tests and normal use). */
+function planPreset(): string | null {
+  try { return new URLSearchParams(globalThis.location?.search ?? "").get("plan"); } catch { return null; }
+}
 
 type Project = ProjectSnapshot["project"];
 type ProjectShot = Project["shots"][number];
@@ -52,13 +69,31 @@ interface PlanState {
   /** Every storyboard command this route answered, so a stale Undo is refused rather than passed on. */
   known: Set<string>;
   pending: Pending | null;
+  /** The next storyboard command is applied but its reply is lost. */
+  loseNext: boolean;
+  /** Receipts of lost replies, by the exact request, so sending it again is answered, not applied twice. */
+  replies: Map<string, unknown>;
+  /** The Director's alongside edit: not scheduled, scheduled, or done. */
+  directorEdit: "off" | "armed" | "scheduled";
+  /** Which alongside edit: rewrite 1.2 and the story, or move 1.2 to another scene and delete 3.1. */
+  alongside: "edits" | "moves";
 }
 
 const states = new WeakMap<FixtureWorld, PlanState>();
 function state(world: FixtureWorld): PlanState {
   let value = states.get(world);
-  if (!value) { value = { serial: 0, latest: null, known: new Set(), pending: null }; states.set(world, value); }
+  if (!value) {
+    const preset = planPreset();
+    const alongside = preset === "director-moves" ? "moves" : "edits";
+    value = { serial: 0, latest: null, known: new Set(), pending: null, loseNext: preset === "lost", replies: new Map(), directorEdit: preset === "director-edits" || preset === "director-moves" ? "armed" : "off", alongside };
+    states.set(world, value);
+  }
   return value;
+}
+
+/** Lose the reply to the next storyboard command (the `lost` preset; tests call it directly). */
+export function loseNextReply(world: FixtureWorld): void {
+  state(world).loseNext = true;
 }
 const nextId = (world: FixtureWorld, prefix: string) => `${prefix}-plan-${++state(world).serial}`;
 
@@ -98,15 +133,15 @@ function emptyScene(id: string, purpose: string, ordinal: number): SceneOverview
   };
 }
 
-const outdateKeyframe = (keyframe: KeyframeSlot, field: string): KeyframeSlot => {
+const outdateKeyframe = (keyframe: KeyframeSlot, field: string | string[]): KeyframeSlot => {
   if (keyframe.state !== "ready" || !keyframe.artifact) return keyframe;
   const { artifact, ...rest } = keyframe;
-  return { ...rest, state: "outdated", previous: artifact, opened: false, outdatedFields: [field] };
+  return { ...rest, state: "outdated", previous: artifact, opened: false, outdatedFields: typeof field === "string" ? [field] : field };
 };
-const outdateClip = (video: MediaSlot, field: string): MediaSlot => {
+const outdateClip = (video: MediaSlot, field: string | string[]): MediaSlot => {
   if (video.state !== "ready" || !video.artifact) return video;
   const { artifact, ...rest } = video;
-  return { ...rest, state: "outdated", previous: artifact, outdatedFields: [field] };
+  return { ...rest, state: "outdated", previous: artifact, outdatedFields: typeof field === "string" ? [field] : field };
 };
 
 const isWorking = (slot: MediaSlot) => slot.state === "running" || slot.state === "queued";
@@ -131,6 +166,7 @@ interface Body {
   value?: string;
   commandId?: string;
   withShots?: boolean;
+  fields?: Record<string, unknown>;
 }
 
 /** Shot fields whose behaviour the Keyframes fixture already simulates. */
@@ -139,15 +175,17 @@ const KEYFRAMES_FIELDS = new Set(["imagePrompt", "motion", "desiredFrames", "vid
 const DIRECTION_FIELDS = new Set(["purpose", "action", "framing"]);
 
 /** The storyboard kinds the server has (its body schema); the Plan view makes all of them but soundtrack. */
-const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack"]);
+const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "shotFields", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack"]);
 const OTHER_VIEWS_KINDS = new Set(["soundtrack"]);
 /** What the server still takes while a written plan is pending (storyboard.ts, IMPORT_PENDING). */
-const DURING_IMPORT = new Set(["treatment", "scene", "shot", "narration"]);
+const DURING_IMPORT = new Set(["treatment", "scene", "shot", "shotFields", "narration"]);
+/** The fields one shotFields command may carry (storyboard.ts). */
+const SHOT_FIELDS = new Set(["purpose", "action", "framing", "motion", "desiredFrames", "imagePrompt", "videoPrompt"]);
 
 const DIRECTION_HEADER = "OpenSlate current direction:\n";
 const DIRECTION_SEPARATOR = "\nReference details (retain only where consistent):\n";
 
-/** The server's rewrite of a prompt after a purpose or framing edit: its direction in front, the words kept. */
+/** The server's rewrite of a prompt after a purpose, action or framing edit: its direction in front, the words kept. */
 function directedPrompt(previous: string, direction: string): string {
   const split = previous.startsWith(DIRECTION_HEADER) ? previous.indexOf(DIRECTION_SEPARATOR) : -1;
   const original = split >= 0 ? previous.slice(split + DIRECTION_SEPARATOR.length) : previous;
@@ -180,6 +218,73 @@ function change(world: FixtureWorld, edit: (overview: GenerationOverview, projec
     w.overview = { ...overview, headVersion, revisionId };
     w.snapshot = { ...w.snapshot, project: { ...next.project, shots: orderedShots(overview, next.project), headVersion, revisionId } };
   });
+}
+
+/**
+ * Several shot fields as one change, as the server's shotFields does: explicit prompts win; otherwise purpose,
+ * action and framing are written into both prompts and motion into the video prompt. Purpose, action, framing or
+ * the picture prompt outdate the keyframe and the clip; motion, length or the video prompt only the clip.
+ */
+function applyShotFields(world: FixtureWorld, shot: ShotOverview, fields: Record<string, unknown>): void {
+  const fps = world.overview.fps;
+  const names = Object.keys(fields);
+  if (!names.length || names.some((name) => !SHOT_FIELDS.has(name))) throw new ApiError("VALIDATION_ERROR", 400);
+  const values: Record<string, string> = {};
+  let frames: number | null = null;
+  for (const name of names) {
+    if (name === "desiredFrames") {
+      const value = fields[name];
+      if (typeof value !== "number" || !Number.isInteger(value) || value < MIN_SHOT_SECONDS * fps || value > MAX_SHOT_SECONDS * fps) throw new ApiError("VALIDATION_ERROR", 400);
+      frames = value;
+    } else values[name] = text(fields[name]);
+  }
+  // Refused whole before anything changes: a shot shorter than its accepted voice line.
+  if (frames !== null) assertLength(shot, frames, fps);
+  change(world, (overview, project) => {
+    const row = project.shots.find((s) => s.id === shot.shotId) as (ProjectShot & { action?: string }) | undefined;
+    const purpose = values.purpose ?? shot.purpose;
+    const action = values.action ?? row?.action ?? "";
+    const framing = values.framing ?? shot.framing;
+    const motion = values.motion ?? shot.motion;
+    const direction = [purpose, action, framing].filter(Boolean).join(". ");
+    const directs = names.some((name) => DIRECTION_FIELDS.has(name));
+    const imagePrompt = values.imagePrompt ?? (directs ? directedPrompt(shot.imagePrompt, direction) : shot.imagePrompt);
+    const priorVideo = row?.videoPrompt ?? shot.imagePrompt;
+    const videoPrompt = values.videoPrompt ?? (directs || "motion" in values ? directedPrompt(priorVideo, `${direction}. Camera movement: ${motion}`) : priorVideo);
+    const keyframeToo = directs || "imagePrompt" in values;
+    let narration = shot.narration;
+    const durationFrames = frames ?? shot.durationFrames;
+    if (frames !== null) {
+      // A line settled by lengthening the shot is unsettled again once the shot is too short for it.
+      const length = narration.measuredSeconds ?? narration.estimatedSeconds;
+      if (narration.fit === "extend_shot" && length !== undefined && length > frames / fps + 1e-9) { const { fit: _fit, ...rest } = narration; narration = rest; }
+    }
+    const edited: ShotOverview = {
+      ...shot, purpose, framing, motion, imagePrompt, durationFrames, narration,
+      keyframe: keyframeToo ? outdateKeyframe(shot.keyframe, names) : shot.keyframe,
+      video: outdateClip(shot.video, names),
+    };
+    // As on the server (promptState "ready"), a written action, framing or prompt lifts "needs direction".
+    const lifts = names.some((name) => ["action", "framing", "imagePrompt", "videoPrompt"].includes(name));
+    return {
+      overview: { ...overview, shots: { ...overview.shots, [shot.shotId]: lifts ? directed(edited) : edited } },
+      project: { ...project, shots: project.shots.map((s) => (s.id === shot.shotId ? { ...s, purpose, framing, motion, imagePrompt, videoPrompt, desiredFrames: durationFrames, ...(values.action ? { action } : {}) } : s)) },
+    };
+  });
+}
+
+/** The storyboard route: a lost reply's request sent again is answered with its receipt; the next one may be lost. */
+function storyboardAnswer(world: FixtureWorld, raw: unknown): unknown {
+  const plan = state(world);
+  const key = canonicalJson(raw);
+  if (plan.replies.has(key)) return plan.replies.get(key);
+  const receipt = storyboard(world, raw);
+  if (receipt !== DECLINE && plan.loseNext) {
+    plan.loseNext = false;
+    plan.replies.set(key, receipt);
+    throw new ApiError("NETWORK_ERROR");
+  }
+  return receipt;
 }
 
 function storyboard(world: FixtureWorld, raw: unknown): unknown {
@@ -216,6 +321,13 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
   const before = { overview: structuredClone(world.overview), project: structuredClone(world.snapshot.project) };
   const commandId = nextId(world, "command");
   switch (body.kind) {
+    case "shotFields": {
+      const shot = world.overview.shots[body.id ?? ""];
+      if (!shot) throw new ApiError("NOT_FOUND", 404);
+      if (!body.fields || typeof body.fields !== "object" || Array.isArray(body.fields) || body.field !== undefined || body.value !== undefined) throw new ApiError("VALIDATION_ERROR", 400);
+      applyShotFields(world, shot, body.fields);
+      break;
+    }
     case "treatment": {
       if (body.field !== "brief" && body.field !== "story") throw new ApiError("VALIDATION_ERROR", 400);
       const value = text(body.value);
@@ -300,14 +412,7 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
     case "deleteShot": {
       const shot = world.overview.shots[body.id ?? ""];
       if (!shot) throw new ApiError("NOT_FOUND", 404);
-      change(world, (overview, project) => {
-        const shots = { ...overview.shots };
-        delete shots[shot.shotId];
-        return {
-          overview: { ...overview, shots, scenes: overview.scenes.map((s) => ({ ...s, shotIds: s.shotIds.filter((id) => id !== shot.shotId) })) },
-          project: { ...project, shots: project.shots.filter((s) => s.id !== shot.shotId) },
-        };
-      });
+      deleteShotIn(world, shot.shotId);
       break;
     }
     case "moveShot": {
@@ -315,19 +420,7 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
       const target = world.overview.scenes.find((s) => s.sceneId === body.sceneId);
       if (!shot || !target) throw new ApiError("NOT_FOUND", 404);
       if (body.beforeId && (body.beforeId === shot.shotId || !target.shotIds.includes(body.beforeId))) throw new ApiError("VALIDATION_ERROR", 400);
-      change(world, (overview, project) => ({
-        overview: {
-          ...overview,
-          scenes: overview.scenes.map((s) => {
-            const ids = s.shotIds.filter((id) => id !== shot.shotId);
-            if (s.sceneId !== target.sceneId) return { ...s, shotIds: ids };
-            const at = body.beforeId ? ids.indexOf(body.beforeId) : ids.length;
-            ids.splice(at, 0, shot.shotId);
-            return { ...s, shotIds: ids };
-          }),
-        },
-        project,
-      }));
+      moveShotIn(world, shot.shotId, target.sceneId, body.beforeId);
       break;
     }
     case "shot": {
@@ -342,16 +435,18 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
       change(world, (overview, project) => {
         const row = project.shots.find((s) => s.id === shot.shotId);
         const purpose = field === "purpose" ? value : shot.purpose;
+        const action = field === "action" ? value : (row as { action?: string } | undefined)?.action ?? "";
         const framing = field === "framing" ? value : shot.framing;
-        const direction = [purpose, framing].filter(Boolean).join(". ");
+        const direction = [purpose, action, framing].filter(Boolean).join(". ");
         const imagePrompt = directedPrompt(shot.imagePrompt, direction);
         const videoPrompt = directedPrompt(row?.videoPrompt ?? shot.imagePrompt, `${direction}. Camera movement: ${shot.motion}`);
+        // The overview has no action; the stored shot keeps it.
         const content = field === "action" ? {} : { [field]: value };
         const edited: ShotOverview = { ...shot, ...content, imagePrompt, keyframe: outdateKeyframe(shot.keyframe, field), video: outdateClip(shot.video, field) };
         return {
           // As on the server (promptState "ready"), a written action or framing lifts "needs direction"; a purpose does not.
           overview: { ...overview, shots: { ...overview.shots, [shot.shotId]: field === "purpose" ? edited : directed(edited) } },
-          project: { ...project, shots: project.shots.map((s) => (s.id === shot.shotId ? { ...s, ...content, imagePrompt, videoPrompt } : s)) },
+          project: { ...project, shots: project.shots.map((s) => (s.id === shot.shotId ? { ...s, [field]: value, imagePrompt, videoPrompt } : s)) },
         };
       });
       break;
@@ -378,6 +473,35 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
       throw new ApiError("VALIDATION_ERROR", 400);
   }
   return commit(world, "plan", commandId, before);
+}
+
+/** Delete a shot from the outline (its media stays in Assets), as one change. */
+function deleteShotIn(world: FixtureWorld, shotId: string): void {
+  change(world, (overview, project) => {
+    const shots = { ...overview.shots };
+    delete shots[shotId];
+    return {
+      overview: { ...overview, shots, scenes: overview.scenes.map((s) => ({ ...s, shotIds: s.shotIds.filter((id) => id !== shotId) })) },
+      project: { ...project, shots: project.shots.filter((s) => s.id !== shotId) },
+    };
+  });
+}
+
+/** Move a shot before `beforeId` in a scene (or to its end), as one change. */
+function moveShotIn(world: FixtureWorld, shotId: string, sceneId: string, beforeId: string | undefined): void {
+  change(world, (overview, project) => ({
+    overview: {
+      ...overview,
+      scenes: overview.scenes.map((s) => {
+        const ids = s.shotIds.filter((id) => id !== shotId);
+        if (s.sceneId !== sceneId) return { ...s, shotIds: ids };
+        const at = beforeId ? ids.indexOf(beforeId) : ids.length;
+        ids.splice(at, 0, shotId);
+        return { ...s, shotIds: ids };
+      }),
+    },
+    project,
+  }));
 }
 
 /** One-step Undo: only the latest command, only while nothing changed since (no new edit, no paid work). */
@@ -410,14 +534,17 @@ const DIRECTOR_NOTES = "I kept your wording and proposed the outline beside it: 
 
 /** The sample proposal: 2.3's line from the draft, and a new shot after it in the same scene. */
 function proposal(world: FixtureWorld, id: string): Project {
-  const project = structuredClone(world.snapshot.project);
+  const project: Project & { narration?: { script: string; source: string } } = structuredClone(world.snapshot.project);
   const overview = world.overview;
+  // The draft's story and its lines as one narration script; the brief stays as it is.
+  project.story = "At closing time Mara buys the last ticket; at dawn she boards the last ferry of the season, and it leaves the harbour in the fog.";
+  project.narration = { script: "One for the morning boat. It was the last boat of the season. I didn't look back.", source: "generated" };
   const scene = overview.scenes[1] ?? overview.scenes[overview.scenes.length - 1];
   if (!scene) return project;
   const third = scene.shotIds[2] ?? scene.shotIds[scene.shotIds.length - 1];
   project.shots = project.shots.map((shot) => (shot.id === third && shot.narration ? { ...shot, narration: { ...shot.narration, text: "It was the last boat of the season." } } : shot));
-  const shot: ProjectShot = {
-    id: `${id}-gangway`, sceneId: scene.sceneId, purpose: "The gangway is lowered; Mara steps aboard.", framing: "Wide", motion: "Static", desiredFrames: 4 * overview.fps,
+  const shot: ProjectShot & { action: string } = {
+    id: `${id}-gangway`, sceneId: scene.sceneId, purpose: "The gangway is lowered; Mara steps aboard.", action: "A deckhand lowers the gangway; Mara crosses it without looking back.", framing: "Wide", motion: "Static", desiredFrames: 4 * overview.fps,
     imagePrompt: "The ferry's gangway lowered onto the pier; Mara steps aboard in her red coat.", videoPrompt: "The ferry's gangway lowered onto the pier; Mara steps aboard in her red coat. Static.",
     narration: { mode: "none", text: "", voice: "stock" },
   };
@@ -426,7 +553,41 @@ function proposal(world: FixtureWorld, id: string): Project {
   return project;
 }
 
+/**
+ * The `director-edits` preset: the Director, working alongside, rewrites 1.2's purpose and motion and the story a
+ * moment after the Plan opens (its first read of /plan-imports), as a new head version with a line in the thread.
+ * `director-moves`: it rewrites 1.2's purpose, moves 1.2 to the start of Scene 2 and deletes 3.1 instead.
+ */
+function armDirectorEdit(world: FixtureWorld): void {
+  const plan = state(world);
+  if (plan.directorEdit !== "armed") return;
+  plan.directorEdit = "scheduled";
+  if (plan.alongside === "moves") {
+    world.later(DIRECTOR_EDIT_MS, (w) => {
+      const byLabel = (label: string) => Object.values(w.overview.shots).find((item) => item.label === label);
+      const moved = byLabel("1.2");
+      const deleted = byLabel("3.1");
+      const second = w.overview.scenes[1];
+      if (moved) applyShotFields(w, moved, { purpose: "Mara counts out her coins for the last ticket." });
+      if (moved && second) moveShotIn(w, moved.shotId, second.sceneId, second.shotIds[0]);
+      if (deleted) deleteShotIn(w, deleted.shotId);
+      const note: ConversationEntry = { id: "director-alongside", role: "assistant", text: "I moved the ticket purchase into the harbour scene and cut the departure's first shot.", requestId: "director-alongside", at: new Date().toISOString() };
+      w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), note] };
+    });
+    return;
+  }
+  world.later(DIRECTOR_EDIT_MS, (w) => {
+    const shot = Object.values(w.overview.shots).find((item) => item.label === "1.2");
+    if (shot) applyShotFields(w, shot, { purpose: "Mara counts out her coins for the last ticket.", motion: "Slow push-in" });
+    change(w, (overview, project) => ({ overview, project: { ...project, story: "Mara leaves her town on the season's last ferry: the ticket office, the harbour at dawn, the departure." } }));
+    // Not marked scripted: the thread would say nothing in the film changed, and here it did.
+    const note: ConversationEntry = { id: "director-alongside", role: "assistant", text: "I tightened 1.2 (purpose and a slow push-in) and the story while you were in the Plan.", requestId: "director-alongside", at: new Date().toISOString() };
+    w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), note] };
+  });
+}
+
 function pendingView(world: FixtureWorld): { pending: PendingImport | null } {
+  armDirectorEdit(world);
   const pending = state(world).pending;
   if (!pending) return { pending: null };
   const stale = pending.ready && (pending.baseVersion !== head(world) || !!world.overview.stopped);
@@ -517,7 +678,7 @@ function discardImport(world: FixtureWorld, requestId: string): unknown {
 
 /** Simulated server routes the Plan view needs in the sample film. */
 export const planRoutes: FixtureRoute[] = [
-  { method: "POST", match: /^\/storyboard$/, handle: (world, _params, body) => storyboard(world, body) },
+  { method: "POST", match: /^\/storyboard$/, handle: (world, _params, body) => storyboardAnswer(world, body) },
   { method: "GET", match: /^\/plan-imports$/, handle: (world) => pendingView(world) },
   { method: "POST", match: /^\/plan-imports$/, handle: (world, _params, body) => createImport(world, body) },
   { method: "POST", match: /^\/plan-imports\/([^/]+)\/confirm$/, handle: (world, [id], body) => confirmImport(world, decodeURIComponent(id ?? ""), body) },

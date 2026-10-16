@@ -1,10 +1,12 @@
-import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import type { HTMLAttributes, KeyboardEvent, ReactNode } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { SceneView } from "../../model/plan.ts";
 import type { Msg } from "../../model/types.ts";
 import { Menu } from "./Menu.tsx";
+import type { Unconfirmed } from "./Notices.tsx";
 import { NoteChips } from "./ShotRow.tsx";
-import { NoneImpact, SaveError } from "./TextPanel.tsx";
+import { FormNotices, NoneImpact, SaveError, useHeldText } from "./TextPanel.tsx";
+import type { DraftSlot } from "./useHeld.ts";
 
 export const sceneElementId = (sceneId: string) => `plan-scene-${sceneId}`;
 
@@ -15,9 +17,19 @@ interface Props {
   guard: string | undefined;
   busy: boolean;
   error: Msg | null;
+  /** The open title or direction save's reply was lost. */
+  unconfirmed: Unconfirmed | null;
+  /** Where the open title or direction draft is kept. */
+  slot: DraftSlot;
   flash: boolean;
+  /** A dragged shot would land at the end of this scene. */
+  dropEnd: boolean;
+  /** Drag-and-drop handlers for the scene as a drop target. */
+  drop: HTMLAttributes<HTMLElement>;
   /** The scene's shot rows (the editor takes the place of the row it edits). */
   children: ReactNode;
+  onRetry(): void;
+  onDismiss(): void;
   onMove(direction: -1 | 1): void;
   onPoint(): void;
   onRename(): void;
@@ -30,13 +42,13 @@ interface Props {
 }
 
 /** One scene: number, title and meta line, ↑ ↓, @ Scene n and •••; its direction; its shots; Add shot. */
-export function ScenePanel({ scene, editing, saving, guard, busy, error, flash, children, onMove, onPoint, onRename, onEditDirection, onDelete, onCancel, onSaveTitle, onSaveDirection, onAddShot }: Props) {
+export function ScenePanel({ scene, editing, saving, guard, busy, error, unconfirmed, slot, flash, dropEnd, drop, children, onRetry, onDismiss, onMove, onPoint, onRename, onEditDirection, onDelete, onCancel, onSaveTitle, onSaveDirection, onAddShot }: Props) {
   const { t, tm } = useI18n();
   const off = !!guard || busy;
   const n = scene.ordinal;
   const offTitle = guard ? { title: guard } : {};
   return (
-    <section className={`scene panel${flash ? " flash" : ""}`} id={sceneElementId(scene.sceneId)} data-scene={scene.sceneId} aria-label={t("plan.scene.aria", { scene: n, title: scene.title })}>
+    <section className={`scene panel${flash ? " flash" : ""}${dropEnd ? " drop-end" : ""}`} id={sceneElementId(scene.sceneId)} data-scene={scene.sceneId} aria-label={t("plan.scene.aria", { scene: n, title: scene.title })} {...drop}>
       <div className="scene-top">
         <span className="sno" aria-hidden="true">{n}</span>
         {editing === "title" ? (
@@ -48,6 +60,10 @@ export function ScenePanel({ scene, editing, saving, guard, busy, error, flash, 
             multiline={false}
             saving={saving}
             guard={guard}
+            unconfirmed={unconfirmed}
+            slot={slot}
+            onRetry={onRetry}
+            onDismiss={onDismiss}
             hint={<span className="hint">{t("plan.scene.rename_hint")}</span>}
             onCancel={onCancel}
             onSave={onSaveTitle}
@@ -82,7 +98,7 @@ export function ScenePanel({ scene, editing, saving, guard, busy, error, flash, 
           </span>
         )}
       </div>
-      {editing === "title" ? <div className="title-error"><SaveError error={error} /></div> : null}
+      {editing === "title" && !unconfirmed ? <div className="title-error"><SaveError error={error} /></div> : null}
       {editing === "direction" ? (
         <InlineForm
           className="dir-edit"
@@ -94,6 +110,10 @@ export function ScenePanel({ scene, editing, saving, guard, busy, error, flash, 
           saving={saving}
           guard={guard}
           error={error}
+          unconfirmed={unconfirmed}
+          slot={slot}
+          onRetry={onRetry}
+          onDismiss={onDismiss}
           hint={<NoneImpact text="plan.scene.direction_impact" />}
           onCancel={onCancel}
           onSave={onSaveDirection}
@@ -133,44 +153,51 @@ interface InlineProps {
   saving: boolean;
   guard: string | undefined;
   error?: Msg | null;
+  unconfirmed: Unconfirmed | null;
+  slot: DraftSlot;
   hint: ReactNode;
+  onRetry(): void;
+  onDismiss(): void;
   onCancel(): void;
   onSave(value: string): void;
 }
 
-/** A title or direction edited in place, with Save and Cancel; Esc cancels. */
-function InlineForm({ className, form, label, visibleLabel, initial, multiline, saving, guard, error, hint, onCancel, onSave }: InlineProps) {
+/**
+ * A title or direction edited in place, with Save and Cancel; Esc cancels. Held against the saved value like every
+ * Plan editor: the saved film changing under the person's text waits for their choice.
+ */
+function InlineForm({ className, form, label, visibleLabel, initial, multiline, error, hint, ...state }: InlineProps) {
   const { t } = useI18n();
-  const [draft, setDraft] = useState(initial);
-  const id = `plan-${form}-input`;
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!draft.trim() || saving || guard) return;
-    if (draft.trim() === initial.trim()) onCancel();
-    else onSave(draft.trim());
-  };
-  const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onCancel(); } };
+  const { held, value, stale, canSave, submit, hint: blocked, ids, keep, takeSaved, fieldAria } = useHeldText(initial, state);
+  const id = ids.input;
+  const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); state.onCancel(); } };
   const select = (element: HTMLInputElement | HTMLTextAreaElement) => element.setSelectionRange(element.value.length, element.value.length);
+  const notices = <FormNotices conflictId={ids.conflict} stale={stale} unconfirmed={state.unconfirmed} saving={state.saving} onKeep={keep} onTakeSaved={takeSaved} onRetry={state.onRetry} onDismiss={state.onDismiss} />;
   return (
     <form className={className} data-form={form} onSubmit={submit} onKeyDown={onKeyDown}>
       {multiline ? (
         <div className="field">
           <label className={visibleLabel ? undefined : "sr"} htmlFor={id}>{label}</label>
-          <textarea id={id} className="textarea" rows={2} value={draft} autoFocus onFocus={(event) => select(event.currentTarget)} onChange={(event) => setDraft(event.target.value)} />
+          <textarea id={id} className="textarea" rows={2} value={value} autoFocus data-conflict={stale || undefined} {...fieldAria} onFocus={(event) => select(event.currentTarget)} onChange={(event) => held.set("text", event.target.value)} />
         </div>
       ) : (
         <>
           <label className="sr" htmlFor={id}>{label}</label>
-          <input id={id} className="input" maxLength={160} value={draft} autoFocus onFocus={(event) => select(event.currentTarget)} onChange={(event) => setDraft(event.target.value)} />
+          <input id={id} className="input" maxLength={160} value={value} autoFocus data-conflict={stale || undefined} {...fieldAria} onFocus={(event) => select(event.currentTarget)} onChange={(event) => held.set("text", event.target.value)} />
         </>
       )}
       {multiline ? hint : null}
-      {multiline && error !== undefined ? <SaveError error={error} /> : null}
+      {multiline ? notices : null}
+      {multiline && error !== undefined && !state.unconfirmed ? <SaveError error={error} /> : null}
       <span className={multiline ? "edit-foot" : "inline-acts"}>
-        <button type="submit" className={`pill${multiline ? "" : " sm"} primary`} data-act={`save-${form}`} disabled={saving || !!guard || !draft.trim()} title={guard}>{t(saving ? "plan.saving" : "plan.save")}</button>
-        <button type="button" className={`pill${multiline ? "" : " sm"}`} data-act="cancel-edit" onClick={onCancel}>{t("plan.cancel")}</button>
+        <button type="submit" className={`pill${multiline ? "" : " sm"} primary`} data-act={`save-${form}`} disabled={!canSave} title={state.guard ?? (blocked ? t(blocked) : undefined)} aria-describedby={blocked ? ids.hint : undefined}>{t(state.saving ? "plan.saving" : "plan.save")}</button>
+        <button type="button" className={`pill${multiline ? "" : " sm"}`} data-act="cancel-edit" onClick={state.onCancel}>{t("plan.cancel")}</button>
+        {multiline && blocked ? <span className="hint" id={ids.hint}>{t(blocked)}</span> : null}
       </span>
       {multiline ? null : hint}
+      {/* The title form has no room for the hint by its buttons: it is said for the screen reader only. */}
+      {!multiline && blocked ? <span className="sr" id={ids.hint}>{t(blocked)}</span> : null}
+      {multiline ? null : notices}
     </form>
   );
 }

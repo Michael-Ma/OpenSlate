@@ -502,6 +502,13 @@ export class StudioStore {
     }
   }
 
+  /**
+   * Whether this press's last attempt went unanswered (no reply, a timeout, a server failure): its key and body are
+   * kept, so pressing it again with the same identity resends the very same request and the server replays its
+   * outcome. False once the server has answered (or refused) it.
+   */
+  unconfirmed = (pressId: string): boolean => !this.#state.pending[pressId] && !!this.#keys.saved(pressId);
+
   // ---- plain UI state ----------------------------------------------------------
 
   setView = (view: ViewName) => this.dispatch({ type: "view", view });
