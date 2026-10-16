@@ -67,6 +67,44 @@ async function headClear(page) {
   expect(side.right <= preview.right + 0.5 && top.left >= preview.left - 0.5, `The preview head leaves the preview: ${JSON.stringify(boxes)}`);
 }
 
+/** The element is wholly inside the container's box (on screen, not scrolled or cut off). */
+async function inView(page, selector, container) {
+  const [box, outer] = await Promise.all([page.locator(selector).first().boundingBox(), page.locator(container).first().boundingBox()]);
+  expect(box && outer && box.height > 0 && box.y >= outer.y - 0.5 && box.y + box.height <= outer.y + outer.height + 0.5,
+    `${selector} is not in view inside ${container}: ${JSON.stringify({ box, outer })}`);
+}
+
+/** Everything in the video panel (segments, headline, stop, button, the reason under it) stays inside its box. */
+async function panelFits(page) {
+  const out = await page.evaluate(() => {
+    const panel = document.querySelector(".vpanel");
+    const outer = panel.getBoundingClientRect();
+    const parts = [...panel.children].map((child) => { const r = child.getBoundingClientRect(); return { part: child.className || child.tagName, top: r.top, bottom: r.bottom }; });
+    return { top: outer.top, bottom: outer.bottom, parts };
+  });
+  const outside = out.parts.filter((part) => part.bottom > out.bottom + 0.5 || part.top < out.top - 0.5);
+  expect(!outside.length, `The video panel overflows: ${JSON.stringify({ panel: [out.top, out.bottom], outside })}`);
+}
+
+/** Scene 3 of the sample film with 3.2's line made longer in Plan, its keyframes made and both opened. */
+async function scene3ToConfirm(page) {
+  // 3.2 gets a longer line in Plan: estimated at 7.6 s, it fits its 8 s shot on paper.
+  await page.click('[data-act="tab"][data-view="plan"]');
+  await page.click(`[data-act="edit-shot"][data-shot="${shot("3.2")}"]`);
+  await page.fill('[data-field="line"]', "I stood at the rail until the town was only a line of lights, and then not even that.");
+  await page.click('[data-act="save-shot"]');
+  await expectText(page, ".toast", /Saved 3\.2/);
+  await page.click('[data-act="tab"][data-view="keyframes"]');
+  await page.click('[data-act="scene"][data-scene="scene-3"]');
+  await page.click('[data-act="make-keyframes"]');
+  await page.waitForSelector('[data-card="shot-3-2"] .pic-img', { timeout: 10000 });
+  await page.click('.card [data-act="open-shot"][data-shot="shot-3-1"]');
+  await expectText(page, '[data-card="shot-3-1"] .stl', /Opened/);
+  await page.click('.card [data-act="open-shot"][data-shot="shot-3-2"]');
+  await expectText(page, '[data-card="shot-3-2"] .stl', /Opened/);
+  await expectText(page, '[data-act="confirm-video"]', /^Confirm frames & generate video · about \$1\.00$/);
+}
+
 /**
  * page.route whose handler goes quiet once the scenario has ended: a late request (the studio's events keep the film
  * reading) would otherwise read a response the closing page already disposed of, and crash the whole run.
@@ -123,7 +161,18 @@ export const scenarios = [
       await page.click('[data-act="edit-motion"]');
       await page.locator('form[data-form="motion"] input').first().press("ArrowLeft");
       expect((await shown(page)) === shot("3.2"), "ArrowLeft in the motion field moved the shot");
+      // The open edit keeps its shot: Previous is off and says why, and the arrows on the stage do not move.
+      const prev = page.locator('.preview [data-act="prev-shot"]');
+      expect(await prev.isDisabled(), "Previous is on while an edit is open");
+      expect((await prev.getAttribute("title")) === "Save or cancel the edit to 3.2 first", `Previous does not say why: ${await prev.getAttribute("title")}`);
+      await page.locator(".preview").focus();
+      await page.keyboard.press("ArrowLeft");
+      await page.waitForTimeout(150);
+      expect((await shown(page)) === shot("3.2"), "ArrowLeft on the stage dropped the open edit");
+      expect(await page.locator('form[data-form="motion"]').count(), "The edit closed");
+      await screenshot(page, "navigation-held-1440");
       await page.click('[data-act="cancel-edit"]');
+      expect(!(await prev.isDisabled()), "Previous stays off after the edit was cancelled");
       // The button that turns off hands focus to the stage, so the keys keep working from there.
       await page.click('.preview [data-act="prev-shot"]');
       await until(() => shown(page), (id) => id === shot("3.1"), "Previous did not go to 3.1");
@@ -219,13 +268,16 @@ export const scenarios = [
       expect((await focused(page)) === "h4", "The prompts did not take focus");
       await expectText(page, '.insp [data-prompt="image"]', /^The ticket’s printed date, “Sunday 31 March”, under Mara’s thumb\.$/);
       await expectText(page, '.insp [data-prompt="video"]', /^The ticket’s printed date, “Sunday 31 March”, under Mara’s thumb\. Slow tilt down\.$/);
-      // Both prompts and Edit in Plan are on screen inside the inspector.
+      // The video prompt has no editor of its own: it says how it changes. Edit in Plan names the shot.
+      await expectText(page, '.insp [data-act="video-prompt-note"]', /^Rewritten when the shot's purpose, framing or motion changes\.$/);
+      await expectText(page, '.insp [data-act="edit-in-plan"]', /^Edit 2\.3 in Plan$/);
+      await screenshot(page, "prompts-1440");
+      // Both prompts, the note and Edit in Plan are on screen inside the inspector.
       const insp = await page.locator(".insp").boundingBox();
-      for (const selector of ['.insp [data-prompt="video"]', '.insp [data-act="edit-in-plan"]']) {
+      for (const selector of ['.insp [data-prompt="video"]', '.insp [data-act="video-prompt-note"]', '.insp [data-act="edit-in-plan"]']) {
         const box = await page.locator(selector).boundingBox();
         expect(box && insp && box.y + box.height <= insp.y + insp.height + 1, `${selector} is cut off`);
       }
-      await screenshot(page, "prompts-1440");
       // Esc goes back to the rows, with focus on the Prompts button.
       await page.keyboard.press("Escape");
       await page.waitForSelector(".insp .rows");
@@ -244,21 +296,7 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      // 3.2 gets a longer line in Plan: estimated at 7.6 s, it fits its 8 s shot on paper.
-      await page.click('[data-act="tab"][data-view="plan"]');
-      await page.click(`[data-act="edit-shot"][data-shot="${shot("3.2")}"]`);
-      await page.fill('[data-field="line"]', "I stood at the rail until the town was only a line of lights, and then not even that.");
-      await page.click('[data-act="save-shot"]');
-      await expectText(page, ".toast", /Saved 3\.2/);
-      await page.click('[data-act="tab"][data-view="keyframes"]');
-      await page.click('[data-act="scene"][data-scene="scene-3"]');
-      await page.click('[data-act="make-keyframes"]');
-      await page.waitForSelector('[data-card="shot-3-2"] .pic-img', { timeout: 10000 });
-      await page.click('.card [data-act="open-shot"][data-shot="shot-3-1"]');
-      await expectText(page, '[data-card="shot-3-1"] .stl', /Opened/);
-      await page.click('.card [data-act="open-shot"][data-shot="shot-3-2"]');
-      await expectText(page, '[data-card="shot-3-2"] .stl', /Opened/);
-      await expectText(page, '[data-act="confirm-video"]', /^Confirm frames & generate video · about \$1\.00$/);
+      await scene3ToConfirm(page);
       await page.click('[data-act="confirm-video"]');
       // The confirm voices 3.2's line first, step by step, before any clip.
       await expectText(page, '[data-card="shot-3-2"] .stl', /Making voice line…/);
@@ -274,11 +312,29 @@ export const scenarios = [
       await expectText(page, ".vpanel .vcount", /^Stopped\s*at 3\.2$/);
       await expectText(page, ".vpanel .vstop", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
       expect(!(await page.locator(".vpanel .vstop-act").count()), "A too-long line offers another view; its choices are in the check");
+      // The line is the stop's own blocker: nothing to add under the button. The opened frames still show.
       expect((await page.locator(".vpanel .why").innerText()) === "", "The reason under the button repeats the stop's next step");
+      expect((await page.locator(".vpanel .vsegs i.on").count()) === 2, "The opened-frame segments are hidden while stopped");
       expect(await page.locator('[data-act="confirm-video"]').isDisabled(), "Confirm is on while the line is too long");
-      await expectText(page, '.insp [data-act="stopped-here"]', /^The scene's video stopped here\. The 3\.2 voice line came out at 8\.4 s/);
+      await panelFits(page);
+      // The inspector says it in one line, so its rows stay in view, the narration row too.
+      await expectText(page, '.insp [data-act="stopped-here"]', /^The video stopped here\.\s*Why$/);
       await expectText(page, ".banner.check", /Narration 8\.4 s, shot 8 s/);
       await screenshot(page, "confirm-stopped-1440");
+      // (A row's label stretches to its row's height, so the narration row is checked by its line.)
+      for (const selector of ['[data-row="motion"] dd', '[data-row="duration"] dd', '[data-row="narration"] dd .quote']) await inView(page, `.insp ${selector}`, ".insp .insp-body");
+      // What is below the fold (the line's length note) is a scroll away, and the body's lower edge fades to say so.
+      const body = await page.locator(".insp .insp-body").evaluate((element) => ({ scrolls: element.scrollHeight > element.clientHeight + 1, fade: getComputedStyle(element).getPropertyValue("--kf-fade-b").trim() }));
+      expect(!body.scrolls || body.fade === "16px", `The inspector scrolls with no cue: ${JSON.stringify(body)}`);
+      // Why opens the reason and the next step in place, and closes again.
+      const why = page.locator('.insp [data-act="stopped-why"]');
+      expect((await why.getAttribute("aria-label")) === "Why the scene's video stopped at 3.2", `Why is not labelled: ${await why.getAttribute("aria-label")}`);
+      await why.click();
+      expect((await why.getAttribute("aria-expanded")) === "true", "Why is not expanded");
+      await expectText(page, ".insp .insp-stop-why", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
+      await screenshot(page, "confirm-stopped-why-1440");
+      await why.click();
+      expect(!(await page.locator(".insp .insp-stop-why").count()), "Why did not close");
       // Lengthen the shot (free), then confirm again: the clips are made.
       await page.click('.banner.check [data-act="make-fit"]');
       await expectText(page, '[data-act="confirm-video"]', /^Confirm frames & generate video · about \$1\.00$/);
@@ -324,6 +380,33 @@ export const scenarios = [
       await expectText(page, '.insp [data-act="takes-impact"]', /^使用旧版本是免费的/);
       await noSideScroll(page, 390);
       await screenshot(page, "narrow-390-zh-takes");
+    },
+  },
+  {
+    // A phone: a confirm running its voice steps, then stopped, with the panel and the inspector's one line and Why.
+    // Scene 3 is prepared at 1440 (the Plan tab), then the phone takes over before the confirm.
+    name: "next-keyframes-parity-confirm-narrow",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      await scene3ToConfirm(page);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.click('[data-act="confirm-video"]');
+      await expectText(page, ".vpanel p", /^Making the voice line for 3\.2; the clips follow\.$/);
+      await page.locator(".vpanel").scrollIntoViewIfNeeded();
+      await noSideScroll(page, 390);
+      await screenshot(page, "confirm-running-390");
+      await page.waitForSelector('.vpanel[data-stopped="NARRATION_CUE_OUT_OF_RANGE"]', { timeout: 8000 });
+      await expectText(page, ".vpanel .vstop", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
+      await page.locator(".vpanel").scrollIntoViewIfNeeded();
+      await noSideScroll(page, 390);
+      await screenshot(page, "confirm-stopped-390");
+      await page.locator(".insp").scrollIntoViewIfNeeded();
+      await page.click('.insp [data-act="stopped-why"]');
+      await expectText(page, ".insp .insp-stop-why", /^The 3\.2 voice line came out at 8\.4 s/);
+      await noSideScroll(page, 390);
+      await screenshot(page, "confirm-stopped-390-why");
     },
   },
   {
@@ -483,6 +566,7 @@ export const scenarios = [
       await page.waitForSelector('.vpanel[data-stopped="NARRATION_SPEECH_UNAVAILABLE"]', { timeout: 15000 });
       await expectText(page, ".vpanel .vcount", /^Stopped\s*at 1\.2$/);
       await expectText(page, ".vpanel .vstop", /^No narrator voice is set up for the line in 1\.2\. Choose a narrator voice in Settings, then confirm again\.$/);
+      await panelFits(page);
       await screenshot(page, "live-stop-settings-1440");
       await page.click('.vpanel [data-act="stop-open-settings"]');
       await page.waitForSelector('.app[data-view="settings"]', { timeout: 10000 });
@@ -491,8 +575,22 @@ export const scenarios = [
       await page.waitForSelector('.vpanel[data-stopped="NARRATION_SPEECH_FAILED"]', { timeout: 10000 });
       await expectText(page, ".vpanel .vstop", /^The voice line for 2\.1 failed\. Check the line in Plan, then confirm again\.$/);
       await expectText(page, '.vpanel [data-act="stop-edit-in-plan"]', /^Edit 2\.1 in Plan$/);
+      // Confirm is still off for a reason the stop does not say: it is said under the button, with the segments.
+      await expectText(page, ".vpanel .why", /^Open 2\.1 and 2\.2 first$/);
+      expect((await page.locator(".vpanel .vsegs i").count()) === 2, "The opened-frame segments are hidden while stopped");
+      await panelFits(page);
       const shotId = await page.locator('.vpanel [data-act="stop-edit-in-plan"]').getAttribute("data-shot");
       await screenshot(page, "live-stop-plan-1440");
+      // An open edit on another shot holds Edit 2.1 in Plan (it would select 2.1 and drop the edit), and says why.
+      const other = await page.locator('.card [data-act="open-shot"]').nth(1).getAttribute("data-shot");
+      await page.click(`.card [data-act="open-shot"][data-shot="${other}"]`);
+      await page.click('.insp [data-act="edit-motion"]');
+      const editInPlan = page.locator('.vpanel [data-act="stop-edit-in-plan"]');
+      expect(await editInPlan.isDisabled(), "Edit 2.1 in Plan is on while 2.2 is being edited");
+      expect((await editInPlan.getAttribute("title")) === "Save or cancel the edit to 2.2 first", `Edit in Plan does not say why: ${await editInPlan.getAttribute("title")}`);
+      await screenshot(page, "live-stop-plan-held-1440");
+      await page.click('.insp [data-act="cancel-edit"]');
+      expect(!(await editInPlan.isDisabled()), "Edit 2.1 in Plan stays off after the edit was cancelled");
       await page.click('.vpanel [data-act="stop-edit-in-plan"]');
       await page.waitForSelector('.app[data-view="plan"]');
       await page.waitForSelector(`[id="plan-row-${shotId}"].flash`, { timeout: 5000 });
