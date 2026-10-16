@@ -1,6 +1,11 @@
 import { errorMsg } from "../i18n/translate.ts";
-import { afterFailure, formatBytes, IMPORT_LIMITS, IMPORT_MAX_SECONDS, importKind, retryable, type AfterFailure, type ChosenFile } from "./assets-import.ts";
+import type { EditDraft } from "../store/state.ts";
+import type { StudioStore } from "../store/store.ts";
+import { afterFailure, formatBytes, IMPORT_LIMITS, IMPORT_MAX_SECONDS, importKind, retryable, type AfterFailure, type ChosenFile, type ImportKeys, type ImportRequest, type SavedImport } from "./assets-import.ts";
+import { displayedHead } from "./displayed-baseline.ts";
+import { editConflict } from "./edit-conflict.ts";
 import { clock } from "./motion.ts";
+import { wordsOf } from "./narration.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -63,11 +68,87 @@ export interface RecordingReceipt {
   fits: boolean;
   measuredSeconds: number;
   recording: { id: string; sha256: string; samples: number };
+  /** Exact narration saved by this command, including the studio's stand-in for an uncaptioned recording. */
+  shot?: { shotId: string; headVersion: number; segment: { script: { text: string } } | null };
 }
 
 export function isRecordingReceipt(value: unknown): value is RecordingReceipt {
   const receipt = value as Partial<RecordingReceipt> | null;
   return !!receipt && typeof receipt.shotId === "string" && typeof receipt.fits === "boolean" && typeof receipt.measuredSeconds === "number";
+}
+
+type RecordingStore = Pick<StudioStore, "getState" | "dispatch">;
+export interface RecordingWriteOwner {
+  projectId: string;
+  projectEpoch: number;
+  shotId: string;
+  revision: number;
+}
+
+/** Only the retained request for this exact recording route can bypass a changed display to check its receipt. */
+export function isRecordingReplay(shotId: string, saved: SavedImport | undefined): saved is SavedImport {
+  if (!saved?.key) return false;
+  const prefix = `/shots/${encodeURIComponent(shotId)}/narration/recording?expectedHeadVersion=`;
+  if (!saved.path.startsWith(prefix)) return false;
+  const version = saved.path.slice(prefix.length);
+  return /^(0|[1-9][0-9]*)$/.test(version) && Number.isSafeInteger(Number(version));
+}
+
+/** A captured receipt check keeps its exact key/path even when the saved entry's TTL expires before sending. */
+export function recordingRequest(keys: Pick<ImportKeys, "begin">, identity: string, freshPath: string, replay?: SavedImport): ImportRequest {
+  return replay ? { key: replay.key, path: replay.path, resent: true } : keys.begin(identity, freshPath);
+}
+
+/** Exact receipt checks send no new edits; field/projection differences must not strand a lost upload reply. */
+export function recordingSaveBlocked(blocked: Msg | null, replay: boolean): Msg | null {
+  return replay && (blocked?.id === "error.EDIT_BASELINE_CHANGED" || blocked?.id === "error.PROJECTION_CHANGED") ? null : blocked;
+}
+
+/** Keep this upload's editor identity through newer typing without lending it to a reopened form. */
+export function beginRecordingWrite(store: RecordingStore, draft: EditDraft, replay?: SavedImport): RecordingWriteOwner | null {
+  const state = store.getState(), current = state.edit;
+  if (!draft.projectId || draft.revision === undefined || !current || current.saving
+    || state.projectId !== draft.projectId || current.projectId !== draft.projectId || current.field !== "narration"
+    || current.shotId !== draft.shotId || current.revision !== draft.revision
+    || !isRecordingReplay(draft.shotId, replay) && editConflict(current, state.overview, displayedHead(state.projectId, state.snapshot, state.overview)).kind !== "none") return null;
+  const owner = { projectId: draft.projectId, projectEpoch: state.projectEpoch, shotId: draft.shotId, revision: draft.revision };
+  store.dispatch({ type: "edit", edit: { ...current, saving: true, recordingRevision: owner.revision } });
+  return owner;
+}
+
+function recordingDraft(store: RecordingStore, owner: RecordingWriteOwner): EditDraft | null {
+  const state = store.getState(), draft = state.edit;
+  return state.projectId === owner.projectId && state.projectEpoch === owner.projectEpoch && draft?.projectId === owner.projectId
+    && draft.shotId === owner.shotId && draft.field === "narration" && draft.recordingRevision === owner.revision ? draft : null;
+}
+
+/** A stale replay may get a fresh key only while its original field inputs and editor owner still hold. */
+export function recordingCanRetryFresh(store: RecordingStore, owner: RecordingWriteOwner, words?: string): boolean {
+  const draft = recordingDraft(store, owner), state = store.getState();
+  return !!draft && editConflict(draft, state.overview, displayedHead(state.projectId, state.snapshot, state.overview)).kind === "none"
+    && (words === undefined || words.trim() === wordsOf(draft.baselineValue ?? "").trim());
+}
+
+/** A refusal/close releases only this upload's local saving flag; it never changes the saved-value baseline. */
+export function endRecordingWrite(store: RecordingStore, owner: RecordingWriteOwner): void {
+  const current = recordingDraft(store, owner);
+  if (!current) return;
+  const { recordingRevision: _owner, ...draft } = current;
+  store.dispatch({ type: "edit", edit: { ...draft, saving: false } });
+}
+
+/**
+ * The upload is an own Save: rebase to its immutable receipt, not a later refreshed saved line. The receipt
+ * may predate another writer; keeping its exact text ensures that writer still produces a real conflict.
+ */
+export function acknowledgeRecording(store: RecordingStore, owner: RecordingWriteOwner, value: unknown): boolean {
+  const current = recordingDraft(store, owner);
+  if (!current || !isRecordingReceipt(value) || value.shotId !== owner.shotId || !Number.isSafeInteger(value.headVersion)
+    || value.headVersion < 0 || value.shot?.shotId !== owner.shotId || value.shot.headVersion !== value.headVersion
+    || typeof value.shot.segment?.script?.text !== "string") return false;
+  const { recordingRevision: _owner, ...draft } = current;
+  store.dispatch({ type: "edit", edit: { ...draft, saving: false, baselineValue: value.shot.segment.script.text, expectedHeadVersion: value.headVersion } });
+  return true;
 }
 
 /**

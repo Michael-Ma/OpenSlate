@@ -1,5 +1,5 @@
 import type { DirectorNote, DirectorProposal, GenerationOverview, NoteChoice } from "@openslate/core/public";
-import { isWorking } from "./keyframes.ts";
+import { isWorking, shotHasNoAnswer, unresolvedQueue } from "./keyframes.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -66,10 +66,20 @@ function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals
 export const regenerating = (overview: GenerationOverview, shotIds: readonly string[]) =>
   shotIds.some((id) => { const shot = overview.shots[id]; return !!shot && isWorking(shot.keyframe); });
 
+/** A resolved choice is not a completed keyframe: unanswered and unclassified queues keep their own status. */
+export function regenerationSummary(overview: GenerationOverview, shotIds: readonly string[]): Msg {
+  const shots = shotIds.map((id) => overview.shots[id]).filter((shot) => !!shot);
+  const names = labels(overview, shotIds);
+  const unanswered = shots.filter(shotHasNoAnswer);
+  if (unanswered.length) return msg("scene.unknown_outcome", { shots: unanswered.map((shot) => shot.label).join(", ") });
+  if (regenerating(overview, shotIds)) return msg("note.settled.regenerating", { shots: names });
+  return msg(shots.some((shot) => !!unresolvedQueue(shot.keyframe)) ? "note.settled.waiting" : "note.settled.regenerated", { shots: names });
+}
+
 function settledMsg(choice: NoteChoice, overview: GenerationOverview): Msg {
   switch (choice.kind) {
     case "accept": return msg("note.settled.accepted", { choice: choice.label });
-    case "regenerate_keyframe": return msg(regenerating(overview, choice.shotIds) ? "note.settled.regenerating" : "note.settled.regenerated", { shots: labels(overview, choice.shotIds) });
+    case "regenerate_keyframe": return regenerationSummary(overview, choice.shotIds);
     case "edit_field": return msg("note.settled.edited", { shot: labels(overview, [choice.shotId]) });
     case "proposal": return msg("note.settled.applied");
     case "reply": return msg("note.settled.replied");

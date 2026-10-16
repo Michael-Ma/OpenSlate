@@ -18,8 +18,10 @@ export const MESSAGE_LIMIT = 16000;
 
 // ---- Stop -------------------------------------------------------------------
 
-// A slot queued for a person (waiting for their confirm) does not move by itself, so there is nothing to stop.
-const busySlot = (slot: MediaSlot) => slot.state === "running" || (slot.state === "queued" && slot.waiting?.code !== "review") || slot.replacement?.state === "running" || slot.replacement?.state === "queued";
+// Review alone offers no Stop. Other bound queues, including an unclassified wait, can be detached by Stop;
+// this is not evidence that they are currently being made. Already-stopped slots have nothing left to detach.
+const stoppableQueue = (slot: Pick<MediaSlot, "state" | "waiting">) => slot.state === "queued" && slot.waiting?.code !== "review" && slot.waiting?.code !== "stopped";
+const busySlot = (slot: MediaSlot) => slot.state === "running" || stoppableQueue(slot) || slot.replacement?.state === "running" || !!slot.replacement && stoppableQueue(slot.replacement);
 
 /**
  * Whether Stop has something to stop (GR-13): a running or waiting Director turn, a running or

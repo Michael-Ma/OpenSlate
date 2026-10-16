@@ -190,6 +190,7 @@ export const scenarios = [
       await expectText(page, ".toast", /^2\.2 now uses your recording \(3 s\)\./, 6000);
       // The new take plays at once, with its measured length.
       await expectText(page, ".insp .narr-take", /^Your recording · 3 s/);
+      expect(await page.locator('[data-act="edit-conflict"]').count() === 0, "Adding your own recording showed an edit conflict");
       const length = await audioSeconds(page);
       expect(Math.abs(length - 3) < 0.05, `The recording plays for ${length} s`);
       // It is in view, whole, and its player has the focus (Add is off now).
@@ -556,6 +557,7 @@ export const scenarios = [
       await page.hover(".toast");
       // Played back from GET /narration/audio/:audioId/content, checked against its SHA-256.
       await expectText(page, ".insp .narr-take", /^Your recording · 2 s/, 8000);
+      expect(await page.locator('[data-act="edit-conflict"]').count() === 0, "The studio treated its own recording upload as another writer");
       const served = await content;
       expect(/^[0-9a-f]{64}$/.test(served.headers()["x-content-sha256"] ?? ""), "The recording was not served with its SHA-256");
       const length = await audioSeconds(page);

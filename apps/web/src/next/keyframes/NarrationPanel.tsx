@@ -33,21 +33,29 @@ import {
 } from "../model/narration.ts";
 import {
   afterRecordingFailure,
+  acknowledgeRecording,
+  beginRecordingWrite,
   checkRecording,
   checkRecordingLength,
+  endRecordingWrite,
+  isRecordingReplay,
   isRecordingReceipt,
   notAddedToast,
   RECORDING_ACCEPT,
   recordingDone,
+  recordingCanRetryFresh,
   recordingFileMsg,
   recordingFitNote,
   recordingIdentity,
   recordingPath,
   recordingRefusal,
+  recordingRequest,
   recordingRetryable,
+  recordingSaveBlocked,
   sendingMsg,
   wordsNote,
   type RecordingCheck,
+  type RecordingWriteOwner,
   type WordsAfterFailure,
 } from "../model/narration-recording.ts";
 import { seconds } from "../model/keyframes.ts";
@@ -173,10 +181,10 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
    * Storyboard narration edits, in turn: each needs the film version the one before it produced. Only the last
    * one's toast is shown, with its Undo (the studio undoes only its latest command); that toast says so.
    */
-  const canWrite = () => {
+  const canWrite = (reconcile = false) => {
     const state = store.getState();
     return mounted.current && state.projectId === draft.projectId && state.edit?.revision === draft.revision
-      && editConflict(draft, state.overview, displayedHead(state.projectId, state.snapshot, state.overview)).kind === "none";
+      && (reconcile || editConflict(draft, state.overview, displayedHead(state.projectId, state.snapshot, state.overview)).kind === "none");
   };
   const run = (edits: { edit: StoryboardEdit; toast: Msg }[]): Promise<boolean> => canWrite()
     ? runNarrationEdits(store, draft, edits) : Promise.resolve(false);
@@ -413,7 +421,7 @@ interface RecordingProps {
   saving: boolean;
   live: boolean;
   saveBlocked: Msg | null;
-  canWrite(): boolean;
+  canWrite(reconcile?: boolean): boolean;
   onBusy(busy: boolean): void;
   onClose(): void;
   /** The recording was added; `before` is the take that was current when Add was pressed. */
@@ -466,7 +474,10 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
   const final = phase.state === "refused" && !phase.retry;
   const refusal = check && !check.ok ? check.refusal : inspected && !inspected.ok ? inspected.refusal : phase.state === "refused" ? phase.refusal : null;
   const usable = !!file && check?.ok === true && (inspected === null || inspected.ok) && !final;
-  const canAdd = !saveBlocked && usable && !sendingNow && !saving && reading.state !== "reading" && connected && !server.disabled;
+  const savedRequest = file ? importKeysFor(store, mode)?.saved(recordingIdentity(shot.shotId, file)) : undefined;
+  const replay = isRecordingReplay(shot.shotId, savedRequest) ? savedRequest : undefined;
+  const blocked = recordingSaveBlocked(saveBlocked, !!replay);
+  const canAdd = !blocked && usable && !sendingNow && !saving && reading.state !== "reading" && connected && !server.disabled;
   const shotSeconds = seconds(shot.durationFrames, fps);
   const fitNote = usable ? recordingFitNote(length, shotSeconds) : null;
 
@@ -489,7 +500,7 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
   };
 
   const add = async () => {
-    if (!file || !canAdd || !canWrite()) return;
+    if (!file || !canAdd || !canWrite(!!replay)) return;
     const keys = importKeysFor(store, mode);
     if (!keys) return;
     const origin = store.getState();
@@ -502,6 +513,7 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
     flight.current = current;
     const set = (next: Phase) => { if (active() && mounted.current && !controller.signal.aborted) setPhase(next); };
     let wordsSaved: RecordingWordSave | null = null;
+    let writeOwner: RecordingWriteOwner | null = null;
 
     /** The recording was not added: undo the words saved for it, then say what happened (in place, or in a toast once closed). */
     const notAdded = async (stopped: boolean, refusal: Msg, retry: boolean) => {
@@ -518,7 +530,8 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
     set({ state: "sending", loaded: 0, total: chosen.size });
     try {
       // The words first: the studio keeps them as the recording's subtitle.
-      if (words.trim() !== savedWords.trim()) {
+      // A retained request checks only its original bytes/path/key; newer local words are never saved by it.
+      if (!replay && words.trim() !== savedWords.trim()) {
         wordsSaved = await saveRecordingWords(store, draft, words);
         if (!wordsSaved) {
           if (active() && mounted.current) setPhase({ state: "ready" });
@@ -528,9 +541,15 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
       }
       if (!active()) return;
       if (controller.signal.aborted) { await notAdded(true, msg("narr.stopped"), false); return; }
+      // Subtitle preparation has finished; this owner now follows the upload through newer typing only.
+      const currentDraft = store.getState().edit;
+      if (!currentDraft || currentDraft.revision !== draft.revision || !(writeOwner = beginRecordingWrite(store, currentDraft, replay))) {
+        if (active() && mounted.current) setPhase({ state: "ready" });
+        return;
+      }
       const identity = recordingIdentity(shot.shotId, chosen);
       const pathNow = () => recordingPath(shot.shotId, store.getState().snapshot?.project.headVersion ?? 0);
-      let request = keys.begin(identity, pathNow());
+      let request = recordingRequest(keys, identity, pathNow(), replay);
       for (;;) {
         if (!active()) return;
         try {
@@ -540,6 +559,7 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
           });
           keys.settle(identity);
           if (!active()) return;
+          acknowledgeRecording(store, writeOwner, receipt);
           if (live) await store.refresh();
           if (!active()) return;
           const done = isRecordingReceipt(receipt) ? recordingDone(label, receipt, shotSeconds, !!wordsSaved) : msg("narr.toast.recording_mode", { shot: label });
@@ -566,6 +586,11 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
             keys.settle(identity);
             await store.refresh();
             if (!active()) return;
+            // A definite stale replay is not authority to replace a line changed by another writer.
+            if (!recordingCanRetryFresh(store, writeOwner, words)) {
+              await notAdded(false, recordingRefusal(code), true);
+              return;
+            }
             request = keys.begin(identity, pathNow());
             current.sentAll = false;
             continue;
@@ -576,6 +601,7 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
         }
       }
     } finally {
+      if (writeOwner) endRecordingWrite(store, writeOwner);
       if (flight.current === current) flight.current = null;
     }
   };
@@ -637,7 +663,7 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
         </span>
       ) : null}
       <div className="two">
-        <button type="button" className="pill chosen" data-act="narr-add" {...server} disabled={!canAdd} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)} onClick={() => void add()}>
+        <button type="button" className="pill chosen" data-act="narr-add" {...server} disabled={!canAdd} title={server.title ?? (blocked ? tm(blocked) : undefined)} onClick={() => void add()}>
           {t(sendingNow ? "narr.adding" : retry ? "narr.try_again" : "narr.add")}
         </button>
         {phase.state === "sending"

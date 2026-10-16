@@ -1,6 +1,7 @@
 import type { DirectorNote, GenerationOverview, MediaSlot, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import type { MessageId } from "../i18n/messages.ts";
+import { awaitingStudioStatus, queuedToRun, waitingMsg } from "./media-state.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
 /**
@@ -123,10 +124,15 @@ function pictureOf(shot: ShotOverview): { picture: PictureKind; keyframe: Studio
 
 /** Running, or queued to be sent. A slot waiting for a person's confirm, or stopped, is not being made. */
 export function making(slot: MediaSlot): boolean {
-  return slot.state === "running" || (slot.state === "queued" && slot.waiting?.code !== "review" && slot.waiting?.code !== "stopped");
+  return slot.state === "running" || queuedToRun(slot);
 }
 
-type Lack = "no_answer" | "failed" | "making_clip" | "making_keyframe" | "clip_outdated" | "no_clip" | "nothing";
+type Lack = "no_answer" | "failed" | "waiting" | "making_clip" | "making_keyframe" | "clip_outdated" | "no_clip" | "nothing";
+
+/** A slot that waits on input, timing or an unclassified queue: it is named by its own wait, not as being made (B20). */
+function waitingSlot(shot: ShotOverview): MediaSlot | null {
+  return [shot.video, shot.keyframe].find((slot) => awaitingStudioStatus(slot) || slot.state === "queued" && ["input_pending", "timing"].includes(slot.waiting?.code ?? "")) ?? null;
+}
 
 function lackKind(shot: ShotOverview): Lack | null {
   const video = shot.video.state;
@@ -134,6 +140,7 @@ function lackKind(shot: ShotOverview): Lack | null {
   if (video === "ready" && shot.video.artifact) return null;
   if (video === "no_answer" || keyframe === "no_answer") return "no_answer";
   if (video === "failed" || keyframe === "failed") return "failed";
+  if (waitingSlot(shot)) return "waiting";
   if (making(shot.video)) return "making_clip";
   if (making(shot.keyframe)) return "making_keyframe";
   if (video === "outdated") return "clip_outdated";
@@ -149,17 +156,19 @@ const LACKS = {
   clip_outdated: { text: "film.lack.clip_outdated", mark: "none" },
   no_clip: { text: "film.lack.no_clip", mark: "none" },
   nothing: { text: "film.lack.nothing", mark: "none" },
-} as const satisfies Record<Lack, { text: MessageId; mark: StateMark }>;
+} as const satisfies Record<Exclude<Lack, "waiting">, { text: MessageId; mark: StateMark }>;
 
 /** The neutral words on a picture block for what the shot still lacks. Failures are words, never a colour. */
 export function lackOf(shot: ShotOverview): Msg | null {
   const kind = lackKind(shot);
+  if (kind === "waiting") return waitingMsg(waitingSlot(shot)!);
   return kind ? msg(LACKS[kind].text) : null;
 }
 
 /** What the shot lacks in one mark (a block too narrow for the words): no current clip, making, failed, no answer. */
 export function lackMarkOf(shot: ShotOverview): StateMark | null {
   const kind = lackKind(shot);
+  if (kind === "waiting") return "none";
   return kind ? LACKS[kind].mark : null;
 }
 

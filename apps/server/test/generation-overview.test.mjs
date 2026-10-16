@@ -271,6 +271,8 @@ test('queued review, voice and timing reasons are explicit and stable', async t 
   await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady();
   let row=(await f.overview()).shots['shot-0'];
   assert.equal(row.video.state,'queued'); assert.equal(row.video.waiting.code,'review');
+  assert.equal((await f.overview()).scenes[0].state,'keyframes_back');
+  assert.equal((await f.get()).rows[0].videoPending,false,'a human confirm is still required');
   const project=f.store.getProject(f.project.id);
   project.shots[0].narration={mode:'generated',text:'This line still needs recording',voice:'stock'}; project.shots[0].narrationPending=true;
   f.store.saveProject(project,project.headVersion);
@@ -334,7 +336,99 @@ test('current voice attempts project making and failed without dispatching', asy
   f.store.put('attempt',attempt.id,project.id,{...attempt,phase:'failed',failure:{id:'TEST_SPEECH_FAILURE',technical:false,source:'offline-test',retryAllowed:false}});
   f.store.appendEvent(project.id,'test.speech_failed',{});
   assert.equal(reader.read(project.id).shots['shot-0'].narration.state,'failed');
+  assert.equal(reader.read(project.id).scenes[0].state,'needs_attention');
+  f.store.put('attempt',attempt.id,project.id,{...attempt,phase:'submission_unknown'});
+  f.store.appendEvent(project.id,'test.speech_unknown',{});
+  const unknown=reader.read(project.id);
+  assert.equal(unknown.shots['shot-0'].narration.state,'no_answer');
+  assert.equal(unknown.scenes[0].state,'needs_attention');
+  assert.ok(unknown.scenes[0].blockers.some(b=>b.code==='no_answer_in_scene' && b.shotId==='shot-0'));
   assert.deepEqual(f.calls,{http:0,credentials:0});
+});
+
+test('input waits without pending narration never request a human review or claim an unapproved clip is being made', async t => {
+  const f=fixture(t); install(f,p=>sourceFor(p));
+  await f.engine.runReady(); await f.engine.reconcile(); await f.engine.runReady();
+  const video=f.store.list('node_binding',f.project.id).find(b=>b.node.kind==='video');
+  f.store.put('node_wait',video.id,f.project.id,{code:'INPUT_PENDING',since:'2026-10-01T00:00:00Z'});
+  f.store.appendEvent(f.project.id,'test.input_wait',{});
+  const overview=await f.overview();
+  assert.deepEqual(overview.shots['shot-0'].video.waiting,{code:'input_pending',since:'2026-10-01T00:00:00Z'});
+  assert.equal(overview.scenes[0].state,'keyframes_back');
+  assert.equal((await f.get()).rows[0].videoPending,false);
+});
+
+test('missing and unrecognized waits stay unknown even when narration is pending', async t => {
+  const f=fixture(t); install(f,p=>sourceFor(p));
+  const video=f.store.list('node_binding',f.project.id).find(b=>b.node.kind==='video');
+  const project=f.store.getProject(f.project.id);
+  project.shots[0].narration={mode:'generated',text:'Still waiting for a voice',voice:'stock'};
+  f.store.saveProject(project,project.headVersion);
+  let overview=await f.overview();
+  assert.equal(overview.shots['shot-0'].video.waiting.code,'unknown');
+  assert.equal(overview.scenes[0].state,'not_started');
+  f.store.put('node_wait',video.id,project.id,{code:'FUTURE_WAIT',since:'2026-10-01T00:00:00Z'});
+  f.store.appendEvent(project.id,'test.new_wait',{});
+  const cursor=f.store.cursor(project.id), attempts=f.engine.attempts(project.id).length;
+  overview=await f.overview();
+  assert.deepEqual(overview.shots['shot-0'].video.waiting,{code:'unknown',since:'2026-10-01T00:00:00Z'});
+  assert.equal(overview.scenes[0].state,'not_started');
+  assert.equal(f.store.cursor(project.id),cursor); assert.equal(f.engine.attempts(project.id).length,attempts);
+});
+
+test('only approved automatic waits count as making video; review, timing and unknown waits do not', async t => {
+  const f=fixture(t); await make(f); await f.finish(); await make(f,'scene-0','video');
+  const video=f.store.list('node_binding',f.project.id).find(b=>b.node.kind==='video');
+  assert.equal((await f.get()).rows[0].videoPending,true);
+  for (const [code,state] of [['CAPACITY_EXCEEDED','making_video'],['INPUT_PENDING','making_video'],['HUMAN_REVIEW_REQUIRED','keyframes_back'],['TIMING_REQUIRED','keyframes_back'],['FUTURE_WAIT','keyframes_back']]) {
+    f.store.put('node_wait',video.id,f.project.id,{code,since:'2026-10-01T00:00:00Z'});
+    f.store.appendEvent(f.project.id,'test.wait',{code});
+    assert.equal((await f.overview()).scenes[0].state,state,code);
+  }
+  f.engine.setPaused(f.project.id,true,'synthetic-human');
+  const stopped=await f.overview();
+  assert.equal(stopped.shots['shot-0'].video.waiting.code,'stopped');
+  assert.equal(stopped.scenes[0].state,'keyframes_back');
+});
+
+test('retained current takes preserve their replacement waiting reason without pretending it is a review', async t => {
+  const f=fixture(t); await make(f); await f.finish();
+  const original=(await f.overview()).shots['shot-0'].keyframe.artifact;
+  await ok(await f.post(await f.get(),'image',randomUUID(),{targetShotIds:['shot-0'],regenerate:true}));
+  let slot=(await f.overview()).shots['shot-0'].keyframe;
+  assert.equal(slot.state,'ready'); assert.deepEqual(slot.artifact,original);
+  assert.equal(slot.replacement.waiting.code,'unknown');
+  f.engine.setHold(f.project.id,{scopeId:'shot-0',ownerId:'synthetic-human'});
+  await f.engine.runReady();
+  slot=(await f.overview()).shots['shot-0'].keyframe;
+  assert.equal(slot.replacement.waiting.code,'edit_pending');
+  assert.equal(slot.replacement.state,'queued'); assert.deepEqual(slot.artifact,original);
+});
+
+test('an unanswered clip remains named and blocks a fresh scene confirmation without another submission', async t => {
+  const f=fixture(t); await make(f); await f.finish();
+  const frame=(await f.overview()).shots['shot-0'].keyframe.artifact;
+  await ok(await f.call('POST','/shots/shot-0/frame-views',{artifactId:frame.artifactId,sha256:frame.sha256}));
+  await make(f,'scene-0','video');
+  const video=f.store.list('node_binding',f.project.id).find(b=>b.node.kind==='video');
+  f.provider.setMode(video.id,'unknown_after_accept'); await f.engine.runReady();
+  const overview=await f.overview(), scene=overview.scenes[0];
+  assert.equal(scene.state,'needs_attention');
+  assert.equal(overview.shots['shot-0'].keyframe.opened,true,'the old frame remains truly opened');
+  assert.ok(scene.blockers.some(b=>b.code==='no_answer_in_scene' && b.shotId==='shot-0'));
+  const accepted=f.provider.acceptedCount(), attempts=f.engine.attempts(f.project.id).length;
+  const refusal=await f.call('POST','/scenes/scene-0/confirm',{confirmationDigest:scene.confirmationDigest,reviewedFrames:[{shotId:'shot-0',artifactId:frame.artifactId,sha256:frame.sha256}]});
+  assert.equal(refusal.statusCode,409);
+  assert.equal(f.provider.acceptedCount(),accepted); assert.equal(f.engine.attempts(f.project.id).length,attempts);
+});
+
+test('a proven automatic video retry is making video even without a node wait', async t => {
+  const f=fixture(t); await make(f); await f.finish(); await make(f,'scene-0','video');
+  const video=f.store.list('node_binding',f.project.id).find(b=>b.node.kind==='video');
+  f.provider.setMode(video.id,'technical_failure'); await f.engine.runReady(); await f.engine.reconcile();
+  const overview=await f.overview(), slot=overview.shots['shot-0'].video;
+  assert.equal(slot.state,'queued'); assert.ok(slot.failure.autoRetriesLeft>0); assert.equal(slot.waiting,undefined);
+  assert.equal(overview.scenes[0].state,'making_video');
 });
 
 test('a retained frame exposes queued, running and unknown replacement identity until release', async t => {

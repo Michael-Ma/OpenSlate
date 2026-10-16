@@ -4,6 +4,9 @@ import { formatList } from "../i18n/typeset.ts";
 import { msg, type Msg } from "./types.ts";
 import { CHECK_MARK, narrationChecks, type AppCheck } from "./checks.ts";
 import { formatMicros, priceMsg } from "./price.ts";
+import { queuedToRun, waitingMsg } from "./media-state.ts";
+
+export { waitingMsg } from "./media-state.ts";
 
 export const seconds = (frames: number, fps: number) => Math.round((frames / fps) * 10) / 10;
 
@@ -168,6 +171,8 @@ export interface KeyframesView {
   header: { title: string; ordinal: number; status: Msg; shots: number };
   pills: ScenePill[];
   checks: { letter: string; check: AppCheck }[];
+  /** Current unanswered paid work, named beside the scene instead of an all-clear check row. */
+  attention: Msg | null;
   cards: ShotCard[];
   selected: ShotOverview | null;
   panel: VideoPanel;
@@ -195,20 +200,41 @@ export const heldByEdit = (slot: MediaSlot) => slot.state === "queued" && slot.w
  * (card B15). A slot waiting for the person's confirm is not: it waits for them, not for the studio.
  */
 export const isWorking = (slot: MediaSlot) =>
-  slot.state === "running" || (slot.state === "queued" && !awaitsConfirm(slot)) || slot.replacement?.state === "running" || slot.replacement?.state === "queued";
+  slot.state === "running" || queuedToRun(slot) || slot.replacement?.state === "running" || !!slot.replacement && queuedToRun(slot.replacement);
+
+/** A passive unresolved queue still blocks changing or repurchasing its inputs; it is not running progress. */
+export function unresolvedQueue(slot: MediaSlot): Pick<MediaSlot, "state" | "waiting" | "failure"> | null {
+  return [slot, ...(slot.replacement ? [slot.replacement] : [])]
+    .find((pending) => pending.state === "queued" && !queuedToRun(pending) && pending.waiting?.code !== "review") ?? null;
+}
+
+export const shotHasNoAnswer = (shot: ShotOverview) => shot.keyframe.state === "no_answer" || shot.video.state === "no_answer"
+  || shot.keyframe.replacement?.state === "no_answer" || shot.video.replacement?.state === "no_answer" || shot.narration.state === "no_answer";
+
+/** The current slots are evidence even when an older scene aggregate has not caught up. */
+function unansweredShots(overview: GenerationOverview, scene: SceneOverview): ShotOverview[] {
+  return scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot)
+    .filter((shot) => shotHasNoAnswer(shot) || scene.blockers.some((blocker) => blocker.code === "no_answer_in_scene" && blocker.shotId === shot.shotId));
+}
+
+/** No-answer work blocks new paid scene decisions until it answers or the person explicitly releases it. */
+export function sceneUnknownOutcome(overview: GenerationOverview, scene: SceneOverview, locale: string): Msg | null {
+  const shots = unansweredShots(overview, scene);
+  if (shots.length) return msg("scene.unknown_outcome", { shots: listLabels(shots.map((shot) => shot.label), locale) });
+  return scene.blockers.some((blocker) => blocker.code === "no_answer_in_scene") ? msg("scene.unknown_outcome_unassigned") : null;
+}
 
 const ATTENTION = new Set(["failed", "no_answer", "outdated", "choose_take", "direction_required"]);
 
 /**
- * The scene's state as the screen tells it. The server counts a clip that waits for the person's confirm as being made
- * (SceneOverview.state "making_video" for a queued slot whose waiting code is "review"); until that confirm nothing is
- * made, so such a scene reads as its shots do (by the server's own order: attention, saved, keyframes) and its video
- * panel offers the confirm. Every other state is the server's.
+ * Keep older scene aggregates aligned with their current slots. A passive queue does not make video, and current
+ * unanswered paid work needs attention even when counts or blockers have not caught up after a restart.
  */
 export function sceneStateOf(overview: GenerationOverview, scene: SceneOverview): SceneOverview["state"] {
-  if (scene.state !== "making_video" || scene.confirmation?.state === "running") return scene.state;
   const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
-  if (!shots.some((shot) => awaitsConfirm(shot.video)) || shots.some((shot) => isWorking(shot.video))) return scene.state;
+  if (shots.some(shotHasNoAnswer) || scene.blockers.some((blocker) => blocker.code === "no_answer_in_scene")) return "needs_attention";
+  if (scene.confirmation?.state === "running" || shots.some((shot) => isWorking(shot.video))) return scene.state;
+  if (scene.state !== "making_video") return scene.state;
   const states = shots.flatMap((shot) => [shot.keyframe.state, shot.video.state, shot.keyframe.replacement?.state, shot.video.replacement?.state]);
   if (states.some((state) => state && ATTENTION.has(state))) return "needs_attention";
   const ready = shots.filter((shot) => shot.keyframe.state === "ready").length;
@@ -255,7 +281,8 @@ export function replacementStatus(slot: MediaSlot): { status: Msg; tone: CardTon
   const replacement = slot.state === "ready" ? slot.replacement : undefined;
   if (!replacement) return null;
   switch (replacement.state) {
-    case "running": case "queued": return { status: msg("card.replacement.making"), tone: "working" };
+    case "running": return { status: msg("card.replacement.making"), tone: "working" };
+    case "queued": return queuedToRun(replacement) ? { status: msg("card.replacement.making"), tone: "working" } : { status: waitingMsg(replacement), tone: "quiet" };
     case "failed": return { status: msg(replacement.failure?.charged ? "card.replacement.failed_charged" : "card.replacement.failed"), tone: "attention" };
     case "no_answer": return { status: msg("card.replacement.no_answer"), tone: "attention" };
   }
@@ -280,16 +307,10 @@ export function shotStatus(overview: GenerationOverview, scene: SceneOverview | 
   return voice ? { status: msg(`card.step.${voice}`), tone: "working" } : cardStatus(shot);
 }
 
-export function waitingMsg(slot: MediaSlot): Msg {
-  const code = slot.waiting?.code;
-  if (code === "capacity") return msg("media.waiting.capacity", { ahead: slot.waiting?.ahead ?? 0 });
-  if (code) return msg(`media.waiting.${code}`);
-  return msg("media.waiting.queued");
-}
-
-/** A queued slot's status: what it waits for, with the reason in full when the status is short. */
+/** A queued slot's status: what it waits for (working only when it will run), with the full reason when held. */
 function waiting(slot: MediaSlot): ShotStatus {
-  return heldByEdit(slot) ? { status: waitingMsg(slot), tone: "working", reason: msg("media.held_reason") } : { status: waitingMsg(slot), tone: "working" };
+  const tone = queuedToRun(slot) ? "working" : "quiet";
+  return heldByEdit(slot) ? { status: waitingMsg(slot), tone, reason: msg("media.held_reason") } : { status: waitingMsg(slot), tone };
 }
 
 export function cardStatus(shot: ShotOverview): ShotStatus {
@@ -366,6 +387,28 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   const keyframeHeadline = { value: msg("panel.count", { value: scene.counts.keyframesReady, total: shots.length }), unit: msg("panel.unit.keyframes", { count: shots.length }) };
 
   const state = sceneStateOf(overview, scene);
+  // An opened frame is not permission to resend its unanswered clip (or another unanswered paid job in the scene).
+  // Inspect current slots as well as blockers: restart projections may still carry older counts, targets or state.
+  const unknown = sceneUnknownOutcome(overview, scene, locale);
+  if (unknown) return {
+    ...base, ...noPrice,
+    action: null, enabled: false, label: msg("panel.unknown_wait"), reason: msg("panel.unknown_reason"), note: unknown,
+    headline: { value: msg("panel.unknown_headline"), unit: null },
+  };
+  // Missing/unknown wait reasons, timing decisions and paused queues are not proof that execution will happen.
+  const waiting = shots.flatMap((shot) => [shot.keyframe, shot.video].flatMap((slot) => [slot, ...(slot.replacement ? [slot.replacement] : [])])
+    .filter((slot) => slot.state === "queued" && !queuedToRun(slot) && slot.waiting?.code !== "review")
+    .map((slot) => ({ shot, slot })));
+  const waitCode = waiting[0]?.slot.waiting?.code;
+  const sameWait = (code: string | undefined) => waitCode === "timing" || waitCode === "stopped" ? code === waitCode : code !== "timing" && code !== "stopped";
+  const waitingLabels = listLabels([...new Set(waiting.filter(({ slot }) => sameWait(slot.waiting?.code)).map(({ shot }) => shot.label))], locale);
+  if (waiting.length) return {
+    ...base, ...noPrice,
+    action: null, enabled: false, label: waitingMsg(waiting[0]!.slot),
+    reason: msg(waitCode === "stopped" ? "panel.blocker.stopped" : waitCode === "timing" ? "panel.timing_reason" : "panel.waiting_reason"),
+    note: waitCode === "stopped" ? null : msg(waitCode === "timing" ? "panel.timing_shots" : "panel.waiting_shots", { shots: waitingLabels }),
+    headline: { value: waitingMsg(waiting[0]!.slot), unit: null },
+  };
   if (state === "video_saved") {
     const total = shots.reduce((sum, shot) => sum + shot.durationFrames, 0);
     return {
@@ -469,7 +512,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
     const { status, tone, reason } = shotStatus(overview, scene, shot);
     const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact ?? null : null;
     const previous = current ? null : shot.keyframe.previous ?? null;
-    const remaking = shot.keyframe.replacement?.state === "running" || shot.keyframe.replacement?.state === "queued";
+    const remaking = shot.keyframe.replacement?.state === "running";
     const workingOn = shot.keyframe.state === "running" || remaking ? "keyframe" : shot.video.state === "running" ? "video" : voiceStep ? "voice" : null;
     return {
       shotId: shot.shotId,
@@ -494,6 +537,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
     header: { title: scene.title, ordinal: scene.ordinal, status: sceneStatus(scene, overview), shots: shots.length },
     pills: [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal).map((s) => ({ sceneId: s.sceneId, ordinal: s.ordinal, title: s.title, status: pillStatus(overview, s, s.sceneId === scene.sceneId), selected: s.sceneId === scene.sceneId })),
     checks,
+    attention: sceneUnknownOutcome(overview, scene, locale),
     cards,
     selected,
     panel: videoPanel(overview, scene, locale),

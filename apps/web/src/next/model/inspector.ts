@@ -1,6 +1,6 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
-import { confirmationStop, heldByEdit, isWorking, seconds, shotStatus, type CardTone } from "./keyframes.ts";
+import { confirmationStop, heldByEdit, isWorking, seconds, shotHasNoAnswer, shotStatus, unresolvedQueue, videoPanel, waitingMsg, type CardTone } from "./keyframes.ts";
 import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
 import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
@@ -148,6 +148,9 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   const take = costFrom(unit, "regenerate", locale);
   const first = costFrom(unit, "make", locale);
   const base = { clipNote: null, reason: null, working: false };
+  if (shotHasNoAnswer(shot)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("scene.unknown_outcome", { shots: shot.label }) };
+  const wait = unresolvedQueue(keyframe) ?? unresolvedQueue(shot.video);
+  if (wait) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: waitingMsg(wait), cost: null, primary: false, enabled: false, reason: waitingMsg(wait) };
   // Held by an unfinished Director edit: nothing is being made; the button and its note say what it waits for.
   if (heldByEdit(keyframe)) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: msg("media.waiting.edit_pending"), cost: null, primary: false, enabled: false, reason: msg("media.held_reason") };
   if (isWorking(keyframe)) return { ...base, kind: "regenerate", label: msg("card.keyframe.making"), cost: null, primary: false, enabled: false, working: true };
@@ -189,16 +192,18 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
   if (shot.keyframe.state === "failed") failure = { slot: "keyframe", message: failureMessage(shot.keyframe, "keyframe"), retryVideo: null };
   else if (shot.video.state === "failed") {
     const clip = clipUnit(overview, scene);
+    const panel = scene ? videoPanel(overview, scene, locale) : null;
     failure = {
       slot: "video",
       message: failureMessage(shot.video, "video"),
-      retryVideo: canRetry(shot.video) ? { enabled: !!scene && scene.blockers.length === 0, price: priceFrom(clip?.unitMicros, clip?.unknown ?? false, locale) } : null,
+      retryVideo: canRetry(shot.video) ? { enabled: !!scene && scene.blockers.length === 0 && panel?.action === "confirm" && panel.enabled, price: priceFrom(clip?.unitMicros, clip?.unknown ?? false, locale) } : null,
     };
   }
   // A replacement take with no answer can be given up too, while the current keyframe stays (card B15).
   const noAnswerSlot = shot.keyframe.state === "no_answer" && shot.keyframe.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.attemptId }
     : shot.keyframe.replacement?.state === "no_answer" && shot.keyframe.replacement.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.replacement.attemptId }
-    : shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId } : null;
+    : shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId }
+    : shot.video.replacement?.state === "no_answer" && shot.video.replacement.attemptId ? { slot: "video" as const, attemptId: shot.video.replacement.attemptId } : null;
 
   // An outdated keyframe is explained next to its Regenerate button; an outdated clip here.
   const notes: Msg[] = [];

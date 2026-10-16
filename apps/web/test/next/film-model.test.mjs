@@ -231,3 +231,31 @@ test('a clip waiting for a person\'s confirm, or stopped, is not "being made"', 
   assert.deepEqual(tl.shots.slice(3, 6).map(s => en(s.lack)), ['no clip', 'making clip', 'making clip']);
   assert.deepEqual(readinessRows(overview, false).slice(3, 6).map(r => en(r.clip.text)), ['no clip', 'making…', 'making…']);
 });
+
+test('Film names input and unknown waits in both locales without claiming that unknown work is being made', async () => {
+  const { making } = await import('../../src/next/model/film.ts');
+  const { clipCell } = await import('../../src/next/model/film-export.ts');
+  const overview = lastFerryOverview(), shot = overview.shots[shotId('2.1')];
+  for (const [code, english, chinese, moves] of [
+    ['input_pending', 'Waiting for required media', '等待所需素材', true],
+    ['unknown', 'Waiting for the studio to report its status', '等待工作室报告状态', false],
+    [undefined, 'Waiting for the studio to report its status', '等待工作室报告状态', false],
+    ['timing', 'Waiting for narration timing', '等待确定旁白时长', false],
+  ]) {
+    shot.video = { state: 'queued', takeCount: 0, ...(code ? { waiting: { code, since: '' } } : {}) };
+    const block = filmTimeline(overview).shots.find(s => s.shotId === shot.shotId), cell = clipCell(shot, false);
+    assert.equal(making(shot.video), moves, String(code));
+    assert.deepEqual([en(block.lack), zh(block.lack)], [english, chinese]);
+    assert.deepEqual([en(cell.text), zh(cell.text), cell.tone], [english, chinese, 'plain']);
+  }
+});
+
+test('Film preserves proven automatic retry activity while human and stopped waits remain quiet', async () => {
+  const { making } = await import('../../src/next/model/film.ts');
+  const shot = lastFerryOverview().shots[shotId('2.1')];
+  shot.video = { state: 'queued', takeCount: 0, failure: { autoRetriesLeft: 1 } };
+  assert.equal(making(shot.video), true);
+  const { lackOf } = await import('../../src/next/model/film.ts');
+  assert.equal(en(lackOf(shot)), 'making clip');
+  for (const code of ['review', 'stopped', 'unknown', 'timing']) assert.equal(making({ ...shot.video, waiting: { code, since: '' } }), false, code);
+});

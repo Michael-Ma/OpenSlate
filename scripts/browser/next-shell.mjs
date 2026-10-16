@@ -811,6 +811,10 @@ export const scenarios = [
       await ready(page);
       // The studio says which overview attempts were mid-send at its last start; give the first shot's clip that state.
       let casualty = null;
+      const paidRequests = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST" && /\/scenes\/[^/]+\/(confirm|generate)$/.test(new URL(request.url()).pathname)) paidRequests.push(request.url());
+      });
       await page.route(/\/api\/projects\/[^/]+\/generation$/, (route) => rewrite(route, (overview) => {
         const first = overview.scenes?.[0]?.shotIds?.[0];
         if (first && overview.shots[first]) {
@@ -827,10 +831,14 @@ export const scenarios = [
       expect((await text(page, ".film-strip[data-strip='restart'] .txt span")) === "The service never confirmed it. It may still arrive and be charged; nothing is resent by itself.", "The restart strip does not say what may still happen");
       await noSidewaysScroll(page);
       await inspectorWhole(page, "under the restart strip at 1440");
-      // The other clips wait for the person's confirm: the screen tells one story. The scene is not "making video",
-      // no card says it waits for a confirm the screen does not offer, the panel offers that confirm, and no Stop.
-      const story = { head: await text(page, ".scene-head"), cards: await page.locator(".card .stl").allInnerTexts(), action: await page.locator(".vpanel").getAttribute("data-action"), stop: await page.locator(".topbar [data-act='stop-film']").count() };
-      expect(!/making video/.test(story.head) && !story.cards.some((card) => /Waiting for your confirm/.test(card)) && story.action === "confirm" && story.stop === 0, `The restarted scene contradicts itself: ${JSON.stringify(story)}`);
+      // An opened frame cannot authorize another purchase while its earlier clip may still arrive and be charged.
+      // Even with older scene aggregates, the scene check and panel name the unresolved work; no green all-clear.
+      const story = { head: await text(page, ".scene-head"), check: await text(page, "[data-check='attention']"), cards: await page.locator(".card .stl").allInnerTexts(), action: await page.locator(".vpanel").getAttribute("data-action"), panel: await text(page, ".vpanel"), green: await page.locator(".quiet .ck").count(), stop: await page.locator(".topbar [data-act='stop-film']").count() };
+      expect(/needs attention/.test(story.head) && !/making video/.test(story.head) && !story.cards.some((card) => /Waiting for your confirm/.test(card)) && story.action === "none" && story.stop === 0, `The restarted scene contradicts itself: ${JSON.stringify(story)}`);
+      expect(story.check.includes(casualty) && /may still arrive and be charged/.test(story.check) && story.green === 0, `The scene check hides the unresolved clip: ${JSON.stringify(story)}`);
+      expect(story.panel.includes(casualty) && /No answer yet/.test(story.panel) && !/frames opened|Confirm frames & generate video/.test(story.panel), `The panel offers to redo an unresolved purchase: ${JSON.stringify(story)}`);
+      expect(await page.locator(".vpanel [data-act='video-busy']").isDisabled(), "The unresolved clip's scene panel remains actionable");
+      expect(await page.locator(".vpanel [data-act='confirm-video']").count() === 0, "A new scene confirm is offered while its paid outcome is unknown");
       await shot(page, "next-shell-restart-1440");
 
       // Show takes the person to the shot in Keyframes, from any view.
@@ -842,6 +850,8 @@ export const scenarios = [
 
       await page.locator("[data-act='dismiss-restart']").click();
       await page.waitForSelector(".film-strip-slot[data-strip='none']", { state: "attached" });
+      expect((await text(page, "[data-check='attention']")).includes(casualty), "Dismissing the restart strip also hid the unresolved shot");
+      expect((await page.locator(".vpanel").getAttribute("data-action")) === "none" && paidRequests.length === 0, `Reopening or dismissing the restart report resent paid work: ${JSON.stringify(paidRequests)}`);
     },
   },
   {

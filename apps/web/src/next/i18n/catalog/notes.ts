@@ -2,6 +2,7 @@ import type { Entry } from "./entry.ts";
 
 /** Director notes and recommendations (amber): banner, thread cards, card callouts. */
 export const notes = {
+  "note.settled.waiting": { en: "Waiting for the keyframe status of {shots}.", zh: "等待 {shots} 的关键帧状态。" },
   "note.eyebrow": { en: "Director recommends", zh: "导演建议" },
   "note.eyebrow.observation": { en: "Director's note", zh: "导演备注" },
   "note.eyebrow.done": { en: "Director recommends · done", zh: "导演建议 · 已处理" },

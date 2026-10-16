@@ -278,6 +278,7 @@ function Workspace() {
         overview={overview}
         sceneId={view.scene.sceneId}
         checks={sceneOrdinalChecks}
+        attention={view.attention}
         settled={settled}
         quiet={notes.allSettled ? msg("note.all_settled") : null}
         busy={Object.keys(pending).some((key) => key.startsWith("edit:") || key.startsWith("fit:"))}

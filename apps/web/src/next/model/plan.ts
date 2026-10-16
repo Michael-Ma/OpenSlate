@@ -2,6 +2,7 @@ import type { DirectorProposal, GenerationOverview, MediaSlot, SceneOverview, Sh
 import { joinPromptParts } from "@openslate/core/public";
 import { narrationChecks } from "./checks.ts";
 import { sceneStatus } from "./keyframes.ts";
+import { queuedToRun, waitingMsg } from "./media-state.ts";
 import { planRowRecording } from "./narration.ts";
 import { firstClause } from "./note-banner.ts";
 import { noteViews, shotCallouts, type NoteView } from "./notes.ts";
@@ -102,7 +103,7 @@ export function keyframePill(shot: ShotOverview): StatusPillView {
   switch (keyframe.state) {
     case "ready": return keyframe.opened ? pill("plan.pill.opened", "ok", "✓") : pill("plan.pill.not_opened");
     case "running": return pill("plan.pill.kf_making", "busy");
-    case "queued": return pill("plan.pill.kf_queued", "busy");
+    case "queued": return { text: waitingMsg(keyframe), tone: queuedToRun(keyframe) ? "busy" : "plain", icon: null };
     case "outdated": return pill("plan.pill.kf_outdated");
     case "failed": return pill(keyframe.failure?.charged ? "plan.pill.kf_failed_charged" : "plan.pill.kf_failed", "fail", "!");
     case "no_answer": return pill("plan.pill.no_answer", "fail", "?");
@@ -121,7 +122,7 @@ export function clipPill(shot: ShotOverview): StatusPillView | null {
     case "outdated": return pill("plan.pill.clip_outdated");
     case "running": return pill("plan.pill.clip_making", "busy");
     // Waiting for the person's confirm is not queued work: no clip until the scene is confirmed in Keyframes.
-    case "queued": return video.waiting?.code === "review" ? pill("plan.pill.clip_none") : pill("plan.pill.clip_queued", "busy");
+    case "queued": return video.waiting?.code === "review" ? pill("plan.pill.clip_none") : { text: waitingMsg(video), tone: queuedToRun(video) ? "busy" : "plain", icon: null };
     case "failed": return pill(video.failure?.charged ? "plan.pill.clip_failed_charged" : "plan.pill.clip_failed", "fail", "!");
     case "no_answer": return pill("plan.pill.no_answer", "fail", "?");
     default: return pill("plan.pill.clip_none");

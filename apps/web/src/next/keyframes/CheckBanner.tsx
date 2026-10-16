@@ -34,6 +34,8 @@ interface Props {
   busy: boolean;
   /** The quiet line when nothing is left to check (e.g. "Every Director note in this scene is settled."). */
   quiet?: Msg | null;
+  /** Unanswered paid work is a neutral warning, never a green all-clear check. */
+  attention?: Msg | null;
   onExtend(check: AppCheck): void;
   onKeep(check: AppCheck): void;
   onEditNarration(check: AppCheck): void;
@@ -46,7 +48,7 @@ interface Props {
  * the app found these, the Director did not recommend them. Each option is one free, undoable command, so each
  * follows the shell's server guard (off while offline or expired, with the reason).
  */
-export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
+export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, attention, onExtend, onKeep, onEditNarration, onNext, onUndo }: Props) {
   const { t, tm } = useI18n();
   const server = useGuarded("server");
 
@@ -84,9 +86,9 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, o
   const first = checks[0];
   if (!first) {
     return (
-      <div className="quiet" role="status" data-check="none">
-        <span className="ck" aria-hidden="true">✓</span>
-        <span>{quiet ? tm(quiet) : t("check.all_handled")}</span>
+      <div className="quiet" role="status" data-check={attention ? "attention" : "none"}>
+        <span className={attention ? undefined : "ck"} aria-hidden="true">{attention ? "!" : "✓"}</span>
+        <span>{attention ? tm(attention) : quiet ? tm(quiet) : t("check.all_handled")}</span>
       </div>
     );
   }

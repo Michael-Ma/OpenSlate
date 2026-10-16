@@ -94,17 +94,19 @@ test('the first clause keeps decimals and stops at Chinese punctuation', () => {
   assert.equal(firstClause('Supercalifragilisticexpialidociously long word here', 20), 'Supercalifragilistic…');
 });
 
-test("a card's note link is off while a job on its shot runs, and its tooltip says what to wait for", () => {
+test("a card's note link guards both known work and neutral unclassified waits", () => {
   const { overview, proposals } = golden();
-  const working = (slot) => {
+  const working = (slot, code) => {
     const next = lastFerryOverview();
-    next.shots[shotId('2.2')][slot] = { ...next.shots[shotId('2.2')][slot], state: 'queued' };
+    next.shots[shotId('2.2')][slot] = { ...next.shots[shotId('2.2')][slot], state: 'queued', ...(code ? { waiting: { code, since: 'x' } } : {}) };
     return noteCallout(shotCallouts(noteViews(lastFerryNotes(), next, proposals), shotId('2.2'))[0], shotId('2.2'), next, 'en-US').regenerate;
   };
   const clip = working('video');
-  assert.deepEqual([clip.enabled, en(clip.wait), zh(clip.wait)], [false, "Wait for 2.2's clip to finish.", '请等 2.2 的视频生成完。']);
+  assert.deepEqual([clip.enabled, en(clip.wait), zh(clip.wait)], [false, 'Waiting for the studio to report its status', '等待工作室报告状态']);
   const keyframe = working('keyframe');
-  assert.deepEqual([keyframe.enabled, en(keyframe.wait)], [false, "Wait for 2.2's keyframe to finish."]);
+  assert.deepEqual([keyframe.enabled, en(keyframe.wait)], [false, 'Waiting for the studio to report its status']);
+  assert.equal(en(working('keyframe', 'capacity').wait), "Wait for 2.2's keyframe to finish.");
+  assert.equal(en(working('video', 'capacity').wait), "Wait for 2.2's clip to finish.");
   assert.equal(noteCallout(shotCallouts(noteViews(lastFerryNotes(), overview, proposals), shotId('2.2'))[0], shotId('2.2'), overview, 'en-US').regenerate.wait, null);
 });
 

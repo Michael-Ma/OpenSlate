@@ -49,6 +49,8 @@ export type WaitingCode =
   | "stopped" // the film is stopped
   | "review" // waiting for a human confirm
   | "voice" // waiting for the voice line
+  | "input_pending" // waiting for required media other than the voice line
+  | "unknown" // the studio has not reported a recognized waiting reason
   | "timing"; // waiting for timing to be settled
 
 export interface WaitingReason {
@@ -96,7 +98,7 @@ export interface MediaSlot {
    * A replacement take in progress while the current output stays shown (state "ready"): its own state,
    * so a no-answer replacement can be given up (attemptId) and a failed one explained.
    */
-  replacement?: { state: "running" | "queued" | "failed" | "no_answer"; attemptId?: string; phase?: string; failure?: MediaFailure };
+  replacement?: { state: "running" | "queued" | "failed" | "no_answer"; attemptId?: string; phase?: string; failure?: MediaFailure; waiting?: WaitingReason };
 }
 
 export interface KeyframeSlot extends MediaSlot {
