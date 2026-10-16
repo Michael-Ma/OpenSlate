@@ -104,6 +104,13 @@ test('Stop counts only real work: Director turns, running or queued media, runni
   assert.equal(canStop(awaitingConfirm, idle), false, 'clips waiting for a person to confirm are not running work');
   for (const shot of Object.values(awaitingConfirm.shots)) shot.video.waiting.code = 'capacity';
   assert.equal(canStop(awaitingConfirm, idle), true, 'clips queued behind other jobs will go out by themselves');
+  // A clip waiting for an input nobody is making (Scene 3 before its keyframes) is not running work: an idle film shows
+  // no Stop. Once its keyframe or voice line is being made, the clip will go out after it, and Stop can detach it.
+  const waitingInput = structuredClone(overview);
+  for (const shot of Object.values(waitingInput.shots)) shot.video = { state: 'queued', takeCount: 0, waiting: { code: 'input_pending', since: 'x' } };
+  assert.equal(canStop(waitingInput, idle), false, 'clips waiting for inputs nobody is making are not running work');
+  waitingInput.shots[shotId('3.1')].keyframe = { state: 'queued', takeCount: 0, opened: false, waiting: { code: 'capacity', ahead: 0, since: 'x' } };
+  assert.equal(canStop(waitingInput, idle), true, 'a clip whose keyframe is being made will go out after it');
   assert.equal(canStop(overview, { ...idle, status: 'running' }), true);
   assert.equal(canStop(overview, { ...idle, status: 'waiting_user' }), true);
   assert.equal(canStop(overview, { ...idle, status: 'error' }), false);
