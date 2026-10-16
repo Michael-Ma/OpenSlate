@@ -109,11 +109,8 @@ function Workspace() {
 
   const onScene = useCallback((id: string) => store.selectScene(id), [store]);
 
-  /** The shot's whole row in Plan: Plan scrolls to it once it is on screen (it reads a focus set after it mounts). */
-  const editInPlan = useCallback((id: string) => {
-    store.setView("plan");
-    window.setTimeout(() => store.focusShot(id), 0);
-  }, [store]);
+  /** The shot's whole row in Plan: Plan opens with the shot focused and brings its row into view. */
+  const editInPlan = useCallback((id: string) => store.openShotIn("plan", id), [store]);
 
   const notes = useDirectorNotes({ overview, sceneId: currentSceneId, locale, openShot });
 

@@ -31,6 +31,11 @@ export interface Focus {
   kind: "shot" | "scene";
   id: string;
   nonce: number;
+  /**
+   * Set together with switching to this view (Keyframes' "Edit 2.1 in Plan"): that view was not on screen to see the
+   * focus change, so it handles this one when it opens. Switching to another view drops the mark.
+   */
+  view?: ViewName;
 }
 
 export interface StudioState {

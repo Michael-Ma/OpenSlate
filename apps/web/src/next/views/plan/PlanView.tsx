@@ -99,7 +99,8 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   }, [flash, outline, reduced]);
 
   // A shot or scene opened from elsewhere (the Director's "Open 2.3") stays in Plan: its row or panel comes into view.
-  const seenFocus = useRef(focus?.nonce);
+  // One set together with opening Plan (Keyframes' "Edit 2.1 in Plan") is handled now; an older one is not.
+  const seenFocus = useRef(focus?.view === "plan" ? undefined : focus?.nonce);
   useEffect(() => {
     if (!focus || focus.nonce === seenFocus.current) return;
     seenFocus.current = focus.nonce;

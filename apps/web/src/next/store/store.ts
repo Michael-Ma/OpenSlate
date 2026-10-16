@@ -390,6 +390,8 @@ export class StudioStore {
   /** Open a shot from elsewhere (a Director note): selected, and the view on screen brings it into view, even again. */
   focusShot = (shotId: string) => this.dispatch({ type: "focus", kind: "shot", id: shotId });
   focusScene = (sceneId: string) => this.dispatch({ type: "focus", kind: "scene", id: sceneId });
+  /** Switch to `view` with the shot focused there (Keyframes' "Edit 2.1 in Plan"): the view brings it into view when it opens. */
+  openShotIn = (view: ViewName, shotId: string) => this.dispatch({ type: "focus", kind: "shot", id: shotId, view });
   /** Open Assets showing one kind of file (e.g. Film's earlier exports). */
   openAssets = (role: RoleFilter) => { this.dispatch({ type: "assetsFilter", role }); this.setView("assets"); };
   setDirectorOpen = (open: boolean) => this.dispatch({ type: "directorOpen", open });

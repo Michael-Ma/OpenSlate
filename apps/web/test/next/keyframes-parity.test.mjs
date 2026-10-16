@@ -10,6 +10,8 @@ import { confirmPress, keyframesPress, lostReplyHolds, pressFromId, PAID_PRESS }
 import { inspectorView } from '../../src/next/model/inspector.ts';
 import { lastFerryOverview, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { canonicalJson, PressKeys } from '../../src/next/store/press-keys.ts';
+import { reducer } from '../../src/next/store/reducer.ts';
+import { initialState } from '../../src/next/store/state.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
 const en = m => translateMsg('en', m), zh = m => translateMsg('zh-CN', m);
@@ -255,6 +257,21 @@ test('the inspector carries the full picture prompt and the video prompt read fr
   const view = inspectorView(overview, shot(overview, '2.3'), 'en-US', 'The ticket. Slow tilt down.');
   assert.deepEqual(view.prompts, { image: shot(overview, '2.3').imagePrompt, video: 'The ticket. Slow tilt down.' });
   assert.equal(inspectorView(overview, shot(overview, '2.3'), 'en-US').prompts.video, null, 'not read yet');
+});
+
+test('Edit in Plan opens Plan with the shot focused in one step; Plan handles that focus when it opens, once', () => {
+  const overview = lastFerryOverview();
+  let state = { ...initialState, projectId: 'last-ferry', overview, focus: { kind: 'shot', id: shotId('1.1'), nonce: 4 } };
+  state = reducer(state, { type: 'focus', kind: 'shot', id: shotId('2.3'), view: 'plan' });
+  assert.deepEqual([state.view, state.shotId, state.sceneId], ['plan', shotId('2.3'), sceneId(2)]);
+  assert.deepEqual(state.focus, { kind: 'shot', id: shotId('2.3'), nonce: 5, view: 'plan' }, 'marked for Plan, with a new nonce');
+  // Staying in Plan keeps the mark; going elsewhere makes it an ordinary focus, so Plan opened later does not flash again.
+  assert.equal(reducer(state, { type: 'view', view: 'plan' }).focus.view, 'plan');
+  const left = reducer(state, { type: 'view', view: 'keyframes' });
+  assert.deepEqual(left.focus, { kind: 'shot', id: shotId('2.3'), nonce: 5 });
+  // A focus without a view (a Director note's "Open 2.2") leaves the view alone.
+  const note = reducer(left, { type: 'focus', kind: 'shot', id: shotId('2.2') });
+  assert.deepEqual([note.view, note.focus], ['keyframes', { kind: 'shot', id: shotId('2.2'), nonce: 6 }]);
 });
 
 // ---- a paid press whose reply was lost ---------------------------------------------------------------------
