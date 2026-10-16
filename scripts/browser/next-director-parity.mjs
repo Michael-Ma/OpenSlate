@@ -407,7 +407,8 @@ export const scenarios = [
     async run({ page }) {
       await ready(page);
       const held = (await page.locator('[data-entry="held"] b').textContent()).trim();
-      if (held !== "导演有一项未完成的修改占用着 3.1和3.2") fail(`The held card reads ${held}`);
+      // The shots are set apart from 和 as the catalogs write "第 2 场".
+      if (held !== "导演有一项未完成的修改占用着 3.1 和 3.2") fail(`The held card reads ${held}`);
       if (!(await page.locator('[data-entry="held"] [data-act="release-holds"]').textContent()).includes("放弃这项修改")) fail("Let it go is not in Chinese");
       const marker = (await page.locator(".dir-attention b").textContent()).trim();
       if (marker !== "这条回复需要处理") fail(`The marker reads ${marker}`);

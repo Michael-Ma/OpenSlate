@@ -64,7 +64,8 @@ async function openView(page, view) {
   }
   await page.waitForSelector(`.app[data-view='${view}']`);
 }
-const text = (page, selector) => page.locator(selector).first().innerText().catch(() => "");
+// A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+const text = (page, selector) => page.locator(selector).first().innerText().then((value) => value.replaceAll("\u00a0", " ")).catch(() => "");
 const strip = (page) => page.locator(".film-strip-slot .film-strip");
 
 async function noSidewaysScroll(page, where = "") {
@@ -190,7 +191,8 @@ export const scenarios = [
       expect(layout.column.left === 0 && layout.column.width === 392 && layout.column.top === 52, `Director column is ${JSON.stringify(layout.column)}, expected 392 wide under the bar`);
       expect(layout.scroll.height <= layout.scroll.innerHeight && layout.scroll.width <= layout.scroll.innerWidth, `The page scrolls: ${JSON.stringify(layout.scroll)}`);
       expect(layout.title === "The Last Ferry", `Film title reads "${layout.title}"`);
-      expect(layout.meta === "48 s · 30 fps", `Film meta reads "${layout.meta}"`);
+      // A number and its unit are joined by a no-break space, so "48 s" never breaks into "48" / "s".
+      expect(layout.meta === "48\u00a0s · 30\u00a0fps", `Film meta reads ${JSON.stringify(layout.meta)}`);
       expect(layout.counts === "3 scenes · 8 shots", `Counts read "${layout.counts}"`);
       expect(layout.saved === "Synced", `Connection pill reads "${layout.saved}"`);
       expect(!layout.toggleShown, "The Director toggle shows on a wide screen");
@@ -262,9 +264,12 @@ export const scenarios = [
       }));
       expect(zh.lang === "zh-CN", `html lang is ${zh.lang}`);
       expect(zh.saved === "已同步", `Connection pill reads "${zh.saved}"`);
-      expect(zh.counts === "3 场 · 8 个镜头", `Counts read "${zh.counts}"`);
+      expect(zh.counts === "3\u00a0场 · 8\u00a0个镜头", `Counts read ${JSON.stringify(zh.counts)}`);
       expect(zh.language === "English", `The language switch reads "${zh.language}"`);
       expect(zh.settings === "设置", `Settings is labelled "${zh.settings}"`);
+      // The film's own words keep their own stop: "Wide. The empty harbour…", never "Wide。The empty harbour…".
+      const caption = await text(page, ".preview .pv-caption");
+      expect(/^Wide\. The empty harbour/.test(caption), `The Chinese caption reads ${JSON.stringify(caption)}`);
       await shot(page, "next-shell-language-zh");
 
       await page.reload();

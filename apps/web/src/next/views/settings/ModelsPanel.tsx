@@ -3,6 +3,7 @@ import { ApiError } from "../../api/client.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
 import { errorMsg } from "../../i18n/translate.ts";
+import { sentenceGap } from "../../model/shell-states.ts";
 import { applyRequest, blockedBy, choiceFor, impactOf, JOB_IN_SENTENCE, joinList, modelRows, previewRequest, previewUsable, sharedRequest, type MediaKind, type ModelApplyResult, type ModelPreview, type ModelRow, type ModelSettingsStatus } from "../../model/settings.ts";
 import { CODEX_CHECK_TIMEOUT_MS, DEMO_VALUE, codexState, directorRequest, directorRow, selectionFor, type DirectorChoice, type DirectorSetup } from "../../model/settings-director.ts";
 import { msg, type Msg } from "../../model/types.ts";
@@ -344,12 +345,14 @@ function MediaImpact({ row, pending, status, model, labels, locale, offline, app
 }
 
 function ImpactRow({ title, lines, tone, busy, stale, blocked, actions }: { title: string; lines: Msg[]; tone: "cost" | "none" | "info"; busy?: boolean; stale?: boolean; blocked?: boolean; actions: ReactNode }) {
-  const { tm } = useI18n();
+  const { tm, locale } = useI18n();
+  // Sentences follow each other with a space in English and none after Chinese full stops (？ 。).
+  const gap = sentenceGap(locale);
   return (
     <div className="impact-row" data-impact={tone} data-stale={stale || undefined} data-blocked={blocked || undefined}>
       <div className={`impact${tone === "cost" ? " cost" : tone === "none" ? " none" : ""}`} role="status" aria-busy={busy || undefined}>
         <span className="ic" aria-hidden="true">{tone === "cost" ? "!" : tone === "none" ? "✓" : "i"}</span>
-        <span><b>{title}</b>{lines.length ? " " : ""}{lines.map((line) => tm(line)).join(" ")}</span>
+        <span><b>{title}</b>{lines.length ? gap : ""}{lines.map((line) => tm(line)).join(gap)}</span>
       </div>
       <div className="impact-acts">{actions}</div>
     </div>

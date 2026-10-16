@@ -46,7 +46,7 @@ test('the panel says why Export is off in words, both languages', () => {
   const overview = lastFerryOverview();
   const why = whyNotReady(readinessOf(overview, false), overview, 'en');
   assert.deepEqual(why.map(en), ['5 shots need a clip and settle the voice in 2.3 and 3.2']);
-  assert.deepEqual(whyNotReady(readinessOf(overview, false), overview, 'zh-CN').map(zh), ['5 个镜头需要视频，并处理 2.3和3.2 的配音']);
+  assert.deepEqual(whyNotReady(readinessOf(overview, false), overview, 'zh-CN').map(zh), ['5 个镜头需要视频，并处理 2.3 和 3.2 的配音']);
   const voiceOnly = finished();
   voiceOnly.shots[shotId('3.2')].narration = { state: 'text_only', text: 'x', estimatedSeconds: 1, fits: true };
   assert.deepEqual(whyNotReady(readinessOf(voiceOnly, false), voiceOnly, 'en').map(en), ['Settle the voice in 3.2']);

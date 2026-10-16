@@ -35,7 +35,8 @@ async function ready(page) {
 }
 
 const focused = (page) => page.evaluate(() => document.activeElement?.getAttribute("data-act"));
-const text = (page, selector) => page.locator(selector).first().innerText().catch(() => "");
+// A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+const text = (page, selector) => page.locator(selector).first().innerText().then((value) => value.replaceAll("\u00a0", " ")).catch(() => "");
 const composer = (page) => page.locator("#director [data-field='message']").inputValue().catch(() => "");
 const CARRY_KEY = "openslate.next.carry";
 

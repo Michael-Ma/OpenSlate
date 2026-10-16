@@ -22,7 +22,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   const deadline = Date.now() + timeout;
   let last = "";
   while (Date.now() < deadline) {
-    last = await page.locator(selector).first().innerText().catch(() => "");
+    // A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+    last = (await page.locator(selector).first().innerText().catch(() => "")).replaceAll("\u00a0", " ");
     if (pattern.test(last)) return last;
     await page.waitForTimeout(100);
   }
@@ -94,7 +95,7 @@ export const scenarios = [
       await page.click('[data-act="plan-undo"]');
       await expectText(page, ".toast", /Undone: edit 1\.1\./);
       const row = await page.locator(`.shot-row[data-shot="${shot("1.1")}"]`).innerText();
-      expect(/Wide · 6 s/.test(row) && !/Action:/.test(row) && /Opened[\s\S]*Clip/.test(row), `Undo did not restore every field: ${JSON.stringify(row)}`);
+      expect(/Wide · 6\ss/.test(row) && !/Action:/.test(row) && /Opened[\s\S]*Clip/.test(row), `Undo did not restore every field: ${JSON.stringify(row)}`);
       await noErrorToast(page, "The edit");
     },
   },

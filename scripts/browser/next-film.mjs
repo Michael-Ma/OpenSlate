@@ -27,7 +27,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   const deadline = Date.now() + timeout;
   let last = "";
   while (Date.now() < deadline) {
-    last = await page.locator(selector).first().innerText().catch(() => "");
+    // A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+    last = (await page.locator(selector).first().innerText().catch(() => "")).replaceAll("\u00a0", " ");
     if (pattern.test(last)) return last;
     await page.waitForTimeout(100);
   }
@@ -120,7 +121,7 @@ export const scenarios = [
       await expectText(page, "[data-act='why-not']", /^5 shots need a clip and settle the voice in 2\.3 and 3\.2$/);
       await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · 1280 × 720 · renders here, free$/);
       const noted = await page.getAttribute(`.blk[data-shot='${shot("2.2")}']`, "aria-label");
-      expect(/^2\.2, Medium, \d+ s, .+, Director note a$/.test(noted ?? ""), `2.2's label leaves out its Director note: ${noted}`);
+      expect(/^2\.2, Medium, \d+\ss, .+, Director note a$/.test(noted ?? ""), `2.2's label leaves out its Director note: ${noted}`);
       await expectText(page, `.checks [data-shot='${shot("1.2")}']`, /1\.2\s+✓ clip\s+✓ 2\.1 s/);
       await expectText(page, `.checks [data-shot='${shot("3.2")}']`, /3\.2\s+no clip\s+no voice yet/);
       const done = await page.locator(`.checks [data-shot='${shot("1.1")}'] .y`).evaluate((el) => getComputedStyle(el).color);

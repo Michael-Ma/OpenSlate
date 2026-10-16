@@ -1,5 +1,6 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneBlocker, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { errorMsg } from "../i18n/translate.ts";
+import { formatList } from "../i18n/typeset.ts";
 import { msg, type Msg } from "./types.ts";
 import { narrationChecks, type AppCheck } from "./checks.ts";
 import { formatMicros, priceMsg } from "./price.ts";
@@ -251,13 +252,9 @@ export function cardStatus(shot: ShotOverview): { status: Msg; tone: CardTone } 
   }
 }
 
-/** "2.2 and 2.3" in the interface language. */
+/** "2.2 and 2.3", "2.2 和 2.3" in the interface language. */
 export function listLabels(labels: readonly string[], locale: string): string {
-  try {
-    return new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(labels);
-  } catch {
-    return labels.join(", ");
-  }
+  return formatList(labels, locale);
 }
 
 /** Shots named one by one up to this many; beyond it the panel counts them (it is 230 px wide). */

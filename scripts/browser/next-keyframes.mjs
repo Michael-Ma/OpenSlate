@@ -19,7 +19,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   const deadline = Date.now() + timeout;
   let last = "";
   while (Date.now() < deadline) {
-    last = await page.locator(selector).first().innerText().catch(() => "");
+    // A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+    last = (await page.locator(selector).first().innerText().catch(() => "")).replaceAll("\u00a0", " ");
     if (pattern.test(last)) return last;
     await page.waitForTimeout(100);
   }
@@ -121,7 +122,7 @@ export const scenarios = [
       await expectText(page, '[data-card="shot-2-2"] .anno[data-note="note-a"]', /a\s*Mara's coat came out maroon/);
       // The card's link is one short line with its price; its tooltip and spoken name still say which shot.
       await expectText(page, '[data-card="shot-2-2"] [data-act="note-regenerate"]', /^New take · about \$0\.04\s*· 2\.2$/);
-      if (await page.locator('[data-card="shot-2-2"] [data-act="note-regenerate"]').getAttribute("title") !== "Regenerate 2.2 · about $0.04") throw new Error("The card link's tooltip does not name the full purchase");
+      if (await page.locator('[data-card="shot-2-2"] [data-act="note-regenerate"]').getAttribute("title") !== "Regenerate 2.2 · about\u00a0$0.04") throw new Error("The card link's tooltip does not name the full purchase");
       await expectText(page, '[data-card="shot-2-3"] .anno[data-note="note-b"]', /b\s*The 2\.3 line/);
       if (await page.locator('[data-card="shot-2-3"] .anno.check').count()) throw new Error("The app check's chip repeats note b on 2.3");
       await expectText(page, '[data-card="shot-2-1"] .stl', /Opened/);
@@ -387,6 +388,9 @@ export const scenarios = [
       await page.click(`[data-act="scene"][data-scene="${scene(3)}"]`);
       await page.waitForSelector('.preview .dashed-frame');
       await expectText(page, '[data-act="make-keyframes"]', /^Make 2 keyframes · about \$0\.08$/);
+      // "about" stays on the line of its price, and the seconds on a card stay with their unit.
+      if (!(await page.locator('[data-act="make-keyframes"]').textContent()).includes("about\u00a0$0.08")) throw new Error("The price can break away from its about");
+      if (!(await page.locator('.card .ttl').first().textContent()).includes("\u00a0s")) throw new Error("A card's seconds can break away from their unit");
       await expectText(page, ".kf-row", /No more shots in this scene/);
       await screenshot(page, "scene-3-1440");
       await page.click('[data-act="make-keyframes"]');

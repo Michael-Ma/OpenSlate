@@ -51,6 +51,7 @@ import {
   type WordsAfterFailure,
 } from "../model/narration-recording.ts";
 import { seconds } from "../model/keyframes.ts";
+import { sentenceGap } from "../model/shell-states.ts";
 import { msg, type Msg } from "../model/types.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import type { EditDraft } from "../store/state.ts";
@@ -314,7 +315,7 @@ interface LineProps {
 }
 
 function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices, focusField, working, saveBlocked, impactVoice, impactLeave, onVoice, onEdit, onSave }: LineProps) {
-  const { t, tm } = useI18n();
+  const { t, tm, locale } = useI18n();
   const server = useGuarded("server");
   const id = (part: string) => `narr-${part}-${shot.shotId}`;
   const text = draft.value.trim();
@@ -351,7 +352,7 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
       <span className={`est${!empty && !estimate.fits ? " warn" : ""}`} id={id("estimate")} aria-live="polite">
         {empty ? t("narr.line.empty") : tm(lineEstimateMsg(estimate))}
       </span>
-      <span className="stale" id={id("impact")}>{impact.map((part) => tm(part)).join(" ")}</span>
+      <span className="stale" id={id("impact")}>{impact.map((part) => tm(part)).join(sentenceGap(locale))}</span>
       <div className="narr-foot two">
         <button type="button" className="pill chosen" data-act="save-edit" {...server} disabled={!canSave} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)} onClick={() => void onSave(textChanged)}>
           {t(working ? "inspector.saving" : "inspector.save")}

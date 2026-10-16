@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n/I18n.tsx";
+import { keepTogether } from "../i18n/typeset.ts";
 import type { NoteOpen, ThreadNote } from "../model/director.ts";
 import { useOpenTarget } from "./useOpenTarget.ts";
 
@@ -23,7 +24,7 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
         <article key={view.noteId} className={`note${tone === "open" ? "" : " done"}`} data-note={view.letter} data-state={view.state}>
           <span className="letter" aria-hidden="true">{view.letter}</span>
           <span className="sr">{t("note.thread.label", { letter: view.letter })}</span>
-          <div className="note-text">{view.text}</div>
+          <div className="note-text">{keepTogether(view.text)}</div>
           {opens.length > 0 && (
             <div className="row">
               {opens.map((target) => (

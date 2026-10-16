@@ -5,7 +5,7 @@ import { artifactKey } from "../media/artifact-cache.ts";
 import { useArtifactUrl } from "../media/useArtifactUrl.ts";
 import type { ShotCard } from "../model/keyframes.ts";
 import type { Msg } from "../model/types.ts";
-import { ARROW_OWNERS, shotClip, stageStep, type ShotPosition } from "../model/keyframes-stage.ts";
+import { ARROW_OWNERS, previewCaption, shotClip, stageStep, type ShotPosition } from "../model/keyframes-stage.ts";
 import { clock, motionKind, motionTransform } from "../model/motion.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { Picture, StatusPill, useOnScreen, useReducedMotion } from "./parts.tsx";
@@ -131,7 +131,7 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
   }, [playing, shot.shotId, shot.motion, durationSeconds, reduced]);
 
   const picture = card.picture;
-  const caption = t("preview.caption", { framing: shot.framing, prompt: shot.imagePrompt });
+  const caption = tm(previewCaption(shot.framing, shot.imagePrompt));
   const canOpen = !!current && !keyframe.opened && loaded === currentKey && keyframeVisible && !armed && !openPending;
 
   /**

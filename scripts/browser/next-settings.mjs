@@ -21,7 +21,8 @@ async function expectText(page, selector, pattern, timeout = 8000) {
   const deadline = Date.now() + timeout;
   let last = "";
   while (Date.now() < deadline) {
-    last = await page.locator(selector).first().innerText().catch(() => "");
+    // A number and its unit are joined by a no-break space (i18n keepTogether); it reads as a space here.
+    last = (await page.locator(selector).first().innerText().catch(() => "")).replaceAll("\u00a0", " ");
     if (pattern.test(last)) return last;
     await page.waitForTimeout(100);
   }
@@ -107,7 +108,7 @@ export const scenarios = [
       const jobs = await page.locator("#set-models .mrow .job").allInnerTexts();
       expect(jobs.join("|") === "Director|Keyframes|Video|Narration|Transcription", `Jobs read ${jobs.join("|")}`);
       const prices = await page.locator("#set-models .mrow .price").allInnerTexts();
-      expect(prices.join("|") === "uses your Codex plan|about $0.04 a keyframe|about $0.50 a clip|about $0.01 a voice line|about $0.01 a transcription", `Estimates read ${prices.join("|")}`);
+      expect(prices.join("|").replaceAll("\u00a0", " ") === "uses your Codex plan|about $0.04 a keyframe|about $0.50 a clip|about $0.01 a voice line|about $0.01 a transcription", `Estimates read ${prices.join("|")}`);
       expect(!prices.some((p) => /\$0\.00/.test(p)), "An estimate reads $0.00");
       const ready = await page.locator("#set-models .mrow .ready.y").count();
       expect(ready === 5, `${ready} of 5 models read Ready`);
@@ -394,6 +395,9 @@ export const scenarios = [
       await shot(page, "settings-390-open", { fullPage: true });
       await page.click("#set-language [data-act='set-language'][data-v='zh-CN']");
       await expectText(page, "main[data-view='settings'] .view-head h1", /^设置$/);
+      // Chinese sentences follow each other with no ASCII space after 。 or ？, and no space between Chinese words.
+      const impact = await expectText(page, `${row(page, "video")} .impact`, /视频改用示例视频？还没生成的/);
+      expect(!/[。？] /.test(impact), `The Chinese impact has a space after a full stop: ${JSON.stringify(impact)}`);
       await noSidewaysScroll(page);
       await shot(page, "settings-390-zh", { fullPage: true });
     },

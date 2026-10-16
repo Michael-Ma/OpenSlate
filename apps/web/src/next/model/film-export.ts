@@ -1,4 +1,5 @@
 import type { ExportReadiness, ExportRecord, ExportView, GenerationOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { formatList } from "../i18n/typeset.ts";
 import { making } from "./film.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -93,7 +94,7 @@ export function whyNotReady(readiness: ExportReadiness, overview: GenerationOver
   const shots = (codes: readonly string[]) => [...new Set(readiness.blockers.filter((b) => codes.includes(b.code)).map((b) => label(b.shotId)).filter(Boolean))];
   const clips = shots(["no_clip", "clip_outdated"]);
   const voices = shots(["voice_unsettled"]);
-  const list = (items: string[]) => new Intl.ListFormat(locale, { type: "conjunction" }).format(items);
+  const list = (items: string[]) => formatList(items, locale);
   const reasons: Msg[] = [];
   if (clips.length && voices.length) reasons.push(msg("film.why.clips_voice", { count: clips.length, shots: list(voices) }));
   else if (clips.length) reasons.push(msg("film.why.clips", { count: clips.length }));
