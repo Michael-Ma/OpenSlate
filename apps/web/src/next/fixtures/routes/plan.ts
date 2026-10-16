@@ -1,4 +1,5 @@
 import type { GenerationOverview, KeyframeSlot, MediaSlot, SceneOverview, ShotOverview } from "@openslate/core/public";
+import { joinPromptParts } from "@openslate/core/public";
 import { ApiError } from "../../api/client.ts";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../../model/checks.ts";
 import type { PendingImport } from "../../model/plan-import.ts";
@@ -236,11 +237,11 @@ function applyShotFields(world: FixtureWorld, shot: ShotOverview, fields: Record
     const action = values.action ?? row?.action ?? "";
     const framing = values.framing ?? shot.framing;
     const motion = values.motion ?? shot.motion;
-    const direction = [purpose, action, framing].filter(Boolean).join(". ");
+    const direction = [purpose, action, framing];
     const directs = names.some((name) => DIRECTION_FIELDS.has(name));
-    const imagePrompt = values.imagePrompt ?? (directs ? directedPrompt(shot.imagePrompt, direction) : shot.imagePrompt);
+    const imagePrompt = values.imagePrompt ?? (directs ? directedPrompt(shot.imagePrompt, joinPromptParts(direction)) : shot.imagePrompt);
     const priorVideo = row?.videoPrompt ?? shot.imagePrompt;
-    const videoPrompt = values.videoPrompt ?? (directs || "motion" in values ? directedPrompt(priorVideo, `${direction}. Camera movement: ${motion}`) : priorVideo);
+    const videoPrompt = values.videoPrompt ?? (directs || "motion" in values ? directedPrompt(priorVideo, joinPromptParts([...direction, `Camera movement: ${motion}`])) : priorVideo);
     const keyframeToo = directs || "imagePrompt" in values;
     let narration = shot.narration;
     const durationFrames = frames ?? shot.durationFrames;
@@ -429,9 +430,9 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
         const purpose = field === "purpose" ? value : shot.purpose;
         const action = field === "action" ? value : (row as { action?: string } | undefined)?.action ?? "";
         const framing = field === "framing" ? value : shot.framing;
-        const direction = [purpose, action, framing].filter(Boolean).join(". ");
-        const imagePrompt = directedPrompt(shot.imagePrompt, direction);
-        const videoPrompt = directedPrompt(row?.videoPrompt ?? shot.imagePrompt, `${direction}. Camera movement: ${shot.motion}`);
+        const direction = [purpose, action, framing];
+        const imagePrompt = directedPrompt(shot.imagePrompt, joinPromptParts(direction));
+        const videoPrompt = directedPrompt(row?.videoPrompt ?? shot.imagePrompt, joinPromptParts([...direction, `Camera movement: ${shot.motion}`]));
         // The overview has no action; the stored shot keeps it.
         const content = field === "action" ? {} : { [field]: value };
         const edited: ShotOverview = { ...shot, ...content, imagePrompt, keyframe: outdateKeyframe(shot.keyframe, field), video: outdateClip(shot.video, field) };

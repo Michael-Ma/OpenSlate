@@ -86,7 +86,7 @@ export const scenarios = [
       expect(Number(await head(page)) === before + 1, "Three fields were not one command");
       await expectText(page, `[data-shot="${shot("1.1")}"]`, /Low-angle wide over the counter · 6 s[\s\S]*Action: The clerk pulls the shutter halfway down\./);
       await page.click(`[data-act="toggle-prompts"][data-shot="${shot("1.1")}"]`);
-      await expectText(page, `[data-shot="${shot("1.1")}"] [data-prompt="image"]`, /^OpenSlate current direction:\nThe ticket office[\s\S]*The clerk pulls the shutter halfway down\.\. Low-angle wide over the counter\nReference details/);
+      await expectText(page, `[data-shot="${shot("1.1")}"] [data-prompt="image"]`, /^OpenSlate current direction:\nThe ticket office at closing time, shutters half down, one lamp on\. The clerk pulls the shutter halfway down\. Low-angle wide over the counter\nReference details/);
       // The video prompt was written in the same save as the new direction: the direction (with the camera movement)
       // goes in front of the words, as the server writes it.
       await expectText(page, `[data-shot="${shot("1.1")}"] [data-prompt="video"]`, /^OpenSlate current direction:\n[\s\S]*Low-angle wide over the counter\. Camera movement: Slow pan right\nReference details \(retain only where consistent\):\nThe shutter slides down; the lamp flickers once\.$/);

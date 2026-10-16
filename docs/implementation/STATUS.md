@@ -2,6 +2,12 @@
 
 Reconciled October 16, 2026 (feature branch after the B18 merge, including B1–B18). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
+## October 16 prompt composition — B19 verified
+
+Picture/video direction joins now share a pure browser-safe core helper across server edits, Plan saves and the mutable fixture transport. Parts are trimmed, empty parts skipped and a full stop added between parts only when the preceding part does not end in `.`, `!`, `?`, `…`, `。`, `！` or `？`. The final part's ending and reference details stay verbatim; already correct ordinary joins retain their exact text. Existing saved prompts are not migrated. No frozen fixture, catalog or skill package encoded a doubled prompt form or was changed. The Plan browser parity expectation is corrected and syntax-checked; browser replay remains with the lead.
+
+Pinned Node **24.15.0**, pnpm **10.33.0** and FFmpeg/ffprobe **8.1.1** passed setup/preflight without a download. Build and all five package/app typechecks passed. **18 tests added**, two obsolete unit expectations rewritten, none deleted/disabled. The five touched test files passed **74/74**, zero failures/skips. Full `pnpm test` passed **3,114**, zero failures/cancelled/todo and **one optional native-probe skip (3,115 total)**. Independent review found no must-fix issue. No browser, real model/provider call, external network request, credential read, production-state access/restart or port 3001 listener occurred. Changes remain uncommitted for lead review. [Full inventory, verification, process exception and proposed commit](../ai/uiux-plan/codex/reports/B19-prompt-joins.md).
+
 ## October 16 narration feedback — B18 browser follow-up verified
 
 The lead's B18 browser run passed **163/164**, including edit-while-generating. The remaining recording-refusal failure was a real feedback regression: its internal subtitle pre-save published Saved/Undo before the recording was rejected and words restored. Subtitle preparation and its exact rollback are now fully silent, preserving other actions' toasts; add results/refusal notes retain ownership of feedback. Composite narration suppresses intermediate success messages and emits exactly one final toast/Undo only after all steps and ownership checks complete. Normal Save errors remain visible, and ordinary later Inspector saves keep their default feedback.

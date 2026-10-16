@@ -11,6 +11,13 @@ const golden = () => planOutline(lastFerrySnapshot(), lastFerryOverview());
 const row = (outline, label) => outline.scenes.flatMap((scene) => scene.shots).find((shot) => shot.label === label);
 const ids = (value) => JSON.stringify(value).match(/"id":"[^"]+"/g)?.map((text) => text.slice(6, -1)) ?? [];
 
+test('the Plan prompt mirror preserves terminal punctuation and trims empty direction parts', () => {
+  for (const punctuation of ['.', '!', '?', '…', '。', '！', '？']) {
+    assert.equal(directedPrompt([`  一盏灯亮着${punctuation}  `, '', ' \n ', ' Wide。 ', 'Camera movement: Static？'], 'Original  words.\n'),
+      `OpenSlate current direction:\n一盏灯亮着${punctuation} Wide。 Camera movement: Static？\nReference details (retain only where consistent):\nOriginal  words.\n`);
+  }
+});
+
 test('the outline follows the overview: scenes, shots, length and the 6:00 cap', () => {
   const outline = golden();
   assert.deepEqual(outline.counts, { scenes: 3, shots: 8, seconds: 48, maxSeconds: 360 });
