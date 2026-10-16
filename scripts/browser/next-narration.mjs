@@ -131,6 +131,15 @@ export const scenarios = [
       expect(options[0] === "Same as the film (Cedar)" && options.includes("Cedar · film default") && options.includes("Ash"), `Voice options: ${options.join(", ")}`);
       await page.selectOption(".insp select[data-act='narr-voice']", "ash");
       await expectText(page, '.insp form[data-form="narration"] .stale[id^="narr-impact"]', /^The voice line will be made again in this voice, with the scene's next keyframes or video\.$/);
+      // What Save will do is in sight above the sticky buttons, with the voice; the buttons are never faded.
+      const sight = await page.evaluate(() => {
+        const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+        const body = r(".insp .insp-body"), foot = r(".insp .narr-foot"), impact = r('.insp .stale[id^="narr-impact"]'), voice = r(".insp .narr-voice");
+        return { body: [body.top, body.bottom], foot: foot.top, impact: [impact.top, impact.bottom], voice: [voice.top, voice.bottom], mask: getComputedStyle(document.querySelector(".insp .insp-body")).maskImage };
+      });
+      expect(sight.impact[0] >= sight.body[0] && sight.impact[1] <= sight.foot + 1, `The voice's result is out of sight: ${JSON.stringify(sight)}`);
+      expect(sight.voice[0] >= sight.body[0] && sight.voice[1] <= sight.foot, `The voice is out of sight with its result: ${JSON.stringify(sight)}`);
+      expect(!/(transparent|rgba\(0, 0, 0, 0\))\)$/.test(sight.mask), `The panel's foot is under a fade: ${sight.mask}`);
       await screenshot(page, "panel-voice-1440");
       await page.click('.insp [data-act="save-edit"]');
       await expectText(page, ".toast", /2\.3 has a new voice for its line\./);
@@ -178,6 +187,13 @@ export const scenarios = [
       await expectText(page, ".insp .narr-take", /^Your recording · 3 s/);
       const length = await audioSeconds(page);
       expect(Math.abs(length - 3) < 0.05, `The recording plays for ${length} s`);
+      // It is in view, whole, and its player has the focus (Add is off now).
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "narration-audio", null, { timeout: 3000 });
+      const take = await page.evaluate(() => {
+        const body = document.querySelector(".insp .insp-body").getBoundingClientRect(), box = document.querySelector(".insp .narr-take").getBoundingClientRect();
+        return { body: [body.top, body.bottom], take: [box.top, box.bottom] };
+      });
+      expect(take.take[0] >= take.body[0] - 0.5 && take.take[1] <= take.body[1] + 0.5, `The added take is out of view: ${JSON.stringify(take)}`);
       await expectText(page, '.insp [data-act="cancel-edit"]', /^Done$/);
       await screenshot(page, "recording-added-1440");
       await page.click('.insp [data-act="cancel-edit"]');

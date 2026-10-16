@@ -144,6 +144,10 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
   const opening = useRef(true);
   useEffect(() => { opening.current = false; }, []);
   const focusField = opening.current && !focusTake;
+  // A recording just added: its take is brought into view and its player takes the focus (the Add it came from is
+  // off now), once the take on screen is no longer the one from before the add.
+  const [added, setAdded] = useState<{ before: string | null } | null>(null);
+  const revealing = !!added && !!take && take.audio.artifactId !== added.before;
 
   const working = busy || saving;
   const close = () => onEdit(null);
@@ -188,7 +192,7 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
       </span>
       {/* The voice line's state for the choice on screen; then the current voice line or recording. */}
       {state ? <span className={`narr-state${state.tone === "warn" ? " warn" : ""}`} role="status" data-state={shot.narration.state} data-take={origin ?? undefined}>{tm(state.message)}</span> : null}
-      {take ? <TakePlayer key={take.audio.artifactId} take={take} focus={wantFocus.current} onFocused={focused} />
+      {take ? <TakePlayer key={take.audio.artifactId} take={take} focus={wantFocus.current} onFocused={focused} reveal={revealing} onRevealed={() => setAdded(null)} />
         : !state && shot.narration.state === "ready" && choice !== "none" ? (
           // Voiced, and the shot's narration section is still being read (or could not be).
           detail.error && !detail.loading ? (
@@ -257,6 +261,7 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
           canWrite={canWrite}
           onBusy={setBusy}
           onClose={close}
+          onAdded={(before) => setAdded({ before })}
           live={mode === "live"}
         />
       ) : null}
@@ -327,11 +332,30 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
   const canSave = !empty && (textChanged || voiceChanged || modeChanged) && !working && !server.disabled && !saveBlocked;
   const impact = impactLeave ? [impactLeave]
     : [textChanged || !voiceChanged ? editImpact(shot, ["narration"]) : null, voiceChanged ? impactVoice : null].filter((part): part is Msg => part !== null);
+  const impactText = impact.map((part) => tm(part)).join(" ");
+  // What Save will do changes with the voice or the line: when it is out of sight it is brought into view above the
+  // sticky buttons, with the voice at the top where there is room, so a changed voice is never saved without its
+  // result in sight (and nothing above it is left half-cut).
+  const voiceRow = useRef<HTMLDivElement>(null);
+  const impactLine = useRef<HTMLSpanElement>(null);
+  const shownImpact = useRef(impactText);
+  useEffect(() => {
+    if (shownImpact.current === impactText) return;
+    shownImpact.current = impactText;
+    const line = impactLine.current;
+    const foot = line?.parentElement?.querySelector(".narr-foot");
+    const body = line?.closest(".insp-body");
+    if (!line || !foot || !body) return;
+    const inSight = () => line.getBoundingClientRect().bottom <= foot.getBoundingClientRect().top + 1 && line.getBoundingClientRect().top >= body.getBoundingClientRect().top - 1;
+    if (inSight()) return;
+    voiceRow.current?.scrollIntoView?.({ block: "start" });
+    if (!inSight()) line.scrollIntoView?.({ block: "nearest" });
+  }, [impactText]);
 
   return (
     <>
       {/* The voice first, so it is in view with the line in a short inspector. */}
-      <div className="narr-voice">
+      <div className="narr-voice" ref={voiceRow}>
         <label htmlFor={id("voice")}>{t("narr.voice_label")}</label>
         <select id={id("voice")} data-act="narr-voice" value={voice} disabled={working || (voices.loading && !voices.data)} onChange={(event) => onVoice(event.target.value)}>
           {options.map((option) => <option key={option.value} value={option.value}>{tm(option.label)}</option>)}
@@ -351,7 +375,7 @@ function LinePart({ shot, fps, draft, voice, currentVoice, narrationMode, voices
       <span className={`est${!empty && !estimate.fits ? " warn" : ""}`} id={id("estimate")} aria-live="polite">
         {empty ? t("narr.line.empty") : tm(lineEstimateMsg(estimate))}
       </span>
-      <span className="stale" id={id("impact")}>{impact.map((part) => tm(part)).join(" ")}</span>
+      <span className="stale" id={id("impact")} ref={impactLine}>{impactText}</span>
       <div className="narr-foot two">
         <button type="button" className="pill chosen" data-act="save-edit" {...server} disabled={!canSave} title={server.title ?? (saveBlocked ? tm(saveBlocked) : undefined)} onClick={() => void onSave(textChanged)}>
           {t(working ? "inspector.saving" : "inspector.save")}
@@ -379,6 +403,8 @@ interface RecordingProps {
   canWrite(): boolean;
   onBusy(busy: boolean): void;
   onClose(): void;
+  /** The recording was added; `before` is the take that was current when Add was pressed. */
+  onAdded(before: string | null): void;
 }
 
 /**
@@ -389,7 +415,7 @@ interface RecordingProps {
  * subtitle); when the recording is then not added, that save is undone and the panel says so. Closing the panel
  * while bytes are still going out stops them, and a toast says what happened.
  */
-function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, saving, live, saveBlocked, canWrite, onBusy, onClose }: RecordingProps) {
+function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, saving, live, saveBlocked, canWrite, onBusy, onClose, onAdded }: RecordingProps) {
   const { t, tm } = useI18n();
   const store = useStore();
   const mode = useMode();
@@ -457,6 +483,7 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
     const active = () => store.getState().projectId === origin.projectId && store.getState().projectEpoch === origin.projectEpoch;
     const chosen = file;
     const label = shot.label;
+    const before = take?.audio.artifactId ?? null;
     const controller = new AbortController();
     const current = { controller, sentAll: false };
     flight.current = current;
@@ -510,6 +537,7 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
             setFile(null);
             setCheck(null);
             setReading({ state: "none" });
+            onAdded(before);
           }
           return;
         } catch (error) {
@@ -614,11 +642,23 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
  * The current voice line or recording in the native player (seek, volume, keyboard), with its measured length.
  * A narrow inspector leaves the native timeline no room, so a full-width seek slider joins it there (CSS shows it).
  */
-function TakePlayer({ take, focus, onFocused }: { take: TakeView; focus: boolean; onFocused(): void }) {
+function TakePlayer({ take, focus, onFocused, reveal, onRevealed }: { take: TakeView; focus: boolean; onFocused(): void; reveal: boolean; onRevealed(): void }) {
   const { t, tm } = useI18n();
   const audio = useNarrationAudio(take.audio);
   const element = useRef<HTMLAudioElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const focused = useRef(false);
+  // A take just added: once its player has its size, the panel goes back to its top and brings the whole take into
+  // view, and the player takes the focus (it does not play by itself).
+  useEffect(() => {
+    const take = box.current;
+    if (!reveal || !take || (audio.status !== "ready" && audio.status !== "failed")) return;
+    const body = take.closest(".insp-body");
+    if (body) body.scrollTop = 0;
+    take.scrollIntoView?.({ block: "nearest" });
+    element.current?.focus({ preventScroll: true });
+    onRevealed();
+  }, [reveal, audio.status, onRevealed]);
   const [position, setPosition] = useState(0);
   const [length, setLength] = useState(take.seconds);
   useEffect(() => {
@@ -632,7 +672,7 @@ function TakePlayer({ take, focus, onFocused }: { take: TakeView; focus: boolean
   const round = (value: number) => Math.round(value * 10) / 10;
   const at = Math.min(position, length);
   return (
-    <div className="narr-take" data-take={take.origin} data-seconds={take.seconds}>
+    <div className="narr-take" ref={box} data-take={take.origin} data-seconds={take.seconds}>
       <span className="narr-take-label">{tm(take.label)}</span>
       {audio.status === "ready" ? (
         <>

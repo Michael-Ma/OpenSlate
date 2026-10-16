@@ -141,7 +141,8 @@
 .insp-body { flex: 0 1 auto; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px 2px; }
 .insp-body > form { margin-top: 10px; }
 /* When a panel or form runs past the inspector's room, the edge with more behind it fades, so the body says it scrolls
-   (the fade follows the scroll where the browser can; a body that fits has no fade). */
+   (the fade follows the scroll where the browser can; a body that fits has no fade). A panel with a sticky foot (the
+   narration's Save, the prompts' Edit in Plan) fades only at the top, so the foot is never painted over. */
 @property --kf-fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --kf-fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @keyframes kf-body-edges {
@@ -155,6 +156,7 @@
     animation: kf-body-edges linear both;
     animation-timeline: scroll(self block);
   }
+  .insp:is([data-editing="narration"], [data-sub="prompts"]) .insp-body { mask-image: linear-gradient(to bottom, transparent, #000 var(--kf-fade-t)); }
 }
 
 /* ---------- inspector: the rows view fits its room (useInspectorFit, model/inspector-fit.ts) ---------- */
