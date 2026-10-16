@@ -267,6 +267,18 @@ export function tickLabels(ticks: readonly number[], total: number, width: numbe
   });
 }
 
+/** A box's vertical extent on screen. */
+export interface LineBox { top: number; bottom: number }
+
+/**
+ * A separator in a row that wraps shows only between two items on its own line: at the end or the start of a line it
+ * would separate nothing.
+ */
+export function separatorShown(before: LineBox | null, own: LineBox, after: LineBox | null): boolean {
+  const sameLine = (a: LineBox, b: LineBox) => a.top < b.bottom - 1 && b.top < a.bottom - 1;
+  return !!before && !!after && sameLine(before, own) && sameLine(own, after);
+}
+
 // ---- music ---------------------------------------------------------------------------
 
 export interface FilmMusic {

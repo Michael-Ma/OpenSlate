@@ -125,6 +125,8 @@ export const filmMessages = {
   // ---- timeline
   "film.timeline.eyebrow": { en: "Timeline", zh: "时间线" },
   "film.timeline.note": { en: "storyboard order · edits here are free and take effect at once", zh: "按故事板顺序 · 这里的修改免费，立即生效" },
+  "film.timeline.note_paused": { en: "storyboard order · edits are paused", zh: "按故事板顺序 · 暂时不能修改" },
+  "film.timeline.note_recovery": { en: "storyboard order · edits are paused until you finish the recovery review", zh: "按故事板顺序 · 完成恢复检查前不能修改" },
   "film.lane.scenes": { en: "Scenes", zh: "场景" },
   "film.lane.picture": { en: "Picture", zh: "画面" },
   "film.lane.narration": { en: "Narration", zh: "旁白" },

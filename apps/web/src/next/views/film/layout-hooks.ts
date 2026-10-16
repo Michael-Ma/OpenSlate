@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { rowsBelow } from "../../model/film-export.ts";
+import { separatorShown } from "../../model/film.ts";
 
 /**
  * An element's width in px, followed as it resizes: pass the returned ref to the element. Null until measured (or
@@ -41,4 +42,35 @@ export function useRowsBelow(rowSelector: string, cover: number, rows: string): 
     return () => { node.removeEventListener("scroll", measure); observer?.disconnect(); };
   }, [node, rowSelector, cover, rows]);
   return [setNode, below];
+}
+
+/**
+ * In a row that wraps, hides each `selector` separator that would end or start a line (model/film.ts
+ * separatorShown). It keeps its space, so nothing reflows. Followed as the row resizes and its contents change: pass
+ * the returned ref to the row.
+ */
+export function useLineSeparators(selector: string): (node: HTMLElement | null) => void {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!node) return;
+    let frame = 0;
+    const box = (element: Element | null) => element ? element.getBoundingClientRect() : null;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        for (const separator of node.querySelectorAll<HTMLElement>(selector)) {
+          const shown = separatorShown(box(separator.previousElementSibling), separator.getBoundingClientRect(), box(separator.nextElementSibling));
+          separator.style.visibility = shown ? "" : "hidden";
+        }
+      });
+    };
+    measure();
+    const resized = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    resized?.observe(node);
+    // Only content changes: the separators' own style changes are attribute changes, so they do not come back here.
+    const changed = new MutationObserver(measure);
+    changed.observe(node, { childList: true, subtree: true, characterData: true });
+    return () => { cancelAnimationFrame(frame); resized?.disconnect(); changed.disconnect(); };
+  }, [node, selector]);
+  return setNode;
 }

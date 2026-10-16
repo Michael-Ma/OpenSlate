@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, type MouseEvent, type ReactNode } from "react";
-import { useRecoveryLock } from "../../app/useWriteGuard.ts";
+import { useRecoveryLock, useWriteGuard } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { FilmClock } from "../../model/film-clock.ts";
 import { musicSpan, rulerTicks, tickLabels, type FilmMusic, type FilmShot, type FilmTimeline } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { useClockPaint } from "./clock-hooks.ts";
-import { useElementWidth } from "./layout-hooks.ts";
+import { useElementWidth, useLineSeparators } from "./layout-hooks.ts";
 import { Still } from "./Player.tsx";
 
 export type Selection = { kind: "shot"; id: string } | { kind: "music" } | null;
@@ -61,6 +61,8 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
   // A label too near the lane's end to fit after its mark sits before it, so the last one is never cut off.
   const [ruler, rulerWidth] = useElementWidth();
   const places = useMemo(() => tickLabels(ticks, timeline.total, pps ? timeline.total * pps : rulerWidth), [ticks, timeline.total, pps, rulerWidth]);
+  // The tool row wraps on a narrow screen: its separators never end or start a line.
+  const tools = useLineSeparators(":scope > .sep");
   const bars = useMemo(() => waveBars(music?.audioId ?? "", 90), [music?.audioId]);
 
   useClockPaint(clock, (time) => { if (head.current) head.current.style.left = X(Math.min(time, timeline.total)); });
@@ -143,12 +145,15 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
   const keyWidth = pps ? KEY_WIDTH.narrow : KEY_WIDTH.wide;
   const locked = useRecoveryLock();
   const offline = writable ? undefined : locked ?? t("film.offline");
+  // While the studio takes no edits (offline, or a restored studio in review), the caption does not promise them.
+  const paused = useWriteGuard().serverWhy !== null;
+  const note = locked ? t("film.timeline.note_recovery") : paused ? t("film.timeline.note_paused") : t("film.timeline.note");
 
   return (
     <section className="panel timeline" aria-label={t("film.timeline.eyebrow")}>
       <div className="panel-head">
         <span className="eyebrow">{t("film.timeline.eyebrow")}</span>
-        <span className="dim tl-note">{t("film.timeline.note")}</span>
+        <span className="dim tl-note" data-act="timeline-note">{note}</span>
       </div>
       <div className="tl-scroll" ref={scroller}>
         <div className="tl-grid" style={pps ? { width: `${timeline.total * pps + keyWidth + 12}px` } : undefined}>
@@ -220,7 +225,7 @@ export function Timeline({ timeline, music, clock, selection, pixelsPerSecond: p
           </div>
         </div>
       </div>
-      <div className="tl-tools" data-act="tools" aria-busy={saving}>{children}</div>
+      <div className="tl-tools" data-act="tools" aria-busy={saving} ref={tools}>{children}</div>
     </section>
   );
 }

@@ -482,6 +482,9 @@ export const scenarios = [
       await openFilm(page);
       await readableChecks(page, { scrolls: true });
       await noSidewaysScroll(page, 1280);
+      // The caption by the scrubber wraps under it rather than squeezing the track.
+      const track = await box(page, "[data-act='scrub']");
+      expect(track.width >= 150, `The scrub track is ${Math.round(track.width)}px wide at 1280`);
       await lanesReadable(page);
       // The workspace scrolls when it is taller than the screen, and a selection brings its tools into view.
       const work = await page.locator(".film-work").evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, overflow: getComputedStyle(el).overflowY }));
@@ -618,6 +621,14 @@ export const scenarios = [
       await noSidewaysScroll(page, 390);
       const tools = await page.locator(".tl-tools").evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
       expect(tools, "The tool row is wider than the phone");
+      await page.waitForTimeout(100);
+      const stranded = await page.locator(".tl-tools").evaluate((row) => [...row.querySelectorAll(":scope > .sep")].filter((sep) => {
+        if (getComputedStyle(sep).visibility === "hidden") return false;
+        const own = sep.getBoundingClientRect();
+        const same = (el) => { const r = el?.getBoundingClientRect(); return !!r && r.top < own.bottom && own.top < r.bottom; };
+        return !same(sep.previousElementSibling) || !same(sep.nextElementSibling);
+      }).length);
+      expect(stranded === 0, `${stranded} separators are left at the end or start of a line in the tool row`);
       await page.locator(".timeline").scrollIntoViewIfNeeded();
       await screenshot(page, "phone-390");
       await page.locator(".player").scrollIntoViewIfNeeded();

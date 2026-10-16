@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, filmMusic, musicSpan, musicOn, musicLostAt,
+  filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, separatorShown, filmMusic, musicSpan, musicOn, musicLostAt,
   lengthLimits, lengthEdit, moveEdit, musicStartEdit, musicGainEdit, musicMuteEdit, musicChoiceEdit, editPressId, soundtrackOf, lengthToast,
 } from '../../src/next/model/film.ts';
 import { FilmClock } from '../../src/next/model/film-clock.ts';
@@ -77,6 +77,15 @@ test('the last ruler label is never cut off at the lane\'s end', () => {
   assert.deepEqual(tickLabels([0, 5, 10], 12, null), ['after', 'after', 'after'], 'unmeasured: as before');
   // Phone: 14 px a second, the lane is the film's length.
   assert.deepEqual(tickLabels(rulerTicks(12, 14), 12, 12 * 14, 32), ['after', 'after', 'before']);
+});
+
+test('a separator in the tool row never ends or starts a line', () => {
+  const line1 = { top: 100, bottom: 130 }, line2 = { top: 140, bottom: 170 }, sep = { top: 105, bottom: 125 };
+  assert.equal(separatorShown(line1, sep, line1), true);
+  assert.equal(separatorShown(line1, sep, line2), false, 'the next item wrapped: it would end line 1');
+  assert.equal(separatorShown(line1, { top: 145, bottom: 165 }, line2), false, 'it wrapped itself: it would start line 2');
+  assert.equal(separatorShown(null, sep, line1), false);
+  assert.equal(separatorShown({ top: 100, bottom: 160 }, sep, line1), true, 'a tall item beside it is on the same line');
 });
 
 test('the music library reads every page without repeats', async () => {
