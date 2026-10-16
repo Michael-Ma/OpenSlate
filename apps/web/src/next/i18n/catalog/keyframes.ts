@@ -9,6 +9,8 @@ export const keyframes = {
   "kf.empty.title": { en: "No scenes yet", zh: "还没有场景" },
   "kf.empty.body": { en: "Plan the film's scenes and shots first. Their keyframes appear here.", zh: "请先规划影片的场景和镜头，它们的关键帧会显示在这里。" },
   "kf.empty_scene": { en: "This scene has no shots yet.", zh: "这一场还没有镜头。" },
+  // An open inspector edit keeps its shot: Previous / Next, the arrow keys and "Edit 2.1 in Plan" would drop it.
+  "kf.edit_held": { en: "Save or cancel the edit to {shot} first", zh: "请先保存或取消对 {shot} 的修改" },
 
   // ---- scene header and pills
   "scene.state.video_saved": { en: "video saved", zh: "视频已保存" },

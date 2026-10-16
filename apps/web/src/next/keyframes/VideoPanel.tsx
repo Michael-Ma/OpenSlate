@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n/I18n.tsx";
 import type { VideoPanel as Panel } from "../model/keyframes.ts";
+import type { Msg } from "../model/types.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
   onPlay(): void;
   /** A stopped confirm's next step in another view: the shot's line in Plan, or the narrator voice in Settings. */
   onEditInPlan(shotId: string): void;
+  /** Why "Edit 2.1 in Plan" is off: an open inspector edit on another shot would be dropped. */
+  planHold: Msg | null;
   onOpenSettings(): void;
 }
 
@@ -25,7 +28,7 @@ const ACT = { confirm: "confirm-video", make_keyframes: "make-keyframes", play: 
  * Confirming and making keyframes start paid work, so they follow the shell's run guard (offline, expired,
  * stopped); playing the scene needs nothing.
  */
-export function VideoPanel({ panel, sceneId, pending, playing, unconfirmed, onConfirm, onMakeKeyframes, onPlay, onEditInPlan, onOpenSettings }: Props) {
+export function VideoPanel({ panel, sceneId, pending, playing, unconfirmed, onConfirm, onMakeKeyframes, onPlay, onEditInPlan, planHold, onOpenSettings }: Props) {
   const { t, tm } = useI18n();
   const why = `why-${sceneId}`;
   const run = useGuarded("run");
@@ -63,6 +66,8 @@ export function VideoPanel({ panel, sceneId, pending, playing, unconfirmed, onCo
               className="vstop-act"
               data-act="stop-edit-in-plan"
               data-shot={stop.shotId}
+              disabled={!!planHold}
+              title={planHold ? tm(planHold) : undefined}
               onClick={() => onEditInPlan(stop.shotId!)}
             >
               {t("panel.stopped.edit_in_plan", { shot: stop.label })}

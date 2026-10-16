@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { confirmationStep, confirmationStop, keyframesView, shotStatus, stopExplains, videoPanel } from '../../src/next/model/keyframes.ts';
-import { ARROW_OWNERS, filmShotOrder, shotClip, shotPosition, stageStep } from '../../src/next/model/keyframes-stage.ts';
+import { ARROW_OWNERS, editHold, filmShotOrder, shotClip, shotPosition, stageStep } from '../../src/next/model/keyframes-stage.ts';
 import { takeBlocked, takeImpact, takesPath, takesStrip, takeUsedToast, useTakeCommand } from '../../src/next/model/keyframes-takes.ts';
 import { confirmPress, keyframesPress, lostReplyHolds, pressFromId, PAID_PRESS } from '../../src/next/model/keyframes-press.ts';
 import { inspectorView } from '../../src/next/model/inspector.ts';
@@ -225,6 +225,17 @@ test('ArrowLeft / ArrowRight step through the film unless a modifier is held or 
   for (const key of ['altKey', 'ctrlKey', 'metaKey', 'shiftKey']) assert.equal(stageStep('ArrowRight', { ...none, [key]: true }, false), null, key);
   assert.equal(stageStep('ArrowRight', none, true), null);
   for (const owner of ['input', 'textarea', 'select', 'video', 'audio', '[role="slider"]', '[contenteditable]']) assert.ok(ARROW_OWNERS.includes(owner), owner);
+});
+
+test('an open inspector edit keeps its shot: moving to another shot is off and says why', () => {
+  const overview = lastFerryOverview();
+  assert.equal(editHold(null, overview), null);
+  const edit = { shotId: shotId('2.3'), field: 'motion', value: 'Slow tilt down' };
+  assert.equal(en(editHold(edit, overview)), 'Save or cancel the edit to 2.3 first', 'Previous / Next and the arrow keys');
+  assert.equal(zh(editHold(edit, overview)), '请先保存或取消对 2.3 的修改');
+  assert.equal(en(editHold(edit, overview, shotId('2.1'))), 'Save or cancel the edit to 2.3 first', 'Edit 2.1 in Plan would select 2.1');
+  assert.equal(editHold(edit, overview, shotId('2.3')), null, 'Edit 2.3 in Plan keeps the edit');
+  assert.equal(editHold({ shotId: 'shot-9-9' }, overview), null, 'a shot that is gone holds nothing');
 });
 
 test('the Video side plays the current clip, else the earlier one an edit replaced; none without a clip', () => {

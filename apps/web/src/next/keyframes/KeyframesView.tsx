@@ -3,7 +3,7 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { checkActions, lineEstimate, type AppCheck } from "../model/checks.ts";
 import { inspectorView } from "../model/inspector.ts";
 import { keyframesView } from "../model/keyframes.ts";
-import { shotPosition } from "../model/keyframes-stage.ts";
+import { editHold, shotPosition } from "../model/keyframes-stage.ts";
 import { confirmPress, keyframesPress, lostReplyHolds, PAID_PRESS, type PressIdentity } from "../model/keyframes-press.ts";
 import { advance, playingShot, type Playback } from "../model/motion.ts";
 import { msg } from "../model/types.ts";
@@ -255,6 +255,10 @@ function Workspace() {
     return { card: callouts.length ? { ...c, callouts: [] } : c, notes: callouts };
   });
   const editBusy = selected ? !!pending[`edit:shot:${selected.shotId}`] || !!pending[`edit:narration:${selected.shotId}`] : false;
+  // An open inspector edit keeps its shot: moving to another one would drop it unsaved.
+  const held = editHold(draft, overview);
+  const stopShot = view.panel.stopped?.shotId;
+  const planHold = stopShot ? editHold(draft, overview, stopShot) : null;
 
   return (
     <main className="work kf" data-view="keyframes" data-scene={view.scene.sceneId}>
@@ -298,6 +302,7 @@ function Workspace() {
               onEnded={ended}
               onOpen={openShot}
               onStep={openShot}
+              held={held}
             />
             <Inspector
               view={inspector}
@@ -348,6 +353,7 @@ function Workspace() {
           onMakeKeyframes={() => void store.makeKeyframes(view.scene.sceneId)}
           onPlay={playScene}
           onEditInPlan={editInPlan}
+          planHold={planHold}
           onOpenSettings={() => store.setView("settings")}
         />
       </div>

@@ -1,4 +1,5 @@
 import type { GenerationOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { msg, type Msg } from "./types.ts";
 
 /**
  * The Keyframes stage (the large preview): moving through the whole film with Previous / Next, a "3 / 8" counter
@@ -52,4 +53,15 @@ export function shotClip(shot: ShotOverview): { artifact: StudioArtifactRef; ear
   if (video.state === "ready" && video.artifact) return { artifact: video.artifact, earlier: false };
   if (video.previous && video.previous.kind === "video") return { artifact: video.previous, earlier: true };
   return null;
+}
+
+/**
+ * An open inspector edit keeps its shot: moving to another one (Previous / Next, the arrow keys, a stopped confirm's
+ * "Edit 2.1 in Plan") would select it and drop the edit unsaved. While that would happen, the reason the control is
+ * off, naming the edited shot; null when no edit is open or the move stays on the edited shot.
+ */
+export function editHold(edit: { shotId: string } | null, overview: GenerationOverview, targetShotId?: string | null): Msg | null {
+  if (!edit || edit.shotId === targetShotId) return null;
+  const label = overview.shots[edit.shotId]?.label;
+  return label ? msg("kf.edit_held", { shot: label }) : null;
 }

@@ -4,6 +4,7 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { artifactKey } from "../media/artifact-cache.ts";
 import { useArtifactUrl } from "../media/useArtifactUrl.ts";
 import type { ShotCard } from "../model/keyframes.ts";
+import type { Msg } from "../model/types.ts";
 import { ARROW_OWNERS, shotClip, stageStep, type ShotPosition } from "../model/keyframes-stage.ts";
 import { clock, motionKind, motionTransform } from "../model/motion.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
@@ -29,6 +30,8 @@ interface Props {
   onOpen(shotId: string): void;
   /** Go to another shot (the previous or next one in the film). */
   onStep(shotId: string): void;
+  /** Why Previous / Next and the arrow keys are off: an open inspector edit on this shot would be dropped. */
+  held: Msg | null;
 }
 
 const PlayIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>;
@@ -41,8 +44,8 @@ const NextIcon = () => <svg width="10" height="10" viewBox="0 0 10 10" aria-hidd
  * the person navigated to has loaded, decoded and is on screen (plan item WA-9). A new take that lands
  * while they look is not opened by itself: they open it from its card or the Open button.
  */
-export function Preview({ shot, card, fps, playing, intent, position, onTogglePlay, onEnded, onOpen, onStep }: Props) {
-  const { t } = useI18n();
+export function Preview({ shot, card, fps, playing, intent, position, onTogglePlay, onEnded, onOpen, onStep, held }: Props) {
+  const { t, tm } = useI18n();
   const store = useStore();
   const live = useMode() === "live";
   const reduced = useReducedMotion();
@@ -125,8 +128,12 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
   // motion stands in (as in the Film view).
   const player = showVideo && live;
 
-  /** ArrowLeft / ArrowRight move through the film while the stage has focus (never inside a field or a video). */
+  /**
+   * ArrowLeft / ArrowRight move through the film while the stage has focus (never inside a field or a video, and not
+   * while an open edit would be dropped).
+   */
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (held) return;
     const inField = event.target instanceof Element && !!event.target.closest(ARROW_OWNERS);
     const step = stageStep(event.key, event, inField);
     const target = step === -1 ? position?.previous : step === 1 ? position?.next : null;
@@ -136,7 +143,7 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
   };
   /** A button that would turn off at the film's first or last shot hands focus to the stage, so the arrows keep working. */
   const step = (target: { shotId: string } | null | undefined, end: boolean) => {
-    if (!target) return;
+    if (!target || held) return;
     onStep(target.shotId);
     if (end) section.current?.focus({ preventScroll: true });
   };
@@ -194,14 +201,14 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
             </div>
           ) : null}
           {position ? (
-            <nav className="pv-nav" aria-label={t("preview.nav_label")}>
+            <nav className="pv-nav" aria-label={t("preview.nav_label")} data-held={held ? "true" : undefined}>
               <button
                 type="button"
                 className="pv-step"
                 data-act="prev-shot"
                 aria-label={position.previous ? t("preview.prev_shot", { shot: position.previous.label }) : t("preview.prev_none")}
-                title={position.previous ? t("preview.prev_shot", { shot: position.previous.label }) : t("preview.prev_none")}
-                disabled={!position.previous}
+                title={held ? tm(held) : position.previous ? t("preview.prev_shot", { shot: position.previous.label }) : t("preview.prev_none")}
+                disabled={!position.previous || !!held}
                 onClick={() => step(position.previous, position.index === 2)}
               >
                 <PrevIcon />
@@ -214,8 +221,8 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
                 className="pv-step"
                 data-act="next-shot"
                 aria-label={position.next ? t("preview.next_shot", { shot: position.next.label }) : t("preview.next_none")}
-                title={position.next ? t("preview.next_shot", { shot: position.next.label }) : t("preview.next_none")}
-                disabled={!position.next}
+                title={held ? tm(held) : position.next ? t("preview.next_shot", { shot: position.next.label }) : t("preview.next_none")}
+                disabled={!position.next || !!held}
                 onClick={() => step(position.next, position.index === position.total - 1)}
               >
                 <NextIcon />
