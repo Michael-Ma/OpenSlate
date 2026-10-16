@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  carryFrom, carryReady, carryToApply, continuedToast, filmStrip, guardFor, reconnectedToast, restartCasualties, restartTitle,
+  carriedDraft, carryFrom, carryReady, carryToApply, carryToKeep, continuedToast, disconnectNotes, filmStrip, guardFor, parseStoredCarry,
+  reconnectedToast, restartCasualties, restartTitle, storedCarry, CARRY_MAX_AGE_MS,
   sentenceGap, showStop, stopLines, stopPreview, stoppedLines, unreachable, writeGuard, OFFLINE_GRACE_MS, OPEN_GUARD, REACH_PROBE_MS,
 } from '../../src/next/model/shell-states.ts';
 import { lastFerryOverview } from '../../src/next/fixtures/last-ferry.ts';
@@ -137,7 +138,7 @@ const state = {
 
 test('a reconnect carries the unsent message, its chips and the place, once the same film is read', () => {
   const carry = carryFrom(state);
-  assert.deepEqual(carry, { projectId: 'last-ferry', view: 'plan', sceneId: 'scene-2', shotId: 'shot-2-3', text: 'Keep the fog', targets: state.composer.targets });
+  assert.deepEqual(carry, { projectId: 'last-ferry', view: 'plan', sceneId: 'scene-2', shotId: 'shot-2-3', text: 'Keep the fog', targets: state.composer.targets, edit: null });
   assert.notEqual(carry.targets, state.composer.targets, 'a copy, not the old store state');
   assert.equal(carryFrom({ ...state, projectId: null }), null);
   assert.equal(carryReady(carry, { projectId: null, overview: null }), 'wait');
@@ -158,6 +159,61 @@ test('the reconnect toast mentions the draft only when there was one', () => {
   assert.equal(en(reconnectedToast(carryFrom(state))), 'Connected again. Your unsent message is still in the composer.');
   assert.equal(en(reconnectedToast({ ...carryFrom(state), text: ' ', targets: [] })), 'Connected again.');
   assert.equal(en(reconnectedToast(null)), 'Connected again.');
+  assert.equal(en(reconnectedToast(carryFrom({ ...state, edit: inlineEdit }))), 'Connected again. Your unsent message and your unsaved edit are still there.');
+  assert.equal(en(reconnectedToast(carryFrom({ ...state, composer: { ...state.composer, text: '', targets: [] }, edit: inlineEdit }))), 'Connected again. Your unsaved edit is still open.');
+  assert.equal(zh(reconnectedToast(carryFrom({ ...state, edit: inlineEdit }))), '已重新连接。未发送的消息和未保存的修改都还在。');
+});
+
+// ---- after Disconnect this studio ----------------------------------------------------------
+
+const inlineEdit = { shotId: 'shot-2-2', field: 'imagePrompt', value: 'Fog over the rail, lamps lit', saving: true };
+
+test('an unsaved inline edit is carried too (without its saving flag), and dropped with its shot', () => {
+  const carry = carryFrom({ ...state, edit: inlineEdit });
+  assert.deepEqual(carry.edit, { shotId: 'shot-2-2', field: 'imagePrompt', value: 'Fog over the rail, lamps lit' });
+  assert.deepEqual(carryToApply(carry, lastFerryOverview()).edit, carry.edit);
+  assert.equal(carryToApply({ ...carry, edit: { ...carry.edit, shotId: 'shot-9-9' } }, lastFerryOverview()).edit, null, 'the shot is gone');
+  assert.equal(carriedDraft(carry), 'both');
+  assert.equal(carriedDraft({ ...carry, edit: null }), 'message');
+  assert.equal(carriedDraft({ ...carry, text: '', targets: [] }), 'edit');
+  assert.equal(carriedDraft({ ...carry, text: '  ', targets: [], edit: null }), 'none', 'blank text is no message');
+  assert.equal(carriedDraft({ ...carry, text: '', edit: null }), 'message', 'chips alone are a message on its way');
+  assert.equal(carriedDraft(null), 'none');
+});
+
+test('the Disconnect confirm says what happens to words not sent or saved yet', () => {
+  assert.deepEqual(disconnectNotes('none', false), []);
+  assert.deepEqual(disconnectNotes('message', false).map(en), ['Your unsent message to the Director is kept in this browser and comes back when you connect again.']);
+  assert.deepEqual(disconnectNotes('edit', false).map(en), ['Your unsaved edit is kept in this browser and comes back when you connect again.']);
+  assert.deepEqual(disconnectNotes('both', true).map(en), [
+    'Your unsent message and your unsaved edit are kept in this browser and come back when you connect again.',
+    'A form still open on this page closes without saving.',
+  ]);
+  assert.deepEqual(disconnectNotes('message', true).map(zh), ['未发送给导演的消息会保存在这个浏览器里，重新连接后会回来。', '页面上还开着的表单会关闭，内容不会保存。']);
+});
+
+test('a kept carry comes back from storage as it was, for a day, and nothing else does', () => {
+  const carry = carryFrom({ ...state, edit: inlineEdit });
+  const now = Date.parse('2026-10-15T10:00:00Z');
+  assert.deepEqual(parseStoredCarry(storedCarry(carry, now), now + 60_000), carry);
+  assert.equal(parseStoredCarry(storedCarry(carry, now), now + CARRY_MAX_AGE_MS + 1), null, 'too old');
+  assert.equal(parseStoredCarry(storedCarry(carry, now + 10 * 60_000), now), null, 'from the future');
+  for (const raw of [null, '', 'not json', '{}', JSON.stringify({ savedAt: now, carry: { ...carry, view: 'nowhere' } }), JSON.stringify({ savedAt: now, carry: { ...carry, projectId: '' } }), JSON.stringify({ savedAt: 'now', carry })])
+    assert.equal(parseStoredCarry(raw, now), null, String(raw));
+  // Only the person's words and place come back: odd chips and a damaged edit are left out.
+  const odd = { ...carry, targets: [{ kind: 'shot', id: 'shot-2-3' }, { kind: 'film', id: 'x' }, null, { kind: 'scene' }], edit: { shotId: 'shot-2-2', field: 'secret', value: 'x' }, extra: 'dropped' };
+  assert.deepEqual(parseStoredCarry(JSON.stringify({ savedAt: now, carry: odd }), now), { ...carry, targets: [{ kind: 'shot', id: 'shot-2-3' }], edit: null });
+});
+
+test('disconnecting again before the draft came back keeps the earlier draft', () => {
+  const earlier = carryFrom(state);
+  const empty = { ...earlier, text: '', targets: [], view: 'film' };
+  assert.equal(carryToKeep(earlier, empty), earlier, 'the new session had not put the draft back yet');
+  const newer = { ...earlier, text: 'Newer words' };
+  assert.equal(carryToKeep(earlier, newer), newer);
+  assert.equal(carryToKeep(null, empty), empty, 'the place alone is still worth keeping');
+  assert.equal(carryToKeep(earlier, null), earlier);
+  assert.equal(carryToKeep(null, null), null);
 });
 
 // ---- reachability and the write guard ---------------------------------------------------

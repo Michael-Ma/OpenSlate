@@ -25,8 +25,8 @@ import { StartView } from "../views/start/StartView.tsx";
 import "./shell.css";
 
 /**
- * Put the unsent message, its chips and the person's place back once the new session has the same film open.
- * Returns a cleanup that stops waiting.
+ * Put the unsent message, its chips, an unsaved inline edit and the person's place back once the new session has the
+ * same film open. Returns a cleanup that stops waiting.
  */
 function restoreCarry(store: StudioStore, carry: Carry, done: () => void): () => void {
   const attempt = () => {
@@ -42,6 +42,8 @@ function restoreCarry(store: StudioStore, carry: Carry, done: () => void): () =>
     if (keep.shotId) store.selectShot(keep.shotId);
     if (!store.getState().composer.text && keep.text) store.setComposerText(keep.text);
     for (const target of keep.targets) store.pointAt(target);
+    // After the shot is selected (selecting another shot puts an edit away).
+    if (keep.edit && !store.getState().edit) store.setEdit({ ...keep.edit });
     store.dispatch({ type: "toast", message: reconnectedToast(keep), tone: "info" });
   };
   const unsubscribe = store.subscribe(attempt);
@@ -60,9 +62,16 @@ function restoreCarry(store: StudioStore, carry: Carry, done: () => void): () =>
  * studio) that every view reads through useWriteGuard, and carries the unsent message and the person's place into
  * whatever session replaces this one. After a restore from backup the full-width recovery review stands in place of
  * the view until it is finished or put away (the strip brings it back). The view on screen is kept in the address
- * (`?view=plan`), so a reload or a link reopens it. `onDisconnected` runs once Disconnect this studio ended the session.
+ * (`?view=plan`), so a reload or a link reopens it. `onDisconnected` runs once Disconnect this studio ended the session;
+ * the page keeps that session's unsent message, unsaved edit and place (boot.tsx) and hands them to the next session
+ * as `carried`, which puts them back once and calls `onCarried`.
  */
-export function NextApp({ onReconnect, onDisconnected }: { onReconnect(): Promise<boolean>; onDisconnected?(): void }) {
+export function NextApp({ onReconnect, onDisconnected, carried = null, onCarried }: {
+  onReconnect(): Promise<boolean>;
+  onDisconnected?(): void;
+  carried?: Carry | null;
+  onCarried?(): void;
+}) {
   const store = useStore();
   const { locale } = useI18n();
   const screen = useStudio(connectScreen);
@@ -160,6 +169,17 @@ export function NextApp({ onReconnect, onDisconnected }: { onReconnect(): Promis
     if (pending.from === store) { carry.current = null; return; }
     return restoreCarry(store, pending.carry, () => { carry.current = null; });
   }, [store]);
+
+  // The draft and place of a session this window disconnected on purpose come back the same way, once (React's
+  // development double effect sees the same carry and skips it).
+  const handedTaken = useRef<Carry | null>(null);
+  useEffect(() => {
+    if (!carried || handedTaken.current === carried) return;
+    return restoreCarry(store, carried, () => {
+      handedTaken.current = carried;
+      onCarried?.();
+    });
+  }, [store, carried, onCarried]);
 
   // Say so when the studio can be reached again after the offline strip was up.
   const wasOffline = useRef(false);

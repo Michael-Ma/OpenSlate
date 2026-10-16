@@ -1,6 +1,6 @@
 import type { GenerationOverview } from "@openslate/core/public";
 import type { Locale } from "../../shared/locale-preference.ts";
-import type { StudioState } from "../store/state.ts";
+import type { EditDraft, StudioState } from "../store/state.ts";
 import { canStop } from "./director.ts";
 import { msg, type DirectorStatus, type Msg, type Target, type ViewName } from "./types.ts";
 
@@ -232,11 +232,15 @@ export function stopLines(preview: StopPreview): Msg[] {
   ];
 }
 
-// ---- a reconnect after the session expired --------------------------------------------
+// ---- a reconnect after the session expired, or after Disconnect this studio ------------------
+
+/** An inline edit that was not saved yet (the Keyframes inspector's prompt, motion or line). */
+export type CarriedEdit = Pick<EditDraft, "shotId" | "field" | "value">;
 
 /**
- * What the page carries into the new session when the person reconnects after the session expired:
- * the unsent message and its chips, and where they were. Not authority, only the person's own place and words.
+ * What the page carries into the new session when the person reconnects in the same window, after the session expired
+ * or after they disconnected it: the unsent message and its chips, an inline edit not saved yet, and where they were.
+ * Not authority, only the person's own place and words.
  */
 export interface Carry {
   projectId: string;
@@ -245,10 +249,12 @@ export interface Carry {
   shotId: string | null;
   text: string;
   targets: Target[];
+  edit: CarriedEdit | null;
 }
 
-export function carryFrom(state: Pick<StudioState, "projectId" | "view" | "sceneId" | "shotId" | "composer">): Carry | null {
+export function carryFrom(state: Pick<StudioState, "projectId" | "view" | "sceneId" | "shotId" | "composer"> & Partial<Pick<StudioState, "edit">>): Carry | null {
   if (!state.projectId) return null;
+  const edit = state.edit;
   return {
     projectId: state.projectId,
     view: state.view,
@@ -256,6 +262,7 @@ export function carryFrom(state: Pick<StudioState, "projectId" | "view" | "scene
     shotId: state.shotId,
     text: state.composer.text,
     targets: state.composer.targets.map((target) => ({ ...target })),
+    edit: edit ? { shotId: edit.shotId, field: edit.field, value: edit.value } : null,
   };
 }
 
@@ -269,7 +276,10 @@ export function carryReady(carry: Carry, state: Pick<StudioState, "projectId" | 
   return state.overview ? "apply" : "wait";
 }
 
-/** The parts of the carry that still exist in the film as it is now; chips for removed scenes or shots are dropped. */
+/**
+ * The parts of the carry that still exist in the film as it is now; chips for removed scenes or shots are dropped, and
+ * an edit of a shot that is gone.
+ */
 export function carryToApply(carry: Carry, overview: GenerationOverview): Carry {
   const exists = (target: Target) => (target.kind === "scene" ? overview.scenes.some((scene) => scene.sceneId === target.id) : !!overview.shots[target.id]);
   return {
@@ -277,8 +287,79 @@ export function carryToApply(carry: Carry, overview: GenerationOverview): Carry 
     sceneId: carry.sceneId && overview.scenes.some((scene) => scene.sceneId === carry.sceneId) ? carry.sceneId : null,
     shotId: carry.shotId && overview.shots[carry.shotId] ? carry.shotId : null,
     targets: carry.targets.filter(exists),
+    edit: carry.edit && overview.shots[carry.edit.shotId] ? { ...carry.edit } : null,
   };
 }
 
+/**
+ * Where a disconnected session's carry waits for the next session. The launcher opens its fresh link in a new tab, so
+ * the page keeps it in this browser's storage (the first studio session that connects takes it), for a day at most.
+ */
+export const CARRY_STORAGE_KEY = "openslate.next.carry";
+export const CARRY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const CARRY_VIEWS = new Set<ViewName>(["plan", "keyframes", "assets", "film", "settings", "start"]);
+const EDIT_FIELDS = new Set<CarriedEdit["field"]>(["imagePrompt", "motion", "desiredFrames", "narration"]);
+const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 200;
+const optionalId = (value: unknown): string | null => (isId(value) ? value : null);
+
+/** The carry as it is kept in storage, with when it was kept. */
+export const storedCarry = (carry: Carry, now: number): string => JSON.stringify({ savedAt: now, carry });
+
+/**
+ * A kept carry read back, or null when there is none, it is not one, or it is older than CARRY_MAX_AGE_MS. Only the
+ * person's own words and place come back; anything else in it is dropped.
+ */
+export function parseStoredCarry(raw: string | null, now: number): Carry | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as { savedAt?: unknown; carry?: Record<string, unknown> };
+    const carry = value.carry;
+    if (typeof value.savedAt !== "number" || now - value.savedAt > CARRY_MAX_AGE_MS || value.savedAt - now > 60_000 || !carry) return null;
+    if (!isId(carry.projectId) || !CARRY_VIEWS.has(carry.view as ViewName) || typeof carry.text !== "string" || !Array.isArray(carry.targets)) return null;
+    const targets = (carry.targets as unknown[]).flatMap((target) => {
+      const t = target as Partial<Target> | null;
+      return t && (t.kind === "shot" || t.kind === "scene") && isId(t.id) ? [{ kind: t.kind, id: t.id }] : [];
+    });
+    const rawEdit = carry.edit as Partial<CarriedEdit> | null | undefined;
+    const edit = rawEdit && isId(rawEdit.shotId) && EDIT_FIELDS.has(rawEdit.field as CarriedEdit["field"]) && typeof rawEdit.value === "string"
+      ? { shotId: rawEdit.shotId, field: rawEdit.field as CarriedEdit["field"], value: rawEdit.value } : null;
+    return { projectId: carry.projectId, view: carry.view as ViewName, sceneId: optionalId(carry.sceneId), shotId: optionalId(carry.shotId), text: carry.text, targets, edit };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The carry to keep when a session is disconnected: its own, unless it holds none of the person's words and an earlier
+ * one nobody took yet does (a session disconnected again before it had put the draft back).
+ */
+export const carryToKeep = (earlier: Carry | null, latest: Carry | null): Carry | null =>
+  earlier && carriedDraft(latest) === "none" ? earlier : latest ?? earlier;
+
+/** What of the person's own words the carry holds: an unsent message (text or chips), an unsaved edit, both or none. */
+export type CarriedDraft = "none" | "message" | "edit" | "both";
+
+export function carriedDraft(carry: Carry | null): CarriedDraft {
+  const message = !!carry && (!!carry.text.trim() || carry.targets.length > 0);
+  const edit = !!carry?.edit;
+  return message && edit ? "both" : message ? "message" : edit ? "edit" : "none";
+}
+
 /** The toast once the page is connected again: it says the draft is still there when there was one. */
-export const reconnectedToast = (carry: Carry | null): Msg => msg(carry && (carry.text.trim() || carry.targets.length) ? "expired.back_with_draft" : "expired.back");
+export function reconnectedToast(carry: Carry | null): Msg {
+  const draft = carriedDraft(carry);
+  return msg(draft === "both" ? "expired.back_with_both" : draft === "message" ? "expired.back_with_draft" : draft === "edit" ? "expired.back_with_edit" : "expired.back");
+}
+
+/**
+ * What the Disconnect confirm adds about the person's unsaved words: an unsent message or an unsaved edit is kept in
+ * this browser and comes back when a session connects again; a form still open elsewhere on the page (Plan, Settings)
+ * is not carried and closes without saving.
+ */
+export function disconnectNotes(draft: CarriedDraft, openForm: boolean): Msg[] {
+  return [
+    ...(draft === "none" ? [] : [msg(draft === "both" ? "disconnect.kept_both" : draft === "message" ? "disconnect.kept_message" : "disconnect.kept_edit")]),
+    ...(openForm ? [msg("disconnect.open_form")] : []),
+  ];
+}

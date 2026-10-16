@@ -246,3 +246,22 @@ test('Disconnect ends the session and stops the store; a refusal keeps the page 
   assert.equal(await kept.disconnect(), 'NETWORK_ERROR');
   assert.ok(kept.getState().snapshot, 'the page stays as it was');
 });
+
+test('Disconnect on a session that had already ended counts as disconnected, not as an error', async (t) => {
+  for (const code of ['AUTH_REQUIRED', 'SESSION_CLOSED']) {
+    const port = new FixturePort();
+    const ended = { get closed() { return port.closed; }, events: port.events.bind(port), request: (path, options) => (path === '/api/session/logout' ? Promise.reject(new ApiError(code, code === 'AUTH_REQUIRED' ? 403 : 0)) : port.request(path, options)) };
+    const store = new StudioStore({ client: ended, storage: null, newKey: () => 'k' });
+    await store.start();
+    t.after(() => { store.stop(); port.close(); });
+    assert.equal(await store.disconnect(), null, code);
+    assert.equal(store.getState().pending['session:disconnect'], undefined, code);
+  }
+  // A refusal of another kind is still said.
+  const port = new FixturePort();
+  const refusing = { get closed() { return port.closed; }, events: port.events.bind(port), request: (path, options) => (path === '/api/session/logout' ? Promise.reject(new ApiError('CSRF_DENIED', 403)) : port.request(path, options)) };
+  const store = new StudioStore({ client: refusing, storage: null, newKey: () => 'k' });
+  await store.start();
+  t.after(() => { store.stop(); port.close(); });
+  assert.equal(await store.disconnect(), 'CSRF_DENIED');
+});

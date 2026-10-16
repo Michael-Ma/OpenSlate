@@ -35,6 +35,22 @@ async function ready(page) {
 }
 
 const focused = (page) => page.evaluate(() => document.activeElement?.getAttribute("data-act"));
+const text = (page, selector) => page.locator(selector).first().innerText().catch(() => "");
+const composer = (page) => page.locator("#director [data-field='message']").inputValue().catch(() => "");
+const CARRY_KEY = "openslate.next.carry";
+
+/** Disconnect this studio from the menu, past its confirm; returns the confirm's notes about unsent words. */
+async function disconnectFromMenu(page, name) {
+  await page.locator(".topbar [data-act='studio-menu']").click();
+  await page.locator(".studio-menu [data-act='disconnect']").click();
+  const dialog = page.locator("dialog[data-dialog='disconnect']");
+  await dialog.waitFor();
+  const notes = await dialog.locator("#disconnect-body [data-note]").allInnerTexts();
+  if (name) await shot(page, name);
+  await dialog.locator("[data-act='confirm-disconnect']").click();
+  await page.waitForSelector(".connect[data-state='disconnected']", { timeout: 10000 });
+  return notes;
+}
 const view = (page) => page.evaluate(() => document.querySelector(".app")?.getAttribute("data-view"));
 const asked = (page) => page.evaluate(() => new URLSearchParams(location.search).get("view"));
 const tab = (page, name) => page.locator(`.topbar [data-act='tab'][data-view='${name}']`);
@@ -117,11 +133,107 @@ export const scenarios = [
       const menu = await page.locator(".menu.studio-menu").boundingBox();
       expect(menu && menu.x >= 8 && menu.x + menu.width <= 390 - 8, `The menu runs off the screen: ${JSON.stringify(menu)}`);
       await shot(page, "next-recovery-shell-menu-390");
-      await page.locator(".studio-menu [data-act='disconnect']").click();
-      await page.locator("dialog[data-dialog='disconnect'] [data-act='confirm-disconnect']").click();
-      await page.waitForSelector(".connect[data-state='disconnected']");
+      await page.keyboard.press("Escape");
+      // A draft written in the drawer is kept through Disconnect, and the confirm says so at phone width too.
+      await page.locator(".topbar [data-act='toggle-director']").click();
+      await page.locator("#director [data-field='message']").fill("Keep the fog low");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector(".app:not(.dir-open)");
+      const notes = await disconnectFromMenu(page, "next-recovery-shell-disconnect-draft-390");
+      expect(JSON.stringify(notes) === JSON.stringify(["Your unsent message to the Director is kept in this browser and comes back when you connect again."]), `The confirm says ${JSON.stringify(notes)}`);
       await page.locator(".connect [data-act='retry']").click();
       await ready(page);
+      await page.locator(".topbar [data-act='toggle-director']").click();
+      await until(page, () => composer(page), (value) => value === "Keep the fog low", "The draft did not come back on a phone");
+    },
+  },
+  {
+    name: "next-recovery-shell-disconnect-draft",
+    query: FIXTURE,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      // An unsent message and an unsaved edit are kept through Disconnect: the confirm says so, and they come back
+      // when the studio connects again.
+      await ready(page);
+      await page.waitForSelector(".insp [data-act='edit-prompt']", { timeout: 20000 });
+      await page.click(".card [data-act='open-shot'][data-shot='shot-2-2']");
+      await page.waitForSelector(".card.sel [data-act='open-shot'][data-shot='shot-2-2']", { state: "attached" });
+      await page.click(".insp [data-act='edit-prompt']");
+      await page.fill(".insp form[data-form='prompt'] textarea", "Fog over the rail, the lamps already lit");
+      await page.locator("#director [data-field='message']").fill("Unsent draft about the fog");
+      const notes = await disconnectFromMenu(page, "next-recovery-shell-disconnect-draft-1440");
+      expect(JSON.stringify(notes) === JSON.stringify(["Your unsent message and your unsaved edit are kept in this browser and come back when you connect again."]), `The confirm says ${JSON.stringify(notes)}`);
+      await page.locator(".connect [data-act='retry']").click();
+      await ready(page);
+      await until(page, () => composer(page), (value) => value === "Unsent draft about the fog", "The unsent message was lost");
+      await until(page, () => page.locator(".insp form[data-form='prompt'] textarea").inputValue().catch(() => ""), (value) => value === "Fog over the rail, the lamps already lit", "The unsaved edit was lost");
+      expect(await page.locator(".card.sel [data-act='open-shot'][data-shot='shot-2-2']").count() === 1, "The selected shot was lost");
+      await until(page, () => text(page, ".toast"), (value) => value === "Connected again. Your unsent message and your unsaved edit are still there.", "No toast said the draft was kept");
+      await page.waitForTimeout(400);
+      await shot(page, "next-recovery-shell-disconnect-draft-back-1440");
+
+      // With nothing unsent the confirm adds nothing; an editor still open in Plan is said to close without saving.
+      await page.click(".insp [data-act='cancel-edit']");
+      await page.locator("#director [data-field='message']").fill("");
+      await page.locator(".topbar [data-act='tab'][data-view='plan']").click();
+      await page.waitForSelector("main.work[data-view='plan']");
+      await page.locator("[data-act='edit-shot']").first().click();
+      await page.waitForSelector("main.work form[data-form='shot']");
+      const planNotes = await disconnectFromMenu(page);
+      expect(JSON.stringify(planNotes) === JSON.stringify(["A form still open on this page closes without saving."]), `The confirm in Plan says ${JSON.stringify(planNotes)}`);
+    },
+  },
+  {
+    name: "next-recovery-shell-disconnect-draft-live",
+    query: "ui=next",
+    viewport: { width: 1440, height: 900 },
+    async run({ page, origin }) {
+      // Live, the launcher opens its fresh link in a new tab: the unsent message waits in this browser and the first
+      // session that connects takes it. The logout is answered here without ending the studio's session, so a second
+      // tab can connect the way a fresh link would.
+      await ready(page);
+      await until(page, () => page.locator(".topbar .saved").innerText(), (value) => value === "Synced", "The live shell never connected");
+      await page.locator("#director [data-field='message']").fill("Unsent draft about the fog");
+      await page.route("**/api/session/logout", (route) => route.fulfill({ json: { disconnected: true } }));
+      const notes = await disconnectFromMenu(page);
+      expect(JSON.stringify(notes) === JSON.stringify(["Your unsent message to the Director is kept in this browser and comes back when you connect again."]), `The confirm says ${JSON.stringify(notes)}`);
+      const kept = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null"), CARRY_KEY);
+      expect(kept?.carry?.text === "Unsent draft about the fog" && typeof kept.savedAt === "number", `This browser kept ${JSON.stringify(kept)}`);
+
+      const fresh = await page.context().newPage();
+      try {
+        await fresh.goto(`${origin}/?ui=next`);
+        await ready(fresh);
+        await until(fresh, () => composer(fresh), (value) => value === "Unsent draft about the fog", "The new tab did not get the unsent message");
+        await until(fresh, () => text(fresh, ".toast"), (value) => value === "Connected again. Your unsent message is still in the composer.", "The new tab did not say the draft was kept");
+        expect(await fresh.evaluate((key) => localStorage.getItem(key), CARRY_KEY) === null, "The kept draft stayed in storage after it was taken");
+        await shot(fresh, "next-recovery-shell-disconnect-draft-live-1440");
+      } finally {
+        await fresh.close();
+      }
+      // The first tab connects again without a second copy of the draft.
+      await page.locator(".connect [data-act='retry']").click();
+      await ready(page);
+      await page.waitForSelector("main.work", { timeout: 20000 });
+      await page.waitForTimeout(500);
+      expect((await composer(page)) === "", `The first tab got the draft too: ${JSON.stringify(await composer(page))}`);
+    },
+  },
+  {
+    name: "next-recovery-shell-disconnect-ended",
+    query: "ui=next",
+    viewport: { width: 1440, height: 900 },
+    allowConsoleErrors: [/^HTTP 403 \/api\/session\/logout$/],
+    async run({ page }) {
+      // A session that had already ended answers the logout with AUTH_REQUIRED: that is what the person asked for, so
+      // the page goes to the Disconnected screen, with no error and no expired dialog over it.
+      await ready(page);
+      await until(page, () => page.locator(".topbar .saved").innerText(), (value) => value === "Synced", "The live shell never connected");
+      await page.route("**/api/session/logout", (route) => route.fulfill({ status: 403, json: { error: { code: "AUTH_REQUIRED", message: "Open studio from the local launcher" } } }));
+      await disconnectFromMenu(page);
+      expect((await text(page, ".connect h1")) === "Disconnected", "Connect does not say Disconnected");
+      expect(await page.locator("dialog[data-dialog='expired']").count() === 0, "The expired dialog opened over the Disconnected screen");
+      expect(await page.locator("dialog[data-dialog='disconnect']").count() === 0, "The Disconnect confirm stayed open");
     },
   },
   {

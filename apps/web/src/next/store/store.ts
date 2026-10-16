@@ -31,6 +31,8 @@ export interface StoreDeps {
 const LAST_PROJECT_KEY = "openslate.next.project";
 /** The press id of Disconnect while the logout is being sent. */
 export const DISCONNECT_PRESS = "session:disconnect";
+/** A logout refused because the session had already ended: the window is disconnected all the same. */
+const SESSION_GONE = new Set(["AUTH_REQUIRED", "SESSION_CLOSED"]);
 const path = (projectId: string, rest = "") => `/api/projects/${encodeURIComponent(projectId)}${rest}`;
 
 /** Definite refusals: the request was answered and will not succeed by resending it. */
@@ -463,7 +465,9 @@ export class StudioStore {
   /**
    * End this window's session (POST /api/session/logout). Resolves null once the studio confirmed it and the store
    * stopped (the page then shows Connect), or the error code when it refused or did not answer (the page stays and
-   * the dialog that asked says why). It is not a studio write, so a studio in recovery review still allows it.
+   * the dialog that asked says why). A session that had already ended (AUTH_REQUIRED, or a client already closed) is
+   * what the person asked for, so that counts as disconnected too. It is not a studio write, so a studio in recovery
+   * review still allows it.
    */
   async disconnect(): Promise<string | null> {
     if (this.#state.pending[DISCONNECT_PRESS]) return "PENDING";
@@ -473,6 +477,7 @@ export class StudioStore {
       this.stop();
       return null;
     } catch (error) {
+      if (error instanceof ApiError && SESSION_GONE.has(error.code)) { this.stop(); return null; }
       this.#deps.onError?.(error);
       return error instanceof ApiError ? error.code : "NETWORK_ERROR";
     } finally {
