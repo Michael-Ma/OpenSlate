@@ -6,6 +6,7 @@
 // Set BROWSER_CHECK_SHOTS=/some/dir to also save screenshots of each scenario.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { inspectorWhole } from "./inspector-whole.mjs";
 
 const RESTORED = "ui=next&fixture=last-ferry&recovery=quarantined";
 const REASON = "This studio was restored from a backup. Finish the recovery review to make changes.";
@@ -129,6 +130,8 @@ export const scenarios = [
       // Reads keep working: another shot opens in the preview.
       await page.click(".card [data-act='open-shot'][data-shot='shot-2-2']");
       await page.waitForSelector(".card.sel [data-act='open-shot'][data-shot='shot-2-2']", { state: "attached" });
+      // Under the strip the inspector's rows and actions are still whole.
+      await inspectorWhole(page, "under the recovery strip at 1440");
       await shot(page, "next-recovery-keyframes-1440");
 
       await tab(page, "plan").click();

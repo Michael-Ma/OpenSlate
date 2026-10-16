@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inspectorWhole } from "./inspector-whole.mjs";
 
 const query = "ui=next&fixture=last-ferry";
 const shot = (label) => `shot-${label.replace(".", "-")}`;
@@ -83,6 +84,8 @@ export const scenarios = [
       // The controls make the row no taller than its line and notes: the inspector's stacked actions keep their room.
       const [label, value] = await page.locator('.insp [data-row="narration"]').evaluate((el) => [el.querySelector("dt").getBoundingClientRect().height, el.querySelector("dd").getBoundingClientRect().height]);
       expect(label <= value + 0.5, `The narration controls make the row taller: ${label} px against ${value} px`);
+      // The row's warning is read in full: nothing in the inspector is cut mid-height.
+      await inspectorWhole(page, "with 2.3's narration row at 1440");
       await screenshot(page, "row-1440");
       await page.click('.insp [data-act="narration-listen"]');
       await page.waitForSelector('.insp form[data-form="narration"][data-choice="line"]');
@@ -201,6 +204,13 @@ export const scenarios = [
       await expectText(page, ".toast", /1\.1 now uses your recording \(7\.4 s\), longer than the 6 s shot\. Choose how to fit it\./, 6000);
       await page.click('.insp [data-act="cancel-edit"]');
       await expectText(page, '.insp [data-row="narration"]', /Your recording[\s\S]*7\.4 s · longer than the shot/);
+      // The rows come back at their top, whole: nothing is kept scrolled from the panel.
+      await inspectorWhole(page, "after the narration panel closed");
+      const motion = await page.evaluate(() => {
+        const insp = document.querySelector(".insp").getBoundingClientRect(), row = document.querySelector('.insp [data-row="motion"] dd').getBoundingClientRect();
+        return { insp: [insp.top, insp.bottom], row: [row.top, row.bottom] };
+      });
+      expect(motion.row[0] >= motion.insp[0] && motion.row[1] <= motion.insp[1], `The Motion row is scrolled out of view: ${JSON.stringify(motion)}`);
       // The existing fit choices settle it.
       await page.waitForSelector('.banner.check[data-state="open"]');
       await expectText(page, ".banner.check h2", /^Narration 7\.4 s, shot 6 s$/);

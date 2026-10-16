@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatMicros } from "../../apps/web/src/next/model/price.ts";
+import { inspectorWhole } from "./inspector-whole.mjs";
 
 const query = "ui=next&fixture=last-ferry";
 const shot = (label) => `shot-${label.replace(".", "-")}`;
@@ -324,15 +325,16 @@ export const scenarios = [
       await screenshot(page, "confirm-stopped-1440");
       // (A row's label stretches to its row's height, so the narration row is checked by its line.)
       for (const selector of ['[data-row="motion"] dd', '[data-row="duration"] dd', '[data-row="narration"] dd .quote']) await inView(page, `.insp ${selector}`, ".insp .insp-body");
-      // What is below the fold (the line's length note) is a scroll away, and the body's lower edge fades to say so.
-      const body = await page.locator(".insp .insp-body").evaluate((element) => ({ scrolls: element.scrollHeight > element.clientHeight + 1, fade: getComputedStyle(element).getPropertyValue("--kf-fade-b").trim() }));
-      expect(!body.scrolls || body.fade === "16px", `The inspector scrolls with no cue: ${JSON.stringify(body)}`);
+      // Nothing is cut mid-height: the line's length note is read in full, and no row is half under the actions.
+      await inspectorWhole(page, "with the stop line at 1440");
       // Why opens the reason and the next step in place, and closes again.
       const why = page.locator('.insp [data-act="stopped-why"]');
       expect((await why.getAttribute("aria-label")) === "Why the scene's video stopped at 3.2", `Why is not labelled: ${await why.getAttribute("aria-label")}`);
       await why.click();
       expect((await why.getAttribute("aria-expanded")) === "true", "Why is not expanded");
       await expectText(page, ".insp .insp-stop-why", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
+      // The rows below the reason stay whole.
+      await inspectorWhole(page, "with Why open at 1440");
       await screenshot(page, "confirm-stopped-why-1440");
       await why.click();
       expect(!(await page.locator(".insp .insp-stop-why").count()), "Why did not close");
