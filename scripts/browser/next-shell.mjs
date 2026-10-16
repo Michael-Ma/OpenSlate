@@ -203,6 +203,14 @@ export const scenarios = [
       expect(layout.strip === "none", `A film-wide strip shows on a quiet film: ${layout.strip}`);
       expect(layout.described === 0, "A tab still says it opens in the classic studio");
       expect((await tab(page, "keyframes").getAttribute("aria-selected")) === "true", "Keyframes is not the selected tab");
+      // One title treatment: the bold title on the meta's baseline, never a bordered control (with a picker or without).
+      const titleRow = await page.evaluate(() => {
+        const title = document.querySelector(".topbar .film b").getBoundingClientRect();
+        const meta = document.querySelector(".topbar .film-meta").getBoundingClientRect();
+        const name = getComputedStyle(document.querySelector(".topbar .film-name"));
+        return { offset: Math.abs(title.bottom - meta.bottom), border: name.borderTopWidth, background: name.backgroundColor };
+      });
+      expect(titleRow.offset < 2.5 && titleRow.border === "0px" && titleRow.background === "rgba(0, 0, 0, 0)", `The film title is not the plain title on the meta's baseline: ${JSON.stringify(titleRow)}`);
       await shot(page, "next-shell-layout-1440");
     },
   },
@@ -450,13 +458,22 @@ export const scenarios = [
       await page.click("[data-act='make-keyframes']");
       const stop = page.locator(".topbar [data-act='stop-film']");
       await stop.waitFor({ timeout: 5000 });
+      // Stop ends the tab row, so the film's title keeps its room on the first row (with Stop there it read "The La…").
       const rows = await page.evaluate(() => {
         const top = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().top);
         return { stop: top(".topbar [data-act='stop-film']"), toggle: top(".topbar .dir-toggle"), tabs: top(".topbar .tabs") };
       });
-      expect(Math.abs(rows.stop - rows.toggle) < 8 && rows.tabs > rows.toggle, `Stop is not on the first row: ${JSON.stringify(rows)}`);
+      expect(Math.abs(rows.stop - rows.tabs) < 8 && rows.tabs > rows.toggle, `Stop does not end the tab row: ${JSON.stringify(rows)}`);
+      const titleFits = () => page.evaluate(() => { const title = document.querySelector(".topbar .film b"); return title.scrollWidth <= title.clientWidth; });
+      expect(await titleFits(), "Stop squeezes the film's title");
       await noSidewaysScroll(page, "running");
       await shot(page, "next-shell-running-390");
+      await page.locator(".topbar [data-act='language']").click();
+      await page.waitForFunction(() => document.querySelector(".topbar [data-act='stop-film']")?.textContent === "停止");
+      expect(await titleFits(), "Stop squeezes the film's title in Chinese");
+      await noSidewaysScroll(page, "running in Chinese");
+      await shot(page, "next-shell-running-390-zh");
+      await page.locator(".topbar [data-act='language']").click();
       await stop.click();
       await page.locator("dialog[data-dialog='stop'] [data-act='confirm-stop']").click();
       await page.waitForSelector(".film-strip[data-strip='stopped']");

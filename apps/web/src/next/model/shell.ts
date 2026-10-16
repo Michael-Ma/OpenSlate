@@ -62,10 +62,10 @@ const SHOWS_SHOTS: readonly ViewName[] = ["plan", "keyframes", "assets", "film"]
 export const noteOpenView = (view: ViewName): ViewName => (SHOWS_SHOTS.includes(view) ? view : "keyframes");
 
 /**
- * The top bar in a film (title, tabs, counts, Stop) or on Start, where no film is open
- * (the films on this computer; no tabs, no counts, no Stop).
+ * The top bar in a film (title, tabs, counts, Stop) or with no film open: on Start, and in Settings reached from Start
+ * with no film chosen (the films on this computer; no tabs, no counts, no Stop, since the views have nothing to show).
  */
-export const topBarMode = (view: ViewName): "film" | "films" => (view === "start" ? "films" : "film");
+export const topBarMode = (view: ViewName, filmOpen = true): "film" | "films" => (view === "start" || !filmOpen ? "films" : "film");
 
 /**
  * When the whole page is the Connect screen instead of the studio. Before the film list has been read there

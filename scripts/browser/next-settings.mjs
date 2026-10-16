@@ -419,6 +419,10 @@ export const scenarios = [
       await expectText(page, "#set-computer [data-row='key-openai']", /Used by keyframes, narration, transcription/);
       const computer = await box(page, "#set-computer");
       expect(computer.top < 300, `This computer is at ${Math.round(computer.top)}, not scrolled into view`);
+      // No film is open, so the top bar is the one on Start: the films on this computer, and no view tabs that would
+      // open a film's views with nothing in them.
+      const bar = await page.evaluate(() => ({ tabs: document.querySelectorAll(".topbar [role='tab']").length, film: document.querySelector(".topbar .film")?.innerText.replace(/\s+/g, " ") }));
+      expect(bar.tabs === 0 && bar.film === "Films on this computer", `With no film open the top bar reads ${JSON.stringify(bar)}`);
       await shot(page, "settings-1440-no-film");
       await page.click("#set-computer [data-act='recheck']");
       await expectText(page, ".toast", /Checked this computer\./);

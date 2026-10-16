@@ -12,10 +12,16 @@
 /* The meta gives way long before the title does. */
 .topbar .film-meta{flex:0 100 auto}
 .topbar .tabs{flex:none}
-.film-pick-wrap{position:relative;display:inline-flex;flex:0 1 auto;min-width:0;max-width:220px;align-self:center}
-.film-pick-wrap::after{content:"";position:absolute;right:11px;top:50%;width:5px;height:5px;margin-top:-4px;border-right:1.5px solid var(--text-2);border-bottom:1.5px solid var(--text-2);transform:rotate(45deg);pointer-events:none}
-.topbar .pill.film-pick{appearance:none;-webkit-appearance:none;field-sizing:content;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-weight:700;font-size:13.5px;padding:3px 28px 3px 12px;color:var(--text)}
-.topbar .pill.film-pick option{background:var(--raised);color:var(--text)}
+/* The film's title is the same bold text with or without other films (DESIGN.md: film title and live meta line). With
+   other films a small chevron follows it and a transparent native picker lies over both, so it shares the meta's
+   baseline and never turns into a bordered control. */
+.topbar .film-name{position:relative;display:inline-flex;align-items:baseline;flex:0 1 auto;min-width:0;max-width:100%}
+.topbar .film-name[data-switch]{padding-right:17px}
+.topbar .film-name[data-switch]::after{content:"";position:absolute;right:4px;top:50%;width:5px;height:5px;margin-top:-5px;border-right:1.5px solid var(--text-2);border-bottom:1.5px solid var(--text-2);transform:rotate(45deg);pointer-events:none}
+.topbar .film-name[data-switch]:hover::after{border-color:var(--text)}
+.topbar .film-pick{position:absolute;left:-4px;top:-3px;width:calc(100% + 8px);height:calc(100% + 6px);margin:0;padding:0;border:0;opacity:0;cursor:pointer;appearance:none;-webkit-appearance:none;font:inherit;color:var(--text);background:var(--raised)}
+.topbar .film-pick option{background:var(--raised);color:var(--text)}
+.topbar .film-name:has(.film-pick:focus-visible){outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
 .topbar .saved{display:inline-flex;align-items:center;gap:7px}
 .topbar .saved.waiting{color:var(--text);border-style:dashed;border-color:var(--track)}
 .topbar .saved.waiting::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}
@@ -37,10 +43,13 @@
 .menu.studio-menu button:hover,.menu.studio-menu button:focus-visible{background:var(--raised-2)}
 .menu.studio-menu button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 
-/* 900–1279 px: the fixed film column and the counts no longer fit beside the tabs. */
+/* 900–1279 px: the fixed film column and the counts no longer fit beside the tabs. The tabs stay right after the
+   film, as at 1440, and the free space falls between them and the status cluster, which keeps at least 32 px away so
+   the outlined Synced pill never reads as a fifth tab. */
 @media (min-width:900px) and (max-width:1279px){
   .topbar .brand{width:auto;margin-right:22px}
-  .topbar .film{width:auto;flex:1 1 0;margin-right:18px}
+  .topbar .film{width:auto;flex:0 1 auto;margin-right:18px}
+  .topbar .top-right{padding-left:32px}
   .topbar .top-right .counts{display:none}
 }
 /* 900–1099 px: the mark alone, and the film's title without its meta. */
@@ -103,13 +112,13 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
   .topbar .film b,.topbar .film-meta{max-width:100%}
   .topbar .tabs{flex:1 1 calc(100% - 120px)}
   .topbar .lang{order:3}
-  .topbar .top-right .stop-btn{order:3;margin-left:8px}
+  /* Stop ends the tab row, where there is room for its word, so it never squeezes the film's title on the first row. */
+  .topbar .top-right .stop-btn{order:6;flex:none;margin-left:8px}
   .topbar .top-right .settings-btn{order:3;margin-left:6px}
   .topbar .top-right .studio-menu-btn{order:3;margin-left:6px}
   /* Reconnecting gets its own slim row under the tabs instead of crowding the first row. */
   .topbar .top-right .saved.waiting,.topbar .top-right .saved.offline{display:flex;order:7;flex:1 0 100%;justify-content:center;font-size:11.5px;padding:2px 9px;border-radius:8px}
   .topbar .tab:focus-visible{outline-offset:-2px}
-  .film-pick-wrap{max-width:100%}
   .film-strip{flex-wrap:wrap;margin:14px 16px 0}
   .film-strip .acts{width:100%;padding-left:34px}
   .shell-dialog{padding:18px 16px 14px}
@@ -117,7 +126,6 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
 }
 @media (max-width:400px){
   .topbar .tab{padding:6px 9px}
-  .topbar .top-right .stop-btn{padding:3px 8px}
 }
 
 /* Read by a screen reader, not shown (a card's link names its shot this way; the card already shows it). */
