@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../api/client.ts";
+import { resourceFor, resourceIdentity, type OwnedResource } from "../../model/settings-ownership.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 
 export interface Read<T> {
@@ -40,19 +41,22 @@ export function useRead<T>(path: string | null, { film = true, follow }: ReadOpt
   const cursor = useStudio((s) => (follow === undefined ? (s.overview?.cursor ?? s.snapshot?.cursor ?? 0) : 0));
   const trigger = follow ?? cursor;
   const projectId = useStudio((s) => s.projectId);
-  const [state, setState] = useState<{ data: T | null; error: string | null; status: number | null; loading: boolean }>({ data: null, error: null, status: null, loading: !!path });
+  const projectEpoch = useStudio((s) => s.projectEpoch);
+  const identity = resourceIdentity(projectId, path, film, projectEpoch);
+  const [state, setState] = useState<OwnedResource<T>>({ identity, data: null, error: null, status: null, loading: !!identity });
   const [nonce, setNonce] = useState(0);
   /** The read that answered 404, by film, path and reload count. */
   const missing = useRef<string | null>(null);
   const running = useRef<Running | null>(null);
 
   useEffect(() => {
-    if (!path || (film && !projectId)) {
+    if (!path || !identity) {
       running.current?.controller.abort();
       running.current = null;
+      setState((s) => resourceFor(s, null));
       return;
     }
-    const key = `${film ? projectId : ""}|${path}|${nonce}`;
+    const key = `${identity}|${nonce}`;
     if (missing.current === key) return;
     const current = running.current;
     if (current?.key === key) { current.again = true; return; }
@@ -60,29 +64,29 @@ export function useRead<T>(path: string | null, { film = true, follow }: ReadOpt
     const start = () => {
       const entry: Running = { key, controller: new AbortController(), again: false };
       running.current = entry;
-      setState((s) => ({ ...s, loading: true }));
+      setState((s) => ({ ...resourceFor(s, identity), loading: true }));
       const settle = (next: () => void) => {
-        if (entry.controller.signal.aborted) return;
+        if (entry.controller.signal.aborted || running.current !== entry) return;
         running.current = null;
         next();
       };
       store.read<T>(path, entry.controller.signal).then(
         (data) => settle(() => {
           missing.current = null;
-          setState({ data, error: null, status: null, loading: false });
+          setState({ identity, data, error: null, status: null, loading: false });
           if (entry.again) start();
         }),
         (error: unknown) => settle(() => {
           const known = error instanceof ApiError;
           const notThere = known && error.status === 404;
           if (notThere) missing.current = key;
-          setState((s) => ({ ...s, error: known ? error.code : "NETWORK_ERROR", status: known ? error.status : null, loading: false }));
+          setState((s) => ({ ...resourceFor(s, identity), error: known ? error.code : "NETWORK_ERROR", status: known ? error.status : null, loading: false }));
           if (entry.again && !notThere) start();
         }),
       );
     };
     start();
-  }, [store, path, film, projectId, trigger, nonce]);
+  }, [store, path, identity, trigger, nonce]);
 
   // Leaving the view cancels the read on its way.
   useEffect(() => () => {
@@ -91,5 +95,5 @@ export function useRead<T>(path: string | null, { film = true, follow }: ReadOpt
   }, []);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
-  return { ...state, reload };
+  return { ...resourceFor(state, identity), reload };
 }

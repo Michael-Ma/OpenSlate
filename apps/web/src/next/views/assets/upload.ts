@@ -4,7 +4,7 @@ import { recoveryReadOnly } from "../../model/recovery.ts";
 import type { StudioStore } from "../../store/store.ts";
 
 export interface UploadRequest {
-  /** Project-relative path with its query, from uploadPath(). */
+  /** Frozen project-absolute path, or a project-relative path captured at send entry. */
   path: string;
   file: File;
   kind: ImportKind;
@@ -58,12 +58,13 @@ export function liveUploader(store: StudioStore): Uploader {
       refuseInReview(store);
       const projectId = store.getState().projectId;
       if (!projectId) throw new ApiError("NOT_FOUND", 404);
+      const target = request.path.startsWith("/api/") ? request.path : `/api/projects/${encodeURIComponent(projectId)}${request.path}`;
       const value = await token();
       if (request.signal.aborted) throw abortError();
       return new Promise<unknown>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         const onAbort = () => xhr.abort();
-        xhr.open("POST", `/api/projects/${encodeURIComponent(projectId)}${request.path}`);
+        xhr.open("POST", target);
         xhr.setRequestHeader("content-type", "application/octet-stream");
         xhr.setRequestHeader("x-openslate-client", "studio");
         xhr.setRequestHeader("x-openslate-csrf", value);
@@ -161,6 +162,9 @@ export function fixtureUploader(store: StudioStore): Uploader {
   return {
     async send(request, progress) {
       refuseInReview(store);
+      const projectId = store.getState().projectId;
+      if (!projectId) throw new ApiError("NOT_FOUND", 404);
+      const target = request.path.startsWith("/api/") ? request.path : `/api/projects/${encodeURIComponent(projectId)}${request.path}`;
       const total = request.file.size;
       for (let step = 0; step <= 6; step++) {
         progress.sending(Math.round((total * step) / 6), total);
@@ -171,7 +175,7 @@ export function fixtureUploader(store: StudioStore): Uploader {
       if (request.signal.aborted) throw abortError();
       if (preview) stageFixturePreview(request.key, preview);
       const body = { name: request.file.name, size: total, type: request.file.type, key: request.key, refusalInBody: true, ...(request.durationSeconds ? { durationSeconds: request.durationSeconds } : {}) };
-      const receipt = await store.command<unknown>(`assets-import:${request.key}`, { key: request.key, path: request.path }, () => ({ path: request.path, body }));
+      const receipt = await store.command<unknown>(`assets-import:${request.key}`, { key: request.key, path: request.path }, () => ({ path: target, body }));
       const refused = (receipt as { refused?: { code?: unknown } } | undefined)?.refused;
       if (refused) throw new ApiError(typeof refused.code === "string" ? refused.code : "REQUEST_FAILED", 409);
       // Undefined: the store could not send it and has said why in a toast.

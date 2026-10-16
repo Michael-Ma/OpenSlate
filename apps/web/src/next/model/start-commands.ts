@@ -234,3 +234,22 @@ export async function openDemo(store: StartStore, name: string, pending: Film | 
 
 /** ACTOR_DENIED on the fill: this studio has no stand-in Director, so the demo cannot work here at all. */
 export const DEMO_UNAVAILABLE = "ACTOR_DENIED";
+
+/** Navigate to the newly filled demo and report success only in its exact destination selection. */
+export async function showDemoFilm(store: {
+  selectProject(projectId: string): Promise<void>;
+  setView(view: "keyframes"): void;
+  getState(): Pick<StudioState, "projectId" | "projectEpoch">;
+  dispatch(action: Action): void;
+}, film: Film, origin?: Pick<StudioState, "projectId" | "projectEpoch">): Promise<void> {
+  const current = store.getState();
+  if (origin && (current.projectId !== origin.projectId || current.projectEpoch !== origin.projectEpoch)) return;
+  // selectProject clears the previous film's toast synchronously, before its reads await.
+  const opening = store.selectProject(film.id);
+  const projectEpoch = store.getState().projectEpoch;
+  store.setView("keyframes");
+  await opening;
+  const destination = store.getState();
+  if (destination.projectId !== film.id || destination.projectEpoch !== projectEpoch) return;
+  store.dispatch({ type: "toast", message: msg("start.demo.opened", { name: film.name }), tone: "info" });
+}

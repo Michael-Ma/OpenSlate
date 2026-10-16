@@ -20,6 +20,7 @@ import {
   type ImportCapabilities,
   type ImportKind,
 } from "../../model/assets-import.ts";
+import { projectUploadPath, refreshUploadRequest } from "../../model/import-flight.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { useMode, useStore, useStudio } from "../../store/react.tsx";
 import { importKeysFor } from "./import-keys.ts";
@@ -145,15 +146,19 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
     if (!file || !kind || !canGo) return;
     const keys = importKeysFor(store, mode);
     if (!keys) return;
+    const origin = store.getState();
+    if (!origin.projectId || origin.snapshot?.project.id !== origin.projectId) return;
+    const projectId = origin.projectId;
+    const active = () => store.getState().projectId === projectId && store.getState().projectEpoch === origin.projectEpoch;
     const chosen = file, fileKind = kind, chosenUse = use;
     const seconds = reading.state === "done" ? reading.seconds : null;
     const identity = importIdentity(chosen, fileKind, chosenUse);
-    const pathNow = () => uploadPath(fileKind, store.getState().snapshot?.project.headVersion ?? 0, chosenUse, chosen.name);
+    const initialPath = projectUploadPath(projectId, uploadPath(fileKind, origin.snapshot.project.headVersion, chosenUse, chosen.name));
     const controller = new AbortController();
     const current = { controller, sentAll: false };
     flight.current = current;
-    const set = (next: Phase) => { if (mounted.current && !controller.signal.aborted) setPhase(next); };
-    let request = keys.begin(identity, pathNow());
+    const set = (next: Phase) => { if (active() && mounted.current && !controller.signal.aborted) setPhase(next); };
+    let request = keys.begin(identity, initialPath);
     set({ state: "sending", loaded: 0, total: chosen.size });
     try {
       for (;;) {
@@ -164,14 +169,14 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
             checking: () => { current.sentAll = true; set({ state: "checking" }); },
           });
           keys.settle(identity);
-          onImported({ kind: fileKind, use: chosenUse, name: chosen.name, artifactId: importedArtifactId(fileKind, receipt), background: !mounted.current });
+          if (active()) onImported({ kind: fileKind, use: chosenUse, name: chosen.name, artifactId: importedArtifactId(fileKind, receipt), background: !mounted.current });
           return;
         } catch (error) {
           if (aborted(error, controller.signal)) {
             // Stopped while sending (never after the last byte): the studio never had the whole file, so the next
             // try is a new import.
             keys.settle(identity);
-            if (mounted.current) setPhase({ state: "stopped" });
+            if (active() && mounted.current) setPhase({ state: "stopped" });
             return;
           }
           const code = error instanceof ApiError ? error.code : "NETWORK_ERROR";
@@ -179,8 +184,13 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
           if (next === "fresh") {
             // The resent request was out of date, so the first try never arrived: send it again as a new import.
             keys.settle(identity);
-            await store.refresh();
-            request = keys.begin(identity, pathNow());
+            const refreshed = await refreshUploadRequest(store.read.bind(store), projectId, fileKind, chosenUse, chosen.name);
+            if (!refreshed.ok) {
+              set({ state: "refused", refusal: refreshed.refusal, retry: refreshed.retry });
+              if (active() && !mounted.current) store.dispatch({ type: "toast", message: msg("assets.import.refused_later", { name: chosen.name, reason: tm(refreshed.refusal) }), tone: "error" });
+              return;
+            }
+            request = keys.begin(identity, refreshed.path);
             current.sentAll = false;
             continue;
           }
@@ -188,10 +198,10 @@ export function ImportSheet({ onClose, onImported }: { onClose(): void; onImport
           // A newer film version is needed before the next try.
           if (code === "REVISION_CONFLICT") void store.refresh();
           const said = refusalMsg(code, fileKind);
-          if (mounted.current) setPhase({ state: "refused", refusal: said, retry: retryable(code) });
+          if (active() && mounted.current) setPhase({ state: "refused", refusal: said, retry: retryable(code) });
           // Closed while the studio checked it: say how it ended. An unknown answer is not called a refusal.
-          else if (next === "keep") store.dispatch({ type: "toast", message: msg("assets.import.unknown_later", { name: chosen.name }), tone: "error" });
-          else store.dispatch({ type: "toast", message: msg("assets.import.refused_later", { name: chosen.name, reason: tm(said) }), tone: "error" });
+          else if (active() && next === "keep") store.dispatch({ type: "toast", message: msg("assets.import.unknown_later", { name: chosen.name }), tone: "error" });
+          else if (active()) store.dispatch({ type: "toast", message: msg("assets.import.refused_later", { name: chosen.name, reason: tm(said) }), tone: "error" });
           return;
         }
       }

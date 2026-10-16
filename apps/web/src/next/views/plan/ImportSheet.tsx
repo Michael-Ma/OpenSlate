@@ -7,6 +7,8 @@ import { UnconfirmedNotice, type Unconfirmed } from "./Notices.tsx";
 
 interface Props {
   stage: ImportStage;
+  draft: { name: string; text: string };
+  onDraft(update: (current: { name: string; text: string }) => { name: string; text: string }): void;
   pending: PendingImport | null;
   review: ImportReview | null;
   /** What the Director wrote while reading, listed apart from the outline. */
@@ -83,10 +85,8 @@ export function ImportSheet(props: Props) {
 }
 
 function PasteStep(props: Props) {
-  const { busy, guard, runGuard, unconfirmed, onClose, onSend } = props;
+  const { busy, guard, runGuard, unconfirmed, onClose, onSend, draft: { name, text }, onDraft } = props;
   const { t, tm, locale } = useI18n();
-  const [name, setName] = useState("");
-  const [text, setText] = useState("");
   const [fileError, setFileError] = useState<Msg | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const problem = importProblem(name, text);
@@ -101,8 +101,7 @@ function PasteStep(props: Props) {
     try {
       const content = await picked.text();
       if (content.length > IMPORT_MAX_CHARS) { setFileError(msg("plan.import.too_long", { max: IMPORT_MAX_CHARS })); return; }
-      setName(picked.name);
-      setText(content);
+      onDraft(() => ({ name: picked.name, text: content }));
     } catch {
       setFileError(msg("plan.import.file_unreadable"));
     }
@@ -120,13 +119,13 @@ function PasteStep(props: Props) {
         {fileError ? <p className="edit-error" role="alert"><i className="ic" aria-hidden="true">!</i>{tm(fileError)}</p> : null}
         <div className="field">
           <label htmlFor="plan-import-name">{t("plan.import.name")}</label>
-          <input id="plan-import-name" className="input" data-field="import-name" value={name} maxLength={160} placeholder={DEFAULT_IMPORT_NAME} aria-invalid={!!nameProblem} aria-describedby={nameProblem ? "plan-import-name-hint" : undefined} onChange={(event) => setName(event.target.value)} />
+          <input id="plan-import-name" className="input" data-field="import-name" value={name} maxLength={160} placeholder={DEFAULT_IMPORT_NAME} aria-invalid={!!nameProblem} aria-describedby={nameProblem ? "plan-import-name-hint" : undefined} onChange={(event) => { const name = event.target.value; onDraft((current) => ({ ...current, name })); }} />
           {nameProblem ? <span className="hint" id="plan-import-name-hint">{tm(nameProblem)}</span> : null}
         </div>
         <div className="field">
           <label htmlFor="plan-import-text">{t("plan.import.text")}</label>
           {/* Most plans are pasted, so the sheet opens with focus here. */}
-          <textarea id="plan-import-text" className="textarea" data-field="import-text" data-autofocus rows={11} maxLength={IMPORT_MAX_CHARS} value={text} aria-describedby="plan-import-count" onChange={(event) => setText(event.target.value)} />
+          <textarea id="plan-import-text" className="textarea" data-field="import-text" data-autofocus rows={11} maxLength={IMPORT_MAX_CHARS} value={text} aria-describedby="plan-import-count" onChange={(event) => { const text = event.target.value; onDraft((current) => ({ ...current, text })); }} />
           <span className="counter" id="plan-import-count">{t("plan.import.count", { count, max })}</span>
         </div>
       </div>

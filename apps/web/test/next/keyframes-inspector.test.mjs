@@ -88,7 +88,8 @@ test('while making, out of date, failed, or waiting on a clip', () => {
   assert.equal(en(retrying.failure.message), 'Failed; it will retry by itself (2 left).');
   assert.equal(retrying.regenerate.enabled, false);
   const refused = at({ keyframe: { state: 'failed', takeCount: 0, opened: false, failure: { code: 'X', technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: 'x' } } });
-  assert.match(en(refused.failure.message), /did not charge/);
+  assert.equal(en(refused.failure.message), 'Keyframe failed · not charged');
+  assert.equal(refused.regenerate.enabled, true, 'retryAllowed governs automatic retries of the failed attempt');
   const clip = at({ video: { state: 'running', takeCount: 0 } }).regenerate;
   assert.deepEqual([clip.enabled, en(clip.reason)], [false, "Wait for this shot's clip to finish."]);
 });

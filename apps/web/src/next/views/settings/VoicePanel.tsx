@@ -1,10 +1,14 @@
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useId, useMemo, useRef, type ChangeEvent } from "react";
+import { ApiError } from "../../api/client.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { draftProblems, emptyDraft, narratorChoices, narratorName, narratorRequest, PROVIDER_NAME, registerRequest, revokeRequest, undoTarget, voiceCards, type PersonalProvider, type PersonalVoice, type PersonalVoices, type VoiceCard, type VoiceDraft, type VoiceSetting } from "../../model/settings-voice.ts";
+import { errorMsg } from "../../i18n/translate.ts";
+import { draftProblems, emptyDraft, narratorChoices, narratorName, narratorOriginCurrent, narratorRequest, prepareNarratorUndo, PROVIDER_NAME, registerRequest, revokeRequest, voiceCards, type PersonalProvider, type PersonalVoice, type PersonalVoices, type VoiceCard, type VoiceDraft, type VoiceSetting } from "../../model/settings-voice.ts";
 import { msg } from "../../model/types.ts";
+import { settingsRequest } from "../../model/settings-ownership.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
 import { Dialog, onRadioKeys, Panel, radioTab, ReadState } from "./parts.tsx";
+import { useProjectDraft } from "./useProjectDraft.ts";
 
 const NARRATOR_PRESS = "settings:narrator";
 const REGISTER_PRESS = "settings:voice-register";
@@ -19,17 +23,17 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
   const store = useStore();
   const { t, tm } = useI18n();
   const presses = useStudio((s) => s.pending);
+  const projectId = useStudio((s) => s.projectId);
+  const projectEpoch = useStudio((s) => s.projectEpoch);
   const ids = useId();
   const voices: PersonalVoice[] = useMemo(() => personal.data?.voices ?? [], [personal.data]);
   const current = voice.data?.narratorVoice ?? null;
   const choices = useMemo(() => (current ? narratorChoices(current, voices) : null), [current, voices]);
   const cards = useMemo(() => voiceCards(voices), [voices]);
-  /** What the toast's Undo reads when it is pressed, which may be after more changes here. */
-  const latest = useRef({ current, voices });
-  latest.current = { current, voices };
-  const [adding, setAdding] = useState<VoiceDraft | null>(null);
-  const [revoking, setRevoking] = useState<VoiceCard | null>(null);
-  const head = () => store.getState().snapshot?.project.headVersion ?? voice.data?.headVersion ?? 0;
+  const [addFormState, setAddForm] = useProjectDraft<{ value: VoiceDraft; headVersion: number }>("voice-add");
+  const adding = addFormState?.value ?? null;
+  const setAdding = (value: VoiceDraft | null) => setAddForm((current) => value ? { value, headVersion: current?.headVersion ?? personal.data?.headVersion ?? voice.data?.headVersion ?? 0 } : null);
+  const [revoking, setRevoking] = useProjectDraft<VoiceCard>("voice-revoke");
   /** A revoked card loses its Revoke button, so focus moves on to "Add a personal voice". */
   const refocus = useRef(false);
   useEffect(() => {
@@ -41,26 +45,40 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
     }
   }, [personal.data]);
 
-  const setNarrator = async (next: string, undoing: boolean) => {
-    const before = latest.current.current;
-    if (!before || next === before) return;
-    const request = narratorRequest(next, head());
+  const setNarrator = async (next: string) => {
+    const before = voice.data?.narratorVoice;
+    if (!before || next === before || !projectId || !voice.data) return;
+    const origin = { projectId, projectEpoch };
+    const active = () => narratorOriginCurrent(origin, store.getState());
+    if (!active()) return;
+    const request = settingsRequest(projectId, narratorRequest(next, voice.data.headVersion));
     const result = await store.command(NARRATOR_PRESS, request.body, () => request);
-    if (!result) return;
-    const toast = msg("set.toast.narrator", { name: narratorName(next, latest.current.voices) });
-    if (undoing) {
-      store.dispatch({ type: "toast", message: toast, tone: "info" });
-      document.getElementById(`${ids}-narrator`)?.focus();
-    } else {
-      store.toastUndo(toast, () => {
-        const target = undoTarget({ previous: before, set: next }, latest.current.current, latest.current.voices);
-        if (target) void setNarrator(target, true);
-      });
-    }
+    if (!result || !active()) return;
+    const toast = msg("set.toast.narrator", { name: narratorName(next, voices) });
+    store.toastUndo(toast, async () => {
+      try {
+        const prepared = await prepareNarratorUndo({ previous: before, set: next }, origin, store.read.bind(store), store.getState);
+        if (!prepared) {
+          if (active()) {
+            store.dispatch({ type: "toast", message: errorMsg("REVISION_CONFLICT"), tone: "error" });
+            voice.reload();
+            personal.reload();
+          }
+          return;
+        }
+        const undone = await store.command(NARRATOR_PRESS, prepared.request.body, () => prepared.request);
+        if (!undone || !active()) return;
+        store.dispatch({ type: "toast", message: msg("set.toast.narrator", { name: narratorName(prepared.target, prepared.voices) }), tone: "info" });
+        voice.reload();
+        document.getElementById(`${ids}-narrator`)?.focus();
+      } catch (error) {
+        if (active()) store.dispatch({ type: "toast", message: errorMsg(error instanceof ApiError ? error.code : "NETWORK_ERROR"), tone: "error" });
+      }
+    });
     voice.reload();
   };
 
-  const onNarrator = (event: ChangeEvent<HTMLSelectElement>) => void setNarrator(event.target.value, false);
+  const onNarrator = (event: ChangeEvent<HTMLSelectElement>) => void setNarrator(event.target.value);
 
   const openAdd = () => {
     setAdding(emptyDraft());
@@ -71,20 +89,24 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
     requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-act='voice-open']")?.focus());
   };
   const problems = adding ? draftProblems(adding) : [];
+  const addConflict = !!addFormState && !!personal.data && addFormState.headVersion !== personal.data.headVersion;
   const add = async () => {
-    if (!adding || problems.length) return;
-    const request = registerRequest(adding, head());
-    const result = await store.command<{ voice: { label: string } }>(REGISTER_PRESS, request.body, () => request, msg("set.toast.voice_added", { name: adding.label.trim() }));
+    if (!addFormState || problems.length || addConflict || store.getState().projectId !== projectId) return;
+    const submitted = addFormState;
+    const request = settingsRequest(projectId, registerRequest(submitted.value, submitted.headVersion));
+    const result = await store.command<{ voice: { label: string } }>(REGISTER_PRESS, request.body, () => request, msg("set.toast.voice_added", { name: submitted.value.label.trim() }));
     if (!result) return;
-    closeAdd();
+    setAddForm((current) => current === submitted ? null : current);
+    if (store.getState().projectId !== projectId) return;
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-act='voice-open']")?.focus());
     personal.reload();
   };
 
   const revoke = async (card: VoiceCard) => {
-    const request = revokeRequest(card.identityId);
+    const request = settingsRequest(projectId, revokeRequest(card.identityId));
     const result = await store.command(REVOKE_PRESS(card.identityId), { identityId: card.identityId }, () => request, msg("set.toast.voice_revoked", { name: card.label }));
-    setRevoking(null);
-    if (!result) return;
+    if (!result || !projectId || !narratorOriginCurrent({ projectId, projectEpoch }, store.getState())) return;
+    setRevoking((current) => current === card ? null : current);
     refocus.current = true;
     personal.reload();
   };
@@ -140,9 +162,11 @@ export function VoicePanel({ voice, personal, film, offline }: { voice: Resource
           <span>{t("set.voice.consent_permit")}</span>
         </label>
         <div className="form-acts">
-          <button type="submit" className="pill primary" data-act="voice-add" disabled={problems.length > 0 || !!offline || !!presses[REGISTER_PRESS]} aria-describedby={`${ids}-why`} title={offline ?? undefined}>{t("set.voice.add")}</button>
+          <button type="submit" className="pill primary" data-act="voice-add" disabled={problems.length > 0 || addConflict || !!offline || !!presses[REGISTER_PRESS]} aria-describedby={`${ids}-why`} title={offline ?? undefined}>{t("set.voice.add")}</button>
           <button type="button" className="pill" data-act="voice-cancel" onClick={closeAdd}>{t("set.cancel")}</button>
           <span className="hint" id={`${ids}-why`} aria-live="polite">{problems[0] ? tm(problems[0]) : ""}</span>
+          {addConflict && <span className="hint" role="status">{tm(errorMsg("REVISION_CONFLICT"))}</span>}
+          {addConflict && <button type="button" className="pill" data-act="voice-recheck" disabled={!!offline || !!presses[REGISTER_PRESS]} onClick={() => setAddForm((current) => current ? { ...current, headVersion: personal.data!.headVersion } : null)}>{t("set.impact.check_again")}</button>}
         </div>
       </form>
     );

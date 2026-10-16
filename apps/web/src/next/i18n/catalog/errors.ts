@@ -12,6 +12,10 @@ export const errors = {
   // A paid press whose reply was lost (client-side): pressing again resends the same request, which the studio replays.
   "error.PAID_UNCONFIRMED": { en: "Not confirmed. Press again to check; it will not charge twice.", zh: "未确认。再按一次即可核实，不会重复计费。" },
   "error.AUTH_REQUIRED": { en: "This window is no longer connected. Open a fresh studio link.", zh: "这个窗口已断开连接，请打开新的工作室链接。" },
+  "error.EDIT_BASELINE_CHANGED": { en: "This shot changed while you were editing. Your text is kept. Review the saved value, then choose which text to keep.", zh: "你编辑时镜头已变化。已保留你的文字。请查看已保存的值，然后选择保留哪份文字。" },
+  "error.FILM_GAIN_SAVE_FAILED": { en: "Your volume is kept. Check the save result before retrying.", zh: "你的音量已保留。请先检查保存结果，再重试。" },
+  "error.PROJECTION_CHANGED": { en: "The film is updating. Wait for the displayed version to catch up before changing it.", zh: "影片正在更新。请等显示内容同步后再修改。" },
+  "error.PLAN_PROJECTION_CHANGED": { en: "The saved film is updating. Your text is kept; wait for the displayed version to catch up.", zh: "已保存的影片正在更新。已保留你的文字，请等显示内容同步。" },
   "error.REVISION_CONFLICT": { en: "The film changed while you were editing. Your edit was not saved; try again.", zh: "你编辑时影片已经变化，这次修改没有保存，请重试。" },
   "error.IDEMPOTENCY_CONFLICT": { en: "This press was already used for a different request. Try again.", zh: "这次操作已用于另一个请求，请重试。" },
   "error.FRAME_STALE": { en: "This keyframe was replaced. Open the new one.", zh: "这张关键帧已被替换，请查看新的。" },

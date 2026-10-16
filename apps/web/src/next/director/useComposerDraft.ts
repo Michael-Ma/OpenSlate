@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import { draftKey } from "../model/director.ts";
 import { useMode, useRelinquishedDrafts, useStore, useStudio } from "../store/react.tsx";
 import type { StudioStore } from "../store/store.ts";
-import { watchComposerDraft } from "./composer-draft.ts";
+import { ownedDraftVersion, removeDraftVersion, watchComposerDraft } from "./composer-draft.ts";
 
 const browserStorage = (): Storage | null => {
   try { return window.localStorage; } catch { return null; }
 };
 
 /** Remove a film's kept draft (it was sent after another film was opened, so the composer no longer holds it). */
-export function forgetDraft(projectId: string, mode: "live" | "fixture"): void {
-  try { browserStorage()?.removeItem(draftKey(projectId, mode)); } catch { /* blocked: nothing kept to remove */ }
+export function keptDraftVersion(store: StudioStore, projectId: string): string | null {
+  return ownedDraftVersion(store, projectId);
+}
+
+export function forgetDraft(projectId: string, mode: "live" | "fixture", version: string | null): void {
+  try { removeDraftVersion(browserStorage(), draftKey(projectId, mode), version); } catch { /* blocked: nothing kept to remove */ }
 }
 
 /**

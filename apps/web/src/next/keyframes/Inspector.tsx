@@ -6,6 +6,7 @@ import { durationIssue, editImpact, parseSeconds, type InspectorView } from "../
 import { wordsOf, type ShotNarrationRead } from "../model/narration.ts";
 import type { EditDraft } from "../store/state.ts";
 import type { Resource } from "../store/useResource.ts";
+import { useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { NarrationPanel } from "./NarrationPanel.tsx";
 import { StatusPill } from "./parts.tsx";
@@ -43,6 +44,9 @@ interface Props {
  */
 export function Inspector({ view, shot, fps, draft, narrationDetail, busy, unconfirmed, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease, onEditInPlan }: Props) {
   const { t, tm } = useI18n();
+  const store = useStore();
+  const snapshot = useStudio(s => s.snapshot);
+  const conflict = !!draft && draft.expectedHeadVersion !== snapshot?.project.headVersion;
   const server = useGuarded("server");
   const run = useGuarded("run");
   const editing = draft && draft.shotId === shot.shotId ? draft : null;
@@ -118,6 +122,14 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       )}
 
       <div className="insp-body">
+      {editing && conflict ? <div className="insp-alert" role="alert" data-act="edit-conflict">
+        <p>{t("error.EDIT_BASELINE_CHANGED")}</p>
+        <p>{t("inspector.conflict_saved")}: {editing.field === "narration" ? shot.narration.text : editing.field === "desiredFrames" ? String(shot.durationFrames) : shot[editing.field]}</p>
+        <div className="two">
+          <button type="button" className="pill sm" data-act="edit-keep-text" onClick={() => store.resolveEditConflict(true)}>{t("inspector.conflict_keep")}</button>
+          <button type="button" className="pill sm" data-act="edit-use-saved" onClick={() => store.resolveEditConflict(false)}>{t("inspector.conflict_use_saved")}</button>
+        </div>
+      </div> : null}
       {editing?.field === "narration" ? (
         <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} detail={narrationDetail} saving={busy.edit || !!editing.saving} focusTake={listening} onEdit={onEdit} onSaveDraft={onSaveDraft} />
       ) : editing ? (
@@ -250,12 +262,11 @@ interface FormProps {
 function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion }: FormProps) {
   const { t, tm } = useI18n();
   const shotSeconds = Math.round(shot.durationFrames / fps);
-  const [secondsText, setSecondsText] = useState(String(shotSeconds));
+  const secondsText = draft.secondsText ?? String(shotSeconds);
   const id = (part: string) => `edit-${part}-${shot.shotId}`;
   const cancel = () => onEdit(null);
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); cancel(); } };
 
-  useEffect(() => { setSecondsText(String(shotSeconds)); }, [shotSeconds]);
 
   if (draft.field === "motion" || draft.field === "desiredFrames") {
     const issue = durationIssue(secondsText, shot);
@@ -283,7 +294,7 @@ function EditForm({ shot, fps, draft, saving, onEdit, onSaveDraft, onSaveMotion 
           value={secondsText}
           aria-invalid={issue?.kind === "refusal"}
           aria-describedby={id("impact")}
-          onChange={(event) => setSecondsText(event.target.value)}
+          onChange={(event) => onEdit({ ...draft, secondsText: event.target.value })}
         />
         {issue ? <span className={`stale${issue.kind === "refusal" ? " warn" : ""}`} role={issue.kind === "refusal" ? "alert" : undefined}>{tm(issue.message)}</span> : null}
         <span className="stale" id={id("impact")}>{tm(editImpact(shot, ["motion", "desiredFrames"]))}</span>

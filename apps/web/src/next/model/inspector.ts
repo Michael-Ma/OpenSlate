@@ -2,7 +2,7 @@ import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOver
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { confirmationStop, isWorking, seconds, shotStatus, type CardTone } from "./keyframes.ts";
 import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
-import { formatMicros } from "./price.ts";
+import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
 /** The shot fields the inspector edits. */
@@ -121,25 +121,24 @@ export function clipUnit(overview: GenerationOverview, scene: SceneOverview | un
 
 /**
  * One keyframe's price for this shot. The shot's own quote is exact (it includes a voice line still to make,
- * so it is a total, not a unit); the scene's quotes are the fallback.
+ * so it is a total, not a unit); a common exact regeneration quote is the only fallback.
  */
-function keyframePrice(shot: ShotOverview, scene: SceneOverview | undefined): { unitMicros: string; unknown: boolean } | null {
-  const own = shot.quotes?.regenerateKeyframe;
-  if (own) return { unitMicros: own.micros, unknown: own.priceUnknown };
-  return quoteUnit(scene?.quotes.regenerateKeyframe) ?? quoteUnit(scene?.quotes.makeKeyframes);
+function keyframePrice(overview: GenerationOverview, shot: ShotOverview): { unitMicros: string; unknown: boolean } | null {
+  const estimate = keyframeEstimate([shot.shotId], overview);
+  return estimate ? { unitMicros: estimate.micros, unknown: estimate.priceUnknown } : null;
 }
 
 function failureMessage(slot: MediaSlot, kind: "keyframe" | "video"): Msg {
   const failure = slot.failure;
   if (failure && failure.technical && failure.autoRetriesLeft > 0) return msg("inspector.failed.retrying", { count: failure.autoRetriesLeft });
-  if (failure && !failure.retryAllowed) return msg(failure.charged ? "inspector.failed.refused_charged" : "inspector.failed.refused");
+  if (kind === "video" && failure && !failure.retryAllowed) return msg(failure.charged ? "inspector.failed.refused_charged" : "inspector.failed.refused");
   return msg(`card.${kind}.${failure?.charged ? "failed_charged" : "failed"}`);
 }
 
 const canRetry = (slot: MediaSlot) => !slot.failure || (slot.failure.retryAllowed && !(slot.failure.technical && slot.failure.autoRetriesLeft > 0));
 
 function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scene: SceneOverview | undefined, locale: string): RegenerateAction {
-  const unit = keyframePrice(shot, scene);
+  const unit = keyframePrice(overview, shot);
   const clip = clipUnit(overview, scene);
   const clipPrice = clip && !clip.unknown && Number(clip.unitMicros) > 0 ? formatMicros(clip.unitMicros, locale) : null;
   const clipNote = shot.video.state === "ready" ? (clipPrice ? msg("inspector.clip_will_redo", { price: clipPrice }) : msg("inspector.clip_will_redo_unpriced")) : null;
@@ -150,13 +149,17 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   if (isWorking(keyframe)) return { ...base, kind: "regenerate", label: msg("card.keyframe.making"), cost: null, primary: false, enabled: false, working: true };
   if (isWorking(shot.video)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("inspector.wait_for_clip") };
   switch (keyframe.state) {
-    case "ready": return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: take, primary: false, enabled: true, clipNote };
-    case "outdated": return { ...base, kind: "make", label: msg("inspector.regenerate"), cost: take, primary: true, enabled: true, reason: msg("inspector.keyframe_outdated") };
-    case "failed": return { ...base, kind: "make", label: msg("inspector.make_again"), cost: canRetry(keyframe) ? (keyframe.previous ? take : first) : null, primary: canRetry(keyframe), enabled: canRetry(keyframe) };
+    case "ready": return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: take, primary: false, enabled: !!unit, clipNote };
+    case "outdated": return { ...base, kind: "make", label: msg("inspector.regenerate"), cost: take, primary: true, enabled: !!unit, reason: msg("inspector.keyframe_outdated") };
+    case "failed": {
+      // retryAllowed describes the old candidate's automatic retry, never a new human purchase.
+      const fresh = !!unit && !(keyframe.failure?.technical && keyframe.failure.autoRetriesLeft > 0);
+      return { ...base, kind: "make", label: msg("inspector.make_again"), cost: fresh ? (keyframe.previous ? take : first) : null, primary: fresh, enabled: fresh };
+    }
     case "direction_required": return { ...base, kind: "make", label: msg("inspector.make_keyframe"), cost: null, primary: false, enabled: false, reason: msg("card.direction_required") };
     case "no_answer":
     case "choose_take": return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false };
-    default: return { ...base, kind: "make", label: msg("inspector.make_keyframe"), cost: first, primary: true, enabled: true };
+    default: return { ...base, kind: "make", label: msg("inspector.make_keyframe"), cost: first, primary: true, enabled: !!unit };
   }
 }
 

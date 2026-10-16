@@ -1,4 +1,5 @@
 import type { Request } from "./settings.ts";
+import { settingsRequest } from "./settings-ownership.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -85,6 +86,36 @@ export interface NarratorUndo {
 export function undoTarget(undo: NarratorUndo | null, current: string | null, voices: readonly PersonalVoice[]): string | null {
   if (!undo || current !== undo.set || undo.previous === current) return null;
   return usableNarrator(undo.previous, voices) ? undo.previous : null;
+}
+
+/** An Undo callback belongs to the selection that offered it, including a reselected film's epoch. */
+export interface NarratorOrigin {
+  projectId: string;
+  projectEpoch: number;
+}
+
+export const narratorOriginCurrent = (origin: NarratorOrigin, current: { projectId: string | null; projectEpoch: number }): boolean =>
+  current.projectId === origin.projectId && current.projectEpoch === origin.projectEpoch;
+
+/**
+ * Read both current narrator and personal-voice eligibility at one matching head. Undo uses that exact
+ * saved baseline, rather than the form that performed the original change or an unrelated latest head.
+ */
+export async function prepareNarratorUndo(
+  undo: NarratorUndo,
+  origin: NarratorOrigin,
+  read: <T>(path: string) => Promise<T>,
+  current: () => { projectId: string | null; projectEpoch: number },
+): Promise<{ request: Request; target: string; voices: PersonalVoice[] } | null> {
+  if (!narratorOriginCurrent(origin, current())) return null;
+  const base = `/api/projects/${encodeURIComponent(origin.projectId)}`;
+  const [voice, personal] = await Promise.all([
+    read<VoiceSetting>(`${base}/settings/voice`),
+    read<PersonalVoices>(`${base}/narration/personal-voices`),
+  ]);
+  if (!narratorOriginCurrent(origin, current()) || voice.headVersion !== personal.headVersion) return null;
+  const target = undoTarget(undo, voice.narratorVoice, personal.voices);
+  return target ? { request: settingsRequest(origin.projectId, narratorRequest(target, voice.headVersion)), target, voices: personal.voices } : null;
 }
 
 export const narratorRequest =(voice: string, headVersion: number): Request => ({ path: "/settings/voice", body: { narratorVoice: voice, expectedHeadVersion: headVersion } });

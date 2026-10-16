@@ -126,6 +126,9 @@ export const settingsMessages = {
   "set.toast.director_switched": { en: "The Director uses {model} from its next turn.", zh: "导演下一轮起使用 {model}。" },
 
   // ---- Director ------------------------------------------------------------------------
+  "set.director.keep": { en: "Keep my settings", zh: "保留我的设置" },
+  "set.director.use_saved": { en: "Use saved settings", zh: "使用已保存的设置" },
+  "set.director.saved_selection": { en: "Saved: {model} · {program} · {home}", zh: "已保存：{model} · {program} · {home}" },
   "set.director.change": { en: "Change…", zh: "修改…" },
   "set.director.setup_codex": { en: "Set up Codex…", zh: "设置 Codex…" },
   "set.director.program": { en: "Program", zh: "程序" },

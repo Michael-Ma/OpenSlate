@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { formatMicros } from "../../apps/web/src/next/model/price.ts";
 
 const query = "ui=next&fixture=last-ferry";
 const shot = (label) => `shot-${label.replace(".", "-")}`;
@@ -432,10 +433,12 @@ export const scenarios = [
         await route.fulfill({ response, json: overview });
       });
       const keys = [];
+      const purchases = [];
       const answers = [];
       let mode = "drop";
       await routeQuietly(page, /\/api\/projects\/[^/]+\/scenes\/[^/]+\/generate$/, async (route) => {
         keys.push(route.request().headers()["idempotency-key"]);
+        purchases.push(route.request().postDataJSON());
         const fate = mode;
         mode = "pass";
         if (fate === "drop") { await route.abort("connectionreset"); return; }
@@ -445,8 +448,24 @@ export const scenarios = [
         await route.fulfill({ response });
       });
       await page.waitForSelector('main.work[data-view="keyframes"] .preview .pic-img', { timeout: 30000 });
+      // A fast first load may have finished before the routes above were installed. Pair first, then reload so
+      // the displayed quote and unbound-clip projection are definitely the exact response this scenario captured.
+      if (!latest) {
+        await page.reload();
+        await page.waitForSelector('main.work[data-view="keyframes"] .preview .pic-img', { timeout: 30000 });
+      }
       const target = await page.locator(".insp").getAttribute("data-shot");
+      const overview = await until(() => Promise.resolve(latest), (value) => !!value?.shots[target]?.quotes?.regenerateKeyframe, "The shot's exact regeneration quote was not read", 15000);
+      const quote = overview.shots[target].quotes.regenerateKeyframe;
+      // The button keeps its name; the exact price is the note right under it, which describes the button.
+      const pricedPattern = (value) => {
+        expect(value && !value.priceUnknown && BigInt(value.micros) > 0n, `The integration film has no exact price: ${JSON.stringify(value)}`);
+        const note = `A new take costs about ${formatMicros(value.micros, "en-US")}.`;
+        return new RegExp(note.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      };
       await expectText(page, '.insp [data-act="regen"]:not([disabled])', /^Regenerate keyframe$/, 15000);
+      await expectText(page, `#regen-note-${target}`, pricedPattern(quote), 15000);
+      expect(await page.locator('.insp [data-act="regen"]').getAttribute("aria-describedby") === `regen-note-${target}`, "The price note does not describe the Regenerate button");
       // 1. The reply is lost before the request leaves: the toast and the note under the button say a press again
       //    checks, without paying twice.
       await page.click('.insp [data-act="regen"]');
@@ -468,6 +487,8 @@ export const scenarios = [
       await page.click('.insp [data-act="regen"]');
       await until(() => Promise.resolve(answers.length), (n) => n === 2, "The third press did not reach the studio");
       expect(keys.length === 3 && keys[2] === keys[0], `The third press used another key: ${JSON.stringify(keys)}`);
+      expect(purchases.every((body) => body.kind === "image" && body.regenerate === true && body.targetShotIds?.length === 1 && body.targetShotIds[0] === target && body.expectedEstimateMicros === quote.micros),
+        `The regeneration requests differ from the displayed shot and exact price: ${JSON.stringify(purchases)}`);
       expect(answers[1].status === 200 && answers[1].body.requestId === answers[0].body.requestId, `The studio did not replay its receipt: ${JSON.stringify(answers)}`);
       await until(() => page.locator('.insp [data-unconfirmed="true"]').count(), (n) => n === 0, "The note stayed after the studio answered");
       await until(() => page.locator('.toast[data-tone="error"]').count(), (n) => n === 0, "The toast stayed after the studio answered");
@@ -475,6 +496,7 @@ export const scenarios = [
       freeze = false;
       await expectText(page, `.insp[data-shot="${target}"] [data-row="takes"]`, /Takes\s*2 · Compare/, 20000);
       await expectText(page, `.insp[data-shot="${target}"] [data-act="regen"]:not([disabled])`, /^Regenerate keyframe$/, 20000);
+      await expectText(page, `#regen-note-${target}`, pricedPattern(latest.shots[target].quotes?.regenerateKeyframe), 20000);
       // 5. The takes strip on the studio's own routes: use the first take, then Undo from the toast.
       const uses = [];
       page.on("request", (request) => { if (/\/takes\/[^/]+\/use$/.test(new URL(request.url()).pathname)) uses.push(request.headers()["idempotency-key"]); });
@@ -488,6 +510,7 @@ export const scenarios = [
       await screenshot(page, "live-take-used-1440");
       await page.click('.toast [data-act="undo"]');
       await page.waitForSelector('.insp .take[data-take="2"][data-current="true"]', { timeout: 10000 });
+      expect(keys.length === 3, `Reading, using or undoing a take bought another generation: ${JSON.stringify(keys)}`);
     },
   },
   {

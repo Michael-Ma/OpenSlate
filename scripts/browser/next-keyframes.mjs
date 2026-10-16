@@ -79,7 +79,9 @@ export const scenarios = [
       if (await page.locator(".banner.check").count()) throw new Error("The app check is shown while a Director note is open");
       // Card callouts: amber chips with the note letters; the app check's chip on 2.3 gives way to note b.
       await expectText(page, '[data-card="shot-2-2"] .anno[data-note="note-a"]', /a\s*Mara's coat came out maroon/);
-      await expectText(page, '[data-card="shot-2-2"] [data-act="note-regenerate"]', /Regenerate 2\.2/);
+      // The card's link is one short line with its price; its tooltip and spoken name still say which shot.
+      await expectText(page, '[data-card="shot-2-2"] [data-act="note-regenerate"]', /^New take · about \$0\.04\s*· 2\.2$/);
+      if (await page.locator('[data-card="shot-2-2"] [data-act="note-regenerate"]').getAttribute("title") !== "Regenerate 2.2 · about $0.04") throw new Error("The card link's tooltip does not name the full purchase");
       await expectText(page, '[data-card="shot-2-3"] .anno[data-note="note-b"]', /b\s*The 2\.3 line/);
       if (await page.locator('[data-card="shot-2-3"] .anno.check').count()) throw new Error("The app check's chip repeats note b on 2.3");
       await expectText(page, '[data-card="shot-2-1"] .stl', /Opened/);
@@ -341,8 +343,19 @@ export const scenarios = [
       await noPageScroll(page, 390, { vertical: false });
       await page.click('.banner [data-act="note-choice"][data-kind="edit"]');
       await page.waitForSelector('.insp form[data-form="narration"]');
+      const line = page.locator('.insp form[data-form="narration"] textarea[data-field="line"]');
+      const words = "Keep these unsaved words while I review the scene controls.";
+      await line.fill(words);
       await noPageScroll(page, 390, { vertical: false });
-      await page.click(`[data-act="scene"][data-scene="${scene(3)}"]`);
+      const departure = page.locator(`[data-act="scene"][data-scene="${scene(3)}"]`);
+      if (!(await departure.isDisabled())) throw new Error("Scene 3 is available while 2.3 has an unsaved narration edit");
+      if ((await departure.getAttribute("title")) !== "Save or cancel the edit to 2.3 first") throw new Error("The scene pill does not explain the inspector edit hold");
+      if ((await line.inputValue()) !== words) throw new Error("The scene edit hold lost the person's unsaved words");
+      if ((await page.locator(".preview").getAttribute("data-shot")) !== shot("2.3")) throw new Error("The scene edit hold changed the selected shot");
+      await page.click('.insp [data-act="cancel-edit"]');
+      await page.waitForSelector('.insp form[data-form="narration"]', { state: "detached" });
+      if (await departure.isDisabled()) throw new Error("Scene 3 stays disabled after the person cancelled the edit");
+      await departure.click();
       await page.waitForSelector('[data-act="make-keyframes"]');
       await noPageScroll(page, 390, { vertical: false });
       await screenshot(page, "narrow-390-scene-3");

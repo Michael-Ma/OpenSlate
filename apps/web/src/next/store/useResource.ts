@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../api/client.ts";
+import { resourceFor, resourceIdentity, type OwnedResource } from "../model/settings-ownership.ts";
 import { useStore, useStudio } from "./react.tsx";
 
 export interface Resource<T> {
@@ -18,18 +19,20 @@ export function useResource<T>(path: string | null): Resource<T> {
   const store = useStore();
   const cursor = useStudio((s) => s.overview?.cursor ?? s.snapshot?.cursor ?? 0);
   const projectId = useStudio((s) => s.projectId);
-  const [state, setState] = useState<{ data: T | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: !!path });
+  const projectEpoch = useStudio((s) => s.projectEpoch);
+  const identity = resourceIdentity(projectId, path, true, projectEpoch);
+  const [state, setState] = useState<OwnedResource<T>>({ identity, data: null, error: null, status: null, loading: !!identity });
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
-    if (!path || !projectId) return;
+    if (!path || !identity) { setState((s) => resourceFor(s, null)); return; }
     const controller = new AbortController();
-    setState((s) => ({ ...s, loading: true }));
+    setState((s) => ({ ...resourceFor(s, identity), loading: true }));
     store.read<T>(path, controller.signal).then(
-      (data) => { if (!controller.signal.aborted) setState({ data, error: null, loading: false }); },
-      (error: unknown) => { if (!controller.signal.aborted) setState((s) => ({ ...s, error: error instanceof ApiError ? error.code : "NETWORK_ERROR", loading: false })); },
+      (data) => { if (!controller.signal.aborted) setState({ identity, data, error: null, status: null, loading: false }); },
+      (error: unknown) => { if (!controller.signal.aborted) setState((s) => ({ ...resourceFor(s, identity), error: error instanceof ApiError ? error.code : "NETWORK_ERROR", status: error instanceof ApiError ? error.status : null, loading: false })); },
     );
     return () => controller.abort();
-  }, [store, path, projectId, cursor, nonce]);
+  }, [store, path, identity, cursor, nonce]);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
-  return { ...state, reload };
+  return { ...resourceFor(state, identity), reload };
 }

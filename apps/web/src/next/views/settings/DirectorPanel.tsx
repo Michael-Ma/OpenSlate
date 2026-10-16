@@ -1,12 +1,15 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { CODEX_CHECK_TIMEOUT_MS, codexProgram, directorRequest, draftFrom, draftProblems, reviewRequest, reviewSwitch, type DirectorDraft, type DirectorReview, type DirectorSetup } from "../../model/settings-director.ts";
+import { errorMsg } from "../../i18n/translate.ts";
+import { CODEX_CHECK_TIMEOUT_MS, afterDirectorSave, codexProgram, directorForm, directorFormConflict, directorFormRequest, draftProblems, reviewRequest, reviewSwitch, type DirectorDraft, type DirectorForm, type DirectorReview, type DirectorSetup } from "../../model/settings-director.ts";
 import { msg } from "../../model/types.ts";
+import { settingsRequest } from "../../model/settings-ownership.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
 import type { Resource } from "../../store/useResource.ts";
 import { DIRECTOR_PRESS } from "./ModelsPanel.tsx";
 import { Panel, ReadState } from "./parts.tsx";
 import type { Read } from "./useRead.ts";
+import { useProjectDraft } from "./useProjectDraft.ts";
 
 const REVIEW_PRESS = "settings:director-review";
 
@@ -18,7 +21,10 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
   const store = useStore();
   const { t, tm } = useI18n();
   const presses = useStudio((s) => s.pending);
-  const [draft, setDraft] = useState<DirectorDraft | null>(null);
+  const projectId = useStudio((s) => s.projectId);
+  const [form, setForm] = useProjectDraft<DirectorForm>("director");
+  const draft = form?.value ?? null;
+  const setDraft = (value: DirectorDraft) => setForm((current) => current ? { ...current, value } : null);
   const data = setup.data;
   const native = data?.selection.mode === "native";
   const saving = !!presses[DIRECTOR_PRESS];
@@ -27,22 +33,25 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
 
   const edit = () => {
     if (!data) return;
-    setDraft(draftFrom(data));
+    setForm(directorForm(data));
     requestAnimationFrame(() => document.getElementById(`${ids}-bin`)?.focus());
   };
   const cancel = () => {
-    setDraft(null);
+    setForm(null);
     requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-act='director-edit']")?.focus());
   };
   const problems = draft ? draftProblems(draft) : [];
+  const conflict = !!form && !!data && directorFormConflict(form, data);
 
   const save = async () => {
-    if (!data || !draft || problems.length) return;
-    const request = directorRequest(data, { mode: "native", binaryPath: draft.binaryPath, model: draft.model, codexHome: draft.codexHome });
+    if (!data || !form || problems.length || conflict) return;
+    const submitted = form;
+    const request = settingsRequest(projectId, directorFormRequest(submitted));
     // Saving runs Codex's setup check on this computer, which can take a while the first time.
     const result = await store.command<DirectorSetup>(DIRECTOR_PRESS, request.body, () => request, msg("set.toast.director_saved"), { timeoutMs: CODEX_CHECK_TIMEOUT_MS });
-    if (!result) return;
-    setDraft(null);
+    if (!result) { if (store.getState().projectId === projectId) setup.reload(); return; }
+    setForm((current) => afterDirectorSave(current, submitted, result));
+    if (store.getState().projectId !== projectId) return;
     setup.reload();
     requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-act='director-edit']")?.focus());
   };
@@ -51,7 +60,7 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
     if (toggle.disabled) return;
     const next = !toggle.on;
     const head = store.getState().snapshot?.project.headVersion ?? 0;
-    const request = reviewRequest(next, head);
+    const request = settingsRequest(projectId, reviewRequest(next, head));
     const result = await store.command<DirectorReview>(REVIEW_PRESS, request.body, () => request, msg(next ? "set.toast.review_on" : "set.toast.review_off"));
     if (result) review.reload();
   };
@@ -77,6 +86,15 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
       if (draft.model && !choices.includes(draft.model)) choices.unshift(draft.model);
       return (
         <form className="inline-form" data-form="director" aria-label={t("set.director.form")} onSubmit={(event) => { event.preventDefault(); void save(); }}>
+          {conflict && data && (
+            <div className="impact-row" data-director-conflict role="status">
+              <div className="impact"><span className="ic" aria-hidden="true">!</span><span>{tm(errorMsg("DIRECTOR_SELECTION_STALE"))} {t("set.director.saved_selection", { model: data.selection.mode === "fake" ? t("set.model.demo_director") : data.selection.model ?? data.defaults.model, program: codexProgram(data), home: data.selection.codexHome ?? data.defaults.codexHome ?? t("set.director.home_default") })}</span></div>
+              <div className="impact-acts">
+                <button type="button" className="pill" data-act="director-keep" onClick={() => setForm((current) => current ? { ...current, baseline: structuredClone(data) } : null)}>{t("set.director.keep")}</button>
+                <button type="button" className="pill" data-act="director-use-saved" onClick={() => setForm(directorForm(data))}>{t("set.director.use_saved")}</button>
+              </div>
+            </div>
+          )}
           <label className="field">
             <span className="label">{t("set.director.field.program")}</span>
             <input id={`${ids}-bin`} className="input mono" value={draft.binaryPath} spellCheck={false} autoComplete="off" aria-invalid={!!fieldProblem("binaryPath")} aria-describedby={fieldProblem("binaryPath") ? hint("binaryPath") : undefined} onChange={(e) => setDraft({ ...draft, binaryPath: e.target.value })} />
@@ -100,7 +118,7 @@ export function DirectorPanel({ setup, review, film, offline }: { setup: Resourc
           </label>
           <div className="impact"><span className="ic" aria-hidden="true">i</span><span>{t("set.director.save_note")}</span></div>
           <div className="form-acts">
-            <button type="submit" className="pill primary" data-act="director-save" disabled={!!offline || saving || problems.length > 0} aria-describedby={reasons} title={offline ?? undefined}>{saving ? t("set.saving") : t("set.save")}</button>
+            <button type="submit" className="pill primary" data-act="director-save" disabled={!!offline || saving || conflict || problems.length > 0} aria-describedby={reasons} title={offline ?? undefined}>{saving ? t("set.saving") : t("set.save")}</button>
             <button type="button" className="pill" data-act="director-cancel" onClick={cancel}>{t("set.cancel")}</button>
           </div>
         </form>

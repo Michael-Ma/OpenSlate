@@ -6,7 +6,7 @@ import { errorMsg } from "../../i18n/translate.ts";
 import {
   demoRetryable, filmsView, livePendingDemo, parsePendingDemo, pickerProjects, runningJobs, sameProjects, PENDING_DEMO_KEY, type FilmRow as Row, type OpenView, type PendingDemo,
 } from "../../model/start.ts";
-import { openDemo, renameFilm, setArchived, DEMO_UNAVAILABLE, type Film } from "../../model/start-commands.ts";
+import { openDemo, showDemoFilm, renameFilm, setArchived, DEMO_UNAVAILABLE, type Film } from "../../model/start-commands.ts";
 import { createdMsg, planOffReason, setupStatus, type CreatedOutcome, type FirstStep } from "../../model/start-new.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { useStore, useStudio } from "../../store/react.tsx";
@@ -131,6 +131,8 @@ export function StartView() {
 
   const demo = async () => {
     if (demoBusy || offline || demoOff) return;
+    const { projectId, projectEpoch } = store.getState();
+    const origin = { projectId, projectEpoch };
     setDemoBusy(true);
     try {
       const { film, filled, code } = await openDemo(store, t("start.demo.film_name"), pendingDemo ? { id: pendingDemo.id, name: pendingDemo.name } : null);
@@ -143,9 +145,8 @@ export function StartView() {
         return;
       }
       saveDemo(null);
-      store.dispatch({ type: "toast", message: msg("start.demo.opened", { name: film.name }), tone: "info" });
       remember(film);
-      openFilm(film.id, "keyframes");
+      await showDemoFilm(store, film, origin);
     } finally {
       setDemoBusy(false);
     }

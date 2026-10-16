@@ -12,6 +12,14 @@ export interface EditDraft {
   value: string;
   /** Present while the save is in flight. */
   saving?: boolean;
+  /** Opening identity; retained while typing, never borrowed from a refresh. */
+  projectId?: string;
+  expectedHeadVersion?: number;
+  baselineValue?: string;
+  baselineMotion?: string;
+  baselineFrames?: number;
+  secondsText?: string;
+  revision?: number;
 }
 
 export interface Toast {
@@ -43,6 +51,7 @@ export interface StudioState {
   connection: Connection;
   projects: ProjectSummary[];
   projectId: string | null;
+  projectEpoch: number;
   snapshot: ProjectSnapshot | null;
   overview: GenerationOverview | null;
   director: DirectorStatus | null;
@@ -65,6 +74,7 @@ export interface StudioState {
   /** The message being written: its words, what it points at, and the pictures it shows the Director (at most four). */
   composer: { text: string; targets: Target[]; sending: boolean; images: ComposerImage[] };
   edit: EditDraft | null;
+  inspectorDrafts: Record<string, EditDraft>;
   /** Presses in flight, keyed by press id (e.g. "confirm:scene-2"); a control is disabled while its press is pending. */
   pending: Record<string, true>;
   toast: Toast | null;
@@ -76,6 +86,7 @@ export const initialState: StudioState = {
   connection: "connecting",
   projects: [],
   projectId: null,
+  projectEpoch: 0,
   snapshot: null,
   overview: null,
   director: null,
@@ -89,6 +100,7 @@ export const initialState: StudioState = {
   directorOpen: false,
   composer: { text: "", targets: [], sending: false, images: [] },
   edit: null,
+  inspectorDrafts: {},
   pending: {},
   toast: null,
   recovery: NO_RECOVERY,
