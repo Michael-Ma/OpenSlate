@@ -65,6 +65,27 @@ export function keepMine<T extends HeldFields>(held: Held<T>, live: T): Held<T> 
   return { base, draft: held.draft };
 }
 
+/** The fields the person changed (more than surrounding spaces), in the draft's order. */
+export function editedKeys<T extends HeldFields>(held: Held<T>): (keyof T & string)[] {
+  return keys(held.draft).filter((key) => edited(held, key));
+}
+
+/** The person changed something: closing the editor would throw their text away. */
+export const touched = <T extends HeldFields>(held: Held<T> | undefined): boolean => !!held && editedKeys(held).length > 0;
+
+/**
+ * A save of `sent` (what the editor showed when Save was pressed) was answered. When the person typed on after
+ * pressing Save (the reply was slow or lost), that newer text stays, now held against what was saved, so the saved
+ * values are not taken for someone else's change. Null when nothing is left to save: the editor closes.
+ */
+export function afterSave<T extends HeldFields>(held: Held<T>, sent: T): Held<T> | null {
+  const newer = editedKeys(held).filter((key) => !same(held.draft[key], sent[key]));
+  if (!newer.length) return null;
+  const draft = { ...sent };
+  for (const key of newer) draft[key] = held.draft[key];
+  return { base: { ...sent }, draft };
+}
+
 /** Use saved text: the conflicting fields take the saved values. */
 export function takeSaved<T extends HeldFields>(held: Held<T>, live: T): Held<T> {
   const base = { ...held.base };

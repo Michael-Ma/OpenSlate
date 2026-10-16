@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { change, conflicts, hold, keepMine, shown, takeSaved } from '../../src/next/model/plan-conflict.ts';
+import { afterSave, change, conflicts, editedKeys, hold, keepMine, shown, takeSaved, touched } from '../../src/next/model/plan-conflict.ts';
 
 const saved = { purpose: 'Mara at the counter.', motion: 'Static', seconds: 5 };
 
@@ -56,4 +56,39 @@ test('numbers compare to a millionth', () => {
   const typed = change(hold(saved), saved, 'seconds', 7);
   assert.deepEqual(conflicts(typed, { ...saved, seconds: 5 + 1e-9 }), []);
   assert.deepEqual(conflicts(typed, { ...saved, seconds: 8 }), ['seconds']);
+});
+
+test('a draft is touched once the person changed a field; spaces alone or typing it back is no change', () => {
+  assert.equal(touched(undefined), false);
+  assert.equal(touched(hold(saved)), false);
+  assert.equal(touched(change(hold(saved), saved, 'purpose', ' Mara at the counter. ')), false);
+  const typed = change(change(hold(saved), saved, 'motion', 'Slow push-in'), saved, 'seconds', 6);
+  assert.deepEqual(editedKeys(typed), ['motion', 'seconds']);
+  assert.equal(touched(change(typed, saved, 'motion', 'Static')), true, 'seconds is still changed');
+  // Use saved text leaves nothing changed; Keep my text keeps it changed.
+  const now = { ...saved, motion: 'Slow pan left', seconds: 5 };
+  const one = change(hold(saved), saved, 'motion', 'Slow push-in');
+  assert.equal(touched(takeSaved(one, now)), false);
+  assert.equal(touched(keepMine(one, now)), true);
+});
+
+test('after a save is answered the editor closes, unless the person typed on while the reply was awaited', () => {
+  const typed = change(hold(saved), saved, 'purpose', 'Mine.');
+  const sent = shown(typed, saved);
+  assert.equal(afterSave(typed, sent), null, 'nothing newer: close');
+  assert.equal(afterSave(change(typed, saved, 'purpose', 'Mine. '), sent), null, 'spaces are not newer text');
+  // Typed on after Save: the newer text stays, held against what was saved, so it is no conflict.
+  const later = change(typed, saved, 'purpose', 'Mine, and more.');
+  const rest = afterSave(later, sent);
+  const savedNow = { ...saved, purpose: 'Mine.' };
+  assert.deepEqual(rest.base, sent);
+  assert.equal(shown(rest, savedNow).purpose, 'Mine, and more.');
+  assert.deepEqual(conflicts(rest, savedNow), []);
+  assert.deepEqual(editedKeys(rest), ['purpose']);
+  // A field changed only before Save is saved; one typed after Save stays.
+  const two = change(change(hold(saved), saved, 'purpose', 'Mine.'), saved, 'motion', 'Slow push-in');
+  const sentTwo = shown(two, saved);
+  const afterTwo = afterSave(change(two, saved, 'seconds', 7), sentTwo);
+  assert.deepEqual(editedKeys(afterTwo), ['seconds']);
+  assert.equal(shown(afterTwo, { ...sentTwo }).seconds, 7);
 });

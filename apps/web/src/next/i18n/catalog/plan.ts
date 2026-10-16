@@ -16,6 +16,7 @@ export const planMessages = {
   "plan.guard.offline": { en: "Can't reach the studio. This works again once it's back.", zh: "连不上工作室，恢复连接后可用。" },
   "plan.guard.import": { en: "A written plan is waiting for review. Confirm or discard it first.", zh: "有一份书面计划在等你审阅，请先确认或放弃。" },
   "plan.guard.stopped": { en: "Stopped. Continue first.", zh: "已停止，请先继续。" },
+  "plan.guard.unconfirmed": { en: "A change is not confirmed yet: retry it or dismiss it first.", zh: "有一项修改尚未确认：请先重试或关闭它。" },
 
   // ---- brief and story
   "plan.brief": { en: "Brief", zh: "简介" },
@@ -228,7 +229,26 @@ export const planMessages = {
   "plan.unconfirmed.still": { en: "Still no answer. Check that the studio is running, then retry.", zh: "仍然没有响应。请确认工作室仍在运行，然后重试。" },
   "plan.unconfirmed.retry": { en: "Retry the same request", zh: "重试同一个请求" },
   "plan.unconfirmed.dismiss": { en: "Dismiss", zh: "关闭" },
-  "plan.unconfirmed.first": { en: "Retry the same request first.", zh: "请先重试同一个请求。" },
+  "plan.unconfirmed.first": { en: "Retry the same request, or dismiss it, first.", zh: "请先重试同一个请求，或将其关闭。" },
+
+  // ---- an open draft: moved or deleted underneath, or left for another editor
+  "plan.place.brief": { en: "the brief", zh: "简介" },
+  "plan.place.story": { en: "the story", zh: "故事" },
+  "plan.place.title": { en: "Scene {scene}'s title", zh: "第 {scene} 场的标题" },
+  "plan.place.direction": { en: "Scene {scene}'s direction", zh: "第 {scene} 场的方向" },
+  "plan.place.shot": { en: "{shot}", zh: "{shot}" },
+  "plan.edit.moved": { en: "Moved from {from} to {to} while you were editing. Your text is kept.", zh: "你编辑时，这个镜头从 {from} 移到了 {to}。你的文字已保留。" },
+  "plan.kept.label": { en: "Your unsaved text", zh: "你未保存的文字" },
+  "plan.kept.shot": { en: "**{shot} was deleted** while you were editing it. Your text is kept here so you can copy it.", zh: "**{shot} 已被删除**，当时你正在编辑它。你的文字保留在这里，可以复制。" },
+  "plan.kept.scene": { en: "**Scene {scene} was deleted** while you were editing it. Your text is kept here so you can copy it.", zh: "**第 {scene} 场已被删除**，当时你正在编辑它。你的文字保留在这里，可以复制。" },
+  "plan.kept.copy": { en: "Copy text", zh: "复制文字" },
+  "plan.kept.copied": { en: "Copied", zh: "已复制" },
+  "plan.kept.copy_failed": { en: "Couldn't copy. Select the text and copy it yourself.", zh: "无法复制，请选中文字自行复制。" },
+  "plan.kept.close": { en: "Close", zh: "关闭" },
+  "plan.discard.title": { en: "Discard your changes to {name}?", zh: "放弃对“{name}”的修改？" },
+  "plan.discard.body": { en: "They haven't been saved. Keep editing to save them first.", zh: "这些修改还没有保存。继续编辑可以先保存。" },
+  "plan.discard.keep": { en: "Keep editing", zh: "继续编辑" },
+  "plan.discard.confirm": { en: "Discard changes", zh: "放弃修改" },
 
   // ---- moving a shot to another scene
   "plan.move.title": { en: "Move {shot} to another scene", zh: "把 {shot} 移到另一场" },
