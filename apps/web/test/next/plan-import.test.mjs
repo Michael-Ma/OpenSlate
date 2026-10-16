@@ -93,3 +93,15 @@ test("the review shows the proposed brief, story and narration script beside the
   assert.deepEqual(reviewTexts(now, now).map((text) => [text.field, text.changed]), [['brief', false], ['story', false]]);
   assert.deepEqual(importReview(now, next, 30).texts.map((text) => text.field), ['brief', 'story', 'script']);
 });
+
+test('a missing prompt says which one is missing', () => {
+  const now = project();
+  const next = structuredClone(now);
+  next.shots[0] = { ...next.shots[0], imagePrompt: 'The ticket office, lamp lit.', videoPrompt: '' };
+  const details = importReview(now, next, 30).scenes[0].rows[0].details;
+  assert.deepEqual(details.at(-1), { id: 'plan.import.detail.video_prompt_none' });
+  const added = structuredClone(now);
+  added.shots.push({ ...added.shots[0], id: 'new-shot', imagePrompt: '', videoPrompt: '' });
+  const row = importReview(now, added, 30).scenes[0].rows.find((item) => item.shotId === 'new-shot');
+  assert.deepEqual(row.details.slice(-2), [{ id: 'plan.import.detail.prompt_none' }, { id: 'plan.import.detail.video_prompt_none' }]);
+});

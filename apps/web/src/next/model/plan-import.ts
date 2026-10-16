@@ -136,7 +136,7 @@ function changes(before: ProjectShot, after: ProjectShot, fps: number): Msg[] {
 
 const promptDetail = (id: "plan.import.detail.prompt" | "plan.import.detail.video_prompt", prompt: string | undefined): Msg => {
   const text = written(id === "plan.import.detail.prompt" ? "imagePrompt" : "videoPrompt", prompt);
-  return text ? msg(id, { text }) : msg("plan.import.detail.prompt_none");
+  return text ? msg(id, { text }) : msg(id === "plan.import.detail.prompt" ? "plan.import.detail.prompt_none" : "plan.import.detail.video_prompt_none");
 };
 
 /** A new shot: its framing, length and line, then what happens and both prompts. */

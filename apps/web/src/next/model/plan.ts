@@ -290,6 +290,17 @@ export function planOutline(snapshot: ProjectSnapshot, overview: GenerationOverv
   };
 }
 
+/** Text compared for meaning: case, spaces and closing punctuation aside. */
+const gist = (text: string) => text.trim().replace(/[\s.。!！?？…]+$/u, "").replace(/\s+/g, " ").toLocaleLowerCase();
+
+/**
+ * The row's action line, or "" when it only repeats the purpose: real films often store the same sentence in both,
+ * and the row would say it twice.
+ */
+export function actionLine(row: Pick<ShotRowView, "purpose" | "action">): string {
+  return row.action && gist(row.action) !== gist(row.purpose) ? row.action : "";
+}
+
 /** Find a row's scene and position, for moves and labels. */
 export function locate(outline: PlanOutline, shotId: string): { scene: SceneView; row: ShotRowView } | null {
   for (const scene of outline.scenes) {

@@ -4,7 +4,7 @@ import { lastFerryOverview, lastFerrySnapshot, sceneId, shotId } from '../../src
 import { catalog } from '../../src/next/i18n/messages.ts';
 import {
   addedScene, addedShot, clipPill, clockText, deleteSceneFacts, deleteShotFacts, keyframePill, locate, mediaCountMsgs, mediaCounts,
-  directedPrompt, narrationView, planOutline, promptText, promptToSave, sceneChoices, sceneMove, shotDrop, shotMove, written,
+  actionLine, directedPrompt, narrationView, planOutline, promptText, promptToSave, sceneChoices, sceneMove, shotDrop, shotMove, written,
 } from '../../src/next/model/plan.ts';
 
 const golden = () => planOutline(lastFerrySnapshot(), lastFerryOverview());
@@ -184,4 +184,13 @@ test('the Move dialog offers every other scene with the number the shot gets fir
   overview.scenes.push({ ...overview.scenes[2], sceneId: 'scene-4', ordinal: 4, title: 'Epilogue', shotIds: [] });
   const empty = sceneChoices(planOutline(lastFerrySnapshot(), overview), shotId('2.2')).at(-1);
   assert.deepEqual([empty.first.to, empty.last.to, empty.first.beforeId], ['4.1', '4.1', undefined]);
+});
+
+test('the action line is left out when it only repeats the purpose', () => {
+  assert.equal(actionLine({ purpose: 'A slower pour', action: 'A slower pour' }), '');
+  assert.equal(actionLine({ purpose: 'A slower pour.', action: ' a slower  pour ' }), '', 'case, spaces and the closing stop aside');
+  assert.equal(actionLine({ purpose: '慢慢倒。', action: '慢慢倒' }), '');
+  assert.equal(actionLine({ purpose: 'Mara pays.', action: 'She slides three coins across.' }), 'She slides three coins across.');
+  assert.equal(actionLine({ purpose: '', action: 'She slides three coins across.' }), 'She slides three coins across.');
+  assert.equal(actionLine({ purpose: 'Mara pays.', action: '' }), '');
 });

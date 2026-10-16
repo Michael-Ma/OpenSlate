@@ -2,7 +2,7 @@ import type { StudioArtifactRef } from "@openslate/core/public";
 import { useId, useState, type DragEvent, type HTMLAttributes } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { Picture } from "../../keyframes/parts.tsx";
-import type { NoteChip, ShotRowView, StatusPillView } from "../../model/plan.ts";
+import { actionLine, type NoteChip, type ShotRowView, type StatusPillView } from "../../model/plan.ts";
 import type { Msg } from "../../model/types.ts";
 import { Menu, type MenuItem } from "./Menu.tsx";
 
@@ -132,7 +132,8 @@ export function ShotRow({ row, guard, busy, flash, canMoveScene, dropBefore, dro
       <div className="shot-main">
         <b>{row.purpose || <span className="muted">{t("plan.shot.no_purpose")}</span>}</b>
         <div className="shot-meta">{t("plan.shot.meta", { framing: row.framing || t("plan.shot.not_written"), seconds: row.seconds, motion })}</div>
-        {row.action ? <div className="shot-action" data-field="action">{t("plan.shot.action", { action: row.action })}</div> : null}
+        {/* Said only when it adds to the purpose: many films store the same sentence in both. */}
+        {actionLine(row) ? <div className="shot-action" data-field="action">{t("plan.shot.action", { action: actionLine(row) })}</div> : null}
         <div className="shot-prompt">{t("plan.shot.picture", { prompt: row.prompt || t("plan.shot.not_written") })}</div>
         <button type="button" className="link-btn" data-act="toggle-prompts" data-shot={row.shotId} aria-expanded={promptsOpen} aria-controls={promptsOpen ? promptsId : undefined} onClick={() => setPromptsOpen((open) => !open)}>
           {t(promptsOpen ? "plan.shot.prompts_hide" : "plan.shot.prompts")}<span className="sr"> · {row.label}</span>
