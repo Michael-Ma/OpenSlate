@@ -15,12 +15,88 @@
 .composer textarea:disabled{cursor:not-allowed}
 .at-btn:disabled{color:var(--muted);cursor:not-allowed}
 
-/* thread */
+/* thread: the log scrolls inside its wrap; "View new messages" floats over its bottom edge */
+.thread-wrap{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+.new-messages{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:3;box-shadow:0 6px 18px rgba(0,0,0,.45)}
 .dir-empty{margin:0 0 4px;color:var(--muted);font-size:13px;line-height:1.5}
 .bubble{white-space:pre-line;overflow-wrap:anywhere}
 .dir-text{overflow-wrap:anywhere}
 .dir-text p{margin:0;white-space:pre-line}
 .dir-text p + p{margin-top:8px}
+
+/* chips that open their scene or shot */
+button.atchip{border:0;font:inherit;font-weight:600;line-height:inherit;cursor:pointer}
+button.atchip:hover{background:var(--track)}
+.md .atchip,.bubble span + .atchip,.bubble .atchip + span{margin:0 1px}
+.chips .atchip-wrap{display:inline-flex;align-items:center;background:var(--chip);border-radius:6px}
+.chips .atchip-wrap .atchip{margin-right:0;background:none}
+.chips .atchip-wrap .atchip:hover{background:var(--track)}
+.atchip-x{background:none;border:0;color:var(--text-2);padding:0 6px 0 2px;border-radius:4px;line-height:1}
+.atchip-x:hover{color:var(--text)}
+
+/* pictures shown to the Director: a thumbnail and a name, in the composer and in the sent bubble */
+.pic-chips{list-style:none;margin:0 0 8px;padding:0;display:flex;gap:6px;flex-wrap:wrap}
+.pic-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;background:var(--chip);border-radius:8px;padding:3px 4px 3px 3px;font-size:12.5px;font-weight:600;color:var(--text);vertical-align:middle}
+.pic-chip.problem{outline:1px dashed var(--text-2);outline-offset:-1px}
+.pic-chip .pic-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.pic-chip button{background:none;border:0;color:var(--text-2);padding:0 4px;border-radius:4px;line-height:1}
+.pic-chip button:hover{color:var(--text)}
+.pic-thumb{display:block;width:36px;height:24px;border-radius:5px;object-fit:cover;background:var(--raised-2);flex:none}
+.pic-thumb.failed{background:repeating-linear-gradient(135deg,var(--raised-2) 0 4px,var(--surface-stripe) 4px 8px)}
+.bubble-pictures{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;white-space:normal}
+.bubble-pictures .pic-chip{padding:2px 7px}
+.bubble-picture .pic-thumb{width:84px;height:54px;border-radius:8px}
+.composer-draft{margin:6px 4px 0;font-size:12px;line-height:1.4;color:var(--muted)}
+
+/* replies as Markdown: React elements only; tables and code scroll sideways in their own box */
+.md ul,.md ol{margin:6px 0 0;padding-left:22px}
+.md li{margin:2px 0}
+.md li > p{margin:0}
+.md li > p + p{margin-top:4px}
+.md > :first-child{margin-top:0}
+.md p + ul,.md p + ol,.md ul + p,.md ol + p,.md pre + p,.md .md-table + p,.md blockquote + p{margin-top:8px}
+.md .md-h{margin:10px 0 2px}
+.md .md-h:first-child{margin-top:0}
+.md .md-h1{font-size:15.5px}.md .md-h2{font-size:14.5px}.md .md-h3{font-size:14px}
+.md strong{font-weight:700;color:var(--text)}
+.md del{color:var(--text-2)}
+.md a{color:var(--text);text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--text-2)}
+.md a:hover{text-decoration-color:var(--text)}
+.md .md-code,.md pre{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:12.5px}
+.md .md-code{background:var(--raised-2);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere}
+.md pre{margin:8px 0 0;background:var(--sunken);border:1px solid var(--hairline);border-radius:10px;padding:9px 11px;overflow-x:auto;white-space:pre;line-height:1.45}
+.md pre code{white-space:pre}
+.md blockquote{margin:8px 0 0;padding:0 0 0 11px;border-left:3px solid var(--track);color:var(--text-2)}
+.md hr{border:0;border-top:1px solid var(--hairline);margin:10px 0}
+.md-table{margin-top:8px;max-width:100%;overflow-x:auto;border:1px solid var(--hairline);border-radius:10px}
+.md-table table{border-collapse:collapse;font-size:12.5px;min-width:100%}
+.md-table th,.md-table td{padding:6px 10px;border-bottom:1px solid var(--hairline);text-align:left;vertical-align:top;white-space:nowrap}
+.md-table th{color:var(--text-2);font-weight:600;background:var(--raised)}
+.md-table tr:last-child td{border-bottom:0}
+.md .md-image{color:var(--text-2)}
+
+/* a reply that needs attention: neutral, a filled white "!" (failures are never red, and amber is the Director's) */
+.dir-attention{display:flex;gap:9px;align-items:flex-start;margin-top:8px;border:1px solid var(--track);background:var(--raised);border-radius:10px;padding:8px 11px;font-size:12.5px;line-height:1.45;color:var(--text-2)}
+.dir-attention .mark{flex:none;width:16px;height:16px;border-radius:50%;background:var(--select);color:var(--select-ink);display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px}
+.dir-attention b{display:block;color:var(--text);font-weight:600}
+.dir-attention span{display:block}
+.dir-attention .words{overflow-wrap:anywhere}
+.entry[data-who="you"] .dir-attention{margin-left:auto;max-width:90%}
+
+/* an unfinished Director edit holding shots: the studio's fact, so neutral */
+.dir-held{border:1px solid var(--track);background:var(--raised);border-radius:12px;padding:10px 13px 11px;margin-top:10px;line-height:1.5}
+.dir-held b{font-weight:600}
+.dir-held p{margin:3px 0 0;color:var(--text-2);font-size:12.5px}
+.dir-held .row{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:8px}
+.dir-held .why{color:var(--muted);font-size:12px;line-height:1.35;margin-right:auto}
+
+/* Show the Director on the Keyframes preview: top right, over the picture; on a phone it steps down a row when the
+   top left also holds the Open button, so the two never overlap */
+.preview .pv-show{position:absolute;right:12px;top:12px;z-index:2}
+@media (max-width: 899px){
+  .preview .pv-show{right:8px;top:8px}
+  .preview:has(.pv-top [data-act="open-frame"]) .pv-show{top:44px}
+}
 
 /* the Director's lettered notes (studio.css has .note, .letter, .note.done, .handled) */
 .note-text{white-space:pre-line;overflow-wrap:anywhere}
@@ -49,8 +125,6 @@
 .composer textarea{display:block;overflow-y:hidden;max-height:none}
 .composer textarea[readonly]{color:var(--text-2)}
 .chips .atchip{display:inline-flex;align-items:center}
-.chips .atchip button{border-radius:4px;line-height:1}
-.chips .atchip button:hover{color:var(--text)}
 .at-btn:hover:not(:disabled){color:var(--text);border-color:var(--track)}
 .composer-note{margin:6px 4px 0;font-size:12px;line-height:1.4;color:var(--text-2)}
 

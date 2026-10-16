@@ -1,9 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { composerView, filterPicker, mentionAt, pickerItems, removeMention, type PickerItem } from "../model/director.ts";
-import { useStore, useStudio } from "../store/react.tsx";
+import { composerView, filterPicker, labelList, mentionAt, pickerItems, removeMention, type PickerItem } from "../model/director.ts";
+import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { AtPicker, pickerOptionId } from "./AtPicker.tsx";
+import { PictureThumb, RefChip } from "./RefChip.tsx";
+import { forgetDraft } from "./useComposerDraft.ts";
 
 /** About six lines; past that the textarea scrolls. */
 const MAX_LINES = 6;
@@ -14,24 +16,29 @@ const MAX_LINES = 6;
  * Sending follows the shell's write guard (offline or expired turns it off, the draft stays); while the film is
  * stopped Send stays on and the hint says the Director waits for Continue. With no film open (Start) it is off.
  */
-export function Composer({ hasFilm }: { hasFilm: boolean }) {
-  const { t, tm } = useI18n();
+export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: boolean }) {
+  const { t, tm, locale } = useI18n();
   const store = useStore();
+  const mode = useMode();
   const composer = useStudio((s) => s.composer);
   const sendGuard = useGuarded("server");
   const reachable = !sendGuard.disabled;
   const stopped = useStudio((s) => !!s.overview?.stopped);
   const overview = useStudio((s) => s.overview);
-  const view = useMemo(() => composerView(composer, reachable, overview, { open: hasFilm, stopped }), [composer, reachable, overview, hasFilm, stopped]);
+  const director = useStudio((s) => s.director);
+  const view = useMemo(() => composerView(composer, reachable, overview, { open: hasFilm, stopped }, director), [composer, reachable, overview, hasFilm, stopped, director]);
   const items = useMemo(() => pickerItems(overview), [overview]);
 
   const id = useId();
   const listId = `${id}-picker`;
   const noteId = `${id}-note`;
+  const draftId = `${id}-draft`;
+  const scopeId = `${id}-scope`;
   const hintId = `${id}-hint`;
   // The hint describes the textarea when it says why a message waits (offline, stopped), not when it explains @.
   const hintDescribes = !!view.hint && view.hint.id !== "director.composer.hint";
-  const describedBy = [view.problem ? noteId : null, hintDescribes ? hintId : null].filter(Boolean).join(" ") || undefined;
+  const showDraft = restored && !view.off && (!!composer.text || composer.targets.length > 0 || composer.images.length > 0);
+  const describedBy = [view.problem ? noteId : null, hintDescribes ? hintId : null, view.pointsAt.length ? scopeId : null, showDraft ? draftId : null].filter(Boolean).join(" ") || undefined;
   const textarea = useRef<HTMLTextAreaElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const caretAfterRender = useRef<number | null>(null);
@@ -91,7 +98,9 @@ export function Composer({ hasFilm }: { hasFilm: boolean }) {
   const send = () => {
     if (!view.canSend) return;
     closePicker();
-    void store.sendMessage();
+    // Sent while another film was opened meanwhile: that film's kept draft is the message just sent.
+    const projectId = store.getState().projectId;
+    void store.sendMessage().then((sent) => { if (sent && projectId && store.getState().projectId !== projectId) forgetDraft(projectId, mode); });
   };
 
   const onChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -144,13 +153,31 @@ export function Composer({ hasFilm }: { hasFilm: boolean }) {
     <div className="composer-wrap" ref={wrap}>
       {picker.open && <AtPicker listId={listId} items={shown} active={active} query={query} onPick={pick} onActive={(index) => setPicker({ open: true, active: index })} />}
       <div className="composer">
+        {view.pictures.length > 0 && (
+          <ul className="pic-chips" aria-label={t("director.picture.group")}>
+            {view.pictures.map((picture) => {
+              const name = tm(picture.label);
+              return (
+                <li className={`pic-chip${picture.problem ? " problem" : ""}`} key={picture.key} data-picture={picture.image.artifactId} data-source={picture.image.source}>
+                  <PictureThumb picture={picture.image} alt="" />
+                  <span className="pic-name" title={name}>{name}</span>
+                  <button type="button" data-act="remove-picture" aria-label={t("director.picture.remove", { name })} onClick={() => { store.removePicture(picture.key); textarea.current?.focus(); }}>×</button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
         <div className="chips">
-          {view.chips.map((chip) => (
-            <span className="atchip" key={chip.key} data-target={chip.key}>
-              @{tm(chip.label)}
-              <button type="button" data-act="unpoint" aria-label={t("director.composer.remove", { target: tm(chip.label) })} onClick={() => { store.pointAt(chip.target, false); textarea.current?.focus(); }}>×</button>
-            </span>
-          ))}
+          {view.chips.map((chip) => {
+            const label = tm(chip.label);
+            const gone = chip.label.id === "director.target.gone";
+            return (
+              <span className="atchip-wrap" key={chip.key} data-target={chip.key}>
+                <RefChip label={label} target={gone ? null : chip.target} />
+                <button type="button" className="atchip-x" data-act="unpoint" aria-label={t("director.composer.remove", { target: label })} onClick={() => { store.pointAt(chip.target, false); textarea.current?.focus(); }}>×</button>
+              </span>
+            );
+          })}
         </div>
         <label className="sr" htmlFor={`${id}-message`}>{t("director.composer.label")}</label>
         <textarea
@@ -179,6 +206,8 @@ export function Composer({ hasFilm }: { hasFilm: boolean }) {
         </div>
       </div>
       {view.problem && <p className="composer-note" id={noteId} role="status">{tm(view.problem)}</p>}
+      {view.pointsAt.length > 0 && <p className="composer-draft" id={scopeId} data-note="points-at">{t("director.picture.points_at", { shots: labelList(view.pointsAt, locale), n: view.pointsAt.length })}</p>}
+      {showDraft && <p className="composer-draft" id={draftId} data-draft="restored">{t("director.draft.restored")}</p>}
     </div>
   );
 }

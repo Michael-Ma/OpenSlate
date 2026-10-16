@@ -5,6 +5,7 @@ import { useStore, useStudio } from "../store/react.tsx";
 import { Composer } from "./Composer.tsx";
 import { DirectorNotices } from "./DirectorNotices.tsx";
 import { Thread } from "./Thread.tsx";
+import { useComposerDraft } from "./useComposerDraft.ts";
 import "./director.css";
 
 /**
@@ -23,6 +24,7 @@ export function DirectorColumn() {
   const view = useStudio(shownView);
   const hasFilm = useStudio(directorHasFilm);
   const scene = overview ? currentScene(overview, sceneId) : null;
+  const restored = useComposerDraft();
 
   return (
     <aside className="director" id="director" aria-label={t("director.title")} data-film={hasFilm ? "open" : "none"}>
@@ -45,7 +47,7 @@ export function DirectorColumn() {
           </div>
         </div>
       )}
-      <Composer hasFilm={hasFilm} />
+      <Composer hasFilm={hasFilm} restored={restored} />
     </aside>
   );
 }

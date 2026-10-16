@@ -1,7 +1,6 @@
 import { useI18n } from "../i18n/I18n.tsx";
 import type { NoteOpen, ThreadNote } from "../model/director.ts";
-import { NARROW_QUERY, noteOpenView, shownView } from "../model/shell.ts";
-import { useStore } from "../store/react.tsx";
+import { useOpenTarget } from "./useOpenTarget.ts";
 
 /**
  * The Director's lettered notes under the reply that wrote them (DC-18): an amber card per open note,
@@ -12,17 +11,11 @@ import { useStore } from "../store/react.tsx";
  */
 export function NoteCards({ notes }: { notes: ThreadNote[] }) {
   const { t, tm } = useI18n();
-  const store = useStore();
+  const openTarget = useOpenTarget();
   if (!notes.length) return null;
 
-  const open = (target: NoteOpen) => {
-    if (target.kind === "shot") store.focusShot(target.id);
-    else store.focusScene(target.id);
-    const view = shownView(store.getState());
-    if (noteOpenView(view) !== view) store.setView(noteOpenView(view));
-    // On narrow screens the Director is a drawer over the workspace: get out of the way (the shell returns focus).
-    if (window.matchMedia(NARROW_QUERY).matches) store.setDirectorOpen(false);
-  };
+  // On narrow screens the Director is a drawer over the workspace: opening gets out of the way (the shell returns focus).
+  const open = (target: NoteOpen) => openTarget({ kind: target.kind, id: target.id });
 
   return (
     <div className="notes">
