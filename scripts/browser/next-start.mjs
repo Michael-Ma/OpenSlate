@@ -121,6 +121,11 @@ export const scenarios = [
       // Layout from the study: the list starts beside the Director column, rows are at most 900 wide.
       const first = await row(page, "last-ferry").boundingBox();
       expect(Math.abs(first.x - 414) <= 2 && Math.abs(first.width - 900) <= 2, `First row is at ${first.x}, ${first.width} wide; expected 414, 900`);
+      // The head's actions end where the rows end, and the head stands off the first row as the rows do from each other.
+      const actions = await page.locator("main[data-view='start'] .view-head .actions").boundingBox();
+      expect(Math.abs(actions.x + actions.width - (first.x + first.width)) <= 2, `The head's actions end at ${Math.round(actions.x + actions.width)}, the rows at ${Math.round(first.x + first.width)}`);
+      const gap = first.y - (actions.y + actions.height);
+      expect(gap >= 8, `The head is ${Math.round(gap)} px above the first row`);
       await noSidewaysScroll(page);
       await shot(page, "start-films-1440");
 
@@ -139,6 +144,9 @@ export const scenarios = [
       const input = row(page, "night-bus").locator("[data-act='rename-input']");
       await input.waitFor();
       expect(await input.evaluate((el) => el === document.activeElement && el.selectionStart === 0 && el.selectionEnd === el.value.length), "The rename field is not focused with its name selected");
+      // The name field and its Save and Cancel are one height.
+      const heights = await Promise.all(["rename-input", "rename-save", "rename-cancel"].map(async (act) => Math.round((await row(page, "night-bus").locator(`[data-act='${act}']`).boundingBox()).height)));
+      expect(Math.max(...heights) - Math.min(...heights) <= 1, `The rename controls are ${heights.join(", ")} px tall`);
       await shot(page, "start-films-rename-1440");
       await input.fill("Night bus, take two");
       await input.press("Enter");

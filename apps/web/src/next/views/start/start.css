@@ -12,7 +12,8 @@
 .work.start-view { display: flex; flex-direction: column; gap: 0; grid-template-rows: none; overflow: auto; min-height: 0; padding: 10px 22px 18px; }
 .work.start-view > * { flex: none; }
 
-.start-view .view-head { display: flex; align-items: center; gap: 12px; min-height: 36px; flex-wrap: wrap; }
+/* The head lines up with what it acts on: the same width as the list and the welcome cards, and the rows' spacing below it. */
+.start-view .view-head { display: flex; align-items: center; gap: 12px; min-height: 36px; flex-wrap: wrap; max-width: 900px; padding-bottom: 10px; }
 .start-view .view-head h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
 .start-view .view-head h1:focus { outline: none; }
 .start-view .view-head .line { color: var(--text-2); font-size: 13.5px; min-width: 0; }
@@ -38,7 +39,9 @@
 .start-view .ticks i.on { background: var(--green); }
 
 .start-view .rename { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.start-view .rename .input { max-width: 320px; font-size: 15px; font-weight: 700; }
+/* The name field and its Save / Cancel share one compact height. */
+.start-view .rename .input { max-width: 320px; font-size: 15px; font-weight: 700; height: 32px; padding: 4px 10px; }
+.start-view .rename .pill { height: 32px; padding: 0 13px; }
 .start-view .rename .hint { width: 100%; }
 .start-view .input, .start-sheet .input, .start-sheet .textarea {
   width: 100%; min-width: 0; background: var(--raised); border: 1px solid var(--track); border-radius: 10px;
@@ -61,7 +64,7 @@
 .start-view .arch-row .pill { flex: none; }
 
 /* ---------- first run ---------- */
-.start-view .welcome { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 960px; }
+.start-view .welcome { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 900px; }
 .start-view .welcome .panel { display: flex; flex-direction: column; gap: 10px; padding: 18px; }
 .start-view .welcome h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
 .start-view .welcome p { margin: 0; color: var(--text-2); line-height: 1.55; font-size: 13.5px; }
@@ -152,7 +155,7 @@ dialog.start-sheet[open] { display: flex; flex-direction: column; }
   .work.start-view { overflow: visible; padding: 14px 16px 28px; }
   .start-view .view-head { gap: 4px 10px; }
   .start-view .view-head .line { width: 100%; order: 3; }
-  .start-view .view-head { padding-bottom: 8px; }
+  .start-view .view-head { padding-bottom: 8px; max-width: none; }
   .start-view .view-head .actions { margin-left: 0; order: 4; width: 100%; padding-top: 4px; }
   .start-view .film-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .start-view .film-row .acts { justify-content: flex-start; flex-wrap: wrap; }
