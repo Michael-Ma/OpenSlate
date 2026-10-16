@@ -189,6 +189,9 @@ export const scenarios = [
       await expectText(page, '[data-kept="purpose"]', /^Purpose\s*The ferry slips its moorings\.$/i);
       await expectText(page, '[data-kept="videoPrompt"]', /^Video prompt\s*The ferry pulls away; the pier recedes into fog\.$/i);
       expect(!(await page.locator('[data-kept="motion"]').count()), "An untouched field is listed as kept");
+      // Kept text is to copy: it is not drawn as an input (no fill, no box around it).
+      const look = await page.locator('[data-kept="purpose"] dd').evaluate((el) => { const s = getComputedStyle(el); return [s.backgroundColor, s.borderTopWidth, s.borderRightWidth]; });
+      expect(look[0] === "rgba(0, 0, 0, 0)" && look[1] === "0px" && look[2] === "0px", `The kept text looks like an input: ${look}`);
       expect((await active(page)) === "kept-copy", `Focus was not given to Copy (${await active(page)})`);
       await screenshot(page, "kept-draft-1440");
       await page.click('[data-act="kept-copy"]');

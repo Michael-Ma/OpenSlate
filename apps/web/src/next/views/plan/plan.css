@@ -151,6 +151,9 @@
 .plan .scene-empty{padding:12px 16px 12px 50px;color:var(--text-2);font-size:13px;border-top:1px solid var(--hairline)}
 .plan .add-row{padding:10px 14px 12px 16px;border-top:1px solid var(--hairline);display:flex;gap:8px;align-items:center}
 .plan .add-scene{align-self:flex-start}
+/* Turned off, an Add button looks quieter than when on (system.css: a ghost pill keeps no fill; muted text). */
+.plan .pill.ghost:disabled{background:none;border-color:transparent}
+.plan .add-scene:disabled{background:none;border-color:var(--hairline)}
 
 /* ---------- shot rows ---------- */
 .plan .shot-row{display:grid;grid-template-columns:112px minmax(0,1.25fr) minmax(0,1fr) 196px auto;gap:14px;align-items:start;padding:12px 14px 12px 16px;border-top:1px solid var(--hairline);position:relative}
@@ -248,13 +251,18 @@
 .plan .kept-head b{color:var(--text);font-weight:600}
 .plan .kept dl{margin:0;display:flex;flex-direction:column;gap:8px}
 .plan .kept dt{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
-.plan .kept dd{margin:2px 0 0;color:var(--text);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;user-select:text;background:var(--raised);border:1px solid var(--hairline);border-radius:10px;padding:8px 10px;max-height:220px;overflow:auto}
+/* Kept text is to copy, not to edit: a quoted block, never the input's fill and border. */
+.plan .kept dd{margin:3px 0 0;color:var(--text);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;user-select:text;border-left:2px solid var(--track);padding:1px 0 1px 12px;max-height:220px;overflow:auto}
 .plan .kept .acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .plan .kept .acts .hint:empty{display:none}
 /* The outline scrolls inside the workspace on wide screens: a lost reply's strip stays in sight above it. */
 .plan .lost-strip{scroll-margin-top:120px}
+/*
+ * It sticks flush under the top bar: the workspace's 10 px top padding and an 8 px band below the strip are its
+ * own ground (the negative margins keep it where it was in the flow), so rows never show around it.
+ */
 @media (min-width:900px){
-  .plan .lost-strip{position:sticky;top:0;z-index:6;padding-top:2px;background:var(--ground)}
+  .plan .lost-strip{position:sticky;top:-10px;z-index:6;margin:-10px 0 -8px;padding:12px 0 8px;background:var(--ground)}
   .plan .lost-strip .strip-note{box-shadow:0 8px 20px rgba(0,0,0,.35)}
 }
 .plan .sheet-note{flex:none;padding:0 18px 10px}
