@@ -1,5 +1,5 @@
 import type { ShotOverview } from "@openslate/core/public";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ApiError } from "../api/client.ts";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { useI18n } from "../i18n/I18n.tsx";
@@ -404,7 +404,8 @@ function RecordingPart({ shot, fps, words: savedWords, take, focusField, saving,
 
   const restoring = (phase.state === "refused" || phase.state === "stopped") && phase.words === "restoring";
   const sendingNow = phase.state === "sending" || phase.state === "checking" || restoring;
-  useEffect(() => { onBusy(sendingNow); }, [sendingNow, onBusy]);
+  // Before the next event: Escape and the choices must already know a send has started.
+  useLayoutEffect(() => { onBusy(sendingNow); }, [sendingNow, onBusy]);
 
   const inspected = reading.state === "done" ? reading.check : null;
   const length = reading.state === "done" ? reading.seconds : null;
