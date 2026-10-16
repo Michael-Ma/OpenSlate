@@ -3,7 +3,7 @@ import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { confirmationStop, heldByEdit, isWorking, seconds, shotHasNoAnswer, shotStatus, unresolvedQueue, videoPanel, waitingMsg, type CardTone } from "./keyframes.ts";
 import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
 import { pendingAutomaticRetry } from "./media-state.ts";
-import { formatMicros, keyframeEstimate } from "./price.ts";
+import { formatMicros, keyframeEstimate, priceMsg } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
 /** The shot fields the inspector edits. */
@@ -109,8 +109,9 @@ const priceFrom = (unitMicros: string | undefined, unknown: boolean, locale: str
 };
 
 /** The cost line under the keyframe button: "A new take costs about $0.04", or "About $0.04" for a first make. */
-function costFrom(unit: { unitMicros: string; unknown: boolean } | null, kind: "make" | "regenerate", locale: string): Msg | null {
+function costFrom(unit: { unitMicros: string; unknown: boolean; subscription?: PriceQuote["subscription"] } | null, kind: "make" | "regenerate", locale: string): Msg | null {
   if (!unit) return null;
+  if (unit.subscription) return priceMsg({ micros: unit.unitMicros, unitMicros: "0", units: 1, priceUnknown: unit.unknown, subscription: unit.subscription }, locale);
   if (unit.unknown || Number(unit.unitMicros) === 0) return msg("price.unknown");
   return msg(kind === "regenerate" ? "inspector.cost.take" : "inspector.cost.make", { price: formatMicros(unit.unitMicros, locale) });
 }
@@ -126,9 +127,9 @@ export function clipUnit(overview: GenerationOverview, scene: SceneOverview | un
  * One keyframe's price for this shot. The shot's own quote is exact (it includes a voice line still to make,
  * so it is a total, not a unit); a common exact regeneration quote is the only fallback.
  */
-function keyframePrice(overview: GenerationOverview, shot: ShotOverview): { unitMicros: string; unknown: boolean } | null {
+function keyframePrice(overview: GenerationOverview, shot: ShotOverview): { unitMicros: string; unknown: boolean; subscription?: PriceQuote["subscription"] } | null {
   const estimate = keyframeEstimate([shot.shotId], overview);
-  return estimate ? { unitMicros: estimate.micros, unknown: estimate.priceUnknown } : null;
+  return estimate ? { unitMicros: estimate.micros, unknown: estimate.priceUnknown, ...(estimate.subscription ? { subscription: estimate.subscription } : {}) } : null;
 }
 
 function failureMessage(slot: MediaSlot, kind: "keyframe" | "video"): Msg {

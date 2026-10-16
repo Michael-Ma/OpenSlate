@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { StudioStore } from '../../src/next/store/store.ts';
-import { openDemo, showDemoFilm, readFilms, renameFilm, runCreation, setArchived, setUpDirector, shownRefusal, projectPath, DIRECTOR_SETUP_TIMEOUT_MS } from '../../src/next/model/start-commands.ts';
+import { openDemo, showDemoFilm, readFilms, renameFilm, runCreation, selectCreatedFilm, setArchived, setUpDirector, shownRefusal, projectPath, DIRECTOR_SETUP_TIMEOUT_MS } from '../../src/next/model/start-commands.ts';
+import { shownView } from '../../src/next/model/shell.ts';
 import { codexSource, demoRetryable, filmsView, livePendingDemo, parsePendingDemo } from '../../src/next/model/start.ts';
 import { afterFailure, codexFrom, createBody, createdOutcome, creationSteps, modelPlan } from '../../src/next/model/start-new.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
+import { errorMsg } from '../../src/next/i18n/translate.ts';
+import { ApiError } from '../../src/next/api/client.ts';
 
 /** The fixture studio with The Last Ferry open, like ?ui=next&fixture=last-ferry. `start` sets ?start=. */
 async function studio(t, start) {
@@ -179,6 +182,47 @@ test('a busy Codex check offers Try again, which sets up the same film', async t
   assert.equal((await readFilms(store)).length, before);
 });
 
+test('B22: first-film setup refusal retains Start throughout creation and selects the failed film before Try again', async t => {
+  const { store } = await studio(t, 'first-run-setup-required');
+  assert.equal(store.getState().projectId, null);
+  assert.equal(store.getState().view, 'keyframes', 'Start initially depends on the empty-library fallback');
+  const views = [];
+  const stop = store.subscribe(() => views.push(shownView(store.getState())));
+  t.after(stop);
+  const input = { body: { name: 'First crossing' }, steps: ['create', 'director'], plan: null, codex: UNKNOWN };
+  const made = [];
+  const events = { onStep() {}, onMade(film) { made.push(film); void selectCreatedFilm(store, film); } };
+  const result = await runCreation(store, input, events);
+  assert.deepEqual([result.failedAt, result.code], ['director', 'DIRECTOR_SETUP_REQUIRED']);
+  assert.match(en(result.message), /Codex/);
+  assert.deepEqual(made, [result.film]);
+  await store.refresh();
+  assert.equal(store.getState().projectId, result.film.id);
+  assert.equal(store.getState().snapshot.project.name, 'First crossing');
+  assert.ok(views.length > 0 && views.every(view => view === 'start'), 'no notification unmounts Start or its failed sheet');
+  assert.equal(store.getState().toast, null, 'the sheet owns its setup refusal');
+  const before = (await readFilms(store)).length;
+  const retry = await runCreation(store, input, events, { film: result.film, from: result.failedAt });
+  assert.deepEqual([retry.failedAt, retry.film.id], [null, result.film.id]);
+  assert.equal((await readFilms(store)).length, before, 'retry never creates another film');
+  assert.equal(made.length, 1);
+  assert.equal(shownView(store.getState()), 'start', 'success still waits for the sheet to open Plan');
+});
+
+test('B22: a failed first film is already selected when the person chooses Open the film', async t => {
+  const { store } = await studio(t, 'first-run-setup-required');
+  const result = await runCreation(store, { body: { name: 'Keep the outline' }, steps: ['create', 'director'], plan: null, codex: UNKNOWN },
+    { onStep() {}, onMade: film => { void selectCreatedFilm(store, film); } });
+  assert.equal(result.failedAt, 'director');
+  await store.refresh();
+  assert.equal(shownView(store.getState()), 'start');
+  assert.equal(store.getState().projectId, result.film.id);
+  store.setView('plan');
+  assert.equal(shownView(store.getState()), 'plan');
+  assert.equal(store.getState().snapshot.project.name, 'Keep the outline');
+  assert.equal((await store.read(projectPath(result.film.id, '/director/setup'))).selection.mode, 'fake');
+});
+
 test('an empty outline is made without the Codex check; its Director is set up after, quietly, with the setup the sheet showed', async t => {
   const { store } = await studio(t, 'setup-busy');
   const codex = codexFrom(await store.read('/director/setup'));
@@ -230,6 +274,30 @@ test('the Codex setup gets a long timeout; a lost reply asks the film before cal
   // Neither: the network failure stands.
   const lost = await setUpDirector(fake({ selection: { mode: 'fake' }, defaults: { binaryPath: '', model: 'm' }, busy: false }), film, codex);
   assert.deepEqual([lost.ok, lost.code], [false, 'NETWORK_ERROR']);
+});
+
+test('B22: first-film version refusals retain their code and detailed reason in the sheet', async () => {
+  const details = { expectedVersion: '0.153.4', foundVersion: '0.162.0-alpha.4', binaryPath: '/bundled/codex', installPath: '/supported/codex' };
+  const film = { id: 'first', name: 'First' };
+  for (const duringRead of [true, false]) {
+    let toast = null;
+    const store = {
+      getState: () => ({ toast }),
+      dispatch(action) { if (action.type === 'toastDismiss') toast = null; },
+      async read() {
+        if (duringRead) throw new ApiError('DIRECTOR_CODEX_VERSION_MISMATCH', 409, details);
+        return { selection: { mode: 'fake' }, defaults: { binaryPath: '/bundled/codex', model: 'm' } };
+      },
+      async command() { toast = { id: 1, tone: 'error', message: errorMsg('DIRECTOR_CODEX_VERSION_MISMATCH', details) }; return undefined; },
+    };
+    const result = await setUpDirector(store, film, UNKNOWN);
+    assert.equal(result.code, 'DIRECTOR_CODEX_VERSION_MISMATCH');
+    assert.equal(result.message.id, 'error.DIRECTOR_CODEX_VERSION_DETAILS');
+    for (const value of Object.values(details)) assert.ok(en(result.message).includes(value));
+    assert.equal(toast, null, 'the detailed refusal belongs to the sheet');
+  }
+  const unreadable = { id: 1, tone: 'error', message: errorMsg('DIRECTOR_CODEX_VERSION_MISMATCH', { ...details, foundVersion: null }) };
+  assert.equal(shownRefusal({ getState: () => ({ toast: unreadable }) }, null), 'DIRECTOR_CODEX_VERSION_MISMATCH');
 });
 
 test('Start words the refusals whose general text would mislead: the demo without a stand-in Director, models that changed', async t => {

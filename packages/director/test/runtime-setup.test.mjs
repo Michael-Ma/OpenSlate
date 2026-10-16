@@ -123,3 +123,12 @@ test("read-only transport cannot dispatch a thread, model turn, login or config 
   } finally { await transport.close(); }
   assert.ok(!(await f.records()).some(row => row.kind === "forbidden-method"));
 });
+
+for (const [scenario, foundVersion] of [['version', '0.0.1'], ['version-alpha', '0.162.0-alpha.4'], ['version-private', null]])
+test(`setup records a bounded parsed version for ${scenario} before any account session`, async t => {
+  const f = await fixture(t, scenario), result = await setupLocalCodex(f.input);
+  assert.equal(result.readiness.issues[0].code, 'SETUP_VERSION_MISMATCH');
+  assert.deepEqual(result.readiness.binaryVersion, { expectedVersion: '0.153.4', foundVersion });
+  assert.equal(result.runtimeOptions, undefined); assert.deepEqual((await f.records()).map(row => row.kind), ['version']);
+  assert.ok(!JSON.stringify(result).includes('PRIVATE')); assert.ok(!JSON.stringify(result).includes(f.root));
+});

@@ -37,7 +37,7 @@ function fixture(t, { audioContent = false } = {}) {
     ffprobePath: audioContent ? process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync("/opt/homebrew/bin/ffprobe") ? "/opt/homebrew/bin/ffprobe" : "/usr/bin/ffprobe") : join(directory, "must-not-run-ffprobe") });
   const media = new MediaApplicationService(service, local), narration = new NarrationService(service, local), canonical = new NarrationCanonicalService(narration);
   const token = randomBytes(32).toString("base64url");
-  const runtimeSettings = { settings: () => ({ mode: "fake" }), models: async () => ({ models: [] }), tools: () => ({ tools: [] }),
+  const runtimeSettings = { settings: () => ({ mode: "fake" }), inspectSettings: async () => ({ mode: "fake", codexVersion: null, codexDiagnostic: null }), models: async () => ({ models: [] }), tools: () => ({ tools: [] }),
     codexStatus: async () => ({ found: false, version: null, pinnedVersion: "fixture", signedIn: null }) };
   app = createApp({ service, localToken: token, runtimeSettings, mediaRoutes: { production: service, media, uploads }, imageRoutes: { production: service, images: null, uploads },
     narrationRoutes: { production: service, narration, canonical, uploadDirectory: uploads.rootDir } });
@@ -73,6 +73,8 @@ test("quarantine permits all next studio inspection reads while keeping exact ro
     `${f.path}/audio-library?role=music`, `${f.path}/narration/personal-voices`, `${f.path}/narration/playback`, "/api/narration/voices", `/api/narration/voices?projectId=${f.project.id}`]) {
     const response = await f.request("GET", path); assert.equal(response.statusCode, 200, `${path}: ${response.body}`);
   }
+  const setupRead = (await f.request("GET", `${f.path}/director/setup`)).json();
+  assert.deepEqual(setupRead, { mode: "fake", codexVersion: null, codexDiagnostic: null });
   const head = await f.request("HEAD", `${f.path}/generation`); assert.equal(head.statusCode, 200, head.body); assert.equal(head.body, "");
   denied(await f.request("POST", `${f.path}/settings/director-review`, { expectedHeadVersion: 1, enabled: false }));
   denied(await f.request("POST", `${f.path}/settings/models/preview`, { expectedHeadVersion: 1, expectedSelectionDigest: "a".repeat(64),

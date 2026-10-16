@@ -68,15 +68,26 @@ test('accept publishes once alongside a running Director, retains unrelated requ
  assert.ok(f.store.list('hold',f.project.id).filter(h=>h.active).every(h=>h.ownerId===f.human.requestId));
  f.service.beginRequest(f.project.id,'local-user','A new typed direction');assert.equal(f.store.get('epoch',f.bridge.actor.epochId).state,'revoked');
 });
-test('reject leaves film unchanged, routes require keys and principal/project ownership',async t=>{
+test('reject fences a stale scene press without changing the film; routes require keys and principal/project ownership',async t=>{
  const f=fixture(t),p=await propose(f),before=f.store.getProject(f.project.id);
  assert.equal((await accept(f,p,null)).json().error.code,'IDEMPOTENCY_KEY_REQUIRED');
  assert.throws(()=>proposalCommand(f.service,f.project.id,p.proposalId,'accept','foreign',p.previewDigest,'another-user'),{code:'ACTOR_DENIED'});
  const other=f.service.createProject('Other');assert.throws(()=>proposalCommand(f.service,other.id,p.proposalId,'reject','foreign'),{code:'NOT_FOUND'});
- const currentRequestId=(await f.http('GET','/scenes/scene-0/generation')).json().currentRequestId;
+ const beforeView=(await f.http('GET','/scenes/scene-0/generation')).json();
  const rejected=await f.http('POST',`/director/proposals/${p.proposalId}/reject`,{},'reject');assert.equal(rejected.statusCode,200,rejected.body);assert.equal(rejected.json().proposal.state,'rejected');assert.deepEqual(f.store.getProject(f.project.id),before);
- assert.equal((await f.http('GET','/scenes/scene-0/generation')).json().currentRequestId,currentRequestId);
+ const fresh=(await f.http('GET','/scenes/scene-0/generation')).json(),rejectRequest=f.store.list('message',f.project.id).at(-1);
+ assert.equal(rejectRequest.editing,true);assert.equal(rejectRequest.concurrency,'alongside');
+ assert.equal(fresh.currentRequestId,rejectRequest.id);assert.notEqual(fresh.currentRequestId,beforeView.currentRequestId);
+ assert.equal(fresh.headVersion,beforeView.headVersion);assert.equal(fresh.revisionId,beforeView.revisionId);
+ const cursor=f.store.cursor(f.project.id),messages=f.store.list('message',f.project.id).length;
+ const stale=await f.http('POST','/scenes/scene-0/generate',{headVersion:beforeView.headVersion,revisionId:beforeView.revisionId,
+  expectedRequestId:beforeView.currentRequestId,kind:'image',reviewedFrames:[],reviewedHoldDigest:beforeView.reviewedHoldDigest,
+  reviewedControlAuthorityId:beforeView.reviewedControlAuthorityId},'stale-before-rejection');
+ assert.equal(stale.statusCode,409,stale.body);assert.equal(stale.json().error.code,'SCENE_REVIEW_STALE');
+ assert.equal(f.store.cursor(f.project.id),cursor);assert.equal(f.store.list('grant',f.project.id).length,0);assert.equal(f.store.list('candidate',f.project.id).length,0);
  assert.deepEqual((await f.http('POST',`/director/proposals/${p.proposalId}/reject`,{},'reject')).json(),rejected.json());
+ assert.equal(f.store.list('message',f.project.id).length,messages);assert.equal((await f.http('GET','/scenes/scene-0/generation')).json().currentRequestId,rejectRequest.id);
+ assert.deepEqual(f.store.getProject(f.project.id),before);
  assert.equal((await accept(f,p)).json().error.code,'PROPOSAL_STALE');assert.equal(f.provider.acceptedCount(),0);
 });
 test('unrelated shot edit rebases but changed timeline preview must be reviewed again',async t=>{

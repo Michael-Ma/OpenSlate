@@ -1,0 +1,17 @@
+{
+  "provider": "viggle-h3",
+  "capUsd": 1.0,
+  "estimateUsdPerSecond": 0.01,
+  "submissions": [],
+  "totalSubmittedSeconds": 0,
+  "totalEstimatedCostUsd": 0,
+  "paidRetries": 0,
+  "unknownOutcomes": 0,
+  "plannedUnsubmittedShots": [
+    { "label": "1.1", "shotId": "dbc685ff-bcb4-420e-a637-6bca21298557", "seconds": 6 },
+    { "label": "1.2", "shotId": "28758bf4-f2fb-46ed-8a33-cbfbb97fe119", "seconds": 6 }
+  ],
+  "plannedUnsubmittedEstimateUsd": 0.12,
+  "displayedSceneQuoteUsd": 0.20,
+  "evidence": "diagnostic-final.json attempts is empty; generation-final.json video and keyframe slots none"
+}

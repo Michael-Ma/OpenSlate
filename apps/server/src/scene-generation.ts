@@ -3,7 +3,7 @@ import { requiredCommandKey } from "./application/command-key.js";
 import { sceneNotes, openBlockingNotes } from "./application/director-notes.js";
 import type { FastifyInstance } from "fastify";
 import { requestScopesIntersect } from "./application/request-scopes.js";
-import { assertExpectedHumanRequest } from "./application/expected-human-request.js";
+import { assertExpectedHumanRequest, currentHumanRequestId } from "./application/expected-human-request.js";
 import { sceneNarrationView } from "./scene-narration-view.js";
 import type { NarrationService } from "./narration/service.js";
 import {
@@ -174,7 +174,7 @@ export function sceneGenerationView(production: ProductionService, projectId: st
       framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
       imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration?.mode === "uploaded" && !shot.narration.text.trim()
         ? { ...shot.narration, text: audio.rows.find(row => row.shotId === shot.id)!.narration.text } : shot.narration ?? null })) });
-  const currentRequestId = (snapshot ?? production.snapshot(projectId)).messages.filter(message => message.editing && message.concurrency !== "alongside" && message.state === "active").at(-1)?.id ?? null;
+  const currentRequestId = currentHumanRequestId((snapshot ?? production.snapshot(projectId)).messages);
   const openNotes = sceneNotes(production.store, projectId, sceneId).filter(n => n.state === "open");
   const blockingNotes = openNotes.filter(n => n.blocking);
   const notesDigest = digest(openNotes);

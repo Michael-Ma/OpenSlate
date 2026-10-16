@@ -122,6 +122,23 @@ lines.on("line", line => {
       return setTimeout(() => { process.stdout.write(row.subarray(split)); completed("completed"); }, 10);
     }
     if (mode === "secret-message") { assistant(`redact ${credential}`); return completed("completed"); }
+    if (mode === "activity") {
+      // Payloads intentionally include private content; only phase/state may leave the adapter.
+      for (const type of ["reasoning", "mcpToolCall", "dynamicToolCall", "codeModeToolCall"]) {
+        const item = { id: `activity-${type}`, type, text: `private ${credential}`, arguments: { secret: credential } };
+        notify("item/started", { threadId: "another-thread", turnId, item });
+        notify("item/started", { threadId, turnId: "another-turn", item });
+        notify("item/started", { threadId, turnId, item });
+        notify("item/completed", { threadId, turnId, item });
+      }
+    }
+    if (mode === "overlap-activity") {
+      const a = { id: 'outer', type: 'reasoning' }, b = { id: 'inner', type: 'mcpToolCall' };
+      notify('item/started', { threadId, turnId, item: a });
+      notify('item/started', { threadId, turnId, item: b });
+      notify('item/completed', { threadId, turnId, item: b });
+      notify('item/completed', { threadId, turnId, item: a });
+    }
     setTimeout(done, 10); return;
   }
   if (method === "turn/interrupt") {

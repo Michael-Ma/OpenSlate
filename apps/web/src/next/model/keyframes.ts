@@ -367,6 +367,7 @@ type PriceKind = "clips" | "keyframes";
 
 function prices(quote: PriceQuote | undefined, kind: PriceKind, locale: string): Pick<VideoPanel, "price" | "priceTotal" | "priceEach"> {
   if (!quote) return { price: null, priceTotal: null, priceEach: null };
+  if (quote.subscription) return { price: priceMsg(quote, locale), priceTotal: priceMsg(quote, locale), priceEach: null };
   if (quote.priceUnknown || Number(quote.micros) === 0) return { price: priceMsg(quote, locale), priceTotal: msg("price.unknown"), priceEach: null };
   return {
     price: priceMsg(quote, locale),

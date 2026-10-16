@@ -97,3 +97,32 @@ test('the review switch before its read, after a failed read, and on a server wi
   const loading = reviewSwitch({ data: null, status: null, error: null }, null);
   assert.deepEqual([loading.on, loading.disabled, loading.reason], [false, true, null]);
 });
+
+test('Settings retains an attempted Codex version diagnosis with expected, found, program and supported install in both languages', async () => {
+  const { codexDiagnostic } = await import('../../src/next/model/settings-director.ts');
+  const diagnostic = { code: 'DIRECTOR_CODEX_VERSION_MISMATCH', expectedVersion: '0.153.4', foundVersion: '0.162.0-alpha.4',
+    binaryPath: '/Applications/ChatGPT.app/codex', installPath: '/Users/fixture/.local/share/openslate-codex/node_modules/.bin/codex' };
+  assert.equal(codexDiagnostic(setup()), null);
+  // The attempted setup may have failed before saving: the film can still be using the demo.
+  const failed = setup({ selection: { mode: 'fake' }, codexDiagnostic: diagnostic });
+  assert.equal(codexState(failed), 'blocked');
+  assert.equal(directorRow(failed).choices[0].ready, false);
+  const message = codexDiagnostic(failed);
+  for (const locale of ['en', 'zh-CN']) {
+    const text = translateMsg(locale, message);
+    for (const value of [diagnostic.expectedVersion, diagnostic.foundVersion, diagnostic.binaryPath, diagnostic.installPath]) assert.ok(text.includes(value), text);
+    assert.ok(!text.includes('{'));
+  }
+  assert.match(translateMsg('en', message), /Select that program/);
+  assert.match(translateMsg('zh-CN', message), /请选择该程序/);
+});
+
+test('unknown native version output gets localized guidance without echoing arbitrary child diagnostics', async () => {
+  const { errorMsg } = await import('../../src/next/i18n/translate.ts');
+  const details = { expectedVersion: '0.153.4', foundVersion: null, binaryPath: '/opt/codex', installPath: '/opt/openslate-codex' };
+  const message = errorMsg('DIRECTOR_CODEX_VERSION_MISMATCH', details);
+  assert.match(translateMsg('en', message), /could not be recognized/);
+  assert.match(translateMsg('zh-CN', message), /无法识别/);
+  assert.deepEqual(errorMsg('DIRECTOR_CODEX_VERSION_MISMATCH', { ...details, foundVersion: 'PRIVATE_CHILD_OUTPUT' }), { id: 'error.DIRECTOR_CODEX_VERSION_MISMATCH' });
+  assert.deepEqual(errorMsg('DIRECTOR_CODEX_VERSION_MISMATCH', { ...details, binaryPath: '/opt/codex\nPRIVATE' }), { id: 'error.DIRECTOR_CODEX_VERSION_MISMATCH' });
+});

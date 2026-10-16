@@ -44,7 +44,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   providers: ProviderCatalog | null | "failed";
   offline: string | null;
   onClose(): void;
-  /** The film exists, whatever the later steps do: list it now. */
+  /** The film exists: list and select it without closing this sheet. */
   onMade(film: Film): void;
   /** Open the film. */
   onCreated(film: Film, outcome: CreatedOutcome): void;

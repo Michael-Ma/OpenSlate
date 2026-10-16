@@ -74,7 +74,7 @@ export const settingsMessages = {
   "set.estimate.under.speech": { en: "under {price} a voice line", zh: "每条配音不到 {price}" },
   "set.estimate.under.transcription": { en: "under {price} a transcription", zh: "每次转写不到 {price}" },
   "set.estimate.free": { en: "free stand-in", zh: "免费替身" },
-  "set.estimate.codex": { en: "no price set (Codex plan)", zh: "未设置价格（Codex 套餐）" },
+  "set.estimate.codex": { en: "uses your Codex plan", zh: "使用你的 Codex 订阅" },
   "set.estimate.none": { en: "no price set", zh: "未设置价格" },
   "set.estimate.director_codex": { en: "uses your Codex plan", zh: "使用你的 Codex 套餐" },
   "set.estimate.director_demo": { en: "free stand-in, scripted", zh: "免费替身，预设回复" },

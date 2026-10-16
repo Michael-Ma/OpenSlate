@@ -11,6 +11,7 @@ import { createApp } from "./app.js";
 import { ProductionService } from "./application/service.js";
 import { Store } from "./persistence/store.js";
 import { LocalDirectorController } from "./application/local-director.js";
+import { readDirectorRunTimeout } from "./application/director-run-config.js";
 import { ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from "./media/index.js";
 import { NarrationService, NarrationCanonicalService } from "./narration/index.js";
 import { NarrationSpeechService } from "./narration/narration-speech-service.js";
@@ -30,6 +31,7 @@ const webDirectory = fileURLToPath(new URL("../../web/dist/", import.meta.url));
 const providerConfiguration = process.env.OPENSLATE_PROVIDER_CONFIG
   ? readInstalledProviderConfiguration(resolve(process.env.OPENSLATE_PROVIDER_CONFIG)) : undefined;
 const executionConfiguration = readMediaExecutionConfiguration(process.env);
+const directorRunTimeoutMs = readDirectorRunTimeout(process.env);
 if (serveWeb) assertWebDataSeparation(webDirectory, directory);
 // Validate the production build before creating local application state.
 const webAssets = serveWeb ? (() => {
@@ -68,7 +70,7 @@ const { engine, localMedia, imageStore, providerCatalog, uploadDirectory } = run
 const service = new ProductionService(store, engine, undefined, runtime.productionOptions);
 const narration = new NarrationService(service, localMedia ?? undefined);
 // Each project starts in demo mode until its user chooses and checks local Codex.
-const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", ...(ffmpegPath ? { ffmpegPath } : {}) });
+const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", runTimeoutMs: directorRunTimeoutMs, ...(ffmpegPath ? { ffmpegPath } : {}) });
 const studioSessions = new StudioSessions();
 const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
 const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });

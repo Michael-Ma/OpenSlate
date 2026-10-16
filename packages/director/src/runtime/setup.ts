@@ -29,6 +29,8 @@ export interface LocalCodexReadiness {
   /** Account-advertised text models supporting this adapter's low reasoning effort. */
   modelChoices?: LocalCodexModelChoice[];
   checks: Record<"binary" | "account" | "model" | "catalog" | "policy", LocalCodexSetupCheck>;
+  /** Only a parsed version, never arbitrary child output or paths. */
+  binaryVersion?: { expectedVersion: string; foundVersion: string | null };
   disabledMcpCount: number;
   disabledSkillCount: number;
   issues: { code: string; message: string }[];
@@ -106,13 +108,14 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
   }
   return options;
 }
-async function verifyVersion(options: ReturnType<typeof validateOptions>, signal: AbortSignal): Promise<void> {
+async function verifyVersion(options: ReturnType<typeof validateOptions>, signal: AbortSignal, readiness: LocalCodexReadiness): Promise<void> {
   await new Promise<void>((yes, no) => {
     execFile(options.command.file, [...(options.command.args ?? []), "--version"], { cwd: options.cwd, env: { ...options.env },
       timeout: options.limits.requestTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096, signal }, (error, stdout) => {
-      if (error) no(new RuntimeFault(signal.aborted ? "SETUP_ABORTED" : "SETUP_BINARY_FAILED", "Selected native binary could not be checked"));
-      else if (stdout.trim() !== `codex-cli ${CODEX_PROTOCOL_VERSION}`)
-        no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.153.4 installation"));
+      if (error) { no(new RuntimeFault(signal.aborted ? "SETUP_ABORTED" : "SETUP_BINARY_FAILED", "Selected native binary could not be checked")); return; }
+      const version = /^codex-cli (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.+-]{1,120})?)$/.exec(stdout.trim())?.[1] ?? null;
+      readiness.binaryVersion = { expectedVersion: CODEX_PROTOCOL_VERSION, foundVersion: version };
+      if (version !== CODEX_PROTOCOL_VERSION) no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.153.4 installation"));
       else yes();
     });
   });
@@ -202,7 +205,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
   try {
     requireRuntime(!options.signal?.aborted, "SETUP_ABORTED", "Local runtime setup was cancelled");
     const runtime = await prepare(structuredClone(supplied));
-    checking = "binary"; await verifyVersion(runtime, cancellation.signal); readiness.checks.binary = "passed";
+    checking = "binary"; await verifyVersion(runtime, cancellation.signal, readiness); readiness.checks.binary = "passed";
     checking = "catalog";
     await session(runtime, cancellation.signal, async rpc => {
       checking = "catalog";

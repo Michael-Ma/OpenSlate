@@ -1,0 +1,142 @@
+[
+  {
+    "file": "01-start.png",
+    "at": "2026-10-16T17:48:38.425Z",
+    "recordingOffsetSeconds": 3.601
+  },
+  {
+    "file": "02-new-film-models.png",
+    "at": "2026-10-16T17:48:42.267Z",
+    "recordingOffsetSeconds": 7.443
+  },
+  {
+    "file": "03-film-created.png",
+    "at": "2026-10-16T17:48:48.718Z",
+    "recordingOffsetSeconds": 13.894
+  },
+  {
+    "file": "04-create-stuck.png",
+    "at": "2026-10-16T17:48:57.722Z",
+    "recordingOffsetSeconds": 22.898
+  },
+  {
+    "file": "05-settings-director.png",
+    "at": "2026-10-16T17:49:01.571Z",
+    "recordingOffsetSeconds": 26.747
+  },
+  {
+    "file": "06-director-setup-error.png",
+    "at": "2026-10-16T17:49:06.534Z",
+    "recordingOffsetSeconds": 31.71
+  },
+  {
+    "file": "07-codex-setup-details.png",
+    "at": "2026-10-16T17:49:12.131Z",
+    "recordingOffsetSeconds": 37.307
+  },
+  {
+    "file": "08-codex-save-check.png",
+    "at": "2026-10-16T17:49:18.240Z",
+    "recordingOffsetSeconds": 43.416
+  },
+  {
+    "file": "09-codex-setup-failed.png",
+    "at": "2026-10-16T17:49:30.897Z",
+    "recordingOffsetSeconds": 56.073
+  },
+  {
+    "file": "10-pinned-codex-check.png",
+    "at": "2026-10-16T17:50:17.918Z",
+    "recordingOffsetSeconds": 103.094
+  },
+  {
+    "file": "11-pinned-codex-result.png",
+    "at": "2026-10-16T17:50:21.734Z",
+    "recordingOffsetSeconds": 106.91
+  },
+  {
+    "file": "12-director-ready-or-failed.png",
+    "at": "2026-10-16T17:50:50.495Z",
+    "recordingOffsetSeconds": 135.671
+  },
+  {
+    "file": "13-director-request.png",
+    "at": "2026-10-16T17:51:03.588Z",
+    "recordingOffsetSeconds": 148.764
+  },
+  {
+    "file": "14-director-progress.png",
+    "at": "2026-10-16T17:51:13.956Z",
+    "recordingOffsetSeconds": 159.132
+  },
+  {
+    "file": "15-director-timeout.png",
+    "at": "2026-10-16T21:53:48.451Z",
+    "recordingOffsetSeconds": 14713.627
+  },
+  {
+    "file": "16-director-short-retry.png",
+    "at": "2026-10-16T21:54:06.337Z",
+    "recordingOffsetSeconds": 14731.513
+  },
+  {
+    "file": "17-plan-saved.png",
+    "at": "2026-10-16T21:54:43.659Z",
+    "recordingOffsetSeconds": 14768.835
+  },
+  {
+    "file": "18-plan-editor.png",
+    "at": "2026-10-16T21:54:47.619Z",
+    "recordingOffsetSeconds": 14772.795
+  },
+  {
+    "file": "19-plan-small-edit.png",
+    "at": "2026-10-16T21:54:53.082Z",
+    "recordingOffsetSeconds": 14778.258
+  },
+  {
+    "file": "20-plan-undo.png",
+    "at": "2026-10-16T21:54:57.731Z",
+    "recordingOffsetSeconds": 14782.907
+  },
+  {
+    "file": "21-keyframes-before.png",
+    "at": "2026-10-16T21:54:57.865Z",
+    "recordingOffsetSeconds": 14783.041
+  },
+  {
+    "file": "22-keyframes-submitted.png",
+    "at": "2026-10-16T21:55:03.500Z",
+    "recordingOffsetSeconds": 14788.676
+  },
+  {
+    "file": "23-keyframe-scene-changed.png",
+    "at": "2026-10-16T21:55:33.335Z",
+    "recordingOffsetSeconds": 14818.511
+  },
+  {
+    "file": "24-keyframes-refreshed.png",
+    "at": "2026-10-16T21:55:33.567Z",
+    "recordingOffsetSeconds": 14818.743
+  },
+  {
+    "file": "25-keyframes-retry.png",
+    "at": "2026-10-16T21:55:37.246Z",
+    "recordingOffsetSeconds": 14822.422
+  },
+  {
+    "file": "26-keyframes-stale-after-reload.png",
+    "at": "2026-10-16T21:56:01.240Z",
+    "recordingOffsetSeconds": 14846.416
+  },
+  {
+    "file": "27-keyframe-single-fallback.png",
+    "at": "2026-10-16T21:56:01.330Z",
+    "recordingOffsetSeconds": 14846.506
+  },
+  {
+    "file": "28-final-blocker.png",
+    "at": "2026-10-16T21:56:10.573Z",
+    "recordingOffsetSeconds": 14855.749
+  }
+]

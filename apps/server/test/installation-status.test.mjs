@@ -73,3 +73,13 @@ test('setup includes the detected mismatched Codex version without changing sele
   assert.deepEqual(f.store.getProject(project.id), before); assert.equal(f.store.cursor(project.id), cursor);
   assert.equal(f.store.list('native_model_start', project.id).length, 0);
 });
+
+test('Settings recognizes an app-bundled prerelease mismatch before setup and identifies the supported install', async t => {
+  const f = fixture(t, { version: '0.162.0-alpha.4' }), project = f.service.createProject('Prerelease version');
+  const response = await f.get(`/api/projects/${project.id}/director/setup`); assert.equal(response.statusCode, 200, response.body);
+  const setup = response.json(); assert.equal(setup.codexVersion, '0.162.0-alpha.4');
+  assert.equal(setup.codexDiagnostic.code, 'DIRECTOR_CODEX_VERSION_MISMATCH'); assert.equal(setup.codexDiagnostic.expectedVersion, CODEX_PROTOCOL_VERSION);
+  assert.equal(setup.codexDiagnostic.foundVersion, '0.162.0-alpha.4'); assert.equal(setup.codexDiagnostic.binaryPath, setup.defaults.binaryPath);
+  assert.ok(setup.codexDiagnostic.installPath.endsWith('/.local/share/openslate-codex/node_modules/.bin/codex'));
+  assert.equal(f.store.list('native_model_start', project.id).length, 0); assert.equal(f.store.list('project_director_selection', project.id).length, 0);
+});

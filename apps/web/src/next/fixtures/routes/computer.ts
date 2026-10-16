@@ -39,7 +39,7 @@ export function computer(world: FixtureWorld): Computer {
   if (!current) {
     const preset = startPreset();
     const bare = preset === "no-keys" || preset === "first-run";
-    current = { codex: !bare, keys: !bare, firstRun: preset === "first-run", catalog: { digest: DIGEST, changesOnce: preset === "refusals" } };
+    current = { codex: !bare, keys: !bare, firstRun: preset === "first-run" || preset === "first-run-setup-required", catalog: { digest: DIGEST, changesOnce: preset === "refusals" } };
     computers.set(world, current);
   }
   return current;

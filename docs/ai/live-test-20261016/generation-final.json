@@ -1,0 +1,147 @@
+{
+  "ok": true,
+  "result": {
+    "projectId": "740e060f-c6c9-49ac-9421-dfd87ae658fd",
+    "revisionId": "d2081034-a305-4a18-84d5-a70efa30a6bd",
+    "headVersion": 3,
+    "cursor": 39,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [
+      {
+        "sceneId": "04ee1139-128b-4d47-a94c-bb9a54914caa",
+        "ordinal": 1,
+        "title": "One continuous dusk location: a single white paper boat on a rain puddle in wet dark pavement, with soft amber city-light reflections.",
+        "purpose": "One continuous dusk location: a single white paper boat on a rain puddle in wet dark pavement, with soft amber city-light reflections. Close-up followed by wide view; 12 seconds total.",
+        "state": "not_started",
+        "shotIds": [
+          "dbc685ff-bcb4-420e-a637-6bca21298557",
+          "28758bf4-f2fb-46ed-8a33-cbfbb97fe119"
+        ],
+        "counts": {
+          "shots": 2,
+          "keyframesReady": 0,
+          "opened": 0,
+          "videosReady": 0
+        },
+        "videoTargets": [
+          "dbc685ff-bcb4-420e-a637-6bca21298557",
+          "28758bf4-f2fb-46ed-8a33-cbfbb97fe119"
+        ],
+        "keyframeTargets": [
+          "dbc685ff-bcb4-420e-a637-6bca21298557",
+          "28758bf4-f2fb-46ed-8a33-cbfbb97fe119"
+        ],
+        "quotes": {
+          "makeKeyframes": {
+            "micros": "0",
+            "units": 2,
+            "unitMicros": "0",
+            "priceUnknown": true
+          },
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": true
+          },
+          "confirmVideo": {
+            "micros": "200000",
+            "units": 2,
+            "unitMicros": "100000",
+            "priceUnknown": false
+          },
+          "voice": {
+            "micros": "0",
+            "units": 0,
+            "unitMicros": "0",
+            "priceUnknown": false
+          }
+        },
+        "blockers": [
+          {
+            "code": "keyframe_missing",
+            "shotId": "dbc685ff-bcb4-420e-a637-6bca21298557"
+          },
+          {
+            "code": "keyframe_missing",
+            "shotId": "28758bf4-f2fb-46ed-8a33-cbfbb97fe119"
+          }
+        ],
+        "confirmationDigest": "2e8942c1504e2844f288ba5e44fc365eda3f9c2bd8f5e57691c9b34230e11540"
+      }
+    ],
+    "shots": {
+      "dbc685ff-bcb4-420e-a637-6bca21298557": {
+        "shotId": "dbc685ff-bcb4-420e-a637-6bca21298557",
+        "sceneId": "04ee1139-128b-4d47-a94c-bb9a54914caa",
+        "label": "1.1",
+        "framing": "Low water-level close-up; boat fills most of the frame.",
+        "purpose": "Introduce the solitary paper boat in close-up.",
+        "imagePrompt": "Cinematic naturalistic low water-level close-up of one small white folded paper boat floating on a shallow rain puddle in dark wet city pavement at dusk. Crisp triangular central fold, pointed bow facing screen right, intact white paper. Cool blue-gray twilight with soft amber city-light reflections on water, delicate circular rain ripples, shallow depth of field. No other boats, people, lettering or logos.",
+        "motion": "Locked camera; subtle rocking and concentric rain ripples.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "none",
+          "takeCount": 0,
+          "opened": false
+        },
+        "video": {
+          "state": "none",
+          "takeCount": 0
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": true
+          }
+        }
+      },
+      "28758bf4-f2fb-46ed-8a33-cbfbb97fe119": {
+        "shotId": "28758bf4-f2fb-46ed-8a33-cbfbb97fe119",
+        "sceneId": "04ee1139-128b-4d47-a94c-bb9a54914caa",
+        "label": "1.2",
+        "framing": "Wide low-angle view showing the entire puddle and surrounding wet pavement.",
+        "purpose": "Reveal the boat's wider rain-soaked city setting.",
+        "imagePrompt": "Cinematic naturalistic wide low-angle view of a shallow rain puddle in dark wet city pavement at dusk. The same single small white folded paper boat sits near the center of the puddle, with a crisp triangular central fold and pointed bow facing screen right. Show the whole puddle and surrounding wet pavement; distant city lights are softly out of focus. Cool blue-gray twilight and soft amber reflections match the close-up. Delicate circular rain ripples. No other boats, people, lettering or logos.",
+        "motion": "Locked wide camera; subtle boat rocking and rain ripples.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "none",
+          "takeCount": 0,
+          "opened": false
+        },
+        "video": {
+          "state": "none",
+          "takeCount": 0
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": true
+          }
+        }
+      }
+    },
+    "restartCasualties": []
+  }
+}

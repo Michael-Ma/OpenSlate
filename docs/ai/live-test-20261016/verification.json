@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-10-16T22:18:22.710Z",
+  "testDriverSyntax": "both node --check passed",
+  "screenshots": 28,
+  "mediaAttempts": 0,
+  "viggleSubmittedSeconds": 0,
+  "estimatedViggleCostUsd": 0,
+  "applicationSourceEditsByTestEngineer": 0,
+  "gitCommandsRun": 0,
+  "port3001ListenerAfterStop": false,
+  "textEvidenceSensitivePatternScan": "zero matches for launch code, bearer credential, provider key and signed query patterns; this is a bounded pattern check",
+  "recording": "finalized and ffprobe verified",
+  "recordingDurationSeconds": 14857.48,
+  "recordingBytes": 736504167,
+  "hardRuleDeviation": "Playwright temporary profile under macOS /var/folders instead of permitted /tmp; discovered at cleanup, owned Chrome stopped; no further test run",
+  "recordingEndFrame": "decoded and visually verified against final blocker screenshot",
+  "ownedProcessesStopped": true
+}

@@ -96,7 +96,7 @@ test('Opened is durable, independent of editing and authority, resets after rege
   assert.deepEqual(await ok(await f.call('POST','/shots/shot-0/frame-views',body,key)),receipt,'original command replays after regeneration');
 });
 
-test('quotes use pinned image, retained video and unmade generated speech units; Codex and zero are unknown', () => {
+test('quotes use pinned image, retained video and unmade generated speech units; zero per-call prices stay unknown', () => {
   const profiles = [ ['i','image','40000'], ['v','video','500000'], ['s','speech','30000'] ].map(([id,kind,unitCostMicros]) => ({ id,kind,unitCostMicros,adapter:'fake' }));
   const lock = { profiles }, rows = [
     {imageComplete:false,videoComplete:false,videoProfileLabel:'v',narration:{mode:'generated',ready:false,recordingCurrent:false,profileId:'s'}},
@@ -110,6 +110,19 @@ test('quotes use pinned image, retained video and unmade generated speech units;
   assert.equal(quote({profiles:[{...profiles[0],unitCostMicros:'0'}]},rows,'makeKeyframes').priceUnknown,true);
   assert.equal(quote({profiles:[{...profiles[0],adapter:'codex-image'}]},rows,'makeKeyframes').priceUnknown,true);
   assert.equal(quote(lock,[],'confirmVideo').micros,'0');
+});
+
+test('B22: Codex keyframe quotes name the subscription, including mixed voice and missing per-call prices', () => {
+  const image = { id: 'i', kind: 'image', adapter: 'codex-image', unitCostMicros: '0' };
+  const speech = { id: 's', kind: 'speech', adapter: 'openai-speech', unitCostMicros: '30000' };
+  const rows = [{ imageComplete: false, videoComplete: false }];
+  for (const kind of ['makeKeyframes', 'regenerateKeyframe']) {
+    assert.deepEqual(quote({ profiles: [image] }, rows, kind), { micros: '0', unitMicros: '0', units: 1, priceUnknown: false, subscription: 'codex' });
+    const voiced = [{ ...rows[0], narration: { mode: 'generated', ready: false, recordingCurrent: false, profileId: 's' } }];
+    assert.deepEqual(quote({ profiles: [image, speech] }, voiced, kind), { micros: '30000', unitMicros: '0', units: 2, priceUnknown: false, subscription: 'codex' });
+    assert.deepEqual(quote({ profiles: [image] }, voiced, kind), { micros: '0', unitMicros: '0', units: 2, priceUnknown: true, subscription: 'codex' });
+  }
+  assert.equal(quote({ profiles: [image] }, [], 'makeKeyframes').subscription, undefined, 'no subscription work means no subscription note');
 });
 
 test('estimate mismatch rejects image, regeneration and video before grants; matching and omitted estimates remain valid', async t => {

@@ -237,11 +237,12 @@ export function lineNote(shot: ShotOverview, draft: ShotDraft): Msg | null {
 
 // ---- what a save outdates -------------------------------------------------------------------------------
 
-/** Per-unit estimates in micro-dollars; null when the model has no price set (never shown as $0.00). */
+/** Per-unit estimates; subscription usage is distinct from a missing per-call price (never shown as $0.00). */
 export interface UnitPrices {
   keyframe: number | null;
   clip: number | null;
   voice: number | null;
+  keyframeSubscription?: PriceQuote["subscription"];
 }
 
 const unit = (quote: PriceQuote | undefined): number | null => (!quote || quote.priceUnknown || !(Number(quote.unitMicros) > 0) ? null : Number(quote.unitMicros));
@@ -250,10 +251,12 @@ export function unitPrices(overview: GenerationOverview, sceneId: string): UnitP
   const scene: SceneOverview | undefined = overview.scenes.find((s) => s.sceneId === sceneId);
   const anyScene = (pick: (s: SceneOverview) => PriceQuote | undefined) => overview.scenes.map(pick).find((quote) => quote !== undefined);
   const clip = clipUnit(overview, scene);
+  const keyframe = scene?.quotes.regenerateKeyframe ?? scene?.quotes.makeKeyframes ?? anyScene((s) => s.quotes.regenerateKeyframe);
   return {
-    keyframe: unit(scene?.quotes.regenerateKeyframe ?? scene?.quotes.makeKeyframes ?? anyScene((s) => s.quotes.regenerateKeyframe)),
+    keyframe: unit(keyframe),
     clip: clip && !clip.unknown && Number(clip.unitMicros) > 0 ? Number(clip.unitMicros) : null,
     voice: unit(scene?.quotes.voice ?? anyScene((s) => s.quotes.voice)),
+    ...(keyframe?.subscription ? { keyframeSubscription: keyframe.subscription } : {}),
   };
 }
 
@@ -319,7 +322,9 @@ export function shotImpact(shot: ShotOverview, base: ShotDraft, draft: ShotDraft
   const parts: Msg[] = [];
   if (effects.rewrites) parts.push(msg("plan.impact.rewrites"));
   if (effects.running) parts.push(msg("plan.impact.running", { shot: label }));
-  if (effects.keyframe && effects.clip)
+  if (effects.keyframe && prices.keyframeSubscription === "codex")
+    parts.push(msg(effects.clip ? prices.clip !== null ? "plan.impact.kf_clip_codex" : "plan.impact.kf_clip_codex_unpriced" : "plan.impact.kf_codex", { shot: label, ...(prices.clip !== null ? { price: money(prices.clip) } : {}) }));
+  else if (effects.keyframe && effects.clip)
     parts.push(prices.keyframe !== null && prices.clip !== null ? msg("plan.impact.kf_clip", { shot: label, price: money(prices.keyframe + prices.clip) }) : msg("plan.impact.kf_clip_unpriced", { shot: label }));
   else if (effects.keyframe) parts.push(prices.keyframe !== null ? msg("plan.impact.kf", { shot: label, price: money(prices.keyframe) }) : msg("plan.impact.kf_unpriced", { shot: label }));
   else if (effects.clip) parts.push(prices.clip !== null ? msg("plan.impact.clip", { shot: label, price: money(prices.clip) }) : msg("plan.impact.clip_unpriced", { shot: label }));

@@ -66,6 +66,8 @@ export interface TurnView {
   /** Why a turn ended other than with a reply: no_reply, failed, timeout, superseded, interrupted, owner_lost. */
   reason?: string | null;
   effects?: { notesCreated: number; proposalsHeld: number; changesApplied: number };
+  /** Safe native phase metadata; no reasoning text, arguments or diagnostics. */
+  activity?: { phase: "reasoning" | "tool"; state: "started" | "completed"; at: string } | null;
   progress?: { tool: string; state: string } | null;
 }
 

@@ -1,0 +1,51 @@
+{
+  "checkedAt": "2026-10-16T21:55:50.236Z",
+  "project": {
+    "id": "740e060f-c6c9-49ac-9421-dfd87ae658fd",
+    "headVersion": 3,
+    "sceneCount": 1,
+    "shotCount": 2
+  },
+  "turns": [
+    {
+      "id": "b83dc0fc-fc76-4b09-85d4-e1cb8a42df90",
+      "requestId": "07f45547-ca57-42ec-b280-384eacae670d",
+      "state": "interrupted",
+      "at": "2026-10-16T17:51:03.551Z",
+      "updatedAt": "2026-10-16T17:54:03.898Z",
+      "runtime": "live",
+      "action": "conversation",
+      "reason": "timeout"
+    },
+    {
+      "id": "5d69866f-660a-4fd0-962d-b7daacd83cd5",
+      "requestId": "aae02424-00f3-499f-9b90-6e5261a1025d",
+      "state": "completed",
+      "at": "2026-10-16T21:54:06.289Z",
+      "updatedAt": "2026-10-16T21:54:39.557Z",
+      "runtime": "live",
+      "action": "conversation",
+      "reason": null
+    }
+  ],
+  "director": {
+    "mode": "native",
+    "status": "idle",
+    "message": null,
+    "turn": {
+      "id": "5d69866f-660a-4fd0-962d-b7daacd83cd5",
+      "state": "completed",
+      "errorCode": null,
+      "createdAt": "2026-10-16T21:54:06.289Z",
+      "updatedAt": "2026-10-16T21:54:39.557Z",
+      "dispatched": true
+    }
+  },
+  "setup": {
+    "modelCalls": 2,
+    "selectedModel": "gpt-6-astra",
+    "selectedMode": "native",
+    "modelCatalogStatus": "ready"
+  },
+  "attempts": []
+}

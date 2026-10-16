@@ -14,13 +14,17 @@ export function directorTurnViews(service: ProductionService, projectId: string)
       if (call.tool !== 'apply_change') return [];
       const reconciled = store.get<{ state: string; receipt?: { preparedId?: string } }>('tool_reconciliation', call.id);
       const receipt = call.state === 'succeeded' ? call.result : reconciled?.state === 'effect_confirmed' ? reconciled.receipt : null;
-      return receipt?.preparedId ? [receipt.preparedId] : [];
+      const prepared = receipt?.preparedId ? store.get<{ projectId: string; semanticChange: boolean; compiled?: unknown }>('prepared', receipt.preparedId) : null;
+      return prepared?.projectId === projectId && (prepared.semanticChange || prepared.compiled) ? [receipt!.preparedId!] : [];
     })).size;
+    const activity = store.get<{ phase: 'reasoning' | 'tool'; state: 'started' | 'completed'; at: string }>('director_activity', turn.id);
+    const progress = tools.filter(call => call.state === 'started').at(-1) ?? tools.at(-1);
     return { id: turn.id, requestId: turn.requestId, state: turn.state, at: turn.createdAt, updatedAt: turn.updatedAt,
       runtime: turn.runtimeId === 'codex-app-server' ? 'live' : 'scripted',
       action: store.get('keyframe_review_request', turn.requestId) ? 'keyframe_review' : 'conversation',
       reason: turn.errorCode ? reasons[turn.errorCode] ?? (turn.state === 'failed' ? 'failed' : 'unknown') : turn.state === 'completed' && !replied ? 'no_reply' : turn.state === 'interrupted' ? 'interrupted' : turn.state === 'failed' ? 'failed' : turn.state === 'unknown' ? 'unknown' : null,
       effects: { notesCreated: notes, proposalsHeld: proposals, changesApplied: changes },
-      progress: tools.at(-1) ? { tool: tools.at(-1)!.tool, state: tools.at(-1)!.state } : null };
+      activity: activity ? { phase: activity.phase, state: activity.state, at: activity.at } : null,
+      progress: progress ? { tool: progress.tool, state: progress.state } : null };
   });
 }

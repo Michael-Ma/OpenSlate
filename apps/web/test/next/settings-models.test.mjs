@@ -42,7 +42,7 @@ test('estimates are host-configured, per operation, and never $0.00 (D15)', () =
   const rows = modelRows(status, 'en');
   const estimate = (kind, id) => en(choiceFor(rows.find((r) => r.kind === kind), id).estimate);
   assert.equal(estimate('image', 'gpt-image'), 'about $0.04 a keyframe');
-  assert.equal(estimate('image', 'codex-image'), 'no price set (Codex plan)');
+  assert.equal(estimate('image', 'codex-image'), 'uses your Codex plan');
   assert.equal(estimate('image', 'fake-image-v1'), 'free stand-in');
   assert.equal(estimate('video', 'minimax'), 'about $0.50 a clip');
   assert.equal(estimate('speech', 'tts'), 'about $0.01 a voice line');

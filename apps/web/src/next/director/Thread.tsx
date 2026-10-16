@@ -1,6 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type ThreadBox, type ThreadEntry } from "../model/director.ts";
+import { directorElapsed, resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type ThreadBox, type ThreadEntry } from "../model/director.ts";
 import { useMode, useStudio } from "../store/react.tsx";
 import { HeldEdits } from "./HeldEdits.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -30,6 +30,14 @@ export function Thread() {
   const director = useStudio((s) => s.director);
   const proposals = useStudio((s) => s.proposals);
   const view = useMemo(() => threadView(snapshot, overview, director, locale, new Date(), proposals), [snapshot, overview, director, locale, proposals]);
+  const [clock, setClock] = useState(() => new Date());
+  useEffect(() => {
+    if (!view.working) return;
+    setClock(new Date());
+    const timer = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, [view.working, snapshot?.project.id]);
+  const elapsed = view.working ? directorElapsed(snapshot?.turns, clock) : null;
   const ref = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   // The box the thread was last pinned to its bottom at; null once the reader scrolled away from the bottom.
@@ -101,7 +109,7 @@ export function Thread() {
           {view.working && (
             <div className="entry" data-entry="working">
               <div className="byline"><b>{t("director.title")}</b></div>
-              <div className="working" role="status">{view.activity ? tm(view.activity) : t("director.working")}<i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></div>
+              <div className="working" role="status">{view.activity ? tm(view.activity) : t("director.working")}{elapsed && <span aria-live="off"> · {tm(elapsed)}</span>}<i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></div>
             </div>
           )}
         </div>

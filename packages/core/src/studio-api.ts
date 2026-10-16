@@ -144,8 +144,10 @@ export interface PriceQuote {
   micros: Micros;
   units: number;
   unitMicros: Micros;
-  /** The model has no configured price (unit 0 or quota-based, e.g. Codex images). Never print $0.00. */
+  /** At least one per-call operation has no configured price. Never print $0.00. */
   priceUnknown: boolean;
+  /** Some operations use this subscription. Per-call micros may also be present (e.g. voice); absent on historical quotes. */
+  subscription?: "codex";
 }
 
 export type SceneState =

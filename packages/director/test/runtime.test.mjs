@@ -50,6 +50,34 @@ test("native launch requires an explicit local policy and exact runtime version"
   assert.deepEqual(await f.records(), []);
 });
 
+test("host may deliberately extend only the finite run deadline to ten minutes", async t => {
+  const f = await fixture(t);
+  assert.doesNotThrow(() => new CodexDirectorRuntime({ ...f.options, limits: { runTimeoutMs: 600000 } }));
+  for (const value of [0, -1, 600001, Infinity, 1.5])
+    assert.throws(() => new CodexDirectorRuntime({ ...f.options, limits: { runTimeoutMs: value } }), code("RUNTIME_CONFIG_INVALID"));
+  assert.throws(() => new CodexDirectorRuntime({ ...f.options, limits: { requestTimeoutMs: 60000 } }), code("RUNTIME_CONFIG_INVALID"));
+  assert.deepEqual(await f.records(), [], "validation never starts a native run");
+});
+
+test("native progress retains only phase and state for the exact thread and turn", async t => {
+  const f = await fixture(t, "activity"), events = [];
+  const result = await deadline(f.runtime.start(f.input, { onEvent: event => events.push(event) }));
+  assert.equal(result.status, "completed");
+  assert.deepEqual(events.filter(e => e.kind === 'activity').map(({ phase, state }) => [phase, state]), [
+    ['reasoning', 'started'], ['reasoning', 'completed'], ...Array.from({ length: 3 }, () => [['tool', 'started'], ['tool', 'completed']]).flat(),
+  ]);
+  assert.ok(!JSON.stringify(events).includes('private'));
+  assert.ok(!JSON.stringify(events).includes(f.input.bridge.credential));
+});
+
+test("overlapping native items remain active until the last relevant item completes", async t => {
+  const f = await fixture(t, 'overlap-activity'), events = [];
+  assert.equal((await deadline(f.runtime.start(f.input, { onEvent: e => events.push(e) }))).status, 'completed');
+  assert.deepEqual(events.filter(e => e.kind === 'activity').map(e => [e.phase, e.state]), [
+    ['reasoning', 'started'], ['tool', 'started'], ['reasoning', 'started'], ['reasoning', 'completed'],
+  ]);
+});
+
 test("native bridge rejects remote or wildcard hosts before process launch", async t => {
   const f = await fixture(t);
   for (const endpoint of ["http://192.0.2.1:12345", "http://0.0.0.0:12345", "https://example.com:12345"])

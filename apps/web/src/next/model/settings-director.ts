@@ -1,3 +1,4 @@
+import { errorMsg } from "../i18n/translate.ts";
 import type { MessageId } from "../i18n/messages.ts";
 import type { Request } from "./settings.ts";
 import { msg, type Msg } from "./types.ts";
@@ -29,6 +30,8 @@ export interface DirectorSetup {
   modelCatalogStatus: "unchecked" | "ready" | "blocked";
   modelCatalogCheckedAt: string | null;
   /** Present after a save: the result of Codex's setup check for that selection. */
+  /** The most recent local version failure, including an attempted unsaved program. */
+  codexDiagnostic?: { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string } | null;
   readiness?: { status: "ready" | "blocked"; checks?: Record<string, string> } | null;
 }
 
@@ -46,10 +49,14 @@ export const directorValue = (selection: DirectorSelection): string =>
 /** The Codex program the Director would use: the saved one, else the one this computer found. */
 export const codexProgram = (setup: DirectorSetup): string => setup.selection.binaryPath ?? setup.defaults.binaryPath ?? "";
 
+export const codexDiagnostic = (setup: DirectorSetup): Msg | null => setup.codexDiagnostic
+  ? errorMsg(setup.codexDiagnostic.code, setup.codexDiagnostic) : null;
+
 export type CodexState = "ready" | "blocked" | "unchecked" | "missing";
 
 /** Codex on this computer, from the last setup check. No program found at all is "missing". */
 export function codexState(setup: DirectorSetup): CodexState {
+  if (setup.codexDiagnostic) return "blocked";
   if (setup.readiness?.status === "ready") return "ready";
   if (setup.readiness?.status === "blocked") return "blocked";
   if (!codexProgram(setup)) return "missing";
