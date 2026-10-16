@@ -273,6 +273,11 @@ export const scenarios = [
       // The video prompt has no editor of its own: it says how it changes. Edit in Plan names the shot.
       await expectText(page, '.insp [data-act="video-prompt-note"]', /^Rewritten when the shot's purpose, framing or motion changes\.$/);
       await expectText(page, '.insp [data-act="edit-in-plan"]', /^Edit 2\.3 in Plan$/);
+      // Read-only prompts are quoted with a rule, never boxed like a field that could be typed in.
+      for (const kind of ["image", "video"]) {
+        const look = await page.locator(`.insp [data-prompt="${kind}"]`).evaluate((element) => { const style = getComputedStyle(element); return [style.borderTopWidth, style.borderLeftWidth, style.backgroundColor]; });
+        expect(look[0] === "0px" && look[1] !== "0px" && look[2] === "rgba(0, 0, 0, 0)", `The ${kind} prompt looks like a text field: ${look}`);
+      }
       await screenshot(page, "prompts-1440");
       // Both prompts, the note and Edit in Plan are on screen inside the inspector.
       const insp = await page.locator(".insp").boundingBox();
@@ -333,7 +338,9 @@ export const scenarios = [
       await why.click();
       expect((await why.getAttribute("aria-expanded")) === "true", "Why is not expanded");
       await expectText(page, ".insp .insp-stop-why", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
-      // The rows below the reason stay whole.
+      // The reason is read-only words, quoted with a rule, not boxed like a field; the rows below it stay whole.
+      const quote = await page.locator(".insp .insp-stop-why").evaluate((element) => { const style = getComputedStyle(element); return [style.borderTopWidth, style.borderLeftWidth, style.backgroundColor]; });
+      expect(quote[0] === "0px" && quote[1] !== "0px" && quote[2] === "rgba(0, 0, 0, 0)", `The reason looks like a text field: ${quote}`);
       await inspectorWhole(page, "with Why open at 1440");
       await screenshot(page, "confirm-stopped-why-1440");
       await why.click();
