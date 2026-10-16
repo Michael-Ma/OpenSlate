@@ -86,6 +86,12 @@ function reveal(root: HTMLElement, target: Element): void {
   markPartlyInView(root);
 }
 
+/** A refit or a restored panel can keep focus in a row without dispatching a new focusin event. */
+function revealFocus(root: HTMLElement): void {
+  const focused = root.ownerDocument.activeElement;
+  if (focused instanceof Element && root.contains(focused)) reveal(root, focused);
+}
+
 function clearMarks(root: HTMLElement): void {
   for (const element of root.querySelectorAll("[data-cut]")) element.removeAttribute("data-cut");
   root.removeAttribute("data-below");
@@ -140,7 +146,7 @@ export function useInspectorFit(root: RefObject<HTMLElement | null>, active: boo
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
-    if (scrolls) markPartlyInView(element);
+    if (scrolls) { markPartlyInView(element); revealFocus(element); }
     else clearMarks(element);
   });
   useEffect(() => {
@@ -151,6 +157,7 @@ export function useInspectorFit(root: RefObject<HTMLElement | null>, active: boo
     const onFocus = (event: FocusEvent) => { if (event.target instanceof Element) reveal(element, event.target); };
     element.addEventListener("scroll", onScroll, { passive: true });
     element.addEventListener("focusin", onFocus);
+    revealFocus(element);
     return () => {
       element.removeEventListener("scroll", onScroll);
       element.removeEventListener("focusin", onFocus);

@@ -5,7 +5,7 @@ import { useOpenTarget } from "./useOpenTarget.ts";
 
 /**
  * The Director's lettered notes under the reply that wrote them (DC-18): an amber card per open note,
- * neutral once settled (a green "✓ …" line; a plain line while a regenerate it chose is still being made) or out of date. The only action here is Open: the note's
+ * neutral once settled (a green "✓ …" line only after success; a plain line while regeneration is pending or failed) or out of date. The only action here is Open: the note's
  * choices live in the banner, so they are never offered twice. Open acts in the current view when it shows
  * shots (Plan scrolls to the row, Film selects and seeks, Assets scrolls to the shot's set, Keyframes selects
  * the card); from Settings and Start it goes to Keyframes (P5-DESIGN shell item 9).

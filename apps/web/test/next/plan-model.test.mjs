@@ -57,7 +57,7 @@ test('rows say framing, length, narration and the media state in neutral pills (
 test('Plan names input and unknown waits without turning either into a human confirm', () => {
   const shot = lastFerryOverview().shots[shotId('2.1')];
   for (const [code, english, chinese, tone] of [
-    ['input_pending', 'Waiting for required media', '等待所需素材', 'busy'],
+    ['input_pending', 'Waiting for required media', '等待所需素材', 'plain'],
     ['unknown', 'Waiting for the studio to report its status', '等待工作室报告状态', 'plain'],
     [undefined, 'Waiting for the studio to report its status', '等待工作室报告状态', 'plain'],
   ]) {

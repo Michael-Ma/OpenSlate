@@ -33,6 +33,7 @@ export const notes = {
   "note.thread.label": { en: "Director's note {letter}:", zh: "导演备注 {letter}：" },
   "note.settled.accepted": { en: "Settled: {choice}", zh: "已处理：{choice}" },
   "note.settled.regenerated": { en: "Settled: {shots} regenerated", zh: "已处理：{shots} 已重新生成" },
+  "note.settled.regeneration_failed": { en: "Regeneration failed for {shots}.", zh: "{shots} 重新生成失败。" },
   "note.settled.regenerating": { en: "Regenerating {shots}…", zh: "正在重新生成 {shots}…" },
   "note.settled.edited": { en: "Settled: {shot} edited", zh: "已处理：{shot} 已修改" },
   "note.settled.applied": { en: "Settled: change applied", zh: "已处理：已采用修改" },

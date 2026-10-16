@@ -1,5 +1,5 @@
 import type { DirectorNote, DirectorProposal, GenerationOverview, NoteChoice } from "@openslate/core/public";
-import { isWorking, shotHasNoAnswer, unresolvedQueue } from "./keyframes.ts";
+import { isWorking, shotHasNoAnswer } from "./keyframes.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -38,6 +38,8 @@ export interface NoteView {
   choices: NoteChoiceView[];
   /** How it was settled, for a resolved note; what changed since, for a stale one. */
   settled: Msg | null;
+  /** A regeneration resolution records the request, not its outcome; only a returned frame is complete. */
+  regeneration: RegenerationState | null;
   /**
    * Settled by a regenerate whose new keyframe is still being made: the line says so ("Regenerating 2.2…"), neutral
    * and without a check, until the new take arrives.
@@ -66,14 +68,30 @@ function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals
 export const regenerating = (overview: GenerationOverview, shotIds: readonly string[]) =>
   shotIds.some((id) => { const shot = overview.shots[id]; return !!shot && isWorking(shot.keyframe); });
 
+export type RegenerationState = "failed" | "making" | "waiting" | "complete";
+
+const failedKeyframe = (shot: GenerationOverview["shots"][string]) => (shot.keyframe.replacement ?? shot.keyframe).state === "failed";
+
+/** A retained frame is not proof that its replacement returned successfully. */
+export function regenerationState(overview: GenerationOverview, shotIds: readonly string[]): RegenerationState {
+  const shots = shotIds.map((id) => overview.shots[id]).filter((shot) => !!shot);
+  if (shots.some(failedKeyframe)) return "failed";
+  if (shots.some(shotHasNoAnswer)) return "waiting";
+  if (regenerating(overview, shotIds)) return "making";
+  return shots.length === shotIds.length && shots.length > 0 && shots.every((shot) => shot.keyframe.state === "ready" && !!shot.keyframe.artifact && !shot.keyframe.replacement)
+    ? "complete" : "waiting";
+}
+
 /** A resolved choice is not a completed keyframe: unanswered and unclassified queues keep their own status. */
 export function regenerationSummary(overview: GenerationOverview, shotIds: readonly string[]): Msg {
   const shots = shotIds.map((id) => overview.shots[id]).filter((shot) => !!shot);
   const names = labels(overview, shotIds);
   const unanswered = shots.filter(shotHasNoAnswer);
   if (unanswered.length) return msg("scene.unknown_outcome", { shots: unanswered.map((shot) => shot.label).join(", ") });
-  if (regenerating(overview, shotIds)) return msg("note.settled.regenerating", { shots: names });
-  return msg(shots.some((shot) => !!unresolvedQueue(shot.keyframe)) ? "note.settled.waiting" : "note.settled.regenerated", { shots: names });
+  const failed = shots.filter(failedKeyframe);
+  if (failed.length) return msg("note.settled.regeneration_failed", { shots: failed.map((shot) => shot.label).join(", ") });
+  const state = regenerationState(overview, shotIds);
+  return msg(state === "making" ? "note.settled.regenerating" : state === "complete" ? "note.settled.regenerated" : "note.settled.waiting", { shots: names });
 }
 
 function settledMsg(choice: NoteChoice, overview: GenerationOverview): Msg {
@@ -124,7 +142,7 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
   return notes.map((note) => {
     const where = anchorOf(note, overview);
     const resolvedChoice = note.state === "resolved" && note.resolution ? note.choices[note.resolution.choiceIndex] : undefined;
-    const making = resolvedChoice?.kind === "regenerate_keyframe" && regenerating(overview, resolvedChoice.shotIds);
+    const regeneration = resolvedChoice?.kind === "regenerate_keyframe" ? regenerationState(overview, resolvedChoice.shotIds) : null;
     return {
       noteId: note.noteId,
       letter: note.letter,
@@ -140,15 +158,16 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
         paid: choice.kind === "regenerate_keyframe",
       })),
       settled: note.state === "stale" ? staleMsg(note, overview, where) : resolvedChoice ? settledMsg(resolvedChoice, overview) : null,
-      making,
+      regeneration,
+      making: regeneration === "making",
     };
   });
 }
 
-/** Open notes of one scene, blocking ones first, then by letter: the banner shows the first one. */
+/** Open notes and failed regeneration requests of one scene, blocking ones first, then by letter. */
 export function sceneOpenNotes(views: readonly NoteView[], sceneId: string): NoteView[] {
   return views
-    .filter((view) => view.state === "open" && view.sceneId === sceneId)
+    .filter((view) => (view.state === "open" || view.regeneration === "failed") && view.sceneId === sceneId)
     .sort((a, b) => Number(b.blocking) - Number(a.blocking) || a.letter.localeCompare(b.letter));
 }
 

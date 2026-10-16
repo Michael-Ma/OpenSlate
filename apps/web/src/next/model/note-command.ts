@@ -22,12 +22,15 @@ export function noteCommandCurrent(store: Pick<NoteStore, "getState">, owner: No
 export async function runNoteRegeneration(store: NoteStore, overview: GenerationOverview, action: Extract<NoteAction, { kind: "regenerate" }>): Promise<boolean> {
   const owner = noteCommandOwner(store, overview);
   if (!owner) return false;
+  // A failed resolved note may start a fresh human request, but its original resolution is immutable history.
+  const alreadyResolved = store.getState().snapshot?.notes?.find((note) => note.noteId === action.noteId)?.state === "resolved";
   const first = action.shotIds[0];
   if (!first) return false;
   const receipt = action.shotIds.length === 1 ? await store.regenerateKeyframe(first)
     : await store.makeKeyframes(overview.shots[first]?.sceneId ?? "", action.shotIds, true);
   const requestId = (receipt as { requestId?: string } | undefined)?.requestId;
   if (!requestId || !noteCommandCurrent(store, owner)) return false;
+  if (alreadyResolved) return true;
   const resolved = await store.resolveNote(action.noteId, action.choiceIndex, requestId);
   return !!resolved && noteCommandCurrent(store, owner);
 }

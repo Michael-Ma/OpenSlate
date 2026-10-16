@@ -532,9 +532,11 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
       // The words first: the studio keeps them as the recording's subtitle.
       // A retained request checks only its original bytes/path/key; newer local words are never saved by it.
       if (!replay && words.trim() !== savedWords.trim()) {
-        wordsSaved = await saveRecordingWords(store, draft, words);
+        let wordsRefusal: Msg | null = null;
+        wordsSaved = await saveRecordingWords(store, draft, words, (message) => { wordsRefusal = message; });
         if (!wordsSaved) {
-          if (active() && mounted.current) setPhase({ state: "ready" });
+          if (wordsRefusal) await notAdded(false, wordsRefusal, true);
+          else if (active() && mounted.current) setPhase({ state: "ready" });
           return;
         }
         await store.refresh();

@@ -118,7 +118,7 @@ button.atchip:hover{background:var(--track)}
 /* the Director's lettered notes (studio.css has .note, .letter, .note.done, .handled) */
 .note-text{white-space:pre-line;overflow-wrap:anywhere}
 /* stale: a global .stale rule styles inspector lines, so key off the state attribute instead */
-.note[data-state="stale"] .handled,.note[data-tone="making"] .handled{color:var(--text-2);font-weight:500}
+.note[data-state="stale"] .handled,.note[data-tone="making"] .handled,.note[data-tone="failed"] .handled{color:var(--text-2);font-weight:500}
 
 /* a pending Director question: amber like the Director's notes; the chosen option is white */
 .dir-question{border:1px solid var(--amber-line);background:var(--amber-surface);border-radius:12px;padding:11px 13px 12px;margin-top:10px;line-height:1.5}

@@ -171,7 +171,7 @@ export interface KeyframesView {
   header: { title: string; ordinal: number; status: Msg; shots: number };
   pills: ScenePill[];
   checks: { letter: string; check: AppCheck }[];
-  /** Current unanswered paid work, named beside the scene instead of an all-clear check row. */
+  /** Current unanswered paid work or failed narration, named instead of an all-clear check row. */
   attention: Msg | null;
   cards: ShotCard[];
   selected: ShotOverview | null;
@@ -202,10 +202,11 @@ export const heldByEdit = (slot: MediaSlot) => slot.state === "queued" && slot.w
 export const isWorking = (slot: MediaSlot) =>
   slot.state === "running" || queuedToRun(slot) || slot.replacement?.state === "running" || !!slot.replacement && queuedToRun(slot.replacement);
 
-/** A passive unresolved queue still blocks changing or repurchasing its inputs; it is not running progress. */
-export function unresolvedQueue(slot: MediaSlot): Pick<MediaSlot, "state" | "waiting" | "failure"> | null {
+/** Unknown queues guard inputs; repairing a clip's required keyframe may bypass its passive input wait. */
+export function unresolvedQueue(slot: MediaSlot, allowInputWait = false): Pick<MediaSlot, "state" | "waiting" | "failure"> | null {
   return [slot, ...(slot.replacement ? [slot.replacement] : [])]
-    .find((pending) => pending.state === "queued" && !queuedToRun(pending) && pending.waiting?.code !== "review") ?? null;
+    .find((pending) => pending.state === "queued" && !queuedToRun(pending) && pending.waiting?.code !== "review"
+      && (!allowInputWait || pending.waiting?.code !== "input_pending")) ?? null;
 }
 
 export const shotHasNoAnswer = (shot: ShotOverview) => shot.keyframe.state === "no_answer" || shot.video.state === "no_answer"
@@ -537,7 +538,9 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
     header: { title: scene.title, ordinal: scene.ordinal, status: sceneStatus(scene, overview), shots: shots.length },
     pills: [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal).map((s) => ({ sceneId: s.sceneId, ordinal: s.ordinal, title: s.title, status: pillStatus(overview, s, s.sceneId === scene.sceneId), selected: s.sceneId === scene.sceneId })),
     checks,
-    attention: sceneUnknownOutcome(overview, scene, locale),
+    attention: sceneUnknownOutcome(overview, scene, locale)
+      ?? (shots.some((shot) => shot.narration.state === "failed")
+        ? msg("scene.narration_failed", { shots: listLabels(shots.filter((shot) => shot.narration.state === "failed").map((shot) => shot.label), locale) }) : null),
     cards,
     selected,
     panel: videoPanel(overview, scene, locale),

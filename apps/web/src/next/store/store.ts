@@ -46,6 +46,8 @@ export interface EditSaveFeedback {
   toast?: Msg | null;
   /** Internal recording preparation/rollback must not publish errors or successes of its own. */
   quiet?: boolean;
+  /** A composite action can show the refusal in its own panel. Never retained with the request. */
+  onRefused?: (message: Msg) => void;
 }
 
 interface PendingEditBody {
@@ -205,7 +207,7 @@ export class StudioStore {
    * Run one press with a stable request identity. A lost reply keeps the saved key and body, so the
    * next press of the same thing resends them and the server replays its receipt.
    */
-  async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg, timeoutMs?: number, backgroundResult = false, quiet = false): Promise<T | undefined> {
+  async #press<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }>, toast?: Msg, timeoutMs?: number, backgroundResult = false, quiet = false, onRefused?: (message: Msg) => void): Promise<T | undefined> {
     const keys = this.#keys;
     const { projectId, projectEpoch } = this.#state;
     const current = () => projectId === this.#state.projectId && projectEpoch === this.#state.projectEpoch;
@@ -213,6 +215,7 @@ export class StudioStore {
     // A restored studio in recovery review is read-only: nothing is sent, and the one reason is said.
     if (recoveryReadOnly(this.#state)) {
       if (!quiet) this.dispatch({ type: "toast", message: RECOVERY_LOCK, tone: "error" });
+      onRefused?.(RECOVERY_LOCK);
       return undefined;
     }
     this.dispatch({ type: "pending", pressId, pending: true });
@@ -230,7 +233,10 @@ export class StudioStore {
     } catch (error) {
       if (definite(error) && requestKey) keys.settle(pressId, requestKey);
       // Only a request that was sent can have lost its reply; one that failed before sending says why.
-      if (current()) this.#fail(error, !definite(error) && PAID_PRESS.test(pressId) && keys.saved(pressId)?.logical === canonicalJson(logical), quiet);
+      if (current()) {
+        const refusal = this.#fail(error, !definite(error) && PAID_PRESS.test(pressId) && keys.saved(pressId)?.logical === canonicalJson(logical), quiet);
+        onRefused?.(refusal);
+      }
       if (current() && definite(error)) void this.refresh();
       return undefined;
     } finally {
@@ -239,12 +245,14 @@ export class StudioStore {
   }
 
   /** `unconfirmedPaid`: a paid press whose reply was lost; pressing again resends its saved key and body. */
-  #fail(error: unknown, unconfirmedPaid = false, quiet = false): void {
+  #fail(error: unknown, unconfirmedPaid = false, quiet = false): Msg {
     this.#deps.onError?.(error);
     const code = error instanceof ApiError || error instanceof CommandRefused ? error.code : "NETWORK_ERROR";
-    if (!quiet) this.dispatch({ type: "toast", message: unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code), tone: "error" });
+    const refusal = unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code);
+    if (!quiet) this.dispatch({ type: "toast", message: refusal, tone: "error" });
     // The studio says it is in recovery review while this page did not know: read the status, so the page turns read-only.
     if (code === "INSTALLATION_QUARANTINED") void this.readRecovery();
+    return refusal;
   }
 
   /**
@@ -414,7 +422,9 @@ export class StudioStore {
     const originalFeedback = replay ? previous.feedback ?? original.saveFeedback : undefined;
     const output = originalFeedback ?? { message: feedback.toast === undefined ? msg("toast.saved") : feedback.toast, quiet: feedback.quiet === true };
     if (conflict.kind === "changed" && !replay) {
-      if (!output.quiet) this.dispatch({ type: "toast", message: msg("error.EDIT_BASELINE_CHANGED"), tone: "error" });
+      const refusal = msg("error.EDIT_BASELINE_CHANGED");
+      if (!output.quiet) this.dispatch({ type: "toast", message: refusal, tone: "error" });
+      feedback.onRefused?.(refusal);
       return null;
     }
     const body = replay ? previous.body : candidateBody;
@@ -423,7 +433,7 @@ export class StudioStore {
     const retain = keepOpen || !!(replay && (previous.keepOpen ?? original.keepOpenAfterSave));
     const submitted = { ...original, ...draft, saving: true, expectedHeadVersion: body.expectedHeadVersion, keepOpenAfterSave: retain, saveFeedback: output };
     this.dispatch({ type: "edit", edit: submitted });
-    const receipt = await this.#press<{ commandId: string; headVersion?: number }>(pressId, body, async () => ({ path: target, body, feedback: output, keepOpen: retain }), undefined, undefined, false, output.quiet);
+    const receipt = await this.#press<{ commandId: string; headVersion?: number }>(pressId, body, async () => ({ path: target, body, feedback: output, keepOpen: retain }), undefined, undefined, false, output.quiet, feedback.onRefused);
     if (projectEpoch !== this.#state.projectEpoch || projectId !== this.#state.projectId) return null;
     const current = this.#state.edit;
     // Only this form's submitted revision or its newer typing may be updated; Cancel/reopen is another owner.

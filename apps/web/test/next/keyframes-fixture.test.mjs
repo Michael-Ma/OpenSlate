@@ -96,6 +96,42 @@ test('regenerating 2.2 makes a red-coat second take that is not opened', () => {
   assert.equal(scene(w, 2).state, 'keyframes_back');
 });
 
+test('B21 fixture keyframe repair runs past a passive clip input wait and preserves protected queue refusals', () => {
+  const waiting = code => ({ state: 'queued', takeCount: 0, waiting: { code, since: 'x' } });
+  for (const state of ['none', 'failed']) {
+    const w = world(), target = shot(w, '2.2');
+    target.keyframe = { state, takeCount: 0, opened: false };
+    target.video = waiting('input_pending');
+    const body = keyframesBody(read(w, sceneId(2)), [target.shotId], true);
+    assert.equal(post(w, `/scenes/${sceneId(2)}/generate`, body).accepted, true);
+    assert.equal(shot(w, '2.2').keyframe.state, 'running');
+    w.advance(FIXTURE_TIMING.keyframeMs);
+    assert.equal(shot(w, '2.2').keyframe.state, 'ready');
+  }
+  for (const protectedWork of [waiting('unknown'), { state: 'queued', takeCount: 0 }, { state: 'no_answer', takeCount: 0 },
+    { state: 'ready', takeCount: 1, replacement: { state: 'running' } },
+    { state: 'ready', takeCount: 1, replacement: waiting('unknown') }]) {
+    const w = world(), target = shot(w, '2.2');
+    target.video = protectedWork;
+    assert.throws(() => post(w, `/scenes/${sceneId(2)}/generate`, keyframesBody(read(w, sceneId(2)), [target.shotId], true)), refused('ATTEMPT_EXISTS'));
+  }
+});
+
+test('B21 fixture refuses repurchasing failed automatic keyframe retries and retained replacements', () => {
+  for (const replacement of [false, true]) {
+    const w = world(), target = shot(w, '2.2');
+    const pending = { state: 'failed', failure: { code: 'X', technical: true, retryAllowed: true, autoRetriesLeft: 2, charged: false, at: 'x' } };
+    if (replacement) target.keyframe.replacement = pending;
+    else target.keyframe = { ...pending, takeCount: 0, opened: false };
+    target.video = { state: 'queued', takeCount: 0, waiting: { code: 'input_pending', since: 'x' } };
+    const before = structuredClone(w.overview);
+    assert.throws(() => post(w, `/scenes/${sceneId(2)}/generate`, keyframesBody(read(w, sceneId(2)), [target.shotId], true)), refused('ATTEMPT_EXISTS'));
+    assert.deepEqual(w.overview, before, 'a refused paid request must not replace the candidate');
+    (replacement ? target.keyframe.replacement : target.keyframe).failure.autoRetriesLeft = 0;
+    assert.equal(post(w, `/scenes/${sceneId(2)}/generate`, keyframesBody(read(w, sceneId(2)), [target.shotId], true)).accepted, true);
+  }
+});
+
 test('confirming Scene 2 makes one clip after another, then the scene reads video saved', () => {
   const w = world();
   open(w, '2.2'); open(w, '2.3');

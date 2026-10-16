@@ -34,7 +34,7 @@ interface Props {
   busy: boolean;
   /** The quiet line when nothing is left to check (e.g. "Every Director note in this scene is settled."). */
   quiet?: Msg | null;
-  /** Unanswered paid work is a neutral warning, never a green all-clear check. */
+  /** Unanswered paid work or failed narration is a neutral warning, never a green all-clear check. */
   attention?: Msg | null;
   onExtend(check: AppCheck): void;
   onKeep(check: AppCheck): void;

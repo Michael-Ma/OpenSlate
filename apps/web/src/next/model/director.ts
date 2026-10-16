@@ -294,9 +294,9 @@ export interface ThreadNote {
   view: NoteView;
   /**
    * open: amber; done: settled, neutral with a green line; making: settled by a regenerate still being made, neutral
-   * and without a check; stale: neutral, says what changed.
+   * and without a check; failed: neutral, names the failed regeneration; stale: neutral, says what changed.
    */
-  tone: "open" | "done" | "making" | "stale";
+  tone: "open" | "done" | "making" | "failed" | "stale";
   opens: NoteOpen[];
 }
 
@@ -451,7 +451,9 @@ function replyBlocks(text: string): Block[] {
   return blocks;
 }
 
-const noteTone = (view: NoteView): ThreadNote["tone"] => (view.state === "resolved" ? (view.making ? "making" : "done") : view.state === "stale" ? "stale" : "open");
+const noteTone = (view: NoteView): ThreadNote["tone"] => (view.state === "resolved"
+  ? view.regeneration === "failed" ? "failed" : view.regeneration && view.regeneration !== "complete" ? "making" : "done"
+  : view.state === "stale" ? "stale" : "open");
 
 export function threadView(
   snapshot: ProjectSnapshot | null,
