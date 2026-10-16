@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { composerView, filterPicker, labelList, mentionAt, pickerItems, removeMention, type PickerItem } from "../model/director.ts";
+import { composerView, filterPicker, labelList, mentionAt, pickerItems, removeMention, withoutKeyframes, type PickerItem } from "../model/director.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
 import { AtPicker, pickerOptionId } from "./AtPicker.tsx";
@@ -206,7 +206,17 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
         </div>
       </div>
       {view.problem && <p className="composer-note" id={noteId} role="status">{tm(view.problem)}</p>}
-      {view.pointsAt.length > 0 && <p className="composer-draft" id={scopeId} data-note="points-at">{t("director.picture.points_at", { shots: labelList(view.pointsAt, locale), n: view.pointsAt.length })}</p>}
+      {view.pointsAt.length > 0 && (
+        // With no @ target the keyframes' shots replace the whole film; with targets they join them.
+        <div className="composer-scope" data-note="points-at" data-scope={view.narrowed ? "narrowed" : "added"}>
+          <p className="composer-draft" id={scopeId}>{t(view.narrowed ? "director.picture.points_only" : "director.picture.points_at", { shots: labelList(view.pointsAt, locale), n: view.pointsAt.length })}</p>
+          {view.narrowed && (
+            <button type="button" className="pill sm" data-act="keep-whole-film" disabled={composer.sending} onClick={() => { store.dispatch({ type: "composerImages", images: withoutKeyframes(composer.images) }); textarea.current?.focus(); }}>
+              {t("director.picture.keep_film", { n: view.pointsAt.length })}
+            </button>
+          )}
+        </div>
+      )}
       {showDraft && <p className="composer-draft" id={draftId} data-draft="restored">{t("director.draft.restored")}</p>}
     </div>
   );

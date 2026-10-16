@@ -73,6 +73,8 @@ export const director = {
   "director.picture.not_current": { en: "{shot} has a newer keyframe. Remove its picture, then show the new one.", zh: "{shot} 有了新的关键帧。请移除这张图片，再加入新的关键帧。" },
   "director.picture.gone": { en: "A picture's shot was removed. Remove the picture to send.", zh: "有图片所属的镜头已被删除。移除这张图片后才能发送。" },
   "director.picture.points_at": { en: "This message also points at {shots}, so the Director sees {n, plural, one {its keyframe} other {their keyframes}}.", zh: "这条消息也会指向 {shots}，导演才能看到{n, plural, =1 {它的关键帧} other {这些关键帧}}。" },
+  "director.picture.points_only": { en: "This message now points only at {shots}, not the whole film, so the Director sees {n, plural, one {its keyframe} other {their keyframes}} and can change only {shots}.", zh: "这条消息现在只指向 {shots}，不再是整部影片：导演能看到{n, plural, =1 {它的关键帧} other {这些关键帧}}，也只能修改 {shots}。" },
+  "director.picture.keep_film": { en: "Keep the whole film (remove {n, plural, one {the keyframe} other {the keyframes}})", zh: "改回整部影片（移除{n, plural, =1 {这张关键帧} other {这些关键帧}}）" },
   "director.picture.failed": { en: "Picture not shown ({code})", zh: "图片无法显示（{code}）" },
   // The unsent draft, kept per film in this browser.
   "director.draft.restored": { en: "Unsent draft, kept in this browser until you send it.", zh: "未发送的草稿，发送前保存在这个浏览器里。" },

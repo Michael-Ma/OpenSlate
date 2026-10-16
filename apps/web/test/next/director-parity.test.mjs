@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   pictureRefusal, pictureFromAsset, pictureFromShot, addPicture, pictureChips, composerView, messageBody, messageText,
-  userMessage, resolveRef, sentPictureName, labelList, draftToSave, readDraft, draftKey, failedTurns, heldEdits, threadView, afterSend,
+  userMessage, resolveRef, sentPictureName, labelList, draftToSave, readDraft, draftKey, failedTurns, heldEdits, threadView, withoutKeyframes, afterSend,
   PICTURE_LIMIT, MESSAGE_LIMIT,
 } from '../../src/next/model/director.ts';
 import { refLink } from '../../src/next/model/markdown.ts';
@@ -114,6 +114,33 @@ test('keyframes point the message at their shots: the composer says so unless a 
   assert.equal(en({ id: 'director.picture.points_at', values: { shots: '2.1 and 2.3', n: 2 } }), 'This message also points at 2.1 and 2.3, so the Director sees their keyframes.');
   assert.equal(zh({ id: 'director.picture.points_at', values: { shots: '2.1', n: 1 } }), '这条消息也会指向 2.1，导演才能看到它的关键帧。');
   assert.equal(zh({ id: 'director.picture.points_at', values: { shots: '2.1和2.3', n: 2 } }), '这条消息也会指向 2.1和2.3，导演才能看到这些关键帧。');
+});
+
+test('a keyframe on a message with no @ target narrows it from the whole film to that shot, and the composer says so', () => {
+  const overview = lastFerryOverview();
+  const film = { open: true, stopped: false };
+  const keyframe21 = { artifactId: artifactFor('2.1').artifactId, sha256: artifactFor('2.1').sha256, source: 'keyframe', shotId: shotId('2.1'), name: '' };
+  const view = (targets, images) => composerView({ ...empty, text: 'Make the whole film colder, like this frame', targets, images }, true, overview, film, codex);
+  // No target: the keyframe's shot replaces the whole film (the server attaches no keyframes to a whole-film message).
+  const alone = view([], [keyframe21, uploadImage]);
+  assert.deepEqual([alone.pointsAt, alone.narrowed], [['2.1'], true]);
+  assert.deepEqual(messageBody({ ...empty, text: 'x', images: [keyframe21, uploadImage] }, overview).scopeIds, [shotId('2.1')]);
+  // With a target, the keyframe's shot joins it: "also".
+  const joined = view([{ kind: 'shot', id: shotId('2.3') }], [keyframe21]);
+  assert.deepEqual([joined.pointsAt, joined.narrowed], [['2.1'], false]);
+  // Imported pictures alone narrow nothing.
+  assert.deepEqual([view([], [uploadImage]).pointsAt, view([], [uploadImage]).narrowed], [[], false]);
+  assert.equal(en({ id: 'director.picture.points_only', values: { shots: '2.1', n: 1 } }),
+    'This message now points only at 2.1, not the whole film, so the Director sees its keyframe and can change only 2.1.');
+  assert.equal(en({ id: 'director.picture.points_only', values: { shots: '2.1 and 2.3', n: 2 } }),
+    'This message now points only at 2.1 and 2.3, not the whole film, so the Director sees their keyframes and can change only 2.1 and 2.3.');
+  assert.equal(zh({ id: 'director.picture.points_only', values: { shots: '2.1', n: 1 } }), '这条消息现在只指向 2.1，不再是整部影片：导演能看到它的关键帧，也只能修改 2.1。');
+  assert.equal(en({ id: 'director.picture.keep_film', values: { n: 1 } }), 'Keep the whole film (remove the keyframe)');
+  assert.equal(zh({ id: 'director.picture.keep_film', values: { n: 2 } }), '改回整部影片（移除这些关键帧）');
+  // Keeping the whole film drops the keyframes and keeps imported pictures: the message points at the film again.
+  const kept = withoutKeyframes([keyframe21, uploadImage]);
+  assert.deepEqual(kept, [uploadImage]);
+  assert.deepEqual([view([], kept).narrowed, messageBody({ ...empty, text: 'x', images: kept }, overview).scopeIds], [false, [PROJECT_ID]]);
 });
 
 test('the message body: imported pictures as images, keyframes through their shot, links before the words', () => {

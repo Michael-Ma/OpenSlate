@@ -48,6 +48,9 @@ button.atchip:hover{background:var(--track)}
 .bubble-pictures .pic-chip{padding:2px 7px}
 .bubble-picture .pic-thumb{width:84px;height:54px;border-radius:8px}
 .composer-draft{margin:6px 4px 0;font-size:12px;line-height:1.4;color:var(--muted)}
+/* a keyframe that narrows the message: the line, then a way back to the whole film */
+.composer-scope{display:flex;flex-direction:column;align-items:flex-start}
+.composer-scope [data-act="keep-whole-film"]{margin:6px 0 0;white-space:normal;text-align:left}
 
 /* replies as Markdown: React elements only; tables and code scroll sideways in their own box */
 .md ul,.md ol{margin:6px 0 0;padding-left:22px}

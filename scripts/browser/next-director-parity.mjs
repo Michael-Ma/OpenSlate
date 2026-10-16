@@ -59,10 +59,11 @@ export const scenarios = [
       await toast(page, /^Added to your message/);
       if ((await pictureNames(page)).join() !== "2.1 keyframe") fail(`Pictures after the preview: ${await pictureNames(page)}`);
       await page.waitForFunction(() => document.activeElement?.matches('[data-field="message"]'), null, { timeout: 2000 }).catch(() => fail("Focus did not move to the reply box"));
-      // A keyframe is shown by pointing the message at its shot: the composer says so.
-      const scope = await texts(page, '[data-note="points-at"]');
-      if (scope[0] !== "This message also points at 2.1, so the Director sees its keyframe.") fail(`The scope line reads ${JSON.stringify(scope)}`);
-      if (!(await page.locator('[data-field="message"]').getAttribute("aria-describedby"))?.includes(await page.locator('[data-note="points-at"]').getAttribute("id"))) fail("The scope line does not describe the reply box");
+      // A keyframe is shown by pointing the message at its shot; with no @ target that replaces the whole film, and the composer says so.
+      const scope = await texts(page, '[data-note="points-at"] p');
+      if (scope[0] !== "This message now points only at 2.1, not the whole film, so the Director sees its keyframe and can change only 2.1.") fail(`The scope line reads ${JSON.stringify(scope)}`);
+      if (!(await page.locator('[data-field="message"]').getAttribute("aria-describedby"))?.includes(await page.locator('[data-note="points-at"] p').getAttribute("id"))) fail("The scope line does not describe the reply box");
+      if (await page.locator('[data-act="keep-whole-film"]').textContent() !== "Keep the whole film (remove the keyframe)") fail("The way back to the whole film is missing");
       // Assets: an imported picture joins it; the same one again is refused.
       await openAssets(page);
       await showAsset(page, "art-ref");
@@ -93,7 +94,42 @@ export const scenarios = [
       await page.waitForSelector('.thread [data-entry="working"]', { state: "detached", timeout: 5000 });
       const reply = await texts(page, '.thread [data-who="director"] .md');
       if (!/I looked at the 2 pictures you showed me/.test(reply.at(-1) ?? "")) fail(`The reply reads ${JSON.stringify(reply.at(-1))}`);
+      // The message went to 2.1 alone, as the composer said; its bubble shows that.
+      const chips = await sent.locator(".atchip").allTextContents();
+      if (chips.join() !== "@2.1") fail(`The sent message points at ${chips}`);
+      await noNamelessImages(page);
       await page.screenshot({ path: shot("pictures-sent-1440"), clip: column });
+    },
+  },
+  {
+    name: "next-director-pictures-scope",
+    query: `${base}&director=codex`,
+    async run({ page }) {
+      await ready(page);
+      const box = page.locator('[data-field="message"]');
+      // No @ target: the keyframe narrows the message; "Keep the whole film" takes the keyframe out again.
+      await page.locator('.preview [data-act="show-director"]').click();
+      await page.waitForSelector('[data-note="points-at"][data-scope="narrowed"]');
+      await page.screenshot({ path: shot("pictures-narrowed-1440"), clip: column });
+      await page.locator('[data-act="keep-whole-film"]').click();
+      if (await page.locator('.composer .pic-chip').count() || await page.locator('[data-note="points-at"]').count()) fail("Keep the whole film left the keyframe or the line");
+      if (!(await page.evaluate(() => document.activeElement?.matches('[data-field="message"]')))) fail("Focus did not go back to the reply box");
+      // With an @ target the keyframe's shot joins it: "also", and no way back is offered (nothing was replaced).
+      await box.pressSequentially("@2.3");
+      await page.waitForSelector('.picker [role="listbox"]');
+      await box.press("Enter");
+      await page.locator('.preview [data-act="show-director"]').click();
+      await page.waitForSelector('[data-note="points-at"][data-scope="added"]');
+      const line = await texts(page, '[data-note="points-at"] p');
+      if (line[0] !== "This message also points at 2.1, so the Director sees its keyframe.") fail(`The scope line reads ${JSON.stringify(line)}`);
+      if (await page.locator('[data-act="keep-whole-film"]').count()) fail("Keep the whole film is offered when the message has a target");
+      await removeTargets(page);
+      await page.screenshot({ path: shot("pictures-also-1440"), clip: column });
+      await box.fill("Match 2.3 to this frame");
+      await box.press("Enter");
+      await page.waitForSelector('.thread [data-entry="working"]');
+      const chips = await page.locator('.thread [data-who="you"]').last().locator(".atchip").allTextContents();
+      if (chips.join() !== "@2.3,@2.1") fail(`The sent message points at ${chips}`);
     },
   },
   {

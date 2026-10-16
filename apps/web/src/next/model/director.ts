@@ -495,6 +495,11 @@ export interface ComposerView {
    * keyframe of each shot a message points at), labels in film order; empty when the chips already cover them.
    */
   pointsAt: string[];
+  /**
+   * The message has no @ target, so its keyframes' shots replace the whole film as its scope: the Director is given
+   * those keyframes but may change only those shots (the server attaches no keyframes to a whole-film message).
+   */
+  narrowed: boolean;
   canSend: boolean;
   /** Why sending is not possible right now, when that is not obvious (empty is obvious). */
   problem: Msg | null;
@@ -532,7 +537,13 @@ export function composerView(
     : !reachable ? msg("director.composer.hint_offline")
     : film.stopped ? msg("director.composer.hint_stopped")
     : msg("director.composer.hint");
-  return { chips, pictures, pointsAt, canSend: film.open && !!text && !problem && reachable && !composer.sending, problem, hint, off: !film.open };
+  const narrowed = pointsAt.length > 0 && composer.targets.length === 0;
+  return { chips, pictures, pointsAt, narrowed, canSend: film.open && !!text && !problem && reachable && !composer.sending, problem, hint, off: !film.open };
+}
+
+/** "Keep the whole film": the message's pictures without its keyframes, so it points at the whole film again. */
+export function withoutKeyframes(images: readonly ComposerImage[]): ComposerImage[] {
+  return images.filter((image) => image.source !== "keyframe");
 }
 
 /** The labels of the shots whose keyframes the message shows and that no chip already points at (by shot or scene). */
