@@ -2,17 +2,19 @@ import { canonical, digest, invariant, newId, parseChangeProposal, parseToolArgu
 import type { ActorContext, CreativePatch, DirectorNote, DirectorProposal, ProjectRecord, ProposalPatch, ProposalPreview, ProposalReceipt, PreviewBindings } from '@openslate/core';
 import type { FastifyInstance } from 'fastify';
 import type { NodeBinding } from '../execution/engine.js';
-import type { ProductionService } from './service.js';
+import type { ProductionService, ShotNarrationAcceptance } from './service.js';
 import { requiredCommandKey } from './command-key.js';
 
 interface TouchedField { shotId?: string; sceneId?: string; field: string; before: unknown; after: unknown }
+interface NarrationAcceptanceSnapshot { state: ShotNarrationAcceptance; cueDigest: string }
+interface NarrationProposalUndo { shotId: string; before: NarrationAcceptanceSnapshot; after: NarrationAcceptanceSnapshot }
 export interface ProposalRecord {
   id: string; projectId: string; principalId: string; requestId: string; turnId: string; epochId: string; invocationId: string;
   argumentsDigest: string; patch: ProposalPatch; baseVersion: number; baseShotRevisions: Record<string, string>; baseSceneRevisions: Record<string, string>;
   /** Narration-only updates can intentionally retain a picture revision; pin field data too. */
   baseShotDigests: Record<string, string>;
   state: DirectorProposal['state']; preview: ProposalPreview; previewDigest: string; createdAt: string;
-  accepted?: { at: string; touchedFields: TouchedField[] }; noteId?: string;
+  accepted?: { at: string; touchedFields: TouchedField[]; cursor?: number; narration?: NarrationProposalUndo[] }; noteId?: string;
 }
 const creative = (patch: ProposalPatch): CreativePatch => ({ ...patch, ...(patch.updateShots ? { updateShots: patch.updateShots.map(row => { const copy = { ...row, reauthorPrompts: true }; if (copy.narration === null) delete copy.narration; return copy; }) } : {}) });
 function bindings(service: ProductionService, project: ProjectRecord): PreviewBindings {
@@ -103,6 +105,21 @@ function touched(project: ProjectRecord, patch: ProposalPatch): TouchedField[] {
   }
   return result;
 }
+function narrationAcceptance(project: ProjectRecord, shotId: string): NarrationAcceptanceSnapshot | null {
+  const shot = project.shots.find(s => s.id === shotId);
+  if (!shot) return null;
+  const state: ShotNarrationAcceptance = { cueId: shot.cueId };
+  for (const field of ['narrationPending', 'narrationTimingMode', 'narrationFit'] as const)
+    if (shot[field] !== undefined) Object.assign(state, { [field]: shot[field] });
+  return { state, cueDigest: digest(project.cues.find(cue => cue.id === shot.cueId) ?? null) };
+}
+/** Later audio acceptance/fit belongs to its own edit, even if it returns to the same values. */
+function laterNarrationEdit(service: ProductionService, projectId: string, proposal: ProposalRecord, shotId: string): boolean {
+  if (proposal.accepted?.cursor === undefined) return false;
+  return service.store.readEvents(projectId, proposal.accepted.cursor).some(event => event.kind === 'human.fields_changed' &&
+    (event.payload.fields as unknown as { shotId?: string; field: string }[]).some(field => field.shotId === shotId &&
+      ['*', 'narration', 'cueId', 'narrationPending', 'narrationTimingMode', 'narrationFit'].includes(field.field)));
+}
 export function proposalCommand(service: ProductionService, projectId: string, id: string, action: 'accept' | 'reject' | 'undo', key: string, previewDigest?: string, principalId = 'local-user'): ProposalReceipt {
   service.recovery.assertWritable(projectId);
   return service.store.command(`${principalId}:${projectId}:proposal`, key, digest({ id, action, previewDigest: previewDigest ?? null }), () => {
@@ -121,7 +138,13 @@ export function proposalCommand(service: ProductionService, projectId: string, i
       for (const field of proposal.accepted!.touchedFields) {
         const now = field.shotId ? project.shots.find(s => s.id === field.shotId) : project.scenes.find(s => s.id === field.sceneId);
         const later = laterProposals.some(p => p.accepted?.touchedFields.some(f => f.shotId === field.shotId && f.sceneId === field.sceneId && f.field === field.field));
-        if (!now || later || canonical((now as unknown as Record<string, unknown>)[field.field] ?? null) !== canonical(field.after)) { leftAlone.push({ ...(field.shotId ? { shotId: field.shotId } : {}), field: field.field }); continue; }
+        const narration = field.field === 'narration' && field.shotId ? proposal.accepted!.narration?.find(saved => saved.shotId === field.shotId) : undefined;
+        // Historical acceptances did not capture these states; their inverse must not invent readiness.
+        const missingNarrationSnapshot = field.field === 'narration' && !narration;
+        const audioChanged = narration && (canonical(narrationAcceptance(project, narration.shotId)) !== canonical(narration.after) ||
+          digest(project.cues.find(cue => cue.id === narration.before.state.cueId) ?? null) !== narration.before.cueDigest ||
+          laterNarrationEdit(service, projectId, proposal, narration.shotId));
+        if (!now || later || missingNarrationSnapshot || audioChanged || canonical((now as unknown as Record<string, unknown>)[field.field] ?? null) !== canonical(field.after)) { leftAlone.push({ ...(field.shotId ? { shotId: field.shotId } : {}), field: field.field }); continue; }
         if (field.shotId) {
           const row = (patch.updateShots ??= []).find(s => s.id === field.shotId) ?? { id: field.shotId };
           if (!patch.updateShots.includes(row)) patch.updateShots.push(row);
@@ -134,9 +157,15 @@ export function proposalCommand(service: ProductionService, projectId: string, i
     let next = proposal;
     if (action !== 'reject') {
       const preview = previewCreativePatch(project, patch, bindings(service, project));
-      if (preview.changes.length) service.publishHumanCreativePatch(projectId, actor, creative(patch), (patch.updateShots ?? []).filter(s => s.narration === null).map(s => s.id));
+      const restoreNarration = action === 'undo' ? (patch.updateShots ?? []).flatMap(row => {
+        const saved = proposal.accepted!.narration?.find(saved => saved.shotId === row.id);
+        return Object.hasOwn(row, 'narration') && saved ? [{ shotId: row.id, state: saved.before.state }] : [];
+      }) : [];
+      if (preview.changes.length) service.publishHumanCreativePatch(projectId, actor, creative(patch), (patch.updateShots ?? []).filter(s => s.narration === null).map(s => s.id), restoreNarration);
+      const touchedFields = action === 'accept' ? touched(project, patch) : [];
+      const narration = touchedFields.filter(field => field.field === 'narration' && field.shotId).map(field => ({ shotId: field.shotId!, before: narrationAcceptance(project, field.shotId!)!, after: narrationAcceptance(store.getProject(projectId), field.shotId!)! }));
       next = { ...proposal, state: action === 'accept' ? 'accepted' : 'undone', preview, previewDigest: proposalPreviewDigest(preview),
-        ...(action === 'accept' ? { accepted: { at: new Date().toISOString(), touchedFields: touched(project, patch) } } : {}) };
+        ...(action === 'accept' ? { accepted: { at: new Date().toISOString(), touchedFields, cursor: store.cursor(projectId), narration } } : {}) };
       noteTransition(service, next, action === 'undo');
     } else next = { ...proposal, state: 'rejected', preview: current.preview, previewDigest: current.previewDigest };
     service.releaseAlongsideHolds(projectId, actor);

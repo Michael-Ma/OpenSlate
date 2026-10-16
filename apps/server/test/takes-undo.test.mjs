@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { confirmationFixture } from './helpers/confirmation-fixture.mjs';
+import { fixture as generationFixture } from './helpers/generation-fixture.mjs';
+import { compilePlan } from '@openslate/core';
 
 async function completed(t) {
   const f = await confirmationFixture(t, { modes: ['none'] });
@@ -15,6 +17,70 @@ const shot = async f => (await f.overview()).shots['shot-0'];
 const undo = async (f, commandId) => f.call('POST', '/storyboard', { kind: 'undo', commandId, expectedHeadVersion: f.store.getProject(f.project.id).headVersion });
 const edit = (f, field, value) => f.call('POST', '/storyboard', { kind: 'shot', id: 'shot-0', field, value, expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
 const use = (f, artifactId, key) => f.call('POST', `/shots/shot-0/takes/${artifactId}/use`, undefined, key);
+
+for (const completedBeforeUndo of [false, true]) test(`Undo reconnects an exact paid video ${completedBeforeUndo ? 'completed while edited' : 'still in flight'} without buying another`, async t => {
+  const f = await confirmationFixture(t, { modes: ['none'] });
+  await f.make(); await f.tick(5);
+  const view = await f.call('GET', '/scenes/scene-0/generation').then(f.ok);
+  await f.call('POST', '/scenes/scene-0/generate', { headVersion: view.headVersion, revisionId: view.revisionId, kind: 'video',
+    reviewedFrames: view.rows.map(r => ({ shotId: r.shotId, artifactId: r.image.artifactId, sha256: r.image.sha256 })),
+    reviewedHoldDigest: view.reviewedHoldDigest, reviewedControlAuthorityId: view.reviewedControlAuthorityId }).then(f.ok);
+  const binding = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'video');
+  f.provider.setMode(binding.id, 'pending'); await f.engine.runReady();
+  const attempt = f.engine.attempts(f.project.id).find(a => a.nodeId === binding.id);
+  assert.equal(attempt.phase, 'remote_pending');
+  const receipt = await edit(f, 'videoPrompt', 'Temporary edit while the paid clip runs');
+  if (completedBeforeUndo) { f.provider.complete(attempt.taskId); await f.engine.reconcile(); }
+  const count = f.provider.acceptedCount(), grants = f.store.list('grant', f.project.id);
+  await undo(f, receipt.commandId).then(f.ok);
+  assert.equal(f.store.get('node_binding', binding.id).candidateId, attempt.candidateId, 'Undo reconnects the exact submitted candidate');
+  assert.ok(f.store.get('candidate_stop', attempt.candidateId), 'reconnection never restores retry authority');
+  if (!completedBeforeUndo) { await f.restart(); f.provider.complete(attempt.taskId); await f.engine.reconcile(); }
+  const restored = await shot(f), finished = f.store.get('attempt', attempt.id);
+  assert.equal(restored.video.state, 'ready'); assert.equal(restored.video.artifact.artifactId, finished.outputs.video.artifactId);
+  await f.tick(3);
+  assert.equal(f.provider.acceptedCount(), count); assert.deepEqual(f.store.list('grant', f.project.id), grants);
+});
+
+test('Undo reconnection cannot turn a later technical failure into an automatic paid retry', async t => {
+  const f = await confirmationFixture(t, { modes: ['none'] });
+  await f.make(); await f.tick(5);
+  const view = await f.call('GET', '/scenes/scene-0/generation').then(f.ok);
+  await f.call('POST', '/scenes/scene-0/generate', { headVersion: view.headVersion, revisionId: view.revisionId, kind: 'video',
+    reviewedFrames: view.rows.map(r => ({ shotId: r.shotId, artifactId: r.image.artifactId, sha256: r.image.sha256 })),
+    reviewedHoldDigest: view.reviewedHoldDigest, reviewedControlAuthorityId: view.reviewedControlAuthorityId }).then(f.ok);
+  const binding = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'video');
+  f.provider.setMode(binding.id, 'pending'); await f.engine.runReady();
+  const attempt = f.engine.attempts(f.project.id).find(a => a.nodeId === binding.id), receipt = await edit(f, 'videoPrompt', 'Temporary direction');
+  await undo(f, receipt.commandId).then(f.ok);
+  f.provider.db.prepare("UPDATE fake_jobs SET status='failed',failure_id=? WHERE id=?").run(randomUUID(), attempt.taskId);
+  await f.tick(4);
+  assert.equal(f.store.get('node_binding', binding.id).candidateId, attempt.candidateId);
+  assert.equal(f.engine.attempts(f.project.id).filter(a => a.candidateId === attempt.candidateId).length, 1);
+  assert.equal(f.provider.acceptedCount(), 2); assert.equal((await shot(f)).video.state, 'failed');
+});
+
+for (const conditioning of ['owned', 'shared']) test(`takes reports unsupported ${conditioning} conditioning frames as unselectable and refuses use atomically`, async t => {
+  const f = generationFixture(t, { sharedScene: true }), ok = async r => { assert.equal(r.statusCode, 200, r.body); return r.json(); };
+  let artifact;
+  if (conditioning === 'owned') { await f.post(await f.get('scene-2')).then(ok); await f.finish(); artifact = (await f.get('scene-2')).rows[0].image; }
+  let project = f.store.getProject(f.project.id);
+  if (artifact) { project.artifacts.push(artifact); project = f.store.saveProject(project, project.headVersion); }
+  const frame = artifact ? `p.asset(${JSON.stringify(artifact.artifactId)})` : 'p.image("shared",{profile:"fake-image-v1",prompt:"Shared frame"})';
+  const source = `definePlan({baseRevision:${JSON.stringify(project.revisionId)}},p=>{const frame=${frame};` +
+    'const s=p.shot("shot-0");const r=p.humanReview("review",{shots:[{intent:s,keyframe:frame,videoProfile:"fake-video-v1",motionPrompt:"Slow push angle 0",seconds:6}]});' +
+    'return p.video("clip",{intent:s,profile:"fake-video-v1",firstFrame:p.approvedImage(frame,r),prompt:"Slow push angle 0",seconds:6});});';
+  const compiled = compilePlan(source, { project, profiles: f.store.get('capability_lock', project.capabilityLockId).profiles, logicalIds: {}, allocateId: randomUUID });
+  const planId = randomUUID(), grants = Object.fromEntries(compiled.nodes.map(n => [n.id, f.engine.createGrant(project.id, n.shotId ?? project.id, n.kind, 'synthetic-human').id]));
+  f.engine.installPlan(project.id, planId, compiled, grants); f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion);
+  await f.finish(); const review = f.engine.reviewSnapshot(project.id); f.engine.approve(project.id, review.id, review.members.map(m => m.videoNodeId), 'synthetic-human'); await f.finish();
+  const takes = await f.call('GET', '/shots/shot-0/takes').then(ok);
+  assert.equal(takes.keyframes.length, 1); assert.equal(takes.keyframes[0].selectable, false);
+  const before = f.store.getProject(project.id), cursor = f.store.cursor(project.id), attempts = f.engine.attempts(project.id);
+  const response = await use(f, takes.keyframes[0].artifact.artifactId);
+  assert.equal(response.json().error.code, 'TAKE_NOT_SELECTABLE', response.body);
+  assert.deepEqual(f.store.getProject(project.id), before); assert.equal(f.store.cursor(project.id), cursor); assert.deepEqual(f.engine.attempts(project.id), attempts);
+});
 
 test('regeneration keeps current frame and clip through dispatch/restart, then outdates clip only on success', async t => {
   const f = await completed(t), before = await shot(f);
@@ -32,6 +98,7 @@ test('regeneration keeps current frame and clip through dispatch/restart, then o
   assert.equal(after.video.state, 'outdated'); assert.deepEqual(after.video.previous, before.video.artifact);
   const takes = await f.call('GET', '/shots/shot-0/takes').then(f.ok);
   assert.deepEqual(takes.keyframes.map(t => t.current), [true, false]);
+  assert.deepEqual(takes.keyframes.map(t => t.selectable), [true, true]);
   assert.equal(takes.keyframes[1].artifact.artifactId, before.keyframe.artifact.artifactId);
 });
 
@@ -53,6 +120,7 @@ test('failed regeneration retains current frame and clip and never invents anoth
 test('use earlier take verifies bytes, publishes without grants, outdates clip, replays and undoes', async t => {
   const f = await completed(t), earlier = (await shot(f)).keyframe.artifact;
   await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.tick(4);
+  assert.equal((await f.call('GET', '/shots/shot-0/takes').then(f.ok)).keyframes.find(t => t.artifact.artifactId === earlier.artifactId).selectable, true);
   await f.openFrames(); await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok); await f.tick(6);
   const before = await shot(f), project = f.store.getProject(f.project.id), grants = f.store.list('grant', f.project.id), attempts = f.engine.attempts(f.project.id);
   const artifact = f.store.get('artifact', earlier.artifactId), bytes = readFileSync(artifact.path), cursor = f.store.cursor(f.project.id);

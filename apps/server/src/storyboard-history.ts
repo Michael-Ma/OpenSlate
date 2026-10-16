@@ -56,6 +56,25 @@ export function restoreMediaUndo(s: ProductionService, project: ProjectRecord, u
         if (!profile || sceneVideoDurationFrames(shot, profile, old.node) !== old.node.args.durationFrames) continue;
       }
     } else continue; // Local assembly must be rebuilt against the restored canonical state.
+    const submitted = old.candidateId ? s.engine.attempts(project.id)
+      .filter(attempt => attempt.candidateId === old.candidateId && !attempt.released &&
+        ["submitting", "remote_pending", "submission_unknown", "ingesting", "succeeded"].includes(attempt.phase) &&
+        s.engine.attemptMatchesOperation(old, attempt))
+      .sort((a, b) => b.ordinal - a.ordinal)[0] : undefined;
+    if (submitted) {
+      const outputs = submitted.phase === "succeeded" ? submitted.outputs : old.outputs;
+      const retainedOutputs = old.retainedTake?.outputs;
+      if (!s.engine.outputsMatchOperation(old, outputs) || (retainedOutputs && !s.engine.outputsMatchOperation(old, retainedOutputs))) continue;
+      for (const artifact of [...Object.values(outputs), ...Object.values(retainedOutputs ?? {})]) s.engine.verifyArtifact(project.id, artifact);
+      // Reconnect publication/reconciliation only. An edit cannot revive an old
+      // candidate's automatic retry authority, including a later technical failure.
+      if (!s.store.get("candidate_stop", submitted.candidateId!))
+        s.store.insert("candidate_stop", submitted.candidateId!, project.id, { reason: "undo_reconnect" });
+      const { retainedTake: _retained, outdated: _outdated, outdatedReason: _reason, ...saved } = old;
+      s.store.put("node_binding", old.id, project.id, { ...saved, planId: project.activePlanId, candidateId: submitted.candidateId, outputs,
+        ...(submitted.phase !== "succeeded" && old.retainedTake ? { retainedTake: old.retainedTake } : {}) });
+      continue;
+    }
     const outputs = old.retainedTake?.outputs ?? old.outputs;
     // A previously submitted exact operation may finish during async verification.
     // An empty historical snapshot must not erase its newly verified paid output.

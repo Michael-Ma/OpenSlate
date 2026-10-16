@@ -32,6 +32,7 @@ import type { NarrationSpeechAttemptInput } from "../narration/narration-speech-
 import type { OwnedTranscriptionAttemptInput } from "../narration/owned-transcription-types.js";
 import { assertPersonalVoiceCurrent } from '../narration/personal-voices.js';
 import { narrationSpeechHoldExemption, narrationSpeechShotScopes } from '../narration/narration-scope.js';
+import { automaticRetriesLeft, sceneConfirmationIdForCandidate } from "./retry-eligibility.js";
 
 export interface Grant { id: string; projectId: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
 export interface Candidate { id: string; projectId: string; nodeId: string; grantId: string; origin: Grant["origin"] }
@@ -345,15 +346,28 @@ export class Engine {
 
   attempts(projectId: string): Attempt[] { return this.store.list<Attempt>("attempt", projectId); }
 
-  /** Called in the Stop transaction. Admitted attempts keep their immutable submission intent. */
+  /** Called in the Stop transaction. Only possibly dispatched intents keep monitoring authority. */
   detachUnsent(projectId: string, stopId: string): { sentJobs: number; detachedJobs: number } {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId);
       const pending = this.attempts(projectId).filter(attempt => !TERMINAL.has(attempt.phase));
+      const cancelled = new Set<string>();
+      for (const attempt of pending) {
+        if (attempt.candidateId && !this.store.get("candidate_stop", attempt.candidateId))
+          this.store.insert("candidate_stop", attempt.candidateId, projectId, { stopId });
+        // A preparing intent is positive evidence that the irreversible marker
+        // has not been crossed. Unknown ordinary submissions remain liabilities.
+        if (attempt.phase !== "preparing" || this.preparationObserved(attempt)) continue;
+        resolveTranscriptionPreparationIntent(this.store, attempt);
+        this.store.put("attempt", attempt.id, projectId, { ...attempt, phase: "failed", leaseExpiresAt: 0,
+          failure: { id: "PREPARATION_OBSOLETE", technical: false, source: "application:submission-preparation/1", retryAllowed: false } });
+        this.setReservation(attempt, "released"); cancelled.add(attempt.id);
+        this.store.appendEvent(projectId, "attempt.state_changed", { attemptId: attempt.id, phase: "failed", reason: "stopped_before_dispatch", stopId });
+      }
       let detachedJobs = 0;
       for (const binding of this.store.list<NodeBinding>("node_binding", projectId)) {
         if (binding.state !== "active" || !binding.candidateId || Object.keys(binding.outputs).length) continue;
-        if (pending.some(attempt => attempt.candidateId === binding.candidateId)) {
+        if (pending.some(attempt => !cancelled.has(attempt.id) && attempt.candidateId === binding.candidateId)) {
           // Reconciliation may finish this intent, but a failure after Stop must
           // not turn Continue into permission to buy a technical retry.
           if (!this.store.get("candidate_stop", binding.candidateId))
@@ -370,7 +384,7 @@ export class Engine {
           this.releaseHold(projectId, hold.id, row.id);
         this.store.appendEvent(projectId, "scene.confirmation_changed", { confirmationId: row.id, state: "cancelled", stopId });
       }
-      return { sentJobs: pending.length, detachedJobs };
+      return { sentJobs: pending.length - cancelled.size, detachedJobs };
     });
   }
 
@@ -811,6 +825,14 @@ export class Engine {
       });
     } catch (error) { if (!(error instanceof DomainError)) throw error; return false; }
   }
+  /** Exact submitted identity, also usable before an in-flight attempt has outputs. */
+  attemptMatchesOperation(binding: NodeBinding, attempt: Readonly<Attempt>): boolean {
+    try {
+      const inputs = this.resolveInputs(binding.projectId, binding.node);
+      return attempt.projectId === binding.projectId && attempt.nodeId === binding.id && attempt.specDigest === binding.node.specDigest
+        && attempt.fingerprint === inputs.fingerprint && canonical(attempt.request.inputs) === canonical(inputs.artifacts);
+    } catch (error) { if (!(error instanceof DomainError)) throw error; return false; }
+  }
   /** Trusted host take/Undo operations use the same immutable-byte verification as admission. */
   verifyArtifact(projectId: string, artifact: ArtifactRef): ArtifactRef {
     return this.resolveSource(projectId, { kind: "artifact", artifact }, true);
@@ -873,10 +895,9 @@ export class Engine {
       const ownedInput = resolveOwnedTranscriptionNode(this.store, project, node, binding.candidateId);
       if (ownedInput) assertOwnedTranscriptionCurrent(this.store, project, node, binding.candidateId, ownedInput.resolved);
       const speechInput = resolveNarrationSpeechNode(this.store, project, node, binding.candidateId);
-      const candidateOwner = binding.candidateId ? this.store.get<{ grantId: string }>("candidate", binding.candidateId) : undefined;
-      const ownerGrant = candidateOwner ? this.store.get<Grant>("grant", candidateOwner.grantId) : undefined;
-      const sceneOwner = speechInput ? this.store.get<{ confirmationId: string }>("scene_confirmation_request", speechInput.resolved.review.requestId) : undefined;
-      const confirmationId = sceneOwner?.confirmationId ?? ownerGrant?.authorityId;
+      invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
+        "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's dispatch authority; generate again with a new press");
+      const confirmationId = sceneConfirmationIdForCandidate(this.store, projectId, binding.candidateId);
       const confirmation = confirmationId ? this.store.get<{ state: string; sceneId: string; guardDigest: string; framePins: ConfirmationFramePin[] }>("scene_confirmation", confirmationId) : undefined;
       if (confirmation) invariant(["running", "done"].includes(confirmation.state) && confirmation.guardDigest === sceneConfirmationGuard(project, confirmation.sceneId, this.store.get("capability_lock", project.capabilityLockId)) && confirmationFramesCurrent(this.store, project, confirmation.framePins),
         "SCENE_REVIEW_STALE", "The scene confirmation changed before dispatch");
@@ -924,11 +945,8 @@ export class Engine {
       const workKey = binding.candidateId ? null : digest({ projectId, nodeId, fingerprint: inputs.fingerprint });
       const previous = this.attempts(projectId).filter(attempt => !attempt.released && (binding.candidateId ? attempt.candidateId === binding.candidateId : attempt.workKey === workKey)).sort((a, b) => b.ordinal - a.ordinal)[0];
       if (previous) {
-        invariant(!confirmation, "RETRY_NOT_AUTHORIZED", "A scene confirmation never retries paid work");
         invariant(previous.phase === "failed", "ATTEMPT_EXISTS", "Existing work must be reconciled, never resubmitted");
-        invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
-          "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's retry authority; generate again with a new press");
-        invariant(binding.candidateId && previous.failure?.technical && previous.failure.retryAllowed && previous.ordinal <= (profile?.maxRetries ?? 0), "RETRY_NOT_AUTHORIZED", "No trusted technical retry allowance");
+        invariant(automaticRetriesLeft(this.store, previous, profile?.maxRetries ?? 0) > 0, "RETRY_NOT_AUTHORIZED", "No trusted technical retry allowance");
         invariant(previous.fingerprint === inputs.fingerprint, "NEW_CANDIDATE_REQUIRED", "A technical retry cannot change its creative inputs");
       }
       if (profile) {
@@ -950,6 +968,8 @@ export class Engine {
         externalAllowanceId = approval.allowanceId;
       }
       const pinnedProfile = profile ? executionProfileSnapshot(profile) : undefined;
+      invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
+        "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's dispatch authority; generate again with a new press");
       const attempt: Attempt = {
         id, projectId, nodeId, candidateId: binding.candidateId, ordinal: (previous?.ordinal ?? 0) + 1,
         specDigest: node.specDigest, fingerprint: inputs.fingerprint, workKey,
@@ -998,6 +1018,7 @@ export class Engine {
     invariant(current.reservationId && this.store.get<Reservation>("reservation", current.reservationId)?.state === "reserved",
       "SUBMISSION_PREPARATION_INVALID", "Preparation requires its original reserved liability");
     const project = this.store.getProject(current.projectId), binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
+    if (current.candidateId && this.store.get("candidate_stop", current.candidateId)) return { type: "obsolete", reason: "intent_changed" };
     if (!binding || binding.projectId !== project.id || binding.state !== "active" || binding.planId !== project.activePlanId
       || binding.candidateId !== current.candidateId || binding.node.specDigest !== current.specDigest || Object.keys(binding.outputs).length)
       return { type: "obsolete", reason: "binding_changed" };

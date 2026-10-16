@@ -7,6 +7,9 @@ interface Field { shotId?: string; sceneId?: string; field: string }
 export function recordHumanFields(store: Store, before: ProjectRecord, after: ProjectRecord, actor: ActorContext): void {
   if (actor.kind !== 'human') return;
   const fields: Field[] = [];
+  for (const field of ['brief', 'story'] as const) if (before[field] !== after[field]) fields.push({ field });
+  if (before.narration.script !== after.narration.script) fields.push({ field: 'narrationScript' });
+  if (before.narration.source !== after.narration.source) fields.push({ field: 'narrationSource' });
   for (const id of new Set([...before.shots, ...after.shots].map(s => s.id))) {
     const old = before.shots.find(s => s.id === id), shot = after.shots.find(s => s.id === id);
     if (!old || !shot) { fields.push({ shotId: id, field: '*' }); continue; }
@@ -29,6 +32,7 @@ export function assertNoHumanFieldConflict(store: Store, projectId: string, acto
   if (captured.cursor === null) return; // Legacy/direct service callers without a captured turn.
   const cursor = captured.cursor;
   const fields: Field[] = [
+    ...(['brief', 'story', 'narrationScript', 'narrationSource'] as const).filter(field => patch[field] !== undefined).map(field => ({ field })),
     ...(patch.updateShots ?? []).flatMap(row => Object.keys(row).filter(key => key !== 'id' && key !== 'reauthorPrompts').map(field => ({ shotId: row.id, field }))),
     ...(patch.updateScenes ?? []).map(row => ({ sceneId: row.id, field: 'purpose' })),
   ];

@@ -13,6 +13,7 @@ import type { DirectorTurn } from "./application/director-supervisor.js";
 import { sceneView, sceneGenerationView } from "./scene-generation.js";
 import { generationTargets } from "./scene-row.js";
 import { quote } from "./generation-quotes.js";
+import { automaticRetriesLeft } from "./execution/retry-eligibility.js";
 
 /** Existing scenes retain their purpose-derived label until named. */
 export function sceneTitle(purpose: string, title?: string): string {
@@ -82,25 +83,33 @@ export class GenerationOverviewReader {
             const current = kind === "image" ? row.imageComplete : row.videoComplete;
             const previous = binding?.outdated?.previous ?? artifacts.at(-1);
             const base: MediaSlot = { state: "none", takeCount: new Set(artifacts.map(a => a.artifactId).concat(output && current ? [output.artifactId] : [], previous ? [previous.artifactId] : [])).size,
+              ...(history.some(a => a.released) ? { releasedAttemptIds: history.filter(a => a.released).map(a => a.id) } : {}),
               ...(!binding?.candidateId && binding?.outdatedReason ? { takenOff: binding.outdatedReason } : {}),
               ...(!current && previous ? { previous: ref(previous), ...(binding?.outdated ? { outdatedFields: binding.outdated.fields } : {}) } : {}) };
             if (nodes.length > 1) return { ...base, state: "choose_take" };
             if (shot.promptState === "placeholder") return { ...base, state: "direction_required" };
-            if (current && output) return { ...base, state: "ready", artifact: ref(output) };
+            // The selected paid take and the replacement have independent status.
+            // Keep showing the selected output while exposing the replacement's recovery identity.
+            const progress = (pending: MediaSlot & { state: "running" | "queued" | "failed" | "no_answer" }): MediaSlot => current && output
+              ? { ...base, state: "ready", artifact: ref(output), replacement: { state: pending.state,
+                ...(pending.attemptId ? { attemptId: pending.attemptId } : {}), ...(pending.phase ? { phase: pending.phase } : {}),
+                ...(pending.failure ? { failure: pending.failure } : {}) } }
+              : pending;
             // Detached, still-live attempts are honest in-flight work; they must never look safe to resubmit.
             const active = history.filter(a => !a.released && !["failed", "succeeded"].includes(a.phase)).at(-1);
-            if (active) return { ...base, state: active.phase === "submission_unknown" ? "no_answer" : "running", phase: active.phase, startedAt: active.createdAt, attemptId: active.id };
-            const last = history.filter(a => a.candidateId === binding?.candidateId).at(-1);
+            if (active) return progress({ ...base, state: active.phase === "submission_unknown" ? "no_answer" : "running", phase: active.phase, startedAt: active.createdAt, attemptId: active.id });
+            const last = history.filter(a => !a.released && a.candidateId === binding?.candidateId).at(-1);
             if (last?.phase === "failed") {
               const evidence = store.list<{ attemptId: string; outcome: { type: string; failureId?: string; technical?: boolean; retryAllowed?: boolean }; recordedAt: string }>("execution_evidence", projectId).filter(e => e.attemptId === last.id).at(-1);
               const failure = last.failure ?? (evidence?.outcome.failureId ? { id: evidence.outcome.failureId, technical: evidence.outcome.technical === true, retryAllowed: false } : null);
               const profile = captured.lock.profiles.find(p => p.id === binding?.node.profileId);
-              const retriesLeft = failure?.technical && failure.retryAllowed ? Math.max(0, (profile?.maxRetries ?? 0) + 1 - last.ordinal) : 0;
-              return { ...base, state: retriesLeft ? "queued" : "failed", failure: { code: failure?.id ?? "EXECUTION_FAILED", technical: failure?.technical ?? false,
-                retryAllowed: failure?.retryAllowed ?? false, autoRetriesLeft: retriesLeft,
+              const retriesLeft = automaticRetriesLeft(store, last, profile?.maxRetries ?? 0);
+              return progress({ ...base, state: retriesLeft ? "queued" : "failed", attemptId: last.id, phase: last.phase, failure: { code: failure?.id ?? "EXECUTION_FAILED", technical: failure?.technical ?? false,
+                retryAllowed: retriesLeft > 0, autoRetriesLeft: retriesLeft,
                 charged: !last.reservationId || store.get<{ state: string }>("reservation", last.reservationId)?.state !== "released",
-                at: evidence?.recordedAt ?? last.createdAt } };
+                at: evidence?.recordedAt ?? last.createdAt } });
             }
+            if (current && output && !binding?.retainedTake) return { ...base, state: "ready", artifact: ref(output) };
             // Proposal publication retains paid outputs. A stale completed recipe is
             // outdated evidence, even while its historical candidate remains bound.
             if (previous && binding && Object.keys(binding.outputs).length) return { ...base, state: "outdated" };
@@ -115,15 +124,16 @@ export class GenerationOverviewReader {
               const ahead = code === "capacity" ? capacityProfile ? store.listProjects().flatMap(p => this.production.engine.attempts(p.id)).filter(a =>
                 !["succeeded", "failed"].includes(a.phase) && a.request.args.profileIdentity === binding.node.profileId && a.request.args.profileRevision === binding.node.args.profileRevision &&
                 canonical(requestExecutionIdentity(a.request)) === canonical(profileExecutionIdentity(capacityProfile))).length : 0 : undefined;
-              return { ...base, state: "queued", waiting: { code, since: (snapshot.control.paused ? pauseEvent?.occurredAt : undefined) ?? wait?.since ?? events.find(e => e.payload.nodeId === binding.id)?.occurredAt ?? this.production.engine.startedAt, ...(ahead !== undefined ? { ahead } : {}), ...(code === "edit_pending" && heldRequest ? { requestId: heldRequest.id } : {}) } };
+              return progress({ ...base, state: "queued", waiting: { code, since: (snapshot.control.paused ? pauseEvent?.occurredAt : undefined) ?? wait?.since ?? events.find(e => e.payload.nodeId === binding.id)?.occurredAt ?? this.production.engine.startedAt, ...(ahead !== undefined ? { ahead } : {}), ...(code === "edit_pending" && heldRequest ? { requestId: heldRequest.id } : {}) } });
             }
+            if (current && output) return { ...base, state: "ready", artifact: ref(output) };
             return { ...base, state: previous ? "outdated" : "none" };
           };
           const image = slot("image"), video = slot("video");
           const opened = image.state === "ready" && !!image.artifact && views.some(v => v.principal === "local-user" && v.shotId === shot.id && v.artifactId === image.artifact!.artifactId && v.sha256 === image.artifact!.sha256);
           const audio = shotNarration(view.narrationEvidence.find(e => e.shotId === shot.id)!.narration, shot.desiredFrames);
           const speech = snapshot.attempts.filter(a => {
-            if (!a.narrationSpeech) return false;
+            if (a.released || !a.narrationSpeech) return false;
             const application = store.get<{ review: { id: string } }>("narration_speech_application", a.narrationSpeech.application.id);
             const review = application ? store.get<{ section: { segmentId: string; segmentRevisionId: string } }>("narration_speech_review", application.review.id) : undefined;
             return review?.section.segmentId === row.narration.segmentId && review?.section.segmentRevisionId === row.narration.segmentRevisionId;
@@ -138,14 +148,14 @@ export class GenerationOverviewReader {
           else if (!opened && !row.videoComplete) blockers.push({ code: "frame_not_opened", shotId: shot.id });
           if (audio.fits === false) blockers.push({ code: "narration_too_long", shotId: shot.id });
           if (audio.state === "making") blockers.push({ code: "narration_making", shotId: shot.id });
-          if ([image.state, video.state, audio.state].includes("no_answer")) blockers.push({ code: "no_answer_in_scene", shotId: shot.id });
+          if ([image.state, video.state, audio.state, image.replacement?.state, video.replacement?.state].includes("no_answer")) blockers.push({ code: "no_answer_in_scene", shotId: shot.id });
         }
         if (openBlockingNotes(store, projectId, scene.id).length) blockers.push({ code: "recommendation_open" });
         if (overview.stopped) blockers.push({ code: "stopped" });
         if (!isKeyframeReview(this.production, requestId) && overview.director.state !== "idle" && (!scopeIds.length || scopeIds.includes(scene.id) || rows.some(r => scopeIds.includes(r.shotId)))) blockers.push({ code: "director_working" });
         const shots = rows.map(r => overview.shots[r.shotId]!);
         const counts = { shots: shots.length, keyframesReady: shots.filter(s => s.keyframe.state === "ready").length, opened: shots.filter(s => s.keyframe.opened).length, videosReady: shots.filter(s => s.video.state === "ready").length };
-        const attention = shots.some(s => [s.keyframe.state, s.video.state].some(state => ["failed", "no_answer", "outdated", "choose_take", "direction_required"].includes(state)));
+        const attention = shots.some(s => [s.keyframe.state, s.video.state, s.keyframe.replacement?.state, s.video.replacement?.state].some(state => state && ["failed", "no_answer", "outdated", "choose_take", "direction_required"].includes(state)));
         const regenerationQuotes = rows.map(r => quote(captured.lock, [r], "regenerateKeyframe"));
         const commonRegenerationQuote = regenerationQuotes.length && regenerationQuotes.every(q => canonical(q) === canonical(regenerationQuotes[0])) ? regenerationQuotes[0] : undefined;
         const confirmation = store.list<SceneConfirmationRecord>("scene_confirmation", projectId).filter(r => r.sceneId === scene.id && r.kind === "video").at(-1);

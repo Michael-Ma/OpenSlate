@@ -147,6 +147,14 @@ test("a technical retry cannot exceed the bounded paid attempt allowance", async
   const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "RETRY_NOT_AUTHORIZED"); assert.equal(f.provider.acceptedCount(), 2);
 });
 
+test("a Stop-fenced candidate cannot start its first attempt after Continue", async t => {
+  const f = setup(t, { count: 1, imagesOnly: true }), binding = f.store.list("node_binding", f.projectId)[0];
+  f.store.insert("candidate_stop", binding.candidateId, f.projectId, { stopId: "human-stop" });
+  const result = await f.engine.runReady();
+  assert.equal(result.dispatched, 0); assert.equal(result.blocked[0].code, "RETRY_NOT_AUTHORIZED");
+  assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.engine.attempts(f.projectId).length, 0);
+});
+
 test("restart uses immutable lock prices and profiles instead of changed constructor defaults", async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); const project = f.store.getProject(f.projectId);
   f.store.insert("capability_lock", project.capabilityLockId, project.id, { profiles: DEFAULT_PROFILES });

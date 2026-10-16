@@ -137,6 +137,8 @@ export function resolveTranscriptionAdmission(store: TranscriptionAuthorityStore
 /** Use inside the short pre-marker/local-failure transaction; late provider observations use no first-submit check. */
 export function assertTranscriptionFirstDispatch(store: Store, original: TranscriptionAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
   assertTranscriptionSubmissionOwner(store, original, expectedLease);
+  invariant(!original.attempt.candidateId || !store.get("candidate_stop", original.attempt.candidateId),
+    "TRANSCRIPTION_EXECUTION_NOT_DISPATCHABLE", "Stop ended this candidate's first-dispatch authority");
   assertOwnedTranscriptionAttemptCurrent(store, original.attempt);
 }
 

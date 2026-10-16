@@ -312,3 +312,59 @@ test('personal voice consent revoked after a keyframe press fences its queued sp
   assert.equal(f.store.list('narration_speech_proposal', f.project.id).length, 0);
   assert.ok(f.store.list('scene_confirmation', f.project.id).some(r => r.state === 'blocked'));
 });
+
+for (const kind of ['keyframes', 'video']) test(`a personal project default preserves the authored voice tag during ${kind} confirmation`, async t => {
+  const f = await confirmationFixture(t, { modes: [kind === 'keyframes' ? 'generated' : 'none'] });
+  const { voice } = await f.call('POST', '/narration/personal-voices', { expectedHeadVersion: f.store.getProject(f.project.id).headVersion,
+    label: 'Project narrator', provider: 'openai', providerVoiceId: 'voice_b15_default', ownVoice: true, permitSynthesis: true }).then(f.ok);
+  await f.call('POST', '/settings/voice', { narratorVoice: voice.selector, expectedHeadVersion: f.store.getProject(f.project.id).headVersion }).then(f.ok);
+  if (kind === 'video') {
+    await f.make(); await f.tick(5); await addGeneratedAfterFrames(f); await f.openFrames();
+    await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok);
+  } else await f.make();
+  await f.tick(1); // Materialize the frozen personal selector without dispatching speech.
+  await f.restart(); await f.tick(14);
+  const confirmation = f.store.list('scene_confirmation', f.project.id).filter(r => r.kind === kind).at(-1);
+  assert.equal(confirmation.state, 'done', JSON.stringify(confirmation.blocker));
+  assert.equal(f.store.getProject(f.project.id).shots[0].narration.voice, 'stock');
+  assert.equal(f.calls.speech, 1);
+  assert.equal(f.narration.workspaceSnapshot(f.project.id).segments[0].script.source.voice, voice.selector);
+  const { assertGeneratedNarrationAudio } = await import('../dist/narration/generated-audio.js');
+  const recording = f.store.list('narration_audio', f.project.id).find(a => a.originEvidence === 'verified_generated_audio');
+  assert.equal(recording.generation.voice, voice.selector);
+  const forged = structuredClone(recording); forged.generation.voice = 'openai-custom:voice_another_identity';
+  assert.throws(() => assertGeneratedNarrationAudio(f.store, f.project.id, forged), { code: 'GENERATED_NARRATION_CONFLICT' });
+  if (kind === 'video') assert.equal((await f.overview()).scenes[0].counts.videosReady, 1);
+});
+
+test('failed confirmed video projects no forbidden automatic retry or perpetual making_video', async t => {
+  const f = await confirmationFixture(t, { modes: ['none'] });
+  await f.make(); await f.tick(5); await f.openFrames();
+  await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok);
+  await f.runner.advance();
+  const binding = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'video');
+  assert.ok(f.profiles.find(p => p.id === binding.node.profileId).maxRetries > 0);
+  f.provider.setMode(binding.id, 'technical_failure'); await f.engine.runReady(); await f.engine.reconcile();
+  const overview = await f.overview(), slot = overview.shots['shot-0'].video;
+  assert.equal(slot.state, 'failed'); assert.equal(slot.failure.autoRetriesLeft, 0); assert.equal(slot.failure.retryAllowed, false);
+  assert.equal(overview.scenes[0].state, 'needs_attention');
+  await f.tick(3); assert.equal(f.engine.attempts(f.project.id).filter(a => a.request.kind === 'video').length, 1);
+});
+
+test('released unknown speech keeps liability evidence and no longer blocks a new confirmation', async t => {
+  const f = await confirmationFixture(t, { modes: ['none'], fetch: async () => { throw Error('synthetic unknown speech'); } });
+  await f.make(); await f.tick(5); await addGeneratedAfterFrames(f); await f.openFrames();
+  await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok); await f.tick(5);
+  const attempt = f.engine.attempts(f.project.id).find(a => a.request.kind === 'speech');
+  assert.equal((await f.overview()).shots['shot-0'].narration.state, 'no_answer');
+  await f.call('POST', `/attempts/${attempt.id}/release`, { expectedPhase: 'submission_unknown', acknowledgeDoubleCharge: true }).then(f.ok);
+  const view = await f.overview();
+  assert.equal(view.shots['shot-0'].narration.state, 'text_only');
+  assert.ok(!view.scenes[0].blockers.some(b => b.code === 'no_answer_in_scene'));
+  const retained = f.store.get('attempt', attempt.id);
+  assert.equal(retained.phase, 'submission_unknown'); assert.ok(retained.released);
+  assert.notEqual(f.store.get('reservation', retained.reservationId).state, 'released');
+  const calls = f.calls.speech;
+  await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok);
+  assert.equal(f.calls.speech, calls, 'a new human press is admitted without blindly repeating the released job');
+});

@@ -336,3 +336,58 @@ test('current voice attempts project making and failed without dispatching', asy
   assert.equal(reader.read(project.id).shots['shot-0'].narration.state,'failed');
   assert.deepEqual(f.calls,{http:0,credentials:0});
 });
+
+test('a retained frame exposes queued, running and unknown replacement identity until release', async t => {
+  const f = fixture(t); await make(f); await f.finish();
+  const original = (await f.overview()).shots['shot-0'].keyframe.artifact;
+  await ok(await f.post(await f.get(), 'image', randomUUID(), { targetShotIds: ['shot-0'], regenerate: true }));
+  let slot = (await f.overview()).shots['shot-0'].keyframe;
+  assert.equal(slot.state, 'ready'); assert.deepEqual(slot.artifact, original);
+  assert.equal(slot.replacement?.state, 'queued');
+  const binding = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'image' && b.node.shotId === 'shot-0');
+  f.provider.setMode(binding.id, 'pending'); await f.engine.runReady();
+  const attempt = f.engine.attempts(f.project.id).at(-1);
+  slot = (await f.overview()).shots['shot-0'].keyframe;
+  assert.deepEqual(slot.artifact, original); assert.equal(slot.replacement.state, 'running');
+  assert.equal(slot.replacement.attemptId, attempt.id); assert.equal(slot.replacement.phase, attempt.phase);
+  f.store.put('attempt', attempt.id, f.project.id, { ...attempt, phase: 'submission_unknown' });
+  f.store.appendEvent(f.project.id, 'test.replacement_unknown', {});
+  const unknown = await f.overview(); slot = unknown.shots['shot-0'].keyframe;
+  assert.equal(slot.state, 'ready'); assert.equal(slot.replacement.state, 'no_answer');
+  assert.equal(slot.replacement.attemptId, attempt.id);
+  assert.ok(unknown.scenes[0].blockers.some(b => b.code === 'no_answer_in_scene'));
+  await ok(await f.call('POST', `/attempts/${attempt.id}/release`, { expectedPhase: 'submission_unknown', acknowledgeDoubleCharge: true }));
+  slot = (await f.overview()).shots['shot-0'].keyframe;
+  assert.deepEqual(slot.artifact, original); assert.equal(slot.replacement, undefined);
+  assert.deepEqual(slot.releasedAttemptIds, [attempt.id]);
+});
+
+test('a retained frame explains a failed replacement and keeps its paid take available', async t => {
+  const f = fixture(t); await make(f); await f.finish();
+  const original = (await f.overview()).shots['shot-0'].keyframe.artifact;
+  await ok(await f.post(await f.get(), 'image', randomUUID(), { targetShotIds: ['shot-0'], regenerate: true }));
+  const binding = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'image' && b.node.shotId === 'shot-0');
+  const submit = f.provider.submit.bind(f.provider);
+  f.provider.submit = async (...args) => ({ ...await submit(...args), technical: false, retryAllowed: false });
+  f.provider.setMode(binding.id, 'reject_before_accept'); await f.engine.runReady();
+  const slot = (await f.overview()).shots['shot-0'].keyframe;
+  assert.equal(slot.state, 'ready'); assert.deepEqual(slot.artifact, original);
+  assert.equal(slot.replacement?.state, 'failed');
+  assert.equal(slot.replacement.attemptId, f.engine.attempts(f.project.id).at(-1).id);
+  assert.ok(slot.replacement.failure.code); assert.equal(slot.replacement.failure.charged, false);
+});
+
+test('a Stop-fenced technical failure never advertises queued retries after Continue', async t => {
+  const f = fixture(t); await make(f);
+  const binding = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'image');
+  f.provider.setMode(binding.id, 'pending'); await f.engine.runReady();
+  const attempt = f.engine.attempts(f.project.id)[0];
+  const { stopped } = await ok(await f.call('POST', '/controls', { action: 'stop' }));
+  f.store.put('attempt', attempt.id, f.project.id, { ...attempt, phase: 'failed',
+    failure: { id: 'SYNTHETIC_TECHNICAL_FAILURE', technical: true, source: 'offline-test', retryAllowed: true } });
+  f.store.appendEvent(f.project.id, 'test.stopped_failure', {});
+  await ok(await f.call('POST', '/controls', { action: 'resume', expectedAuthorityId: stopped.stopId }));
+  const slot = (await f.overview()).shots['shot-0'].keyframe;
+  assert.equal(slot.state, 'failed'); assert.equal(slot.failure.autoRetriesLeft, 0); assert.equal(slot.failure.retryAllowed, false);
+  await f.engine.runReady(); assert.equal(f.engine.attempts(f.project.id).length, 1);
+});

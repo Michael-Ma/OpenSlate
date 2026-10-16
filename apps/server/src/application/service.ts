@@ -1,6 +1,7 @@
 import { directorTurnViews } from "./director-turn-view.js";
 import { rebaseCreativeDraft } from "./creative-rebase.js";
 import { recordHumanFields, assertNoHumanFieldConflict } from "./human-fields.js";
+import { assertAcceptedNarrationDurationFloor } from "./publication-validation.js";
 import { directorNotes } from "./director-notes.js";
 import { rebaseProposal, type ProposalRecord } from "./director-proposals.js";
 import { requestScopesIntersect } from "./request-scopes.js";
@@ -51,6 +52,7 @@ interface Prepared {
 }
 
 export interface ApplyReceipt { preparedId: string; projectId: string; revisionId: string; headVersion: number; activePlanId: string | null; cursor: number }
+export type ShotNarrationAcceptance = Pick<ShotRecord, 'cueId' | 'narrationPending' | 'narrationTimingMode' | 'narrationFit'>;
 export interface ProductionServiceOptions {
   /** Trusted installation choice for new projects only. Existing locks never inherit this default. */
   newProjectLocalExecution?: LocalExecutionIdentity;
@@ -588,7 +590,7 @@ export class ProductionService {
   }
 
   /** Held creative changes use the same validated Prepared/publication kernel, without generation authority. */
-  publishHumanCreativePatch(projectId: string, actor: ActorContext, creative: import('@openslate/core').CreativePatch, clearNarrationShotIds: string[] = []): ApplyReceipt {
+  publishHumanCreativePatch(projectId: string, actor: ActorContext, creative: import('@openslate/core').CreativePatch, clearNarrationShotIds: string[] = [], restoreNarration: { shotId: string; state: ShotNarrationAcceptance }[] = []): ApplyReceipt {
     return this.store.transaction(() => {
       this.assertActor(projectId, actor, true);
       invariant(actor.kind === "human" && this.request(projectId, actor).concurrency === "alongside", "ACTOR_DENIED", "Use an alongside human request");
@@ -602,6 +604,15 @@ export class ProductionService {
         delete shot.narrationFit;
         delete shot.narrationPending;
         shot.revisionId = newId();
+      }
+      for (const { shotId, state } of restoreNarration) {
+        const shot = next.shots.find(s => s.id === shotId);
+        invariant(shot && creative.updateShots?.some(s => s.id === shotId), 'SCOPE_DENIED', 'Narration restoration must belong to the inverse patch');
+        invariant(state.cueId === null || next.cues.some(cue => cue.id === state.cueId), 'NARRATION_INTEGRITY_ERROR', 'The original accepted narration is unavailable');
+        for (const field of ['narrationPending', 'narrationTimingMode', 'narrationFit'] as const) delete shot[field];
+        Object.assign(shot, state);
+        const cue = next.cues.find(cue => cue.id === shot.cueId);
+        shot.promptIntent = { image: shotIntentDigest(shot, 'image', cue), video: shotIntentDigest(shot, 'video', cue) };
       }
       const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
       invariant(lock?.projectId === projectId && lock.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Project workflow lock is unsupported");
@@ -670,6 +681,7 @@ export class ProductionService {
     invariant(digest(this.store.get("capability_lock", before.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Project capability lock changed");
     validateStageRequirements(prepared.next, prepared.stages);
     invariant(before.headVersion === prepared.baseVersion, "REVISION_CONFLICT", "Prepared change is stale");
+    assertAcceptedNarrationDurationFloor(prepared.next);
     for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed");
     let planId = before.activePlanId;
     if (prepared.compiled) planId = newId();
