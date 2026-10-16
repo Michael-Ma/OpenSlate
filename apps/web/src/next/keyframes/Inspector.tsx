@@ -140,7 +140,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       {/* The takes strip and the prompts take the status line's room too (the preview's badge still shows it). */}
       {sub ? null : (
         <div className="st">
-          <StatusPill status={view.status} tone={view.tone} />
+          <StatusPill status={view.status} tone={view.tone} reason={view.statusReason} />
           {!editing ? (
             <button type="button" className="insp-link" data-act="prompts" data-shot={shot.shotId} aria-label={t("inspector.prompts_show_label", { shot: view.label })} onClick={() => setOpen("prompts")}>
               {t("inspector.prompts_show")}

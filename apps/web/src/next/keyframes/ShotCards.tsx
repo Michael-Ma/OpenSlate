@@ -56,6 +56,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
         const cardNotes = notes[card.shotId] ?? [];
         const title = `${card.label} ${card.framing}`;
         const state = [tm(card.status), motion].filter(Boolean).join(" · ");
+        const reason = card.statusReason ? tm(card.statusReason) : "";
         // An open inspector edit holds every other card, its note link included, until Save or Cancel.
         const isHeld = !!held && !card.selected;
         // The footer and the chips show one line each; the card's tooltip carries them whole, and its description
@@ -73,7 +74,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
               aria-label={t("card.select", { shot: card.label, framing: card.framing })}
               aria-describedby={describedBy}
               disabled={isHeld}
-              title={held && isHeld ? tm(held) : [title, state, fullNotes].filter(Boolean).join("\n")}
+              title={held && isHeld ? tm(held) : [title, state, reason, fullNotes].filter(Boolean).join("\n")}
               onClick={() => onOpen(card.shotId)}
             />
             {describedBy ? <span id={describedBy} hidden>{fullNotes}</span> : null}

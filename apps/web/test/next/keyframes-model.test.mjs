@@ -176,15 +176,22 @@ test('shots held by an unfinished Director edit wait for it everywhere: no "maki
   for (const label of ['3.1', '3.2']) overview.shots[shotId(label)].keyframe = { state: 'queued', takeCount: 0, opened: false, waiting: { code: 'edit_pending', since: 'x', requestId: 'r' } };
   overview.scenes[2].keyframeTargets = [];
   const view = keyframesView(overview, sceneId(3), null, 'en-US');
-  assert.deepEqual(view.cards.map(c => en(c.status)), ['Waiting for an edit to finish', 'Waiting for an edit to finish']);
+  // The status is short, so the card keeps its motion and the inspector its Prompts link on one line; the card's
+  // tooltip and the inspector say the reason in full.
+  assert.deepEqual(view.cards.map(c => en(c.status)), ['Held by an edit', 'Held by an edit']);
+  assert.deepEqual(view.cards.map(c => zh(c.status)), ['被修改占用', '被修改占用']);
+  assert.deepEqual(view.cards.map(c => en(c.statusReason)), ['An unfinished Director edit holds this shot; see the Director column.', 'An unfinished Director edit holds this shot; see the Director column.']);
   const panel = view.panel;
-  assert.deepEqual([panel.action, panel.enabled, en(panel.eyebrow), en(panel.label)], [null, false, 'Scene 3 keyframes', 'Waiting for an edit to finish']);
+  assert.deepEqual([panel.action, panel.enabled, en(panel.eyebrow), en(panel.label)], [null, false, 'Scene 3 keyframes', 'Held by an edit']);
   assert.equal(en(panel.note), 'An unfinished Director edit holds 3.1 and 3.2.');
   assert.equal(en(panel.reason), 'See the Director column to let it go.');
-  assert.equal(zh(panel.label), '等待编辑完成');
+  assert.equal(zh(panel.label), '被修改占用');
   const insp = inspectorView(overview, overview.shots[shotId('3.1')], 'en-US');
-  assert.deepEqual([en(insp.regenerate.label), insp.regenerate.enabled, insp.regenerate.working], ['Waiting for an edit to finish', false, false]);
+  assert.deepEqual([en(insp.status), en(insp.statusReason)], ['Held by an edit', 'An unfinished Director edit holds this shot; see the Director column.']);
+  assert.deepEqual([en(insp.regenerate.label), insp.regenerate.enabled, insp.regenerate.working], ['Held by an edit', false, false]);
   assert.match(en(insp.regenerate.reason), /^An unfinished Director edit holds this shot/);
+  // Any other status says itself in full: no reason.
+  assert.equal(keyframesView(lastFerryOverview(), sceneId(2), null, 'en-US').cards[0].statusReason, null);
   // Once one keyframe is really being made, the panel says so again.
   overview.shots[shotId('3.1')].keyframe = { state: 'running', takeCount: 0, opened: false };
   assert.equal(en(keyframesView(overview, sceneId(3), null, 'en-US').panel.label), 'Making keyframes…');

@@ -28,6 +28,8 @@ export interface ShotCard {
   pictureDimmed: boolean;
   status: Msg;
   tone: CardTone;
+  /** The status in full where the pill says it short (a shot held by an edit): for the card's tooltip. */
+  statusReason: Msg | null;
   motion: string;
   /** Indeterminate progress while a keyframe or clip is being made. */
   working: boolean;
@@ -265,8 +267,15 @@ export function voiceStepOf(overview: GenerationOverview, scene: SceneOverview |
   return step && step.step !== "video" && step.shotId === shotId ? step.step : null;
 }
 
+/** A card status; `reason` says it in full where the status is short (a slot held by an edit). */
+export interface ShotStatus {
+  status: Msg;
+  tone: CardTone;
+  reason?: Msg;
+}
+
 /** A shot's status for its card, the preview and the inspector: the confirm's voice step for it, else its slots' state. */
-export function shotStatus(overview: GenerationOverview, scene: SceneOverview | undefined, shot: ShotOverview): { status: Msg; tone: CardTone } {
+export function shotStatus(overview: GenerationOverview, scene: SceneOverview | undefined, shot: ShotOverview): ShotStatus {
   const voice = voiceStepOf(overview, scene, shot.shotId);
   return voice ? { status: msg(`card.step.${voice}`), tone: "working" } : cardStatus(shot);
 }
@@ -278,12 +287,18 @@ export function waitingMsg(slot: MediaSlot): Msg {
   return msg("media.waiting.queued");
 }
 
-export function cardStatus(shot: ShotOverview): { status: Msg; tone: CardTone } {
+/** A queued slot's status: what it waits for, with the reason in full when the status is short. */
+function waiting(slot: MediaSlot): ShotStatus {
+  return heldByEdit(slot) ? { status: waitingMsg(slot), tone: "working", reason: msg("media.held_reason") } : { status: waitingMsg(slot), tone: "working" };
+}
+
+export function cardStatus(shot: ShotOverview): ShotStatus {
   const { keyframe, video } = shot;
   if (keyframe.state === "running") return { status: msg("card.keyframe.making"), tone: "working" };
   // A clip waiting for the person's confirm is not being made: the card says what its keyframe needs (opened or not),
   // as before any confirm, and the video panel offers the confirm itself.
-  if (video.state === "running" || (video.state === "queued" && !awaitsConfirm(video))) return { status: video.state === "queued" ? waitingMsg(video) : msg("card.video.making"), tone: "working" };
+  if (video.state === "queued" && !awaitsConfirm(video)) return waiting(video);
+  if (video.state === "running") return { status: msg("card.video.making"), tone: "working" };
   if (video.state === "ready" && keyframe.state === "ready") return { status: msg("card.video.saved"), tone: "opened" };
   if (video.state === "failed") return { status: msg(video.failure?.charged ? "card.video.failed_charged" : "card.video.failed"), tone: "attention" };
   if (video.state === "no_answer") return { status: msg("card.no_answer"), tone: "attention" };
@@ -291,7 +306,7 @@ export function cardStatus(shot: ShotOverview): { status: Msg; tone: CardTone } 
   if (newTake) return newTake;
   switch (keyframe.state) {
     case "ready": return keyframe.opened ? { status: msg("card.opened"), tone: "opened" } : { status: msg("card.not_opened"), tone: "not_opened" };
-    case "queued": return { status: waitingMsg(keyframe), tone: "working" };
+    case "queued": return waiting(keyframe);
     case "outdated": return { status: msg("card.outdated"), tone: "attention" };
     case "failed": return { status: msg(keyframe.failure?.charged ? "card.keyframe.failed_charged" : "card.keyframe.failed"), tone: "attention" };
     case "no_answer": return { status: msg("card.no_answer"), tone: "attention" };
@@ -451,7 +466,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
   const selected = shots.find((shot) => shot.shotId === shotId) ?? shots[0] ?? null;
   const cards = shots.map((shot): ShotCard => {
     const voiceStep = voiceStepOf(overview, scene, shot.shotId);
-    const { status, tone } = shotStatus(overview, scene, shot);
+    const { status, tone, reason } = shotStatus(overview, scene, shot);
     const current = shot.keyframe.state === "ready" ? shot.keyframe.artifact ?? null : null;
     const previous = current ? null : shot.keyframe.previous ?? null;
     const remaking = shot.keyframe.replacement?.state === "running" || shot.keyframe.replacement?.state === "queued";
@@ -466,6 +481,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
       pictureDimmed: !current && !!previous,
       status,
       tone,
+      statusReason: reason ?? null,
       motion: shot.motion,
       working: isWorking(shot.keyframe) || isWorking(shot.video) || !!voiceStep,
       workingOn,

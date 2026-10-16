@@ -426,12 +426,20 @@ export const scenarios = [
       if ((await texts(page, ".dir-notices .dir-mode")).join() !== "Scripted Director: its replies are scripted.") fail(`The mode line reads ${await texts(page, ".dir-notices .dir-mode")}`);
       await page.locator('.scene-pills [aria-pressed]').nth(2).click();
       await page.waitForSelector('.card[data-card="shot-3-1"]');
-      // The held status is long: Prompts goes onto its own line, and stays at the right as on the pill's line.
-      const status = await page.evaluate(() => ({ line: document.querySelector(".insp .st").getBoundingClientRect().right, prompts: document.querySelector('.insp .st [data-act="prompts"]').getBoundingClientRect().right }));
-      if (Math.abs(status.line - status.prompts) > 1) fail(`Prompts is not at the right of the status line: ${JSON.stringify(status)}`);
+      // The held status is short: Prompts keeps its place at the right of the pill's line, each card keeps its motion
+      // whole beside the pill, and the pill's tooltip says the reason in full.
+      const status = await page.evaluate(() => {
+        const box = (element) => element.getBoundingClientRect();
+        const pill = document.querySelector(".insp .st .status"), prompts = document.querySelector('.insp .st [data-act="prompts"]');
+        const motions = [...document.querySelectorAll(".card .stl > span:last-child")].map((span) => [span.textContent, span.scrollWidth <= span.clientWidth]);
+        return { line: box(document.querySelector(".insp .st")).right, prompts: box(prompts).right, sameLine: Math.abs(box(pill).top - box(prompts).top) < 6, motions, title: pill.getAttribute("title") };
+      });
+      if (Math.abs(status.line - status.prompts) > 1 || !status.sameLine) fail(`Prompts is not at the right of the held status's line: ${JSON.stringify(status)}`);
+      if (status.motions.length !== 2 || status.motions.some(([, whole]) => !whole)) fail(`The held cards cut their motion: ${JSON.stringify(status.motions)}`);
+      if (status.title !== "An unfinished Director edit holds this shot; see the Director column.") fail(`The held status's tooltip reads ${JSON.stringify(status.title)}`);
       // The held shots wait for that edit everywhere: the inspector and the panel never say they are being made.
       const waiting = { regen: (await page.locator('.insp [data-act="regen"]').textContent()).trim(), panel: (await page.locator(".vpanel").innerText()).replace(/\s+/g, " ") };
-      if (waiting.regen !== "Waiting for an edit to finish" || !/Waiting for an edit to finish/.test(waiting.panel) || /being made|Making|Keep working/.test(waiting.panel)) fail(`The held shots read ${JSON.stringify(waiting)}`);
+      if (waiting.regen !== "Held by an edit" || !/Held by an edit/.test(waiting.panel) || /being made|Making|Keep working/.test(waiting.panel)) fail(`The held shots read ${JSON.stringify(waiting)}`);
       await page.screenshot({ path: shot("held-1440") });
       await card.locator('[data-act="release-holds"]').click();
       await toast(page, /^Let go\. 3\.1 and 3\.2 can go ahead\.$/);

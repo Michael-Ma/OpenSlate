@@ -20,7 +20,7 @@ export const keyframes = {
   "scene.state.making_video": { en: "making video", zh: "正在生成视频" },
   "scene.state.keyframes_back": { en: "keyframes back, no video yet", zh: "关键帧已回来，还没有视频" },
   "scene.state.clips_saved": { en: "{ready} of {total} clips saved", zh: "已保存 {ready}/{total} 段视频" },
-  "scene.state.held": { en: "waiting for an edit to finish", zh: "等待编辑完成" },
+  "scene.state.held": { en: "held by an edit", zh: "被修改占用" },
   "scene.state.keyframes_partial": { en: "{ready} of {total} keyframes back", zh: "已回来 {ready}/{total} 张关键帧" },
   "scene.state.needs_attention": { en: "needs attention", zh: "需要处理" },
   "scene.state.not_started": { en: "not started", zh: "未开始" },
@@ -31,7 +31,9 @@ export const keyframes = {
 
   // ---- waiting and card status
   "media.waiting.capacity": { en: "Queued · {ahead, plural, =0 {next} one {# ahead} other {# ahead}}", zh: "排队中 · {ahead, plural, =0 {下一个} other {前面还有 # 个}}" },
-  "media.waiting.edit_pending": { en: "Waiting for an edit to finish", zh: "等待编辑完成" },
+  "media.waiting.edit_pending": { en: "Held by an edit", zh: "被修改占用" },
+  // The held status in full: in the tooltips of the short status, and under the inspector's keyframe button.
+  "media.held_reason": { en: "An unfinished Director edit holds this shot; see the Director column.", zh: "导演有一项未完成的修改占用着这个镜头，请看导演栏。" },
   "media.waiting.stopped": { en: "Stopped", zh: "已停止" },
   "media.waiting.review": { en: "Waiting for your confirm", zh: "等待你确认" },
   "media.waiting.voice": { en: "Waiting for voice", zh: "等待配音" },
@@ -110,7 +112,6 @@ export const keyframes = {
   "inspector.clip_will_redo": { en: "Its clip will need redoing, about {price}.", zh: "它的视频需要重做，约 {price}。" },
   "inspector.clip_will_redo_unpriced": { en: "Its clip will need redoing.", zh: "它的视频需要重做。" },
   "inspector.wait_for_clip": { en: "Wait for this shot's clip to finish.", zh: "请等这个镜头的视频生成完。" },
-  "inspector.held": { en: "An unfinished Director edit holds this shot; see the Director column.", zh: "导演有一项未完成的修改占用着这个镜头，请看导演栏。" },
   "inspector.keyframe_outdated": { en: "The prompt changed; the earlier keyframe is shown.", zh: "画面描述已修改，显示的是之前的关键帧。" },
   "inspector.clip_outdated": { en: "The clip is out of date and will be made again with the scene's video.", zh: "视频已过期，会随这一场的视频重新生成。" },
   "inspector.failed.retrying": { en: "Failed; it will retry by itself ({count} left).", zh: "失败了，会自动重试（还剩 {count} 次）。" },
@@ -221,7 +222,7 @@ export const keyframes = {
   "panel.making_video_note": { en: "Clips are being made. You can keep working.", zh: "视频正在生成，你可以继续做别的。" },
   "panel.making_video_progress": { en: "Clip {index} of {total}: {shot}. Progress shows on each card.", zh: "第 {index}/{total} 段：{shot}。每张卡片上都有进度。" },
   "panel.keep_working": { en: "Keep working; nothing else is blocked.", zh: "可以继续工作，其他操作不受影响。" },
-  "panel.held": { en: "Waiting for an edit to finish", zh: "等待编辑完成" },
+  "panel.held": { en: "Held by an edit", zh: "被修改占用" },
   "panel.held_headline": { en: "Waiting", zh: "等待中" },
   "panel.held_note": { en: "An unfinished Director edit holds {shots}.", zh: "导演有一项未完成的修改占用着 {shots}。" },
   "panel.held_reason": { en: "See the Director column to let it go.", zh: "可在导演栏里放弃这项修改。" },
