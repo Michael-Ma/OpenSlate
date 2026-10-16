@@ -1,6 +1,7 @@
 import type { DirectorProposal, GenerationOverview, MediaSlot, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { narrationChecks } from "./checks.ts";
 import { sceneStatus } from "./keyframes.ts";
+import { planRowRecording } from "./narration.ts";
 import { noteViews, shotCallouts, type NoteView } from "./notes.ts";
 import { msg, type Msg, type ProjectSnapshot } from "./types.ts";
 
@@ -137,6 +138,8 @@ export interface NarrationView {
 
 export function narrationView(shot: ShotOverview, mode: NarrationMode | undefined, fps: number): NarrationView {
   const line = shot.narration;
+  // Set to "My recording": its words (never the studio's stand-in for none) and the take, not a "voice line".
+  if (mode === "uploaded") return { kind: "line", ...planRowRecording(shot) };
   if (line.state === "none" || !line.text.trim()) return { kind: mode === "undecided" ? "undecided" : "none", text: "", detail: null };
   const shotSeconds = secondsOf(shot.durationFrames, fps);
   let detail: Msg;

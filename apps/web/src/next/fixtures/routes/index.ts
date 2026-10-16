@@ -3,6 +3,7 @@ import { directorRoutes } from "../fixture-director.ts";
 import { assetsRoutes } from "./assets.ts";
 import { computerRoutes } from "./computer.ts";
 import { filmRoutes } from "./film.ts";
+import { narrationRoutes } from "./narration.ts";
 import { planRoutes } from "./plan.ts";
 import { settingsRoutes } from "./settings.ts";
 import { startRoutes } from "./start.ts";
@@ -16,9 +17,10 @@ import { DECLINE, type Decline, type FixtureRoute } from "./types.ts";
  *
  * Owners of endpoints more than one view reads: GET /api/providers (computer.ts, this computer's catalog), GET and
  * POST /director/setup of the sample film (settings.ts; Start's routes answer the other films'), GET /api/projects
- * (start.ts), GET /audio-library (film.ts; Assets' audio imports join it).
+ * (start.ts), GET /audio-library (film.ts; Assets' audio imports join it). Plan declines the shot's narration voice for
+ * narration.ts, which also owns a shot's recording and the Undo of both.
  */
-export const extraRoutes: FixtureRoute[] = [...planRoutes, ...filmRoutes, ...assetsRoutes, ...settingsRoutes, ...startRoutes, ...computerRoutes, ...directorRoutes];
+export const extraRoutes: FixtureRoute[] = [...planRoutes, ...narrationRoutes, ...filmRoutes, ...assetsRoutes, ...settingsRoutes, ...startRoutes, ...computerRoutes, ...directorRoutes];
 
 /**
  * The answer of the first route for this request that does not decline, or DECLINE when none answers (the caller

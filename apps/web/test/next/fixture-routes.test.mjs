@@ -5,13 +5,14 @@ import { extraRoutes } from '../../src/next/fixtures/routes/index.ts';
 import { assetsRoutes } from '../../src/next/fixtures/routes/assets.ts';
 import { computerRoutes } from '../../src/next/fixtures/routes/computer.ts';
 import { filmRoutes } from '../../src/next/fixtures/routes/film.ts';
+import { narrationRoutes } from '../../src/next/fixtures/routes/narration.ts';
 import { planRoutes } from '../../src/next/fixtures/routes/plan.ts';
 import { settingsRoutes } from '../../src/next/fixtures/routes/settings.ts';
 import { startRoutes } from '../../src/next/fixtures/routes/start.ts';
 import { DECLINE } from '../../src/next/fixtures/routes/types.ts';
 import { shotId } from '../../src/next/fixtures/last-ferry.ts';
 
-const OWNERS = { plan: planRoutes, film: filmRoutes, assets: assetsRoutes, settings: settingsRoutes, start: startRoutes, computer: computerRoutes };
+const OWNERS = { plan: planRoutes, narration: narrationRoutes, film: filmRoutes, assets: assetsRoutes, settings: settingsRoutes, start: startRoutes, computer: computerRoutes };
 const ownerOf = (route) => Object.entries(OWNERS).find(([, routes]) => routes.includes(route))?.[0];
 const matching = (method, path) => extraRoutes.filter((route) => route.method === method && route.match.test(path));
 
@@ -34,6 +35,9 @@ test('every endpoint more than one view reads has exactly one owner', () => {
     ['GET', '/media', 'film'],
     ['GET', '/plan-imports', 'plan'],
     ['POST', '/rename', 'start'],
+    ['GET', '/api/narration/voices?projectId=last-ferry', 'narration'],
+    ['GET', '/narration/shots/shot-2-3', 'narration'],
+    ['POST', '/shots/shot-2-3/narration/recording?expectedHeadVersion=12', 'narration'],
   ];
   for (const [method, path, owner] of expected) {
     const routes = matching(method, path);
@@ -41,8 +45,8 @@ test('every endpoint more than one view reads has exactly one owner', () => {
   }
 });
 
-test('POST /storyboard is Plan\'s: it declines the music and the Undo of commands it never answered, then Film declines the rest', async () => {
-  assert.deepEqual(matching('POST', '/storyboard').map(ownerOf), ['plan', 'film']);
+test('POST /storyboard is Plan\'s: it declines the music, a shot\'s narration voice and the Undo of commands it never answered, then Narration and Film decline the rest', async () => {
+  assert.deepEqual(matching('POST', '/storyboard').map(ownerOf), ['plan', 'narration', 'film']);
   const port = new FixturePort();
   try {
     const head = () => port.world.snapshot.project.headVersion;
@@ -55,7 +59,8 @@ test('POST /storyboard is Plan\'s: it declines the music and the Undo of command
     await post({ kind: 'undo', commandId: moved.commandId });
     assert.equal(port.world.overview.shots[shotId('2.2')].label, '2.2');
     // The Keyframes commands answer what no view's route takes.
-    const [, film] = matching('POST', '/storyboard');
+    const [, narration, film] = matching('POST', '/storyboard');
+    assert.equal(narration.handle(port.world, [], { kind: 'shot', id: shotId('2.1'), field: 'motion', value: 'Static' }), DECLINE);
     assert.equal(film.handle(port.world, [], { kind: 'shot', id: shotId('2.1'), field: 'motion', value: 'Static' }), DECLINE);
   } finally {
     port.close();

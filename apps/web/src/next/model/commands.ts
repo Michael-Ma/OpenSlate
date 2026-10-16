@@ -84,7 +84,7 @@ export function confirmBody(overview: GenerationOverview, scene: SceneOverview):
 /** Storyboard edits (POST /api/projects/:projectId/storyboard). */
 export type StoryboardEdit =
   | { kind: "shot"; id: string; field: "imagePrompt" | "motion" | "desiredFrames" | "videoPrompt" | "framing" | "purpose"; value: string }
-  | { kind: "narration"; id: string; field: "text" | "mode"; value: string }
+  | { kind: "narration"; id: string; field: "text" | "mode" | "voice"; value: string }
   | { kind: "undo"; commandId: string };
 
 export function seconds(frames: number, fps: number): number {

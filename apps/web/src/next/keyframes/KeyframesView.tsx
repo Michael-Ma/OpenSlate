@@ -3,12 +3,14 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { checkActions, lineEstimate, type AppCheck } from "../model/checks.ts";
 import { inspectorView } from "../model/inspector.ts";
 import { keyframesView } from "../model/keyframes.ts";
+import { takeOrigin, wordsOf } from "../model/narration.ts";
 import { advance, playingShot, type Playback } from "../model/motion.ts";
 import { msg } from "../model/types.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import type { EditDraft } from "../store/state.ts";
 import { CheckBanner, type SettledCheck } from "./CheckBanner.tsx";
 import { Inspector } from "./Inspector.tsx";
+import { useShotNarration } from "./narration-media.ts";
 import { NoteBanner } from "./NoteBanner.tsx";
 import { Preview, type OpenIntent } from "./Preview.tsx";
 import { SceneHeader } from "./SceneHeader.tsx";
@@ -77,6 +79,12 @@ function Workspace() {
   const selected = view?.selected ?? null;
   const selectedId = selected?.shotId ?? null;
   const currentSceneId = view?.scene.sceneId ?? null;
+  // The stored narration mode, so the inspector reads a recording as one (the overview reports only the line).
+  const narrationMode = useStudio((s) => (selectedId ? s.snapshot?.project.shots.find((row) => row.id === selectedId)?.narration?.mode : undefined));
+  // The selected shot's current take, read while its narration panel is open or a recording is the choice: the
+  // panel plays it, and the row never calls a voice line still in use "your recording".
+  const narrationOpen = draft?.field === "narration" && draft.shotId === selectedId;
+  const narrationDetail = useShotNarration(selectedId && (narrationOpen || (narrationMode === "uploaded" && selected?.narration.state === "ready")) ? selectedId : null);
 
   // Navigating to a shot (including the first one shown) arms "Opened" for its current frame.
   useEffect(() => {
@@ -134,7 +142,7 @@ function Workspace() {
     if (!shot) return;
     narrationFromCheck.current = { shotId: check.shotId, letter };
     openShot(check.shotId);
-    store.setEdit({ shotId: check.shotId, field: "narration", value: shot.narration.text });
+    store.setEdit({ shotId: check.shotId, field: "narration", value: wordsOf(shot.narration.text) });
   }, [overview, store, openShot]);
 
   const saveDraft = useCallback(async (next: EditDraft) => {
@@ -224,7 +232,7 @@ function Workspace() {
 
   if (!view) return null;
   const card = view.cards.find((c) => c.shotId === selectedId);
-  const inspector = selected ? inspectorView(overview, selected, locale) : null;
+  const inspector = selected ? inspectorView(overview, selected, locale, narrationMode, takeOrigin(selected, narrationDetail.data)) : null;
   const playingHere = playingShot(playback) === selectedId ? playback!.kind : null;
   const sceneOrdinalChecks = view.checks;
   // A card already carrying a Director note for its shot does not repeat the app's check about it.
@@ -280,6 +288,7 @@ function Workspace() {
               shot={selected}
               fps={overview.fps}
               draft={draft}
+              narrationDetail={narrationDetail}
               busy={{
                 regenerate: !!pending[`regenerate:${selected.shotId}`],
                 edit: editBusy,

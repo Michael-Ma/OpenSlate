@@ -1,7 +1,9 @@
 import type { ShotOverview } from "@openslate/core/public";
 import { useEffect, useId, useRef, type FocusEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
+import { useShotNarration } from "../../keyframes/narration-media.ts";
 import { listLabels } from "../../model/keyframes.ts";
+import { choiceLabel, planRecordingNote, takeOrigin } from "../../model/narration.ts";
 import { canStep, draftEdits, draftOf, draftProblem, DRAFT_FIELD, editChange, FIELD_LABEL, FRAMINGS, lengthFloor, lengthHint, lineNote, MOTIONS, shotImpact, stepLength, storedShot, type ShotDraft, type UnitPrices } from "../../model/plan-edit.ts";
 import type { ShotRowView, SnapshotShot } from "../../model/plan.ts";
 import { msg, type Msg } from "../../model/types.ts";
@@ -79,8 +81,11 @@ export function ShotEditor({ shot, row, stored, fps, prices, saving, guard, erro
   const set = <K extends keyof ShotDraft>(key: K, value: ShotDraft[K]) => held.set(key, value);
   const stale = held.stale.map((key) => DRAFT_FIELD[key]);
 
+  // A shot set to "My recording" may still be using its voice line: its take says which, for the note and the impact.
+  const detail = useShotNarration(mode === "uploaded" && shot.narration.state === "ready" ? shot.shotId : null);
+  const origin = takeOrigin(shot, detail.data);
   const floor = lengthFloor(shot, fps, draft.narration);
-  const impact = shotImpact(shot, live, draft, prices, locale);
+  const impact = shotImpact(shot, live, draft, prices, locale, origin);
   const problem = draftProblem(live, draft);
   const commands = draftEdits(live, draft, fps, mode, storedShot(shot, stored));
   const line = lineNote(shot, draft);
@@ -174,7 +179,9 @@ export function ShotEditor({ shot, row, stored, fps, prices, saving, guard, erro
           <span className="segctl" role="radiogroup" aria-labelledby={field("narr")} {...aria("narration")}>
             <button type="button" role="radio" aria-checked={draft.narration === "none"} data-act="narr-none" onClick={() => set("narration", "none")}>{t("plan.narr.choice_none")}</button>
             <button type="button" role="radio" aria-checked={draft.narration === "line"} data-act="narr-line" onClick={() => set("narration", "line")}>{t("plan.narr.choice_line")}</button>
+            <button type="button" role="radio" aria-checked={draft.narration === "recording"} data-act="narr-recording" onClick={() => set("narration", "recording")}>{tm(choiceLabel("recording"))}</button>
           </span>
+          {draft.narration === "recording" ? <span className="hint" data-note="recording">{tm(planRecordingNote(shot, mode, origin))}</span> : null}
         </div>
         {draft.narration === "line" ? (
           <div className="field wide" {...conflictProps("line")}>
