@@ -149,8 +149,8 @@ export function ShotEditor({ shot, row, stored, fps, prices, saving, guard, erro
             <output aria-live="polite" data-field="length">{t("plan.len.value", { seconds: draft.seconds })}</output>
             <button type="button" data-act="len-longer" aria-label={t("plan.len.longer")} disabled={!canStep(draft.seconds, 1, floor)} onClick={() => set("seconds", stepLength(draft.seconds, 1, floor))}>+</button>
           </span>
+          <span className="hint len-hint" id={field("len-hint")}>{tm(lengthHint(shot, floor))}</span>
         </div>
-        <span className="hint len-hint" id={field("len-hint")}>{tm(lengthHint(shot, floor))}</span>
         <div className="field wide" {...conflictProps("action")}>
           <label htmlFor={field("action")}>{t("plan.field.action")}</label>
           <textarea id={field("action")} className="textarea" data-field="action" rows={2} value={draft.action} placeholder={t("plan.field.action_placeholder")} {...aria("action")} onChange={(event) => set("action", event.target.value)} />
@@ -169,7 +169,7 @@ export function ShotEditor({ shot, row, stored, fps, prices, saving, guard, erro
           <summary>{t("plan.prompts.saved")}</summary>
           <FullPrompts prompts={row.fullPrompts} />
         </details>
-        <div className="field" {...conflictProps("motion")}>
+        <div className="field motion" {...conflictProps("motion")}>
           <label htmlFor={field("motion")}>{t("plan.field.motion")}</label>
           <input id={field("motion")} className="input" data-field="motion" list={field("motions")} value={draft.motion} {...aria("motion")} onChange={(event) => set("motion", event.target.value)} />
           <datalist id={field("motions")}>{MOTIONS.map((value) => <option key={value} value={value} />)}</datalist>

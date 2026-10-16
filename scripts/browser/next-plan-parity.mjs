@@ -248,6 +248,19 @@ export const scenarios = [
       await page.click(`[data-act="scene-up"][data-scene="${scene(3)}"]`);
       await page.waitForSelector('.unconfirmed.strip-note', { timeout: 8000 });
       await expectText(page, '.strip-note', /Not confirmed: move “Departure”\. The studio did not answer/);
+      // Turned off meanwhile, the Add buttons look quieter than when on: no fill.
+      const fills = await page.$$eval('[data-act="add-shot"], [data-act="add-scene"]', (els) => els.map((el) => [el.disabled, getComputedStyle(el).backgroundColor]));
+      expect(fills.length > 1 && fills.every(([off, fill]) => off && fill === "rgba(0, 0, 0, 0)"), `Turned-off Add buttons: ${JSON.stringify(fills)}`);
+      // Scrolled, the strip sits flush under the top bar: above it and just below it is its own ground, not the rows.
+      await page.locator('main.work[data-view="plan"]').evaluate((el) => { el.scrollTop = 420; });
+      await page.waitForTimeout(100);
+      const flush = await page.evaluate(() => {
+        const work = document.querySelector('main.work[data-view="plan"]').getBoundingClientRect();
+        const note = document.querySelector(".strip-note").getBoundingClientRect();
+        const strip = document.querySelector(".lost-strip");
+        return [work.top + 2, note.top - 3, note.bottom + 4].map((y) => strip.contains(document.elementFromPoint(note.left + 60, y)));
+      });
+      expect(flush.every(Boolean), `Rows show around the stuck strip (above, at its edge, below): ${flush}`);
       await screenshot(page, "lost-reply-strip-1440");
       await page.click('.strip-note [data-act="retry-same"]');
       await page.waitForSelector('.strip-note', { state: "detached" });

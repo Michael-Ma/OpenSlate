@@ -325,6 +325,9 @@ export const scenarios = [
       await expectText(page, '[data-impact="cost"] .txt', /1\.2 will use your recording instead of its voice line once you add it in Keyframes \(until then the voice line plays; it stays in Assets\)\./);
       const group = await page.locator('form[data-form="shot"] .segctl').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
       expect(group.scroll <= group.client + 1, `The narration choices overflow: ${JSON.stringify(group)}`);
+      // The note under the choice does not push Motion, beside it, down.
+      const labels = await page.locator('form[data-form="shot"]').evaluate((form) => [form.querySelector('[data-field="motion"]'), form.querySelector(".segctl")].map((el) => Math.round(el.closest(".field").getBoundingClientRect().top)));
+      expect(Math.abs(labels[0] - labels[1]) <= 1, `Motion and Narration start at ${labels.join(" and ")}`);
       await screenshot(page, "plan-recording-1440");
       await page.click('[data-act="save-shot"]');
       await page.waitForSelector('form[data-form="shot"]', { state: "detached" });

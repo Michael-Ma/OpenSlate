@@ -131,7 +131,8 @@ export function SettingsView() {
       </div>
       <div className="set-grid">
         <nav className="set-index" aria-label={t("set.index")}>
-          <span className="grp">{t("set.index.film")}</span>
+          {/* With no film open, these three are set for each film (as their panels say), not for "this film". */}
+          <span className="grp">{t(hasFilm ? "set.index.film" : "set.index.each_film")}</span>
           {SECTIONS.filter((s) => s.group === "film").map(link)}
           <span className="grp">{t("set.index.everywhere")}</span>
           {SECTIONS.filter((s) => s.group === "everywhere").map(link)}

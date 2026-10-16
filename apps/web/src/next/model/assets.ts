@@ -77,8 +77,32 @@ export const kindMsg = (role: AssetRole): Msg => msg(`assets.kind.${role}` as co
 /** Server fallbacks for audio without a name; the view says it in the interface language instead. */
 const UNNAMED_AUDIO = new Set(["Uploaded audio", "Uploaded recording", "Voice line", "Generated narration"]);
 
-/** The tile and detail title. Shot assets are named by role, shot and take; imported audio keeps its file name. */
-export function titleMsg(item: AssetItem, overview: GenerationOverview): Msg {
+/** A label that is an imported file's own name ("pier.png"), not a server description ("The Last Ferry · upload"). */
+const fileName = (label: string): string => {
+  const text = label.trim();
+  return MEDIA_EXTENSION.test(text) && !text.includes(" · ") ? text : "";
+};
+
+/**
+ * An imported picture or video without its file name (the library keeps none for them today) is numbered among
+ * the film's nameless imports of its kind, oldest first ("Imported image 2"), when there is more than one: the
+ * tiles, the detail title and the download name then tell them apart. 0 when it is the only one. The library
+ * lists newest first, so a later place in `items` is the older one when two share a time.
+ */
+export function importNumber(item: AssetItem, items: readonly AssetItem[]): number {
+  const nameless = (other: AssetItem) => other.role === "upload" && other.artifact.kind === item.artifact.kind && !fileName(other.label);
+  const peers = items.map((other, index) => ({ other, index })).filter(({ other }) => nameless(other));
+  if (peers.length < 2) return 0;
+  peers.sort((a, b) => time(a.other.createdAt) - time(b.other.createdAt) || b.index - a.index);
+  const key = assetKey(item);
+  return peers.findIndex(({ other }) => assetKey(other) === key) + 1;
+}
+
+/**
+ * The tile and detail title. Shot assets are named by role, shot and take; an import keeps its file name when the
+ * library has it, and imported pictures and videos without one are numbered among `items` (the whole library).
+ */
+export function titleMsg(item: AssetItem, overview: GenerationOverview, items: readonly AssetItem[] = []): Msg {
   const shot = item.shotId ? overview.shots[item.shotId] : undefined;
   const take = item.takeIndex;
   switch (item.role) {
@@ -93,12 +117,16 @@ export function titleMsg(item: AssetItem, overview: GenerationOverview): Msg {
     case "export":
       return msg(item.source === "demo" ? "assets.label.demo_export" : "assets.label.export");
     default:
-      // Music and uploads. Imported audio carries the name it was imported with; image and video imports keep none.
+      // Music and uploads. Imported audio carries the name it was imported with; image and video imports keep none today.
       if (item.artifact.kind === "audio") {
         const name = item.label.trim();
         return name && !UNNAMED_AUDIO.has(name) ? msg("assets.raw", { text: name }) : msg("assets.label.audio_upload");
       }
-      return msg(item.artifact.kind === "video" ? "assets.label.video_upload" : "assets.label.image_upload");
+      const name = fileName(item.label);
+      if (name) return msg("assets.raw", { text: name });
+      const video = item.artifact.kind === "video";
+      const n = importNumber(item, items);
+      return n ? msg(video ? "assets.label.video_upload_n" : "assets.label.image_upload_n", { n }) : msg(video ? "assets.label.video_upload" : "assets.label.image_upload");
   }
 }
 
@@ -151,7 +179,7 @@ export function tileFor(item: AssetItem, items: readonly AssetItem[], overview: 
   return {
     key: assetKey(item),
     item,
-    title: titleMsg(item, overview),
+    title: titleMsg(item, overview, items),
     use: useMsg(item),
     source: sourceMsg(item),
     tag: tagFor(item),
@@ -335,7 +363,7 @@ export function assetDetail(item: AssetItem, items: readonly AssetItem[], overvi
   return {
     key: assetKey(item),
     item,
-    title: titleMsg(item, overview),
+    title: titleMsg(item, overview, items),
     rows,
     point,
     open,

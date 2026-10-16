@@ -52,6 +52,37 @@ async function noSidewaysScroll(page, width) {
   if (size > width) throw new Error(`The page scrolls sideways: ${size}px wide at ${width}px`);
 }
 
+/**
+ * The open shot editor's grid: at 1440 the labels of a row line up and the one-line controls share one height; on a
+ * phone every field takes the full width (the fields stack). The stepper and the narration choice are content-width.
+ */
+async function editorGrid(page, phone) {
+  const at = await page.locator('form[data-form="shot"]').evaluate((form) => {
+    const rect = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; };
+    const field = (selector) => form.querySelector(selector).closest(".field");
+    const label = (selector) => rect(field(selector).querySelector("label, .label"));
+    return {
+      purpose: rect(form.querySelector('[data-field="purpose"]')), framing: rect(form.querySelector('[data-field="framing"]')),
+      motion: rect(form.querySelector('[data-field="motion"]')), action: rect(form.querySelector('[data-field="action"]')),
+      stepper: rect(form.querySelector(".stepper")), lenField: rect(field(".stepper")), segctl: rect(form.querySelector(".segctl")), narrField: rect(field(".segctl")),
+      labels: { purpose: label('[data-field="purpose"]'), framing: label('[data-field="framing"]'), length: label(".stepper"), motion: label('[data-field="motion"]'), narration: label(".segctl") },
+    };
+  });
+  expect(at.stepper.width < at.lenField.width - 20 || phone, `The length stepper stretches across its column (${Math.round(at.stepper.width)} of ${Math.round(at.lenField.width)} px)`);
+  expect(at.segctl.width < at.narrField.width - 20, `The narration choice stretches across its column (${Math.round(at.segctl.width)} of ${Math.round(at.narrField.width)} px)`);
+  expect(Math.abs(at.stepper.height - at.purpose.height) <= 1 && Math.abs(at.segctl.height - at.motion.height) <= 1, `Controls differ in height: input ${at.purpose.height}, stepper ${at.stepper.height}, choice ${at.segctl.height}`);
+  if (phone) {
+    for (const name of ["purpose", "framing", "motion"]) expect(Math.abs(at[name].width - at.action.width) <= 1, `${name} is ${Math.round(at[name].width)} px wide on a phone, not the full ${Math.round(at.action.width)} px`);
+    return;
+  }
+  const tops = (names) => names.map((name) => Math.round(at.labels[name].top));
+  const row1 = tops(["purpose", "framing", "length"]);
+  expect(Math.max(...row1) - Math.min(...row1) <= 1, `Purpose, Framing and Length labels are at ${row1.join(", ")}`);
+  expect(Math.abs(at.stepper.top - at.purpose.top) <= 1, `The stepper starts at ${Math.round(at.stepper.top)}, the inputs at ${Math.round(at.purpose.top)}`);
+  const row2 = tops(["motion", "narration"]);
+  expect(Math.abs(row2[0] - row2[1]) <= 1, `Motion and Narration labels are at ${row2.join(", ")}`);
+}
+
 const rowText = (page, label) => page.locator(`[data-shot="${shot(label)}"]`).first().innerText();
 
 const SAMPLE = `# The Last Ferry — draft 3
@@ -147,6 +178,7 @@ export const scenarios = [
       await page.waitForSelector('form[data-form="shot"]', { state: "detached" });
       // Length: a second at a time, 3 to 15 s; 1.1's clip goes out of date.
       await page.click(`[data-act="edit-shot"][data-shot="${shot("1.1")}"]`);
+      await editorGrid(page, false);
       await page.click('[data-act="len-longer"]');
       await expectText(page, '[data-field="length"]', /^7 s$/);
       await expectText(page, '[data-impact="cost"] .txt', /Saving outdates 1\.1's clip \(remaking it costs about \$0\.50\)\. The keyframe stays\./);
@@ -426,6 +458,7 @@ export const scenarios = [
       await page.click(`[data-act="edit-shot"][data-shot="${shot("1.2")}"]`);
       await page.fill('[data-field="purpose"]', "Mara buys the last ticket of the season.");
       await noSidewaysScroll(page, 390);
+      await editorGrid(page, true);
       await page.locator('[data-impact]').scrollIntoViewIfNeeded();
       await screenshot(page, "editing-390");
       await page.click('[data-act="cancel-edit"]');

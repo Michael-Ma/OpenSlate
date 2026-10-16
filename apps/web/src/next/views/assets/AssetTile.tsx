@@ -104,7 +104,8 @@ export const AssetTileButton = memo(function AssetTileButton({ tile, selected, o
       <b>{tm(tile.title)}</b>
       <span className="sub">
         {tile.use.on ? <span className="cur"><span aria-hidden="true">✓ </span>{tm(tile.use.label)}</span> : <span>{tm(tile.use.label)}</span>}
-        <span>· {tm(tile.source)}</span>
+        <span className="sep" aria-hidden="true">·</span>
+        <span>{tm(tile.source)}</span>
       </span>
     </button>
   );

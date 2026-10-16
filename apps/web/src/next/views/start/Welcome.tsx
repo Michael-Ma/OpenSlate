@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { Fragment, useId } from "react";
 import { useI18n } from "../../i18n/I18n.tsx";
 import type { MessageId } from "../../i18n/messages.ts";
 import { codeSegments } from "../../model/shell.ts";
@@ -91,7 +91,8 @@ export function Welcome({ setup, offline, demoBusy, demoOff, planWhy, onDemo, on
         </div>
         {!ready && (
           <p className="hint">
-            {codeSegments(t("start.setup.how")).map((part, index) => (part.code ? <b key={index} className="cmd">{part.text}</b> : <span key={index}>{part.text}</span>))}
+            {/* A line may break before each command (a Chinese full stop has no space after it). */}
+            {codeSegments(t("start.setup.how")).map((part, index) => (part.code ? <Fragment key={index}><wbr /><b className="cmd">{part.text}</b></Fragment> : <span key={index}>{part.text}</span>))}
           </p>
         )}
         <div className="acts">

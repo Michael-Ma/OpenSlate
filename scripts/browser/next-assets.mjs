@@ -167,6 +167,12 @@ export const scenarios = [
       });
       expect(colours.current === "rgb(95, 196, 138)", `Current reads in ${colours.current}, expected the green role`);
       expect(!colours.amber, "The Assets view uses the Director's amber");
+      // The dot between a tile's status and its source has the same space on both sides.
+      const spacing = await page.evaluate(() => [...document.querySelectorAll("main[data-view='assets'] .tile .sub")].map((sub) => {
+        const [use, dot, source] = [...sub.children].map((el) => el.getBoundingClientRect());
+        return dot && source ? Math.abs((dot.left - use.right) - (source.left - dot.right)) : 99;
+      }).filter((delta) => delta > 1));
+      expect(!spacing.length, `The separator dot sits off-centre on ${spacing.length} tiles`);
       await shot(page, "next-assets-1440");
     },
   },
@@ -299,7 +305,8 @@ export const scenarios = [
       await chooseFile(page, { name: "pier.png", mimeType: "image/png", buffer: png(32, 18, [80, 110, 150]) });
       await page.locator("[data-act='import-go']").click();
       await expectText(page, ".toast", /Imported pier\.png\./, 8000);
-      await expectText(page, "aside.detail h3", /^Imported image$/);
+      // The library keeps no name for an imported picture: it is numbered after the film's two earlier ones.
+      await expectText(page, "aside.detail h3", /^Imported image 3$/);
       await page.waitForFunction(() => { const img = document.querySelector("aside.detail .big-pic img"); return img?.complete && img.naturalWidth > 0; }, null, { timeout: 6000 });
       await expectText(page, ".filters .count", /^Showing 18 of 18$/);
       // Once everything is sent, the sheet can be closed: the studio's check goes on in the background.
@@ -359,6 +366,9 @@ export const scenarios = [
       await sheet.waitFor();
       await page.keyboard.press("Escape");
       await page.waitForFunction(() => !document.querySelector("dialog[data-act='import-sheet']"));
+      // Every imported file has a name of its own: the tiles are not told apart by their pictures only.
+      const uploads = await page.locator("main[data-view='assets'] .tile[data-role='upload'] b").allInnerTexts();
+      expect(uploads.length === 6 && new Set(uploads).size === uploads.length, `Imported files share a name: ${JSON.stringify(uploads)}`);
       await shot(page, "next-assets-1440-imported");
     },
   },
@@ -418,6 +428,9 @@ export const scenarios = [
       expect(!cut.length, `Cut-off tiles at 1024 px: ${cut.join(", ")}`);
       await tile(page, "[data-role='keyframe']").first().click();
       await expectText(page, "aside.detail h3", /^Keyframe 1\.1 · take 1$/);
+      // The two Director actions say what each acts on: this picture, or the shot.
+      const director = await page.locator("aside.detail [data-act='show-director'], aside.detail [data-act='point-director']").allInnerTexts();
+      expect(director.join(" | ") === "Show the Director this picture | Point the Director at 1.1", `The Director actions read ${JSON.stringify(director)}`);
       // Pictures on screen (and the detail's) load; the ones further down wait until they are near.
       await page.waitForFunction(() => {
         const view = document.querySelector("main[data-view='assets'] .groups").getBoundingClientRect();

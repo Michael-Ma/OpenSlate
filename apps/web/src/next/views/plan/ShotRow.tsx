@@ -105,7 +105,8 @@ export function ShotRow({ row, guard, busy, flash, canMoveScene, dropBefore, dro
   const promptsId = useId();
   const [promptsOpen, setPromptsOpen] = useState(false);
   const off = !!guard || busy;
-  const motion = row.motion ? row.motion.charAt(0).toLocaleLowerCase(locale) + row.motion.slice(1) : t("plan.shot.not_written");
+  // An unwritten framing or motion says which one is missing: the meta line has no labels.
+  const motion = row.motion ? row.motion.charAt(0).toLocaleLowerCase(locale) + row.motion.slice(1) : t("plan.shot.no_motion");
   const offTitle = guard ? { title: guard } : {};
   const items: MenuItem[] = [
     { act: "shot-earlier", label: t("plan.shot.earlier"), onSelect: () => onMove(-1), disabled: off || row.first, ...offTitle },
@@ -134,7 +135,7 @@ export function ShotRow({ row, guard, busy, flash, canMoveScene, dropBefore, dro
       </div>
       <div className="shot-main">
         <b>{row.purpose || <span className="muted">{t("plan.shot.no_purpose")}</span>}</b>
-        <div className="shot-meta">{t("plan.shot.meta", { framing: row.framing || t("plan.shot.not_written"), seconds: row.seconds, motion })}</div>
+        <div className="shot-meta">{t("plan.shot.meta", { framing: row.framing || t("plan.shot.no_framing"), seconds: row.seconds, motion })}</div>
         {/* Said only when it adds to the purpose: many films store the same sentence in both. */}
         {actionLine(row) ? <div className="shot-action" data-field="action">{t("plan.shot.action", { action: actionLine(row) })}</div> : null}
         <div className="shot-prompt">{t("plan.shot.picture", { prompt: row.prompt || t("plan.shot.not_written") })}</div>

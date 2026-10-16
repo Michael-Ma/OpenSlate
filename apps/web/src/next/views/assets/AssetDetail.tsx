@@ -5,7 +5,7 @@ import { clock, motionKind, motionTransform } from "../../model/motion.ts";
 import { msg } from "../../model/types.ts";
 import { useMode, useStore, useStudio } from "../../store/react.tsx";
 import { pictureFromAsset } from "../../model/director.ts";
-import { ShowDirectorButton } from "../../director/ShowDirector.tsx";
+import { useShowToDirector } from "../../director/ShowDirector.tsx";
 import { AssetFace, AssetPicture, Wave } from "./AssetTile.tsx";
 import { useAssetFile } from "./media.ts";
 
@@ -190,6 +190,7 @@ export function AssetDetail({ detail, tile, headingId, onPoint, onOpen, onShown 
   // A picture (an imported one, or a shot's keyframe) can be shown to the Director in the next message.
   const overview = useStudio((s) => s.overview);
   const picture = pictureFromAsset(detail.item, overview);
+  const show = useShowToDirector();
   return (
     <>
       <AssetPreview key={detail.key} detail={detail} tile={tile} title={title} />
@@ -204,7 +205,8 @@ export function AssetDetail({ detail, tile, headingId, onPoint, onOpen, onShown 
       </dl>
       <div className="acts">
         <DownloadAction key={detail.key} detail={detail} title={title} />
-        {picture && <ShowDirectorButton candidate={picture} {...(onShown ? { onShown } : {})} />}
+        {/* Two Director actions, each naming what it acts on: the picture joins the message; Point adds its shot. */}
+        {picture && <button type="button" className="pill" data-act="show-director" onClick={() => { if (show(picture)) onShown?.(); }}>{t("assets.show_director")}</button>}
         {detail.point && <button type="button" className="pill" data-act="point-director" onClick={onPoint}>{t("assets.point", { target: tm(detail.point.name) })}</button>}
         {detail.open && <button type="button" className="pill" data-act="open-in" data-target-view={detail.open.view} onClick={onOpen}>{tm(detail.open.label)}</button>}
       </div>

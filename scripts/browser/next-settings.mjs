@@ -194,7 +194,8 @@ export const scenarios = [
       // Scene 3's keyframes start (simulated): the settings look the same, the pending work does not, so the server refuses.
       await store.evaluate((s) => s.makeKeyframes(s.getState().overview.scenes[2].sceneId));
       await page.click(`${video} [data-act='model-apply']`);
-      await expectText(page, ".toast", /The model settings changed\. Check the switch again\./);
+      // The toast and the row give the same reason (here the film changed, not the model settings).
+      await expectText(page, ".toast", /^The film or its settings changed since this check\. Check the switch again\./);
       await expectText(page, `${video} .impact-row[data-stale]`, /The film or its settings changed since this check\./);
       expect(await page.locator(`${video} [data-act='model-apply']`).count() === 0, "Switch is still offered on a refused check");
       await page.waitForFunction(() => document.activeElement?.getAttribute("data-act") === "model-recheck", null, { timeout: 3000 })
@@ -401,6 +402,12 @@ export const scenarios = [
       const impact = await expectText(page, `${row(page, "video")} .impact`, /视频改用示例视频？还没生成的/);
       expect(!/[。？] /.test(impact), `The Chinese impact has a space after a full stop: ${JSON.stringify(impact)}`);
       await noSidewaysScroll(page);
+      // A Chinese full stop has no space after it: the line still breaks before a command, inside the note's box.
+      const out = await page.locator("#set-computer .keys-note").evaluate((note) => {
+        const edge = note.getBoundingClientRect().right - parseFloat(getComputedStyle(note).paddingRight) + 1;
+        return [...note.querySelectorAll("span:not(.ic), code")].flatMap((el) => [...el.getClientRects()]).filter((r) => r.right > edge).length;
+      });
+      expect(out === 0, `The keys note runs past its box in Chinese (${out} line boxes)`);
       await shot(page, "settings-390-zh", { fullPage: true });
     },
   },
@@ -417,6 +424,8 @@ export const scenarios = [
       for (const section of ["set-models", "set-director", "set-voice"]) await expectText(page, `#${section} [data-no-film]`, /Open a film to/);
       expect(await page.locator("#set-models select, #set-voice select, #set-director form").count() === 0, "A film control shows with no film open");
       expect((await page.locator(".set-index [data-section='set-computer']").getAttribute("aria-current")) === "true", "The index does not mark This computer");
+      // No film is open, so the first group is set for each film, as its panels say.
+      await expectText(page, ".set-index .grp", /^Each film$/i);
       await expectText(page, "#set-computer [data-row='codex']", /Codex is checked inside a film\..*Not checked/s);
       await expectText(page, "#set-computer [data-row='key-openai']", /Used by keyframes, narration, transcription/);
       const computer = await box(page, "#set-computer");

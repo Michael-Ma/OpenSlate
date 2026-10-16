@@ -58,6 +58,8 @@ export const planMessages = {
   // ---- shot rows
   "plan.shot.no_purpose": { en: "No purpose yet", zh: "还没有写目的" },
   "plan.shot.not_written": { en: "not written", zh: "未填写" },
+  "plan.shot.no_framing": { en: "No framing yet", zh: "还没有写景别" },
+  "plan.shot.no_motion": { en: "no motion yet", zh: "还没有写运动" },
   "plan.shot.meta": { en: "{framing} · {seconds} s · {motion}", zh: "{framing} · {seconds} 秒 · {motion}" },
   "plan.shot.picture": { en: "Picture: {prompt}", zh: "画面：{prompt}" },
   "plan.shot.edit_label": { en: "Edit shot {shot}", zh: "编辑镜头 {shot}" },

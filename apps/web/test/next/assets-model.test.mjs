@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { lastFerryOverview, shotId, sceneId, artifactFor } from '../../src/next/fixtures/last-ferry.ts';
 import {
   ALL_ASSETS, assetDetail, assetKey, assetLibrary, compareAssets, downloadName, durationMsg, madeMsg, placement,
-  readAllAssets, roleCounts, SlotQueue, stillFor, titleMsg, useMsg, validFilters, waveHeights,
+  importNumber, readAllAssets, roleCounts, SlotQueue, stillFor, titleMsg, useMsg, validFilters, waveHeights,
 } from '../../src/next/model/assets.ts';
 import { translate } from '../../src/next/i18n/translate.ts';
 
@@ -34,7 +34,8 @@ test('the library groups the whole film first, then each scene and shot in film 
   assert.equal(view.shown, 16);
   assert.deepEqual(view.counts, { all: 16, keyframe: 6, clip: 3, voice: 3, music: 2, upload: 2, export: 0 });
   assert.ok(view.film);
-  assert.deepEqual(view.film.tiles.map((t) => en(t.title)), ['low-tide.mp3', 'foghorn-theme.wav', 'Imported image', 'Imported image']);
+  // Imported pictures keep no file name in the library, so the two are numbered, oldest first.
+  assert.deepEqual(view.film.tiles.map((t) => en(t.title)), ['low-tide.mp3', 'foghorn-theme.wav', 'Imported image 1', 'Imported image 2']);
   assert.equal(view.film.noExports, true, 'no exports yet points to Film');
   assert.deepEqual(view.scenes.map((s) => [s.ordinal, s.title, s.sets.map((set) => set.label)]), [
     [1, 'Closing time', ['1.1', '1.2', '1.3']], [2, 'Harbour at dawn', ['2.1', '2.2', '2.3']], [3, 'Departure', ['3.1', '3.2']],
@@ -97,6 +98,30 @@ test('titles, use and lengths read in both languages', () => {
   assert.equal(zh(durationMsg(6)), '6 秒');
   assert.equal(en(durationMsg(72)), '1:12');
   assert.equal(durationMsg(undefined), null);
+});
+
+test('an imported picture is named by its file name when the library has one, else numbered among the nameless ones of its kind', () => {
+  const first = upload('image', { createdAt: at(9, 58) });
+  const second = upload('image', { createdAt: at(10, 5) });
+  const third = upload('image', { createdAt: at(11, 0) });
+  const film = upload('video', { createdAt: at(9, 0) });
+  // The library lists newest first; numbers follow the order they were made in.
+  const items = [third, second, film, first];
+  assert.deepEqual([first, second, third].map((item) => en(titleMsg(item, overview, items))), ['Imported image 1', 'Imported image 2', 'Imported image 3']);
+  assert.equal(zh(titleMsg(second, overview, items)), '导入的图片 2');
+  assert.equal(importNumber(film, items), 0, 'videos are numbered among videos');
+  assert.equal(en(titleMsg(film, overview, items)), 'Imported video', 'the only one of its kind is not numbered');
+  assert.equal(en(titleMsg(first, overview, [first])), 'Imported image');
+  // Two made in the same second: the one listed later (older) comes first.
+  const twin = upload('image', { createdAt: at(11, 0), artifact: { artifactId: 'up-twin', sha256: 'f'.repeat(64), kind: 'image' } });
+  assert.deepEqual([twin, third].map((item) => importNumber(item, [twin, third])), [2, 1]);
+  // A file name the library keeps is the title, and that picture leaves the numbering.
+  const named = upload('image', { label: 'pier.png', createdAt: at(12, 0), artifact: { artifactId: 'up-pier', sha256: 'f'.repeat(64), kind: 'image' } });
+  assert.equal(en(titleMsg(named, overview, [named, ...items])), 'pier.png');
+  assert.equal(en(titleMsg(third, overview, [named, ...items])), 'Imported image 3');
+  // The detail panel and the download name use the same title.
+  assert.equal(en(assetDetail(second, items, overview, now, 'en').title), 'Imported image 2');
+  assert.equal(downloadName(en(titleMsg(second, overview, items)), 'image'), 'Imported image 2.png');
 });
 
 test('a clip tile shows the keyframe it was made from', () => {
