@@ -4,6 +4,8 @@ import { checkActions, lineEstimate, type AppCheck } from "../model/checks.ts";
 import { inspectorView } from "../model/inspector.ts";
 import { keyframesView } from "../model/keyframes.ts";
 import { takeOrigin, wordsOf } from "../model/narration.ts";
+import { editHold, shotPosition } from "../model/keyframes-stage.ts";
+import { confirmPress, keyframesPress, lostReplyHolds, PAID_PRESS, type PressIdentity } from "../model/keyframes-press.ts";
 import { advance, playingShot, type Playback } from "../model/motion.ts";
 import { msg } from "../model/types.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
@@ -67,6 +69,8 @@ function Workspace() {
   const shotId = useStudio((s) => s.shotId);
   const draft = useStudio((s) => s.edit);
   const pending = useStudio((s) => s.pending);
+  const snapshot = useStudio((s) => s.snapshot);
+  const toast = useStudio((s) => s.toast);
   const view = useMemo(() => keyframesView(overview, sceneId, shotId, locale), [overview, sceneId, shotId, locale]);
 
   const [settled, setSettled] = useState<SettledCheck | null>(null);
@@ -112,6 +116,9 @@ function Workspace() {
   }, [store]);
 
   const onScene = useCallback((id: string) => store.selectScene(id), [store]);
+
+  /** The shot's whole row in Plan: Plan opens with the shot focused and brings its row into view. */
+  const editInPlan = useCallback((id: string) => store.openShotIn("plan", id), [store]);
 
   const notes = useDirectorNotes({ overview, sceneId: currentSceneId, locale, openShot });
 
@@ -220,6 +227,14 @@ function Workspace() {
     setPlayback({ queue, index: 0, kind: clips ? "clip" : "motion" });
   }, [view, playback, overview, mode, store]);
 
+  // "Not confirmed. Press again to check…" holds while pressing again would resend a saved paid request (the same key).
+  // Once the studio answered, or the film shows the job started, it goes: it would no longer be true.
+  const paidPending = Object.keys(pending).some((key) => PAID_PRESS.test(key));
+  useEffect(() => {
+    if (toast?.message.id !== "error.PAID_UNCONFIRMED" || paidPending) return;
+    if (!lostReplyHolds(overview, store.savedPressIds(), (press) => store.wouldResend(press.pressId, press.logical))) store.dismissToast();
+  }, [toast, overview, paidPending, store]);
+
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
   const ended = useCallback(() => {
@@ -232,7 +247,14 @@ function Workspace() {
 
   if (!view) return null;
   const card = view.cards.find((c) => c.shotId === selectedId);
-  const inspector = selected ? inspectorView(overview, selected, locale, narrationMode, takeOrigin(selected, narrationDetail.data)) : null;
+  const videoPrompt = selected ? snapshot?.project.shots.find((row) => row.id === selected.shotId)?.videoPrompt ?? null : null;
+  const inspector = selected ? inspectorView(overview, selected, locale, narrationMode, takeOrigin(selected, narrationDetail.data), videoPrompt) : null;
+  const position = selectedId ? shotPosition(overview, selectedId) : null;
+  // A paid press whose reply was lost: pressing again now resends the same request (never charged twice).
+  const unconfirmed = ({ pressId, logical }: PressIdentity) => !pending[pressId] && store.wouldResend(pressId, logical);
+  const regenLost = selected ? unconfirmed(keyframesPress(overview, view.scene, [selected.shotId], true)) : false;
+  const panelLost = view.panel.action === "confirm" ? unconfirmed(confirmPress(overview, view.scene))
+    : view.panel.action === "make_keyframes" ? unconfirmed(keyframesPress(overview, view.scene)) : false;
   const playingHere = playingShot(playback) === selectedId ? playback!.kind : null;
   const sceneOrdinalChecks = view.checks;
   // A card already carrying a Director note for its shot does not repeat the app's check about it.
@@ -241,6 +263,10 @@ function Workspace() {
     return { card: callouts.length ? { ...c, callouts: [] } : c, notes: callouts };
   });
   const editBusy = selected ? !!pending[`edit:shot:${selected.shotId}`] || !!pending[`edit:narration:${selected.shotId}`] : false;
+  // An open inspector edit keeps its shot: moving to another one would drop it unsaved.
+  const held = editHold(draft, overview);
+  const stopShot = view.panel.stopped?.shotId;
+  const planHold = stopShot ? editHold(draft, overview, stopShot) : null;
 
   return (
     <main className="work kf" data-view="keyframes" data-scene={view.scene.sceneId}>
@@ -279,9 +305,12 @@ function Workspace() {
               fps={overview.fps}
               playing={playingHere}
               intent={intent}
+              position={position}
               onTogglePlay={() => setPlayback(playingHere ? null : { queue: [selected.shotId], index: 0, kind: "motion" })}
               onEnded={ended}
               onOpen={openShot}
+              onStep={openShot}
+              held={held}
             />
             <Inspector
               view={inspector}
@@ -295,6 +324,7 @@ function Workspace() {
                 release: Object.keys(pending).some((key) => key.startsWith("release:")),
                 video: !!pending[`confirm:${selected.sceneId}`],
               }}
+              unconfirmed={{ regenerate: regenLost, video: view.panel.action === "confirm" && panelLost }}
               onPoint={() => {
                 store.pointAt({ kind: "shot", id: selected.shotId });
                 // On narrow screens the Director is a drawer: open it so the pointer is seen (as in the prototype).
@@ -306,6 +336,7 @@ function Workspace() {
               onSaveDraft={(next) => void saveDraft(next)}
               onSaveMotion={(motion, secondsValue) => void saveMotion(motion, secondsValue)}
               onRelease={(attemptId) => void store.releaseAttempt(attemptId)}
+              onEditInPlan={() => editInPlan(selected.shotId)}
             />
           </>
         ) : (
@@ -326,9 +357,13 @@ function Workspace() {
           sceneId={view.scene.sceneId}
           pending={!!pending[`confirm:${view.scene.sceneId}`] || !!pending[`keyframes:${view.scene.sceneId}`]}
           playing={!!playback && playback.queue.length > 1}
+          unconfirmed={panelLost}
           onConfirm={confirm}
           onMakeKeyframes={() => void store.makeKeyframes(view.scene.sceneId)}
           onPlay={playScene}
+          onEditInPlan={editInPlan}
+          planHold={planHold}
+          onOpenSettings={() => store.setView("settings")}
         />
       </div>
     </main>

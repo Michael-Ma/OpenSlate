@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ApiError } from '../../src/next/api/client.ts';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { RESTORE_ID, setFixtureRecovery } from '../../src/next/fixtures/routes/recovery.ts';
-import { shotId } from '../../src/next/fixtures/last-ferry.ts';
+import { sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { RELEASE_PATH, RELEASE_PRESS, RELEASE_STORAGE_KEY, recoveryReadOnly, stoppedByRestore } from '../../src/next/model/recovery.ts';
 import { StudioStore } from '../../src/next/store/store.ts';
 
@@ -61,6 +61,23 @@ test('a restored studio is read-only from its first screen: presses are refused 
   await store.openFrame(shotId('2.2'));
   assert.deepEqual(posts(), []);
   assert.equal(store.getState().toast, null);
+});
+
+test('Keyframes paid presses and take selection stay read-only in recovery without creating lost requests', async (t) => {
+  const { store, posts } = await studio(t);
+  const attempts = [
+    () => store.makeKeyframes(sceneId(3)),
+    () => store.regenerateKeyframe(shotId('2.1')),
+    () => store.confirmVideo(sceneId(2)),
+    () => store.command(`take:${shotId('2.1')}`, { kind: 'use-take', shotId: shotId('2.1'), artifactId: 'earlier-frame' }, () => ({ path: `/shots/${shotId('2.1')}/takes/earlier-frame/use`, body: {} })),
+  ];
+  for (const attempt of attempts) {
+    assert.equal(await attempt(), undefined);
+    assert.equal(store.getState().toast.message.id, 'guard.recovery');
+    assert.deepEqual(store.savedPressIds(), [], 'an unsent press must not be mistaken for a lost paid request');
+    assert.deepEqual(store.getState().pending, {});
+  }
+  assert.deepEqual(posts(), []);
 });
 
 test('the sample studio refuses writes like the server while in review, the Director\'s messages included', async (t) => {

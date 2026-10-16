@@ -9,6 +9,7 @@ import {
   recoveryChange, releaseBody, releaseOutcome, unconfirmedStillApplies, type ReleaseOutcome, type SavedRelease,
 } from "../model/recovery.ts";
 import { addPicture, messageBody, pictureKey, type Draft, type PictureCandidate } from "../model/director.ts";
+import { confirmPress, keyframesPress, PAID_PRESS } from "../model/keyframes-press.ts";
 import { msg, type DirectorStatus, type Msg, type ProjectSnapshot, type ProjectSummary, type Target, type ViewName } from "../model/types.ts";
 import { canonicalJson, PressKeys } from "./press-keys.ts";
 import { reducer, type Action } from "./reducer.ts";
@@ -199,7 +200,8 @@ export class StudioStore {
       return result;
     } catch (error) {
       if (definite(error)) keys.settle(pressId);
-      this.#fail(error);
+      // Only a request that was sent can have lost its reply; one that failed before sending says why.
+      this.#fail(error, !definite(error) && PAID_PRESS.test(pressId) && keys.saved(pressId)?.logical === canonicalJson(logical));
       if (definite(error)) void this.refresh();
       return undefined;
     } finally {
@@ -207,12 +209,26 @@ export class StudioStore {
     }
   }
 
-  #fail(error: unknown): void {
+  /** `unconfirmedPaid`: a paid press whose reply was lost; pressing again resends its saved key and body. */
+  #fail(error: unknown, unconfirmedPaid = false): void {
     this.#deps.onError?.(error);
     const code = error instanceof ApiError || error instanceof CommandRefused ? error.code : "NETWORK_ERROR";
-    this.dispatch({ type: "toast", message: errorMsg(code), tone: "error" });
+    this.dispatch({ type: "toast", message: unconfirmedPaid ? msg("error.PAID_UNCONFIRMED") : errorMsg(code), tone: "error" });
     // The studio says it is in recovery review while this page did not know: read the status, so the page turns read-only.
     if (code === "INSTALLATION_QUARANTINED") void this.readRecovery();
+  }
+
+  /**
+   * True when pressing `pressId` for `logical` now would resend a saved request whose reply was lost (or that is
+   * still in flight): the same Idempotency-Key, so the studio replays its receipt and never charges twice.
+   */
+  wouldResend(pressId: string, logical: unknown): boolean {
+    return this.#keys.saved(pressId)?.logical === canonicalJson(logical);
+  }
+
+  /** The presses of this film sent with no definite answer yet (a lost reply, or still in flight). */
+  savedPressIds(): string[] {
+    return this.#keys.ids();
   }
 
   async #sceneRead(sceneId: string): Promise<SceneGenerationRead> {
@@ -234,8 +250,8 @@ export class StudioStore {
     const scene = overview?.scenes.find((s) => s.sceneId === sceneId);
     if (!overview || !scene) return Promise.resolve(undefined);
     const expected = regenerate ? scene.quotes.regenerateKeyframe : scene.quotes.makeKeyframes;
-    const logical = { kind: "image", sceneId, targets: targetShotIds ?? scene.keyframeTargets, regenerate: !!regenerate, previous: (targetShotIds ?? []).map((id) => overview.shots[id]?.keyframe.artifact?.artifactId ?? null) };
-    return this.#press(regenerate ? `regenerate:${targetShotIds?.join(",")}` : `keyframes:${sceneId}`, logical, async () => {
+    const { pressId, logical } = keyframesPress(overview, scene, targetShotIds, regenerate);
+    return this.#press(pressId, logical, async () => {
       const read = await this.#sceneRead(sceneId);
       const body = { ...keyframesBody(read, targetShotIds, regenerate), ...(expected && !expected.priceUnknown ? { expectedEstimateMicros: expected.micros } : {}) };
       return { path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(sceneId)}/generate`), body };
@@ -252,9 +268,9 @@ export class StudioStore {
     const overview = this.#state.overview;
     const scene = overview?.scenes.find((s) => s.sceneId === sceneId);
     if (!overview || !scene) return Promise.resolve(undefined);
-    const frames = scene.videoTargets.map((id) => ({ shotId: id, artifactId: overview.shots[id]?.keyframe.artifact?.artifactId ?? null }));
+    const { pressId, logical } = confirmPress(overview, scene);
     // One durable server command (P3): it survives a closed tab or a restart and never buys a step twice.
-    return this.#press(`confirm:${sceneId}`, { kind: "confirm", sceneId, frames }, async () => ({
+    return this.#press(pressId, logical, async () => ({
       path: path(this.#state.projectId!, `/scenes/${encodeURIComponent(sceneId)}/confirm`),
       body: confirmBody(overview, scene),
     }));
@@ -520,6 +536,8 @@ export class StudioStore {
   /** Open a shot from elsewhere (a Director note): selected, and the view on screen brings it into view, even again. */
   focusShot = (shotId: string) => this.dispatch({ type: "focus", kind: "shot", id: shotId });
   focusScene = (sceneId: string) => this.dispatch({ type: "focus", kind: "scene", id: sceneId });
+  /** Switch to `view` with the shot focused there (Keyframes' "Edit 2.1 in Plan"): the view brings it into view when it opens. */
+  openShotIn = (view: ViewName, shotId: string) => this.dispatch({ type: "focus", kind: "shot", id: shotId, view });
   /** Open Assets showing one kind of file (e.g. Film's earlier exports). */
   openAssets = (role: RoleFilter) => { this.dispatch({ type: "assetsFilter", role }); this.setView("assets"); };
   setDirectorOpen = (open: boolean) => this.dispatch({ type: "directorOpen", open });

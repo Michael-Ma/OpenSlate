@@ -230,7 +230,7 @@ export function lastFerryProposals(now: Date = new Date()): DirectorProposal[] {
 
 export const lastFerryDirector: DirectorStatus = { mode: "fake", status: "idle", activeRequestId: null };
 
-/** Which picture key (in last-ferry-pictures.ts) an artifact id shows. */
+/** Which picture key (in last-ferry-pictures.ts) an artifact id shows; a later take ("art-1.1~3") shows its shot's. */
 export function pictureKey(artifactId: string): string {
-  return artifactId.replace(/^art-/, "");
+  return artifactId.replace(/^art-/, "").replace(/~\d+$/, "");
 }

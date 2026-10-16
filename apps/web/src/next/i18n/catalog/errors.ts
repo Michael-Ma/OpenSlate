@@ -9,6 +9,8 @@ import type { Entry } from "./entry.ts";
 export const errors = {
   "error.unknown": { en: "Something went wrong ({code}).", zh: "出错了（{code}）。" },
   "error.NETWORK_ERROR": { en: "The studio did not answer. Check that it is still running.", zh: "工作室没有响应，请确认它仍在运行。" },
+  // A paid press whose reply was lost (client-side): pressing again resends the same request, which the studio replays.
+  "error.PAID_UNCONFIRMED": { en: "Not confirmed. Press again to check; it will not charge twice.", zh: "未确认。再按一次即可核实，不会重复计费。" },
   "error.AUTH_REQUIRED": { en: "This window is no longer connected. Open a fresh studio link.", zh: "这个窗口已断开连接，请打开新的工作室链接。" },
   "error.REVISION_CONFLICT": { en: "The film changed while you were editing. Your edit was not saved; try again.", zh: "你编辑时影片已经变化，这次修改没有保存，请重试。" },
   "error.IDEMPOTENCY_CONFLICT": { en: "This press was already used for a different request. Try again.", zh: "这次操作已用于另一个请求，请重试。" },
@@ -35,6 +37,7 @@ export const errors = {
   "error.EXECUTION_HELD": { en: "An edit is still being saved. Try again in a moment.", zh: "还有修改正在保存，请稍后再试。" },
   "error.NARRATION_CUE_OUT_OF_RANGE": { en: "The voice line is longer than the shot. Choose how to fit it.", zh: "配音比镜头长，请选择处理方式。" },
   "error.UNDO_UNAVAILABLE": { en: "That change can no longer be undone.", zh: "这次修改已无法撤销。" },
+  "error.TAKE_NOT_SELECTABLE": { en: "This take can be viewed but cannot be used for this shot.", zh: "这个版本可以查看，但无法用于这个镜头。" },
   "error.ATTEMPT_EXISTS": { en: "This is already being made. Wait for it to finish.", zh: "这已经在生成中，请等它完成。" },
   "error.ATTEMPTS_RUNNING": { en: "Jobs are still running here. Wait for them to finish, then try again.", zh: "这里还有任务在进行，请等它们结束后再试。" },
   "error.SCENE_NOT_READY": { en: "This scene is not ready for video yet.", zh: "这一场还不能生成视频。" },

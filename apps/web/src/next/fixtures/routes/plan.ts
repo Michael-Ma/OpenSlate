@@ -4,7 +4,7 @@ import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "..
 import type { PendingImport } from "../../model/plan-import.ts";
 import type { ConversationEntry, ProjectSnapshot } from "../../model/types.ts";
 import { canonicalJson } from "../../store/press-keys.ts";
-import { fixtureCommand, recompute } from "../fixture-commands.ts";
+import { directedPrompt, fixtureCommand, recompute } from "../fixture-commands.ts";
 import type { FixtureWorld } from "../fixture-port.ts";
 import { DECLINE, type FixtureRoute } from "./types.ts";
 
@@ -181,16 +181,6 @@ const OTHER_VIEWS_KINDS = new Set(["soundtrack"]);
 const DURING_IMPORT = new Set(["treatment", "scene", "shot", "shotFields", "narration"]);
 /** The fields one shotFields command may carry (storyboard.ts). */
 const SHOT_FIELDS = new Set(["purpose", "action", "framing", "motion", "desiredFrames", "imagePrompt", "videoPrompt"]);
-
-const DIRECTION_HEADER = "OpenSlate current direction:\n";
-const DIRECTION_SEPARATOR = "\nReference details (retain only where consistent):\n";
-
-/** The server's rewrite of a prompt after a purpose, action or framing edit: its direction in front, the words kept. */
-function directedPrompt(previous: string, direction: string): string {
-  const split = previous.startsWith(DIRECTION_HEADER) ? previous.indexOf(DIRECTION_SEPARATOR) : -1;
-  const original = split >= 0 ? previous.slice(split + DIRECTION_SEPARATOR.length) : previous;
-  return `${DIRECTION_HEADER}${direction}${DIRECTION_SEPARATOR}${original}`;
-}
 
 /** The server refuses a shot shorter than its accepted voice line (SB-8). */
 function assertLength(shot: ShotOverview, frames: number, fps: number): void {

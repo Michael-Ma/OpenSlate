@@ -17,7 +17,7 @@ export type Action =
   | { type: "view"; view: ViewName }
   | { type: "scene"; sceneId: string }
   | { type: "shot"; shotId: string }
-  | { type: "focus"; kind: "shot" | "scene"; id: string }
+  | { type: "focus"; kind: "shot" | "scene"; id: string; view?: ViewName }
   | { type: "assetsFilter"; role: RoleFilter | null }
   | { type: "directorOpen"; open: boolean }
   | { type: "composerText"; text: string }
@@ -67,8 +67,12 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, proposals: action.proposals };
     case "loadError":
       return { ...state, loadErrors: { ...state.loadErrors, [action.source]: action.code ?? undefined } };
-    case "view":
-      return { ...state, view: action.view };
+    case "view": {
+      // A focus set for the view being opened is that view's alone: once another view opens, it is an ordinary one.
+      const mark = state.focus?.view;
+      const focus = mark && mark !== action.view ? { kind: state.focus!.kind, id: state.focus!.id, nonce: state.focus!.nonce } : state.focus;
+      return { ...state, view: action.view, focus };
+    }
     case "scene": {
       if (action.sceneId === state.sceneId) return state;
       const first = state.overview?.scenes.find((s) => s.sceneId === action.sceneId)?.shotIds[0] ?? null;
@@ -80,9 +84,11 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, shotId: action.shotId, sceneId, edit: state.edit?.shotId === action.shotId ? state.edit : null };
     }
     case "focus": {
-      // Selected like any selection, and marked as opened from elsewhere with a new nonce.
+      // Selected like any selection, and marked as opened from elsewhere with a new nonce. With a view, that view
+      // opens with it and handles it when it mounts.
       const selected = reducer(state, action.kind === "shot" ? { type: "shot", shotId: action.id } : { type: "scene", sceneId: action.id });
-      return { ...selected, focus: { kind: action.kind, id: action.id, nonce: (state.focus?.nonce ?? 0) + 1 } };
+      const focus = { kind: action.kind, id: action.id, nonce: (state.focus?.nonce ?? 0) + 1, ...(action.view ? { view: action.view } : {}) };
+      return { ...selected, ...(action.view ? { view: action.view } : {}), focus };
     }
     case "assetsFilter":
       return { ...state, assetsFilter: action.role ? { role: action.role } : null };
