@@ -90,9 +90,15 @@ function Workspace() {
   const narrationOpen = draft?.field === "narration" && draft.shotId === selectedId;
   const narrationDetail = useShotNarration(selectedId && (narrationOpen || (narrationMode === "uploaded" && selected?.narration.state === "ready")) ? selectedId : null);
 
-  // Navigating to a shot (including the first one shown) arms "Opened" for its current frame.
+  // Navigating to a shot (including the first one shown) arms "Opened" for its current frame. The shot this view opens
+  // on brings its preview on screen (a phone keeps its scroll from the view before); the first shot of a scene the
+  // person picked from the pills does not: the page never scrolls by itself under a tap at its top.
+  const opened = useRef(false);
   useEffect(() => {
-    if (selectedId) setIntent((current) => (current?.shotId === selectedId ? current : { shotId: selectedId, nonce: ++nonce.current }));
+    if (!selectedId) return;
+    const reveal = !opened.current;
+    opened.current = true;
+    setIntent((current) => (current?.shotId === selectedId ? current : { shotId: selectedId, nonce: ++nonce.current, reveal }));
   }, [selectedId]);
 
   // A settled check describes the film as the edit left it; once that changes (Undo from the toast,
@@ -112,7 +118,7 @@ function Workspace() {
   const openShot = useCallback((id: string) => {
     setPlayback((current) => (playingShot(current) === id ? current : null));
     store.selectShot(id);
-    setIntent({ shotId: id, nonce: ++nonce.current });
+    setIntent({ shotId: id, nonce: ++nonce.current, reveal: true });
   }, [store]);
 
   const onScene = useCallback((id: string) => store.selectScene(id), [store]);

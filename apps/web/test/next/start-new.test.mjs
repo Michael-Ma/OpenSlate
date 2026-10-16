@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   afterFailure, codexFrom, createBody, createdMsg, createdOutcome, creationSteps, sheetFootMsg, defaultStep, directorAfterOpen, directorSetupBody, effectiveStep, failedMsg, failureNeedsReason,
-  keysMsg, madePlan, modelPlan, modelSummaryText, nameRuns, notReadyReason, planFileName, planOffReason, planTextProblem, retryMsg, setupStatus, sheetTitleMsg, stepAvailable, PLAN_TEXT_MAX,
+  keysMsg, madePlan, modelPlan, modelsNote, modelSummaryText, nameRuns, notReadyReason, planFileName, planOffReason, planTextProblem, retryMsg, setupStatus, sheetTitleMsg, stepAvailable, PLAN_TEXT_MAX,
 } from '../../src/next/model/start-new.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
@@ -68,6 +68,26 @@ test('with every key set, a new film gets the ready real models with their price
   assert.equal(modelSummaryText(plan, en), 'This computer’s defaults, all ready: Codex · gpt-6-astra Director (uses your Codex plan), OpenAI gpt-image-2 keyframes (about $0.04 a keyframe), '
     + 'MiniMax H3 video (about $0.50 a clip), OpenAI gpt-4o-mini-tts narration (about $0.01 a line), OpenAI whisper-1 transcription (about $0.01 a recording). Each price is an estimate set on this computer.');
   assert.match(modelSummaryText(plan, zh), /^本机默认模型，都已就绪：Codex · gpt-6-astra 导演（使用你的 Codex 套餐）、OpenAI gpt-image-2 关键帧（每张关键帧约 \$0\.04）、/);
+  // The line under the listed models explains the prices, because there are some.
+  assert.equal(en({ id: modelsNote(plan) }), 'Change any of them later in Settings. Prices are estimates set on this computer.');
+});
+
+test('a model list with no price on it says nothing about prices', () => {
+  // Every row a free stand-in (no keys, no Codex): only where to change them.
+  const free = modelPlan(catalog(allReal(false)), { state: 'not_found' }, 'en');
+  assert.equal(en({ id: modelsNote(free) }), 'Change any of them later in Settings.');
+  assert.equal(zh({ id: modelsNote(free) }), '之后可以在设置里修改。');
+  // The Codex plan and "no price set" are not estimates either, so the all-ready line does not call them one.
+  const unpriced = allReal(true).map(r => row(r.id, r.label, r.profile.kind, r.profile.adapter, '0', true));
+  const plan = modelPlan(catalog(unpriced), found, 'en');
+  assert.equal(plan.ready, 4);
+  assert.deepEqual(plan.rows.map(r => en(r.price)), ['uses your Codex plan', 'no price set', 'no price set', 'no price set', 'no price set']);
+  assert.equal(en({ id: modelsNote(plan) }), 'Change any of them later in Settings.');
+  assert.doesNotMatch(modelSummaryText(plan, en), /estimate/);
+  assert.match(modelSummaryText(plan, en), /^This computer’s defaults, all ready: .+ \(no price set\)\.$/);
+  // One estimate is enough to explain them.
+  const one = unpriced.slice(); one[1] = allReal(true)[1];
+  assert.equal(modelsNote(modelPlan(catalog(one), found, 'en')), 'start.models.later');
 });
 
 test('without keys the film starts with the free stand-ins and says which model waits for what', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import type { KeyframesView } from "../model/keyframes.ts";
+import type { KeyframesView, ScenePill } from "../model/keyframes.ts";
 import { revealScroll } from "../model/keyframes-layout.ts";
 import type { Msg } from "../model/types.ts";
 

@@ -182,3 +182,13 @@ export function revealScroll(scrollLeft: number, view: { left: number; right: nu
   if (item.right > view.right) return scrollLeft + (item.right - view.right + margin);
   return scrollLeft;
 }
+
+/**
+ * On a phone the preview sits above the shot cards: opening a shot from its card (or a note) brings the preview on
+ * screen when less than half of it shows. `box` is the preview's rectangle in viewport pixels.
+ */
+export function previewNeedsReveal(box: { top: number; bottom: number; height: number }, viewportHeight: number): boolean {
+  if (box.height <= 0) return false;
+  const shown = Math.min(box.bottom, viewportHeight) - Math.max(box.top, 0);
+  return shown / box.height < 0.5;
+}

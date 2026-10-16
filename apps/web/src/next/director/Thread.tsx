@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { resolveRef, scriptedTag, threadView, type Attention, type ThreadEntry } from "../model/director.ts";
+import { resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type ThreadBox, type ThreadEntry } from "../model/director.ts";
 import { useMode, useStudio } from "../store/react.tsx";
 import { HeldEdits } from "./HeldEdits.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -8,15 +8,20 @@ import { NoteCards } from "./NoteCards.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { PictureThumb, RefChip } from "./RefChip.tsx";
 
-/** Within this many pixels of the bottom, new content keeps the thread scrolled to the bottom. */
-const STICK_PX = 40;
-
 const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/** Scrolls the thread to its bottom and returns the box it was pinned at. */
+function pinToBottom(element: HTMLElement): Pick<ThreadBox, "height" | "client"> {
+  element.scrollTop = element.scrollHeight;
+  return { height: element.scrollHeight, client: element.clientHeight };
+}
 
 /**
  * The conversation, anchored to the bottom: bylines, the user's bubbles with @ chips and the pictures they showed,
- * the Director's replies as safe Markdown. New content follows when the reader is at the bottom; scrolled up, a
- * "View new messages" button says something arrived and takes them there.
+ * the Director's replies as safe Markdown. It opens at its bottom (in either language), and new content, or a
+ * language whose text runs longer, keeps it there while the reader is at the bottom; only the reader's own
+ * scrolling takes it away (threadScrolled). Scrolled up, a "View new messages" button says something arrived and
+ * takes them there.
  */
 export function Thread() {
   const { t, tm, locale } = useI18n();
@@ -27,7 +32,8 @@ export function Thread() {
   const view = useMemo(() => threadView(snapshot, overview, director, locale, new Date(), proposals), [snapshot, overview, director, locale, proposals]);
   const ref = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
+  // The box the thread was last pinned to its bottom at; null once the reader scrolled away from the bottom.
+  const pinned = useRef<Pick<ThreadBox, "height" | "client"> | null>({ height: 0, client: 0 });
   const [unseen, setUnseen] = useState(false);
   const projectId = useStudio((s) => s.projectId);
   const last = view.entries.at(-1);
@@ -41,22 +47,22 @@ export function Thread() {
     before.current = now;
     if (!element) return;
     // A new film starts at its bottom, with nothing unseen.
-    if (was.projectId !== now.projectId) { stick.current = true; setUnseen(false); element.scrollTop = element.scrollHeight; return; }
+    if (was.projectId !== now.projectId) { pinned.current = pinToBottom(element); setUnseen(false); return; }
     // Something new at the bottom: an entry, a question, a held edit, or the Director starting to work.
     const grew = now.entries > was.entries || now.questions > was.questions || now.held > was.held || (now.working && !was.working);
     if (!grew) return;
     // Follow new content when the reader is at the bottom, and always after the person's own message.
-    if (stick.current || (now.entries > was.entries && last?.who === "you")) { element.scrollTop = element.scrollHeight; stick.current = true; setUnseen(false); }
+    if (pinned.current || (now.entries > was.entries && last?.who === "you")) { pinned.current = pinToBottom(element); setUnseen(false); }
     else setUnseen(true);
   });
 
-  // Content that grows without a new entry (notes once the overview arrives, a picture loading) keeps the reader
-  // at the bottom when they were there.
+  // Content that grows without a new entry (notes once the overview arrives, a picture loading, the other language)
+  // and a thread that gets shorter (a taller composer) keep the reader at the bottom when they were there.
   useLayoutEffect(() => {
     const element = ref.current;
     const inner = body.current;
     if (!element || !inner || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => { if (stick.current) element.scrollTop = element.scrollHeight; });
+    const observer = new ResizeObserver(() => { if (pinned.current) pinned.current = pinToBottom(element); });
     observer.observe(inner);
     observer.observe(element);
     return () => observer.disconnect();
@@ -65,14 +71,17 @@ export function Thread() {
   const onScroll = () => {
     const element = ref.current;
     if (!element) return;
-    stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < STICK_PX;
-    if (stick.current) setUnseen(false);
+    const box = { top: element.scrollTop, height: element.scrollHeight, client: element.clientHeight };
+    const meaning = threadScrolled(box, pinned.current);
+    if (meaning === "away") { pinned.current = null; return; }
+    pinned.current = meaning === "pin" ? pinToBottom(element) : { height: box.height, client: box.client };
+    setUnseen(false);
   };
 
   const showNew = () => {
     const element = ref.current;
     if (!element) return;
-    stick.current = true;
+    pinned.current = { height: element.scrollHeight, client: element.clientHeight };
     setUnseen(false);
     element.scrollTo({ top: element.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
     // The button goes away: the reply box is where the reader goes next.

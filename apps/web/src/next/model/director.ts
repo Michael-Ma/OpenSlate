@@ -93,10 +93,20 @@ export function scopeLabel(overview: GenerationOverview | null, id: string): Msg
   return null;
 }
 
+/** Where a scene or shot sits in the storyboard: a scene before its own shots, each shot at its place in its scene. */
+function storyboardPlace(overview: GenerationOverview, id: string): [number, number] | null {
+  const scene = overview.scenes.find((s) => s.sceneId === id);
+  if (scene) return [scene.ordinal, -1];
+  const shot = overview.shots[id];
+  const owner = shot ? overview.scenes.find((s) => s.sceneId === shot.sceneId) : undefined;
+  return owner ? [owner.ordinal, owner.shotIds.indexOf(id)] : null;
+}
+
 /**
- * The header's label. Once the composer points somewhere (its @ targets, then the shots whose keyframes it shows, in
- * the order the message sends them), it names that, so the header and the composer's scope line say the same thing;
- * otherwise it follows the view: the scene in Keyframes, the whole film elsewhere (P5 shell item 9).
+ * The header's label. Once the composer points somewhere (its @ targets and the shots whose keyframes it shows), it
+ * names that, so the header and the composer's scope line say the same thing; otherwise it follows the view: the
+ * scene in Keyframes, the whole film elsewhere (P5 shell item 9). The places are named in storyboard order, as the
+ * scope line names its shots, whatever order the chips under it were added in ("2.1 and 2.2", never "2.2 and 2.1").
  */
 export function headerScope(input: {
   hasFilm: boolean;
@@ -106,12 +116,17 @@ export function headerScope(input: {
   overview: GenerationOverview | null;
 }): HeaderScope {
   if (!input.hasFilm) return { kind: "view", label: msg("director.scope.no_film") };
-  const targets = input.composer.targets.flatMap((target) => {
-    const label = scopeLabel(input.overview, target.id);
-    return label ? [label] : [];
-  });
-  const shown = keyframeScope(input.composer, input.overview).map((shot) => msg("director.target.shot", { shot }));
-  if (targets.length || shown.length) return { kind: "message", labels: [...targets, ...shown] };
+  const overview = input.overview;
+  const ids = [...new Set([...input.composer.targets.map((target) => target.id), ...keyframeShots(input.composer, overview)])];
+  const placed = overview ? ids.flatMap((id) => {
+    const place = storyboardPlace(overview, id);
+    const label = scopeLabel(overview, id);
+    return place && label ? [{ place, label }] : [];
+  }) : [];
+  if (placed.length) {
+    placed.sort((a, b) => a.place[0] - b.place[0] || a.place[1] - b.place[1]);
+    return { kind: "message", labels: placed.map((entry) => entry.label) };
+  }
   return { kind: "view", label: input.sceneOrdinal !== null ? msg("director.target.scene", { scene: input.sceneOrdinal }) : msg("director.scope.film") };
 }
 
@@ -233,6 +248,30 @@ export function resolveRef(ref: RefLink, overview: GenerationOverview | null): R
 }
 
 // ---- thread -------------------------------------------------------------------
+
+/** Within this many pixels of its bottom, the thread counts as at its bottom: new content keeps it there. */
+export const THREAD_STICK_PX = 40;
+
+/** The thread's scroll box: its offset, its content's height and its own height. */
+export interface ThreadBox {
+  top: number;
+  height: number;
+  client: number;
+}
+
+/**
+ * What a scroll event on the Director thread means. follow: the reader is at the bottom, and new content keeps them
+ * there. pin: the thread was pinned to its bottom and its content or its room changed since, so the event is the
+ * layout's, not the reader's: a scroll event arrives a frame after the offset moved (a pin, or the browser pulling the
+ * offset in when the content shrank), and by then a note, a held edit or the other language's longer text may have
+ * grown under it; the thread goes back to its bottom. away: the reader scrolled up, and new content waits for them.
+ * `pinned` is the box when the thread was last pinned to its bottom, or null once the reader has scrolled away.
+ */
+export function threadScrolled(box: ThreadBox, pinned: Pick<ThreadBox, "height" | "client"> | null): "follow" | "pin" | "away" {
+  if (box.height - box.top - box.client < THREAD_STICK_PX) return "follow";
+  if (pinned && (pinned.height !== box.height || pinned.client !== box.client)) return "pin";
+  return "away";
+}
 
 /** Where a note's Open pill goes: the anchored shot, or the scene when the note has no shot. */
 export interface NoteOpen {
@@ -602,13 +641,18 @@ export function withoutKeyframes(images: readonly ComposerImage[]): ComposerImag
   return images.filter((image) => image.source !== "keyframe");
 }
 
-/** The labels of the shots whose keyframes the message shows and that no chip already points at (by shot or scene). */
-function keyframeScope(composer: ComposerState, overview: GenerationOverview | null): string[] {
+/** The shots whose keyframes the message shows and that no chip already points at (by shot or scene), in storyboard order. */
+function keyframeShots(composer: ComposerState, overview: GenerationOverview | null): string[] {
   if (!overview) return [];
   const covered = (shotId: string) => composer.targets.some((target) => target.id === shotId || (target.kind === "scene" && overview.shots[shotId]?.sceneId === target.id));
   const ids = new Set((composer.images ?? []).flatMap((image) => (image.source === "keyframe" && image.shotId && overview.shots[image.shotId] && !covered(image.shotId) ? [image.shotId] : [])));
   const order = [...overview.scenes].sort((a, b) => a.ordinal - b.ordinal).flatMap((scene) => scene.shotIds);
-  return order.filter((id) => ids.has(id)).map((id) => overview.shots[id]!.label);
+  return order.filter((id) => ids.has(id));
+}
+
+/** The labels of those shots, for the composer's scope line. */
+function keyframeScope(composer: ComposerState, overview: GenerationOverview | null): string[] {
+  return keyframeShots(composer, overview).map((id) => overview!.shots[id]!.label);
 }
 
 /** "3.1 and 3.2", "3.1、3.2 和 3.3": shot labels as one list in the interface language. */

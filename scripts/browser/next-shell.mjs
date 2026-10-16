@@ -75,6 +75,7 @@ async function noSidewaysScroll(page, where = "") {
   expect(scrollWidth <= innerWidth, `The page scrolls sideways${where ? ` (${where})` : ""}: ${scrollWidth}px content in a ${innerWidth}px window`);
 }
 
+/** The scene pills scroll inside their row; the selected one is shown whole (also after the other pills' words change). */
 /** Measure actual rendered text and hit targets: a priced action may wrap, but every line must stay visible. */
 async function pricedActionsFit(page, width) {
   expect(await page.locator(".card .callout .link").count() > 0, `No priced card callout is present at ${width}`);
@@ -596,7 +597,16 @@ export const scenarios = [
     async run({ page }) {
       await ready(page);
       await selectedPillWhole(page, "when the view opens");
-      await page.click("[data-act='scene'][data-scene='scene-3']");
+      // The page never scrolls by itself: a scene picked from the pills does not pull the page back to its preview
+      // after the person scrolled on (a smooth scroll caught mid-way showed the sticky bar cut by the window's top).
+      await page.evaluate(() => {
+        document.querySelector("[data-act='scene'][data-scene='scene-3']").click();
+        window.scrollTo(0, document.scrollingElement.scrollHeight);
+      });
+      await page.waitForTimeout(700);
+      // Still at the bottom the person scrolled to (Scene 3 is shorter, so that bottom moved up with it).
+      const still = await page.evaluate(() => ({ y: window.scrollY, bottom: document.scrollingElement.scrollHeight - window.innerHeight, bar: document.querySelector(".topbar").getBoundingClientRect().top }));
+      expect(still.bottom > 0 && still.y === still.bottom && still.bar === 0, `The page scrolled by itself after a scene pill: ${JSON.stringify(still)}`);
       await page.click("[data-act='make-keyframes']");
       const stop = page.locator(".topbar [data-act='stop-film']");
       await stop.waitFor({ timeout: 5000 });
@@ -615,6 +625,9 @@ export const scenarios = [
       expect(await titleFits(), "Stop squeezes the film's title in Chinese");
       await selectedPillWhole(page, "in Chinese");
       await noSidewaysScroll(page, "running in Chinese");
+      // The switch moves nothing but the words: the sticky bar stays at the window's top.
+      expect(await page.evaluate(() => document.querySelector(".topbar").getBoundingClientRect().top) === 0, "The top bar left the window's top in Chinese");
+      await selectedPillWhole(page, "running in Chinese");
       await shot(page, "next-shell-running-390-zh");
       await page.locator(".topbar [data-act='language']").click();
       await stop.click();
@@ -622,8 +635,7 @@ export const scenarios = [
       await page.waitForSelector(".film-strip[data-strip='stopped']");
       await noSidewaysScroll(page, "stopped");
       await page.evaluate(() => window.scrollTo(0, 0));
-      // The scene pills scroll inside their row; the selected one is shown whole.
-      await selectedPillWhole(page, "stopped");
+      await selectedPillWhole(page, "stopped, after Chinese and back");
       await shot(page, "next-shell-stopped-390");
       // Chinese strings are the longest here; the strip wraps and nothing scrolls sideways.
       await page.locator(".topbar [data-act='language']").click();

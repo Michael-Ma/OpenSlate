@@ -6,6 +6,7 @@ import { useArtifactUrl } from "../media/useArtifactUrl.ts";
 import type { ShotCard } from "../model/keyframes.ts";
 import type { Msg } from "../model/types.ts";
 import { ARROW_OWNERS, previewCaption, shotClip, stageStep, type ShotPosition } from "../model/keyframes-stage.ts";
+import { previewNeedsReveal } from "../model/keyframes-layout.ts";
 import { clock, motionKind, motionTransform } from "../model/motion.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { Picture, StatusPill, useOnScreen, useReducedMotion } from "./parts.tsx";
@@ -18,6 +19,12 @@ import { ShowDirectorButton } from "../director/ShowDirector.tsx";
 export interface OpenIntent {
   shotId: string;
   nonce: number;
+  /**
+   * On a phone, bring the preview on screen: the person opened this shot (its card, a note's Open, Previous / Next),
+   * or the view opened on it. The first shot of a scene picked from the pills is not revealed: the page never
+   * scrolls by itself after a tap at its top (and never undoes a scroll the person started meanwhile).
+   */
+  reveal: boolean;
 }
 
 interface Props {
@@ -93,15 +100,13 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
     void store.openFrame(shot.shotId);
   }, [intent, consumed, current, currentKey, keyframe.opened, loaded, visible, keyframeVisible, shot.shotId, store]);
 
-  // Narrow layouts stack the cards below the preview: navigating to a shot brings its preview on screen.
-  const nonce = intent?.shotId === shot.shotId ? intent.nonce : null;
+  // Narrow layouts stack the cards below the preview: opening a shot brings its preview on screen.
+  const nonce = intent?.shotId === shot.shotId && intent.reveal ? intent.nonce : null;
   useEffect(() => {
     const element = section.current;
     if (nonce === null || !element) return;
     // Measured now: the observer may not have reported a scroll that happened a moment ago.
-    const rect = element.getBoundingClientRect();
-    const shown = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
-    if (rect.height > 0 && shown / rect.height >= 0.5) return;
+    if (!previewNeedsReveal(element.getBoundingClientRect(), window.innerHeight)) return;
     element.scrollIntoView?.({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
     // Only a new navigation scrolls; later visibility changes do not.
   }, [nonce]);
