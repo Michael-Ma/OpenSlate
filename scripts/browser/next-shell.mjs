@@ -650,6 +650,8 @@ export const scenarios = [
       const guarded = await page.evaluate(() => [...document.querySelectorAll("main.work [data-needs]")].map((node) => ({ act: node.getAttribute("data-act"), needs: node.getAttribute("data-needs"), disabled: node.disabled, title: node.getAttribute("title") })));
       const why = "Can’t reach the studio. This works again once it’s back.";
       expect(guarded.some((control) => control.needs === "run") && guarded.some((control) => control.act === "edit-prompt"), `Keyframes has no guarded paid or edit control: ${JSON.stringify(guarded)}`);
+      // The narration row's Edit opens an editor like the actions under it, so it is off too.
+      expect(guarded.some((control) => control.act === "narration-edit"), `The narration row's Edit is not guarded: ${JSON.stringify(guarded)}`);
       expect(guarded.every((control) => control.disabled && control.title === why), `A write stays on offline: ${JSON.stringify(guarded.filter((control) => !control.disabled || control.title !== why))}`);
       expect((await text(page, "#director [data-hint]")) === "Offline · your draft is kept", `The composer hint reads ${JSON.stringify(await text(page, "#director [data-hint]"))}`);
       await page.locator("#director [data-field='message']").fill("Keep the fog");

@@ -205,7 +205,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
                   // Narration is edited and heard in its own panel (the line or a recording, the voice, the current take).
                   // Its two controls sit under the label, so the row is no taller than the line and its notes.
                   <span className="narr-acts">
-                    <button type="button" className="pill sm" data-act="narration-edit" data-shot={shot.shotId} aria-label={t("narr.row.edit_label", { shot: view.label })} onClick={() => openNarration(false)}>{t("narr.row.edit")}</button>
+                    <button type="button" className="pill sm" data-act="narration-edit" data-shot={shot.shotId} aria-label={t("narr.row.edit_label", { shot: view.label })} {...server} onClick={() => openNarration(false)}>{t("narr.row.edit")}</button>
                     {shot.narration.state === "ready" ? (
                       <button type="button" className="play sm" data-act="narration-listen" data-shot={shot.shotId} aria-label={t("narr.row.listen_label", { shot: view.label })} title={t("narr.row.listen")} onClick={() => openNarration(true)}>
                         <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>
