@@ -2,6 +2,9 @@ import type { Entry } from "./entry.ts";
 
 /** Keyframes view: scene header, pills, checks, preview, inspector, cards, video panel, prices. */
 export const keyframes = {
+  "inspector.conflict_saved": { en: "Saved value", zh: "已保存的值" },
+  "inspector.conflict_keep": { en: "Keep my text", zh: "保留我的文字" },
+  "inspector.conflict_use_saved": { en: "Use saved text", zh: "使用已保存的文字" },
   // ---- view states
   "kf.loading": { en: "Loading the film…", zh: "正在加载影片…" },
   "kf.overview_missing.title": { en: "Keyframes can't be shown here yet", zh: "这里暂时无法显示关键帧" },

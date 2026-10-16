@@ -214,7 +214,9 @@ export function stopPreview(overview: GenerationOverview | null, director: Direc
     for (const slot of [shot.keyframe, shot.video]) {
       if (slot.state === "running" || slot.state === "no_answer") sent++;
       else if (slot.state === "queued") queued++;
-      for (const id of slot.releasedAttemptIds ?? []) if (id !== slot.attemptId) released.add(id);
+      if (slot.replacement?.state === "running" || slot.replacement?.state === "no_answer") sent++;
+      else if (slot.replacement?.state === "queued") queued++;
+      for (const id of slot.releasedAttemptIds ?? []) if (id !== slot.attemptId && id !== slot.replacement?.attemptId) released.add(id);
     }
     if (shot.narration.state === "making" || shot.narration.state === "no_answer") sent++;
   }
@@ -235,7 +237,7 @@ export function stopLines(preview: StopPreview): Msg[] {
 // ---- a reconnect after the session expired, or after Disconnect this studio ------------------
 
 /** An inline edit that was not saved yet (the Keyframes inspector's prompt, motion or line). */
-export type CarriedEdit = Pick<EditDraft, "shotId" | "field" | "value">;
+export type CarriedEdit = Pick<EditDraft, "shotId" | "field" | "value" | "expectedHeadVersion" | "baselineValue" | "baselineMotion" | "baselineFrames" | "secondsText">;
 
 /**
  * What the page carries into the new session when the person reconnects in the same window, after the session expired
@@ -262,7 +264,12 @@ export function carryFrom(state: Pick<StudioState, "projectId" | "view" | "scene
     shotId: state.shotId,
     text: state.composer.text,
     targets: state.composer.targets.map((target) => ({ ...target })),
-    edit: edit ? { shotId: edit.shotId, field: edit.field, value: edit.value } : null,
+    edit: edit ? { shotId: edit.shotId, field: edit.field, value: edit.value,
+      ...(edit.expectedHeadVersion !== undefined ? { expectedHeadVersion: edit.expectedHeadVersion } : {}),
+      ...(edit.baselineValue !== undefined ? { baselineValue: edit.baselineValue } : {}),
+      ...(edit.baselineMotion !== undefined ? { baselineMotion: edit.baselineMotion } : {}),
+      ...(edit.baselineFrames !== undefined ? { baselineFrames: edit.baselineFrames } : {}),
+      ...(edit.secondsText !== undefined ? { secondsText: edit.secondsText } : {}) } : null,
   };
 }
 
@@ -308,7 +315,7 @@ export const storedCarry = (carry: Carry, now: number): string => JSON.stringify
 
 /**
  * A kept carry read back, or null when there is none, it is not one, or it is older than CARRY_MAX_AGE_MS. Only the
- * person's own words and place come back; anything else in it is dropped.
+ * person's own words, place and original edit baseline come back; command authority is never restored.
  */
 export function parseStoredCarry(raw: string | null, now: number): Carry | null {
   if (!raw) return null;
@@ -323,7 +330,12 @@ export function parseStoredCarry(raw: string | null, now: number): Carry | null 
     });
     const rawEdit = carry.edit as Partial<CarriedEdit> | null | undefined;
     const edit = rawEdit && isId(rawEdit.shotId) && EDIT_FIELDS.has(rawEdit.field as CarriedEdit["field"]) && typeof rawEdit.value === "string"
-      ? { shotId: rawEdit.shotId, field: rawEdit.field as CarriedEdit["field"], value: rawEdit.value } : null;
+      ? { shotId: rawEdit.shotId, field: rawEdit.field as CarriedEdit["field"], value: rawEdit.value,
+        ...(Number.isSafeInteger(rawEdit.expectedHeadVersion) && rawEdit.expectedHeadVersion! >= 0 ? { expectedHeadVersion: rawEdit.expectedHeadVersion! } : {}),
+        ...(typeof rawEdit.baselineValue === "string" ? { baselineValue: rawEdit.baselineValue } : {}),
+        ...(typeof rawEdit.baselineMotion === "string" ? { baselineMotion: rawEdit.baselineMotion } : {}),
+        ...(Number.isSafeInteger(rawEdit.baselineFrames) && rawEdit.baselineFrames! > 0 ? { baselineFrames: rawEdit.baselineFrames! } : {}),
+        ...(typeof rawEdit.secondsText === "string" ? { secondsText: rawEdit.secondsText } : {}) } : null;
     return { projectId: carry.projectId, view: carry.view as ViewName, sceneId: optionalId(carry.sceneId), shotId: optionalId(carry.shotId), text: carry.text, targets, edit };
   } catch {
     return null;

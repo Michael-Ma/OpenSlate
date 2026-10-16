@@ -170,27 +170,13 @@ function Workspace() {
     }
   }, [overview, store, currentSceneId, notes]);
 
-  /** Motion and duration are two storyboard fields; each changed one is its own edit, saved in turn. */
+  /** Motion and duration share one original baseline and one atomic, undoable command. */
   const saveMotion = useCallback(async (motion: string, secondsValue: number) => {
-    if (!selected) return;
-    const base: EditDraft = { shotId: selected.shotId, field: "motion", value: motion };
-    const changes: { field: "motion" | "desiredFrames"; value: string }[] = [];
-    if (motion !== selected.motion) changes.push({ field: "motion", value: motion });
-    const frames = Math.round(secondsValue * overview.fps);
-    if (frames !== selected.durationFrames) changes.push({ field: "desiredFrames", value: String(frames) });
-    if (!changes.length) { store.setEdit(null); return; }
-    store.setEdit({ ...base, saving: true });
-    let motionCommand: string | null = null;
-    for (const [index, change] of changes.entries()) {
-      // The next edit must carry the head version the previous one produced.
-      if (index > 0) await store.refresh();
-      const commandId = await store.edit({ kind: "shot", id: selected.shotId, ...change }, msg("toast.saved"));
-      if (!commandId) { store.setEdit({ ...base, saving: false }); return; }
-      if (change.field === "motion") motionCommand = commandId;
-    }
-    store.setEdit(null);
-    notes.editSaved(selected.shotId, "motion", motionCommand);
-  }, [selected, overview.fps, store, notes]);
+    const draft = store.getState().edit;
+    if (!selected || !draft || draft.shotId !== selected.shotId) return;
+    const commandId = await store.saveEdit({ ...draft, value: motion }, secondsValue);
+    if (commandId) notes.editSaved(selected.shotId, "motion", commandId);
+  }, [selected, store, notes]);
 
   const editDraft = useCallback((next: EditDraft | null) => {
     // Leaving the narration editor (cancel, or another form) forgets that it came from a check.
@@ -270,7 +256,7 @@ function Workspace() {
 
   return (
     <main className="work kf" data-view="keyframes" data-scene={view.scene.sceneId}>
-      <SceneHeader view={view} onScene={onScene} />
+      <SceneHeader view={view} held={held} onScene={onScene} />
       {notes.banner ? (
         <NoteBanner
           view={notes.banner}
@@ -349,6 +335,7 @@ function Workspace() {
           notes={Object.fromEntries(cards.map((c) => [c.card.shotId, c.notes]))}
           sceneOrdinal={view.scene.ordinal}
           busy={notes.busy}
+          held={held}
           onOpen={openShot}
           onNoteChoice={notes.chooseOnCard}
         />

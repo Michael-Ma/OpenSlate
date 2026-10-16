@@ -331,7 +331,7 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     };
   }
   const keyframesWorking = shots.some((shot) => isWorking(shot.keyframe));
-  if (scene.keyframeTargets.length && !scene.counts.keyframesReady && !keyframesWorking)
+  if (scene.keyframeTargets.length && !keyframesWorking)
     return makeKeyframes({ ...base, segments: segmentsOf(shots), headline: keyframeHeadline }, scene, locale);
   if (!targets.length) {
     if (keyframesWorking)
@@ -366,7 +366,7 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
 }
 
 function makeKeyframes(base: Omit<VideoPanel, "action" | "enabled" | "label" | "price" | "priceTotal" | "priceEach" | "reason" | "note">, scene: SceneOverview, locale: string): VideoPanel {
-  const blocked = scene.blockers.find((b) => b.code === "direction_required" || b.code === "stopped" || b.code === "director_working");
+  const blocked = scene.blockers.find((b) => b.code === "direction_required" || b.code === "stopped" || b.code === "director_working" || b.code === "no_answer_in_scene" || b.code === "narration_making" || b.code === "confirmation_running");
   const enabled = !blocked && scene.keyframeTargets.length > 0;
   return {
     ...base,

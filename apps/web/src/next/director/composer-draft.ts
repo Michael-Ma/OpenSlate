@@ -4,6 +4,8 @@ import type { StudioStore } from "../store/store.ts";
 
 type DraftStore = Pick<StudioStore, "getState" | "subscribe" | "restoreDraft">;
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+const versions = new WeakMap<DraftStore, Map<string, string>>();
+export const ownedDraftVersion = (store: DraftStore, projectId: string): string | null => versions.get(store)?.get(projectId) ?? null;
 
 /**
  * Keep each film's words in the shared cache. A window that handed its draft to another session must not take a
@@ -13,6 +15,9 @@ type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 export function watchComposerDraft(store: DraftStore, storage: DraftStorage | null, mode: "live" | "fixture", relinquished: Set<string>, restored: (projectId: string | null) => void): () => void {
   let project: string | null = null;
   let last: StudioState["composer"] | null = null;
+  const owned = versions.get(store) ?? new Map<string, string>();
+  versions.set(store, owned);
+  const contents = new Map<string, string>();
   const sync = () => {
     const state = store.getState();
     if (state.projectId !== project) {
@@ -22,10 +27,14 @@ export function watchComposerDraft(store: DraftStore, storage: DraftStorage | nu
       const { text, targets, images } = state.composer;
       if (text || targets.length || images.length) { relinquished.delete(project); return; }
       if (relinquished.has(project)) return;
+      owned.delete(project);
+      contents.delete(project);
       let raw: string | null = null;
       try { raw = storage?.getItem(draftKey(project, mode)) ?? null; } catch { /* unreadable: no draft */ }
       const draft = readDraft(raw);
       if (!draft) return;
+      owned.set(project, raw!);
+      contents.set(project, JSON.stringify(draft));
       restored(project);
       store.restoreDraft(draft);
       return;
@@ -36,10 +45,25 @@ export function watchComposerDraft(store: DraftStore, storage: DraftStorage | nu
     if (draft) relinquished.delete(project);
     else restored(null);
     try {
-      if (draft) storage?.setItem(draftKey(project, mode), JSON.stringify(draft));
-      else if (!relinquished.has(project)) storage?.removeItem(draftKey(project, mode));
+      const key = draftKey(project, mode);
+      const content = draft ? JSON.stringify(draft) : null;
+      if (content && content !== contents.get(project)) {
+        const raw = JSON.stringify({ ...draft, draftVersion: crypto.randomUUID() });
+        storage?.setItem(key, raw);
+        owned.set(project, raw);
+        contents.set(project, content);
+      } else if (!draft && !relinquished.has(project)) {
+        removeDraftVersion(storage, key, owned.get(project) ?? null);
+        owned.delete(project);
+        contents.delete(project);
+      }
     } catch { /* full or blocked: the draft stays in this tab only */ }
   };
   sync();
   return store.subscribe(sync);
+}
+
+/** Compare the exact stored version: another tab may have saved even identical words since this one read it. */
+export function removeDraftVersion(storage: DraftStorage | null, key: string, version: string | null): void {
+  if (version !== null && storage?.getItem(key) === version) storage.removeItem(key);
 }

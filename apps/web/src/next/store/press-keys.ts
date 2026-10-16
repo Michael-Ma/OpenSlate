@@ -53,9 +53,16 @@ export class PressKeys {
     }
   }
 
-  #write(): void {
+  #write(pressId: string, next: SavedPress | null, expectedKey?: string): void {
     try {
-      if (Object.keys(this.#memory).length) this.#storage?.setItem(this.#storageKey, JSON.stringify(this.#memory));
+      // Mutate only this exact entry. Other tabs may have saved a newer request or another control.
+      const saved = this.#read();
+      if (next) saved[pressId] = next;
+      else {
+        if (expectedKey !== undefined && saved[pressId]?.key !== expectedKey) return;
+        delete saved[pressId];
+      }
+      if (Object.keys(saved).length) this.#storage?.setItem(this.#storageKey, JSON.stringify(saved));
       else this.#storage?.removeItem(this.#storageKey);
     } catch { /* storage unavailable: memory still protects this tab */ }
   }
@@ -70,7 +77,7 @@ export class PressKeys {
     if (saved && saved.logical === logicalJson) return saved;
     const next = { key: this.#newKey(), logical: logicalJson, body };
     this.#memory = { ...this.#memory, [pressId]: next };
-    this.#write();
+    this.#write(pressId, next);
     return next;
   }
 
@@ -84,10 +91,11 @@ export class PressKeys {
   }
 
   /** The server answered definitely; the next press is a new request. */
-  settle(pressId: string): void {
-    if (!(pressId in this.#memory)) return;
+  settle(pressId: string, expectedKey?: string): void {
+    if (!(pressId in this.#memory) || expectedKey !== undefined && this.#memory[pressId]?.key !== expectedKey) return;
+    const key = this.#memory[pressId]!.key;
     const { [pressId]: _dropped, ...rest } = this.#memory;
     this.#memory = rest;
-    this.#write();
+    this.#write(pressId, null, key);
   }
 }

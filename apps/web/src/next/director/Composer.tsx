@@ -6,7 +6,7 @@ import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { useGuarded, useRecoveryLock } from "../app/useWriteGuard.ts";
 import { AtPicker, pickerOptionId } from "./AtPicker.tsx";
 import { PictureThumb, RefChip } from "./RefChip.tsx";
-import { forgetDraft } from "./useComposerDraft.ts";
+import { forgetDraft, keptDraftVersion } from "./useComposerDraft.ts";
 
 /** About six lines; past that the textarea scrolls. */
 const MAX_LINES = 6;
@@ -109,7 +109,8 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
     closePicker();
     // Sent while another film was opened meanwhile: that film's kept draft is the message just sent.
     const projectId = store.getState().projectId;
-    void store.sendMessage().then((sent) => { if (sent && projectId && store.getState().projectId !== projectId) forgetDraft(projectId, mode); });
+    const version = projectId ? keptDraftVersion(store, projectId) : null;
+    void store.sendMessage().then((sent) => { if (sent && projectId && store.getState().projectId !== projectId) forgetDraft(projectId, mode, version); });
   };
 
   const onChange = (event: ChangeEvent<HTMLTextAreaElement>) => {

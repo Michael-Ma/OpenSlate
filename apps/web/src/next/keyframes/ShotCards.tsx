@@ -3,6 +3,7 @@ import { useI18n } from "../i18n/I18n.tsx";
 import { checkCallout } from "../model/checks.ts";
 import type { ShotCard } from "../model/keyframes.ts";
 import type { Label, NoteCallout } from "../model/note-banner.ts";
+import type { Msg } from "../model/types.ts";
 import { Picture, StatusPill } from "./parts.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
 
@@ -20,11 +21,13 @@ interface Props {
   notes: Record<string, NoteCallout[]>;
   sceneOrdinal: number;
   busy: boolean;
+  /** An inspector draft keeps the selected card until it is saved or cancelled. */
+  held: Msg | null;
   onOpen(shotId: string): void;
   onNoteChoice(noteId: string, choiceIndex: number): void;
 }
 
-export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoice }: Props) {
+export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNoteChoice }: Props) {
   const { t, tm, locale } = useI18n();
   const label = (value: Label) => ("text" in value ? value.text : tm(value));
   const row = useRef<HTMLDivElement>(null);
@@ -59,6 +62,8 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoi
               data-shot={card.shotId}
               aria-pressed={card.selected}
               aria-label={t("card.select", { shot: card.label, framing: card.framing })}
+              disabled={!!held && !card.selected}
+              title={held && !card.selected ? tm(held) : undefined}
               onClick={() => onOpen(card.shotId)}
             />
             <div className={`pic${card.pictureDimmed ? " dim" : ""}${bar ? " vp" : ""}`}>
@@ -85,8 +90,11 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, onOpen, onNoteChoi
                       <span className="anno-text">{note.done && note.doneLabel ? t("note.callout.done", { choice: label(note.doneLabel) }) : note.text}</span>
                     </span>
                     {note.regenerate ? (
-                      <button type="button" className="link" data-act="note-regenerate" data-note={note.noteId} data-shot={card.shotId} {...run} disabled={busy || run.disabled} onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}>
-                        {label(note.regenerate.label)}
+                      <button type="button" className="link" data-act="note-regenerate" data-note={note.noteId} data-shot={card.shotId} {...run} title={run.title ?? label(note.regenerate.label)} disabled={busy || run.disabled || !note.regenerate.enabled} onClick={() => onNoteChoice(note.noteId, note.regenerate!.choiceIndex)}>
+                        {/* One line with its price where the card has room; on a narrow card the price wraps under it. */}
+                        <span className="link-words">{tm(note.regenerate.take)} ·</span>{" "}
+                        <span className="link-price">{note.regenerate.price ? tm(note.regenerate.price) : null}</span>
+                        <span className="sr-only"> · {note.regenerate.shots}</span>
                       </button>
                     ) : null}
                   </span>

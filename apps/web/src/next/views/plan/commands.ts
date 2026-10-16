@@ -1,6 +1,7 @@
 import { msg, type Msg } from "../../model/types.ts";
 import type { PendingImport } from "../../model/plan-import.ts";
 import type { StudioStore } from "../../store/store.ts";
+import { projectionBaseline, type PlanBaseline } from "../../model/plan-session.ts";
 
 /**
  * The Plan view's commands, through the store's generic press (request identity, refresh, error toasts).
@@ -13,40 +14,38 @@ export interface StoryboardReceipt {
   headVersion?: number;
 }
 
-/** A storyboard command body without the head version, which is added when it is sent (shotFields nests its fields). */
+/** A storyboard command body without the head version, which comes from its displayed baseline (shotFields nests its fields). */
 export type StoryboardInput = { kind: string } & Record<string, string | boolean | undefined | Readonly<Record<string, string | number | undefined>>>;
 
 const clean = (input: StoryboardInput) => Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
 
-/**
- * The head version the latest receipt produced, per film. The studio is read again after each command, but that
- * read can land after the next press (a quick ↑ ↑ or Enter Enter); head versions only grow, so the next command
- * expects the larger of this and the studio's head instead of a stale one.
- */
-const receiptHeads = new Map<string, number>();
-
-/** The head version the next storyboard command expects. */
+/** Only a head whose two independently refreshed projections describe the same film may authorize new edits. */
 export function expectedHead(store: StudioStore): number | undefined {
-  const project = store.getState().snapshot?.project;
-  if (!project) return undefined;
-  const receipt = receiptHeads.get(project.id);
-  // Once the studio's read has caught up, it is the authority again.
-  if (receipt === undefined || receipt <= project.headVersion) {
-    receiptHeads.delete(project.id);
-    return project.headVersion;
-  }
-  return receipt;
+  const { snapshot, overview } = store.getState();
+  return projectionBaseline(snapshot, overview)?.headVersion;
 }
 
-/** One storyboard command. Resolves undefined when it was refused; the store has already shown why. */
-export async function storyboard(store: StudioStore, pressId: string, input: StoryboardInput, headVersion?: number): Promise<StoryboardReceipt | undefined> {
-  const project = store.getState().snapshot?.project;
-  const expected = headVersion ?? expectedHead(store);
-  if (!project || expected === undefined) return undefined;
-  const body = { ...clean(input), expectedHeadVersion: expected };
-  const receipt = await store.command<StoryboardReceipt>(`plan:${pressId}`, body, () => ({ path: "/storyboard", body }));
-  if (typeof receipt?.headVersion === "number") receiptHeads.set(project.id, Math.max(receipt.headVersion, receiptHeads.get(project.id) ?? -1));
-  return receipt;
+const projectPath = (projectId: string, rest: string) => `/api/projects/${encodeURIComponent(projectId)}${rest}`;
+
+function baselineFor(store: StudioStore, baseline?: number | PlanBaseline): PlanBaseline | null {
+  const state = store.getState();
+  const projectId = state.projectId ?? state.snapshot?.project.id;
+  if (typeof baseline === "object") return baseline.projectId === projectId ? baseline : null;
+  if (typeof baseline === "number") return projectId ? { projectId, headVersion: baseline } : null;
+  const shown = projectionBaseline(state.snapshot, state.overview);
+  return shown?.projectId === projectId ? shown : null;
+}
+
+function projectionRefused(store: StudioStore): void {
+  store.dispatch({ type: "toast", message: msg("error.PLAN_PROJECTION_CHANGED"), tone: "error" });
+}
+
+/** One storyboard command against the head that was shown, or the exact preceding receipt of a multi-command save. */
+export async function storyboard(store: StudioStore, pressId: string, input: StoryboardInput, baseline?: number | PlanBaseline): Promise<StoryboardReceipt | undefined> {
+  const scope = baselineFor(store, baseline);
+  if (!scope) { projectionRefused(store); return undefined; }
+  const body = { ...clean(input), expectedHeadVersion: scope.headVersion };
+  return store.command<StoryboardReceipt>(`plan:${pressId}`, body, () => ({ path: projectPath(scope.projectId, "/storyboard"), body }));
 }
 
 // ---- answered, refused, or not confirmed --------------------------------------------------------------
@@ -55,11 +54,13 @@ export async function storyboard(store: StudioStore, pressId: string, input: Sto
  * How a press ended. `lost`: the studio never answered (no reply, a timeout, a server failure), so the change may or
  * may not have been made. Its `resend` sends the very same request again: the store keeps the key and body of an
  * unanswered press and resends them when the same press repeats with the same identity, so the server replays its
- * receipt instead of applying it twice. `pressId` names the press, so its notice is its own.
+ * receipt instead of applying it twice. `pressId` names the press, so its notice is its own. `superseded`: the film
+ * selection changed while awaiting the answer; its completion must leave the current view and notices alone.
  */
 export type Outcome<T> =
   | { kind: "done"; receipt: T }
   | { kind: "refused" }
+  | { kind: "superseded" }
   | { kind: "lost"; pressId: string; resend(): Promise<Outcome<T>> };
 
 /**
@@ -68,7 +69,10 @@ export type Outcome<T> =
  * it in place, with the retry.
  */
 export async function settle<T>(store: StudioStore, pressId: string, run: () => Promise<T | undefined>): Promise<Outcome<T>> {
+  const { projectId, projectEpoch } = store.getState();
   const receipt = await run();
+  const now = store.getState();
+  if (now.projectId !== projectId || now.projectEpoch !== projectEpoch) return { kind: "superseded" };
   if (receipt !== undefined) return { kind: "done", receipt };
   if (!store.unconfirmed(pressId)) return { kind: "refused" };
   store.dismissToast();
@@ -76,16 +80,18 @@ export async function settle<T>(store: StudioStore, pressId: string, run: () => 
 }
 
 /** One storyboard command, with the head version fixed now so a resend is the same request. */
-export function storyboardOutcome(store: StudioStore, pressId: string, input: StoryboardInput, headVersion?: number): Promise<Outcome<StoryboardReceipt>> {
-  const expected = headVersion ?? expectedHead(store);
-  return settle(store, `plan:${pressId}`, () => storyboard(store, pressId, input, expected));
+export function storyboardOutcome(store: StudioStore, pressId: string, input: StoryboardInput, baseline?: number | PlanBaseline): Promise<Outcome<StoryboardReceipt>> {
+  const scope = baselineFor(store, baseline);
+  if (!scope) { projectionRefused(store); return Promise.resolve({ kind: "refused" }); }
+  return settle(store, `plan:${pressId}`, () => storyboard(store, pressId, input, scope));
 }
 
 /** The head version a receipt produced, reading the studio again when the receipt does not say. */
-export async function headAfter(store: StudioStore, receipt: StoryboardReceipt): Promise<number | null> {
+export async function headAfter(store: StudioStore, receipt: StoryboardReceipt, projectId = store.getState().projectId): Promise<number | null> {
   if (typeof receipt.headVersion === "number") return receipt.headVersion;
   await store.refresh();
-  return store.getState().snapshot?.project.headVersion ?? null;
+  const project = store.getState().snapshot?.project;
+  return project?.id === projectId ? project.headVersion : null;
 }
 
 /** The reason the last press was refused, as the store's error toast says it. */
@@ -115,20 +121,21 @@ export function infoToast(store: StudioStore, message: Msg): void {
 
 // ---- written plans ------------------------------------------------------------------------------------
 
-export function sendImport(store: StudioStore, name: string, text: string): Promise<Outcome<{ requestId: string }>> {
-  const expected = expectedHead(store);
-  const body = { name, text, expectedHeadVersion: expected };
-  return settle(store, "plan:import:send", async () => (expected === undefined ? undefined : store.command<{ requestId: string }>("plan:import:send", body, () => ({ path: "/plan-imports", body }))));
+export function sendImport(store: StudioStore, name: string, text: string, baseline?: PlanBaseline): Promise<Outcome<{ requestId: string }>> {
+  const scope = baselineFor(store, baseline);
+  if (!scope) { projectionRefused(store); return Promise.resolve({ kind: "refused" }); }
+  const body = { name, text, expectedHeadVersion: scope.headVersion };
+  return settle(store, "plan:import:send", () => store.command<{ requestId: string }>("plan:import:send", body, () => ({ path: projectPath(scope.projectId, "/plan-imports"), body })));
 }
 
-export function confirmImport(store: StudioStore, pending: PendingImport): Promise<Outcome<unknown>> {
+export function confirmImport(store: StudioStore, pending: PendingImport, projectId = store.getState().projectId): Promise<Outcome<unknown>> {
   const draft = pending.draft;
   const pressId = `plan:import:confirm:${pending.id}`;
   const body = draft ? { preparedId: draft.preparedId, proposalDigest: draft.proposalDigest } : null;
-  return settle(store, pressId, async () => (body ? store.command(pressId, { requestId: pending.id, ...body }, () => ({ path: `/plan-imports/${encodeURIComponent(pending.id)}/confirm`, body }), msg("plan.toast.import_confirmed", { name: pending.name })) : undefined));
+  return settle(store, pressId, async () => (body ? store.command(pressId, { requestId: pending.id, ...body }, () => ({ path: projectPath(projectId ?? "", `/plan-imports/${encodeURIComponent(pending.id)}/confirm`), body }), msg("plan.toast.import_confirmed", { name: pending.name })) : undefined));
 }
 
-export function discardImport(store: StudioStore, pending: PendingImport): Promise<Outcome<unknown>> {
+export function discardImport(store: StudioStore, pending: PendingImport, projectId = store.getState().projectId): Promise<Outcome<unknown>> {
   const pressId = `plan:import:discard:${pending.id}`;
-  return settle(store, pressId, () => store.command(pressId, { requestId: pending.id }, () => ({ path: `/plan-imports/${encodeURIComponent(pending.id)}/discard`, body: {} }), msg("plan.toast.import_discarded")));
+  return settle(store, pressId, () => store.command(pressId, { requestId: pending.id }, () => ({ path: projectPath(projectId ?? "", `/plan-imports/${encodeURIComponent(pending.id)}/discard`), body: {} }), msg("plan.toast.import_discarded")));
 }

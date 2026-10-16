@@ -124,6 +124,23 @@ export const draftFrom = (setup: DirectorSetup): DirectorDraft => ({
   codexHome: setup.selection.codexHome ?? setup.defaults.codexHome ?? "",
 });
 
+/** The original setup is authority for this form, even after a background refresh. */
+export interface DirectorForm {
+  baseline: DirectorSetup;
+  value: DirectorDraft;
+}
+
+export const directorForm = (setup: DirectorSetup): DirectorForm => ({ baseline: structuredClone(setup), value: draftFrom(setup) });
+export const directorFormConflict = (form: DirectorForm, current: DirectorSetup): boolean =>
+  form.baseline.selectionDigest !== current.selectionDigest || form.baseline.locked !== current.locked;
+export const directorFormRequest = (form: DirectorForm): Request => directorRequest(form.baseline, { mode: "native", ...form.value });
+
+/** A delayed success may rebase later typing only inside the form that originally sent it. */
+export function afterDirectorSave(current: DirectorForm | null, submitted: DirectorForm, saved: DirectorSetup): DirectorForm | null {
+  if (current === submitted) return null;
+  return current && current.baseline === submitted.baseline ? { ...current, baseline: saved } : current;
+}
+
 const absolute = (path: string) => path.startsWith("/") && !path.includes("\0") && path.length <= 4096;
 
 /** What stops the Codex form from saving, as the server would refuse it. */

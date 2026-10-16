@@ -8,6 +8,7 @@ import { dropLost, dropLostAt, placeOf, placeView, putLost, sayLost, type Editin
 import { DRAFT_FIELD, draftEdits, editChange, FIELD_LABEL, savedMessage, storedShot, unitPrices, type DraftCommand, type ShotDraft } from "../../model/plan-edit.ts";
 import { importName, importNotes, importReview, importStage, type PlanImportsRead } from "../../model/plan-import.ts";
 import { addedScene, addedShot, deleteSceneFacts, deleteShotFacts, locate, planOutline, sceneChoices, sceneMove, shotDrop, shotMove, type SceneView, type ShotMoveTarget, type ShotRowView, type SnapshotShot } from "../../model/plan.ts";
+import { planSession, projectionBaseline, receiptBaseline, type PlanBaseline } from "../../model/plan-session.ts";
 import { NARROW_QUERY } from "../../model/shell.ts";
 import { msg, type Msg, type ProjectSnapshot, type Target } from "../../model/types.ts";
 import { useMode, useStore, useStudio } from "../../store/react.tsx";
@@ -25,6 +26,7 @@ import { ShotEditor, type EditorFocus } from "./ShotEditor.tsx";
 import { rowId, SHOT_DRAG_TYPE, ShotRow } from "./ShotRow.tsx";
 import { TextPanel } from "./TextPanel.tsx";
 import { useLatest, type DraftSlot } from "./useHeld.ts";
+import { usePlanSession } from "./usePlanSession.ts";
 import "./plan.css";
 
 type Confirming = { kind: "scene"; sceneId: string } | { kind: "shot"; shotId: string };
@@ -71,7 +73,7 @@ export function PlanView() {
   const overview = useStudio((s) => s.overview);
   const snapshot = useStudio((s) => s.snapshot);
   const loadError = useStudio((s) => s.loadErrors.snapshot ?? s.loadErrors.overview);
-  if (!overview || !snapshot) {
+  if (!overview || !snapshot || !projectionBaseline(snapshot, overview)) {
     return (
       <main className="work plan plan-state" data-view="plan" data-state={loadError ? "missing" : "loading"} aria-busy={!loadError}>
         <div className="plan-message" role={loadError ? "alert" : "status"}>
@@ -80,13 +82,19 @@ export function PlanView() {
       </main>
     );
   }
-  // One film's drafts and notices never carry over to another.
+  // Drafts live above this mount in the store-owned, per-film Plan session.
   return <Workspace key={snapshot.project.id} overview={overview} snapshot={snapshot} />;
 }
 
 function Workspace({ overview, snapshot }: { overview: GenerationOverview; snapshot: ProjectSnapshot }) {
   const store = useStore();
   const mode = useMode();
+  const projectId = snapshot.project.id;
+  const projectEpoch = useStudio((s) => s.projectEpoch);
+  const session = useMemo(() => planSession<Lost>(store, projectId), [store, projectId]);
+  const baseline = projectionBaseline(snapshot, overview);
+  const active = () => store.getState().projectId === projectId && store.getState().projectEpoch === projectEpoch;
+  const focusHere = (selector: string) => { if (active() && store.getState().view === "plan") focusLater(selector); };
   const { t, tm } = useI18n();
   const reduced = useReducedMotion();
   const proposals = useStudio((s) => s.proposals);
@@ -101,20 +109,21 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
 
   // What a press's outcome acts on is read through the `...Now` refs: it may arrive after an await, or from a retry
   // long after the press, when something else is open.
-  const [editing, setEditing, editingNow] = useLatest<Editing | null>(null);
-  /** Open drafts by place ("shot:<id>", "brief"): kept here, so a draft outlives its editor's mount. */
-  const [drafts, setDrafts, draftsNow] = useLatest<Drafts>({});
+  const [editing, setEditing, editingNow] = usePlanSession(session, "editing");
+  /** Open drafts by place: retained above every view, recovery and project mount. */
+  const [drafts, setDrafts, draftsNow] = usePlanSession(session, "drafts");
   const [error, setError] = useState<{ place: string; message: Msg } | null>(null);
   const [confirming, setConfirmingState, confirmingNow] = useLatest<Confirming | null>(null);
   const [deleteError, setDeleteError] = useState<Msg | null>(null);
   const [moving, setMovingState, movingNow] = useLatest<string | null>(null);
   const [moveError, setMoveError] = useState<Msg | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  const [justSent, setJustSent] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = usePlanSession(session, "importOpen");
+  const [importDraft, setImportDraft] = usePlanSession(session, "importDraft");
+  const [justSent, setJustSent] = usePlanSession(session, "justSent");
   const [noCodex, setNoCodex] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   /** Presses whose reply was lost, one notice each, until their own resend is answered or they are dismissed. */
-  const [lost, setLost, lostNow] = useLatest<Lost[]>([]);
+  const [lost, setLost, lostNow] = usePlanSession(session, "lost");
   const [asking, setAsking] = useState<Asking | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropAt, setDropAtState] = useState<DropAt | null>(null);
@@ -122,7 +131,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   /** Where focus goes when the shot editor mounts (opened, or remounted in another scene after a move). */
   const editorFocus = useRef<EditorFocus | null>(null);
   /** The open editor's subject as last seen on screen, to name it once it is deleted. */
-  const seen = useRef<{ place: string; view: PlaceView } | null>(null);
+  const seen = useRef<{ place: string; view: PlaceView } | null>(session.getSnapshot().seen);
   const retrying = useRef(new Set<string>());
 
   // ---- guards ----------------------------------------------------------------------------------------
@@ -134,7 +143,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   const offlineWhy = locked ?? t("plan.guard.offline");
   // While a change is unconfirmed the film's head version is unknown: a new edit would be refused as out of date,
   // and a second unanswered press would hide the first. It is retried or dismissed first.
-  const guard = !connected ? offlineWhy : importPending ? t("plan.guard.import") : lost.length ? t("plan.guard.unconfirmed") : undefined;
+  const guard = !connected ? offlineWhy : !baseline ? t("error.PLAN_PROJECTION_CHANGED") : importPending ? t("plan.guard.import") : lost.length ? t("plan.guard.unconfirmed") : undefined;
   const runGuard = overview.stopped ? t("plan.guard.stopped") : undefined;
   const codexReady = !noCodex && (mode === "fixture" || director?.mode === "native");
   const stage = importPending ? importStage(importPending, codexReady) : justSent ? "reading" : importStage(null, codexReady);
@@ -149,7 +158,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   const gone = !!editing && !editView;
   const goneDraft = gone && editPlace ? drafts[editPlace] : undefined;
   const kept = goneDraft && touched(goneDraft) ? goneDraft : null;
-  useEffect(() => { if (editPlace && editView) seen.current = { place: editPlace, view: editView }; });
+  useEffect(() => { if (editPlace && editView) { seen.current = { place: editPlace, view: editView }; session.set("seen", seen.current); } });
   // Deleted underneath with nothing typed: the editor simply goes with it. With text, KeptDraft keeps it on screen.
   useEffect(() => { if (gone && !kept) closeEditor(); });
 
@@ -186,6 +195,14 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     setFlash(focus.kind === "shot" ? rowId(focus.id) : sceneElementId(focus.id));
   }, [focus]);
 
+  const sendStoryboard = (pressId: string, input: Parameters<typeof storyboardOutcome>[2], scope: PlanBaseline | null = baseline) => {
+    if (!scope) {
+      if (active()) store.dispatch({ type: "toast", message: msg("error.PLAN_PROJECTION_CHANGED"), tone: "error" });
+      return Promise.resolve<Outcome<StoryboardReceipt>>({ kind: "refused" });
+    }
+    return storyboardOutcome(store, pressId, input, scope);
+  };
+
   // ---- editors and their drafts ----------------------------------------------------------------------------
   const isOpen = (place: string) => placeOf(editingNow.current) === place;
   const slotFor = (place: string): DraftSlot => ({ held: drafts[place], put: (update) => setDrafts((all) => withDraft(all, place, update(all[place]))) });
@@ -209,7 +226,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     if (place) dropDraft(place);
     setEditing(null);
     setError(null);
-    if (focusTo) focusLater(focusTo);
+    if (focusTo) focusHere(focusTo);
   }
   /**
    * Opening another editor, or adding a shot or scene (which opens one), closes the open editor: when it has unsaved
@@ -228,10 +245,10 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
    * A save from the editor at `place` was answered. Only that editor closes, and only when it is still open with
    * nothing newer typed since `sent`: text typed while the reply was awaited stays open, held against what was saved.
    */
-  const closeAt = (place: string, focusTo?: string, sent?: HeldFields) => {
+  const closeAt = (place: string, focusTo?: string, sent?: HeldFields, submitted?: Held<HeldFields>) => {
     if (!isOpen(place)) return;
     const held = draftsNow.current[place];
-    const newer = held && sent ? afterSave(held, sent) : null;
+    const newer = held && sent ? afterSave(held, sent, submitted) : null;
     if (newer) {
       setDrafts((all) => withDraft(all, place, newer));
       setError(null);
@@ -256,12 +273,12 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
 
   // ---- presses and their outcomes ---------------------------------------------------------------------------
   const record = async (receipt: StoryboardReceipt, change: Msg) => {
-    const head = await headAfter(store, receipt);
+    const head = await headAfter(store, receipt, projectId);
     setLast(head === null ? null : { commandId: receipt.commandId, label: change, headVersion: head });
   };
   const finish = async (receipt: StoryboardReceipt, change: Msg, toast: Msg) => {
     await record(receipt, change);
-    undoToast(store, toast, receipt.commandId);
+    if (active()) undoToast(store, toast, receipt.commandId);
   };
 
   /**
@@ -270,6 +287,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
    * toast already says why, unless it moves it). Other presses' notices are left alone.
    */
   const after = async <T,>(out: Outcome<T>, change: Msg, place: string, done: (receipt: T) => Promise<void> | void, refused?: () => void): Promise<void> => {
+    if (out.kind === "superseded") return;
     if (out.kind === "done") { await done(out.receipt); return; }
     if (out.kind === "lost") {
       setLost((list) => putLost(list, { pressId: out.pressId, change, place, still: false, resend: out.resend, done: done as Lost["done"], ...(refused ? { refused } : {}) }));
@@ -285,6 +303,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     retrying.current.add(pressId);
     try {
       const out = await current.resend();
+      if (out.kind === "superseded") return;
       if (out.kind === "lost") { setLost((list) => putLost(list, { ...current, resend: out.resend, still: true })); return; }
       setLost((list) => dropLost(list, pressId));
       if (out.kind === "done") await current.done(out.receipt);
@@ -305,30 +324,33 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
 
   // ---- brief, story, scene title and direction (nothing made goes out of date: SB-12) -----------------
   const saveText = async (field: "brief" | "story", value: string) => {
+    const submitted = draftsNow.current[field];
     const change = msg(field === "brief" ? "plan.change.brief" : "plan.change.story");
-    const out = await storyboardOutcome(store, `treatment:${field}`, { kind: "treatment", field, value });
+    const out = await sendStoryboard(`treatment:${field}`, { kind: "treatment", field, value });
     await after(out, change, field, async (receipt) => {
-      closeAt(field, `[data-act="edit-text"][data-field="${field}"]`, { text: value });
+      closeAt(field, `[data-act="edit-text"][data-field="${field}"]`, { text: value }, submitted);
       await finish(receipt, change, msg(field === "brief" ? "plan.toast.brief_saved" : "plan.toast.story_saved"));
     }, failedAt(field));
   };
 
   const saveTitle = async (scene: SceneView, value: string) => {
+    const submitted = draftsNow.current[`title:${scene.sceneId}`];
     const change = msg("plan.change.rename", { scene: scene.ordinal });
-    const out = await storyboardOutcome(store, `sceneTitle:${scene.sceneId}`, { kind: "sceneTitle", id: scene.sceneId, value });
+    const out = await sendStoryboard(`sceneTitle:${scene.sceneId}`, { kind: "sceneTitle", id: scene.sceneId, value });
     const place = `title:${scene.sceneId}`;
     await after(out, change, place, async (receipt) => {
-      closeAt(place, `[data-act="scene-menu"][data-scene="${scene.sceneId}"]`, { text: value });
+      closeAt(place, `[data-act="scene-menu"][data-scene="${scene.sceneId}"]`, { text: value }, submitted);
       await finish(receipt, change, msg("plan.toast.renamed", { scene: scene.ordinal, title: value }));
     }, failedAt(place));
   };
 
   const saveDirection = async (scene: SceneView, value: string) => {
+    const submitted = draftsNow.current[`direction:${scene.sceneId}`];
     const change = msg("plan.change.direction", { scene: scene.ordinal });
-    const out = await storyboardOutcome(store, `scene:${scene.sceneId}`, { kind: "scene", id: scene.sceneId, value });
+    const out = await sendStoryboard(`scene:${scene.sceneId}`, { kind: "scene", id: scene.sceneId, value });
     const place = `direction:${scene.sceneId}`;
     await after(out, change, place, async (receipt) => {
-      closeAt(place, `[data-act="scene-menu"][data-scene="${scene.sceneId}"]`, { text: value });
+      closeAt(place, `[data-act="scene-menu"][data-scene="${scene.sceneId}"]`, { text: value }, submitted);
       await finish(receipt, change, msg("plan.toast.direction", { scene: scene.ordinal }));
     }, failedAt(place));
   };
@@ -338,11 +360,11 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     const target = sceneMove(outline, scene.sceneId, direction);
     if (!target) return;
     const change = msg("plan.change.move_scene", { title: scene.title });
-    const out = await storyboardOutcome(store, `moveScene:${scene.sceneId}`, { kind: "moveScene", id: scene.sceneId, beforeId: target.beforeId });
+    const out = await sendStoryboard(`moveScene:${scene.sceneId}`, { kind: "moveScene", id: scene.sceneId, beforeId: target.beforeId });
     await after(out, change, "view", async (receipt) => {
       setFlash(sceneElementId(scene.sceneId));
       const lands = target.ordinal === 1 || target.ordinal === outline.scenes.length;
-      focusLater(`[data-act="${lands ? (direction < 0 ? "scene-down" : "scene-up") : direction < 0 ? "scene-up" : "scene-down"}"][data-scene="${scene.sceneId}"]`);
+      focusHere(`[data-act="${lands ? (direction < 0 ? "scene-down" : "scene-up") : direction < 0 ? "scene-up" : "scene-down"}"][data-scene="${scene.sceneId}"]`);
       await finish(receipt, change, msg("plan.toast.scene_moved", { title: scene.title, scene: target.ordinal }));
     });
   };
@@ -350,11 +372,11 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   /** moveShot to a place in any scene: ↑ ↓ in the menu, the Move dialog, or a drop. Free; nothing goes out of date. */
   const moveShotTo = async (shotId: string, target: ShotMoveTarget, fromDialog = false) => {
     const change = msg("plan.change.move_shot", { shot: target.from });
-    const out = await storyboardOutcome(store, `moveShot:${shotId}`, { kind: "moveShot", id: shotId, sceneId: target.sceneId, beforeId: target.beforeId });
-    if (fromDialog && out.kind !== "refused") setMoving(null);
+    const out = await sendStoryboard(`moveShot:${shotId}`, { kind: "moveShot", id: shotId, sceneId: target.sceneId, beforeId: target.beforeId });
+    if (fromDialog && out.kind !== "refused" && out.kind !== "superseded") setMoving(null);
     await after(out, change, "view", async (receipt) => {
       setFlash(rowId(shotId));
-      focusLater(`[data-act="shot-menu"][data-shot="${shotId}"]`);
+      focusHere(`[data-act="shot-menu"][data-shot="${shotId}"]`);
       await finish(receipt, change, msg("plan.toast.shot_moved", { from: target.from, to: target.to }));
     }, fromDialog ? () => { if (movingNow.current === shotId) setMoveError(takeRefusal(store)); } : undefined);
   };
@@ -365,12 +387,12 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   };
 
   const addShot = async (scene: SceneView) => {
-    const before = store.getState().overview ?? overview;
+    const before = overview;
     const change = msg("plan.change.add_shot", { scene: scene.ordinal });
-    const out = await storyboardOutcome(store, `addShot:${scene.sceneId}`, { kind: "addShot", sceneId: scene.sceneId });
+    const out = await sendStoryboard(`addShot:${scene.sceneId}`, { kind: "addShot", sceneId: scene.sceneId });
     await after(out, change, "view", async (receipt) => {
       await store.refresh();
-      const after = store.getState().overview;
+      const after = active() ? store.getState().overview : null;
       const shot = after ? addedShot(before, after, scene.sceneId) : null;
       // Its editor opens unless one with unsaved text is open (a retried add can answer long after the press).
       if (shot) { if (free()) openEditor({ kind: "shot", shotId: shot.shotId, openedAs: shot.label }); setFlash(rowId(shot.shotId)); }
@@ -379,13 +401,13 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   };
 
   const addScene = async () => {
-    const before = store.getState().overview ?? overview;
+    const before = overview;
     const change = msg("plan.change.add_scene");
     // No value: the server stores it as the scene's direction. The new scene is named in place right after.
-    const out = await storyboardOutcome(store, "addScene", { kind: "addScene" });
+    const out = await sendStoryboard("addScene", { kind: "addScene" });
     await after(out, change, "view", async (receipt) => {
       await store.refresh();
-      const after = store.getState().overview;
+      const after = active() ? store.getState().overview : null;
       const scene = after ? addedScene(before, after) : null;
       if (scene) { if (free()) openEditor({ kind: "title", sceneId: scene.sceneId }); setFlash(sceneElementId(scene.sceneId)); }
       await finish(receipt, change, msg("plan.toast.scene_added", { scene: scene?.ordinal ?? outline.scenes.length + 1 }));
@@ -397,7 +419,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   // or keeps its unsaved text on screen (KeptDraft).
   const deleteScene = async (scene: SceneView) => {
     const change = msg("plan.change.delete_scene", { scene: scene.ordinal });
-    const out = await storyboardOutcome(store, `deleteScene:${scene.sceneId}`, { kind: "deleteScene", id: scene.sceneId, withShots: true });
+    const out = await sendStoryboard(`deleteScene:${scene.sceneId}`, { kind: "deleteScene", id: scene.sceneId, withShots: true });
     if (out.kind === "lost") setConfirming(null);
     await after(out, change, "view", async (receipt) => {
       await store.refresh();
@@ -408,7 +430,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
 
   const deleteShot = async (row: ShotRowView) => {
     const change = msg("plan.change.delete_shot", { shot: row.label });
-    const out = await storyboardOutcome(store, `deleteShot:${row.shotId}`, { kind: "deleteShot", id: row.shotId });
+    const out = await sendStoryboard(`deleteShot:${row.shotId}`, { kind: "deleteShot", id: row.shotId });
     if (out.kind === "lost") setConfirming(null);
     await after(out, change, "view", async (receipt) => {
       await store.refresh();
@@ -465,7 +487,8 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     const commands = draftEdits(live, draft, fps, stored?.narration?.mode, storedShot(shot, stored));
     if (!commands.length) return closeAt(`shot:${shot.shotId}`, `[data-act="edit-shot"][data-shot="${shot.shotId}"]`);
     setError(null);
-    await runShot(shot, commands, 0, undefined, null, { summary: savedMessage(shot, live, draft), change: editChange(shot.label, commands.map((command) => command.fields)), sent: draft });
+    if (!baseline) return;
+    await runShot(shot, commands, 0, baseline, null, { summary: savedMessage(shot, live, draft), change: editChange(shot.label, commands.map((command) => command.fields)), sent: draft, submitted: draftsNow.current[`shot:${shot.shotId}`] });
   };
 
   /**
@@ -473,20 +496,38 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
    * keeps the editor open with the server's reason (anything saved before it can still be undone from the header);
    * a lost reply waits for "Retry the same request", and its answer carries on from the next command.
    */
-  const runShot = async (shot: ShotOverview, commands: DraftCommand[], start: number, head: number | undefined, done: StoryboardReceipt | null, words: { summary: Msg; change: Msg; sent: ShotDraft }): Promise<void> => {
+  const runShot = async (shot: ShotOverview, commands: DraftCommand[], start: number, head: PlanBaseline, done: StoryboardReceipt | null, words: { summary: Msg; change: Msg; sent: ShotDraft; submitted: Held<HeldFields> | undefined }): Promise<void> => {
     const place = `shot:${shot.shotId}`;
     let last = done;
     let at = head;
     for (let index = start; index < commands.length; index++) {
-      if (index > 0 && at === undefined) await store.refresh();
       const command = commands[index]!;
-      const out = await storyboardOutcome(store, commandPress(command, shot.shotId), { ...command.edit, id: shot.shotId }, at);
-      if (out.kind === "done") { last = out.receipt; at = out.receipt.headVersion; continue; }
+      const out = await sendStoryboard(commandPress(command, shot.shotId), { ...command.edit, id: shot.shotId }, at);
+      if (out.kind === "superseded") return;
+      if (out.kind === "done") {
+        last = out.receipt;
+        const next = receiptBaseline(at, out.receipt);
+        if (index + 1 < commands.length && !next) {
+          // Without the preceding receipt's head, continuing would borrow unrelated authority from a later read.
+          if (active()) setError({ place, message: msg("error.PLAN_PROJECTION_CHANGED") });
+          await record(last, editChange(shot.label, commands.slice(0, index + 1).map((item) => item.fields)));
+          return;
+        }
+        at = next ?? at;
+        continue;
+      }
       if (last) await record(last, editChange(shot.label, commands.slice(0, index).map((item) => item.fields)));
-      await after(out, words.change, place, (receipt) => runShot(shot, commands, index + 1, receipt.headVersion, receipt, words), failedAt(place));
+      await after(out, words.change, place, (receipt) => {
+        const next = receiptBaseline(at, receipt);
+        if (!next && index + 1 < commands.length) {
+          if (active()) setError({ place, message: msg("error.PLAN_PROJECTION_CHANGED") });
+          return;
+        }
+        return runShot(shot, commands, index + 1, next ?? at, receipt, words);
+      }, failedAt(place));
       return;
     }
-    closeAt(place, `[data-act="edit-shot"][data-shot="${shot.shotId}"]`, words.sent);
+    closeAt(place, `[data-act="edit-shot"][data-shot="${shot.shotId}"]`, words.sent, words.submitted);
     if (!last) return;
     // A save that also changes the narration is several commands, and Undo reverts only the last: the toast says which.
     const toast = commands.length > 1 ? msg("plan.toast.saved_undo_last", { saved: tm(words.summary), change: tm(words.change) }) : words.summary;
@@ -498,12 +539,12 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
     const named = last;
     const change = tm(named.label);
     store.dismissToast();
-    const out = await storyboardOutcome(store, `undo:${named.commandId}`, { kind: "undo", commandId: named.commandId });
+    const out = await sendStoryboard(`undo:${named.commandId}`, { kind: "undo", commandId: named.commandId });
     await after(out, msg("plan.change.undo", { change }), "view", () => {
       setLast(null);
-      infoToast(store, msg("plan.toast.undone", { change }));
+      if (active()) infoToast(store, msg("plan.toast.undone", { change }));
       // The Undo button turns off; focus stays in the view instead of falling to the page.
-      focusLater(`#${PLAN_TITLE_ID}`);
+      focusHere(`#${PLAN_TITLE_ID}`);
     }, () => {
       // Something changed since (a new edit elsewhere, paid work that used it): this Undo is gone for good.
       if (refusal(store)?.id === "error.UNDO_UNAVAILABLE") setLast(null);
@@ -513,7 +554,8 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   // ---- written plans -------------------------------------------------------------------------------------
   const send = async (name: string, text: string) => {
     const finalName = importName(name);
-    const out = await sendImport(store, finalName, text);
+    if (!baseline) return;
+    const out = await sendImport(store, finalName, text, baseline);
     await after(out, msg("plan.change.import_send", { name: finalName }), "import", () => {
       setJustSent(finalName);
       imports.reload();
@@ -523,7 +565,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   };
   const discard = async () => {
     if (!importPending) return;
-    const out = await discardImport(store, importPending);
+    const out = await discardImport(store, importPending, projectId);
     await after(out, msg("plan.change.import_discard", { name: importPending.name }), "import", () => {
       setImportOpen(false);
       setJustSent(null);
@@ -532,7 +574,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   };
   const confirmPlan = async () => {
     if (!importPending) return;
-    const out = await confirmImport(store, importPending);
+    const out = await confirmImport(store, importPending, projectId);
     await after(out, msg("plan.change.import_confirm", { name: importPending.name }), "import", () => {
       setImportOpen(false);
       setJustSent(null);
@@ -583,8 +625,8 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
             type="button"
             className="pill"
             data-act="import-open"
-            disabled={!connected || !!runGuard}
-            title={!connected ? offlineWhy : runGuard}
+            disabled={!connected || !baseline || !!runGuard}
+            title={!connected ? offlineWhy : !baseline ? t("error.PLAN_PROJECTION_CHANGED") : runGuard}
             onClick={() => setImportOpen(true)}
           >
             {t(importPending ? "plan.import.review_open" : "plan.import.open")}
@@ -729,11 +771,13 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
       {importOpen ? (
         <ImportSheet
           stage={stage}
+          draft={importDraft}
+          onDraft={setImportDraft}
           pending={importPending}
           review={review}
           notes={notes}
           busy={busy}
-          guard={connected ? undefined : offlineWhy}
+          guard={!connected ? offlineWhy : !baseline ? t("error.PLAN_PROJECTION_CHANGED") : undefined}
           runGuard={runGuard}
           unconfirmed={lostIn("import")}
           onRetry={() => retryAt("import")}

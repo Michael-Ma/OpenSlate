@@ -34,7 +34,8 @@ const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia
  */
 export function SettingsView() {
   const { t } = useI18n();
-  const hasFilm = useStudio((s) => !!s.projectId);
+  const projectId = useStudio((s) => s.projectId);
+  const hasFilm = !!projectId;
   const film = useStudio((s) => s.snapshot?.project.name ?? s.projects.find((p) => p.id === s.projectId)?.name ?? "");
   const connection = useStudio((s) => s.connection);
   // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one for
@@ -138,9 +139,9 @@ export function SettingsView() {
         <div className="set-sections">
           {hasFilm ? (
             <>
-              <ModelsPanel models={models} setup={setup} film={film} offline={offline} />
-              <DirectorPanel setup={setup} review={review} film={film} offline={offline} />
-              <VoicePanel voice={voice} personal={personal} film={film} offline={offline} />
+              <ModelsPanel key={`models:${projectId}`} models={models} setup={setup} film={film} offline={offline} />
+              <DirectorPanel key={`director:${projectId}`} setup={setup} review={review} film={film} offline={offline} />
+              <VoicePanel key={`voice:${projectId}`} voice={voice} personal={personal} film={film} offline={offline} />
             </>
           ) : (
             <>

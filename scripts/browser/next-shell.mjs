@@ -72,6 +72,72 @@ async function noSidewaysScroll(page, where = "") {
   expect(scrollWidth <= innerWidth, `The page scrolls sideways${where ? ` (${where})` : ""}: ${scrollWidth}px content in a ${innerWidth}px window`);
 }
 
+/** Measure actual rendered text and hit targets: a priced action may wrap, but every line must stay visible. */
+async function pricedActionsFit(page, width) {
+  expect(await page.locator(".card .callout .link").count() > 0, `No priced card callout is present at ${width}`);
+  expect(await page.locator(".insp-actions [data-act='regen']").count() === 1, `The inspector purchase action is missing at ${width}`);
+  const actions = page.locator(".card .callout .link, .insp-actions .pill");
+  for (let index = 0; index < await actions.count(); index++) {
+    const action = actions.nth(index);
+    // At phone widths the cards scroll inside their row and the inspector is further down the page.
+    await action.scrollIntoViewIfNeeded();
+    const layout = await action.evaluate((button) => {
+      const box = (element) => {
+        const { left, top, right, bottom } = element.getBoundingClientRect();
+        return { left, top, right, bottom };
+      };
+      const textRects = (element, clamped = false) => {
+        if (!element) return [];
+        const clip = element.getBoundingClientRect();
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const rects = [];
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          // Text for screen readers only is not drawn.
+          if (!node.textContent.trim() || node.parentElement?.closest(".sr-only")) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const rect of range.getClientRects()) {
+            // Only picture captions are intentionally clamped. Buttons must show every text line.
+            if (!clamped || (rect.top < clip.bottom && rect.bottom > clip.top)) rects.push({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+          }
+        }
+        return rects;
+      };
+      const callout = button.closest(".callout-note");
+      const picture = callout && button.closest(".card").querySelector(".pic");
+      const rect = box(button);
+      const hit = document.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+      return {
+        // The inspector's price is the note that describes its button; a card link carries its own.
+        text: [button.textContent, ...(button.getAttribute("aria-describedby") || "").split(" ").filter(Boolean).map((id) => document.getElementById(id)?.textContent ?? "")].join(" ").trim(), rect, bounds: box(picture || button.closest(".insp")), lines: textRects(button),
+        paid: !!callout || button.getAttribute("data-act") === "regen",
+        callout: !!callout,
+        blockers: !picture ? [] : [
+          { name: "shot badge", rect: box(picture.querySelector(".badge")) },
+          { name: "note chip", rect: box(callout.querySelector(".anno")) },
+          ...textRects(picture.querySelector(".ptxt"), true).map((rect) => ({ name: "picture caption", rect })),
+        ],
+        scroll: [button.scrollWidth, button.clientWidth, button.scrollHeight, button.clientHeight],
+        hit: hit === button || button.contains(hit),
+      };
+    });
+    const where = `${layout.callout ? "note link" : "inspector action"} at ${width}`;
+    const detail = JSON.stringify(layout);
+    const contains = (outer, inner) => inner.left >= outer.left - 1 && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+    const overlaps = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+    expect(!layout.paid || /\$[\d.]+/.test(layout.text), `A paid ${where} has no price: ${layout.text}`);
+    expect(contains(layout.bounds, layout.rect), `A priced ${where} leaves its picture/panel: ${detail}`);
+    expect(layout.lines.length > 0 && layout.lines.every((line) => contains(layout.rect, line)), `A priced ${where} clips its text: ${detail}`);
+    expect(layout.scroll[0] <= layout.scroll[1] + 1 && layout.scroll[2] <= layout.scroll[3] + 1, `A priced ${where} hides overflowing text: ${detail}`);
+    expect(layout.blockers.every((blocker) => !overlaps(layout.rect, blocker.rect)), `A priced ${where} overlaps a badge or caption: ${detail}`);
+    expect(layout.hit, `A priced ${where} is not clickable: ${detail}`);
+    // A card's link is one line where the card has room (two lines would cover the picture it is about); on the
+    // two-card rows below 1100 the price may take a second line, never more.
+    const lineLimit = typeof width === "number" && width >= 1100 ? 24 : 42;
+    expect(!layout.callout || layout.rect.bottom - layout.rect.top <= lineLimit, `A note's link wraps onto the picture at ${width}: ${detail}`);
+  }
+}
+
 /**
  * Scene 2 of the sample film: open its frames, settle 2.3's line through the Director's note (the proposal
  * choice) and make its three clips (one sent, two queued).
@@ -434,16 +500,26 @@ export const scenarios = [
             line: [line.scrollWidth, line.clientWidth, line.textContent],
             scrolls: cards.scrollWidth > cards.clientWidth + 1,
             mask: getComputedStyle(cards).maskImage || getComputedStyle(cards).webkitMaskImage || "none",
-            links: [...document.querySelectorAll(".card .callout .link")].map((link) => Math.round(link.getBoundingClientRect().height)),
           };
         });
         // The scene's status is read in full: the scene pills wrap below it before it is cut.
         expect(kf.line[0] <= kf.line[1], `The scene status is cut at ${width}: ${JSON.stringify(kf.line)}`);
         // A row with cards out of view says so with a faded edge.
         expect(!kf.scrolls || /gradient/.test(kf.mask), `The card row hides cards without a sign at ${width}: ${kf.mask}`);
-        expect(kf.links.every((h) => h <= 24), `A note's link wraps onto the picture at ${width}: ${kf.links}`);
+        // Priced actions show their price, stay inside their card or panel, and keep clear of the badge and caption.
+        await pricedActionsFit(page, width);
+        expect(await page.evaluate(() => document.documentElement.scrollHeight) <= 900, `Priced actions make Keyframes scroll the page at ${width}`);
+        await noSidewaysScroll(page, `priced actions at ${width}`);
         await shot(page, `next-shell-keyframes-${width}`);
       }
+      // On a phone the page may scroll vertically, while every priced action remains fully readable and usable.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await pricedActionsFit(page, 390);
+      await noSidewaysScroll(page, "priced actions at 390");
+      await page.locator(".topbar [data-act='language']").click();
+      await page.waitForFunction(() => document.documentElement.lang === "zh-CN");
+      await pricedActionsFit(page, "390 zh-CN");
+      await noSidewaysScroll(page, "priced actions at 390 in Chinese");
     },
   },
   {

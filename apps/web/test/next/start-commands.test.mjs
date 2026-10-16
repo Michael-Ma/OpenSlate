@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { StudioStore } from '../../src/next/store/store.ts';
-import { openDemo, readFilms, renameFilm, runCreation, setArchived, setUpDirector, shownRefusal, projectPath, DIRECTOR_SETUP_TIMEOUT_MS } from '../../src/next/model/start-commands.ts';
+import { openDemo, showDemoFilm, readFilms, renameFilm, runCreation, setArchived, setUpDirector, shownRefusal, projectPath, DIRECTOR_SETUP_TIMEOUT_MS } from '../../src/next/model/start-commands.ts';
 import { codexSource, demoRetryable, filmsView, livePendingDemo, parsePendingDemo } from '../../src/next/model/start.ts';
 import { afterFailure, codexFrom, createBody, createdOutcome, creationSteps, modelPlan } from '../../src/next/model/start-new.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
@@ -356,4 +356,68 @@ test('a simulated film answers the Director composer with a scripted reply', asy
   assert.equal(await store.sendMessage(), true);
   await store.refresh();
   assert.equal(store.getState().snapshot.conversation.at(-1).role, 'user');
+});
+
+
+test('B17 browser follow-up: first-run demo completion remains visible after its destination film opens', async t => {
+  const { store } = await studio(t, 'first-run');
+  assert.equal(store.getState().projectId, null);
+  const { film, filled } = await openDemo(store, 'Demo film', null);
+  assert.equal(filled, true);
+  await showDemoFilm(store, film);
+  assert.equal(store.getState().projectId, film.id);
+  assert.equal(store.getState().view, 'keyframes');
+  assert.equal(en(store.getState().toast.message), 'Made Demo film. The stand-in Director is filling it in; nothing is charged.');
+  assert.equal(store.getState().overview.scenes[0].counts.keyframesReady, 3);
+});
+
+test('B17 browser follow-up: opening a demo from another film keeps only its destination completion', async t => {
+  const { store } = await studio(t);
+  store.dispatch({ type: 'toast', message: { id: 'toast.saved' }, tone: 'info', undoCommandId: 'old-film-edit' });
+  const { film } = await openDemo(store, 'Demo film', null);
+  await showDemoFilm(store, film);
+  assert.equal(toastId(store), 'start.demo.opened');
+  assert.equal(store.getState().toast.undoCommandId, undefined);
+});
+
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+test('B17 browser follow-up: a superseded demo open cannot move the new selection or publish its toast', async () => {
+  const read = deferred(); const actions = [];
+  let state = { projectId: null, projectEpoch: 0 };
+  const store = {
+    getState: () => state,
+    selectProject(id) { state = { projectId: id, projectEpoch: state.projectEpoch + 1 }; return read.promise; },
+    setView(view) { actions.push({ type: 'view', view }); },
+    dispatch(action) { actions.push(action); },
+  };
+  const opening = showDemoFilm(store, { id: 'demo', name: 'Demo film' });
+  state = { projectId: 'other-film', projectEpoch: 2 };
+  const before = actions.length;
+  read.resolve(); await opening;
+  assert.deepEqual(actions.slice(before), [], 'late completion leaves another film and its view alone');
+});
+
+
+test('B17 browser follow-up: an old Start completion cannot take navigation from a newer film', async () => {
+  const store = {
+    getState: () => ({ projectId: 'other-film', projectEpoch: 3 }),
+    selectProject() { assert.fail('superseded Start completion must not select its demo'); },
+    setView() { assert.fail('superseded Start completion must not change the view'); },
+    dispatch() { assert.fail('superseded Start completion must not replace the new toast'); },
+  };
+  await showDemoFilm(store, { id: 'demo', name: 'Demo film' }, { projectId: null, projectEpoch: 0 });
+});
+
+test('B17 browser follow-up: a reselected demo has its own epoch and cannot inherit an older completion', async () => {
+  const read = deferred();const actions=[];let state = { projectId: null, projectEpoch: 0 };
+  const store = {
+    getState: () => state,
+    selectProject(id) { state = { projectId: id, projectEpoch: 1 };return read.promise; },
+    setView(view) { actions.push({ type:'view',view }); },
+    dispatch(action) { actions.push(action); },
+  };
+  const opening = showDemoFilm(store, { id:'demo',name:'Demo film' });
+  state = { projectId:'demo',projectEpoch:3 };
+  const before=actions.length;read.resolve();await opening;
+  assert.deepEqual(actions.slice(before),[]);
 });

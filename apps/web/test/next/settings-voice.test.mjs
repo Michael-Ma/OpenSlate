@@ -62,3 +62,44 @@ test('Undo goes back only to a voice that can still narrate, and only while the 
   assert.equal(undoTarget({ previous: 'openai-custom:voice_old99', set: 'marin' }, 'marin', voices), null, 'the old voice was revoked since');
   assert.equal(undoTarget(null, 'marin', voices), null);
 });
+
+const voiceModel = await import('../../src/next/model/settings-voice.ts');
+const undoOrigin = { projectId: 'film-a', projectEpoch: 1 };
+const undoChange = { previous: 'cedar', set: 'marin' };
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; };
+
+test('B17 #6 narrator Undo reads the saved voice and matching fresh head instead of the old form head', async () => {
+  const reads = [];
+  const prepared = await voiceModel.prepareNarratorUndo(undoChange, undoOrigin, async path => {
+    reads.push(path);
+    return path.endsWith('/settings/voice') ? { narratorVoice: 'marin', headVersion: 13 } : { voices, headVersion: 13 };
+  }, () => undoOrigin);
+  assert.deepEqual(reads.sort(), ['/api/projects/film-a/narration/personal-voices', '/api/projects/film-a/settings/voice']);
+  assert.equal(prepared.request.path, '/api/projects/film-a/settings/voice');
+  assert.deepEqual(prepared.request.body, { narratorVoice: 'cedar', expectedHeadVersion: 13 });
+  assert.equal(prepared.target, 'cedar');
+});
+
+test('B17 #6 narrator Undo refuses another saved choice, revoked voices and mismatched read baselines', async () => {
+  const read = (saved, personalHead = saved.headVersion) => async path => path.endsWith('/settings/voice') ? saved : { voices, headVersion: personalHead };
+  assert.equal(await voiceModel.prepareNarratorUndo(undoChange, undoOrigin, read({ narratorVoice: 'ash', headVersion: 14 }), () => undoOrigin), null);
+  assert.equal(await voiceModel.prepareNarratorUndo({ previous: voices[2].id, set: 'marin' }, undoOrigin, read({ narratorVoice: 'marin', headVersion: 14 }), () => undoOrigin), null);
+  assert.equal(await voiceModel.prepareNarratorUndo(undoChange, undoOrigin, read({ narratorVoice: 'marin', headVersion: 14 }, 15), () => undoOrigin), null);
+});
+
+test('B17 #6 narrator Undo is fenced before and after reads, including A to B to A', async () => {
+  let current = { projectId: 'film-b', projectEpoch: 2 };
+  let reads = 0;
+  assert.equal(await voiceModel.prepareNarratorUndo(undoChange, undoOrigin, async () => { reads++; }, () => current), null);
+  assert.equal(reads, 0);
+  current = undoOrigin;
+  const saved = deferred();
+  const pending = voiceModel.prepareNarratorUndo(undoChange, undoOrigin, async path => path.endsWith('/settings/voice') ? saved.promise : { voices, headVersion: 13 }, () => current);
+  current = { projectId: 'film-a', projectEpoch: 3 };
+  saved.resolve({ narratorVoice: 'marin', headVersion: 13 });
+  assert.equal(await pending, null);
+});
+
+test('B17 #6 narrator Undo does not prepare a write after a failed fresh read', async () => {
+  await assert.rejects(voiceModel.prepareNarratorUndo(undoChange, undoOrigin, async () => { throw new TypeError('offline'); }, () => undoOrigin), /offline/);
+});

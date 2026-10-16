@@ -11,8 +11,8 @@ export type Action =
   | { type: "project"; projectId: string }
   | { type: "snapshot"; snapshot: ProjectSnapshot }
   | { type: "overview"; overview: GenerationOverview }
-  | { type: "director"; director: DirectorStatus }
-  | { type: "proposals"; proposals: DirectorProposal[] }
+  | { type: "director"; director: DirectorStatus; projectId: string; projectEpoch: number }
+  | { type: "proposals"; proposals: DirectorProposal[]; projectId: string; projectEpoch: number }
   | { type: "loadError"; source: keyof StudioState["loadErrors"]; code: string | null }
   | { type: "view"; view: ViewName }
   | { type: "scene"; sceneId: string }
@@ -46,7 +46,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, projects: action.projects };
     case "project":
       if (action.projectId === state.projectId) return state;
-      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, focus: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false, images: [] } };
+      return { ...state, projectId: action.projectId, projectEpoch: state.projectEpoch + 1, toast: null, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: state.inspectorDrafts[action.projectId]?.shotId ?? null, focus: null, edit: state.inspectorDrafts[action.projectId] ? { ...state.inspectorDrafts[action.projectId]!, saving: false } : null, pending: {}, composer: { text: "", targets: [], sending: false, images: [] } };
     case "snapshot":
       if (action.snapshot.project.id !== state.projectId) return state;
       // A stale read (lower cursor) never replaces a newer one.
@@ -56,14 +56,16 @@ export function reducer(state: StudioState, action: Action): StudioState {
       if (action.overview.projectId !== state.projectId) return state;
       if (state.overview && action.overview.cursor < state.overview.cursor) return state;
       // Keep the selection when it still exists; otherwise let the view pick a sensible scene and shot.
-      const sceneId = state.sceneId && action.overview.scenes.some((s) => s.sceneId === state.sceneId) ? state.sceneId : null;
+      const sceneId = state.sceneId && action.overview.scenes.some((s) => s.sceneId === state.sceneId) ? state.sceneId : action.overview.shots[state.edit?.shotId ?? ""]?.sceneId ?? null;
       const shotId = state.shotId && action.overview.shots[state.shotId] ? state.shotId : null;
       const edit = state.edit && action.overview.shots[state.edit.shotId] ? state.edit : null;
       return { ...state, overview: action.overview, sceneId, shotId, edit, loadErrors: { ...state.loadErrors, overview: undefined } };
     }
     case "director":
+      if (action.projectId !== state.projectId || action.projectEpoch !== state.projectEpoch) return state;
       return { ...state, director: action.director, loadErrors: { ...state.loadErrors, director: undefined } };
     case "proposals":
+      if (action.projectId !== state.projectId || action.projectEpoch !== state.projectEpoch) return state;
       return { ...state, proposals: action.proposals };
     case "loadError":
       return { ...state, loadErrors: { ...state.loadErrors, [action.source]: action.code ?? undefined } };
@@ -74,16 +76,19 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, view: action.view, focus };
     }
     case "scene": {
+      if (state.edit) return state;
       if (action.sceneId === state.sceneId) return state;
       const first = state.overview?.scenes.find((s) => s.sceneId === action.sceneId)?.shotIds[0] ?? null;
       return { ...state, sceneId: action.sceneId, shotId: first, edit: null };
     }
     case "shot": {
+      if (state.edit) return state;
       // Selecting a shot never changes what the composer points at (plan item LG-3).
       const sceneId = state.overview?.shots[action.shotId]?.sceneId ?? state.sceneId;
-      return { ...state, shotId: action.shotId, sceneId, edit: state.edit?.shotId === action.shotId ? state.edit : null };
+      return { ...state, shotId: action.shotId, sceneId, edit: null };
     }
     case "focus": {
+      if (state.edit) return state;
       // Selected like any selection, and marked as opened from elsewhere with a new nonce. With a view, that view
       // opens with it and handles it when it mounts.
       const selected = reducer(state, action.kind === "shot" ? { type: "shot", shotId: action.id } : { type: "scene", sceneId: action.id });
@@ -109,8 +114,14 @@ export function reducer(state: StudioState, action: Action): StudioState {
     case "composerSent":
       // A picture or @ target added while the message was sending stays for the next one.
       return { ...state, composer: action.sent ? afterSend(state.composer, action.sent) : { text: "", targets: [], sending: false, images: [] } };
-    case "edit":
-      return { ...state, edit: action.edit };
+    case "edit": {
+      const inspectorDrafts = { ...state.inspectorDrafts };
+      if (state.projectId) {
+        if (action.edit) inspectorDrafts[state.projectId] = action.edit;
+        else delete inspectorDrafts[state.projectId];
+      }
+      return { ...state, edit: action.edit, inspectorDrafts };
+    }
     case "pending": {
       const pending = { ...state.pending };
       if (action.pending) pending[action.pressId] = true;

@@ -2,7 +2,7 @@ import type { DirectorProposal, GenerationOverview, ProposalPreview } from "@ope
 import type { TimelineSegment } from "./checks.ts";
 import { isWorking } from "./keyframes.ts";
 import type { NoteAction, NoteView } from "./notes.ts";
-import { formatMicros } from "./price.ts";
+import { formatMicros, keyframeEstimate } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -88,16 +88,9 @@ export function proposalTimeline(preview: ProposalPreview, overview: GenerationO
 
 /** What a regenerate choice costs: the shots' own quotes (exact, voice included), else the scene's per-keyframe quote. */
 export function regeneratePrice(shotIds: readonly string[], overview: GenerationOverview, locale: string): Msg | null {
-  let micros = 0;
-  for (const id of shotIds) {
-    const shot = overview.shots[id];
-    const scene = overview.scenes.find((s) => s.sceneId === shot?.sceneId);
-    const quote = shot?.quotes?.regenerateKeyframe ?? scene?.quotes.regenerateKeyframe;
-    if (!quote) return null;
-    if (quote.priceUnknown || Number(quote.micros) === 0) return msg("price.unknown");
-    micros += Number(quote.micros);
-  }
-  return micros > 0 ? msg("price.about", { total: formatMicros(micros, locale) }) : null;
+  const quote = keyframeEstimate(shotIds, overview);
+  if (!quote) return msg("price.unknown");
+  return quote.priceUnknown ? msg("price.unknown") : msg("price.about", { total: formatMicros(quote.micros, locale) });
 }
 
 function choiceAction(note: NoteView, index: number, overview: GenerationOverview, proposals: readonly DirectorProposal[], locale: string): NoteBannerAction {
@@ -114,7 +107,7 @@ function choiceAction(note: NoteView, index: number, overview: GenerationOvervie
     case "regenerate": {
       const busy = action.shotIds.some((id) => { const shot = overview.shots[id]; return !shot || isWorking(shot.keyframe) || isWorking(shot.video); });
       // A stale note can still be carried out by a regenerate (the server accepts it); only an in-flight job stops it.
-      return { ...base, price: regeneratePrice(action.shotIds, overview, locale), enabled: note.state !== "resolved" && !busy };
+      return { ...base, price: regeneratePrice(action.shotIds, overview, locale), enabled: note.state !== "resolved" && !busy && keyframeEstimate(action.shotIds, overview) !== null };
     }
     case "edit": return { ...base, enabled: note.state !== "resolved" };
     default: return base;
@@ -182,7 +175,17 @@ export interface NoteCallout {
   /** For a settled note: the choice that settled it ("Keep maroon"). */
   doneLabel: Label | null;
   /** An open note's regenerate choice for this shot, offered as a link under the chip (as in the design). */
-  regenerate: { choiceIndex: number; label: Label; price: Msg | null } | null;
+  regenerate: {
+    choiceIndex: number;
+    /** The full choice, as the banner names it ("Regenerate 2.2 · about $0.04"): the link's tooltip. */
+    label: Label;
+    /** What the link shows on the card before its price ("New take", "2 new takes"); the card names the shot. */
+    take: Msg;
+    /** The shots it remakes, read after the short label by a screen reader ("2.2"). */
+    shots: string;
+    price: Msg | null;
+    enabled: boolean;
+  } | null;
 }
 
 const CLAUSE_END = /[,;:，。；：！？!?]|\.(?=\s|$)|\s[—–]\s/;
@@ -201,6 +204,11 @@ export function noteCallout(note: NoteView, shotId: string, overview: Generation
   const chosen = note.choices.find((choice) => choice.chosen) ?? null;
   const regenerateIndex = note.choices.findIndex((choice) => choice.action.kind === "regenerate" && choice.action.shotIds.includes(shotId));
   const regenerate = !done && regenerateIndex >= 0 ? note.choices[regenerateIndex]! : null;
+  const ids = regenerate?.action.kind === "regenerate" ? regenerate.action.shotIds : [];
+  const estimate = keyframeEstimate(ids, overview);
+  const unique = [...new Set(ids)];
+  const shots = unique.map((id) => overview.shots[id]?.label ?? "?").join(", ");
+  const priced = !!estimate && !estimate.priceUnknown;
   return {
     noteId: note.noteId,
     letter: note.letter,
@@ -208,7 +216,15 @@ export function noteCallout(note: NoteView, shotId: string, overview: Generation
     done,
     doneLabel: done ? chosen?.label ?? null : null,
     regenerate: regenerate && regenerate.action.kind === "regenerate"
-      ? { choiceIndex: regenerateIndex, label: regenerate.label, price: regeneratePrice(regenerate.action.shotIds, overview, locale) }
+      ? {
+        choiceIndex: regenerateIndex,
+        // Keep the price in the link's own label: this purchase remains priced when another note fills the banner.
+        label: priced ? msg("note.choice.regenerate_priced", { shots, price: formatMicros(estimate!.micros, locale) }) : msg("note.choice.regenerate_unpriced", { shots }),
+        take: unique.length > 1 ? msg("note.callout.take_many", { count: unique.length }) : msg("note.callout.take_one"),
+        shots,
+        price: regeneratePrice(ids, overview, locale),
+        enabled: choiceAction(note, regenerateIndex, overview, [], locale).enabled,
+      }
       : null,
   };
 }

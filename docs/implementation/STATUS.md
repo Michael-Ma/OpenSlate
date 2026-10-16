@@ -1,6 +1,6 @@
 # Current implementation status
 
-Reconciled October 16, 2026 (B14 retirement worktree, including the merged B1–B13/B15/B16 source). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 16, 2026 (feature branch after the B17 merge, including B1–B17). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
 
 ## Current branch delivery — P0 to P6
 
@@ -14,7 +14,7 @@ Reconciled October 16, 2026 (B14 retirement worktree, including the merged B1–
 | P3 — server-owned media decisions | B7 keyframes with voice, durable scene confirm and free narration-fit; B8 retained current takes, eligible take selection and media-restoring Undo | Exact frames, timing, provenance and unknown-outcome rules remain; shared unsupported conditioners are unselectable |
 | P4 — Director collaboration | B5 notes/tool contract 5.0.0/V6; B9 held proposals, app-computed Now/After and alongside human edits; B10 bounded generated-frame projection, optional automatic read-only reviews, honest activity/answers and scripted Last Ferry seed | Fake/SVG evidence makes no visual claim; no new live-model acceptance is implied |
 | P5 — remaining views | B6 storyboard-order exports/demo watermark and hold-free Film edits; B11 scene/project management, assets/music/voice; B12 installation diagnostic, personal-voice details, taken-off state, stopped local export and atomic shot edits; B13 request-hold release, quarantine reads, recording import and voice/cross-scene parity | Installer packaging, new voice enrollment and advanced editorial tools remain pending |
-| P6 — retirement and integration | Next-only Plan/Keyframes/Assets/Film/Start/Settings; B14 caller-audited HTTP retirement and current docs; B15 backend integrity fixes and B16 source/layout/recovery fixes | B14's exact checks belong in its report; B16's rendered browser replay is still reserved for the lead |
+| P6 — retirement and integration | Next-only Plan/Keyframes/Assets/Film/Start/Settings; B14 caller-audited HTTP retirement and current docs; B15 backend integrity fixes, B16 source/layout/recovery fixes and B17 web review fixes | B14's exact checks belong in its report; rendered browser replays are run by the lead outside card sandboxes |
 
 ### Current UI areas
 
@@ -45,6 +45,18 @@ Pinned Node **24.15.0**, pnpm **10.33.0** and FFmpeg/ffprobe **8.1.1** passed se
 No web source, browser contract, DDL, frozen catalog or skill package changed. Validation used disposable state, fake transports, synthetic media and loopback tests, with no live model/provider call, external-network request, personal credential/production-state access, production restart or port 3001 listener. Browser replay remains with the lead under the card rules. No commits were made. [Complete route/caller inventory, files, test changes, decisions and proposed commits](../ai/uiux-plan/codex/reports/B14-retire.md).
 
 The following dated sections preserve their actual commands, counts, limitations and review state. Their past-tense “pending” statements are historical; the delivery tables above describe current source. Older pass counts never verify later edits automatically.
+
+## October 16 B17 browser follow-up — lead browser replay
+
+The lead's first B17 browser run passed 158/163. Three failures encoded intentional B17 behaviour (the edit hold on cards and scene pills, priced regeneration) and were updated; the first-run demo toast was a real ordering regression, fixed by publishing it after the destination film opens, fenced by both selection epochs. The lead then changed two price presentations: the inspector's Regenerate keeps its plain name and its exact price stays in the note that describes it (`aria-describedby`), and a card's paid link reads "New take · about $0.04" on one line, with the price wrapping beneath on two-card rows and the link starting below the shot badge. The layout scenario keeps Codex's containment, visibility, nonoverlap and hit-target checks and restores a one-line limit at 1100 px and wider. [Codex per-failure report](../ai/uiux-plan/codex/reports/B17-browser-followup.md).
+
+## October 16 web review fixes — B17 verified
+
+All fifteen B17 web review findings are fixed. Paid regeneration callouts show their selected-shot prices and dispatch the same exact summed quote. Inspector, Plan, settings and music-volume drafts retain their film and opening baseline, survive workspace navigation, surface conflicts without losing text and reject superseded completions. Every inspector selection path respects its edit hold. Reconnect carries retain inspector baseline/duration text, and legacy carries require explicit review. Composer cache removal and persisted command settlement compare the exact owned version/key, preserving another tab's newer unsent draft or uncertain request. Imports, scene preparation and Director/proposal reads retain originating-film/selection identity through asynchronous continuations. Terminal keyframe failures offer fresh priced human generation, partial scenes offer missing frames, and Stop includes retained replacement and exposed narration work.
+
+Pinned Node **24.15.0**, pnpm **10.33.0** and FFmpeg/ffprobe **8.1.1** passed setup/preflight without a download. Final builds passed; **610 frontend tests passed**, zero failures/skips. Full `pnpm test` returned **3,047 passed, zero failures/cancelled/todo and one optional native-probe skip (3,048 total)**. All five package typechecks and `git diff --check` passed. **66 regression cases** were added; two obsolete assertions were updated for priced callouts and honest terminal-failure wording. Independent review found no outstanding must-fix issue.
+
+No browser was launched under the card rules; rendered replay remains the lead's acceptance step. General draft retention is page/store lifetime; existing composer/reconnect persistence retains its stated scope. Narration counts use exposed `making`/`no_answer` states; unexposed speech-preparation counts are not invented. No browser contract, server source, schema, frozen catalog or skill package changed. Checks used fake transports, disposable state and synthetic media, with no real provider/model call, external network request, credential read, production-state access/restart or port 3001 listener. Changes remain uncommitted for lead review. [Per-finding fixes/tests, full inventory, decisions and proposed commits](../ai/uiux-plan/codex/reports/B17-web-review-fixes.md).
 
 ## October 16 merged-branch verification — B16 source checks passed twice; browser replay reserved for lead
 

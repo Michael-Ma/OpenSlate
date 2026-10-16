@@ -92,3 +92,33 @@ test('after a save is answered the editor closes, unless the person typed on whi
   assert.deepEqual(editedKeys(afterTwo), ['seconds']);
   assert.equal(shown(afterTwo, { ...sentTwo }).seconds, 7);
 });
+
+test('B17.10 reverting a field to its opening value while Save waits keeps the reverted text', () => {
+  const original = { purpose: 'Original', motion: 'Static', seconds: 5 };
+  const typed = change(hold(original), original, 'purpose', 'B');
+  const sent = shown(typed, original);
+  const reverted = change(typed, original, 'purpose', 'Original');
+  const rest = afterSave(reverted, sent);
+  assert.ok(rest, 'Original still needs saving because the answered command saved B');
+  assert.deepEqual(rest.base, sent);
+  assert.equal(rest.draft.purpose, 'Original');
+  assert.deepEqual(conflicts(rest, sent), []);
+});
+
+test('B17.10 reverted numeric and formerly untouched fields compare against every submitted value', () => {
+  const original = { text: 'Original', seconds: 5 };
+  const typed = change(hold(original), original, 'seconds', 8);
+  const sent = shown(typed, { ...original, text: 'A new saved value' });
+  const reverted = change(change(typed, original, 'seconds', 5), original, 'text', 'Original');
+  const rest = afterSave(reverted, sent);
+  assert.deepEqual(rest, { base: sent, draft: original });
+});
+
+test('B17.10 an untouched field that followed newer saved text is not reverted after Save', () => {
+  const original = { text: 'Original', seconds: 5 };
+  const typed = change(hold(original), original, 'seconds', 8);
+  const sent = shown(typed, { ...original, text: 'A newer saved value' });
+  assert.equal(afterSave(typed, sent, typed), null);
+  const later = change(typed, original, 'seconds', 5);
+  assert.deepEqual(afterSave(later, sent, typed), { base: sent, draft: { text: sent.text, seconds: 5 } });
+});

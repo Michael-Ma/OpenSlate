@@ -74,7 +74,9 @@ test('card callouts: the first clause on an amber chip, the regenerate link, and
   const notes = lastFerryNotes();
   const views = noteViews(notes, overview, proposals);
   const a = noteCallout(shotCallouts(views, shotId('2.2'))[0], shotId('2.2'), overview, 'en-US');
-  assert.deepEqual([a.letter, a.text, a.done, label(a.regenerate.label), en(a.regenerate.price), a.regenerate.choiceIndex], ['a', "Mara's coat came out maroon", false, 'Regenerate 2.2', 'about $0.04', 1]);
+  assert.deepEqual([a.letter, a.text, a.done, label(a.regenerate.label), en(a.regenerate.price), a.regenerate.choiceIndex], ['a', "Mara's coat came out maroon", false, 'Regenerate 2.2 · about $0.04', 'about $0.04', 1]);
+  // On the card the link is one short line with its price; the card already names the shot (read out after it).
+  assert.deepEqual([en(a.regenerate.take), en(a.regenerate.price), a.regenerate.shots], ['New take', 'about $0.04', '2.2']);
   const b = noteCallout(shotCallouts(views, shotId('2.3'))[0], shotId('2.3'), overview, 'en-US');
   assert.deepEqual([b.letter, b.text, b.regenerate], ['b', 'The 2.3 line runs 7.4 s but…', null]);
   notes[0] = { ...notes[0], state: 'resolved', version: 2, resolution: { choiceIndex: 0, at: 'x' } };

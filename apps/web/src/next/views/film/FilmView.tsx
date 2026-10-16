@@ -4,10 +4,12 @@ import { useNarrow } from "../../app/useNarrow.ts";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { currentPlacements, type PlaybackView } from "../../model/film-audio.ts";
+import { displayedHead } from "../../model/displayed-baseline.ts";
+import { gainRequest, musicGainSession, type GainBaseline, type GainDraft } from "../../model/film-gain.ts";
 import { FilmClock } from "../../model/film-clock.ts";
 import { changeMsg, lastExport, whenMsg, type MediaView } from "../../model/film-export.ts";
 import {
-  editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicGainEdit, musicMuteEdit, musicStartEdit,
+  editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicMuteEdit, musicStartEdit,
   soundtrackOf, type FilmEdit,
 } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
@@ -70,7 +72,8 @@ function FilmWorkspace() {
   const live = mode === "live";
   // A restored studio in recovery review is read-only (app/useWriteGuard.ts): its reason replaces the offline one.
   const locked = useRecoveryLock();
-  const writable = connection === "connected" && !locked;
+  const head = displayedHead(projectId, snapshot, overview);
+  const writable = connection === "connected" && !locked && head !== null;
 
   const exportsRes = useResource<ExportView>("/exports");
   const mediaRes = useResource<MediaView>("/media");
@@ -80,6 +83,8 @@ function FilmWorkspace() {
   const soundtrack = soundtrackOf(snapshot);
   const recordings = useMusicLibrary();
   const music = useMemo(() => filmMusic(soundtrack, recordings ?? [], overview.fps), [soundtrack, recordings, overview.fps]);
+  const gainSession = useMemo(() => musicGainSession(store, projectId ?? ""), [store, projectId]);
+  const gainBaseline = useMemo<GainBaseline | null>(() => head !== null && projectId && music ? { projectId, headVersion: head, audioId: music.audioId, gainDb: music.gainDb } : null, [head, projectId, music?.audioId, music?.gainDb]);
   const demo = !!exportsRes.data?.readiness.demo;
 
   // ---- one clock --------------------------------------------------------------------------
@@ -90,7 +95,7 @@ function FilmWorkspace() {
   useLiveAudio(clock, projectId, placements, live);
 
   // ---- selection -----------------------------------------------------------------------------
-  const [selection, setSelection] = useState<Selection>(null);
+  const [selection, setSelection] = useState<Selection>(() => gainSession.getSnapshot().draft ? { kind: "music" } : null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const selectShot = useCallback((shotId: string, toggle = true) => {
     setSelection((current) => (toggle && current?.kind === "shot" && current.id === shotId ? null : { kind: "shot", id: shotId }));
@@ -130,24 +135,30 @@ function FilmWorkspace() {
   // ---- free edits with Undo ---------------------------------------------------------------------
   const [editing, setEditing] = useState<string | null>(null);
   const editingRef = useRef<string | null>(null);
-  const runEdit = useCallback(async (edit: FilmEdit, toast: Msg) => {
-    const current = store.getState().snapshot;
+  const runEdit = useCallback(async (edit: FilmEdit, toast: Msg, origin: { projectId: string | null; headVersion: number | null } = { projectId, headVersion: head }) => {
+    const state = store.getState();
     const pressId = editPressId(edit);
-    if (!current || editingRef.current) return false;
+    const shownHead = origin.headVersion;
+    const shownProject = origin.projectId;
+    if (shownHead === null || state.projectId !== shownProject || state.snapshot?.project.headVersion !== shownHead || displayedHead(state.projectId, state.snapshot, state.overview) !== shownHead || editingRef.current) {
+      store.dispatch({ type: "toast", message: msg("error.PROJECTION_CHANGED"), tone: "error" });
+      return null;
+    }
+    const epoch = state.projectEpoch;
     editingRef.current = pressId;
     setEditing(pressId);
     try {
-      const body = { ...edit, expectedHeadVersion: current.project.headVersion };
-      const receipt = await store.command<{ commandId: string }>(pressId, body, () => ({ path: "/storyboard", body }));
-      if (receipt) store.dispatch({ type: "toast", message: toast, tone: "info", undoCommandId: receipt.commandId });
+      const body = { ...edit, expectedHeadVersion: shownHead };
+      const receipt = await store.command<{ commandId: string; headVersion?: number }>(pressId, body, () => ({ path: `/api/projects/${encodeURIComponent(shownProject!)}/storyboard`, body }));
+      if (receipt && store.getState().projectEpoch === epoch) store.dispatch({ type: "toast", message: toast, tone: "info", undoCommandId: receipt.commandId });
       // The next edit must carry the head version this one produced.
       await store.refresh();
-      return !!receipt;
+      return receipt ?? null;
     } finally {
       editingRef.current = null;
       setEditing(null);
     }
-  }, [store]);
+  }, [store, head, projectId]);
 
   const selectedShot = selection?.kind === "shot" ? timeline.shots.find((s) => s.shotId === selection.id) ?? null : null;
   const changeLength = (step: -1 | 1) => {
@@ -177,10 +188,11 @@ function FilmWorkspace() {
     const edit = music && musicStartEdit(music, overview.fps, step, timeline.total);
     if (edit) void runEdit(edit, msg("film.toast.music_start", { time: formatClock(Number(edit.kind === "soundtrack" ? edit.value : 0) / overview.fps) }));
   };
-  const musicGain = async (db: number) => {
-    if (!music || Math.round(db) === music.gainDb) return true;
-    return runEdit(musicGainEdit(db), msg("film.toast.music_volume", { db: Math.round(db) }));
-  };
+  const musicGain = useCallback(async (draft: GainDraft) => {
+    const request = gainRequest(draft, gainBaseline);
+    if (!request) return null;
+    return runEdit(request.body, msg("film.toast.music_volume", { db: Math.round(draft.value) }), draft.baseline);
+  }, [gainBaseline, runEdit]);
   const toggleMute = () => {
     if (music) void runEdit(musicMuteEdit(!music.muted), msg(music.muted ? "film.toast.music_on" : "film.toast.music_muted"));
   };
@@ -281,6 +293,7 @@ function FilmWorkspace() {
           )}
         </div>
       </div>
+      {head === null ? <p className="hint" role="status">{t("error.PROJECTION_CHANGED")}</p> : null}
       <div className="film-stage">
         <Player timeline={timeline} clock={clock} music={music} demo={demo} live={live} />
         <ExportPanel
@@ -326,6 +339,8 @@ function FilmWorkspace() {
             writable={writable}
             saving={!!editing}
             onStart={musicStart}
+            baseline={gainBaseline}
+            session={gainSession}
             onGain={musicGain}
             onMute={toggleMute}
             onChange={setMenuAnchor}

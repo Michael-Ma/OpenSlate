@@ -1,8 +1,9 @@
 import type { ShotOverview } from "@openslate/core/public";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useRecoveryLock } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
 import { lengthLimits, shotSeconds, type FilmMusic, type FilmShot } from "../../model/film.ts";
+import { gainConflict, type GainBaseline, type GainDraft, type GainReceipt, type GainSession } from "../../model/film-gain.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 
 interface ShotToolsProps {
@@ -85,8 +86,10 @@ interface MusicToolsProps {
   /** An edit is being saved: a new volume waits for it. */
   saving: boolean;
   onStart(step: -1 | 1): void;
-  /** Saves the volume; false when it was not saved. */
-  onGain(db: number): Promise<boolean>;
+  baseline: GainBaseline | null;
+  session: GainSession;
+  /** Saves this exact authored volume against its frozen film/head. */
+  onGain(draft: GainDraft): Promise<GainReceipt | null>;
   onMute(): void;
   onChange(anchor: HTMLElement): void;
 }
@@ -95,41 +98,33 @@ interface MusicToolsProps {
 export const GAIN_SETTLE_MS = 400;
 
 /** The music track: start, volume (−60 to 0 dB), mute, and Change music (music-role audio only, SB-24). */
-export function MusicTools({ music, total, writable, saving, onStart, onGain, onMute, onChange }: MusicToolsProps) {
+export function MusicTools({ music, total, writable, saving, baseline, session, onStart, onGain, onMute, onChange }: MusicToolsProps) {
   const { t } = useI18n();
-  const [draft, setDraft] = useState(music.gainDb);
-  // A level let go of (the change event: a release, or an arrow key) and not saved yet.
-  const [unsaved, setUnsaved] = useState<number | null>(null);
-  const unsavedRef = useRef<number | null>(null);
-  unsavedRef.current = unsaved;
+  const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const slider = useRef<HTMLInputElement>(null);
-  const commit = useRef(onGain);
-  commit.current = onGain;
+  const draft = state.draft?.value ?? music.gainDb;
+  const conflict = !!state.draft && gainConflict(state.draft, baseline);
   const locked = useRecoveryLock();
   const offline = writable ? undefined : locked ?? t("film.offline");
-  // The saved level shows unless a newer one waits to be saved.
-  useEffect(() => { if (unsavedRef.current === null) setDraft(music.gainDb); }, [music.gainDb]);
-  const save = useCallback((db: number) => {
-    setUnsaved(null);
-    void commit.current(db).then((saved) => { if (!saved && unsavedRef.current === null) setDraft(music.gainDb); });
-  }, [music.gainDb]);
-  // Not on every step of a drag: once the slider is let go, or the arrow keys rest, and never during a save.
+  const save = useCallback(() => {
+    const submitted = session.begin(baseline);
+    if (submitted) void onGain(submitted).then((receipt) => session.complete(submitted, receipt), () => session.complete(submitted, null));
+  }, [session, baseline, onGain]);
+  // The debounce retains its draft's original head. New props can expose a conflict, never renew its authority.
   useEffect(() => {
-    if (unsaved === null || saving) return;
-    const timer = setTimeout(() => save(unsaved), GAIN_SETTLE_MS);
+    if (!state.draft || !state.ready || state.saving || state.failed || saving || !writable || conflict) return;
+    const timer = setTimeout(save, GAIN_SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [unsaved, saving, save]);
+  }, [state, saving, writable, conflict, save]);
   useEffect(() => {
     const input = slider.current;
     if (!input) return;
-    const onChangeDone = () => setUnsaved(Number(input.value));
-    input.addEventListener("change", onChangeDone);
-    return () => input.removeEventListener("change", onChangeDone);
-  }, []);
-  // Closing the tools (Esc, another selection) saves a level that was still waiting.
-  useEffect(() => () => { if (unsavedRef.current !== null) void commit.current(unsavedRef.current); }, []);
-  // Leaving the slider saves at once (unless a save is running; then the timer above saves after it).
-  const onBlur = () => { if (unsaved !== null && !saving) save(unsaved); };
+    const released = () => session.release();
+    input.addEventListener("change", released);
+    return () => input.removeEventListener("change", released);
+  }, [session]);
+  // Leaving the slider saves at once when possible. Unmounting keeps the value above the view, without a POST.
+  const onBlur = () => { if (state.draft && !saving && !state.saving && !state.failed && writable && !conflict) save(); };
   const name = music.label ?? t("film.music.unnamed");
   return (
     <>
@@ -156,11 +151,19 @@ export function MusicTools({ music, total, writable, saving, onStart, onGain, on
           title={offline}
           aria-label={t("film.tools.volume_label")}
           aria-valuetext={t("film.tools.db", { db: draft })}
-          onChange={(event) => setDraft(Number(event.target.value))}
+          onChange={(event) => { if (baseline) session.edit(baseline, Number(event.target.value)); }}
           onBlur={onBlur}
         />
         <output className="num">{t("film.tools.db", { db: draft })}</output>
       </label>
+      {state.draft && conflict ? <span className="hint" role="status" data-act="gain-conflict">
+        {t("film.tools.gain_conflict", { db: music.gainDb })}
+        <button type="button" className="pill sm" data-act="gain-keep" disabled={!baseline || !writable || state.saving} onClick={() => { if (baseline) session.resolve(baseline, true); }}>{t("film.tools.gain_keep")}</button>
+        <button type="button" className="pill sm" data-act="gain-use-saved" disabled={!baseline || !writable || state.saving} onClick={() => { if (baseline) session.resolve(baseline, false); }}>{t("film.tools.gain_use_saved")}</button>
+      </span> : state.failed ? <span className="hint" role="status" data-act="gain-failed">
+        {t("error.FILM_GAIN_SAVE_FAILED")}
+        <button type="button" className="pill sm" data-act="gain-retry" disabled={!writable || saving || state.saving} onClick={save}>{t("film.tools.gain_retry")}</button>
+      </span> : null}
       <span className="inline">
         <span id="fv-mute-label">{t("film.tools.mute")}</span>
         <button type="button" className="switch" role="switch" data-act="mute-switch" aria-checked={music.muted} aria-labelledby="fv-mute-label" disabled={!writable} title={offline} onClick={onMute} />

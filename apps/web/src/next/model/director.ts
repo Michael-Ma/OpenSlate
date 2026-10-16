@@ -18,7 +18,7 @@ export const MESSAGE_LIMIT = 16000;
 // ---- Stop -------------------------------------------------------------------
 
 // A slot queued for a person (waiting for their confirm) does not move by itself, so there is nothing to stop.
-const busySlot = (slot: MediaSlot) => slot.state === "running" || (slot.state === "queued" && slot.waiting?.code !== "review");
+const busySlot = (slot: MediaSlot) => slot.state === "running" || (slot.state === "queued" && slot.waiting?.code !== "review") || slot.replacement?.state === "running" || slot.replacement?.state === "queued";
 
 /**
  * Whether Stop has something to stop (GR-13): a running or waiting Director turn, a running or
@@ -29,7 +29,7 @@ export function canStop(overview: GenerationOverview | null, director: DirectorS
   if (!overview || overview.stopped) return false;
   if (director?.status === "running" || director?.status === "waiting_user") return true;
   if (overview.director.state === "working" || overview.director.state === "waiting_user") return true;
-  if (Object.values(overview.shots).some((shot) => busySlot(shot.keyframe) || busySlot(shot.video))) return true;
+  if (Object.values(overview.shots).some((shot) => busySlot(shot.keyframe) || busySlot(shot.video) || shot.narration.state === "making")) return true;
   return overview.scenes.some((scene) => scene.confirmation?.state === "running");
 }
 

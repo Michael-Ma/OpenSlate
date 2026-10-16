@@ -76,10 +76,13 @@ export const touched = <T extends HeldFields>(held: Held<T> | undefined): boolea
 /**
  * A save of `sent` (what the editor showed when Save was pressed) was answered. When the person typed on after
  * pressing Save (the reply was slow or lost), that newer text stays, now held against what was saved, so the saved
- * values are not taken for someone else's change. Null when nothing is left to save: the editor closes.
+ * values are not taken for someone else's change. `submitted` is the raw draft at the press: an untouched field
+ * that followed a newer saved value differs from `sent` too, but must not be restored to its older opening value.
+ * Null when nothing is left to save: the editor closes.
  */
-export function afterSave<T extends HeldFields>(held: Held<T>, sent: T): Held<T> | null {
-  const newer = editedKeys(held).filter((key) => !same(held.draft[key], sent[key]));
+export function afterSave<T extends HeldFields>(held: Held<T>, sent: T, submitted?: Held<T>): Held<T> | null {
+  const newer = keys(held.draft).filter((key) => !same(held.draft[key], sent[key])
+    && (!submitted || !same(held.draft[key], submitted.draft[key]) || !same(held.base[key], submitted.base[key])));
   if (!newer.length) return null;
   const draft = { ...sent };
   for (const key of newer) draft[key] = held.draft[key];

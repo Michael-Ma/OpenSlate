@@ -42,8 +42,8 @@ function restoreCarry(store: StudioStore, carry: Carry, done: () => void): () =>
     if (keep.shotId) store.selectShot(keep.shotId);
     if (!store.getState().composer.text && keep.text) store.setComposerText(keep.text);
     for (const target of keep.targets) store.pointAt(target);
-    // After the shot is selected (selecting another shot puts an edit away).
-    if (keep.edit && !store.getState().edit) store.setEdit({ ...keep.edit });
+    // Restore the shot before installing its edit hold. Old carries without a baseline require explicit review.
+    if (keep.edit && !store.getState().edit) store.setEdit({ ...keep.edit, expectedHeadVersion: keep.edit.expectedHeadVersion ?? -1 });
     store.dispatch({ type: "toast", message: reconnectedToast(keep), tone: "info" });
   };
   const unsubscribe = store.subscribe(attempt);

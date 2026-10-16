@@ -1,4 +1,4 @@
-import type { PriceQuote } from "@openslate/core/public";
+import type { GenerationOverview, PriceQuote } from "@openslate/core/public";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -20,4 +20,23 @@ export function priceMsg(quote: PriceQuote, locale: string): Msg {
   // A mixed quote (clips plus voice lines) has no single unit price; show only the total.
   if (quote.units > 1 && Number(quote.unitMicros) > 0) return msg("price.about_each", { total: formatMicros(quote.micros, locale), count: quote.units, each: formatMicros(quote.unitMicros, locale) });
   return msg("price.about", { total: formatMicros(quote.micros, locale) });
+}
+
+/** The same selected-shot total for a regeneration label and its expected-price fence. */
+export function keyframeEstimate(shotIds: readonly string[], overview: GenerationOverview): { micros: string; priceUnknown: boolean } | null {
+  if (!shotIds.length) return null;
+  let total = 0n;
+  let priceUnknown = false;
+  for (const id of new Set(shotIds)) {
+    const shot = overview.shots[id];
+    if (!shot) return null;
+    const scene = overview.scenes.find((row) => row.sceneId === shot.sceneId);
+    // A scene fallback is supplied only when every shot has this same exact quote.
+    const quote = shot.quotes?.regenerateKeyframe ?? scene?.quotes.regenerateKeyframe;
+    if (!quote || !/^\d+$/.test(quote.micros)) return null;
+    const micros = BigInt(quote.micros);
+    total += micros;
+    priceUnknown ||= quote.priceUnknown || micros === 0n;
+  }
+  return { micros: String(total), priceUnknown };
 }

@@ -143,3 +143,26 @@ test('unreadable, full or unavailable storage keeps the in-memory composer worki
     assert.equal(text(store), '');
   }
 });
+
+test('B17 #2 sending tab A removes only its version, preserving tab B unsent words on reload', async t => {
+  const storage=memoryStorage(); const a=await studio(t), b=await studio(t);
+  mount(t,a,storage); a.setComposerText('A message'); mount(t,b,storage); b.setComposerText('B newer unsent words');
+  a.dispatch({type:'composerSent'});
+  const reloaded=await studio(t); mount(t,reloaded,storage);
+  assert.equal(text(reloaded),'B newer unsent words');
+});
+
+test('B17 #2 background send cleanup uses the sending tab version, never the current shared version',async t=>{
+  const {ownedDraftVersion,removeDraftVersion}=await import('../../src/next/director/composer-draft.ts');
+  const storage=memoryStorage(),a=await studio(t),b=await studio(t); mount(t,a,storage); a.setComposerText('A sending');
+  mount(t,b,storage); b.setComposerText('B unsent'); const projectId=a.getState().projectId;
+  const version=ownedDraftVersion(a,projectId); a.dispatch({type:'project',projectId:'other'});
+  removeDraftVersion(storage,draftKey(projectId),version);
+  assert.equal(readDraft(storage.getItem(draftKey(projectId))).text,'B unsent');
+});
+
+test('B17 #2 a removed cache version cannot suppress identical new words after a film switch',async t=>{
+ const storage=memoryStorage(),store=await studio(t);mount(t,store,storage);store.setComposerText('Same words');const projectId=store.getState().projectId;
+ store.dispatch({type:'project',projectId:'other'});storage.removeItem(draftKey(projectId));store.dispatch({type:'project',projectId});store.setComposerText('Same words');
+ const reloaded=await studio(t);mount(t,reloaded,storage);assert.equal(text(reloaded),'Same words');
+});

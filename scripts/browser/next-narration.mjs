@@ -371,9 +371,21 @@ export const scenarios = [
       await page.focus('.insp [data-act="narr-stop"]');
       await page.keyboard.press("Escape");
       expect(await page.locator('.insp .narr-progress-row[data-state="sending"]').count() === 1, "Escape closed the panel while sending");
-      // Opening another shot closes the panel: the transfer stops and a toast says so.
-      await openCard(page, "2.3");
+      // Shot cards share the inspector's hold: this unfinished edit cannot disappear through selection.
+      const hold = await page.locator('.card [data-act="open-shot"][data-shot="shot-2-3"]').evaluate((button) => ({ disabled: button.disabled, title: button.title }));
+      expect(hold.disabled && hold.title === "Save or cancel the edit to 2.2 first", `The other card does not explain the recording edit hold: ${JSON.stringify(hold)}`);
+      // Opening another workspace still closes the sending panel: the transfer stops and a toast says so.
+      // The film's inspector draft is retained across views and must be cancelled before selecting another shot.
+      await page.click(".topbar [data-act='tab'][data-view='plan']");
+      await page.waitForSelector('main.work[data-view="plan"]');
       await expectText(page, ".toast", /^Sending the recording for 2\.2 stopped; nothing was added\./, 6000);
+      await page.click(".topbar [data-act='tab'][data-view='keyframes']");
+      await page.waitForSelector('.insp[data-shot="shot-2-2"] form[data-form="narration"]');
+      expect(await page.locator('.card [data-act="open-shot"][data-shot="shot-2-3"]').isDisabled(), "Returning to Keyframes dropped the retained inspector draft");
+      await page.click('.insp [data-act="cancel-edit"]');
+      await page.waitForSelector('.insp form[data-form="narration"]', { state: "detached" });
+      expect(!(await page.locator('.card [data-act="open-shot"][data-shot="shot-2-3"]').isDisabled()), "Cancelling the retained draft did not release shot selection");
+      await openCard(page, "2.3");
       await openCard(page, "2.2");
       await expectText(page, '.insp [data-row="narration"]', /^Narration\s*Edit\s*None/);
     },
