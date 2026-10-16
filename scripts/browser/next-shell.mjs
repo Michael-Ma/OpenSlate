@@ -126,7 +126,7 @@ export const scenarios = [
       expect(layout.title === "The Last Ferry", `Film title reads "${layout.title}"`);
       expect(layout.meta === "48 s · 30 fps", `Film meta reads "${layout.meta}"`);
       expect(layout.counts === "3 scenes · 8 shots", `Counts read "${layout.counts}"`);
-      expect(layout.saved === "Saved locally", `Connection pill reads "${layout.saved}"`);
+      expect(layout.saved === "Synced", `Connection pill reads "${layout.saved}"`);
       expect(!layout.toggleShown, "The Director toggle shows on a wide screen");
       expect(layout.documentTitle === "The Last Ferry · OpenSlate", `Document title is "${layout.documentTitle}"`);
       expect(layout.brand === "OpenSlate, all films", `The mark is labelled "${layout.brand}"`);
@@ -196,7 +196,7 @@ export const scenarios = [
         settings: document.querySelector(".topbar [data-act='settings']")?.getAttribute("aria-label"),
       }));
       expect(zh.lang === "zh-CN", `html lang is ${zh.lang}`);
-      expect(zh.saved === "已保存在本机", `Connection pill reads "${zh.saved}"`);
+      expect(zh.saved === "已同步", `Connection pill reads "${zh.saved}"`);
       expect(zh.counts === "3 场 · 8 个镜头", `Counts read "${zh.counts}"`);
       expect(zh.language === "English", `The language switch reads "${zh.language}"`);
       expect(zh.settings === "设置", `Settings is labelled "${zh.settings}"`);
@@ -491,7 +491,7 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "The live shell never connected");
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Synced", "The live shell never connected");
       // The event stream fails from now on. Hiding and showing the tab drops the open stream and reconnects it.
       const events = /\/api\/projects\/[^/]+\/events/;
       await page.route(events, (route) => route.abort("internetdisconnected"));
@@ -511,6 +511,7 @@ export const scenarios = [
       const api = /\/api\//;
       await page.route(api, (route) => route.abort("internetdisconnected"));
       await page.waitForSelector(".film-strip[data-strip='offline']", { timeout: 9000 });
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Offline", "The pill never said Offline once the studio could not be reached");
       const offline = await text(page, ".film-strip[data-strip='offline'] .txt");
       expect(offline === "Can’t reach the studio. Changes can’t be saved and nothing can be made until it’s back. OpenSlate keeps trying by itself.", `The offline strip reads ${JSON.stringify(offline)}`);
       // Every write is off and says why: edits, paid makes and confirms, and Send (the draft is kept).
@@ -534,7 +535,7 @@ export const scenarios = [
         await page.waitForTimeout(700);
         return page.locator(".film-strip-slot").getAttribute("data-strip");
       }, (value) => value === "none", "Try now did not bring the studio back", 12000);
-      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "Try now did not reconnect");
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Synced", "Try now did not reconnect");
       await until(page, () => text(page, ".toast"), (value) => value.startsWith("Connected again."), "No toast once the studio was back");
     },
   },
@@ -548,7 +549,7 @@ export const scenarios = [
     ],
     async run({ page }) {
       await ready(page);
-      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "The live shell never connected");
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Synced", "The live shell never connected");
       const box = page.locator("[data-field='message']");
       await box.fill("Keep the fog low over the water");
 
@@ -614,7 +615,7 @@ export const scenarios = [
     ],
     async run({ page, origin }) {
       await ready(page);
-      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Saved locally", "The live shell never connected");
+      await until(page, () => text(page, ".topbar .saved"), (value) => value === "Synced", "The live shell never connected");
       // A place to come back to: the last scene, then Plan, with a message not sent yet.
       const scenes = await page.locator("[data-act='scene']").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-scene")));
       const scene = scenes.at(-1);
@@ -702,7 +703,7 @@ export const scenarios = [
     async run({ page, origin }) {
       // Live mode against the fixture studio: the shell shows its project and says it is saved.
       await page.waitForSelector(".app[data-ui='next'] .topbar", { timeout: 20000 });
-      await page.waitForFunction(() => document.querySelector(".topbar .saved")?.textContent === "Saved locally", null, { timeout: 10000 });
+      await page.waitForFunction(() => document.querySelector(".topbar .saved")?.textContent === "Synced", null, { timeout: 10000 });
       const title = await page.evaluate(() => document.querySelector(".topbar .film b")?.textContent ?? "");
       expect(title.length > 0, "The live shell shows no film title");
 

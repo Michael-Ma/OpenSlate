@@ -85,10 +85,17 @@ test('switching language flips between English and Chinese and updates an explic
   assert.equal(searchWithLocale('?lang=en&ui=next', 'zh-CN'), '?lang=zh-CN&ui=next');
 });
 
-test('the connection pill says Saved locally only while connected', () => {
-  assert.deepEqual([en(connectionPill('connected').label), connectionPill('connected').tone], ['Saved locally', 'ok']);
-  assert.equal(en(connectionPill('reconnecting').label), 'Reconnecting…');
+test('the connection pill says Synced, Reconnecting or Offline', () => {
+  assert.deepEqual([en(connectionPill('connected').label), connectionPill('connected').tone], ['Synced', 'ok']);
+  assert.equal(zh(connectionPill('connected').label), '已同步');
+  // The event stream is down but the studio may still answer reads.
+  assert.deepEqual([en(connectionPill('reconnecting').label), connectionPill('reconnecting').tone], ['Reconnecting…', 'waiting']);
   assert.equal(zh(connectionPill('reconnecting').label), '正在重新连接…');
+  // A plain read got no answer either.
+  assert.deepEqual([en(connectionPill('reconnecting', true).label), connectionPill('reconnecting', true).tone], ['Offline', 'offline']);
+  assert.equal(zh(connectionPill('reconnecting', true).label), '离线');
+  // Offline only qualifies a connection that is not up: a connected stream is synced.
+  assert.equal(en(connectionPill('connected', true).label), 'Synced');
   assert.equal(en(connectionPill('connecting').label), 'Connecting…');
   assert.equal(connectionPill('connecting').tone, 'waiting');
   assert.equal(en(connectionPill('expired').label), 'Not connected');

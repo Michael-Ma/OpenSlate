@@ -137,7 +137,7 @@ export function NextApp({ onReconnect }: { onReconnect(): Promise<boolean> }) {
   return (
     <WriteGuardContext.Provider value={guard}>
       <div className={`app${directorOpen ? " dir-open" : ""}`} data-ui="next" data-view={view}>
-        <TopBar inert={drawer} expired={expired} />
+        <TopBar inert={drawer} expired={expired} offline={offline} />
         <DirectorColumn />
         {/* display: contents, so the strip and the view are the grid's second column. */}
         <div className="workspace-slot" inert={drawer}>

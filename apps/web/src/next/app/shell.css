@@ -19,6 +19,9 @@
 .topbar .saved{display:inline-flex;align-items:center;gap:7px}
 .topbar .saved.waiting{color:var(--text);border-style:dashed;border-color:var(--track)}
 .topbar .saved.waiting::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}
+/* Offline: a plain read got no answer either. Still neutral (failures never get a colour), with a hollow dot that stays still. */
+.topbar .saved.offline{color:var(--text);border-style:dashed;border-color:var(--track)}
+.topbar .saved.offline::before{content:"";width:6px;height:6px;border-radius:50%;border:1.5px solid var(--text-2);box-sizing:border-box}
 .topbar .lang{border:0;background:none;color:var(--text-2);font-size:12.5px;font-weight:600;padding:4px 6px;border-radius:6px}
 .topbar .lang:hover{color:var(--text)}
 .topbar .classic-link{color:var(--muted);text-decoration:none;font-size:12.5px;border-radius:4px}
@@ -99,7 +102,7 @@ dialog.shell-dialog::backdrop{background:rgba(8,9,10,.62)}
   .topbar .top-right .stop-btn{order:3;margin-left:8px}
   .topbar .top-right .settings-btn{order:3;margin-left:6px}
   /* Reconnecting gets its own slim row under the tabs instead of crowding the first row. */
-  .topbar .top-right .saved.waiting{display:flex;order:7;flex:1 0 100%;justify-content:center;font-size:11.5px;padding:2px 9px;border-radius:8px}
+  .topbar .top-right .saved.waiting,.topbar .top-right .saved.offline{display:flex;order:7;flex:1 0 100%;justify-content:center;font-size:11.5px;padding:2px 9px;border-radius:8px}
   .topbar .classic-link{order:6;margin-left:auto;padding-left:10px;font-size:12px}
   .topbar .tab:focus-visible{outline-offset:-2px}
   .film-pick-wrap{max-width:100%}

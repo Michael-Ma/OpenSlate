@@ -27,11 +27,16 @@ function Gear() {
 }
 
 /**
- * 52 px bar: the mark (all films), the film, view tabs, Stop while something runs, counts, connection,
- * language, the classic studio, Settings and (narrow) the Director toggle. On Start no film is open, so the bar
- * names the films on this computer and drops the tabs, counts and Stop.
+ * 52 px bar: the mark (all films), the film, view tabs, Stop while something runs, counts, connection (Synced,
+ * Reconnecting, Offline), language, the classic studio, Settings and (narrow) the Director toggle. On Start no film
+ * is open, so the bar names the films on this computer and drops the tabs, counts and Stop.
  */
-export function TopBar({ inert = false, expired = false }: { inert?: boolean; expired?: boolean }) {
+export function TopBar({ inert = false, expired = false, offline = false }: {
+  inert?: boolean;
+  expired?: boolean;
+  /** The studio could not be reached (the shell's reachability check): the pill says Offline. */
+  offline?: boolean;
+}) {
   const store = useStore();
   const { t, tm, locale, setLocale } = useI18n();
   const name = useStudio((s) => s.snapshot?.project.name);
@@ -48,7 +53,7 @@ export function TopBar({ inert = false, expired = false }: { inert?: boolean; ex
   const reachable = useWriteGuard().server;
   const heading = useMemo(() => filmHeading(name, projects, projectId, overview), [name, projects, projectId, overview]);
   const mode = topBarMode(view);
-  const pill = connectionPill(connection);
+  const pill = connectionPill(connection, offline);
   const tabs = viewTabs(view);
   const stop = mode === "film" && showStop(overview, director, reachable, view);
   const [confirming, setConfirming] = useState(false);

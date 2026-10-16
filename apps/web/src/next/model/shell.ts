@@ -121,16 +121,21 @@ export function searchWithLocale(search: string, locale: Locale): string | null 
 
 export interface ConnectionPill {
   label: Msg;
-  /** "ok" while changes reach the studio; "waiting" otherwise. */
-  tone: "ok" | "waiting";
+  /** "ok" while changes reach the studio; "waiting" while it reconnects; "offline" once it cannot be reached. */
+  tone: "ok" | "waiting" | "offline";
 }
 
-export function connectionPill(connection: Connection): ConnectionPill {
+/**
+ * Synced while the studio's events arrive; Reconnecting while the event stream is down but the studio may still
+ * answer; Offline once a plain read got no answer either (`offline`, the shell's reachability check). Before the
+ * first connection it says Connecting, and Not connected once the session ended.
+ */
+export function connectionPill(connection: Connection, offline = false): ConnectionPill {
   switch (connection) {
-    case "connected": return { label: msg("shell.saved"), tone: "ok" };
-    case "connecting": return { label: msg("connect.connecting"), tone: "waiting" };
-    case "reconnecting": return { label: msg("shell.offline"), tone: "waiting" };
-    default: return { label: msg("shell.not_connected"), tone: "waiting" };
+    case "connected": return { label: msg("shell.synced"), tone: "ok" };
+    case "connecting": return offline ? { label: msg("shell.offline"), tone: "offline" } : { label: msg("connect.connecting"), tone: "waiting" };
+    case "reconnecting": return offline ? { label: msg("shell.offline"), tone: "offline" } : { label: msg("shell.reconnecting"), tone: "waiting" };
+    default: return { label: msg("shell.not_connected"), tone: "offline" };
   }
 }
 
