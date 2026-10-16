@@ -5,8 +5,8 @@ import { numberLocale } from "../../i18n/translate.ts";
 import { FILM_NAME_MAX } from "../../model/start.ts";
 import { runCreation, setUpDirector, type CreationResult, type Film } from "../../model/start-commands.ts";
 import {
-  afterFailure, createBody, createdOutcome, creationSteps, directorAfterOpen, effectiveStep, failedMsg, failureNeedsReason, sheetFootMsg, isPlanFileName, modelPlan, modelSummaryText,
-  planFileName, planTextProblem, stepAvailable, JOB_LABEL, PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep, type ProviderCatalog,
+  afterFailure, createBody, createdOutcome, creationSteps, directorAfterOpen, effectiveStep, failedMsg, failureNeedsReason, sheetFootMsg, isPlanFileName, madePlan, modelPlan, modelSummaryText,
+  nameRuns, planFileName, planTextProblem, retryMsg, sheetTitleMsg, stepAvailable, JOB_LABEL, PLAN_TEXT_MAX, type Codex, type CreatedOutcome, type CreationStep, type FirstStep, type ProviderCatalog,
 } from "../../model/start-new.ts";
 import type { Msg } from "../../model/types.ts";
 import { useStore } from "../../store/react.tsx";
@@ -33,8 +33,9 @@ type Phase =
 /**
  * The New film sheet: a name and a first step (Talk to the Director, Bring a written plan, Start an
  * empty outline), this computer's models on request, and Create. Creating is free. A failed Codex
- * check or plan send leaves the film made (and listed at once) and offers Try again, which never makes
- * a second film; when Codex turns out to be missing, Open the film is the way on. Refusals are said
+ * check or plan send leaves the film made (and listed at once): the sheet then says so in its title and foot,
+ * lists the film's models with the Director as it now is, and offers to run that step again (never a
+ * second film); when Codex turns out to be missing, Open the film is the way on. Refusals are said
  * inside the sheet, never only in the toast behind its backdrop.
  */
 export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, onMade, onCreated, onModelsChanged }: {
@@ -158,8 +159,11 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   useEffect(() => { if (failed || refusal) alertRef.current?.scrollIntoView({ block: "nearest" }); }, [failed, refusal]);
 
   const locked = running || !!failed;
-  const summary = plan ? modelSummaryText(plan, tm) : null;
+  // Once the film exists, its models are listed row by row with the Director as it now is; the summary is for choosing.
+  const shown = plan && failed ? madePlan(plan, failed.step, failed.code) : plan;
+  const summary = plan && !failed && !showModels ? modelSummaryText(plan, tm) : null;
   const allReady = !!plan && plan.ready === plan.total;
+  const listed = !!shown && (showModels || !!failed);
   const createOff = running || !!offline || !!problem || modelsLoading;
   const createTitle = offline ?? (modelsLoading ? t("start.models.loading") : undefined);
   const codexHint = codex.state === "not_found" ? t("start.step.needs_codex") : codex.state === "unknown" && !failed ? t("start.step.codex_unknown") : null;
@@ -167,7 +171,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
   return (
     <Dialog className="sheet start-sheet" labelledBy={titleId} onClose={onClose} locked={running} initialFocus={nameRef}>
       <div className="sheet-head">
-        <h2 id={titleId}>{t("start.new.title")}</h2>
+        <h2 id={titleId}>{tm(sheetTitleMsg(!!failed))}</h2>
         <button type="button" className="pill sm" data-act="sheet-close" disabled={running} onClick={onClose}>{t("start.new.close")}</button>
       </div>
       <form id={formId} className="sheet-body" noValidate onSubmit={(event) => { event.preventDefault(); void create(); }}>
@@ -245,24 +249,27 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
         )}
 
         <div className="field">
-          <span className="label">{t("start.models.label")}</span>
+          <span className="label">{t(failed ? "start.models.label_made" : "start.models.label")}</span>
           {providers === null && <span className="hint" role="status" id={modelsHint}>{t("start.models.loading")}</span>}
           {providers === "failed" && <div className="impact"><span className="ic" aria-hidden="true">!</span><span>{t("start.models.unavailable")}</span></div>}
           {summary && (
             <div className={`impact${allReady ? " none" : ""}`}>
               <span className="ic" aria-hidden="true">{allReady ? "✓" : "!"}</span>
-              <span>{summary}</span>
+              {/* A model's own label never breaks inside ("gpt-4o-mini-tts"). */}
+              <span data-summary="models">{nameRuns(summary, plan?.rows.map((row) => row.model ?? "") ?? []).map((run, index) => (run.name ? <span key={index} className="model-name">{run.text}</span> : run.text))}</span>
             </div>
           )}
-          {plan && (
+          {shown && (
             <>
-              <button type="button" className="pill sm ghost see-models" data-act="see-models" aria-expanded={showModels} aria-controls={showModels ? modelsId : undefined} onClick={() => setShowModels((v) => !v)}>
-                {t(showModels ? "start.models.hide" : "start.models.see")}
-              </button>
-              {showModels && (
+              {!failed && (
+                <button type="button" className="pill sm ghost see-models" data-act="see-models" aria-expanded={showModels} aria-controls={showModels ? modelsId : undefined} onClick={() => setShowModels((v) => !v)}>
+                  {t(showModels ? "start.models.hide" : "start.models.see")}
+                </button>
+              )}
+              {listed && (
                 <div id={modelsId} className="models">
                   <dl className="mlist">
-                    {plan.rows.map((row) => (
+                    {shown.rows.map((row) => (
                       <div key={row.job} className="mrow" data-job={row.job}>
                         <dt className="k">{t(JOB_LABEL[row.job])}</dt>
                         <dd className="m"><span className="name">{row.model ?? t("start.model.stand_in")}</span><span className="price">{tm(row.price)}</span></dd>
@@ -288,7 +295,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
         </div>
       </form>
       <div className="sheet-foot">
-        <span className="grow" role="status">{running ? t(PROGRESS[phase.step]) : tm(sheetFootMsg(step, planText))}</span>
+        <span className="grow" role="status">{running ? t(PROGRESS[phase.step]) : tm(sheetFootMsg(step, planText, failed?.film.name ?? null))}</span>
         {failed ? (
           <>
             <button
@@ -301,7 +308,7 @@ export function NewFilmSheet({ initialStep, codex, providers, offline, onClose, 
               {t("start.new.open_anyway")}
             </button>
             {!failed.final && (
-              <button ref={nextRef} type="submit" form={formId} className="pill primary" data-act="create-film" disabled={!!offline || !!problem} title={offline ?? undefined}>{t("start.new.try_again")}</button>
+              <button ref={nextRef} type="submit" form={formId} className="pill primary" data-act="create-film" disabled={!!offline || !!problem} title={offline ?? undefined}>{tm(retryMsg(failed.step))}</button>
             )}
           </>
         ) : (

@@ -385,7 +385,13 @@ export const scenarios = [
       expect((await page.locator("dialog.start-sheet [data-step='director']").getAttribute("aria-checked")) === "true", "Talk to the Director is not the default with Codex");
       await page.keyboard.type("Crossing");
       await page.keyboard.press("Enter");
-      await expectText(page, "dialog.start-sheet .impact.cost", /Crossing was created, and its Codex Director is still being checked\. Try again in a moment/);
+      await expectText(page, "dialog.start-sheet .impact.cost", /Crossing was created, and its Codex Director is still being checked\. Check again in a moment/);
+      // The film exists: the title, the foot and the way on say so, and the Director is not called ready next to that.
+      await expectText(page, "dialog.start-sheet .sheet-head h2", /^Film created$/);
+      await expectText(page, "dialog.start-sheet .sheet-foot .grow", /^Crossing is in your films\.$/);
+      await expectText(page, "dialog.start-sheet [data-act='create-film']", /^Check the Director again$/);
+      await expectText(page, "dialog.start-sheet .mrow[data-job='director']", /Codex · gpt-6-astra[\s\S]*still being checked/);
+      expect(await page.locator("dialog.start-sheet [data-summary='models'], dialog.start-sheet [data-act='see-models']").count() === 0, "The sheet still offers the models as a choice after the film was made");
       await noErrorToast(page, "An error toast sits behind the sheet");
       await inFront(page, "dialog.start-sheet .impact.cost", "The sheet's refusal is not in front");
       expect(await page.locator("dialog.start-sheet [data-act='create-film']").evaluate((el) => el === document.activeElement), "Try again does not have focus");
@@ -519,7 +525,12 @@ export const scenarios = [
       await shot(page, "start-films-390");
       await page.click("main[data-view='start'] [data-act='new-from-plan']");
       await page.waitForSelector("dialog.start-sheet[open]");
+      // A model's label never breaks inside ("gpt-6-/astra"), in the summary or in the list.
+      const split = async (selector) => page.locator(selector).evaluateAll((els) => els.filter((el) => el.getClientRects().length > 1).map((el) => el.textContent));
+      await page.waitForSelector("dialog.start-sheet [data-summary='models'] .model-name");
+      expect(!(await split("dialog.start-sheet .model-name")).length, `Model names break in the summary: ${await split("dialog.start-sheet .model-name")}`);
       await page.click("dialog.start-sheet [data-act='see-models']");
+      expect(!(await split("dialog.start-sheet .mrow .name")).length, `Model names break in the list: ${await split("dialog.start-sheet .mrow .name")}`);
       await noSidewaysScroll(page);
       const sheet = await page.locator("dialog.start-sheet").boundingBox();
       expect(sheet.width <= 390 && sheet.x >= 0, `The sheet is ${sheet.width} wide at ${sheet.x}`);
@@ -559,6 +570,8 @@ export const scenarios = [
       await page.waitForSelector("dialog.start-sheet[open]");
       await page.click("dialog.start-sheet [data-act='see-models']");
       await expectText(page, "dialog.start-sheet .mrow[data-job='video']", /每段视频约 \$0\.50/);
+      // The open list replaces the summary instead of repeating it.
+      expect(await page.locator("dialog.start-sheet [data-summary='models']").count() === 0, "The summary repeats the open model list");
       await noSidewaysScroll(page);
       await shot(page, "start-new-zh-1440");
     },

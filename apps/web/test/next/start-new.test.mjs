@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   afterFailure, codexFrom, createBody, createdMsg, createdOutcome, creationSteps, sheetFootMsg, defaultStep, directorAfterOpen, directorSetupBody, effectiveStep, failedMsg, failureNeedsReason,
-  keysMsg, modelPlan, modelSummaryText, notReadyReason, planFileName, planOffReason, planTextProblem, setupStatus, stepAvailable, PLAN_TEXT_MAX,
+  keysMsg, madePlan, modelPlan, modelSummaryText, nameRuns, notReadyReason, planFileName, planOffReason, planTextProblem, retryMsg, setupStatus, sheetTitleMsg, stepAvailable, PLAN_TEXT_MAX,
 } from '../../src/next/model/start-new.ts';
 import { translateMsg } from '../../src/next/i18n/translate.ts';
 
@@ -176,7 +176,7 @@ test('the shown step follows a late Codex answer: an untouched choice moves to t
   assert.equal(effectiveStep('empty', found), 'empty');
 });
 
-test('a failed step after Create: no Codex is final, anything else offers Try again; the sheet adds the refusal’s words when they say more', () => {
+test('a failed step after Create: no Codex is final, anything else offers to run that step again; the sheet adds the refusal’s words when they say more', () => {
   assert.equal(afterFailure('CODEX_NOT_FOUND'), 'final');
   assert.equal(afterFailure('DIRECTOR_SETUP_BUSY'), 'retry');
   assert.equal(afterFailure(null), 'retry');
@@ -185,9 +185,13 @@ test('a failed step after Create: no Codex is final, anything else offers Try ag
     'Harbour was created, but Codex was not found on this computer, so the film starts with the stand-in Director. Once Codex is set up, switch its Director in Settings.');
   assert.match(en(failedMsg('plan', 'director', 'CODEX_NOT_FOUND', 'Harbour')), /cannot read the written plan/);
   // A check still running is not "could not be set up".
-  assert.match(en(failedMsg('director', 'director', 'DIRECTOR_SETUP_BUSY', 'Harbour')), /^Harbour was created, and its Codex Director is still being checked\. Try again in a moment/);
-  assert.match(en(failedMsg('director', 'director', 'DIRECTOR_SETUP_REQUIRED', 'Harbour')), /could not be set up\. Try again/);
-  assert.match(en(failedMsg('plan', 'import', null, 'Harbour')), /the plan was not sent/);
+  assert.match(en(failedMsg('director', 'director', 'DIRECTOR_SETUP_BUSY', 'Harbour')), /^Harbour was created, and its Codex Director is still being checked\. Check again in a moment/);
+  assert.match(en(failedMsg('director', 'director', 'DIRECTOR_SETUP_REQUIRED', 'Harbour')), /could not be set up\. Check it again/);
+  assert.match(en(failedMsg('plan', 'import', null, 'Harbour')), /the plan was not sent\. Send it again/);
+  // The way on names the step it runs again, never a bare "Try again" (that reads as making the film again).
+  assert.equal(en(retryMsg('director')), 'Check the Director again');
+  assert.equal(en(retryMsg('import')), 'Send the plan again');
+  assert.equal(zh(retryMsg('director')), '重新检查导演');
   assert.equal(failureNeedsReason('DIRECTOR_SETUP_REQUIRED'), true);
   assert.equal(failureNeedsReason('NETWORK_ERROR'), true);
   assert.equal(failureNeedsReason('CODEX_NOT_FOUND'), false);
@@ -246,4 +250,38 @@ test('after Create the toast names what happens next; a step that did not finish
   assert.equal(en(sheetFootMsg('plan', 'x')), 'Creating a film is free. Reading the plan uses your Codex plan; no media is made.');
   assert.equal(en(sheetFootMsg('plan', '')), 'Creating a film is free.');
   assert.equal(en(sheetFootMsg('director', 'x')), 'Creating a film is free.');
+});
+
+test('once the film exists, the sheet’s title and foot say so instead of offering to create it', () => {
+  assert.equal(en(sheetTitleMsg(false)), 'New film');
+  assert.equal(en(sheetTitleMsg(true)), 'Film created');
+  assert.equal(zh(sheetTitleMsg(true)), '影片已新建');
+  assert.equal(en(sheetFootMsg('plan', 'Scene 1', 'Crossing')), 'Crossing is in your films.');
+  assert.equal(zh(sheetFootMsg('director', '', 'Crossing')), '《Crossing》已在影片列表里。');
+});
+
+test('once the film exists, its Director row says what became of the check, never “ready” beside a notice that says otherwise', () => {
+  const plan = modelPlan(catalog(allReal(true)), found, 'en');
+  const director = (made) => made.rows.find((r) => r.job === 'director');
+  const busy = madePlan(plan, 'director', 'DIRECTOR_SETUP_BUSY');
+  assert.deepEqual([director(busy).model, en(director(busy).status), director(busy).ok], ['Codex · gpt-6-astra', 'still being checked', false]);
+  assert.deepEqual(busy.rows.slice(1), plan.rows.slice(1), 'the media rows stay as they were');
+  const refused = madePlan(plan, 'director', 'DIRECTOR_SETUP_REQUIRED');
+  assert.deepEqual([en(director(refused).status), director(refused).ok], ['not set up yet', false]);
+  const missing = madePlan(plan, 'director', 'CODEX_NOT_FOUND');
+  assert.deepEqual([director(missing).model, en(director(missing).price), en(director(missing).status)], [null, 'free stand-in', 'Codex not found']);
+  // A plan that was not sent came after the Director was set up: the rows stand.
+  assert.equal(madePlan(plan, 'import', 'NETWORK_ERROR'), plan);
+});
+
+test('the summary splits around each model’s own label, so a label is kept whole on screen', () => {
+  const runs = nameRuns('Codex · gpt-6-astra Director (uses your Codex plan), OpenAI gpt-4o-mini-tts narration.', ['Codex · gpt-6-astra', 'OpenAI gpt-4o-mini-tts', '']);
+  assert.deepEqual(runs, [
+    { text: 'Codex · gpt-6-astra', name: true }, { text: ' Director (uses your Codex plan), ', name: false },
+    { text: 'OpenAI gpt-4o-mini-tts', name: true }, { text: ' narration.', name: false },
+  ]);
+  assert.equal(runs.map((run) => run.text).join(''), 'Codex · gpt-6-astra Director (uses your Codex plan), OpenAI gpt-4o-mini-tts narration.');
+  // The longer of two overlapping labels wins.
+  assert.deepEqual(nameRuns('MiniMax H3 Pro video', ['MiniMax H3', 'MiniMax H3 Pro']), [{ text: 'MiniMax H3 Pro', name: true }, { text: ' video', name: false }]);
+  assert.deepEqual(nameRuns('No keys are set.', []), [{ text: 'No keys are set.', name: false }]);
 });

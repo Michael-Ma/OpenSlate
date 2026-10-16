@@ -248,6 +248,29 @@ export function modelSummaryText(plan: ModelPlan, say: (message: Msg) => string)
   return say(msg("start.models.some_ready", { ready: plan.ready, total: plan.total, models }));
 }
 
+/**
+ * The summary as runs of text, each model's own label on its own, so the view can keep a label whole: a line
+ * never breaks inside "gpt-4o-mini-tts". Labels are matched longest first.
+ */
+export function nameRuns(text: string, names: readonly string[]): { text: string; name: boolean }[] {
+  const wanted = [...new Set(names.filter(Boolean))].sort((a, b) => b.length - a.length);
+  const runs: { text: string; name: boolean }[] = [];
+  let rest = text;
+  while (rest) {
+    let at = -1;
+    let found = "";
+    for (const name of wanted) {
+      const index = rest.indexOf(name);
+      if (index >= 0 && (at < 0 || index < at)) { at = index; found = name; }
+    }
+    if (at < 0) { runs.push({ text: rest, name: false }); break; }
+    if (at > 0) runs.push({ text: rest.slice(0, at), name: false });
+    runs.push({ text: found, name: true });
+    rest = rest.slice(at + found.length);
+  }
+  return runs;
+}
+
 // ---- the first-run "Make your own film" card ----
 
 export interface SetupStatus {
@@ -414,5 +437,30 @@ const CREATED: Record<CreatedOutcome, MessageId> = {
 
 export const createdMsg = (outcome: CreatedOutcome, name: string): Msg => msg(CREATED[outcome], { name });
 
-/** The sheet's foot: creating is free; reading a written plan uses the Codex plan and makes no media. */
-export const sheetFootMsg = (step: FirstStep, planText: string): Msg => msg(step === "plan" && planText.trim() ? "start.new.free_plan" : "start.new.free");
+/**
+ * The sheet's foot: creating is free; reading a written plan uses the Codex plan and makes no media. Once the film
+ * exists (`made`, its name) the foot says where it is instead.
+ */
+export const sheetFootMsg = (step: FirstStep, planText: string, made: string | null = null): Msg =>
+  made !== null ? msg("start.new.made_foot", { name: made }) : msg(step === "plan" && planText.trim() ? "start.new.free_plan" : "start.new.free");
+
+/** The sheet's title: "New film", then "Film created" once the film exists and a later step is what is left. */
+export const sheetTitleMsg = (made: boolean): Msg => msg(made ? "start.new.title_made" : "start.new.title");
+
+/** The way on after a later step did not finish says which step it runs again: never a bare "Try again" (that reads as making the film again). */
+export const retryMsg = (failedAt: Exclude<CreationStep, "create">): Msg => msg(failedAt === "director" ? "start.new.retry_director" : "start.new.retry_import");
+
+/**
+ * The new film's models once it exists and a later step did not finish: the Director row says what became of its
+ * check (not found, still being checked, not set up), so the sheet never calls the Director ready beside a notice
+ * that says it is not. A plan that was not sent leaves the rows as they were (the Director was set up first).
+ */
+export function madePlan(plan: ModelPlan, failedAt: Exclude<CreationStep, "create">, code: string | null): ModelPlan {
+  if (failedAt !== "director") return plan;
+  const rows = plan.rows.map((row): ModelRow => {
+    if (row.job !== "director") return row;
+    if (code === CODEX_NOT_FOUND) return { job: "director", model: null, price: msg("start.price.stand_in"), status: msg("start.ready.codex_missing"), ok: false };
+    return { ...row, status: msg(code === SETUP_BUSY ? "start.ready.director_checking" : "start.ready.director_not_set"), ok: false };
+  });
+  return { ...plan, rows };
+}
