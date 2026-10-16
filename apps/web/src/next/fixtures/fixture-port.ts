@@ -1,20 +1,20 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import { ApiError, type EventOptions, type RequestOptions } from "../api/client.ts";
 import type { MediaSource } from "../media/media-source.ts";
-import type { ProjectSnapshot } from "../model/types.ts";
+import type { DirectorStatus, ProjectSnapshot } from "../model/types.ts";
 import type { StudioPort } from "../store/store.ts";
 import { fixtureCommand } from "./fixture-commands.ts";
 import { fixtureRoute } from "./routes/index.ts";
 import { recoveryRequest } from "./routes/recovery.ts";
 import { DECLINE } from "./routes/types.ts";
-import { fixtureMessage } from "./fixture-director.ts";
+import { applyDirectorPresets, fixtureMessage } from "./fixture-director.ts";
 import { lastFerryDirector, lastFerryOverview, lastFerryProposals, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
 
 /** Mutable fixture state that simulated commands change. */
 export interface FixtureWorld {
   overview: GenerationOverview;
   snapshot: ProjectSnapshot;
-  director: typeof lastFerryDirector;
+  director: DirectorStatus;
   /** Held and settled Director proposals (GET /director/proposals). */
   proposals: DirectorProposal[];
   /** Apply a change, bump the cursor and notify the open event stream, like a server event would. */
@@ -53,6 +53,8 @@ export class FixturePort implements StudioPort {
         port.#timers.add(timer);
       },
     };
+    // The sample Director's `?director=` presets (Codex with pictures, a held edit, a failed reply…).
+    applyDirectorPresets(this.world);
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {

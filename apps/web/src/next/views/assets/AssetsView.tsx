@@ -273,7 +273,7 @@ function Library() {
             <button type="button" className="pill sm" data-act="close-asset" onClick={() => setSheet(false)}>{t("assets.close")}</button>
           </div>
           <div className="sheet-body detail" data-asset={selected ?? undefined}>
-            <AssetDetail detail={detail} tile={selectedTile} headingId="av-sheet-detail-title" onPoint={point} onOpen={open} />
+            <AssetDetail detail={detail} tile={selectedTile} headingId="av-sheet-detail-title" onPoint={point} onOpen={open} onShown={() => setSheet(false)} />
           </div>
         </Sheet>
       )}

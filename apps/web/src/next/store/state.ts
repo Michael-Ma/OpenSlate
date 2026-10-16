@@ -1,7 +1,7 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
 import { NO_RECOVERY, type RecoveryState } from "../model/recovery.ts";
-import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
+import type { ComposerImage, DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 
 export type Connection = "connecting" | "connected" | "reconnecting" | "expired" | "failed";
 
@@ -57,7 +57,8 @@ export interface StudioState {
   assetsFilter: { role: RoleFilter } | null;
   /** Narrow layouts show the Director as a drawer. */
   directorOpen: boolean;
-  composer: { text: string; targets: Target[]; sending: boolean };
+  /** The message being written: its words, what it points at, and the pictures it shows the Director (at most four). */
+  composer: { text: string; targets: Target[]; sending: boolean; images: ComposerImage[] };
   edit: EditDraft | null;
   /** Presses in flight, keyed by press id (e.g. "confirm:scene-2"); a control is disabled while its press is pending. */
   pending: Record<string, true>;
@@ -81,7 +82,7 @@ export const initialState: StudioState = {
   focus: null,
   assetsFilter: null,
   directorOpen: false,
-  composer: { text: "", targets: [], sending: false },
+  composer: { text: "", targets: [], sending: false, images: [] },
   edit: null,
   pending: {},
   toast: null,

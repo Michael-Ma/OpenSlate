@@ -1,7 +1,8 @@
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
 import type { RecoveryState } from "../model/recovery.ts";
-import type { DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
+import { afterSend } from "../model/director.ts";
+import type { ComposerImage, DirectorStatus, Msg, ProjectSnapshot, ProjectSummary, Target, ViewName } from "../model/types.ts";
 import type { Connection, EditDraft, StudioState } from "./state.ts";
 
 export type Action =
@@ -22,7 +23,12 @@ export type Action =
   | { type: "composerText"; text: string }
   | { type: "composerTarget"; target: Target; add: boolean }
   | { type: "composerSending"; sending: boolean }
-  | { type: "composerSent" }
+  /** The composer's pictures for the Director, replaced as a whole (the Director model decides what may be added). */
+  | { type: "composerImages"; images: ComposerImage[] }
+  /** A film's unsent draft, read back from this browser after a reload or a film switch. */
+  | { type: "composerRestore"; text: string; targets: Target[]; images: ComposerImage[] }
+  /** A message was sent: what it carried leaves the composer (all of it when `sent` is left out). */
+  | { type: "composerSent"; sent?: { text: string; targets: readonly Target[]; images: readonly ComposerImage[] } }
   | { type: "edit"; edit: EditDraft | null }
   | { type: "pending"; pressId: string; pending: boolean }
   | { type: "toast"; message: Msg; tone: "info" | "error"; undoCommandId?: string; undoKey?: number }
@@ -40,7 +46,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, projects: action.projects };
     case "project":
       if (action.projectId === state.projectId) return state;
-      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, focus: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false } };
+      return { ...state, projectId: action.projectId, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: null, focus: null, edit: null, pending: {}, composer: { text: "", targets: [], sending: false, images: [] } };
     case "snapshot":
       if (action.snapshot.project.id !== state.projectId) return state;
       // A stale read (lower cursor) never replaces a newer one.
@@ -90,8 +96,13 @@ export function reducer(state: StudioState, action: Action): StudioState {
     }
     case "composerSending":
       return { ...state, composer: { ...state.composer, sending: action.sending } };
+    case "composerImages":
+      return { ...state, composer: { ...state.composer, images: action.images } };
+    case "composerRestore":
+      return { ...state, composer: { text: action.text, targets: action.targets, images: action.images, sending: false } };
     case "composerSent":
-      return { ...state, composer: { text: "", targets: [], sending: false } };
+      // A picture or @ target added while the message was sending stays for the next one.
+      return { ...state, composer: action.sent ? afterSend(state.composer, action.sent) : { text: "", targets: [], sending: false, images: [] } };
     case "edit":
       return { ...state, edit: action.edit };
     case "pending": {

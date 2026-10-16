@@ -8,6 +8,9 @@ import { clock, motionKind, motionTransform } from "../model/motion.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 import { Picture, StatusPill, useOnScreen, useReducedMotion } from "./parts.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { checkedShotPicture, shotKeyframesPath } from "../model/director.ts";
+import type { AssetPage } from "../model/assets.ts";
+import { ShowDirectorButton } from "../director/ShowDirector.tsx";
 
 /** A request to record that the person opened a shot's frame: armed when they navigate to it. */
 export interface OpenIntent {
@@ -131,6 +134,8 @@ export function Preview({ shot, card, fps, playing, intent, onTogglePlay, onEnde
         {card.pictureDimmed && !making ? <span className="status">{t("preview.earlier_take")}</span> : null}
         {canOpen ? <button type="button" className="pill sm" data-act="open-frame" data-shot={shot.shotId} {...openGuard} onClick={() => onOpen(shot.shotId)}>{t("preview.open", { shot: shot.label })}</button> : null}
       </div>
+      {/* The current keyframe can be shown to the Director in the next message, unless a demo provider made it (checked in the library when pressed). */}
+      {current && !making && !card.pictureDimmed ? <ShowDirectorButton candidate={() => checkedShotPicture(shot, (offset) => store.read<AssetPage>(shotKeyframesPath(shot.shotId, offset)))} className="pill sm pv-show" label={t("director.picture.show_shot", { shot: shot.label })} /> : null}
       <div className="pv-bottom">
         {picture && !making ? <p className="pv-caption">{caption}</p> : null}
         <div className="scrub">
