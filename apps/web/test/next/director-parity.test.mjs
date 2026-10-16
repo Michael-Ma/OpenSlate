@@ -186,11 +186,24 @@ test('a failed turn marks the last entry of its request, with the catalog\'s wor
   const snapshot = lastFerrySnapshot(NOW);
   const conversation = [...snapshot.conversation, { id: 'u2', role: 'user', text: 'Colder', requestId: 'r2', at: '2026-10-14T11:00:00' }];
   const turns = [{ id: 't2', requestId: 'r2', state: 'failed', reason: 'failed' }];
-  const words = { ...lastFerryDirector, status: 'error', turn: { requestId: 'r2', state: 'failed', errorCode: 'CODEX_TURN_FAILED' }, message: 'Codex stopped: the model did not respond.' };
-  let view = threadView({ ...snapshot, conversation, turns }, lastFerryOverview(), words, 'en', NOW);
-  assert.deepEqual(view.entries.at(-1).attention, { detail: null, text: 'Codex stopped: the model did not respond.' });
+  // A generic run failure: the server sends no words for it, so the catalog says it.
+  const generic = { ...lastFerryDirector, status: 'error', turn: { requestId: 'r2', state: 'failed', errorCode: 'DIRECTOR_RUN_FAILED' }, message: null };
+  let view = threadView({ ...snapshot, conversation, turns }, lastFerryOverview(), generic, 'zh-CN', NOW);
+  assert.deepEqual([zh(view.entries.at(-1).attention.detail), view.entries.at(-1).attention.text], ['导演出错停止了。发送一条消息重试。', null]);
   assert.equal(view.entries.at(-2).attention, null);
   assert.equal(view.ending, null, 'the marker says it; the ending line would repeat it');
+  // Every code the server words itself is in the catalog, so its English sentence never shows in the Chinese interface.
+  for (const code of ['DIRECTOR_GUIDANCE_UNSUPPORTED', 'DIRECTOR_GUIDANCE_IN_FLIGHT', 'DIRECTOR_TOOLS_BUSY', 'DIRECTOR_TOOLS_STALE', 'DIRECTOR_IMAGE_LIMIT', 'DIRECTOR_IMAGES_UNAVAILABLE']) {
+    const status = { ...generic, turn: { ...generic.turn, errorCode: code }, message: 'An English sentence from the server.' };
+    const attention = failedTurns(turns, status).get('r2');
+    assert.equal(attention.text, null, code);
+    // Product names (OpenSlate, Codex, FFmpeg) stay as they are; nothing else is English.
+    assert.doesNotMatch(zh(attention.detail).replace(/OpenSlate|Codex|FFmpeg|PNG/g, ''), /[A-Za-z]{3,}/, `${code} reads ${zh(attention.detail)}`);
+  }
+  // A code this interface does not know yet shows the Director's own words rather than nothing.
+  const words = { ...generic, turn: { ...generic.turn, errorCode: 'SOMETHING_NEW' }, message: 'Codex stopped: the model did not respond.' };
+  view = threadView({ ...snapshot, conversation, turns }, lastFerryOverview(), words, 'en', NOW);
+  assert.deepEqual(view.entries.at(-1).attention, { detail: null, text: 'Codex stopped: the model did not respond.' });
   const coded = { ...words, turn: { ...words.turn, errorCode: 'DIRECTOR_IMAGE_MISSING' } };
   view = threadView({ ...snapshot, conversation, turns }, lastFerryOverview(), coded, 'zh-CN', NOW);
   assert.equal(zh(view.entries.at(-1).attention.detail), '有图片丢失或无法读取。请重新导入，再发一条新消息。');
@@ -224,11 +237,12 @@ test('held edits: queued slots waiting on edit_pending, grouped by request, off 
   assert.equal(heldEdits(overview, null, null).length, 0);
 });
 
-test('fixture presets: codex takes pictures, held holds Scene 3, failed carries the Director\'s words, markdown adds a rich reply', () => {
+test('fixture presets: codex takes pictures, held holds Scene 3, failed fails like the server does, markdown adds a rich reply', () => {
   const port = new FixturePort();
   applyDirectorPresets(port.world, ['codex', 'held', 'failed', 'markdown']);
   assert.equal(port.world.director.imageAttachmentsAvailable, true);
-  assert.equal(port.world.director.message.startsWith('Codex stopped'), true);
+  // The server sends no words of its own for a generic failure.
+  assert.deepEqual([port.world.director.turn.errorCode, port.world.director.message], ['DIRECTOR_RUN_FAILED', null]);
   const held = heldEdits(port.world.overview, port.world.snapshot, port.world.director);
   assert.deepEqual(held.map(h => [h.requestId, h.labels]), [['request-held', ['3.1', '3.2']]]);
   // Whatever order the list names them in, the sample conversation stays in time order.

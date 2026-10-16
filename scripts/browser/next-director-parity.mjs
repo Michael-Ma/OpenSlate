@@ -253,8 +253,10 @@ export const scenarios = [
       await ready(page);
       const marker = page.locator('[data-entry="request-failed"] .dir-attention');
       await marker.waitFor();
-      const words = (await marker.textContent()).replace(/\s+/g, " ").trim();
-      if (!words.startsWith("!This reply needs attention") || !words.includes("Codex stopped before answering")) fail(`The marker reads ${JSON.stringify(words)}`);
+      // A generic failure carries no words from the server: the catalog says it.
+      const words = [await marker.locator("b").textContent(), await marker.locator("b + span").textContent()];
+      if (words.join("|") !== "This reply needs attention|The Director stopped with an error. Send a message to try again.") fail(`The marker reads ${JSON.stringify(words)}`);
+      if (await marker.locator(".words").count()) fail("The marker shows words the server never sends");
       if (await page.locator('[data-entry="ending"]').count()) fail("The ending line repeats the marker");
       await page.screenshot({ path: shot("failed-reply-1440"), clip: column });
     },
@@ -315,6 +317,8 @@ export const scenarios = [
       if (!(await page.locator('[data-entry="held"] [data-act="release-holds"]').textContent()).includes("放弃这项修改")) fail("Let it go is not in Chinese");
       const marker = (await page.locator(".dir-attention b").textContent()).trim();
       if (marker !== "这条回复需要处理") fail(`The marker reads ${marker}`);
+      const detail = (await page.locator(".dir-attention b + span").textContent()).trim();
+      if (detail !== "导演出错停止了。发送一条消息重试。") fail(`The failure reads ${detail}`);
       await page.locator('.preview [data-act="show-director"]').click();
       await toast(page, /^示例导演看不了图片/);
       await page.screenshot({ path: shot("parity-zh-1440"), clip: column });

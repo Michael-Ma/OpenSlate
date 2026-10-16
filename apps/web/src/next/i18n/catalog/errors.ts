@@ -88,5 +88,10 @@ export const errors = {
   "error.DIRECTOR_IMAGE_MISSING": { en: "A picture is missing or can't be read. Import it again and send a new message.", zh: "有图片丢失或无法读取。请重新导入，再发一条新消息。" },
   "error.DIRECTOR_IMAGE_IDENTITY": { en: "The pictures saved for this message no longer match it. Send a new message with the pictures you mean.", zh: "这条消息保存的图片已对不上。请带上要给导演看的图片，重新发一条消息。" },
   "error.DIRECTOR_IMAGE_TOOL_CHANGED": { en: "FFmpeg on this computer changed. Restart OpenSlate, then send a new message.", zh: "本机的 FFmpeg 有变化。请重启 OpenSlate，再发一条新消息。" },
+  // A Director turn that could not start with this film's saved guidance or tools (the turn's error code).
+  "error.DIRECTOR_GUIDANCE_UNSUPPORTED": { en: "OpenSlate couldn't verify this film's Director guidance. Saved work is kept. Restore the matching OpenSlate files, then send a new message.", zh: "OpenSlate 无法核实这部影片的导演指引。已保存的内容会保留。请恢复匹配的 OpenSlate 应用文件，再发一条新消息。" },
+  "error.DIRECTOR_GUIDANCE_IN_FLIGHT": { en: "This conversation began with older Director guidance. Send a new message to use the current version; saved work is kept.", zh: "这段对话开始时用的是旧版导演指引。发一条新消息即可使用当前版本，已保存的内容会保留。" },
+  "error.DIRECTOR_TOOLS_BUSY": { en: "The Director is busy with a conversation or a setup change. Wait for it to finish, then try again.", zh: "导演正在进行对话或设置变更。请等它完成后再试。" },
+  "error.DIRECTOR_TOOLS_STALE": { en: "The Director's setup changed in the meantime. Saved work is kept; try again or send a new message.", zh: "导演设置在此期间发生了变化。已保存的内容会保留；请重试或再发一条新消息。" },
   "error.DIRECTOR_WORKING": { en: "The Director is still working on this edit. Wait for it to finish, or Stop it first.", zh: "导演还在进行这项修改。请等它完成，或先停止。" },
 } satisfies Record<string, Entry>;

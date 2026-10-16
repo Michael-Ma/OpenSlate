@@ -141,7 +141,8 @@ export const directorRoutes: FixtureRoute[] = [
  * - `no-ffmpeg`: the Codex Director on a computer without FFmpeg: pictures are refused with that reason.
  * - `held`: an unfinished Director edit (stopped before it finished) holds 3.1 and 3.2, so their keyframes wait
  *   on it; the thread offers Let it go.
- * - `failed`: the latest reply failed, and the Director's status carries its own words about why.
+ * - `failed`: the latest reply failed with a generic run failure (DIRECTOR_RUN_FAILED): like the server, the status
+ *   carries no words of its own for it, so the thread says it in the interface language.
  * - `markdown`: one more reply that uses lists, a table, code, links and references.
  */
 export function directorPresets(): string[] {
@@ -201,8 +202,8 @@ export function applyDirectorPresets(world: FixtureWorld, presets: readonly stri
       world.snapshot = { ...world.snapshot, conversation: [...(world.snapshot.conversation ?? []), message], turns: [...(world.snapshot.turns ?? []), turn] };
       const status: DirectorStatus = {
         ...world.director, status: "error", activeRequestId: requestId,
-        turn: { requestId, state: "failed", errorCode: "CODEX_TURN_FAILED" },
-        message: "Codex stopped before answering: the model service did not respond. Saved work is kept; send a follow-up to try again.",
+        turn: { requestId, state: "failed", errorCode: "DIRECTOR_RUN_FAILED" },
+        message: null,
       };
       world.director = status;
     }
