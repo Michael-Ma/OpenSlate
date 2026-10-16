@@ -117,7 +117,7 @@ export const scenarios = [
       await expectText(page, "[data-act='last-export']", /^No export yet$/);
       // Only Scene 1 has clips: Export is off and says why.
       expect(await page.locator("[data-act='export']").isDisabled(), "Export is enabled before every shot has a clip");
-      await expectText(page, "[data-act='why-not']", /^5 shots need a clip and settle the voice in 2\.3 and 3\.2$/);
+      await expectText(page, "[data-act='why-not']", /^5 shots need a clip; settle the voice in 2\.3 and 3\.2$/);
       await expectText(page, "[data-act='export-size']", /^Length 48 s of 6:00 · 1280 × 720 · renders here, free$/);
       const noted = await page.getAttribute(`.blk[data-shot='${shot("2.2")}']`, "aria-label");
       expect(/^2\.2, Medium, \d+ s, .+, Director note a$/.test(noted ?? ""), `2.2's label leaves out its Director note: ${noted}`);
@@ -127,6 +127,21 @@ export const scenarios = [
       expect(done === "rgb(95, 196, 138)", `A made clip is not green: ${done}`);
       // Lanes: the too-long line is not placed; the keyframe-only and empty shots say what they lack.
       await expectText(page, `.vblk[data-shot='${shot("2.3")}']`, /^2\.3\s+7\.4 s, too long · not placed$/);
+      // The readiness table says that more rows follow, and scrolls to the shots the summary names.
+      await expectText(page, "[data-act='checks-more']", /^↓\s+\d more$/);
+      expect((await page.getAttribute("[data-act='checks-more']", "aria-label"))?.startsWith("Show "), "The more-rows count has no name");
+      await page.click("[data-act='checks-more']");
+      await page.waitForFunction(() => !document.querySelector("[data-act='checks-more']"), null, { timeout: 4000 })
+        .catch(() => { throw new Error("Showing more rows did not reach the end of the table"); });
+      const named = await page.evaluate(() => {
+        const table = document.querySelector(".export .checks").getBoundingClientRect();
+        const head = document.querySelector(".export .checks .h").getBoundingClientRect();
+        const row = document.querySelector(".checks [data-shot='shot-3-2'] [role='rowheader']").getBoundingClientRect();
+        return { inView: row.top >= head.bottom - 1 && row.bottom <= table.bottom + 1, headTop: head.top - table.top };
+      });
+      expect(named.inView, "3.2, which the summary names, is not in view after showing more rows");
+      expect(named.headTop <= 2, `The table's header scrolled away: ${named.headTop}px`);
+      await page.locator(".export .checks").evaluate((el) => { el.scrollTop = 0; });
       expect((await page.locator(`.vblk[data-shot='${shot("1.2")}']`).getAttribute("data-state")) === "placed", "1.2's settled line is not placed");
       expect(await page.locator(`.blk.kfonly[data-shot='${shot("2.1")}']`).count() === 1, "2.1 is not drawn as keyframe only");
       await expectText(page, `.blk.empty[data-shot='${shot("3.1")}'] .lack`, /^nothing yet$/);
@@ -322,6 +337,8 @@ export const scenarios = [
       await page.click("[data-act='export']");
       await expectText(page, ".export .big", /^Exporting…\s*MP4 · 50 s · 1280 × 720$/);
       await expectText(page, "[data-act='elapsed']", /^0:0\d elapsed$/);
+      const elapsed = await page.locator("[data-act='elapsed']").evaluate((el) => el.getClientRects().length);
+      expect(elapsed === 1, `The elapsed time breaks across lines (${elapsed} pieces)`);
       expect(await page.locator("[data-act='elapsed']").evaluate((el) => !el.closest("[role='status'], [aria-live]:not([aria-live='off'])")), "The elapsed time is inside a live region and is announced every second");
       await expectText(page, ".export .rendering [role='status']", /^Rendering on this computer$/);
       expect(await page.locator(".export [role='progressbar']").count() === 1, "No progress bar while rendering");
@@ -376,8 +393,11 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await openFilm(page);
-      await expectText(page, "[data-act='export-failed']", /The last export stopped \(RENDER_FAILED\)\./);
+      await expectText(page, "[data-act='export-failed'] > span:last-child", /^The last export stopped\. FFmpeg ended with an error\. You can export again\.$/);
+      expect((await page.getAttribute("[data-act='export-failed']", "title")) === "Failure code: MEDIA_TOOL_FAILED", "The failure code is not kept as a detail");
       await readableChecks(page, { scrolls: true });
+      const bottom = await page.evaluate(() => ({ why: document.querySelector("#fv-export-why").getBoundingClientRect().bottom, panel: document.querySelector(".export").getBoundingClientRect().bottom, scrolls: document.querySelector(".export").scrollHeight > document.querySelector(".export").clientHeight + 1 }));
+      expect(!bottom.scrolls && bottom.panel - bottom.why >= 10, `The note under Export sits on the panel's edge: ${JSON.stringify(bottom)}`);
       expect(!(await page.locator("[data-act='export']").isDisabled()), "Export is off after a failed export");
       await screenshot(page, "failed-1440");
       // A 20-shot film: the table scrolls and the page does not.

@@ -1,4 +1,5 @@
 import type { ExportReadiness, ExportRecord, ExportView, GenerationOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import { isMessageId } from "../i18n/messages.ts";
 import { making } from "./film.ts";
 import { msg, type Msg } from "./types.ts";
 
@@ -87,6 +88,16 @@ export function readinessRows(overview: GenerationOverview, demo: boolean): Read
   return orderedShots(overview).map((shot) => ({ shotId: shot.shotId, label: shot.label, clip: clipCell(shot, demo), voice: voiceCell(shot) }));
 }
 
+/**
+ * How many rows of a scrolling table are still to come below what can be read: a row reaching past `visibleBottom`, or
+ * into the `cover` px over its bottom edge (where the count is drawn), counts. Scrolled to the end, none does.
+ * `bottoms` are the rows' bottom edges in the same coordinates.
+ */
+export function rowsBelow(bottoms: readonly number[], visibleBottom: number, cover = 0, atEnd = false): number {
+  if (atEnd) return 0;
+  return bottoms.filter((bottom) => bottom > visibleBottom - cover + 0.5).length;
+}
+
 /** Why Export is off, from the server's blockers. Labels come from the overview; a list reads naturally per language. */
 export function whyNotReady(readiness: ExportReadiness, overview: GenerationOverview, locale: string): Msg[] {
   const label = (id: string | undefined) => (id && overview.shots[id]?.label) || "";
@@ -104,9 +115,19 @@ export function whyNotReady(readiness: ExportReadiness, overview: GenerationOver
   return reasons;
 }
 
+/**
+ * Why the last export did not finish, in plain words. A render that stopped says why through its failure code's
+ * reason in the errors catalog, put into `text` as {reason}; the code itself is kept only as a detail.
+ */
+export interface ExportFailure {
+  text: Msg;
+  reason: Msg | null;
+  code: string | null;
+}
+
 /** The panel's state: what the current export record says, plus whether a restart left it without an owner. */
 export type PanelState =
-  | { kind: "idle"; failed: Msg | null; cancelled: boolean }
+  | { kind: "idle"; failed: ExportFailure | null; cancelled: boolean }
   | { kind: "rendering"; record: ExportRecord }
   | { kind: "interrupted"; record: ExportRecord };
 
@@ -119,7 +140,7 @@ export function panelState(view: ExportView | null, media: MediaView | null, now
     if (job?.canRecover) return { kind: "interrupted", record: current };
     // Prepared but never started: nothing renders it and nothing can recover it, so offer Export again.
     if (job?.state === "prepared" && job.canRun && elapsedSeconds(job.createdAt ?? current.startedAt, nowMs) >= STALLED_AFTER_SECONDS) {
-      return { kind: "idle", failed: msg("film.export.never_started"), cancelled: false };
+      return { kind: "idle", failed: { text: msg("film.export.never_started"), reason: null, code: null }, cancelled: false };
     }
     return { kind: "rendering", record: current };
   }
@@ -128,10 +149,17 @@ export function panelState(view: ExportView | null, media: MediaView | null, now
   return { kind: "idle", failed: null, cancelled: false };
 }
 
-export function failureMsg(code: string | undefined): Msg {
-  if (code === "MEDIA_NO_COMPLETION") return msg("film.export.failed_no_file");
-  if (code === "MEDIA_PAUSED") return msg("film.export.failed_paused");
-  return msg("film.export.failed", { code: code ?? "RENDER_FAILED" });
+/** A render failure's plain reason: the code's words in the errors catalog, or the general one for a code it lacks. */
+export function renderFailureReason(code: string | undefined): Msg {
+  const id = `error.${code}`;
+  return code && isMessageId(id) ? msg(id) : msg("error.MEDIA_RENDER_FAILED");
+}
+
+export function failureMsg(code: string | undefined): ExportFailure {
+  const detail = code ?? null;
+  if (code === "MEDIA_NO_COMPLETION") return { text: msg("film.export.failed_no_file"), reason: null, code: detail };
+  if (code === "MEDIA_PAUSED") return { text: msg("film.export.failed_paused"), reason: null, code: detail };
+  return { text: msg("film.export.failed"), reason: renderFailureReason(code), code: detail };
 }
 
 /** Codes GET /exports fails with when the chosen music is missing or was never measured (storyboard-capture.ts). */
