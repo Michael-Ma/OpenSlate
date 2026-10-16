@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { digest, parseToolArguments } from '@openslate/core';
+import { digest, parseToolArguments, shotVideoTiming } from '@openslate/core';
 import { FakeProvider } from '@openslate/providers';
 import { verifySkillLock } from '@openslate/director';
 import { Store } from '../dist/persistence/store.js';
@@ -31,7 +31,7 @@ function fixture(t, {scope=['scene-0'], editing=false, turnState='completed'}={}
  const config={repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills')};
  const saved=createDirectorSkillLock(config);verifySkillLock(saved.lock,saved.environment);
  new DirectorContextService(service,saved.environment).bootstrapLock(project.id,saved.lock);
- const human=service.beginRequest(project.id,'local-user','Discuss this scene',{scopeIds:scope,editing}),bridge=service.openEpoch(project.id,human),turn={id:randomUUID(),projectId:project.id,requestId:human.requestId,epochId:bridge.actor.epochId,state:turnState,runtimeId:"fixture",createdAt:"2026-10-15T00:00:00Z"};
+ const human=service.beginRequest(project.id,'local-user','Discuss this scene',{scopeIds:scope==='project'?[project.id]:scope,editing}),bridge=service.openEpoch(project.id,human),turn={id:randomUUID(),projectId:project.id,requestId:human.requestId,epochId:bridge.actor.epochId,state:turnState,runtimeId:"fixture",createdAt:"2026-10-15T00:00:00Z"};
  store.insert('director_turn',turn.id,project.id,turn);
  new DirectorContextService(service,saved.environment).capture(project.id,bridge.actor,{lockId:saved.lock.id,selectedSkillIds:['production','plan-authoring']});
  const token='notes_fixture_token_123456789',app=createApp({service,localToken:token});
@@ -234,4 +234,90 @@ test('proposal preview includes the paid take B8 retains while a replacement is 
  const f=fixture(t),project=f.store.getProject(f.project.id),shot=project.shots[0];
  f.store.insert('node_binding','retained-image',project.id,{id:'retained-image',state:'active',planId:project.activePlanId,node:{kind:'image',shotId:shot.id,intentDigest:shot.promptIntent.image,args:{prompt:shot.imagePrompt}},outputs:{},retainedTake:{candidateId:null,outputs:{image:{artifactId:'retained-frame',sha256:'a'.repeat(64),kind:'image'}}}});
  const p=await propose(f);assert.deepEqual(p.preview.effects,[{shotId:shot.id,effect:'keeps_keyframe'}]);
+});
+
+for (const field of ['brief', 'story', 'narrationScript', 'narrationSource']) test(`project ${field} human edits fence the original Director cursor after later context capture and ABA`, async t => {
+ const f=fixture(t,{scope:'project',editing:true});
+ if (field==='narrationScript') { const project=f.store.getProject(f.project.id);project.narration.script='Original global script';f.store.saveProject(project,project.headVersion); }
+ const original=field==='narrationScript'?f.store.getProject(f.project.id).narration.script:field==='narrationSource'?f.project.narration.source:f.project[field];
+ const directorValue=field==='narrationSource'?'generated':'Earlier Director draft';
+ const prepared=await f.service.prepare(f.project.id,f.bridge.actor,{variant:'project',expectedHeadVersion:f.store.getProject(f.project.id).headVersion,creative:{[field]:directorValue}});
+ for (const value of [field==='narrationSource'?'uploaded':'Human project wording',original]) {
+  if (field==='narrationScript'||field==='narrationSource') {
+   const human=f.service.beginRequest(f.project.id,'local-user','Edit project wording',{source:'app',concurrency:'alongside',editing:true,scopeIds:[f.project.id]});
+   f.service.publishHumanCreativePatch(f.project.id,human,{[field]:value});
+  } else editStoryboard(f.service,f.project.id,{kind:'treatment',field,value,expectedHeadVersion:f.store.getProject(f.project.id).headVersion},randomUUID());
+ }
+ new DirectorContextService(f.service,f.saved.environment).capture(f.project.id,f.bridge.actor,{lockId:f.saved.lock.id,selectedSkillIds:['production','plan-authoring']});
+ await assert.rejects(f.service.prepare(f.project.id,f.bridge.actor,{variant:'project',expectedHeadVersion:f.store.getProject(f.project.id).headVersion,creative:{[field]:directorValue}}),{code:'HUMAN_EDITED_FIELD'});
+ assert.throws(()=>f.service.apply(f.project.id,f.bridge.actor,prepared.id),{code:'HUMAN_EDITED_FIELD'});
+ const untouched=field==='brief'?'story':'brief';
+ const allowed=await f.service.prepare(f.project.id,f.bridge.actor,{variant:'project',expectedHeadVersion:f.store.getProject(f.project.id).headVersion,creative:{[untouched]:'Independent project field'}});
+ assert.ok(allowed.id);assert.equal(f.store.get('epoch',f.bridge.actor.epochId).state,'active');
+});
+
+function acceptedNarration(f) {
+ const project=f.store.getProject(f.project.id),shot=project.shots[0];
+ Object.assign(shot,{desiredFrames:240,narration:{mode:'generated',text:'Accepted original line',voice:'stock'},narrationPending:false,narrationTimingMode:'within_shot',narrationFit:'extend_shot',cueId:'accepted-original'});
+ project.cues.push({id:shot.cueId,meaning:shot.narration.text,durationFrames:210,placementFrames:0,audio:{artifactId:'original-audio',sha256:'a'.repeat(64),kind:'audio'},accepted:true,measured:true});
+ f.store.saveProject(project,project.headVersion);return f.store.getProject(project.id);
+}
+test('proposal acceptance and prepared publication refuse a shot shorter than its accepted narration',async t=>{
+ const f=fixture(t),before=acceptedNarration(f),p=await propose(f,patch({desiredFrames:180}));
+ const response=await accept(f,p);assert.equal(response.json().error?.code,'SHOT_SHORTER_THAN_NARRATION',response.body);
+ assert.deepEqual(f.store.getProject(f.project.id),before);assert.equal((await list(f))[0].state,'held');
+ const human=f.service.beginRequest(f.project.id,'local-user','Shorten through shared publication',{source:'app',concurrency:'alongside',editing:true,scopeIds:['shot-0']});
+ const prepared=await f.service.prepare(f.project.id,human,{variant:'project',expectedHeadVersion:before.headVersion,creative:{updateShots:[{id:'shot-0',desiredFrames:180,reauthorPrompts:true}]}});
+ assert.throws(()=>f.service.apply(f.project.id,human,prepared.id),{code:'SHOT_SHORTER_THAN_NARRATION'});
+ assert.deepEqual(f.store.getProject(f.project.id),before);assert.equal(f.provider.acceptedCount(),0);
+});
+for (const mode of ['generated','none']) test(`undo of a ${mode} narration proposal restores exact accepted readiness and fit`,async t=>{
+ const f=fixture(t),before=acceptedNarration(f),p=await propose(f,patch({narration:{mode,text:mode==='none'?'':'Proposed replacement line',voice:'stock'}}));
+ assert.equal((await accept(f,p)).statusCode,200);
+ const undo=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},randomUUID());assert.equal(undo.statusCode,200,undo.body);
+ const after=f.store.getProject(f.project.id),old=before.shots[0],shot=after.shots[0];
+ for (const field of ['narration','cueId','narrationPending','narrationTimingMode','narrationFit']) assert.deepEqual(shot[field],old[field],field);
+ assert.deepEqual(after.cues,before.cues);assert.equal(shotVideoTiming(after,shot).ready,true);assert.deepEqual(undo.json().leftAlone,[]);
+});
+test('narration proposal undo preserves a later audio acceptance while undoing independent duration',async t=>{
+ const f=fixture(t);acceptedNarration(f);const p=await propose(f,patch({desiredFrames:270,narration:{mode:'generated',text:'Proposed replacement line',voice:'stock'}}));
+ assert.equal((await accept(f,p)).statusCode,200);
+ const later=f.store.getProject(f.project.id),shot=later.shots[0];
+ Object.assign(shot,{cueId:'new-audio',narrationPending:false,narrationFit:'cut_to_shot'});
+ later.cues.push({id:'new-audio',meaning:shot.narration.text,durationFrames:180,placementFrames:0,audio:{artifactId:'later-audio',sha256:'b'.repeat(64),kind:'audio'},accepted:true,measured:true});
+ f.store.saveProject(later,later.headVersion);
+ const undo=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},randomUUID());assert.equal(undo.statusCode,200,undo.body);
+ const after=f.store.getProject(f.project.id);assert.equal(after.shots[0].desiredFrames,240);
+ for (const field of ['narration','cueId','narrationPending','narrationTimingMode','narrationFit']) assert.deepEqual(after.shots[0][field],shot[field],field);
+ assert.deepEqual(after.cues,later.cues);assert.deepEqual(undo.json().leftAlone,[{shotId:'shot-0',field:'narration'}]);assert.equal(shotVideoTiming(after,after.shots[0]).ready,true);
+});
+test('narration proposal undo preserves changes to an original cue while it was detached',async t=>{
+ const f=fixture(t);acceptedNarration(f);const p=await propose(f,patch({narration:{mode:'none',text:'',voice:'stock'}}));
+ assert.equal((await accept(f,p)).statusCode,200);
+ const later=f.store.getProject(f.project.id);later.cues[0].accepted=false;f.store.saveProject(later,later.headVersion);
+ const undo=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},randomUUID());assert.equal(undo.statusCode,200,undo.body);
+ const after=f.store.getProject(f.project.id);assert.deepEqual(after.shots[0].narration,later.shots[0].narration);assert.equal(after.shots[0].cueId,null);
+ assert.deepEqual(after.cues,later.cues);assert.deepEqual(undo.json().leftAlone,[{shotId:'shot-0',field:'narration'}]);
+});
+test('narration proposal undo restores absent acceptance flags exactly',async t=>{
+ const f=fixture(t),before=acceptedNarration(f);delete before.shots[0].narrationPending;delete before.shots[0].narrationFit;f.store.saveProject(before,before.headVersion);
+ const p=await propose(f,patch({narration:{mode:'generated',text:'Proposed line',voice:'stock'}}));assert.equal((await accept(f,p)).statusCode,200);
+ assert.equal((await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},randomUUID())).statusCode,200);
+ const after=f.store.getProject(f.project.id);assert.equal(Object.hasOwn(after.shots[0],'narrationPending'),false);assert.equal(Object.hasOwn(after.shots[0],'narrationFit'),false);assert.equal(shotVideoTiming(after,after.shots[0]).ready,true);
+});
+test('narration proposal undo preserves a later audio edit even when acceptance metadata returns to its old values',async t=>{
+ const f=fixture(t);acceptedNarration(f);const p=await propose(f,patch({narration:{mode:'generated',text:'Proposed line',voice:'stock'}}));assert.equal((await accept(f,p)).statusCode,200);
+ const before=f.store.getProject(f.project.id);
+ // Durable field receipts survive an audio fit edit followed by its own inverse (ABA).
+ for (let i=0;i<2;i++) f.store.appendEvent(f.project.id,'human.fields_changed',{requestId:`later-audio-${i}`,fields:[{shotId:'shot-0',field:'narrationFit'}]});
+ const undo=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},randomUUID());assert.equal(undo.statusCode,200,undo.body);
+ assert.deepEqual(f.store.getProject(f.project.id),before);assert.deepEqual(undo.json().leftAlone,[{shotId:'shot-0',field:'narration'}]);
+});
+test('legacy narration proposals without acceptance snapshots leave narration alone and undo other fields',async t=>{
+ const f=fixture(t);acceptedNarration(f);const p=await propose(f,patch({desiredFrames:270,narration:{mode:'generated',text:'Historical proposed line',voice:'stock'}}));assert.equal((await accept(f,p)).statusCode,200);
+ const record=f.store.get('director_proposal',p.proposalId);delete record.accepted.narration;delete record.accepted.cursor;f.store.put('director_proposal',record.id,f.project.id,record);
+ const before=f.store.getProject(f.project.id),undo=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},randomUUID());assert.equal(undo.statusCode,200,undo.body);
+ const after=f.store.getProject(f.project.id);assert.equal(after.shots[0].desiredFrames,240);
+ for (const field of ['narration','cueId','narrationPending','narrationTimingMode','narrationFit']) assert.deepEqual(after.shots[0][field],before.shots[0][field],field);
+ assert.deepEqual(after.cues,before.cues);assert.deepEqual(undo.json().leftAlone,[{shotId:'shot-0',field:'narration'}]);
 });

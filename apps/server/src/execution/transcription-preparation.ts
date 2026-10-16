@@ -105,6 +105,8 @@ export function assertOwnedTranscriptionPreparation(store: Store, attempt: Reado
     && attempt.leaseOwner === lease.owner && attempt.leaseEpoch === lease.epoch && current.leaseExpiresAt > Date.now(),
   "SUBMISSION_PREPARATION_LEASE_LOST", "Preparation no longer owns its original active lease");
   const proof = resolveTranscriptionPreparationIntent(store, current);
+  invariant(!current.candidateId || !store.get("candidate_stop", current.candidateId),
+    "SUBMISSION_PREPARATION_OBSOLETE", "Stop ended this candidate's unstarted preparation authority");
   const reservation = store.get<{ state: string }>("reservation", proof.reservation.id);
   invariant(reservation?.state === "reserved", "SUBMISSION_PREPARATION_LEASE_LOST", "Preparation requires its original reserved liability");
   new InstallationRecoveryGuard(store).assertFirstSubmit(attempt.projectId, attempt.id);

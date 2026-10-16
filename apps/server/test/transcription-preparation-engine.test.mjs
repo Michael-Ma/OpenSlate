@@ -37,6 +37,48 @@ test("not-yet-due waiting work does not claim a lease or repeat local preparatio
   assert.deepEqual(current(f), saved); assert.deepEqual(f.calls, calls);
 });
 
+test("Stop retires and detaches positively unsent transcription preparation before Continue", async t => {
+  const f = await preparationEngineFixture(t); await f.engine.runReady();
+  const attempt = current(f), consumption = rows(f, "external_allowance_consumption");
+  assert.deepEqual(f.engine.detachUnsent(f.project.id, "human-stop"), { sentJobs: 0, detachedJobs: 1 });
+  assert.equal(current(f).phase, "failed"); assert.equal(current(f).failure.retryAllowed, false);
+  assert.equal(f.store.get("node_binding", f.node.id).candidateId, null);
+  assert.equal(rows(f, "reservation")[0].state, "released");
+  assert.deepEqual(rows(f, "external_allowance_consumption"), consumption);
+  f.control.busy = false; f.engine.setPaused(f.project.id, false, "human-continue");
+  await f.engine.reconcile(); await f.engine.runReady();
+  assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0);
+  assert.equal(rows(f, "attempt").length, 1); assert.equal(current(f).id, attempt.id);
+  assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
+});
+
+test("Stop after verified transcription upload preparation fences the irreversible marker", async t => {
+  const f = await preparationEngineFixture(t), read = f.files.readUpload.bind(f.files);
+  f.files.readUpload = async (...args) => {
+    const upload = await read(...args); f.engine.detachUnsent(f.project.id, "stop-before-marker"); return upload;
+  };
+  f.control.busy = false; await f.engine.runReady();
+  assert.equal(current(f).phase, "failed"); assert.equal(rows(f, "reservation")[0].state, "released");
+  assert.equal(rows(f, "transcription_execution_dispatch").length, 0); assert.equal(f.calls.http, 0);
+  assert.equal(f.calls.credentials, 0); assert.equal(f.store.get("node_binding", f.node.id).candidateId, null);
+});
+
+test("Stop preserves a dispatched transcription's liability and late provider evidence", async t => {
+  const entered = deferred(), release = deferred();
+  const f = await preparationEngineFixture(t, { fetch: async () => { entered.resolve(); await release.promise; return response(); } });
+  f.control.busy = false; const running = f.engine.runReady(); await entered.promise;
+  try {
+    assert.deepEqual(f.engine.detachUnsent(f.project.id, "stop-after-marker"), { sentJobs: 1, detachedJobs: 0 });
+    assert.equal(rows(f, "reservation")[0].state, "reserved");
+    assert.equal(f.store.get("node_binding", f.node.id).candidateId, current(f).candidateId);
+  } finally { release.resolve(); }
+  // This scheduler fixture intentionally omits raw transcript ingestion.
+  await assert.rejects(running, { code: "INVALID_PROVIDER_OUTPUT" });
+  assert.equal(current(f).phase, "ingesting"); assert.equal(f.calls.http, 1);
+  assert.equal(rows(f, "transcription_execution_result")[0].observation.kind, "completed");
+  assert.equal(rows(f, "reservation")[0].state, "reserved");
+});
+
 test("two admitted transcriptions defer independently in one cycle without repeating either spending consumption", async t => {
   const f = await preparationEngineFixture(t); addSecondTranscription(f);
   assert.equal((await f.engine.runReady()).dispatched, 2);

@@ -1,8 +1,9 @@
 import { recordHumanFields } from "./application/human-fields.js";
+import { assertAcceptedNarrationDurationFloor } from "./application/publication-validation.js";
 import { assertUndoUnused, captureMediaUndo, restoreCanonicalUndo, restoreMediaUndo, restoreNarrationWorkspaceUndo, type MediaUndo } from "./storyboard-history.js";
 import { OPENAI_SPEECH_VOICES } from "@openslate/providers";
 import type { FastifyInstance } from "fastify";
-import { digest, DomainError, invariant, newId, shotIntentDigest } from "@openslate/core";
+import { digest, invariant, newId, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord, ShotRecord } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationAudio } from "./narration/types.js";
@@ -199,11 +200,6 @@ export function editStoryboard(
           if (field === "desiredFrames") {
             invariant(typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 90 && entry <= 450,
               "VALIDATION_ERROR", "Use 3–15 seconds per shot.");
-            const cue = next.cues.find(cue => cue.id === row.cueId);
-            if (row.narrationTimingMode === "within_shot" && cue?.accepted && cue.durationFrames > entry)
-              throw new DomainError("SHOT_SHORTER_THAN_NARRATION", "Make the shot longer or cut the accepted narration before shortening it.", {
-                shotId: row.id, narrationFrames: cue.durationFrames, requestedFrames: entry,
-              });
             row.desiredFrames = entry;
           } else {
             invariant(typeof entry === "string" && entry.trim() && entry.length <= 16000,
@@ -494,6 +490,7 @@ export function editStoryboard(
         });
       }
       // Existing in-flight attempts retain their durable receipts and cannot publish into detached candidates.
+      assertAcceptedNarrationDurationFloor(next);
       next = s.store.saveProject(
         { ...next, revisionId: newId() },
         before.headVersion,

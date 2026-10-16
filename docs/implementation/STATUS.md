@@ -1,6 +1,16 @@
 # Current implementation status
 
-Reconciled October 15, 2026 (B13 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+Reconciled October 15, 2026 (B15 worktree). OpenSlate is an early single-user local studio. The implementation supports human testing; a complete production release and real-provider acceptance are not established.
+
+## October 15 backend review fixes — B15 verified
+
+All ten B15 backend findings are fixed. Stop cancels positively unsent preparations, releases their reservations and fences first dispatch while preserving possibly submitted liability. Undo reconnects exact paid operations and verified late outputs without retry authority. Retained outputs expose replacement state/recovery identity; retry projection now shares admission's confirmation/Stop rules, and released speech no longer blocks a new human confirmation. Unsupported conditioning takes are marked unselectable and refused explicitly.
+
+Project Brief/Story/narration fields use the original Director cursor fence. Shared publication validation enforces accepted within-shot narration duration. New proposal acceptances capture exact narration readiness/fit state for a selective inverse that preserves newer audio, ABA edits and changed detached cues; legacy rows without snapshots leave narration alone and report it. Personal project defaults preserve the authored shot voice tag through materialization and restart, while generated recording evidence accepts the supported personal selector with unchanged lineage checks.
+
+Pinned Node 24.15.0, pnpm 10.33.0 and FFmpeg/ffprobe 8.1.1 passed setup/preflight without a download. Final `pnpm build` passed; **205 tests across all eight touched files passed**, including **30 added regression cases**, zero failures/skips/todo. Final `pnpm test` passed **3,054 tests, zero failures and one optional native-probe skip (3,055 total)**. All five package typechecks and `git diff --check` passed. Independent review found no outstanding must-fix issue.
+
+No web source, `studio-api.ts`, DDL, frozen catalog or skill package changed. Checks used disposable stores, fake providers, synthetic audio and stubbed transports. No real provider/model call, external network request, credential read, production-state access/restart or port 3001 listener occurred. Changes remain uncommitted for lead review, as the card rules require. [Per-finding scope, baseline failures, complete inventory, decisions and proposed commits](../ai/uiux-plan/codex/reports/B15-review-fixes.md).
 
 ## October 15 classic UI server parity — B13 verified
 

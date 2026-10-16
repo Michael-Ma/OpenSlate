@@ -80,6 +80,16 @@ test("first dispatch requires the captured original unexpired submitting lease",
   assert.equal(rows(g, "speech_execution_mapping").length, 0);
 });
 
+test("a Stop fence installed during speech preparation refuses the first irreversible dispatch", async t => {
+  let f;
+  f = speechFixture(t, { credential: () => {
+    f.store.insert("candidate_stop", f.attempt.candidateId, f.project.id, { stopId: "stop-before-speech-marker" }); return key;
+  } });
+  await assert.rejects(f.bridge.submit(f.request, context(f)), { code: "SPEECH_EXECUTION_NOT_DISPATCHABLE" });
+  assert.equal(f.calls.http, 0); assert.equal(rows(f, "speech_execution_dispatch").length, 0);
+  assert.equal(rows(f, "speech_execution_result").length, 0);
+});
+
 test("a stale local credential failure cannot preempt the replacement owner's first dispatch", async t => {
   let replacement, first = true;
   const f = speechFixture(t, { credential: () => {

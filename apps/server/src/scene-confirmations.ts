@@ -180,7 +180,7 @@ export class SceneConfirmationRunner {
         this.store.transaction(() => {
           this.fresh(row);
           const saved = workspace.saveWriting(projectId, shotId, { sessionId: step.sessionId!, expectedHeadVersion: this.store.getProject(projectId).headVersion,
-            expectedVersion: this.audio!.narration.workspaceSnapshot(projectId).state.version, text: audio.text, language: /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(audio.text) ? "zh" : "en", mode: "generated", voice, profileRevisionId: audio.profileRevisionId }, stepKey(row, shotId, "writing"));
+            expectedVersion: this.audio!.narration.workspaceSnapshot(projectId).state.version, text: audio.text, language: /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(audio.text) ? "zh" : "en", mode: "generated", voice, profileRevisionId: audio.profileRevisionId }, stepKey(row, shotId, "writing"), { preserveAuthoredVoice: true });
           invariant(saved.segment, "NARRATION_SPEECH_INVALID", "The saved voice line is unavailable");
           step.speechInput = { key: stepKey(row, shotId, "speech"), expectedHeadVersion: saved.headVersion, segmentId: saved.segment.entry.segmentId,
             segmentRevisionId: saved.segment.script.id, profileId: audio.profileId!, voice, instructions: "" };

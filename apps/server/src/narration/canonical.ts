@@ -1,4 +1,5 @@
 import { recordHumanFields } from "../application/human-fields.js";
+import { assertAcceptedNarrationDurationFloor } from "../application/publication-validation.js";
 import { installNarrationPlanRebase, prepareNarrationPlanRebase } from './plan-rebase.js';
 import { digest, invariant, newId, requiredStages, shotIntentDigest, stageInputDigest, STAGE_CONTRACTS, STAGE_CONTRACTS_DIGEST, RECIPE_DIGEST, validateStageRequirements } from "@openslate/core";
 import type { ActorContext, CueRecord, ProjectRecord, StageRequirement } from "@openslate/core";
@@ -181,6 +182,7 @@ export class NarrationCanonicalService {
       this.ensureHolds(projectId, actor);
       const before = this.store.getProject(projectId);
       const beforePublish = this.store.getProject(projectId);
+      assertAcceptedNarrationDurationFloor(candidateNext);
       const next = this.store.saveProject({ ...candidateNext, activePlanId: derived.compiled ? derived.planId : candidateNext.activePlanId }, prepared.expectedHeadVersion);
       recordHumanFields(this.store, beforePublish, next, actor);
       installNarrationPlanRebase(this.production, before, derived);

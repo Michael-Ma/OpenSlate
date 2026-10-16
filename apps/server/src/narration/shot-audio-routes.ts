@@ -199,12 +199,13 @@ export function createShotAudioWorkspace(options: ShotAudioOptions) {
     shotId: string,
     b: SaveShotScript,
     commandKey: string,
+    options?: { preserveAuthoredVoice: true },
   ) => {
     const actor = actorForShot(projectId, b.sessionId, shotId);
     return store.command(
       `local-user:${projectId}:shot-audio-script`,
       commandKey,
-      digest({ shotId, ...b }),
+      digest({ shotId, ...b, ...(options ? { preserveAuthoredVoice: true } : {}) }),
       () => {
         const project = store.getProject(projectId),
           shot = project.shots.find((shot) => shot.id === shotId);
@@ -243,7 +244,11 @@ export function createShotAudioWorkspace(options: ShotAudioOptions) {
         const writing = {
           mode: b.mode,
           text: b.text,
-          voice: b.voice?.startsWith("openai-custom:")
+          // Materialization resolves a project default into the segment source;
+          // it does not change the shot's authored selector or confirmed intent.
+          voice: options?.preserveAuthoredVoice
+            ? (shot.narration?.voice ?? ("stock" as const))
+            : b.voice?.startsWith("openai-custom:")
             ? ("personal" as const)
             : (shot.narration?.voice ?? ("stock" as const)),
         };

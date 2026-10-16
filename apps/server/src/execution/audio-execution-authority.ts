@@ -107,5 +107,7 @@ export function assertSpeechFirstDispatch(store: Store, original: SpeechAdmissio
     && current.attempt.leaseEpoch === expectedLease.epoch && current.attempt.leaseExpiresAt > Date.now()
     && current.attempt.phase === "submitting" && current.reservation.state === "reserved",
   "SPEECH_EXECUTION_NOT_DISPATCHABLE", "Speech no longer owns its original unexpired submitting lease");
+  invariant(!current.attempt.candidateId || !store.get("candidate_stop", current.attempt.candidateId),
+    "SPEECH_EXECUTION_NOT_DISPATCHABLE", "Stop ended this candidate's first-dispatch authority");
   assertNarrationSpeechAttemptCurrent(store, current.attempt);
 }

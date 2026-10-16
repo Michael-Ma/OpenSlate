@@ -13,9 +13,12 @@ export function shotTakes(s: ProductionService, projectId: string, shotId: strin
   invariant(project.shots.some(shot => shot.id === shotId), "NOT_FOUND", "Choose a shot in this film");
   const shot = project.shots.find(s => s.id === shotId)!;
   const row = sceneView(s, projectId, shot.sceneId).view.rows.find(r => r.shotId === shotId)!;
+  const images = s.store.list<NodeBinding>("node_binding", projectId).filter(b => b.state === "active" && b.planId === project.activePlanId &&
+    b.node.kind === "image" && b.node.shotId === shotId);
+  const selectable = images.length === 1 && row.imageNodeId === images[0]!.id;
   return { shotId, keyframes: keyframeTakeHistory(s, projectId, shotId).map(({ artifact, createdAt }) => ({
     artifact: { artifactId: artifact.artifactId, sha256: artifact.sha256, kind: "image" },
-    current: row.imageComplete && row.image?.artifactId === artifact.artifactId, createdAt,
+    current: row.imageComplete && row.image?.artifactId === artifact.artifactId, createdAt, selectable,
   })) };
 }
 export function useShotTake(s: ProductionService, projectId: string, shotId: string, artifactId: string, key: string): UseTakeReceipt {
@@ -23,6 +26,7 @@ export function useShotTake(s: ProductionService, projectId: string, shotId: str
   return s.store.command(`local-user:${projectId}:use-take`, key, digest({ shotId, artifactId }), () => {
     const project = s.store.getProject(projectId), take = shotTakes(s, projectId, shotId).keyframes.find(t => t.artifact.artifactId === artifactId);
     invariant(take, "NOT_FOUND", "Choose an earlier keyframe of this shot");
+    invariant(take.selectable, "TAKE_NOT_SELECTABLE", "This frame uses a conditioning source this shot cannot switch to; generate a shot keyframe first");
     const bindings = s.store.list<NodeBinding>("node_binding", projectId).filter(b => b.state === "active" && b.planId === project.activePlanId);
     const images = bindings.filter(b => b.node.kind === "image" && b.node.shotId === shotId);
     invariant(images.length === 1, "SCENE_SELECTION_REQUIRED", "Choose one active keyframe operation for this shot");

@@ -86,6 +86,16 @@ test("first preparation requires original submitting owner and never borrows a r
   assert.equal(f.calls.prepare, 0); assert.equal(rows(f, "transcription_execution_result").length, 0);
 });
 
+test("a Stop fence installed after transcription preparation refuses the first irreversible dispatch", async t => {
+  let f;
+  f = await transcriptionFixture(t, { credential: () => {
+    f.store.insert("candidate_stop", f.attempt.candidateId, f.project.id, { stopId: "stop-before-transcription-marker" }); return key;
+  } });
+  await assert.rejects(f.bridge.submit(f.request, context(f)), { code: "TRANSCRIPTION_EXECUTION_NOT_DISPATCHABLE" });
+  assert.equal(f.calls.http, 0); assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
+  assert.equal(rows(f, "transcription_execution_result").length, 0);
+});
+
 test("owned MEDIA_BUSY is a definite local non-dispatch and never automatically prepares again", async t => {
   const f = await transcriptionFixture(t); let called = 0;
   f.preparation.prepare = async () => { called++; throw new DomainError("MEDIA_BUSY", "owned local worker busy"); };
