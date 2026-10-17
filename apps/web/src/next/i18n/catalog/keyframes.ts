@@ -338,6 +338,7 @@ export const keyframes = {
   "check.tail.end_later": { en: "Ends {seconds} s later", zh: "片尾推后 {seconds} 秒" },
   "check.tail.end_from": { en: "Ends at {time}", zh: "在 {time} 结束" },
   "check.all_handled": { en: "Nothing to check in this scene.", zh: "这一场没有需要检查的地方。" },
+  "check.reviewing": { en: "The Director is reviewing these keyframes; its notes will appear here.", zh: "导演正在审阅这些关键帧，备注会显示在这里。" },
   "check.idle": { en: "Checks appear here once this scene has keyframes.", zh: "这一场有了关键帧后，检查会显示在这里。" },
   "preview.caption_plain": { en: "{text}", zh: "{text}" },
   "check.callout.narration": { en: "Narration {line} s, shot {shot} s", zh: "旁白 {line} 秒，镜头 {shot} 秒" },

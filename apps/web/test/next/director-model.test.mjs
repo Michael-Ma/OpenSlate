@@ -389,3 +389,16 @@ test('the thread stays at its bottom unless the reader scrolls away, even when c
   // Once away, a growing thread leaves the reader where they are.
   assert.equal(threadScrolled({ top: 0, height: 980, client: 650 }, null), 'away');
 });
+
+test('the check row knows when the Director is reviewing this scene\'s new keyframes (from the third real run)', async () => {
+  const { reviewingScene } = await import('../../src/next/model/director.ts');
+  const overview = lastFerryOverview();
+  const scene = overview.scenes[1];
+  const review = (state) => [{ id: 't', requestId: 'r', state, action: 'keyframe_review' }];
+  assert.equal(reviewingScene(review('running'), { ...overview, director: { state: 'working', scopeIds: [scene.sceneId] } }, scene.sceneId), true);
+  assert.equal(reviewingScene(review('running'), { ...overview, director: { state: 'working', scopeIds: [scene.shotIds[0]] } }, scene.sceneId), true);
+  assert.equal(reviewingScene(review('running'), { ...overview, director: { state: 'working', scopeIds: [overview.scenes[0].sceneId] } }, scene.sceneId), false, 'another scene under review');
+  assert.equal(reviewingScene(review('completed'), overview, scene.sceneId), false);
+  assert.equal(reviewingScene([{ id: 't', requestId: 'r', state: 'running', action: 'conversation' }], overview, scene.sceneId), false);
+  assert.equal(reviewingScene(undefined, overview, scene.sceneId), false);
+});

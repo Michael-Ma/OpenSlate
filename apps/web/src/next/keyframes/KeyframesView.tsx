@@ -9,6 +9,7 @@ import { confirmPress, keyframesPress, lostReplyHolds, PAID_PRESS, type PressIde
 import { advance, playingShot, type Playback } from "../model/motion.ts";
 import { msg } from "../model/types.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
+import { reviewingScene } from "../model/director.ts";
 import type { EditDraft } from "../store/state.ts";
 import { CheckBanner, type SettledCheck } from "./CheckBanner.tsx";
 import { Inspector } from "./Inspector.tsx";
@@ -66,6 +67,7 @@ function Workspace() {
   const { locale } = useI18n();
   const overview = useStudio((s) => s.overview)!;
   const sceneId = useStudio((s) => s.sceneId);
+  const turns = useStudio((s) => s.snapshot?.turns);
   const shotId = useStudio((s) => s.shotId);
   const draft = useStudio((s) => s.edit);
   const pending = useStudio((s) => s.pending);
@@ -280,6 +282,7 @@ function Workspace() {
         checks={sceneOrdinalChecks}
         attention={view.attention}
         idle={view.scene.state === "not_started"}
+        reviewing={reviewingScene(turns, overview, view.scene.sceneId)}
         settled={settled}
         quiet={notes.allSettled ? msg("note.all_settled") : null}
         busy={Object.keys(pending).some((key) => key.startsWith("edit:") || key.startsWith("fit:"))}
