@@ -26,7 +26,9 @@ test('one film lists keyframe takes, clip, voice, music, upload and export with 
  const f=setup(t),service=new ProductionService(f.store,f.engine),app=createApp({service,localToken:token});t.after(()=>app.close());
  await f.engine.runReady();await f.engine.reconcile();const review=f.engine.reviewSnapshot(f.projectId);
  f.engine.approve(f.projectId,review.id,[review.members[0].videoNodeId],'offline-library-review');await f.engine.runReady();await f.engine.reconcile();
- const p=f.store.getProject(f.projectId),frame=f.store.list('artifact',p.id).find(x=>x.artifact.kind==='image'),shotId=f.store.get('node_binding',f.store.get('attempt',frame.attemptId).nodeId).node.shotId;
+ // The expected shot is the approved clip's own (images of several shots publish in a varying order).
+ const p=f.store.getProject(f.projectId),shotOf=x=>f.store.get('node_binding',f.store.get('attempt',x.attemptId).nodeId).node.shotId;
+ const shotId=shotOf(f.store.list('artifact',p.id).find(x=>x.artifact.kind==='video'&&x.attemptId)),frame=f.store.list('artifact',p.id).find(x=>x.artifact.kind==='image'&&x.attemptId&&shotOf(x)===shotId);
  f.store.insert('artifact','older-saved-take',p.id,{...frame,id:'older-saved-take',artifact:{...frame.artifact,artifactId:'older-saved-take'}});
  const media=id=>({kind:'audio',sha256:'a'.repeat(64),byteLength:192044,probe:{audio:{samples:48000,sampleRate:48000,channels:2}}});
  for(const [id,role] of [['voice-line','voice'],['music','music'],['upload','upload']]){
