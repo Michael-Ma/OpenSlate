@@ -92,7 +92,22 @@ export function SettingsView() {
       if (next) setSection(next);
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(measure); };
-    const landed = () => { jumping.current = 0; schedule(); };
+    // A jump has landed when its section reached the top line, or the page cannot scroll further; a scrollend from an
+    // earlier scroll (it can arrive just after the jump starts) does not end it, so the index never marks a section
+    // the jump is only passing. The jump still ends after a second at most.
+    const landed = () => {
+      const main = document.querySelector<HTMLElement>("main[data-view='settings']");
+      const target = chosen.current ? document.getElementById(chosen.current) : null;
+      if (main && target && Date.now() < jumping.current) {
+        const own = main.scrollHeight > main.clientHeight + 1 && getComputedStyle(main).overflowY !== "visible";
+        const scroller = own ? main : document.scrollingElement ?? document.documentElement;
+        const line = (own ? main.getBoundingClientRect().top : 0) + 24;
+        const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+        if (!atEnd && Math.abs(target.getBoundingClientRect().top - (line - 24)) > 30) return;
+      }
+      jumping.current = 0;
+      schedule();
+    };
     // Scroll events do not bubble, but they reach a capturing listener on the document from any scroller.
     document.addEventListener("scroll", schedule, { capture: true, passive: true });
     document.addEventListener("scrollend", landed, { capture: true, passive: true });
