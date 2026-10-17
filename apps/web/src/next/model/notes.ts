@@ -164,11 +164,15 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
   });
 }
 
-/** Open notes and failed regeneration requests of one scene, blocking ones first, then by letter. */
+/**
+ * Open notes and failed regeneration requests of one scene: blocking ones first, then recommendations before
+ * observations (a note asking for a change leads the banner over one saying a frame works), then by letter.
+ */
 export function sceneOpenNotes(views: readonly NoteView[], sceneId: string): NoteView[] {
+  const rank = (view: NoteView) => (view.blocking ? 0 : view.kind === "recommendation" ? 1 : 2);
   return views
     .filter((view) => (view.state === "open" || view.regeneration === "failed") && view.sceneId === sceneId)
-    .sort((a, b) => Number(b.blocking) - Number(a.blocking) || a.letter.localeCompare(b.letter));
+    .sort((a, b) => rank(a) - rank(b) || a.letter.localeCompare(b.letter));
 }
 
 /** Callout chips for a shot card: every open or recently settled note anchored to that shot. */

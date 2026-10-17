@@ -78,3 +78,11 @@ test('a scene-anchored note names its scene', () => {
   assert.equal(en(views[0].anchor), 'Scene 3');
   assert.equal(views[0].sceneId, sceneId(3));
 });
+
+test('a recommendation leads the banner over an observation (from the LIVE-4b review: "a" said a frame works, "b" asked for a change)', async () => {
+  const { sceneOpenNotes } = await import('../../src/next/model/notes.ts');
+  const view = (letter, kind, blocking = false) => ({ noteId: letter, letter, kind, blocking, state: 'open', sceneId: 's', regeneration: null });
+  assert.deepEqual(sceneOpenNotes([view('a', 'observation'), view('b', 'recommendation')], 's').map((n) => n.letter), ['b', 'a']);
+  assert.deepEqual(sceneOpenNotes([view('a', 'recommendation'), view('b', 'observation', true)], 's').map((n) => n.letter), ['b', 'a'], 'blocking still first');
+  assert.deepEqual(sceneOpenNotes([view('b', 'observation'), view('a', 'observation')], 's').map((n) => n.letter), ['a', 'b']);
+});
