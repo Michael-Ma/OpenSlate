@@ -1,0 +1,226 @@
+[
+  {
+    "name": "phase-01-start.webm",
+    "seconds": 19.0,
+    "bytes": 1294250,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-02-director.webm",
+    "seconds": 8.04,
+    "bytes": 336463,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-03-setup-workaround.webm",
+    "seconds": 24.72,
+    "bytes": 1818029,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-04-director-progress.webm",
+    "seconds": 10.0,
+    "bytes": 535184,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-05-plan.webm",
+    "seconds": 34.4,
+    "bytes": 2447188,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-06-plan-edit-undo.webm",
+    "seconds": 17.72,
+    "bytes": 1563048,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-07-keyframes-progress.webm",
+    "seconds": 5.4,
+    "bytes": 563181,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-08-keyframe-one.webm",
+    "seconds": 2.24,
+    "bytes": 288465,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-09-keyframes-review.webm",
+    "seconds": 6.56,
+    "bytes": 940596,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-10-video.webm",
+    "seconds": 1.92,
+    "bytes": 232717,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-11-video-progress.webm",
+    "seconds": 1.32,
+    "bytes": 160756,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-12-film-export.webm",
+    "seconds": 33.88,
+    "bytes": 2714402,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-13-restart-stop.webm",
+    "seconds": 10.84,
+    "bytes": 1086039,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-14-restart-open.webm",
+    "seconds": 1.28,
+    "bytes": 171926,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-15-assets-settings.webm",
+    "seconds": 24.68,
+    "bytes": 2039900,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  },
+  {
+    "name": "phase-16-settings-evidence.webm",
+    "seconds": 1.32,
+    "bytes": 195884,
+    "decoded": true,
+    "streams": [
+      {
+        "codec_name": "vp8",
+        "width": 1440,
+        "height": 900,
+        "r_frame_rate": "25/1"
+      }
+    ]
+  }
+]

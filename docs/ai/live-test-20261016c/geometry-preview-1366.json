@@ -1,0 +1,63 @@
+[
+  {
+    "tag": "SECTION",
+    "class": "preview",
+    "text": "1.2\n✓\nOpened\nAdd to message\n2 / 2\n\nWide. Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.\n\n0:00\n0:06",
+    "rect": {
+      "x": 414,
+      "y": 166.84375,
+      "width": 664,
+      "height": 373.15625
+    },
+    "fit": "fill"
+  },
+  {
+    "tag": "DIV",
+    "class": "pv-frame",
+    "text": "",
+    "rect": {
+      "x": 415,
+      "y": 167.84375,
+      "width": 662,
+      "height": 285.15625
+    },
+    "fit": "fill"
+  },
+  {
+    "tag": "IMG",
+    "class": "pic-img",
+    "rect": {
+      "x": 415,
+      "y": 167.84375,
+      "width": 662,
+      "height": 285.15625
+    },
+    "fit": "contain",
+    "naturalWidth": 1254,
+    "naturalHeight": 1254
+  },
+  {
+    "tag": "P",
+    "class": "pv-caption",
+    "text": "Wide. Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.",
+    "rect": {
+      "x": 429,
+      "y": 462.5625,
+      "width": 634,
+      "height": 36.4375
+    },
+    "fit": "fill"
+  },
+  {
+    "tag": "DIV",
+    "class": "scrub",
+    "text": "0:00\n0:06",
+    "rect": {
+      "x": 429,
+      "y": 505,
+      "width": 634,
+      "height": 26
+    },
+    "fit": "fill"
+  }
+]

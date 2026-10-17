@@ -1,0 +1,82 @@
+{
+  "checkedAt": "2026-10-16T23:45:02.636Z",
+  "sources": {
+    "before": "diagnostic-before-restart.json",
+    "after": "diagnostic-after-restart.json",
+    "final": "diagnostic-final.json",
+    "setupBefore": "setup-before-restart.json",
+    "setupAfter": "setup-after-restart.json"
+  },
+  "checks": {
+    "projectPreserved": true,
+    "planPreserved": true,
+    "attemptsPreserved": true,
+    "noNewAttemptIdsOnRestart": true,
+    "attemptCountPreserved": true,
+    "mediaSlotsPreserved": true,
+    "exportPreserved": true,
+    "takesPreserved": true,
+    "modelCallCountPreserved": true,
+    "directorTurnsPreserved": true,
+    "noSubmissionsDuringAssetsSettings": true,
+    "noModelCallsDuringAssetsSettings": true,
+    "finalMediaSlotsPreserved": true,
+    "finalExportPreserved": true,
+    "directorSuccessfulCheckPresentBefore": true,
+    "directorSuccessfulCheckPresentAfter": true,
+    "directorSuccessfulCheckPreserved": true,
+    "durationEvidenceComplete": true,
+    "withinRemaining88Seconds": true,
+    "initialSubmissionsAtMostTwo": true,
+    "atMostOneRetryPerShot": true,
+    "noDuplicateVendorJobIds": true,
+    "noUnresolvedOutcomes": true
+  },
+  "allRequiredChecksPassed": true,
+  "optionalChecksNotExercised": [],
+  "counts": {
+    "before": {
+      "attempts": 4,
+      "modelCalls": 2
+    },
+    "after": {
+      "attempts": 4,
+      "modelCalls": 2
+    },
+    "final": {
+      "attempts": 4,
+      "modelCalls": 2
+    }
+  },
+  "takes": [
+    {
+      "number": 1,
+      "before": "takes-1-before-restart.json",
+      "after": "takes-1-after-restart.json",
+      "complete": true,
+      "preserved": true
+    },
+    {
+      "number": 2,
+      "before": "takes-2-before-restart.json",
+      "after": "takes-2-after-restart.json",
+      "complete": true,
+      "preserved": true
+    }
+  ],
+  "directorSuccessfulCheck": {
+    "presentBefore": true,
+    "presentAfter": true,
+    "preserved": true,
+    "checkedAtBefore": "2026-10-16T23:36:13.369Z",
+    "checkedAtAfter": "2026-10-16T23:36:13.369Z"
+  },
+  "exportIdentity": {
+    "exportId": "4a321790-0f81-4a32-9b8d-535a8dcf8f40",
+    "artifact": {
+      "artifactId": "61ab8cd7-d80f-4335-860f-61baf45eda02",
+      "kind": "video",
+      "sha256": "9d5bdf149312d6bbcdc7bae0eb55a4eee7c290c192c663fb81b2fb1a7fa1f5be"
+    }
+  }
+}

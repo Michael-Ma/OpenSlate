@@ -1,0 +1,8 @@
+{
+  "confirmationPreserved": true,
+  "videoAttemptsBeforeReload": 0,
+  "videoAttemptsAfterReload": 0,
+  "finalVideoAttempts": 2,
+  "allVideoOrdinalsOne": true,
+  "limitation": "Reload occurred in the accepted scene confirmation/generation pipeline before the first persisted vendor attempt. No duplicate confirmation or video attempt appeared; this does not test reloading an already-identified remote job."
+}

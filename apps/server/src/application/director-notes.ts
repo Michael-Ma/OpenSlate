@@ -1,5 +1,5 @@
-import { canonical, digest, invariant, newId } from '@openslate/core';
-import type { ActorContext, DirectorNote, ProjectRecord, ResolveNoteInput } from '@openslate/core';
+import { canonical, digest, DomainError, invariant, newId } from '@openslate/core';
+import type { ActorContext, DirectorNote, ProjectRecord, ResolveNoteInput, ReviewNotesFailure } from '@openslate/core';
 import type { FastifyInstance } from 'fastify';
 import type { Store } from '../persistence/store.js';
 import type { ProductionService, RequestRecord } from './service.js';
@@ -45,28 +45,31 @@ export function recordNotes(service: ProductionService, projectId: string, actor
     const allows = (id: string) => request.scopeIds.includes(projectId) || request.scopeIds.includes(id) || project.shots.some(s => s.id === id && request.scopeIds.includes(s.sceneId));
     const start = store.list<DirectorNote>('director_note', projectId).filter(n => n.turnId === turn.id).length;
     const notes = input.notes.map((input, index): DirectorNote => {
+      const check = (value: unknown, code: string, reason: ReviewNotesFailure['reason'], field: string, message: string): void => {
+        if (!value) throw new DomainError(code, `/notes/${index}/${field}: ${message}`, { reason });
+      };
       const anchor = input.anchor, shots = shotsFor(project, anchor);
-      invariant(!anchor.sceneId || project.scenes.some(s => s.id === anchor.sceneId) && allows(anchor.sceneId), 'SCOPE_DENIED', 'Note scene exceeds this request');
-      invariant(!anchor.shotIds || anchor.shotIds.every(id => project.shots.some(s => s.id === id && (!anchor.sceneId || s.sceneId === anchor.sceneId)) && allows(id)), 'SCOPE_DENIED', 'Note shots exceed this request');
-      invariant(shots.every(s => allows(s.id)), 'SCOPE_DENIED', 'Note anchor exceeds this request');
+      check(!anchor.sceneId || project.scenes.some(s => s.id === anchor.sceneId) && allows(anchor.sceneId), 'SCOPE_DENIED', 'outside_scope', 'anchor/sceneId', 'Note scene exceeds this request. Read scenes context and use an existing in-scope scene ID.');
+      check(!anchor.shotIds || anchor.shotIds.every(id => project.shots.some(s => s.id === id && (!anchor.sceneId || s.sceneId === anchor.sceneId)) && allows(id)), 'SCOPE_DENIED', 'outside_scope', 'anchor/shotIds', 'Note shots exceed this request or scene. Read shots context and use existing in-scope shot IDs from the anchored scene.');
+      check(shots.every(s => allows(s.id)), 'SCOPE_DENIED', 'outside_scope', 'anchor', 'Note anchor exceeds this request. Use only the reviewed shots.');
       const ids = new Set(shots.map(s => s.id));
-      for (const choice of input.choices) {
+      for (const [choiceIndex, choice] of input.choices.entries()) {
         if (choice.kind === 'proposal') {
           const proposal = store.get<{ projectId: string; principalId: string; patch: { updateShots?: { id: string }[]; updateScenes?: { id: string }[] } }>('director_proposal', choice.proposalId);
-          invariant(proposal?.projectId === projectId && proposal.principalId === actor.principalId
+          check(proposal?.projectId === projectId && proposal.principalId === actor.principalId
             && (proposal.patch.updateShots ?? []).every(s => ids.has(s.id))
-            && (proposal.patch.updateScenes ?? []).every(s => s.id === anchor.sceneId), 'SCOPE_DENIED', 'Link an owned proposal within this note anchor');
+            && (proposal.patch.updateScenes ?? []).every(s => s.id === anchor.sceneId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/proposalId`, 'Link an owned proposal within this note anchor. Use the proposalId returned by propose_change.');
         }
-        if (choice.kind === 'edit_field') invariant(ids.has(choice.shotId), 'SCOPE_DENIED', 'Edit choice must target an anchored shot');
-        if (choice.kind === 'regenerate_keyframe') invariant(choice.shotIds.every(id => ids.has(id)), 'SCOPE_DENIED', 'Regeneration choice must target anchored shots');
+        if (choice.kind === 'edit_field') check(ids.has(choice.shotId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotId`, 'Edit choice must target an anchored shot. Use an ID from this note anchor.');
+        if (choice.kind === 'regenerate_keyframe') check(choice.shotIds.every(id => ids.has(id)), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotIds`, 'Regeneration choice must target anchored shots. Use IDs from this note anchor.');
       }
-      invariant(!input.blocking || input.choices.some(c => c.kind === 'accept'), 'VALIDATION_ERROR', 'Blocking notes must offer a keep choice');
+      check(!input.blocking || input.choices.some(c => c.kind === 'accept'), 'VALIDATION_ERROR', 'missing_keep_choice', 'choices', 'Blocking notes must offer an accept choice with a short keep label.');
       if (input.seenKeyframe) {
         const seen = input.seenKeyframe;
         const projection = store.get<import('./keyframe-projector.js').KeyframeProjection>('request_keyframe_projection', actor.requestId);
-        invariant(projection?.projectId === projectId && projection.epochId === actor.epochId && ids.has(seen.shotId)
+        check(projection?.projectId === projectId && projection.epochId === actor.epochId && ids.has(seen.shotId)
           && projection.images.some(e => e.shotId === seen.shotId && e.artifactId === seen.artifactId && e.sha256 === seen.sha256),
-          'SCOPE_DENIED', 'The Director was not shown this exact keyframe');
+          'SCOPE_DENIED', 'unseen_keyframe', 'seenKeyframe', 'The Director was not shown this exact keyframe. Copy shotId, artifactId and sha256 from one exact attachedKeyframes entry, or omit visual claims and seenKeyframe if none was attached.');
       }
       return { ...structuredClone(input), noteId: newId(), requestId: actor.requestId, turnId: turn.id, letter: letter(start + index), state: 'open', version: 1, createdAt: new Date().toISOString() };
     });

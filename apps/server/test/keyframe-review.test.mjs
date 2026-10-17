@@ -19,6 +19,7 @@ import { directorProposals, proposalCommand } from '../dist/application/director
 import { seedLastFerry, lastFerryRows } from '../../../scripts/fixtures/last-ferry.mjs';
 import { NarrationService } from '../dist/narration/service.js';
 import { LocalMediaService } from '../dist/media/index.js';
+import { ToolBridge } from '@openslate/director';
 function writable(path) { chmodSync(path,0o700);for(const e of readdirSync(path,{withFileTypes:true}))if(e.isDirectory())writable(join(path,e.name)); }
 function fixture(t) {
  const root=mkdtempSync(join(tmpdir(),'openslate-frame-review-')), store=new Store(join(root,'state.sqlite')), provider=new FakeProvider(join(root,'fake.sqlite'));
@@ -33,7 +34,7 @@ function fixture(t) {
  const press=async(kind='image',extra={})=>{const view=(await http('GET','/scenes/scene-0/generation')).json();return http('POST','/scenes/scene-0/generate',{kind,headVersion:view.headVersion,revisionId:view.revisionId,reviewedHoldDigest:view.reviewedHoldDigest,reviewedControlAuthorityId:view.reviewedControlAuthorityId,reviewedFrames:kind==='video'?view.rows.filter(r=>!r.videoComplete).map(r=>({shotId:r.shotId,artifactId:r.image.artifactId,sha256:r.image.sha256})):[],...extra});};
  const finish=async()=>{for(let i=0;i<6;i++){await engine.runReady();await engine.reconcile();}};
  t.after(async()=>{await director.close();await app.close();store.close();provider.close();writable(root);rmSync(root,{recursive:true,force:true});});
- return {root,store,provider,engine,service,project,director,config,http,press,finish};
+ return {root,store,provider,engine,service,project,director,config,app,http,press,finish};
 }
 test('terminal batch decision waits on unknown, queued and automatic retries; settings and busy suppress it',()=>{
  const batch={imageNodes:[{nodeId:'i',candidateId:'c'}]},binding={id:'i',state:'active',candidateId:'c',outputs:{}};
@@ -137,4 +138,54 @@ test('historical presses without candidate pins do not trigger a retrospective r
  f.store.insert('scene_generation_action','historical',f.project.id,{requestId:'historical',sceneId:'scene-0',kind:'image',shotIds:['shot-0']});
  f.director.tick();await f.director.settle();assert.equal(f.store.list('director_turn',f.project.id).length,0);
  assert.equal((await f.press()).statusCode,200);await f.finish();f.director.tick();await f.director.settle();assert.equal(f.store.list('keyframe_review_batch',f.project.id).length,1);
+});
+
+// LIVE-3 sent two notes with singular anchor.shotId. Text and media identities are synthetic.
+const reviewNotes = () => ({ notes: [0, 1].map(i => ({ anchor: { shotId: `shot-${i}` }, kind: 'observation', blocking: false,
+ text: '[redacted observation]', choices: [{ kind: 'accept', label: 'Keep' }, { kind: 'reply' }] })) });
+test('LIVE-3 refused notes have a precise durable app warning independent of Director prose',async t=>{
+ const f=fixture(t);assert.equal((await f.press()).statusCode,200);await f.finish();
+ f.director.fake.runtime.start=async input=>{
+  const actor=f.service.actorForBridge(f.project.id,input.bridge.credential),tools=new ToolInvocationService(f.service);
+  await assert.rejects(tools.invoke(f.project.id,actor,'live-shape','record_notes',reviewNotes()),error=>
+   error.code==='VALIDATION_ERROR'&&/\/notes\/0\/anchor.*sceneId or shotIds/.test(error.message));
+  return {...input,status:'completed',text:'The review is finished.',dispatched:true};
+ };
+ f.director.tick();await f.director.settle();const snapshot=f.service.snapshot(f.project.id);
+ assert.equal(snapshot.turns[0].state,'completed');assert.equal(snapshot.notes.length,0);
+ assert.deepEqual(snapshot.turns[0].notesSaveFailure,{code:'VALIDATION_ERROR',reason:'invalid_anchor'});
+ assert.equal(snapshot.toolCalls.filter(c=>c.tool==='record_notes'&&c.state==='failed').length,1);
+ assert.doesNotMatch(JSON.stringify(snapshot.turns),/redacted observation|shotId|Keep/);
+ const restarted=new LocalDirectorController(f.service,f.config);restarted.tick();await restarted.settle();await restarted.close();
+ assert.deepEqual(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,snapshot.turns[0].notesSaveFailure);
+ assert.equal(f.provider.acceptedCount(),3,'the review cannot start more media');
+});
+test('fake review corrects LIVE-3 anchors within the same read-only turn and clears its warning',async t=>{
+ const f=fixture(t);assert.equal((await f.press()).statusCode,200);await f.finish();
+ const endpoint=await f.app.listen({port:0,host:'127.0.0.1'});
+ f.director.fake.runtime.start=async input=>{
+  const guide=JSON.parse(input.context).filmPlanning.notes;
+  assert.deepEqual(guide.example.notes[0].anchor,{shotIds:['shot-0']});
+  assert.match(guide.validation,/new call|new.*identity/i);
+  const actor=f.service.actorForBridge(f.project.id,input.bridge.credential),tools=new ToolInvocationService(f.service);
+  assert.equal(f.store.get('epoch',actor.epochId).state,'read_only');
+  const bridge=new ToolBridge({endpoint,projectId:f.project.id,credential:input.bridge.credential,toolContractVersion:'5.0.0'});
+  const wrong=reviewNotes(),refused=await bridge.call('record_notes',wrong);
+  assert.equal(refused.isError,true);assert.equal(refused.value.error.code,'VALIDATION_ERROR');
+  assert.match(refused.value.error.message,/\/notes\/0\/anchor.*sceneId or shotIds/);
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,{code:'VALIDATION_ERROR',reason:'invalid_anchor'});
+  const fixed={notes:wrong.notes.map(n=>({...n,anchor:{shotIds:[n.anchor.shotId]}}))};
+  await assert.rejects(tools.invoke(f.project.id,actor,refused.callId,'record_notes',fixed),{code:'IDEMPOTENCY_CONFLICT'});
+  const corrected=await bridge.call('record_notes',fixed);assert.equal(corrected.isError,false);
+  assert.notEqual(corrected.callId,refused.callId);const saved=corrected.value;
+  assert.deepEqual(saved.notes.map(n=>n.letter),['a','b']);
+  assert.deepEqual(await tools.invoke(f.project.id,actor,corrected.callId,'record_notes',fixed),saved);
+  // An old refused-call replay must not replace the newer successful outcome.
+  await assert.rejects(tools.invoke(f.project.id,actor,refused.callId,'record_notes',wrong),{code:'VALIDATION_ERROR'});
+  return {...input,status:'completed',text:'Saved two review notes.',dispatched:true};
+ };
+ const before=f.store.getProject(f.project.id);f.director.tick();await f.director.settle();const snapshot=f.service.snapshot(f.project.id);
+ assert.equal(snapshot.turns[0].state,'completed');assert.equal(snapshot.notes.length,2);
+ assert.equal(snapshot.turns[0].notesSaveFailure,null);assert.deepEqual(f.store.getProject(f.project.id),before);
+ assert.equal(f.provider.acceptedCount(),3);assert.equal(f.store.list('director_proposal',f.project.id).length,0);
 });

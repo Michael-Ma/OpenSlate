@@ -1,4 +1,4 @@
-import type { DirectorNote, GenerationOverview } from "@openslate/core/public";
+import type { DirectorNote, GenerationOverview, ReviewNotesFailure } from "@openslate/core/public";
 import type { MessageValues } from "../i18n/format.ts";
 import type { MessageId } from "../i18n/messages.ts";
 
@@ -69,6 +69,8 @@ export interface TurnView {
   /** Safe native phase metadata; no reasoning text, arguments or diagnostics. */
   activity?: { phase: "reasoning" | "tool"; state: "started" | "completed"; at: string } | null;
   progress?: { tool: string; state: string } | null;
+  /** The latest refused note batch, cleared when a corrected batch saves; no tool arguments or model prose. */
+  notesSaveFailure?: ReviewNotesFailure | null;
 }
 
 export interface PendingQuestion {

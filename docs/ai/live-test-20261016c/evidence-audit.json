@@ -1,0 +1,17 @@
+{
+  "clips": 16,
+  "allClipsDecode": true,
+  "totalClipSeconds": 203.32,
+  "longestClipSeconds": 34.4,
+  "exportSha256": "9d5bdf149312d6bbcdc7bae0eb55a4eee7c290c192c663fb81b2fb1a7fa1f5be",
+  "matchesArtifactSha256": true,
+  "sensitivePatternHits": 0,
+  "exportFullyDecodes": true,
+  "reportLinksValid": true,
+  "verificationCheckCount": 23,
+  "allVerificationChecksPass": true,
+  "portsFree": {
+    "3001": true,
+    "3199": true
+  }
+}

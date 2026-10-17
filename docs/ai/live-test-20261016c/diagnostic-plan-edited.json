@@ -1,0 +1,304 @@
+{
+  "at": "2026-10-16T23:38:03.106Z",
+  "project": {
+    "activePlanId": null,
+    "artifacts": [],
+    "brief": "A simple, natural 12-second silent film: a white paper boat floating in a rain puddle at dusk. One scene, two shots of 6 seconds each: close-up, then wide with a gentle slow push-in. No people, text, narration, music or sound. Retain selected Codex images and Viggle models; generation only through human scene review buttons.",
+    "capabilityLockId": "918277f4-d1a1-49a0-83e7-85d3eafdd89d",
+    "cues": [],
+    "headVersion": 3,
+    "id": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+    "maxFrames": 10800,
+    "name": "Harbour film LIVE-3",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "c4ad1882-2f54-40c8-b913-fd4ee2fc525f",
+    "scenes": [
+      {
+        "id": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "purpose": "Paper Boat at Dusk",
+        "revisionId": "55529191-9369-49df-8d33-57610a1c6d08"
+      }
+    ],
+    "shots": [
+      {
+        "action": "A white folded-paper boat floats and gently bobs in a rain puddle at dusk.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Close-up",
+        "id": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+        "imagePrompt": "OpenSlate current direction:\nObserve the paper boat quietly up close. A white folded-paper boat floats and gently bobs in a rain puddle at dusk. Close-up\nReference details (retain only where consistent):\nNaturalistic close-up at puddle level of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Soft cool dusk light, delicate concentric rain ripples, visible paper folds, restrained natural colors. Simple composition. No people, no text, no logos.",
+        "motion": "Locked camera; subtle boat drift and small rain ripples.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "1c133e1d5625527a1b290e0aadda814ce559eb69d7c54d45afe059a6daab4528",
+          "video": "4b426ec89e16b34e854432e0928f255b6e6ae8836afc13f011f6bb652ad789e2"
+        },
+        "purpose": "Observe the paper boat quietly up close.",
+        "referenceArtifactIds": [],
+        "revisionId": "f1ba20a4-5633-4537-b0bf-878a29d3c528",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "videoPrompt": "OpenSlate current direction:\nObserve the paper boat quietly up close. A white folded-paper boat floats and gently bobs in a rain puddle at dusk. Close-up. Camera movement: Locked camera; subtle boat drift and small rain ripples.\nReference details (retain only where consistent):\nSix-second naturalistic close-up. Keep the camera locked as the white paper boat gently bobs and drifts slightly on the rain puddle; small raindrops create delicate ripples. Preserve the boat's folded shape and soft dusk lighting. No people, text, dramatic motion or added objects. Silent, no narration or music."
+      },
+      {
+        "action": "The same white folded-paper boat floats quietly in the puddle, surrounded by wet ground and soft rain ripples.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Wide",
+        "id": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+        "imagePrompt": "Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.",
+        "motion": "Gentle slow push-in; subtle boat bobbing and rain ripples.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "b62e024c77572dfed54f36d95fb4ad871587e94d93f8ece8e1dfa5db0f10f9cc",
+          "video": "9c2351c7a4e9a6a9d37347a50e8ab2f14e9edf85c7b745d2b9e60d3646078825"
+        },
+        "purpose": "Reveal the boat's small scale within the dusk puddle.",
+        "referenceArtifactIds": [],
+        "revisionId": "01f93f32-9bef-4076-802c-3b40f711332b",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "videoPrompt": "Six-second naturalistic wide shot of the same white folded-paper boat in the dusk rain puddle. Make a gentle, slow, steady camera push-in toward the boat while retaining a wide view and visible puddle edges. The boat gently bobs with slight natural drift; delicate rain ripples spread across the water. Preserve folded shape, environment and soft cool dusk light. No people, text, added objects or dramatic movement. Silent, no narration or music."
+      }
+    ],
+    "story": "Dusk settles over a rain puddle. In close-up, a small white folded-paper boat floats quietly amid delicate rain ripples. Cut to a wide view of the same boat and puddle, revealing the surrounding wet ground; a gentle slow push-in returns our attention to the boat. Natural light, restrained movement, a straight cut and complete silence."
+  },
+  "plan": null,
+  "attempts": [],
+  "turns": [
+    {
+      "id": "2b77c7c7-c32c-43a9-9cae-514b87d390cf",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "state": "completed",
+      "at": "2026-10-16T23:36:23.908Z",
+      "updatedAt": "2026-10-16T23:37:03.930Z",
+      "runtime": "live",
+      "action": "conversation",
+      "reason": null,
+      "effects": {
+        "notesCreated": 0,
+        "proposalsHeld": 0,
+        "changesApplied": 2
+      },
+      "activity": {
+        "phase": "tool",
+        "state": "completed",
+        "at": "2026-10-16T23:37:00.654Z"
+      },
+      "progress": {
+        "tool": "read_context",
+        "state": "succeeded"
+      }
+    }
+  ],
+  "generation": {
+    "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+    "revisionId": "c4ad1882-2f54-40c8-b913-fd4ee2fc525f",
+    "headVersion": 3,
+    "cursor": 48,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [
+      {
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "ordinal": 1,
+        "title": "Paper Boat at Dusk",
+        "purpose": "Paper Boat at Dusk",
+        "state": "not_started",
+        "shotIds": [
+          "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+          "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8"
+        ],
+        "counts": {
+          "shots": 2,
+          "keyframesReady": 0,
+          "opened": 0,
+          "videosReady": 0
+        },
+        "videoTargets": [
+          "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+          "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8"
+        ],
+        "keyframeTargets": [
+          "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+          "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8"
+        ],
+        "quotes": {
+          "makeKeyframes": {
+            "micros": "0",
+            "units": 2,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          },
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          },
+          "confirmVideo": {
+            "micros": "200000",
+            "units": 2,
+            "unitMicros": "100000",
+            "priceUnknown": false
+          },
+          "voice": {
+            "micros": "0",
+            "units": 0,
+            "unitMicros": "0",
+            "priceUnknown": false
+          }
+        },
+        "blockers": [
+          {
+            "code": "keyframe_missing",
+            "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e"
+          },
+          {
+            "code": "keyframe_missing",
+            "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8"
+          }
+        ],
+        "confirmationDigest": "496c9b006629882bef9d6d41c20c8674d58d0cc85a8eadc6f5dcf67df4b63057"
+      }
+    ],
+    "shots": {
+      "3d899eae-6cee-4443-bb1e-b2e45604f32e": {
+        "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "label": "1.1",
+        "framing": "Close-up",
+        "purpose": "Observe the paper boat quietly up close.",
+        "imagePrompt": "OpenSlate current direction:\nObserve the paper boat quietly up close. A white folded-paper boat floats and gently bobs in a rain puddle at dusk. Close-up\nReference details (retain only where consistent):\nNaturalistic close-up at puddle level of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Soft cool dusk light, delicate concentric rain ripples, visible paper folds, restrained natural colors. Simple composition. No people, no text, no logos.",
+        "motion": "Locked camera; subtle boat drift and small rain ripples.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "none",
+          "takeCount": 0,
+          "opened": false
+        },
+        "video": {
+          "state": "none",
+          "takeCount": 0
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          }
+        }
+      },
+      "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8": {
+        "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+        "sceneId": "6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563",
+        "label": "1.2",
+        "framing": "Wide",
+        "purpose": "Reveal the boat's small scale within the dusk puddle.",
+        "imagePrompt": "Naturalistic wide view of a single plain white folded-paper boat floating in a shallow rain puddle on dark wet ground at dusk. Show the full puddle and simple surrounding wet ground, with the boat small but clearly visible. Match the close-up's white folded boat, soft cool dusk light and restrained natural colors. Delicate rain ripples. No people, text or logos.",
+        "motion": "Gentle slow push-in; subtle boat bobbing and rain ripples.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "none",
+          "takeCount": 0,
+          "opened": false
+        },
+        "video": {
+          "state": "none",
+          "takeCount": 0
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          }
+        }
+      }
+    },
+    "restartCasualties": []
+  },
+  "exports": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 12,
+      "blockers": [
+        {
+          "code": "no_clip",
+          "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e"
+        },
+        {
+          "code": "no_clip",
+          "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  },
+  "director": {
+    "mode": "native",
+    "status": "idle",
+    "activeRequestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+    "turn": {
+      "createdAt": "2026-10-16T23:36:23.908Z",
+      "dispatched": true,
+      "epochId": "195588c4-82cd-4eec-a837-ce8e4ce7511c",
+      "errorCode": null,
+      "id": "2b77c7c7-c32c-43a9-9cae-514b87d390cf",
+      "leaseExpiresAt": 0,
+      "nativeThreadId": "01a14712-ea69-7fc1-a45d-67be4e4e74e5",
+      "nativeTurnId": "01a14712-ec1d-78a0-b4fc-ab2e0a7f2cca",
+      "owner": "090daacc-e177-4160-b3e7-221d02eadaa1",
+      "projectId": "7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921",
+      "requestId": "1f638704-0065-4a66-8e2f-d1362b908361",
+      "runtimeId": "codex-app-server",
+      "state": "completed",
+      "updatedAt": "2026-10-16T23:37:03.930Z"
+    },
+    "message": null,
+    "imageAttachmentsAvailable": true
+  },
+  "setup": {
+    "modelCalls": 1,
+    "selection": {
+      "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+      "mode": "native",
+      "model": "gpt-6-astra"
+    },
+    "modelCatalogStatus": "ready",
+    "codexVersion": "0.153.4",
+    "codexDiagnostic": null
+  }
+}
