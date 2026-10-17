@@ -1,5 +1,5 @@
 import type { DirectorImageInput } from "./images.js";
-import type { ToolContractVersion } from "@openslate/core";
+import type { NativeDiagnostic, ToolContractVersion } from "@openslate/core";
 export type { DirectorImageInput } from "./images.js";
 /** Application identities remain authoritative; native IDs are correlation hints only. */
 export interface DirectorRunIdentity {
@@ -54,7 +54,7 @@ export interface DirectorRunResult extends DirectorRunIdentity {
   text: string;
   nativeThreadId?: string;
   nativeTurnId?: string;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; nativeDiagnostic?: NativeDiagnostic };
   /** True only after this adapter attempted to write turn/start. Never retry an unknown result. */
   dispatched: boolean;
 }

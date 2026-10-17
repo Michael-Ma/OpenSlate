@@ -66,6 +66,7 @@ export function shownRefusal(store: Pick<StartStore, "getState">, toastBefore: T
   const toast = store.getState().toast;
   if (!toast || toast === toastBefore || toast.tone !== "error") return null;
   const { id, values } = toast.message;
+  if (id.startsWith("error.DIRECTOR_SETUP_native_")) return "DIRECTOR_SETUP_REQUIRED";
   if (id === "error.DIRECTOR_CODEX_VERSION_DETAILS" || id === "error.DIRECTOR_CODEX_VERSION_UNREADABLE") return "DIRECTOR_CODEX_VERSION_MISMATCH";
   if (id === "error.unknown") return typeof values?.code === "string" ? values.code : null;
   return id.startsWith("error.") ? id.slice("error.".length) : null;

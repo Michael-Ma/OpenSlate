@@ -1,4 +1,5 @@
-import { errorMsg } from "../i18n/translate.ts";
+import type { NativeDiagnostic } from "@openslate/core/public";
+import { errorMsg, nativeDiagnosticMsg } from "../i18n/translate.ts";
 import type { MessageId } from "../i18n/messages.ts";
 import type { Request } from "./settings.ts";
 import { msg, type Msg } from "./types.ts";
@@ -36,7 +37,8 @@ export interface DirectorSetup {
   /** Present after a save: the result of Codex's setup check for that selection. */
   /** The most recent local version failure, including an attempted unsaved program. */
   codexDiagnostic?: { code: "DIRECTOR_CODEX_VERSION_MISMATCH"; expectedVersion: string; foundVersion: string | null; binaryPath: string; installPath: string } | null;
-  readiness?: { status: "ready" | "blocked"; checks?: Record<string, string> } | null;
+  nativeDiagnostic?: NativeDiagnostic | null;
+  readiness?: { status: "ready" | "blocked"; checks?: Record<string, string>; nativeDiagnostic?: NativeDiagnostic } | null;
 }
 
 /** GET /settings/director-review (server card B10, apps/server/src/application/keyframe-review.ts). */
@@ -54,13 +56,13 @@ export const directorValue = (selection: DirectorSelection): string =>
 export const codexProgram = (setup: DirectorSetup): string => setup.selection.binaryPath ?? setup.defaults.binaryPath ?? "";
 
 export const codexDiagnostic = (setup: DirectorSetup): Msg | null => setup.codexDiagnostic
-  ? errorMsg(setup.codexDiagnostic.code, setup.codexDiagnostic) : null;
+  ? errorMsg(setup.codexDiagnostic.code, setup.codexDiagnostic) : nativeDiagnosticMsg(setup.nativeDiagnostic ?? setup.readiness?.nativeDiagnostic, "setup");
 
 export type CodexState = "ready" | "found" | "blocked" | "unchecked" | "missing";
 
 /** Codex on this computer, from the last setup check. No program found at all is "missing". */
 export function codexState(setup: DirectorSetup): CodexState {
-  if (setup.codexDiagnostic) return "blocked";
+  if (setup.codexDiagnostic || setup.nativeDiagnostic || setup.readiness?.nativeDiagnostic) return "blocked";
   if (setup.codexVersion === null) return "missing";
   // A setup-command replay may still include its original ready result after a newer failed check.
   if (setup.modelCatalogStatus === "blocked") return "blocked";
@@ -94,7 +96,7 @@ export function directorRow(setup: DirectorSetup): DirectorRow {
   const ids = setup.modelChoices.map((choice) => choice.id);
   const current = setup.selection.mode === "native" ? setup.selection.model : undefined;
   for (const id of [current, setup.defaults.model]) if (id && !ids.includes(id)) ids.push(id);
-  const reason = state === "missing" ? msg("set.why.codex_missing") : state === "blocked" ? msg("set.why.codex_blocked") : null;
+  const reason = state === "missing" ? msg("set.why.codex_missing") : state === "blocked" ? codexDiagnostic(setup) ?? msg("set.why.codex_blocked") : null;
   const native = ids.map((model): DirectorChoice => ({ value: `${NATIVE_PREFIX}${model}`, model, ready: !reason, reason, estimate: msg("set.estimate.director_codex") }));
   return {
     selected: directorValue(setup.selection),

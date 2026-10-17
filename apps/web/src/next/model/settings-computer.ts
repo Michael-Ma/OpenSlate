@@ -1,6 +1,6 @@
 import type { MessageId } from "../i18n/messages.ts";
 import { JOB_IN_SENTENCE, isMediaKind, type MediaKind, type ProviderCatalogView } from "./settings.ts";
-import { codexState, type DirectorSetup } from "./settings-director.ts";
+import { codexDiagnostic, codexState, type DirectorSetup } from "./settings-director.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -61,7 +61,7 @@ function codexRow(setup: DirectorSetup | null, setupError: string | null, contex
     case "ready": return setup.lastSuccessfulCheck
       ? { ...base, tone: "ok", status: msg("set.computer.checked"), detail: msg("set.computer.codex_last_check", setup.lastSuccessfulCheck) }
       : { ...base, tone: "ok", status: msg("set.computer.found"), detail: msg("set.computer.codex_ready") };
-    case "blocked": return { ...base, tone: "missing", status: msg("set.computer.needs_attention"), detail: msg("set.computer.codex_blocked") };
+    case "blocked": return { ...base, tone: "missing", status: msg("set.computer.needs_attention"), detail: codexDiagnostic(setup) ?? msg("set.computer.codex_blocked") };
     case "missing": return { ...base, tone: "missing", status: msg("set.computer.not_found"), detail: msg("set.computer.codex_missing") };
     default: return { ...base, tone: "unknown", status: msg("set.computer.not_checked"), detail: msg("set.computer.codex_unchecked") };
   }

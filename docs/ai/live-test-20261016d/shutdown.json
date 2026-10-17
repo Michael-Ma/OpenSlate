@@ -1,0 +1,52 @@
+{
+  "stopped": true,
+  "elapsedMs": 22,
+  "portFree": true,
+  "clips": [
+    {
+      "name": "phase-01-start.webm",
+      "startedAt": "2026-10-17T00:16:37.230Z",
+      "endedAt": "2026-10-17T00:17:16.795Z"
+    },
+    {
+      "name": "phase-02-director-setup.webm",
+      "startedAt": "2026-10-17T00:17:28.113Z",
+      "endedAt": "2026-10-17T00:18:02.828Z"
+    },
+    {
+      "name": "phase-03-settings-diagnostic.webm",
+      "startedAt": "2026-10-17T00:18:31.670Z",
+      "endedAt": "2026-10-17T00:19:23.255Z"
+    },
+    {
+      "name": "phase-04-director-request.webm",
+      "startedAt": "2026-10-17T00:19:42.587Z",
+      "endedAt": "2026-10-17T00:19:43.737Z"
+    },
+    {
+      "name": "phase-05-plan-keyframes.webm",
+      "startedAt": "2026-10-17T00:20:22.665Z",
+      "endedAt": "2026-10-17T00:20:44.041Z"
+    },
+    {
+      "name": "phase-05-review-running.webm",
+      "startedAt": "2026-10-17T00:21:16.902Z",
+      "endedAt": "2026-10-17T00:21:37.123Z"
+    },
+    {
+      "name": "phase-07-keyframe-retry.webm",
+      "startedAt": "2026-10-17T00:22:02.179Z",
+      "endedAt": "2026-10-17T00:22:03.545Z"
+    },
+    {
+      "name": "phase-08-review-second-batch.webm",
+      "startedAt": "2026-10-17T00:22:36.210Z",
+      "endedAt": "2026-10-17T00:22:37.430Z"
+    },
+    {
+      "name": "phase-09-final-notes.webm",
+      "startedAt": "2026-10-17T00:22:57.861Z",
+      "endedAt": "2026-10-17T00:22:59.199Z"
+    }
+  ]
+}

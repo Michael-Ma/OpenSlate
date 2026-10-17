@@ -1,5 +1,6 @@
 import { registerDirectorReviewSetting } from "./application/keyframe-review.js";
 import { CODEX_PROTOCOL_VERSION } from "@openslate/director";
+import { safeNativeDiagnostic } from "./application/native-diagnostics.js";
 import { toolVersion } from "./installation-status.js";
 import { registerDirectorProposals } from "./application/director-proposals.js";
 import { registerShotTakes } from "./shot-takes.js";
@@ -86,7 +87,10 @@ export function createApp(options: AppOptions = {}) {
     if (error instanceof DomainError) {
       const status = ["EPOCH_REVOKED", "ACTOR_DENIED", "SCOPE_DENIED", "AUTH_REQUIRED", "ORIGIN_DENIED", "CSRF_DENIED", "STUDIO_LINK_EXPIRED"].includes(error.code) ? 403
         : error.code === "NOT_FOUND" ? 404 : error.code === "SERVICE_UNAVAILABLE" ? 503 : ["VALIDATION_ERROR", "IDEMPOTENCY_KEY_REQUIRED"].includes(error.code) ? 400 : 409;
-      void reply.status(status).send({ error: { code: error.code, message: error.message, ...(["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
+      const nativeDiagnostic = error.code === "DIRECTOR_SETUP_REQUIRED"
+        ? safeNativeDiagnostic((error.details as { nativeDiagnostic?: unknown } | undefined)?.nativeDiagnostic) : undefined;
+      void reply.status(status).send({ error: { code: error.code, message: error.message,
+        ...(nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });

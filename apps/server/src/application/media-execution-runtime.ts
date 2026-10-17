@@ -35,11 +35,13 @@ import { InstalledProviderCatalog, profilePolicy } from "./provider-catalog.js";
 import { ExternalAllowanceService } from "./external-allowances.js";
 import type { ProductionServiceOptions } from "./service.js";
 import type { MediaExecutionConfiguration } from "./media-execution-config.js";
+import { readCodexStartupTimeout } from "./director-run-config.js";
 
 export interface MediaExecutionRuntimeOptions {
   store: Store; fakeProvider: FakeProvider; dataDirectory: string; configuration: Readonly<MediaExecutionConfiguration>;
   ffmpegPath: string | null; ffprobePath: string | null;
   credentials?: EnvironmentMediaCredentials; providerConfiguration?: unknown;
+  startupTimeoutMs?: number;
   /** Trusted host/test dependencies only; never populated from a browser or model request. */
   transport?: { codexImage?: CodexImageTransport; imageFetch?: typeof globalThis.fetch; h3Fetch?: typeof globalThis.fetch; viggleFetch?: typeof globalThis.fetch;
     speechFetch?: typeof globalThis.fetch; transcriptionFetch?: typeof globalThis.fetch;
@@ -53,6 +55,7 @@ function executable(path: string | null): path is string {
 
 /** One local installation. Construction performs no network, generation or authority writes. */
 export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOptions) {
+  const startupTimeoutMs = readCodexStartupTimeout(options.startupTimeoutMs === undefined ? {} : { OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(options.startupTimeoutMs) });
   const { store, fakeProvider, ffmpegPath, ffprobePath } = options;
   const captured = structuredClone(options.configuration);
   const configuration = { ...captured, codexImage: captured.codexImage === undefined ? false : captured.codexImage, speech: captured.speech === undefined ? false : captured.speech,
@@ -78,6 +81,7 @@ export function createMediaExecutionRuntime(options: MediaExecutionRuntimeOption
   invariant(!configuration.codexImage || codexImageConfigured, "MEDIA_EXECUTION_CODEX_REQUIRED",
     "Enabled Codex image generation requires an executable pinned native binary");
   const nativeWorker = !injectedCodex && configuration.codexImage ? new CodexImageWorkerTransport({ directory: join(resolve(options.dataDirectory), "codex-images"),
+    startupTimeoutMs,
     command: { file: configuration.codexImageBinary! }, nativeHome: homedir(), codexHome: configuration.codexImageHome ?? join(homedir(), ".codex"),
     env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", CI: "1", NO_COLOR: "1" } }) : undefined;
   let closing: Promise<void> | undefined;

@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 // Protocol assertions must survive concurrent builds/media tests starting other
 // child processes. Tests of short deadlines override these fixture-only budgets.
 export const PROTOCOL_FIXTURE_LIMITS = Object.freeze({
-  requestTimeoutMs: 5000, runTimeoutMs: 15000, interruptGraceMs: 500,
+  startupTimeoutMs: 5000, requestTimeoutMs: 5000, runTimeoutMs: 15000, interruptGraceMs: 500,
   shutdownGraceMs: 500, eventTimeoutMs: 500,
 });
 export const FIXTURE_DEADLINE_MS = 30000;

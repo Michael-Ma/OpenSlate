@@ -3,6 +3,9 @@ import { constants,mkdirSync,realpathSync } from 'node:fs';
 import { open,realpath } from 'node:fs/promises';
 import { isAbsolute,relative,sep } from 'node:path';
 import { canonical,digest,invariant } from '@openslate/core';
+import type { NativeDiagnostic } from '@openslate/core';
+import { classifyNativeDiagnostic } from '@openslate/director';
+import { logNativeDiagnostic } from '../application/native-diagnostics.js';
 import { assertExecutionRequest,describeCodexImageInput,inspectCodexImagePng,registerExecutionProvider } from '@openslate/providers';
 import type { CodexImageInput,CodexImageOutcome,CodexImagePrepared,CodexImageTransport,ExecutionCallOptions,ExecutionOutcome,ExecutionProvider,ExecutionRequest } from '@openslate/providers';
 import { InstallationRecoveryGuard } from '../application/installation-recovery.js';
@@ -54,7 +57,8 @@ export class CodexImageExecution implements ExecutionProvider {
         invariant(!this.marked(attempt.id),'CODEX_IMAGE_EXECUTION_CONFLICT','Native turn was already claimed');
         return this.#store.insert('codex_image_execution_mapping',attempt.id,attempt.projectId,value);
       });
-    }catch{await release();return this.notDispatched(admission,lease,signal?.aborted?'LOCAL_CANCELLED':'LOCAL_NATIVE_UNAVAILABLE',signal);}
+    }catch(error){await release();return this.notDispatched(admission,lease,signal?.aborted?'LOCAL_CANCELLED':'LOCAL_NATIVE_UNAVAILABLE',signal,
+      signal?.aborted?undefined:classifyNativeDiagnostic(error));}
     let claimed:boolean;
     try {claimed=this.#store.transaction(()=>{
       if(this.marked(attempt.id))return false;
@@ -113,11 +117,12 @@ export class CodexImageExecution implements ExecutionProvider {
     const result=this.#store.get<CodexImageExecutionResult>('codex_image_execution_result',attempt.id)!;
     if(result.observation.kind==='completed')await this.#outputs.spool(attempt.projectId,result.observation.outputReceiptId,async function*(){for(let offset=0;offset<bytes.byteLength;offset+=1024*1024)yield bytes.subarray(offset,offset+1024*1024);},signal?{signal}:{});
   }
-  private async notDispatched(admission:CodexImageAdmission,lease:ExecutionCallOptions['expectedLease'],code:Extract<CodexImageObservation,{kind:'not_dispatched'}>['code'],signal?:AbortSignal):Promise<ExecutionOutcome> {
+  private async notDispatched(admission:CodexImageAdmission,lease:ExecutionCallOptions['expectedLease'],code:Extract<CodexImageObservation,{kind:'not_dispatched'}>['code'],signal?:AbortSignal,nativeDiagnostic?:NativeDiagnostic):Promise<ExecutionOutcome> {
     this.#store.transaction(()=>{
       if(this.marked(admission.attempt.id))return;
       try{assertCodexImageFirstDispatch(this.#store,admission,lease);}catch{return;}
-      this.saveResult(admission.attempt,{kind:'not_dispatched',code});
+      this.saveResult(admission.attempt,{kind:'not_dispatched',code,...(nativeDiagnostic?{nativeDiagnostic}:{})});
+      if(nativeDiagnostic)logNativeDiagnostic('codex_image_prepare',admission.attempt.projectId,nativeDiagnostic,admission.attempt.id);
     });
     return this.recover(admission.attempt,signal,false);
   }

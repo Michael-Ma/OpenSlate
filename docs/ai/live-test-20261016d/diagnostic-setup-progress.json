@@ -1,0 +1,75 @@
+{
+  "at": "2026-10-17T00:17:56.282Z",
+  "project": {
+    "activePlanId": null,
+    "artifacts": [],
+    "brief": "",
+    "capabilityLockId": "c2e3b258-cf3d-47a1-a92a-27b6e3250d68",
+    "cues": [],
+    "headVersion": 0,
+    "id": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+    "maxFrames": 10800,
+    "name": "Paper boat review LIVE-4",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "cc6a392c-25e2-47bc-9d00-e0ab34ae76c1",
+    "scenes": [],
+    "shots": [],
+    "story": ""
+  },
+  "plan": null,
+  "attempts": [],
+  "turns": [],
+  "notes": [],
+  "conversation": [],
+  "toolCalls": [],
+  "generation": {
+    "projectId": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+    "revisionId": "cc6a392c-25e2-47bc-9d00-e0ab34ae76c1",
+    "headVersion": 0,
+    "cursor": 1,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [],
+    "shots": {},
+    "restartCasualties": []
+  },
+  "exports": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 0,
+      "blockers": [
+        {
+          "code": "empty_film"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  },
+  "director": {
+    "mode": "fake",
+    "status": "idle",
+    "activeRequestId": null,
+    "turn": null,
+    "message": null,
+    "imageAttachmentsAvailable": false
+  },
+  "setup": {
+    "modelCalls": 0,
+    "selection": {
+      "mode": "fake"
+    },
+    "modelCatalogStatus": "blocked",
+    "codexVersion": "0.153.4",
+    "codexDiagnostic": null
+  }
+}

@@ -1,6 +1,7 @@
 import { configuredProviderUse, providerAdmissionRequest, allowanceMappingMatches } from "./provider-use.js";
 import { canonical, digest, invariant, providerProfileArguments } from '@openslate/core';
-import type { ProviderProfile } from '@openslate/core';
+import type { NativeDiagnostic,ProviderProfile } from '@openslate/core';
+import { safeNativeDiagnostic } from '../application/native-diagnostics.js';
 import { describeCodexImageInput } from '@openslate/providers';
 import type { CodexImageDescription, CodexImagePrepared, ExecutionRequest } from '@openslate/providers';
 import type { Attempt } from './engine.js';
@@ -15,7 +16,7 @@ export interface CodexImageExecutionMapping extends Identity {
 }
 export interface CodexImageExecutionDispatch extends Identity { mappingDigest:string;threadId:string;turnInputDigest:string;createdAt:string }
 export interface CodexImageExecutionRun extends Identity { mappingDigest:string;dispatchDigest:string;threadId:string;turnId:string }
-export type CodexImageObservation = {kind:'not_dispatched';code:'LOCAL_INPUT_INVALID'|'LOCAL_NATIVE_UNAVAILABLE'|'LOCAL_CANCELLED'}
+export type CodexImageObservation = {kind:'not_dispatched';code:'LOCAL_INPUT_INVALID'|'LOCAL_NATIVE_UNAVAILABLE'|'LOCAL_CANCELLED';nativeDiagnostic?:NativeDiagnostic}
   | {kind:'failed';code:'USAGE_LIMIT'|'TURN_FAILED'|'IMAGE_FAILED';threadId:string;turnId:string}
   | {kind:'completed';threadId:string;turnId:string;itemId:string;revisedPrompt:string|null;outputReceiptId:string;
       output:{sha256:string;byteLength:number;width:number;height:number}};
@@ -93,7 +94,10 @@ export function assertCodexImageExecutionResult(attempt:Attempt,mapping:CodexIma
   invariant(result.mappingDigest===(mapping?digest(mapping):null) && result.dispatchDigest===(dispatch?digest(dispatch):null) && result.runDigest===(run?digest(run):null),
     'CODEX_IMAGE_EXECUTION_CONFLICT','Codex result lost its exact history');
   const value=result.observation;
-  if(value.kind==='not_dispatched') {codexFields(value,['kind','code']);invariant(!dispatch&&!run&&['LOCAL_INPUT_INVALID','LOCAL_NATIVE_UNAVAILABLE','LOCAL_CANCELLED'].includes(value.code),
+  if(value.kind==='not_dispatched') {codexFields(value,['kind','code',...(value.nativeDiagnostic===undefined?[]:['nativeDiagnostic'])]);
+    if(value.nativeDiagnostic!==undefined)invariant(value.code==='LOCAL_NATIVE_UNAVAILABLE'&&canonical(value.nativeDiagnostic)===canonical(safeNativeDiagnostic(value.nativeDiagnostic)??null),
+      'CODEX_IMAGE_EXECUTION_CONFLICT','Native preparation diagnostic must contain only safe evidence');
+    invariant(!dispatch&&!run&&['LOCAL_INPUT_INVALID','LOCAL_NATIVE_UNAVAILABLE','LOCAL_CANCELLED'].includes(value.code),
     'CODEX_IMAGE_EXECUTION_CONFLICT','Only a pre-marker local failure proves no start');return;}
   invariant(mapping&&dispatch&&run&&value.threadId===run.threadId&&value.turnId===run.turnId,'CODEX_IMAGE_EXECUTION_CONFLICT','Result belongs to another native turn');
   if(value.kind==='failed'){codexFields(value,['kind','code','threadId','turnId']);invariant(['USAGE_LIMIT','TURN_FAILED','IMAGE_FAILED'].includes(value.code),'CODEX_IMAGE_EXECUTION_CONFLICT','Invalid terminal native failure');return;}

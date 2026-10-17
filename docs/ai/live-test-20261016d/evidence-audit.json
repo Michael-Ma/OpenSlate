@@ -1,0 +1,180 @@
+{
+  "at": "2026-10-17T00:23:33.461Z",
+  "projectId": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+  "imageResults": [
+    {
+      "attemptId": "7a01e19c-826c-4314-8b46-516b8f26ae44",
+      "outcome": "not_dispatched",
+      "code": "LOCAL_NATIVE_UNAVAILABLE"
+    },
+    {
+      "attemptId": "08b52306-30c5-46f0-a22d-896b42d3d481",
+      "outcome": "not_dispatched",
+      "code": "LOCAL_NATIVE_UNAVAILABLE"
+    },
+    {
+      "attemptId": "9cfc4af4-b497-4477-bc2c-58615f4fad15",
+      "outcome": "not_dispatched",
+      "code": "LOCAL_NATIVE_UNAVAILABLE"
+    },
+    {
+      "attemptId": "ad2945b1-76f5-46b5-9842-e263201fca43",
+      "outcome": "not_dispatched",
+      "code": "LOCAL_NATIVE_UNAVAILABLE"
+    }
+  ],
+  "noteReceipts": [
+    {
+      "sequence": 122,
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "epochId": "a47d7bb8-75c3-49f6-bf19-33f62a324dcf",
+      "state": "succeeded",
+      "code": null,
+      "reason": null,
+      "message": null
+    }
+  ],
+  "nativeStarts": [
+    {
+      "projectId": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+      "count": 3
+    }
+  ],
+  "imageDispatches": 0,
+  "mediaAttempts": [
+    {
+      "id": "7a01e19c-826c-4314-8b46-516b8f26ae44",
+      "nodeId": "426d0425-6b7b-4e83-aeb8-775e0a2c24af",
+      "ordinal": 1,
+      "phase": "failed",
+      "taskId": null,
+      "createdAt": "2026-10-17T00:20:43.003Z",
+      "failure": {
+        "id": "codex-image-b777d688b894e796a8926f8eb4ab7f47",
+        "retryAllowed": false,
+        "source": "codex-image_provider",
+        "technical": true
+      },
+      "kind": "image",
+      "adapter": "codex-image"
+    },
+    {
+      "id": "08b52306-30c5-46f0-a22d-896b42d3d481",
+      "nodeId": "1b5921bd-a27d-4ec6-9b85-40dd7cd864e5",
+      "ordinal": 1,
+      "phase": "failed",
+      "taskId": null,
+      "createdAt": "2026-10-17T00:20:59.531Z",
+      "failure": {
+        "id": "codex-image-d1365532fda7bd12fcc3b60a26d25794",
+        "retryAllowed": false,
+        "source": "codex-image_provider",
+        "technical": true
+      },
+      "kind": "image",
+      "adapter": "codex-image"
+    },
+    {
+      "id": "9cfc4af4-b497-4477-bc2c-58615f4fad15",
+      "nodeId": "426d0425-6b7b-4e83-aeb8-775e0a2c24af",
+      "ordinal": 1,
+      "phase": "failed",
+      "taskId": null,
+      "createdAt": "2026-10-17T00:22:03.167Z",
+      "failure": {
+        "id": "codex-image-7bca3409508d80922a0c5123ab439bff",
+        "retryAllowed": false,
+        "source": "codex-image_provider",
+        "technical": true
+      },
+      "kind": "image",
+      "adapter": "codex-image"
+    },
+    {
+      "id": "ad2945b1-76f5-46b5-9842-e263201fca43",
+      "nodeId": "1b5921bd-a27d-4ec6-9b85-40dd7cd864e5",
+      "ordinal": 1,
+      "phase": "failed",
+      "taskId": null,
+      "createdAt": "2026-10-17T00:22:19.228Z",
+      "failure": {
+        "id": "codex-image-ffe866df9a14f766dab4ddfe78da8b12",
+        "retryAllowed": false,
+        "source": "codex-image_provider",
+        "technical": true
+      },
+      "kind": "image",
+      "adapter": "codex-image"
+    }
+  ],
+  "videoAttempts": [],
+  "videoJobs": 0,
+  "submittedVideoSeconds": 0,
+  "estimatedViggleCost": "$0.00",
+  "sceneGenerationPosts": 2,
+  "videoConfirmationPosts": 0,
+  "blockedVideoCommands": 0,
+  "finalKeyframes": [
+    {
+      "shotId": "746c106e-800f-4801-b6e0-49860aaea9ec",
+      "state": "failed",
+      "takes": 0
+    },
+    {
+      "shotId": "f6041b4d-db0d-4c07-a955-1a776af4fed4",
+      "state": "failed",
+      "takes": 0
+    }
+  ],
+  "notes": [
+    {
+      "anchor": {
+        "shotIds": [
+          "746c106e-800f-4801-b6e0-49860aaea9ec",
+          "f6041b4d-db0d-4c07-a955-1a776af4fed4"
+        ]
+      },
+      "blocking": false,
+      "choices": [
+        {
+          "kind": "accept",
+          "label": "Keep current direction"
+        },
+        {
+          "kind": "reply"
+        }
+      ],
+      "createdAt": "2026-10-17T00:21:28.355Z",
+      "id": "62c31729-b98a-47bb-9a92-877d8044d6d2",
+      "kind": "observation",
+      "letter": "a",
+      "noteId": "62c31729-b98a-47bb-9a92-877d8044d6d2",
+      "projectId": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "state": "open",
+      "text": "No current keyframe is available for either shot in this review, so I cannot assess the boat's appearance, composition or visual continuity. The saved close-up and wide-shot directions remain intact. Review the actual frames when available before deciding on visual changes.",
+      "turnId": "52b8396d-d2be-48d9-86cb-a6b8fb13f66a",
+      "version": 1
+    }
+  ],
+  "notesSaveFailures": [
+    {
+      "id": "d4090cb7-0086-40cf-8bd0-a5287ef809fa",
+      "action": "conversation",
+      "notesSaveFailure": null
+    },
+    {
+      "id": "52b8396d-d2be-48d9-86cb-a6b8fb13f66a",
+      "action": "keyframe_review",
+      "notesSaveFailure": null
+    },
+    {
+      "id": "bca973ad-26d9-4d62-94a4-39f7a296d871",
+      "action": "keyframe_review",
+      "notesSaveFailure": null
+    }
+  ],
+  "allTurnsEnded": true,
+  "allMediaEnded": true,
+  "uncertainAttempts": []
+}

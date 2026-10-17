@@ -9,6 +9,13 @@
 /** Money in integer micro-dollars, as a decimal string (matches ProviderProfile.unitCostMicros). */
 export type Micros = string;
 
+/** Allowlisted native-start failure evidence. Never carries native prose, paths or RPC bodies. */
+export interface NativeDiagnostic {
+  category: "native_timeout" | "native_spawn_failed" | "native_auth_required" | "native_protocol" | "native_rate_limited" | "native_unknown";
+  /** Actual deadline that expired, in milliseconds. Only present for a timeout. */
+  limitMs?: number;
+}
+
 export interface StudioArtifactRef {
   artifactId: string;
   sha256: string;
@@ -71,6 +78,9 @@ export interface MediaFailure {
   /** True unless the reservation was released (engine reservation state "released"). */
   charged: boolean;
   at: string;
+  nativeDiagnostic?: NativeDiagnostic;
+  /** Proven by the exact native pre-dispatch receipt; never inferred from reservation state. */
+  notDispatched?: boolean;
 }
 
 export interface MediaSlot {

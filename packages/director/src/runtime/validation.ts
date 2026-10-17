@@ -1,9 +1,10 @@
 import { isAbsolute } from "node:path";
 import { ToolBridge } from "../tools/bridge.js";
 import type { DirectorRunIdentity, DirectorRunInput } from "./types.js";
+import type { NativeDiagnostic } from "@openslate/core";
 
 export class RuntimeFault extends Error {
-  constructor(readonly code: string, message: string) { super(message); }
+  constructor(readonly code: string, message: string, readonly nativeDiagnostic?: NativeDiagnostic) { super(message); }
 }
 export function requireRuntime(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new RuntimeFault(code, message);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CodexImageWorkerTransport} from '@openslate/director';
 import {codexImageFixture as fixture,codexImageProfile as codex,codexRuntimeConfiguration as config,codexRowCounts as rowCounts} from './codex-image-execution-fixture.mjs';
+import { GenerationOverviewReader } from '../dist/generation-overview.js';
 test('disabled Codex remains unregistered despite trusted access and preserves legacy factory defaults',t=>{
   const f=fixture(t,{configuration:{image:false,h3:false,h3DownloadHosts:[]}}),before=rowCounts(f),runtime=f.build();
   assert.throws(()=>runtime.engine.registry.resolve({adapter:'codex-image',version:'1'}),{code:'PROVIDER_NOT_REGISTERED'});
@@ -79,4 +80,31 @@ test('first Codex route rejects project-scoped images before consuming their usa
   const result=await f.runtime.engine.runReady();assert.equal(result.dispatched,0);assert.ok(result.blocked.some(row=>row.code==='CODEX_IMAGE_PREFLIGHT_INVALID'));
   for(const family of ['attempt','reservation','external_allowance_consumption'])assert.equal(f.store.list(family,selected.projectId).length,0);
   assert.equal(f.store.list('external_allowance',selected.projectId).length,1);assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
+});
+
+for(const [code,category] of [['RUNTIME_RPC_TIMEOUT','native_timeout'],['ENOENT','native_spawn_failed'],['SETUP_AUTH_REQUIRED','native_auth_required'],
+  ['RUNTIME_PROTOCOL_INVALID','native_protocol'],[429,'native_rate_limited'],['UNRECOGNIZED','native_unknown']])
+test(`native preparation ${category} is retained and publicly projected without raw data or a retry`,async t=>{
+  const f=fixture(t),raw='PRIVATE_NATIVE_MESSAGE /private/account/token secret-value',logs=[],nativeDiagnostic={category,...(category==='native_timeout'?{limitMs:60000}:{})};
+  t.mock.method(console,'warn',(...args)=>logs.push(args));
+  f.transport.prepare=async()=>{f.calls.prepare++;throw Object.assign(Error(raw),{code,...(category==='native_timeout'?{nativeDiagnostic:{...nativeDiagnostic,message:raw}}:{})});};
+  f.build();const selected=await f.seed();await f.runtime.engine.runReady();
+  const attempt=f.store.list('attempt',selected.projectId)[0];
+  assert.equal(attempt.phase,'failed');assert.equal(f.store.get('reservation',attempt.reservationId).state,'released');
+  assert.deepEqual(f.store.get('codex_image_execution_result',attempt.id).observation,{kind:'not_dispatched',code:'LOCAL_NATIVE_UNAVAILABLE',nativeDiagnostic});
+  const view=new GenerationOverviewReader(f.production).read(selected.projectId),failure=view.shots['shot-0'].keyframe.failure;
+  assert.deepEqual(failure.nativeDiagnostic,nativeDiagnostic);assert.equal(failure.notDispatched,true);assert.equal(failure.charged,false);
+  assert.equal(failure.retryAllowed,false);assert.equal(failure.autoRetriesLeft,0);
+  const publicData={view,snapshot:f.production.snapshot(selected.projectId),logs};
+  assert.equal(JSON.stringify(publicData).includes(raw),false);assert.equal(JSON.stringify(publicData).includes('secret-value'),false);
+  await f.runtime.engine.reconcile();await f.runtime.engine.runReady();
+  assert.equal(f.calls.prepare,1);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
+  assert.equal(f.store.get('codex_image_execution_dispatch',attempt.id),undefined);assert.equal(logs.length,1);
+});
+
+test('media runtime rejects an invalid startup setting before writing state or starting native work',t=>{
+  for(const startupTimeoutMs of [14999,120001,NaN,Infinity]){
+    const f=fixture(t,{startupTimeoutMs}),before=rowCounts(f);
+    assert.throws(()=>f.build(),{code:'CONFIGURATION_ERROR'});assert.deepEqual(rowCounts(f),before);assert.equal(f.calls.prepare,0);
+  }
 });
