@@ -6,6 +6,8 @@ import { CODEX_PROTOCOL_VERSION, normalizePermissionProfile, toml, validateOptio
 import type { CodexConfigValue, CodexDirectorOptions, CodexRuntimeLimits } from "./policy.js";
 import { CodexTransport } from "./transport.js";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
+import { classifyNativeDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
+import type { NativeDiagnostic } from "@openslate/core";
 
 export interface LocalCodexSetupInput {
   command: { file: string; args?: readonly string[] };
@@ -34,6 +36,7 @@ export interface LocalCodexReadiness {
   disabledMcpCount: number;
   disabledSkillCount: number;
   issues: { code: string; message: string }[];
+  nativeDiagnostic?: NativeDiagnostic;
 }
 export interface LocalCodexSetupResult {
   /** Safe for the local UI. It deliberately excludes paths, email, config, env and native diagnostics. */
@@ -111,8 +114,10 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
 async function verifyVersion(options: ReturnType<typeof validateOptions>, signal: AbortSignal, readiness: LocalCodexReadiness): Promise<void> {
   await new Promise<void>((yes, no) => {
     execFile(options.command.file, [...(options.command.args ?? []), "--version"], { cwd: options.cwd, env: { ...options.env },
-      timeout: options.limits.requestTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096, signal }, (error, stdout) => {
-      if (error) { no(new RuntimeFault(signal.aborted ? "SETUP_ABORTED" : "SETUP_BINARY_FAILED", "Selected native binary could not be checked")); return; }
+      timeout: options.limits.startupTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096, signal }, (error, stdout) => {
+      if (error) { no(signal.aborted ? new RuntimeFault("SETUP_ABORTED", "Local runtime setup was cancelled") : error.killed && error.signal === "SIGKILL"
+        ? nativeTimeoutFault("SETUP_BINARY_TIMEOUT", "Selected native binary did not respond in time", options.limits.startupTimeoutMs)
+        : new RuntimeFault("SETUP_BINARY_FAILED", "Selected native binary could not be checked", classifyNativeDiagnostic(error))); return; }
       const version = /^codex-cli (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.+-]{1,120})?)$/.exec(stdout.trim())?.[1] ?? null;
       readiness.binaryVersion = { expectedVersion: CODEX_PROTOCOL_VERSION, foundVersion: version };
       if (version !== CODEX_PROTOCOL_VERSION) no(new RuntimeFault("SETUP_VERSION_MISMATCH", "Select the pinned Codex 0.153.4 installation"));
@@ -201,10 +206,15 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
   const cancellation = new AbortController(); let timedOut = false;
   const abort = () => cancellation.abort(); options.signal?.addEventListener("abort", abort, { once: true });
   // Bounds the complete discovery, including pagination and both native processes.
-  const timer = setTimeout(() => { timedOut = true; cancellation.abort(); }, 60_000);
+  // One version probe and two separate cold, read-only app-server processes.
+  // Each process still shares a single startup deadline across its preparation RPCs.
+  let setupLimitMs = 180_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     requireRuntime(!options.signal?.aborted, "SETUP_ABORTED", "Local runtime setup was cancelled");
     const runtime = await prepare(structuredClone(supplied));
+    setupLimitMs = runtime.limits.startupTimeoutMs * 3;
+    timer = setTimeout(() => { timedOut = true; cancellation.abort(); }, setupLimitMs);
     checking = "binary"; await verifyVersion(runtime, cancellation.signal, readiness); readiness.checks.binary = "passed";
     checking = "catalog";
     await session(runtime, cancellation.signal, async rpc => {
@@ -259,10 +269,11 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
   } catch (error) {
     readiness.checks[checking] = "failed";
     // RuntimeFault messages are locally authored. Never expose an OS error, RPC body or child stderr.
-    const issue = timedOut ? new RuntimeFault("SETUP_TIMEOUT", "Local runtime setup exceeded its time limit") :
+    const issue = timedOut ? nativeTimeoutFault("SETUP_TIMEOUT", "Local runtime setup exceeded its time limit", setupLimitMs) :
       cancellation.signal.aborted ? new RuntimeFault("SETUP_ABORTED", "Local runtime setup was cancelled") :
       error instanceof RuntimeFault ? error : new RuntimeFault("SETUP_FAILED", "Local runtime setup could not complete; check selected paths and native installation");
     readiness.issues.push({ code: issue.code, message: issue.message });
+    readiness.nativeDiagnostic = classifyNativeDiagnostic(issue);
     return { readiness };
   } finally { clearTimeout(timer); options.signal?.removeEventListener("abort", abort); }
 }

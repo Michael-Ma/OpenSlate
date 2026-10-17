@@ -16,7 +16,7 @@ const fixture = async (t, scenario = "ready") => {
   const input = { command: { file: process.execPath, args: [entry] }, model: "gpt-6-astra", nativeHome, codexHome,
     directories: { projection: join(root, "workspace"), snapshots: join(root, "workspace/.agents/skills"), storage: join(root, "runtime") },
     env: { SETUP_FIXTURE_SCENARIO: scenario, SETUP_FIXTURE_LOG: join(root, "fixture.jsonl"), SETUP_FIXTURE_SKILL: join(codexHome, "skills/private/SKILL.md"),
-      SETUP_FIXTURE_MODEL: "gpt-6-astra" }, limits: { requestTimeoutMs: PROTOCOL_FIXTURE_LIMITS.requestTimeoutMs, shutdownGraceMs: PROTOCOL_FIXTURE_LIMITS.shutdownGraceMs } };
+      SETUP_FIXTURE_MODEL: "gpt-6-astra" }, limits: { startupTimeoutMs: PROTOCOL_FIXTURE_LIMITS.startupTimeoutMs, requestTimeoutMs: PROTOCOL_FIXTURE_LIMITS.requestTimeoutMs, shutdownGraceMs: PROTOCOL_FIXTURE_LIMITS.shutdownGraceMs } };
   const records = async () => { try { return (await readFile(input.env.SETUP_FIXTURE_LOG, "utf8")).trim().split("\n").filter(Boolean).map(JSON.parse); }
     catch (error) { if (error.code === "ENOENT") return []; throw error; } };
   return { input, records, root };
@@ -30,6 +30,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
   assert.equal(result.readiness.disabledMcpCount, 2); assert.equal(result.readiness.disabledSkillCount, 1);
   assert.deepEqual(result.readiness.modelChoices, [{ id: 'gpt-6-astra', label: 'gpt-6-astra' }]);
   assert.equal(result.runtimeOptions.model, "gpt-6-astra");
+  assert.equal(result.runtimeOptions.limits.startupTimeoutMs, PROTOCOL_FIXTURE_LIMITS.startupTimeoutMs);
   assert.doesNotThrow(() => new CodexDirectorRuntime(result.runtimeOptions));
   const policy = result.runtimeOptions.policy;
   assert.equal(policy.mode, "local"); assert.equal(policy.runtimeVersion, "0.153.4");
@@ -64,6 +65,8 @@ for (const [scenario, code] of [
   const f = await fixture(t, scenario), result = await setupLocalCodex(f.input);
   assert.equal(result.readiness.status, "blocked"); assert.equal(result.runtimeOptions, undefined);
   assert.equal(result.readiness.issues[0].code, code);
+  const category = scenario === "hang" ? "native_timeout" : ["auth", "approval"].includes(scenario) ? "native_auth_required" : scenario === "rpc-error" ? "native_unknown" : "native_protocol";
+  assert.deepEqual(result.readiness.nativeDiagnostic, { category, ...(scenario === "hang" ? { limitMs: PROTOCOL_FIXTURE_LIMITS.startupTimeoutMs } : {}) });
   assert.ok(!JSON.stringify(result).includes("PRIVATE")); assert.ok(!JSON.stringify(result).includes(f.root));
   assert.ok(!(await f.records()).some(row => row.kind === "forbidden-method"));
 });

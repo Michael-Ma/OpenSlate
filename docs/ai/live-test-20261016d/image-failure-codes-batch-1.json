@@ -1,0 +1,12 @@
+[
+  {
+    "attemptId": "7a01e19c-826c-4314-8b46-516b8f26ae44",
+    "outcome": "not_dispatched",
+    "code": "LOCAL_NATIVE_UNAVAILABLE"
+  },
+  {
+    "attemptId": "08b52306-30c5-46f0-a22d-896b42d3d481",
+    "outcome": "not_dispatched",
+    "code": "LOCAL_NATIVE_UNAVAILABLE"
+  }
+]

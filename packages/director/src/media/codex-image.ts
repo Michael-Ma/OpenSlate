@@ -2,11 +2,12 @@ import { createHash } from "node:crypto";
 import { lstat, realpath, open } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { digest } from "@openslate/core";
+import { digest, type NativeDiagnostic } from "@openslate/core";
 import { CODEX_IMAGE_LIMITS, codexImageTurnText, describeCodexImageInput, inspectCodexImagePng,
   type CodexImageInput, type CodexImageOutcome, type CodexImagePrepared, type CodexImageTransport } from "@openslate/providers";
 import { setupLocalCodex } from "../runtime/setup.js";
-import { CODEX_RUNTIME_LIMITS, normalizePermissionProfile, toml, type CodexConfigValue, type CodexDirectorOptions } from "../runtime/policy.js";
+import { CODEX_RUNTIME_LIMITS, CODEX_MAX_STARTUP_TIMEOUT_MS, normalizePermissionProfile, toml, type CodexConfigValue, type CodexDirectorOptions } from "../runtime/policy.js";
+import { classifyNativeDiagnostic } from "../runtime/native-diagnostic.js";
 import { object, requireRuntime, RuntimeFault } from "../runtime/validation.js";
 import { ImageRpc, type RpcMessage } from "./image-rpc.js";
 import { imageDirectory, imageFileSha, imageRead, imageStopped, imageWithin, imageWrite } from "./image-files.js";
@@ -17,8 +18,10 @@ export interface CodexImageWorkerOptions {
   model?: "gpt-6-astra";
   /** Trusted host may tighten the fixed 180-second turn bound. */
   timeoutMs?: number;
+  /** Trusted host cold process preparation limit, separately bounded from image execution. */
+  startupTimeoutMs?: number;
 }
-export interface CodexImageReadiness { status: "ready" | "blocked"; code: string | null; runtimeVersion: "0.153.4"; authMode: "chatgpt" }
+export interface CodexImageReadiness { status: "ready" | "blocked"; code: string | null; runtimeVersion: "0.153.4"; authMode: "chatgpt"; nativeDiagnostic?: NativeDiagnostic }
 type Ready = { options: CodexDirectorOptions; binary: string; runtimeDigest: string; root: string };
 type Configuration = { version: 1; config: Record<string, CodexConfigValue>; workspace: string; binary: string;
   args: string[]; runtimeDigest: string; environmentDigest: string };
@@ -82,6 +85,8 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     "CODEX_IMAGE_PATH_INVALID", "Image worker requires explicit absolute host paths");
     requireRuntime(this.#input.timeoutMs === undefined || (Number.isSafeInteger(this.#input.timeoutMs) && this.#input.timeoutMs > 0 && this.#input.timeoutMs <= 180_000),
       "CODEX_IMAGE_LIMIT_INVALID", "Image worker turn limit may only tighten its bound");
+    requireRuntime(this.#input.startupTimeoutMs === undefined || (Number.isSafeInteger(this.#input.startupTimeoutMs) && this.#input.startupTimeoutMs > 0 && this.#input.startupTimeoutMs <= CODEX_MAX_STARTUP_TIMEOUT_MS),
+      "CODEX_IMAGE_LIMIT_INVALID", "Image worker startup limit exceeds its supported bound");
     this.#env = environment(this.#input);
   }
   async #command(signal?: AbortSignal): Promise<{ file: string; args?: readonly string[] }> {
@@ -109,8 +114,9 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     const root = resolve(this.#input.directory), projection = join(root, "workspaces"), snapshots = join(projection, "skills");
     const command = await this.#command(signal);
     const result = await setupLocalCodex({ command, model: MODEL, nativeHome: this.#input.nativeHome,
-      codexHome: this.#input.codexHome, env: this.#env, directories: { projection, snapshots, storage: join(root, "runtime") } }, signal ? { signal } : {});
-    requireRuntime(result.runtimeOptions && result.readiness.status === "ready", result.readiness.issues[0]?.code ?? "CODEX_IMAGE_SETUP_FAILED", "Image worker setup is unavailable");
+      codexHome: this.#input.codexHome, env: this.#env, directories: { projection, snapshots, storage: join(root, "runtime") },
+      ...(this.#input.startupTimeoutMs === undefined ? {} : { limits: { startupTimeoutMs: this.#input.startupTimeoutMs } }) }, signal ? { signal } : {});
+    if (!result.runtimeOptions || result.readiness.status !== "ready") throw new RuntimeFault(result.readiness.issues[0]?.code ?? "CODEX_IMAGE_SETUP_FAILED", "Image worker setup is unavailable", result.readiness.nativeDiagnostic);
     const binary = command.file, runtimeDigest = await imageFileSha(binary, signal);
     const ready = { options: result.runtimeOptions, binary, runtimeDigest, root: await realpath(root) };
     imageStopped(signal); this.#ready = ready; return ready;
@@ -128,7 +134,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     const args = [...config.args, "app-server", "--strict-config", ...Object.entries(config.config).flatMap(([key, value]) => ["-c", `${key}=${toml(value)}`])];
     requireRuntime(Buffer.byteLength(args.join("\0")) <= 128 * 1024, "CODEX_IMAGE_CONFIG_LIMIT", "Image worker configuration exceeds its bound");
     const rpc = new ImageRpc({ command: config.binary, args, cwd: config.workspace, env: { ...this.#env },
-      limits: { ...CODEX_RUNTIME_LIMITS, outputBytes: 192 * 1024 ** 2 }, secrets: Object.values(this.#env), allowedMethods: methods,
+      limits: { ...CODEX_RUNTIME_LIMITS, ...(this.#input.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.#input.startupTimeoutMs }), outputBytes: 192 * 1024 ** 2 }, secrets: Object.values(this.#env), allowedMethods: methods,
       onMessage: message => {
         if (message.id !== undefined) { rpc.rejectServerRequest(message.id); rpc.fail(new RuntimeFault("CODEX_IMAGE_INTERACTIVE_DENIED", "Interactive image worker requests are unavailable")); }
         else receive(message);
@@ -164,7 +170,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       rpc = this.#launch(config, CHECK); await this.#initialize(rpc, signal); await this.#check(rpc, config, signal);
       await this.#close(rpc); rpc = undefined; imageStopped(signal);
       return { status: "ready", code: null, runtimeVersion: "0.153.4", authMode: "chatgpt" };
-    } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: "0.153.4", authMode: "chatgpt" }; }
+    } catch (error) { return { status: "blocked", code: safeCode(error), runtimeVersion: "0.153.4", authMode: "chatgpt", nativeDiagnostic: classifyNativeDiagnostic(error) }; }
     finally { if (rpc) await this.#close(rpc); }
   }
   async prepare(supplied: CodexImageInput, options: { signal?: AbortSignal } = {}): Promise<CodexImagePrepared> {
@@ -196,6 +202,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       imageStopped(signal);
       const prepared: CodexImagePrepared = { runtime: { version: 1, runtimeVersion: "0.153.4", runtimeDigest: ready.runtimeDigest,
         configurationDigest, model: MODEL, authMode: "chatgpt" }, session: { threadId, turnInputDigest: description.turnInputDigest } };
+      rpc.finishStartup();
       requireRuntime(!this.#closed, "CODEX_IMAGE_CLOSED", "Image worker closed before prepared handoff");
       const heldRpc = rpc;
       const timer = setTimeout(() => { if (this.#held?.rpc === heldRpc) this.#held = undefined; void this.#close(heldRpc).catch(() => {}); }, 120_000); timer.unref();
@@ -341,6 +348,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       requireRuntime(selectedTurn === undefined || validId(selectedTurn), "CODEX_IMAGE_TURN_INVALID", "Saved native turn identity is invalid");
       const config = await this.#load(prepared, signal);
       rpc = this.#launch(config, READ); await this.#initialize(rpc, signal);
+      rpc.finishStartup();
       // Pinned 0.153.4 advertises items/list but returns -32601. Its legacy history mode supports this bounded read.
       // Never fall back to resume/start when history is unavailable, incomplete, oversized or ambiguous.
       const response = object(await rpc.request("thread/read", { threadId: prepared.session.threadId, includeTurns: true }, signal));

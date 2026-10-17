@@ -34,7 +34,13 @@ test("construction is lazy; readiness has no threads, turns, credentials or inhe
  assert.ok(calls.filter(x=>x.kind==="launch").every(x=>x.parentSecretAbsent&&x.apiEnvironmentAbsent));
 });
 for(const scenario of ["api-key","capability"])test(`new work blocks ${scenario} without starting any turn`,async t=>{
- const f=await fixture(t,scenario);const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.ok(!methods(await f.records()).includes("turn/start"));
+ const f=await fixture(t,scenario);const ready=await f.worker.checkReadiness();assert.equal(ready.status,"blocked");assert.deepEqual(ready.nativeDiagnostic,{category:scenario==="api-key"?"native_auth_required":"native_protocol"});assert.ok(!methods(await f.records()).includes("turn/start"));
+});
+test("image startup settings are bounded independently of its turn execution deadline",async t=>{
+ const f=await fixture(t);
+ for(const startupTimeoutMs of [0,-1,120001,Infinity,1.5])assert.throws(()=>new CodexImageWorkerTransport({...f.options,startupTimeoutMs}),error=>error.code==="CODEX_IMAGE_LIMIT_INVALID");
+ for(const startupTimeoutMs of [15000,60000,120000])assert.doesNotThrow(()=>new CodexImageWorkerTransport({...f.options,startupTimeoutMs}));
+ assert.deepEqual(await f.records(),[]);
 });
 test("one exact turn yields a unique structured image and preserves model/canvas preference distinction",async t=>{
  const f=await fixture(t),value=input();value.images=[{artifactId:"ref-1",sha256:createHash("sha256").update(png).digest("hex"),byteLength:png.length,bytes:png}];

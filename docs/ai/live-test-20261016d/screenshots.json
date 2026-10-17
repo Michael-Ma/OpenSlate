@@ -1,0 +1,99 @@
+[
+  {
+    "name": "01-new-film-sheet.png",
+    "phase": "phase-01-start",
+    "at": "2026-10-17T00:16:41.196Z",
+    "phaseSeconds": 3.966
+  },
+  {
+    "name": "02-new-film-models.png",
+    "phase": "phase-01-start",
+    "at": "2026-10-17T00:16:46.472Z",
+    "phaseSeconds": 9.242
+  },
+  {
+    "name": "03-director-first-step.png",
+    "phase": "phase-02-director-setup",
+    "at": "2026-10-17T00:17:33.188Z",
+    "phaseSeconds": 5.075
+  },
+  {
+    "name": "04-director-setup-refused.png",
+    "phase": "phase-02-director-setup",
+    "at": "2026-10-17T00:18:01.109Z",
+    "phaseSeconds": 32.996
+  },
+  {
+    "name": "05-settings-pinned-setup.png",
+    "phase": "phase-03-settings-diagnostic",
+    "at": "2026-10-17T00:19:05.161Z",
+    "phaseSeconds": 33.491
+  },
+  {
+    "name": "06-settings-ready.png",
+    "phase": "phase-03-settings-diagnostic",
+    "at": "2026-10-17T00:19:22.037Z",
+    "phaseSeconds": 50.367
+  },
+  {
+    "name": "07-director-request.png",
+    "phase": "phase-04-director-request",
+    "at": "2026-10-17T00:19:43.537Z",
+    "phaseSeconds": 0.95
+  },
+  {
+    "name": "08-plan-saved.png",
+    "phase": "phase-05-plan-keyframes",
+    "at": "2026-10-17T00:20:34.103Z",
+    "phaseSeconds": 11.438
+  },
+  {
+    "name": "09-keyframes-price.png",
+    "phase": "phase-05-plan-keyframes",
+    "at": "2026-10-17T00:20:34.269Z",
+    "phaseSeconds": 11.604
+  },
+  {
+    "name": "10-keyframes-submitted.png",
+    "phase": "phase-05-plan-keyframes",
+    "at": "2026-10-17T00:20:42.903Z",
+    "phaseSeconds": 20.238
+  },
+  {
+    "name": "12-review-first-ended.png",
+    "phase": "phase-05-review-running",
+    "at": "2026-10-17T00:21:36.505Z",
+    "phaseSeconds": 19.603
+  },
+  {
+    "name": "13-notes-saved-first-batch.png",
+    "phase": "phase-07-keyframe-retry",
+    "at": "2026-10-17T00:22:03.009Z",
+    "phaseSeconds": 0.83
+  },
+  {
+    "name": "14-keyframes-retry-submitted.png",
+    "phase": "phase-07-keyframe-retry",
+    "at": "2026-10-17T00:22:03.290Z",
+    "phaseSeconds": 1.111
+  },
+  {
+    "name": "15-review-second-batch.png",
+    "phase": "phase-08-review-second-batch",
+    "at": "2026-10-17T00:22:37.186Z",
+    "phaseSeconds": 0.976
+  },
+  {
+    "name": "16-final-notes-banner.png",
+    "phase": "phase-09-final-notes",
+    "at": "2026-10-17T00:22:58.770Z",
+    "phaseSeconds": 0.909
+  },
+  {
+    "name": "11-review-running-from-clip.png",
+    "phase": "phase-05-review-running",
+    "sourceClip": "phase-05-review-running.webm",
+    "phaseSeconds": 2,
+    "capture": "Exact frame extracted with ffmpeg; not a later live screenshot."
+  }
+]

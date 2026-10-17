@@ -59,6 +59,15 @@ test("host may deliberately extend only the finite run deadline to ten minutes",
   assert.deepEqual(await f.records(), [], "validation never starts a native run");
 });
 
+test("host cold startup limit is independent of the unchanged ordinary request bound", async t => {
+  const f = await fixture(t);
+  for (const startupTimeoutMs of [15_000, 60_000, 120_000])
+    assert.doesNotThrow(() => new CodexDirectorRuntime({ ...f.options, limits: { startupTimeoutMs } }));
+  for (const startupTimeoutMs of [0, -1, 120_001, Infinity, 1.5])
+    assert.throws(() => new CodexDirectorRuntime({ ...f.options, limits: { startupTimeoutMs } }), code("RUNTIME_CONFIG_INVALID"));
+  assert.deepEqual(await f.records(), [], "invalid or accepted configuration performs no native work");
+});
+
 test("native progress retains only phase and state for the exact thread and turn", async t => {
   const f = await fixture(t, "activity"), events = [];
   const result = await deadline(f.runtime.start(f.input, { onEvent: event => events.push(event) }));

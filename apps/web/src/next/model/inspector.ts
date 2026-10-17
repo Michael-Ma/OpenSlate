@@ -1,4 +1,5 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneOverview, ShotOverview } from "@openslate/core/public";
+import { nativeDiagnosticMsg } from "../i18n/translate.ts";
 import { MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "./checks.ts";
 import { confirmationStop, heldByEdit, isWorking, seconds, shotHasNoAnswer, shotStatus, unresolvedQueue, videoPanel, waitingMsg, type CardTone } from "./keyframes.ts";
 import { narrationRow, type NarrationMode, type TakeOrigin } from "./narration.ts";
@@ -134,6 +135,8 @@ function keyframePrice(overview: GenerationOverview, shot: ShotOverview): { unit
 
 function failureMessage(slot: MediaSlot, kind: "keyframe" | "video"): Msg {
   const failure = slot.failure;
+  const native = kind === "keyframe" && failure ? nativeDiagnosticMsg(failure.nativeDiagnostic, "images", failure.notDispatched === true && !failure.charged) : null;
+  if (native) return native;
   if (failure && failure.technical && failure.autoRetriesLeft > 0) return msg("inspector.failed.retrying", { count: failure.autoRetriesLeft });
   if (kind === "video" && failure && !failure.retryAllowed) return msg(failure.charged ? "inspector.failed.refused_charged" : "inspector.failed.refused");
   return msg(`card.${kind}.${failure?.charged ? "failed_charged" : "failed"}`);
@@ -194,6 +197,8 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
 
   let failure: InspectorView["failure"] = null;
   if (shot.keyframe.state === "failed") failure = { slot: "keyframe", message: failureMessage(shot.keyframe, "keyframe"), retryVideo: null };
+  else if (shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "failed" && shot.keyframe.replacement.failure?.nativeDiagnostic)
+    failure = { slot: "keyframe", message: failureMessage({ ...shot.keyframe, failure: shot.keyframe.replacement.failure }, "keyframe"), retryVideo: null };
   else if (shot.video.state === "failed") {
     const clip = clipUnit(overview, scene);
     const panel = scene ? videoPanel(overview, scene, locale) : null;

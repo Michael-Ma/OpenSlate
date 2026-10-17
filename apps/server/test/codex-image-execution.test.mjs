@@ -50,6 +50,23 @@ test('ChatGPT auth failure closes only owned premarker preparation and never sta
   assert.equal(rows(f,'codex_image_execution_result')[0].observation.code,'LOCAL_NATIVE_UNAVAILABLE');assert.equal(f.calls.api,0);
 });
 
+test('legacy pre-dispatch receipts remain valid and diagnostics cannot smuggle raw fields',async t=>{
+  t.mock.method(console,'warn',()=>{});
+  const f=await fixture(t,{prepare:async()=>{throw Error('private native details');}});
+  await f.bridge.submit(f.request,f.context);
+  const saved=rows(f,'codex_image_execution_result')[0],{nativeDiagnostic:_,...legacy}=saved.observation;
+  const replace=value=>f.store.db.prepare("UPDATE entities SET body=? WHERE kind='codex_image_execution_result' AND id=?").run(JSON.stringify(value),saved.id);
+  replace({...saved,observation:legacy});
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type,'rejected');assertCodexImageRecords(f.store,f.attempt);
+  for(const nativeDiagnostic of [{category:'native_timeout',limitMs:60000,message:'private native details'},
+    {category:'native_unknown',path:'/private/account/token'},{category:'native_timeout',limitMs:Infinity},{category:'untrusted'}]){
+    // Non-JSON numbers cannot be stored; an out-of-bounds integer covers persisted limit validation.
+    if(nativeDiagnostic.limitMs===Infinity)nativeDiagnostic.limitMs=600001;
+    replace({...saved,observation:{...legacy,nativeDiagnostic}});
+    assert.throws(()=>assertCodexImageRecords(f.store,f.attempt),{code:'CODEX_IMAGE_EXECUTION_CONFLICT'});
+  }
+});
+
 test('forged API-auth prepared identity cannot receive a native marker',async t=>{
   const f=await fixture(t,{prepare:async input=>({runtime:{version:1,runtimeVersion:'0.153.4',runtimeDigest:'a'.repeat(64),configurationDigest:'b'.repeat(64),model:'gpt-6-astra',authMode:'api'},session:{threadId:'wrong-auth',turnInputDigest:describeCodexImageInput(input).turnInputDigest}})});
   assert.equal((await f.bridge.submit(f.request,f.context)).type,'rejected');assert.equal(f.calls.start,0);assert.equal(rows(f,'codex_image_execution_mapping').length,0);

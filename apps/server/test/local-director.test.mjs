@@ -275,3 +275,28 @@ test('a host-configured Director turn limit reaches local Codex setup without ch
   await f.director.configure(project.id,f.native,'configured-timeout');
   assert.equal(f.setups.length,1);assert.equal(f.setups[0].limits.runTimeoutMs,360000);assert.equal(f.calls.length,0);
 });
+
+test('a bounded host startup limit reaches setup and changes retained check identity',async t=>{
+  const f=fixture(t,{startupTimeoutMs:90000}),project=f.service.createProject('Cold startup limit');
+  await f.director.configure(project.id,f.native,'cold-start');
+  assert.equal(f.setups[0].limits.startupTimeoutMs,90000);
+  const other=new LocalDirectorController(f.service,{...f.config,startupTimeoutMs:60000});t.after(()=>other.close());
+  assert.equal(other.settings(project.id).modelCatalogStatus,'unchecked');
+  assert.equal(f.calls.length,0);
+});
+
+for(const category of ['native_timeout','native_spawn_failed','native_auth_required','native_protocol','native_rate_limited','native_unknown'])
+test(`setup ${category} survives restart without raw messages or automatic native turns`,async t=>{
+  const nativeDiagnostic={category,...(category==='native_timeout'?{limitMs:60000}:{})},raw='PRIVATE_NATIVE_MESSAGE /private/account/token secret-value',logs=[];
+  t.mock.method(console,'warn',(...args)=>logs.push(args));
+  const f=fixture(t,{setup:async()=>({readiness:{status:'blocked',issues:[{code:'SETUP_FAILED',message:raw}],nativeDiagnostic:{...nativeDiagnostic,message:raw}}})});
+  const project=f.service.createProject('Retained safe diagnostic'),path=`/api/projects/${project.id}/director/setup`;
+  const response=await f.req('POST',path,f.native,'failure');
+  assert.equal(response.statusCode,409);assert.deepEqual(response.json().error.details,{nativeDiagnostic});assert.ok(!response.body.includes(raw));
+  const settings=(await f.req('GET',path)).json();assert.deepEqual(settings.nativeDiagnostic,nativeDiagnostic);
+  const rows=f.store.list('director_local_check',project.id);assert.equal(rows.length,1);assert.deepEqual(rows[0].nativeDiagnostic,nativeDiagnostic);
+  const restarted=new LocalDirectorController(f.service,f.config);t.after(()=>restarted.close());
+  assert.deepEqual(restarted.settings(project.id).nativeDiagnostic,nativeDiagnostic);
+  assert.equal(JSON.stringify({rows,logs,settings}).includes(raw),false);
+  assert.equal(f.calls.length,0);assert.equal(f.store.list('native_model_start',project.id).length,0);
+});

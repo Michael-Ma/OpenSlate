@@ -5,6 +5,7 @@ import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
 import { prepareDirectorImages } from "./images.js";
 import { fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
+import { classifyNativeDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
 import type { DirectorQuestion, DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent, DirectorStartOptions } from "./types.js";
 
 const SERVER = "openslate";
@@ -105,7 +106,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       }).catch(() => { deliveryFailed = true; stop(new RuntimeFault("RUNTIME_EVENT_CONSUMER_FAILED", "Runtime event consumer failed")); }).finally(() => { queued--; });
     };
     options.signal?.addEventListener("abort", abort, { once: true });
-    const runTimer = setTimeout(() => stop(new RuntimeFault("RUNTIME_RUN_TIMEOUT", "Director run exceeded its time limit")), config.limits.runTimeoutMs);
+    const runTimer = setTimeout(() => stop(nativeTimeoutFault("RUNTIME_RUN_TIMEOUT", "Director run exceeded its time limit", config.limits.runTimeoutMs)), config.limits.runTimeoutMs);
     let result: DirectorRunResult | undefined;
     try {
       requireRuntime(!options.signal?.aborted, "RUNTIME_ABORTED", "Director run was cancelled");
@@ -200,6 +201,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       await this.catalog(transport, nativeThreadId, input, cancellation.signal);
       emit({ ...base, kind: "runtime_started", nativeThreadId });
       await delivery; if (stopReason) throw stopReason;
+      transport.finishStartup();
       dispatched = true;
       const started = object(await rpc("turn/start", { threadId: nativeThreadId,
         input: [{ type: "text", text: input.text }, ...input.skills.map(skill => ({ type: "skill", ...skill })), ...images],
@@ -222,7 +224,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       }
       const status = terminalStatus ?? (dispatched ? "unknown" : problem.code === "RUNTIME_ABORTED" ? "interrupted" : "failed");
       result = { ...base, status, text: this.finalText(messages), dispatched,
-        ...(nativeThreadId ? { nativeThreadId } : {}), ...(nativeTurnId ? { nativeTurnId } : {}), error: { code: problem.code, message: problem.message } };
+        ...(nativeThreadId ? { nativeThreadId } : {}), ...(nativeTurnId ? { nativeTurnId } : {}), error: { code: problem.code, message: problem.message, nativeDiagnostic: classifyNativeDiagnostic(problem) } };
     } finally {
       clearTimeout(runTimer); options.signal?.removeEventListener("abort", abort);
       if (transport) {
@@ -262,10 +264,12 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     const value = this.#options;
     return new Promise((resolve, reject) => {
       execFile(value.command.file, [...(value.command.args ?? []), "--version"], {
-        cwd: value.cwd, env: { ...value.env }, timeout: value.limits.requestTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096,
+        cwd: value.cwd, env: { ...value.env }, timeout: value.limits.startupTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096,
         ...(signal ? { signal } : {}),
       }, (error, stdout) => {
-        if (error) reject(new RuntimeFault(signal?.aborted ? "RUNTIME_ABORTED" : "RUNTIME_VERSION_FAILED", "Pinned native version could not be checked"));
+        if (error) reject(signal?.aborted ? new RuntimeFault("RUNTIME_ABORTED", "Director run was cancelled") : error.killed && error.signal === "SIGKILL"
+          ? nativeTimeoutFault("RUNTIME_VERSION_TIMEOUT", "Pinned native version did not respond in time", value.limits.startupTimeoutMs)
+          : new RuntimeFault("RUNTIME_VERSION_FAILED", "Pinned native version could not be checked", classifyNativeDiagnostic(error)));
         else if (stdout.trim() !== `codex-cli ${value.runtimeVersion}`) reject(new RuntimeFault("RUNTIME_VERSION_MISMATCH", "Native binary does not match the pinned version"));
         else resolve();
       });

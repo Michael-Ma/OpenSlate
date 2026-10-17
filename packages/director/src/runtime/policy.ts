@@ -32,6 +32,8 @@ export interface LocalCodexPolicy {
   config: Readonly<Record<string, CodexConfigValue>>;
 }
 export interface CodexRuntimeLimits {
+  /** Whole cold app-server preparation phase; ordinary RPCs retain their separate limit. */
+  startupTimeoutMs: number;
   requestTimeoutMs: number;
   runTimeoutMs: number;
   interruptGraceMs: number;
@@ -41,12 +43,13 @@ export interface CodexRuntimeLimits {
   eventTimeoutMs: number;
 }
 export const CODEX_RUNTIME_LIMITS: Readonly<CodexRuntimeLimits> = Object.freeze({
-  requestTimeoutMs: 15_000, runTimeoutMs: 180_000, interruptGraceMs: 3_000,
+  startupTimeoutMs: 60_000, requestTimeoutMs: 15_000, runTimeoutMs: 180_000, interruptGraceMs: 3_000,
   shutdownGraceMs: 1_000, outputBytes: 16 * 1024 * 1024, eventQueue: 256, eventTimeoutMs: 5_000,
 });
 /** Host-configured planning turns may take longer; the default stays three minutes.
  * This bounds the complete native run, never a retry or an idle-time extension. */
 export const CODEX_MAX_RUN_TIMEOUT_MS = 600_000;
+export const CODEX_MAX_STARTUP_TIMEOUT_MS = 120_000;
 export interface CodexDirectorOptions {
   /** An explicitly selected local binary; never resolved through PATH. */
   command: { file: string; args?: readonly string[] };
@@ -81,7 +84,7 @@ export function validateOptions(supplied: CodexDirectorOptions): CodexDirectorOp
   for (const key of Object.keys(limits) as (keyof CodexRuntimeLimits)[]) {
     const requested = value.limits?.[key];
     if (requested !== undefined) {
-      const maximum = key === "runTimeoutMs" ? CODEX_MAX_RUN_TIMEOUT_MS : limits[key];
+      const maximum = key === "runTimeoutMs" ? CODEX_MAX_RUN_TIMEOUT_MS : key === "startupTimeoutMs" ? CODEX_MAX_STARTUP_TIMEOUT_MS : limits[key];
       requireRuntime(Number.isSafeInteger(requested) && requested > 0 && requested <= maximum, "RUNTIME_CONFIG_INVALID", "Runtime limit exceeds its supported bound");
       limits[key] = requested;
     }

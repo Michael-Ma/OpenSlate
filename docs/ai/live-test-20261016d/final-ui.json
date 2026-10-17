@@ -1,0 +1,54 @@
+{
+  "at": "2026-10-17T00:22:58.798Z",
+  "geometry": [
+    {
+      "tag": "ARTICLE",
+      "class": "note",
+      "text": "a\nDirector's note a:\nNo current keyframe is available for either shot in this review, so I cannot assess the boat's appearance, composition or visual continuity. The saved close-up and wide-shot directions remain intact. Review the actual frames when available before deciding on visual changes.\nOpen 1.1\nOpen 1.2",
+      "rect": {
+        "x": 18,
+        "y": 403.25,
+        "width": 355,
+        "height": 206.75
+      },
+      "fit": "fill"
+    },
+    {
+      "tag": "SECTION",
+      "class": "banner",
+      "text": "a\nDIRECTOR'S NOTE\nNo current keyframe is available for either shot in this review, so I cannot assess the boat's appearance, composition or visual continuity. The saved close-up and wide-shot directions remain intact. Review the actual frames when available before deciding on visual changes.\n1.1, 1.2\nKeep current direction\nReply",
+      "rect": {
+        "x": 414,
+        "y": 112,
+        "width": 1004,
+        "height": 153
+      },
+      "fit": "fill"
+    },
+    {
+      "tag": "SPAN",
+      "class": "anno",
+      "text": "a\nNo current keyframe is available for either shot in this review\nNo current keyframe is available for either shot in this review",
+      "rect": {
+        "x": 482.125,
+        "y": 703,
+        "width": 160.859375,
+        "height": 20
+      },
+      "fit": "fill"
+    },
+    {
+      "tag": "SPAN",
+      "class": "anno",
+      "text": "a\nNo current keyframe is available for either shot in this review\nNo current keyframe is available for either shot in this review",
+      "rect": {
+        "x": 740.109375,
+        "y": 703,
+        "width": 160.859375,
+        "height": 20
+      },
+      "fit": "fill"
+    }
+  ],
+  "ui": "OpenSlate\nPaper boat review LIVE-4\nPaper boat review LIVE-4\nPaper boat LIVE-4\n12 s · 30 fps\nPlan\nKeyframes\nAssets\nFilm\n1 scene · 2 shots\nSynced\n中文\nD\nDirector\nScene 1\nYou · 17:19\nMake a silent 12-second film: one scene, two shots of 6 seconds each. A plain white paper boat floats on a small rain puddle at dusk, first a close-up then a wide shot. Save the story, scene, two shots, visual prompts and simple motion. Use short framing labels. Explicitly set No narration on both shots; no music. Stop after saving the plan; I will make the keyframes.\nDirector · 17:20\n\nSaved the story, scene, and six-second close-up with No narration. I’m adding the six-second wide shot next.\n\nDirector · 17:20\n\nSaved Paper Boat at Dusk:\n\nClose-up: 6 seconds.\n\nWide: 6 seconds.\n\nStory, visual prompts, and gentle drifting/bobbing motion are saved. Both shots explicitly use No narration; no music.\n\nStopped after saving the storyboard plan. Keyframes are left for you.\n\nDirector · 17:21\n\nPaper Boat at Dusk — Note a saved: Neither shot has a current keyframe available to inspect, so visual quality and continuity remain unreviewed.\n\nNo creative changes proposed, film edits made, or generation started. Next step: review the actual frames when available.\n\na\nDirector's note a:\nNo current keyframe is available for either shot in this review, so I cannot assess the boat's appearance, composition or visual continuity. The saved close-up and wide-shot directions remain intact. Review the actual frames when available before deciding on visual changes.\nOpen 1.1\nOpen 1.2\nDirector · 17:22\n\nPaper Boat at Dusk: Neither shot has a current keyframe available to inspect. Existing note a already records this limitation; no duplicate note added.\n\nNo visual changes proposed, film edits made, or generation started. Review the actual frames when available.\n\nMessage to the Director\n@\na scene or shot to point at it\nPaper Boat at Dusk\nScene 1 · 2 shots · needs attention\n1 Paper Boat at Dusk\na\nDIRECTOR'S NOTE\nNo current keyframe is available for either shot in this review, so I cannot assess the boat's appearance, composition or visual continuity. The saved close-up and wide-shot directions remain intact. Review the actual frames when available before deciding on visual changes.\n1.1, 1.2\nKeep current direction\nReply\nNo keyframe yet\nClose-up at puddle level of a single plain white folded paper boat floating on a small rain puddle at dusk. Unmarked white paper with crisp folds, subtle ripples, soft cool dusk light reflected on the water, wet ground softly out of focus. Naturalistic, quiet composition. No people, lettering or decorations.\n1.1\n1 / 2\n0:00\n0:06\nShot 1.1\nClose-up\n@ 1.1\nKeyframe failed · not charged\nPrompts\nMotion\nLocked camera; gentle bobbing and a slight drift.\nDuration\n6 s\nNarration\nEdit\nNone\n\nKeyframe failed · not charged\n\nEdit prompt\nMotion & duration\nMake again\n\nuses your Codex plan\n\nClose-up at puddle level of a single plain white folded paper boat floating on a small rain puddle at dusk. Unmarked white paper with crisp folds, subtle ripples, soft cool dusk light reflected on the water, wet ground softly out of focus. Naturalistic, quiet composition. No people, lettering or decorations.\n1.1\na\nNo current keyframe is available for either shot in this review\nNo current keyframe is available for either shot in this review\n1.1 Close-up\n6 s\nKeyframe failed · not charged\nlocked camera; gentle bobbing and a slight drift.\nWide shot of a small shallow rain puddle surrounded by wet ground at dusk. A single plain white folded paper boat floats in the puddle, small but clearly visible. Match the close-up's unmarked white paper, crisp folds, soft cool dusk light and subtle water ripples. Show the whole puddle and its immediate surroundings in a naturalistic, quiet composition. No people, lettering or decorations.\n1.2\na\nNo current keyframe is available for either shot in this review\nNo current keyframe is available for either shot in this review\n1.2 Wide\n6 s\nKeyframe failed · not charged\nlocked camera; the boat continues a slight drift and gentle bobbing.\nNo more shots in this scene\nSCENE 1 KEYFRAMES\n0 of 2keyframes\n\nThe prompts are written. Make keyframes to see the shots.\n\nMake 2 keyframes · uses your Codex plan"
+}

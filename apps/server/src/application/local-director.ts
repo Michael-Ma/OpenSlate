@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { digest, DomainError, invariant, newId } from "@openslate/core";
-import { CODEX_PROTOCOL_VERSION, CodexDirectorRuntime, setupLocalCodex, verifySkillLock } from "@openslate/director";
+import { CODEX_PROTOCOL_VERSION, CodexDirectorRuntime, classifyNativeDiagnostic, setupLocalCodex, verifySkillLock } from "@openslate/director";
 import { toolVersion } from "../installation-status.js";
 import type { DirectorRunInput, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorSupervisor } from "./director-supervisor.js";
@@ -14,14 +14,15 @@ import { KeyframeProjector, describeUnattachedKeyframes } from "./keyframe-proje
 import { triggerKeyframeReviews } from "./keyframe-review.js";
 import { DirectorImageProjector } from "./director-images.js";
 import type { SelectedDirectorImage } from "./director-images.js";
-import type { ActorContext, ToolContractVersion } from "@openslate/core";
+import type { ActorContext, NativeDiagnostic, ToolContractVersion } from "@openslate/core";
 import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
 import { createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
 import type { SkillCapabilityLock } from "@openslate/director";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
-import { readDirectorRunTimeout } from "./director-run-config.js";
+import { readCodexStartupTimeout, readDirectorRunTimeout } from "./director-run-config.js";
+import { logNativeDiagnostic, safeNativeDiagnostic } from "./native-diagnostics.js";
 import { findLocalCodexBinary, supportedCodexInstall } from "./codex-binary.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
@@ -37,11 +38,14 @@ interface SavedCodexCheck {
   modelChoices?: { id: string; label: string }[];
   lastSuccessfulCheck: SuccessfulCodexCheck | null;
   diagnostic: CodexVersionDiagnostic | null;
+  nativeDiagnostic?: NativeDiagnostic;
 }
 export interface LocalDirectorOptions {
   repositoryRoot: string; dataDirectory: string; endpoint: string;
   /** Finite trusted host turn deadline; defaults to the runtime's three minutes. */
   runTimeoutMs?: number;
+  /** Trusted host cold native startup deadline; never accepted from a browser command. */
+  startupTimeoutMs?: number;
   /** Test/deployment injection points are trusted host code, never browser arguments. */
   setup?: Setup;
   makeRuntime?: (result: Ready) => DirectorRuntime;
@@ -69,6 +73,7 @@ export class LocalDirectorController {
   private readonly imageProjector: DirectorImageProjector | null;
   constructor(readonly service: ProductionService, readonly config: LocalDirectorOptions) {
     if (config.runTimeoutMs !== undefined) readDirectorRunTimeout({ OPENSLATE_DIRECTOR_RUN_TIMEOUT_MS: String(config.runTimeoutMs) });
+    if (config.startupTimeoutMs !== undefined) readCodexStartupTimeout({ OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(config.startupTimeoutMs) });
     this.setup = config.setup ?? setupLocalCodex;
     this.defaults = config.defaults ?? { binaryPath: findLocalCodexBinary(), model: "gpt-6-astra" };
     try { this.imageProjector = config.ffmpegPath ? new KeyframeProjector(service, { ffmpegPath: config.ffmpegPath }) : null; }
@@ -160,6 +165,7 @@ export class LocalDirectorController {
       modelChoices: structuredClone(catalog?.modelChoices ?? []), modelCatalogStatus: !catalog || catalog.status === "ready" && catalog.modelChoices === undefined ? "unchecked" as const
         : catalog.status === "ready" ? "ready" as const : "blocked" as const, modelCatalogCheckedAt: catalog?.checkedAt ?? null,
       lastSuccessfulCheck: structuredClone(storedCheck?.lastSuccessfulCheck ?? null),
+      nativeDiagnostic: safeNativeDiagnostic(catalog?.nativeDiagnostic) ?? (catalog?.status === "blocked" ? { category: "native_unknown" as const } : null),
       codexDiagnostic: this.binaryDiagnostics.has(projectId) ? structuredClone(this.binaryDiagnostics.get(projectId)!) : storedCheck?.diagnostic ?? null };
   }
   private modelSelection(projectId: string): LocalDirectorSelection {
@@ -173,7 +179,8 @@ export class LocalDirectorController {
     // a runtime: prepare() still runs the complete local check before the next native conversation.
     return digest({ projectId, selection, setupRevision: 1, version: CODEX_PROTOCOL_VERSION,
       repositoryRoot: resolve(this.config.repositoryRoot), dataDirectory: resolve(this.config.dataDirectory),
-      nativeHome: homedir(), runTimeoutMs: this.config.runTimeoutMs ?? null });
+      nativeHome: homedir(), runTimeoutMs: this.config.runTimeoutMs ?? null,
+      startupTimeoutMs: this.config.startupTimeoutMs ?? null });
   }
   private savedCheck(projectId: string, selection: LocalDirectorSelection): SavedCodexCheck | undefined {
     return this.service.store.get<SavedCodexCheck>("director_local_check", this.checkKey(projectId, selection));
@@ -185,8 +192,11 @@ export class LocalDirectorController {
     const lastSuccessfulCheck = readiness.status === "ready"
       ? { binaryPath: selection.binaryPath!, version: CODEX_PROTOCOL_VERSION, checkedAt } : previous?.lastSuccessfulCheck ?? null;
     const diagnostic = this.recordVersionDiagnostic(projectId, selection, readiness);
+    const nativeDiagnostic = safeNativeDiagnostic(readiness.nativeDiagnostic) ?? (readiness.status === "blocked" ? { category: "native_unknown" as const } : undefined);
     this.service.store.put<SavedCodexCheck>("director_local_check", id, projectId, { id, projectId, status: readiness.status, checkedAt,
-      ...(readiness.modelChoices === undefined ? {} : { modelChoices: structuredClone(readiness.modelChoices) }), lastSuccessfulCheck, diagnostic });
+      ...(readiness.modelChoices === undefined ? {} : { modelChoices: structuredClone(readiness.modelChoices) }), lastSuccessfulCheck, diagnostic,
+      ...(nativeDiagnostic ? { nativeDiagnostic } : {}) });
+    if (nativeDiagnostic) logNativeDiagnostic("director_setup", projectId, nativeDiagnostic);
   }
 
   /** Read-only native preflight; only local diagnostic evidence is retained. No selection, project, thread or turn is written. */
@@ -346,7 +356,9 @@ export class LocalDirectorController {
       const diagnostic = this.binaryDiagnostics.get(projectId);
       if (diagnostic && result.readiness.issues?.some(issue => issue.code === "SETUP_VERSION_MISMATCH"))
         throw new DomainError(diagnostic.code, `Codex ${diagnostic.expectedVersion} is required; found ${diagnostic.foundVersion ?? "an unrecognized version"} at ${diagnostic.binaryPath}. The supported installation is ${diagnostic.installPath}.`, diagnostic);
-      invariant(result.readiness.status === "ready" && result.runtimeOptions, "DIRECTOR_SETUP_REQUIRED", "Codex setup checks did not pass. Verify the selected binary, model and existing Codex sign-in.");
+      if (result.readiness.status !== "ready" || !result.runtimeOptions)
+        throw new DomainError("DIRECTOR_SETUP_REQUIRED", "Codex setup checks did not pass. Verify the selected binary, model and existing Codex sign-in.",
+          { nativeDiagnostic: safeNativeDiagnostic(result.readiness.nativeDiagnostic) ?? { category: "native_unknown" } });
       const runtime = this.config.makeRuntime?.(result) ?? new CodexDirectorRuntime(result.runtimeOptions);
       const input = createDirectorInput(this.service, { repositoryRoot: this.config.repositoryRoot, snapshotRoot: snapshots, endpoint: this.config.endpoint, runtimeId: "codex-app-server", freshTurnGuidance: this.toolSettings });
       return { runtime, input, readiness: result.readiness, runtimeOptions: result.runtimeOptions };
@@ -357,10 +369,16 @@ export class LocalDirectorController {
     invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
     const root = resolve(this.config.dataDirectory, "native", projectId), projection = join(root, "workspace");
     const checking = this.setup({ command: { file: selection.binaryPath! }, model: selection.model!, nativeHome: homedir(), codexHome: selection.codexHome ?? join(homedir(), ".codex"),
-      ...(this.config.runTimeoutMs === undefined ? {} : { limits: { runTimeoutMs: this.config.runTimeoutMs } }),
+      limits: { ...(this.config.runTimeoutMs === undefined ? {} : { runTimeoutMs: this.config.runTimeoutMs }),
+        ...(this.config.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: this.config.startupTimeoutMs }) },
       env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, SHELL: "/bin/sh", NO_COLOR: "1", CI: "1" },
       directories: { projection, snapshots: join(projection, ".agents", "skills"), storage: join(root, "runtime") } }, { signal: this.shutdown.signal }).then(result => {
-      invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down"); return result;
+      invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
+      const nativeDiagnostic = safeNativeDiagnostic(result.readiness.nativeDiagnostic) ?? (result.readiness.status === "blocked"
+        ? classifyNativeDiagnostic({ code: result.readiness.issues?.[0]?.code }) : undefined);
+      // Native prose is never an API payload, including errors injected by a host adapter.
+      return { ...result, readiness: { ...result.readiness, ...(nativeDiagnostic ? { nativeDiagnostic } : {}),
+        ...(result.readiness.issues ? { issues: result.readiness.issues.map(issue => ({ code: issue.code, message: "Codex setup check did not pass." })) } : {}) } };
     });
     this.setupChecks.add(checking);
     void checking.finally(() => this.setupChecks.delete(checking)).catch(() => {});

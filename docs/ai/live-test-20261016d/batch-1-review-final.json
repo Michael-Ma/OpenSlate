@@ -1,0 +1,557 @@
+{
+  "at": "2026-10-17T00:21:37.208Z",
+  "project": {
+    "activePlanId": "bae13dec-5af8-482f-a223-bd5c07e87de6",
+    "artifacts": [],
+    "brief": "A silent 12-second film in one scene: a plain white paper boat floats on a small rain puddle at dusk. Two shots, close-up then wide, six seconds each. No narration, music or other audio.",
+    "capabilityLockId": "c2e3b258-cf3d-47a1-a92a-27b6e3250d68",
+    "cues": [],
+    "headVersion": 3,
+    "id": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+    "maxFrames": 10800,
+    "name": "Paper boat review LIVE-4",
+    "narration": {
+      "script": "",
+      "source": "undecided"
+    },
+    "revisionId": "608384d7-b5f2-4e5e-a5c4-9141bf8f9bc7",
+    "scenes": [
+      {
+        "id": "d6985775-ec43-43bb-8ea3-c4213946ea8f",
+        "purpose": "Paper Boat at Dusk",
+        "revisionId": "290ab821-9f57-496c-af72-b1c675d24868"
+      }
+    ],
+    "shots": [
+      {
+        "action": "A plain white folded paper boat floats and gently bobs on a small rain puddle at dusk.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Close-up",
+        "id": "746c106e-800f-4801-b6e0-49860aaea9ec",
+        "imagePrompt": "Close-up at puddle level of a single plain white folded paper boat floating on a small rain puddle at dusk. Unmarked white paper with crisp folds, subtle ripples, soft cool dusk light reflected on the water, wet ground softly out of focus. Naturalistic, quiet composition. No people, lettering or decorations.",
+        "motion": "Locked camera; gentle bobbing and a slight drift.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "eec597bf44205e0a37e9ed3d289ebee65db57418d7ced4153a6e121cc4c123da",
+          "video": "f51ec097c5c2592504fda0ccbe5ed60372c0515d9c6593f421dce871a1268f0e"
+        },
+        "purpose": "Introduce the plain white paper boat and delicate ripples.",
+        "referenceArtifactIds": [],
+        "revisionId": "f97b0942-a36d-4c66-9ec4-dee92afc3e40",
+        "sceneId": "d6985775-ec43-43bb-8ea3-c4213946ea8f",
+        "videoPrompt": "Hold the camera still for six seconds. The plain white paper boat gently bobs and drifts slightly across the puddle as faint ripples spread. Preserve its folded shape and soft dusk lighting; no abrupt movement."
+      },
+      {
+        "action": "The same plain white paper boat continues floating on the small rain puddle, surrounded by wet ground at dusk.",
+        "cueId": null,
+        "desiredFrames": 180,
+        "framing": "Wide",
+        "id": "f6041b4d-db0d-4c07-a955-1a776af4fed4",
+        "imagePrompt": "Wide shot of a small shallow rain puddle surrounded by wet ground at dusk. A single plain white folded paper boat floats in the puddle, small but clearly visible. Match the close-up's unmarked white paper, crisp folds, soft cool dusk light and subtle water ripples. Show the whole puddle and its immediate surroundings in a naturalistic, quiet composition. No people, lettering or decorations.",
+        "motion": "Locked camera; the boat continues a slight drift and gentle bobbing.",
+        "narration": {
+          "mode": "none",
+          "text": "",
+          "voice": "stock"
+        },
+        "promptIntent": {
+          "image": "71966d0a02bd05ff814094d8ecd7ac00106b1b1c323a8d43b48c81db7fb23a22",
+          "video": "b87a11eb70621f0f67202bf9cbd8eb5cd2458559cd3e11e4cfd1a54b62e36dae"
+        },
+        "purpose": "Reveal the small puddle and the boat within its quiet surroundings.",
+        "referenceArtifactIds": [],
+        "revisionId": "e903db4d-930d-4bcc-8a50-3a6254d0d7f4",
+        "sceneId": "d6985775-ec43-43bb-8ea3-c4213946ea8f",
+        "videoPrompt": "Hold the wide camera still for six seconds. The plain white paper boat continues gently bobbing and drifting slightly on the small puddle while faint ripples spread. Keep the surrounding wet ground still, preserve the boat's folded shape and maintain consistent dusk lighting."
+      }
+    ],
+    "story": "At dusk, a close-up watches a plain white paper boat gently bob on a small rain puddle. After six seconds, cut to a wide view revealing the modest puddle and surrounding wet ground; the same boat continues its quiet drift for six seconds. A still, understated observation, entirely silent."
+  },
+  "plan": {
+    "id": "bae13dec-5af8-482f-a223-bd5c07e87de6",
+    "nodes": [
+      {
+        "id": "426d0425-6b7b-4e83-aeb8-775e0a2c24af",
+        "shotId": "746c106e-800f-4801-b6e0-49860aaea9ec",
+        "kind": "image"
+      },
+      {
+        "id": "1b5921bd-a27d-4ec6-9b85-40dd7cd864e5",
+        "shotId": "f6041b4d-db0d-4c07-a955-1a776af4fed4",
+        "kind": "image"
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "id": "7a01e19c-826c-4314-8b46-516b8f26ae44",
+      "nodeId": "426d0425-6b7b-4e83-aeb8-775e0a2c24af",
+      "ordinal": 1,
+      "phase": "failed",
+      "taskId": null,
+      "createdAt": "2026-10-17T00:20:43.003Z",
+      "failure": {
+        "id": "codex-image-b777d688b894e796a8926f8eb4ab7f47",
+        "retryAllowed": false,
+        "source": "codex-image_provider",
+        "technical": true
+      },
+      "kind": "image",
+      "adapter": "codex-image"
+    },
+    {
+      "id": "08b52306-30c5-46f0-a22d-896b42d3d481",
+      "nodeId": "1b5921bd-a27d-4ec6-9b85-40dd7cd864e5",
+      "ordinal": 1,
+      "phase": "failed",
+      "taskId": null,
+      "createdAt": "2026-10-17T00:20:59.531Z",
+      "failure": {
+        "id": "codex-image-d1365532fda7bd12fcc3b60a26d25794",
+        "retryAllowed": false,
+        "source": "codex-image_provider",
+        "technical": true
+      },
+      "kind": "image",
+      "adapter": "codex-image"
+    }
+  ],
+  "turns": [
+    {
+      "id": "d4090cb7-0086-40cf-8bd0-a5287ef809fa",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "state": "completed",
+      "at": "2026-10-17T00:19:43.475Z",
+      "updatedAt": "2026-10-17T00:20:15.806Z",
+      "runtime": "live",
+      "action": "conversation",
+      "reason": null,
+      "effects": {
+        "notesCreated": 0,
+        "proposalsHeld": 0,
+        "changesApplied": 2
+      },
+      "notesSaveFailure": null,
+      "activity": {
+        "phase": "tool",
+        "state": "completed",
+        "at": "2026-10-17T00:20:13.124Z"
+      },
+      "progress": {
+        "tool": "read_context",
+        "state": "succeeded"
+      }
+    },
+    {
+      "id": "52b8396d-d2be-48d9-86cb-a6b8fb13f66a",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "state": "completed",
+      "at": "2026-10-17T00:21:16.060Z",
+      "updatedAt": "2026-10-17T00:21:31.156Z",
+      "runtime": "live",
+      "action": "keyframe_review",
+      "reason": null,
+      "effects": {
+        "notesCreated": 1,
+        "proposalsHeld": 0,
+        "changesApplied": 0
+      },
+      "notesSaveFailure": null,
+      "activity": {
+        "phase": "tool",
+        "state": "completed",
+        "at": "2026-10-17T00:21:28.358Z"
+      },
+      "progress": {
+        "tool": "record_notes",
+        "state": "succeeded"
+      }
+    }
+  ],
+  "notes": [
+    {
+      "anchor": {
+        "shotIds": [
+          "746c106e-800f-4801-b6e0-49860aaea9ec",
+          "f6041b4d-db0d-4c07-a955-1a776af4fed4"
+        ]
+      },
+      "blocking": false,
+      "choices": [
+        {
+          "kind": "accept",
+          "label": "Keep current direction"
+        },
+        {
+          "kind": "reply"
+        }
+      ],
+      "createdAt": "2026-10-17T00:21:28.355Z",
+      "id": "62c31729-b98a-47bb-9a92-877d8044d6d2",
+      "kind": "observation",
+      "letter": "a",
+      "noteId": "62c31729-b98a-47bb-9a92-877d8044d6d2",
+      "projectId": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "state": "open",
+      "text": "No current keyframe is available for either shot in this review, so I cannot assess the boat's appearance, composition or visual continuity. The saved close-up and wide-shot directions remain intact. Review the actual frames when available before deciding on visual changes.",
+      "turnId": "52b8396d-d2be-48d9-86cb-a6b8fb13f66a",
+      "version": 1
+    }
+  ],
+  "conversation": [
+    {
+      "id": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "role": "user",
+      "text": "Make a silent 12-second film: one scene, two shots of 6 seconds each. A plain white paper boat floats on a small rain puddle at dusk, first a close-up then a wide shot. Save the story, scene, two shots, visual prompts and simple motion. Use short framing labels. Explicitly set No narration on both shots; no music. Stop after saving the plan; I will make the keyframes.",
+      "state": "superseded",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "at": "2026-10-17T00:19:43.475Z"
+    },
+    {
+      "id": "7b8b7db1-99a2-45e6-a58f-c1639e400359",
+      "role": "assistant",
+      "text": "Saved the story, scene, and six-second close-up with No narration. I’m adding the six-second wide shot next.\n",
+      "state": "commentary",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "at": "2026-10-17T00:20:04.542Z",
+      "runtime": "live"
+    },
+    {
+      "id": "f4b59701-d30f-4d79-9e50-9cc543dc82b4",
+      "role": "assistant",
+      "text": "Saved **Paper Boat at Dusk**:\n- **Close-up:** 6 seconds.\n- **Wide:** 6 seconds.\n\nStory, visual prompts, and gentle drifting/bobbing motion are saved. Both shots explicitly use **No narration**; no music.\n\nStopped after saving the storyboard plan. Keyframes are left for you.",
+      "state": "final",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "at": "2026-10-17T00:20:15.753Z",
+      "runtime": "live"
+    },
+    {
+      "id": "c5d2626a-5dfb-4f3a-9339-9e541a514165",
+      "role": "assistant",
+      "text": "**Paper Boat at Dusk — Note a saved:** Neither shot has a current keyframe available to inspect, so visual quality and continuity remain unreviewed.\n\nNo creative changes proposed, film edits made, or generation started. Next step: review the actual frames when available.",
+      "state": "final",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "at": "2026-10-17T00:21:31.121Z",
+      "runtime": "live"
+    }
+  ],
+  "toolCalls": [
+    {
+      "id": "c2a676706bee47dcf0ada1fc665c9b417926649f3e6c2a239838b1e36381eb3d",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "epochId": "10d7734b-cc08-4637-ac78-bde1acda8d92",
+      "callId": "2c8e3bda-e607-415d-9dde-3816fb42d5ec",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "1ce9d1206acb7f8a1b09858ad101a5cea08e5ead816c3099b06b9ae15a369f7d"
+    },
+    {
+      "id": "db0b68c4d8ca378fb6a10471050d9cddfaabcc05f34a2484a064b8ec578b90b1",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "epochId": "10d7734b-cc08-4637-ac78-bde1acda8d92",
+      "callId": "ae06f6b3-3982-425f-8d28-fae85d453a0a",
+      "tool": "prepare_change",
+      "state": "succeeded",
+      "resultDigest": "4ea03e157b2ecb271a520ccad552a87b27284b4849ad1731677cf97ef389ed05"
+    },
+    {
+      "id": "d7452b5703d63a35418050bb57ac5da2e1fc059ce6ac861147f67cc4e385d429",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "epochId": "10d7734b-cc08-4637-ac78-bde1acda8d92",
+      "callId": "00ca0d95-067e-40eb-8ec6-49b15f556fe6",
+      "tool": "apply_change",
+      "state": "succeeded",
+      "resultDigest": "51204ce88faa3302d68adbd528d280d05f22b68348406ea0fcd3c962039d8fcb"
+    },
+    {
+      "id": "42ecff0617d60d18fc11a491eed6db9f07f85709300492909eae7f54db9446f9",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "epochId": "10d7734b-cc08-4637-ac78-bde1acda8d92",
+      "callId": "84e2b1aa-0625-49ba-8493-b7a7595d3838",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "d9fee7949545e4fd3a519618506a4e7b5efe5375c78ae97345b3966523ad3b4d"
+    },
+    {
+      "id": "03e88633997a256e0bdc6a75438457c0da7dd294410c8bedc25ec550437e36de",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "epochId": "10d7734b-cc08-4637-ac78-bde1acda8d92",
+      "callId": "0ed3ceef-27b4-4f88-a590-a30e9a089ec9",
+      "tool": "prepare_change",
+      "state": "succeeded",
+      "resultDigest": "1a26646956b4d8f897b3f8988a3509f83e5385abd4a8ee89712526e2dddd7dff"
+    },
+    {
+      "id": "cc0dc016048812198c2c726c8aec4f1a14edd95cd0444a604ef1e4a29f50cca6",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "epochId": "10d7734b-cc08-4637-ac78-bde1acda8d92",
+      "callId": "8a57e3c3-9a45-4c32-b76c-56798b23e42a",
+      "tool": "apply_change",
+      "state": "succeeded",
+      "resultDigest": "d3a4cc9967bd67696ad77cb9023f1cb0a0c39ca8ee52d58dcdb802787c37261e"
+    },
+    {
+      "id": "c8341c4a92c963eb6900ee902756467aea6a98efaf7e35a40e3e75d4bb138780",
+      "requestId": "11ecc420-44a9-463a-bf3d-01135bc69a4c",
+      "epochId": "10d7734b-cc08-4637-ac78-bde1acda8d92",
+      "callId": "89b3e8dc-24e0-4316-8b9a-fbae38ea1adb",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "bad6e2630c29900e13ba4d1bc99c09b04292dbbe2769f21a74512a2d64abcbfe"
+    },
+    {
+      "id": "e183a8d6b9c95a1d0884113b7f0681951b044a0d0fea0e7d12b6244e0bf92f5f",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "epochId": "a47d7bb8-75c3-49f6-bf19-33f62a324dcf",
+      "callId": "95948fc6-8a22-48b2-b470-bfd73ac96a6d",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "46ebb46e38e57adcbf1202ce14657bff0514ac84c27d3ef630c45899a71e1ad0"
+    },
+    {
+      "id": "9060df76968d3c94570a3a27356de8493e8bb8b6ce5630623190652c2f44c38b",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "epochId": "a47d7bb8-75c3-49f6-bf19-33f62a324dcf",
+      "callId": "517249f4-1f55-47d1-baa7-3d0e17614225",
+      "tool": "read_context",
+      "state": "succeeded",
+      "resultDigest": "9c6529980b38482f13bb8e36117dec408382f608735901e73f756aa85d3348aa"
+    },
+    {
+      "id": "3a56c6e54e18eda03ec515b95682e5e7f0a44e3df1bc1cd716500cfd1c74684d",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "epochId": "a47d7bb8-75c3-49f6-bf19-33f62a324dcf",
+      "callId": "d959c064-26d0-46a2-985b-40d5eb885fe5",
+      "tool": "record_notes",
+      "state": "succeeded",
+      "resultDigest": "5380d830e6c3367f5c911196c0da0f85b468090b555aed67a49bbf642f4941e8"
+    }
+  ],
+  "generation": {
+    "projectId": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+    "revisionId": "608384d7-b5f2-4e5e-a5c4-9141bf8f9bc7",
+    "headVersion": 3,
+    "cursor": 80,
+    "fps": 30,
+    "stopped": null,
+    "director": {
+      "state": "idle",
+      "scopeIds": []
+    },
+    "controlAuthorityId": null,
+    "scenes": [
+      {
+        "sceneId": "d6985775-ec43-43bb-8ea3-c4213946ea8f",
+        "ordinal": 1,
+        "title": "Paper Boat at Dusk",
+        "purpose": "Paper Boat at Dusk",
+        "state": "needs_attention",
+        "shotIds": [
+          "746c106e-800f-4801-b6e0-49860aaea9ec",
+          "f6041b4d-db0d-4c07-a955-1a776af4fed4"
+        ],
+        "counts": {
+          "shots": 2,
+          "keyframesReady": 0,
+          "opened": 0,
+          "videosReady": 0
+        },
+        "videoTargets": [
+          "746c106e-800f-4801-b6e0-49860aaea9ec",
+          "f6041b4d-db0d-4c07-a955-1a776af4fed4"
+        ],
+        "keyframeTargets": [
+          "746c106e-800f-4801-b6e0-49860aaea9ec",
+          "f6041b4d-db0d-4c07-a955-1a776af4fed4"
+        ],
+        "quotes": {
+          "makeKeyframes": {
+            "micros": "0",
+            "units": 2,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          },
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          },
+          "confirmVideo": {
+            "micros": "200000",
+            "units": 2,
+            "unitMicros": "100000",
+            "priceUnknown": false
+          },
+          "voice": {
+            "micros": "0",
+            "units": 0,
+            "unitMicros": "0",
+            "priceUnknown": false
+          }
+        },
+        "blockers": [
+          {
+            "code": "keyframe_missing",
+            "shotId": "746c106e-800f-4801-b6e0-49860aaea9ec"
+          },
+          {
+            "code": "keyframe_missing",
+            "shotId": "f6041b4d-db0d-4c07-a955-1a776af4fed4"
+          }
+        ],
+        "confirmationDigest": "975a1ea5e0ce2d3073767dc5f927a3c9adaab111e4a8099ebff6f969452237ac"
+      }
+    ],
+    "shots": {
+      "746c106e-800f-4801-b6e0-49860aaea9ec": {
+        "shotId": "746c106e-800f-4801-b6e0-49860aaea9ec",
+        "sceneId": "d6985775-ec43-43bb-8ea3-c4213946ea8f",
+        "label": "1.1",
+        "framing": "Close-up",
+        "purpose": "Introduce the plain white paper boat and delicate ripples.",
+        "imagePrompt": "Close-up at puddle level of a single plain white folded paper boat floating on a small rain puddle at dusk. Unmarked white paper with crisp folds, subtle ripples, soft cool dusk light reflected on the water, wet ground softly out of focus. Naturalistic, quiet composition. No people, lettering or decorations.",
+        "motion": "Locked camera; gentle bobbing and a slight drift.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "failed",
+          "takeCount": 0,
+          "attemptId": "7a01e19c-826c-4314-8b46-516b8f26ae44",
+          "phase": "failed",
+          "failure": {
+            "code": "codex-image-b777d688b894e796a8926f8eb4ab7f47",
+            "technical": true,
+            "retryAllowed": false,
+            "autoRetriesLeft": 0,
+            "charged": false,
+            "at": "2026-10-17T00:20:59.083Z"
+          },
+          "opened": false
+        },
+        "video": {
+          "state": "none",
+          "takeCount": 0
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          }
+        }
+      },
+      "f6041b4d-db0d-4c07-a955-1a776af4fed4": {
+        "shotId": "f6041b4d-db0d-4c07-a955-1a776af4fed4",
+        "sceneId": "d6985775-ec43-43bb-8ea3-c4213946ea8f",
+        "label": "1.2",
+        "framing": "Wide",
+        "purpose": "Reveal the small puddle and the boat within its quiet surroundings.",
+        "imagePrompt": "Wide shot of a small shallow rain puddle surrounded by wet ground at dusk. A single plain white folded paper boat floats in the puddle, small but clearly visible. Match the close-up's unmarked white paper, crisp folds, soft cool dusk light and subtle water ripples. Show the whole puddle and its immediate surroundings in a naturalistic, quiet composition. No people, lettering or decorations.",
+        "motion": "Locked camera; the boat continues a slight drift and gentle bobbing.",
+        "durationFrames": 180,
+        "keyframe": {
+          "state": "failed",
+          "takeCount": 0,
+          "attemptId": "08b52306-30c5-46f0-a22d-896b42d3d481",
+          "phase": "failed",
+          "failure": {
+            "code": "codex-image-d1365532fda7bd12fcc3b60a26d25794",
+            "technical": true,
+            "retryAllowed": false,
+            "autoRetriesLeft": 0,
+            "charged": false,
+            "at": "2026-10-17T00:21:15.570Z"
+          },
+          "opened": false
+        },
+        "video": {
+          "state": "none",
+          "takeCount": 0
+        },
+        "narration": {
+          "state": "none",
+          "text": "",
+          "fits": true
+        },
+        "quotes": {
+          "regenerateKeyframe": {
+            "micros": "0",
+            "units": 1,
+            "unitMicros": "0",
+            "priceUnknown": false,
+            "subscription": "codex"
+          }
+        }
+      }
+    },
+    "restartCasualties": []
+  },
+  "exports": {
+    "readiness": {
+      "ready": false,
+      "demo": false,
+      "seconds": 12,
+      "blockers": [
+        {
+          "code": "no_clip",
+          "shotId": "746c106e-800f-4801-b6e0-49860aaea9ec"
+        },
+        {
+          "code": "no_clip",
+          "shotId": "f6041b4d-db0d-4c07-a955-1a776af4fed4"
+        }
+      ]
+    },
+    "current": null,
+    "history": []
+  },
+  "director": {
+    "mode": "native",
+    "status": "idle",
+    "activeRequestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+    "turn": {
+      "createdAt": "2026-10-17T00:21:16.060Z",
+      "dispatched": true,
+      "epochId": "a47d7bb8-75c3-49f6-bf19-33f62a324dcf",
+      "errorCode": null,
+      "id": "52b8396d-d2be-48d9-86cb-a6b8fb13f66a",
+      "leaseExpiresAt": 0,
+      "nativeThreadId": "01a1473b-fe19-7412-b79e-72cc9b1d6a68",
+      "nativeTurnId": "01a1473b-ffa1-7332-b6ef-582490e9c619",
+      "owner": "61dceb14-9bea-4503-a866-c28145abbf3b",
+      "projectId": "c7ac8aaf-bdd7-47c1-9048-c82d6de7687d",
+      "requestId": "064676e1-b755-436b-84ed-0e1f1c63dd64",
+      "runtimeId": "codex-app-server",
+      "state": "completed",
+      "updatedAt": "2026-10-17T00:21:31.156Z"
+    },
+    "message": null,
+    "imageAttachmentsAvailable": true
+  },
+  "setup": {
+    "modelCalls": 2,
+    "selection": {
+      "binaryPath": "/Users/michael/.local/share/openslate-codex/node_modules/@openai/codex/bin/codex.js",
+      "mode": "native",
+      "model": "gpt-6-astra"
+    },
+    "modelCatalogStatus": "ready",
+    "codexVersion": "0.153.4",
+    "codexDiagnostic": null
+  }
+}

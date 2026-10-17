@@ -14,6 +14,8 @@ import { sceneView, sceneGenerationView } from "./scene-generation.js";
 import { generationTargets } from "./scene-row.js";
 import { quote } from "./generation-quotes.js";
 import { automaticRetriesLeft } from "./execution/retry-eligibility.js";
+import { assertCodexImageRecords } from "./execution/codex-image-lineage.js";
+import { safeNativeDiagnostic } from "./application/native-diagnostics.js";
 
 /** Existing scenes retain their purpose-derived label until named. */
 export function sceneTitle(purpose: string, title?: string): string {
@@ -104,8 +106,11 @@ export class GenerationOverviewReader {
               const failure = last.failure ?? (evidence?.outcome.failureId ? { id: evidence.outcome.failureId, technical: evidence.outcome.technical === true, retryAllowed: false } : null);
               const profile = captured.lock.profiles.find(p => p.id === binding?.node.profileId);
               const retriesLeft = automaticRetriesLeft(store, last, profile?.maxRetries ?? 0);
+              const native = last.request.execution?.adapter === "codex-image" ? assertCodexImageRecords(store, last).result?.observation : undefined;
+              const nativeDiagnostic = native?.kind === "not_dispatched" ? safeNativeDiagnostic(native.nativeDiagnostic) : undefined;
               return progress({ ...base, state: retriesLeft ? "queued" : "failed", attemptId: last.id, phase: last.phase, failure: { code: failure?.id ?? "EXECUTION_FAILED", technical: failure?.technical ?? false,
                 retryAllowed: retriesLeft > 0, autoRetriesLeft: retriesLeft,
+                ...(nativeDiagnostic ? { nativeDiagnostic, notDispatched: true } : {}),
                 charged: !last.reservationId || store.get<{ state: string }>("reservation", last.reservationId)?.state !== "released",
                 at: evidence?.recordedAt ?? last.createdAt } });
             }

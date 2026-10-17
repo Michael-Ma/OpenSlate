@@ -1,5 +1,5 @@
 import type { GenerationOverview, MediaSlot, PriceQuote, SceneBlocker, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
-import { errorMsg } from "../i18n/translate.ts";
+import { errorMsg, nativeDiagnosticMsg } from "../i18n/translate.ts";
 import { formatList } from "../i18n/typeset.ts";
 import { msg, type Msg } from "./types.ts";
 import { CHECK_MARK, narrationChecks, type AppCheck } from "./checks.ts";
@@ -278,13 +278,18 @@ export function heldOnly(overview: GenerationOverview, scene: SceneOverview): bo
 }
 
 /** The status of a replacement take while the current output stays shown, or null when none is in progress. */
-export function replacementStatus(slot: MediaSlot): { status: Msg; tone: CardTone } | null {
+export function replacementStatus(slot: MediaSlot): { status: Msg; tone: CardTone; reason?: Msg } | null {
   const replacement = slot.state === "ready" ? slot.replacement : undefined;
   if (!replacement) return null;
   switch (replacement.state) {
     case "running": return { status: msg("card.replacement.making"), tone: "working" };
     case "queued": return queuedToRun(replacement) ? { status: msg("card.replacement.making"), tone: "working" } : { status: waitingMsg(replacement), tone: "quiet" };
-    case "failed": return { status: msg(replacement.failure?.charged ? "card.replacement.failed_charged" : "card.replacement.failed"), tone: "attention" };
+    case "failed": {
+      const reason = nativeDiagnosticMsg(replacement.failure?.nativeDiagnostic, "images", replacement.failure?.notDispatched === true && !replacement.failure.charged);
+      const status = reason && !replacement.failure?.charged && replacement.failure?.notDispatched !== true ? "error.CODEX_IMAGES_REPLACEMENT_FAILED"
+        : replacement.failure?.charged ? "card.replacement.failed_charged" : "card.replacement.failed";
+      return { status: msg(status), tone: "attention", ...(reason ? { reason } : {}) };
+    }
     case "no_answer": return { status: msg("card.replacement.no_answer"), tone: "attention" };
   }
 }
@@ -330,7 +335,12 @@ export function cardStatus(shot: ShotOverview): ShotStatus {
     case "ready": return keyframe.opened ? { status: msg("card.opened"), tone: "opened" } : { status: msg("card.not_opened"), tone: "not_opened" };
     case "queued": return waiting(keyframe);
     case "outdated": return { status: msg("card.outdated"), tone: "attention" };
-    case "failed": return { status: msg(keyframe.failure?.charged ? "card.keyframe.failed_charged" : "card.keyframe.failed"), tone: "attention" };
+    case "failed": {
+      const reason = nativeDiagnosticMsg(keyframe.failure?.nativeDiagnostic, "images", keyframe.failure?.notDispatched === true && !keyframe.failure.charged);
+      const status = reason && !keyframe.failure?.charged && keyframe.failure?.notDispatched !== true ? "error.CODEX_IMAGES_FAILED"
+        : keyframe.failure?.charged ? "card.keyframe.failed_charged" : "card.keyframe.failed";
+      return { status: msg(status), tone: "attention", ...(reason ? { reason } : {}) };
+    }
     case "no_answer": return { status: msg("card.no_answer"), tone: "attention" };
     case "choose_take": return { status: msg("card.choose_take"), tone: "attention" };
     case "direction_required": return { status: msg("card.direction_required"), tone: "quiet" };
