@@ -61,6 +61,55 @@ test('anchors, choices and unseen visual claims cannot escape scope; calls are a
  await assert.rejects(f.record([f.note({blocking:true,choices:[{kind:'reply'}]})]),{code:'VALIDATION_ERROR'});
  assert.equal(f.store.list('director_note',f.project.id).length,0);
 });
+test('note domain refusals identify the failed field and correction without losing scope or atomicity',async t=>{
+ const f=fixture(t);
+ const cases=[
+  [f.note({anchor:{shotIds:['shot-1']}}),'SCOPE_DENIED','outside_scope',/\/notes\/1\/anchor\/shotIds.*request.*Read.*shots/i],
+  [f.note({choices:[{kind:'regenerate_keyframe',shotIds:['shot-1']}]}),'SCOPE_DENIED','outside_scope',/\/notes\/1\/choices\/0.*anchored shots/i],
+  [f.note({blocking:true,choices:[{kind:'reply'}]}),'VALIDATION_ERROR','missing_keep_choice',/\/notes\/1\/choices.*accept.*keep/i],
+  [f.note({seenKeyframe:{shotId:'shot-0',artifactId:'made-up',sha256:'a'.repeat(64)}}),'SCOPE_DENIED','unseen_keyframe',/\/notes\/1\/seenKeyframe.*attachedKeyframes/],
+ ];
+ for(const [bad,code,reason,message] of cases){
+  await assert.rejects(f.record([f.note(),bad]),error=>error.code===code&&error.details?.reason===reason&&message.test(error.message));
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,{code,reason});
+ }
+ assert.equal(f.store.list('director_note',f.project.id).length,0);
+});
+test('corrected LIVE-3 payload preserves exact seen-keyframe evidence and refuses a fabricated replacement',async t=>{
+ const f=fixture(t),seen={shotId:'shot-0',artifactId:'fixture-frame',sha256:'a'.repeat(64)};
+ // Synthetic projection tests application identity validation; it makes no visual-quality claim.
+ f.store.insert('request_keyframe_projection',f.bridge.actor.requestId,f.project.id,{projectId:f.project.id,epochId:f.bridge.actor.epochId,images:[seen]});
+ const note=f.note({text:'[redacted observation]',seenKeyframe:seen,choices:[{kind:'accept',label:'Keep'},{kind:'reply'}]});
+ const wrong={...note,anchor:{shotId:'shot-0'}};
+ await assert.rejects(f.record([wrong],'live-wrong'),{code:'VALIDATION_ERROR'});
+ const saved=await f.record([note],'live-corrected');assert.equal(saved.notes.length,1);
+ assert.deepEqual(f.store.list('director_note',f.project.id)[0].seenKeyframe,seen);
+ await assert.rejects(f.record([{...note,seenKeyframe:{...seen,artifactId:'another-frame'}}],'fabricated'),{code:'SCOPE_DENIED'});
+ assert.equal(f.store.list('director_note',f.project.id).length,1);
+});
+test('unknown note save is reported as uncertain until exact committed receipt reconciliation',async t=>{
+ const f=fixture(t),original=f.store.put.bind(f.store);let fail=true;
+ f.store.put=(kind,...args)=>{if(kind==='tool_invocation'&&fail){fail=false;throw Error('lost result');}return original(kind,...args);};
+ await assert.rejects(f.record([f.note()],'uncertain'),{code:'TOOL_CALL_UNRESOLVED'});f.store.put=original;
+ assert.deepEqual(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,{code:'TOOL_CALL_UNRESOLVED',reason:'unknown'});
+ await assert.rejects(f.record([f.note()],'uncertain'),{code:'TOOL_CALL_UNRESOLVED'});
+ assert.equal(f.store.list('director_note',f.project.id).length,1);
+ const epoch=f.store.get('epoch',f.bridge.actor.epochId);f.store.put('epoch',epoch.id,f.project.id,{...epoch,state:'revoked'});
+ f.tools.reconcileEpoch(f.project.id,epoch.id);
+ assert.equal(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,null);
+ assert.equal(f.store.list('director_note',f.project.id).length,1);
+});
+test('a later successful batch cannot hide an earlier unreconciled note save',async t=>{
+ const f=fixture(t),original=f.store.put.bind(f.store);let fail=true;
+ f.store.put=(kind,...args)=>{if(kind==='tool_invocation'&&fail){fail=false;throw Error('lost result');}return original(kind,...args);};
+ await assert.rejects(f.record([f.note()],'earlier-uncertain'),{code:'TOOL_CALL_UNRESOLVED'});f.store.put=original;
+ await f.record([f.note({text:'A separate second point.'})],'later-success');
+ assert.deepEqual(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,{code:'TOOL_CALL_UNRESOLVED',reason:'unknown'});
+ const epoch=f.store.get('epoch',f.bridge.actor.epochId);f.store.put('epoch',epoch.id,f.project.id,{...epoch,state:'revoked'});
+ f.tools.reconcileEpoch(f.project.id,epoch.id);
+ assert.equal(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,null);
+ assert.equal(f.store.list('director_note',f.project.id).length,2);
+});
 test('a lost note receipt reconciles exact committed effect without invoking again',async t=>{
  const f=fixture(t),original=f.store.put.bind(f.store);let fail=true;
  f.store.put=(kind,...args)=>{if(kind==='tool_invocation'&&fail){fail=false;throw Error('lost result');}return original(kind,...args);};
@@ -94,6 +143,25 @@ test('fake Scene request emits honest observation and narration recommendation t
  const f=fixture(t),prepare=createDirectorInput(f.service,{...f.config,endpoint:'http://127.0.0.1:3105'}),input=prepare(f.turn,f.human,f.bridge);
  const result=await new FakeWorkflowDirector(f.service).start(input);assert.match(result.text,/Scripted demo review/);
  const notes=f.service.snapshot(f.project.id).notes;assert.deepEqual(notes.map(n=>n.letter),['a','b']);assert.deepEqual(notes.map(n=>n.kind),['observation','recommendation']);assert.ok(notes[0].choices.some(c=>c.kind==='regenerate_keyframe'));assert.ok(notes[1].choices.some(c=>c.kind==='edit_field'&&c.field==='narration'));assert.equal(f.provider.acceptedCount(),0);
+});
+test('mutable notes guidance gives a schema-valid example within the exact request scope',t=>{
+ const f=fixture(t,{scope:['scene-1']}),prepare=createDirectorInput(f.service,{...f.config,endpoint:'http://127.0.0.1:3105'});
+ const guide=JSON.parse(prepare(f.turn,f.human,f.bridge).context).filmPlanning.notes;
+ assert.deepEqual(guide.example.notes[0].anchor,{shotIds:['shot-1']});
+ assert.deepEqual(parseToolArguments('record_notes',guide.example,'5.0.0').arguments,guide.example);
+ assert.match(guide.schema,/anchor\.shotIds.*array.*anchor\.shotId is not/);
+ assert.match(guide.limits,/1 to 6.*600.*1 to 4.*1 to 3/);
+ assert.match(guide.validation,/within this same turn/);assert.match(guide.validation,/never blindly resubmit an unknown outcome/);
+ assert.match(guide.evidence,/exact attachedKeyframes entry/);
+});
+test('legacy failed note receipts expose a safe fallback without diagnostic text',t=>{
+ const f=fixture(t),id=randomUUID();
+ f.store.insert('tool_invocation',id,f.project.id,{id,projectId:f.project.id,requestId:f.bridge.actor.requestId,epochId:f.bridge.actor.epochId,
+  callId:'legacy',tool:'record_notes',argumentsDigest:'a'.repeat(64),state:'failed',result:null,resultDigest:null,
+  error:{code:'VALIDATION_ERROR',message:'private historical diagnostic'}});
+ const turn=f.service.snapshot(f.project.id).turns[0];
+ assert.deepEqual(turn.notesSaveFailure,{code:'VALIDATION_ERROR',reason:'unavailable'});
+ assert.doesNotMatch(JSON.stringify(turn),/private historical diagnostic/);
 });
 test('resolution requires the matching human edit; stale edit choice resolves with saved resultRef',async t=>{
  const f=fixture(t),n=(await f.record([f.note({choices:[{kind:'edit_field',shotId:'shot-0',field:'imagePrompt'}]})])).notes[0];

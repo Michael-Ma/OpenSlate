@@ -354,3 +354,67 @@ test('V5 stdio advertises notes/proposals and truthful audio suggestions, forwar
   assert.equal(held.result.isError, false); assert.equal(f.calls.length, 2); assert.deepEqual(f.calls[1].body, proposal);
   assert.equal(toolHandlerId('5.0.0'), 'director-tools@5');
 });
+
+// LIVE-3 made this exact two-note shape, including the singular anchor.shotId.
+// Creative text and the film/media identities are replaced with fixture values.
+const liveReviewNotes = () => ({ notes: ['shot-one', 'shot-two'].map((shotId, index) => ({
+  anchor: { shotId }, blocking: false, kind: 'observation', text: '[redacted visual observation]',
+  seenKeyframe: { artifactId: `frame-${index}`, sha256: String(index + 1).repeat(64), shotId },
+  choices: [{ kind: 'accept', label: 'Keep this frame' }, { kind: 'reply' }],
+})) });
+
+test('V5 stdio forwards the LIVE-3 invalid note shape and its precise refusal, then accepts a corrected new call', async t => {
+  const refusal = { error: { code: 'VALIDATION_ERROR',
+    message: 'record_notes /notes/0/anchor: replace shotId with shotIds: [shotId]. No notes were saved; correct the payload and call record_notes again.' } };
+  const f = await fixture(t, (_req, res, call) => {
+    res.setHeader('content-type', 'application/json');
+    if ('shotId' in call.body.notes[0].anchor) { res.statusCode = 400; res.end(JSON.stringify(refusal)); }
+    else { parseToolArguments('record_notes', call.body, '5.0.0'); res.end(JSON.stringify({ notes: [{ noteId: 'note-one', letter: 'a' }, { noteId: 'note-two', letter: 'b' }] })); }
+  });
+  const c = await childFixture(t, { ...f.options, toolContractVersion: '5.0.0' }); await c.initialize();
+  const invalid = liveReviewNotes();
+  const denied = await c.request('tools/call', { name: 'record_notes', arguments: invalid }).response;
+  assert.equal(denied.result.isError, true);
+  assert.deepEqual(JSON.parse(denied.result.content[0].text), refusal);
+  assert.equal(f.calls.length, 1); assert.deepEqual(f.calls[0].body, invalid);
+  const rejectedCallId = denied.result._meta['openslate/callId'];
+  assert.equal(rejectedCallId, f.calls[0].headers['x-openslate-tool-call-id']);
+  const corrected = liveReviewNotes();
+  for (const note of corrected.notes) note.anchor = { shotIds: [note.anchor.shotId] };
+  const saved = await c.request('tools/call', { name: 'record_notes', arguments: corrected }).response;
+  assert.equal(saved.result.isError, false); assert.equal(f.calls.length, 2);
+  assert.deepEqual(JSON.parse(saved.result.content[0].text).notes.map(n => n.letter), ['a', 'b']);
+  assert.deepEqual(f.calls[1].body, corrected);
+  assert.notEqual(saved.result._meta['openslate/callId'], rejectedCallId, 'corrected payload receives a fresh application invocation identity');
+});
+
+test('server note validation is limited to known V5 record_notes; other schemas and tools still refuse locally', async t => {
+  const f = await fixture(t), bridge = new ToolBridge({ ...f.options, toolContractVersion: '5.0.0' });
+  await assert.rejects(bridge.call('unknown_notes', liveReviewNotes()), code('NOT_FOUND'));
+  await assert.rejects(bridge.call('read_context', { actor: 'human' }), code('VALIDATION_ERROR'));
+  await assert.rejects(bridge.call('propose_change', { patch: {} }), code('VALIDATION_ERROR'));
+  for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0']) {
+    await assert.rejects(new ToolBridge({ ...f.options, toolContractVersion: version }).call('record_notes', liveReviewNotes()), code('NOT_FOUND'));
+  }
+  assert.equal(f.calls.length, 0);
+});
+
+test('V5 notes retain JSON, request-size, cancellation and concurrency guards before dispatch', async t => {
+  const f = await fixture(t, () => {}), options = { ...f.options, toolContractVersion: '5.0.0' };
+  const bridge = new ToolBridge({ ...options, limits: { timeoutMs: 150, concurrency: 1 } });
+  for (const value of [undefined, () => {}, 1n, NaN, Infinity, new Date()]) {
+    await assert.rejects(bridge.call('record_notes', { notes: [], extra: value }), code('VALIDATION_ERROR'));
+  }
+  const cyclic = liveReviewNotes(); cyclic.extra = cyclic;
+  await assert.rejects(bridge.call('record_notes', cyclic));
+  const small = new ToolBridge({ ...options, limits: { requestBytes: 32 } });
+  await assert.rejects(small.call('record_notes', liveReviewNotes()), code('TOOL_ARGUMENTS_TOO_LARGE'));
+  await assert.rejects(bridge.call('record_notes', liveReviewNotes(), AbortSignal.abort()), code('TOOL_CALL_CANCELLED'));
+  assert.equal(f.calls.length, 0, 'non-JSON, oversized and cancelled notes never reach HTTP');
+  const pending = bridge.call('record_notes', liveReviewNotes()); await bounded(f.arrived.promise);
+  await assert.rejects(bridge.call('record_notes', liveReviewNotes()), code('BRIDGE_BUSY'));
+  const unresolved = await bounded(pending);
+  assert.equal(unresolved.value.error.code, 'TOOL_CALL_UNRESOLVED');
+  assert.equal(unresolved.value.error.outcome, 'unknown');
+  assert.equal(f.calls.length, 1, 'an unknown note result never causes an automatic retry');
+});

@@ -299,6 +299,12 @@ export type StudioErrorCode =
 // Director notes (phase P4: DC-1, DC-9, DC-10). Returned in the project snapshot as `notes`.
 // ---------------------------------------------------------------------------
 
+/** App-owned summary on snapshot.turns[].notesSaveFailure; never model prose or note content. */
+export interface ReviewNotesFailure {
+  code: string;
+  reason: "invalid_anchor" | "invalid_arguments" | "outside_scope" | "unseen_keyframe" | "missing_keep_choice" | "unavailable" | "unknown";
+}
+
 /**
  * A typed action attached to a note. The web renders every label from the action itself
  * ("Make 2.3 8 s", "Regenerate 2.2"); the model never writes button text, except the short

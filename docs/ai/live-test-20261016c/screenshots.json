@@ -1,0 +1,254 @@
+[
+  {
+    "name": "01-new-film-sheet.png",
+    "phase": "phase-01-start",
+    "at": "2026-10-16T23:35:29.242Z",
+    "phaseSeconds": 6.482
+  },
+  {
+    "name": "02-new-film-models.png",
+    "phase": "phase-01-start",
+    "at": "2026-10-16T23:35:41.009Z",
+    "phaseSeconds": 18.249
+  },
+  {
+    "name": "03-film-setup.png",
+    "phase": "phase-01-start",
+    "at": "2026-10-16T23:35:41.098Z",
+    "phaseSeconds": 18.338
+  },
+  {
+    "name": "04-director-scripted.png",
+    "phase": "phase-02-director",
+    "at": "2026-10-16T23:35:51.802Z",
+    "phaseSeconds": 7.198
+  },
+  {
+    "name": "05-new-film-models-repeat.png",
+    "phase": "phase-03-setup-workaround",
+    "at": "2026-10-16T23:36:13.249Z",
+    "phaseSeconds": 13.372
+  },
+  {
+    "name": "06-director-ready.png",
+    "phase": "phase-03-setup-workaround",
+    "at": "2026-10-16T23:36:23.671Z",
+    "phaseSeconds": 23.794
+  },
+  {
+    "name": "07-director-request.png",
+    "phase": "phase-03-setup-workaround",
+    "at": "2026-10-16T23:36:23.874Z",
+    "phaseSeconds": 23.997
+  },
+  {
+    "name": "08-director-progress.png",
+    "phase": "phase-03-setup-workaround",
+    "at": "2026-10-16T23:36:23.944Z",
+    "phaseSeconds": 24.067
+  },
+  {
+    "name": "09-director-working.png",
+    "phase": "phase-04-director-progress",
+    "at": "2026-10-16T23:36:48.952Z",
+    "phaseSeconds": 9.382
+  },
+  {
+    "name": "10-plan-saved-labels.png",
+    "phase": "phase-05-plan",
+    "at": "2026-10-16T23:37:40.219Z",
+    "phaseSeconds": 29.395
+  },
+  {
+    "name": "11-plan-editor.png",
+    "phase": "phase-05-plan",
+    "at": "2026-10-16T23:37:43.638Z",
+    "phaseSeconds": 32.814
+  },
+  {
+    "name": "12-plan-small-edit.png",
+    "phase": "phase-06-plan-edit-undo",
+    "at": "2026-10-16T23:38:03.036Z",
+    "phaseSeconds": 12.912
+  },
+  {
+    "name": "13-plan-undo.png",
+    "phase": "phase-06-plan-edit-undo",
+    "at": "2026-10-16T23:38:03.227Z",
+    "phaseSeconds": 13.103
+  },
+  {
+    "name": "14-keyframes-price.png",
+    "phase": "phase-06-plan-edit-undo",
+    "at": "2026-10-16T23:38:03.392Z",
+    "phaseSeconds": 13.268
+  },
+  {
+    "name": "15-keyframes-making-panel.png",
+    "phase": "phase-06-plan-edit-undo",
+    "at": "2026-10-16T23:38:07.194Z",
+    "phaseSeconds": 17.07
+  },
+  {
+    "name": "16-keyframes-progress.png",
+    "phase": "phase-07-keyframes-progress",
+    "at": "2026-10-16T23:38:14.712Z",
+    "phaseSeconds": 3.823
+  },
+  {
+    "name": "17-keyframe-one-1440.png",
+    "phase": "phase-08-keyframe-one",
+    "at": "2026-10-16T23:39:04.767Z",
+    "phaseSeconds": 0.596
+  },
+  {
+    "name": "18-keyframe-one-1366.png",
+    "phase": "phase-08-keyframe-one",
+    "at": "2026-10-16T23:39:05.329Z",
+    "phaseSeconds": 1.158
+  },
+  {
+    "name": "19-keyframe-two-1440.png",
+    "phase": "phase-09-keyframes-review",
+    "at": "2026-10-16T23:39:27.111Z",
+    "phaseSeconds": 5.595
+  },
+  {
+    "name": "20-keyframe-two-1366.png",
+    "phase": "phase-09-keyframes-review",
+    "at": "2026-10-16T23:39:27.219Z",
+    "phaseSeconds": 5.703
+  },
+  {
+    "name": "21-video-price.png",
+    "phase": "phase-09-keyframes-review",
+    "at": "2026-10-16T23:39:27.343Z",
+    "phaseSeconds": 5.827
+  },
+  {
+    "name": "22-video-before-confirm.png",
+    "phase": "phase-10-video",
+    "at": "2026-10-16T23:39:55.076Z",
+    "phaseSeconds": 0.62
+  },
+  {
+    "name": "23-video-progress.png",
+    "phase": "phase-10-video",
+    "at": "2026-10-16T23:39:55.325Z",
+    "phaseSeconds": 0.869
+  },
+  {
+    "name": "24-video-reloaded.png",
+    "phase": "phase-10-video",
+    "at": "2026-10-16T23:39:55.641Z",
+    "phaseSeconds": 1.185
+  },
+  {
+    "name": "25-video-running-note-refusal.png",
+    "phase": "phase-11-video-progress",
+    "at": "2026-10-16T23:40:25.179Z",
+    "phaseSeconds": 0.607
+  },
+  {
+    "name": "26-film-poster-before-play.png",
+    "phase": "phase-12-film-export",
+    "at": "2026-10-16T23:42:50.138Z",
+    "phaseSeconds": 0.624
+  },
+  {
+    "name": "27-film-playing-first-shot.png",
+    "phase": "phase-12-film-export",
+    "at": "2026-10-16T23:42:51.283Z",
+    "phaseSeconds": 1.769
+  },
+  {
+    "name": "28-film-playing-second-shot.png",
+    "phase": "phase-12-film-export",
+    "at": "2026-10-16T23:42:57.316Z",
+    "phaseSeconds": 7.802
+  },
+  {
+    "name": "29-film-ended.png",
+    "phase": "phase-12-film-export",
+    "at": "2026-10-16T23:43:17.499Z",
+    "phaseSeconds": 27.985
+  },
+  {
+    "name": "30-export-requested.png",
+    "phase": "phase-12-film-export",
+    "at": "2026-10-16T23:43:17.632Z",
+    "phaseSeconds": 28.118
+  },
+  {
+    "name": "31-export-ready.png",
+    "phase": "phase-12-film-export",
+    "at": "2026-10-16T23:43:22.540Z",
+    "phaseSeconds": 33.026
+  },
+  {
+    "name": "32-before-shutdown.png",
+    "phase": "phase-13-restart-stop",
+    "at": "2026-10-16T23:43:34.899Z",
+    "phaseSeconds": 0.645
+  },
+  {
+    "name": "33-studio-stopped.png",
+    "phase": "phase-13-restart-stop",
+    "at": "2026-10-16T23:43:43.566Z",
+    "phaseSeconds": 9.312
+  },
+  {
+    "name": "34-restart-film-export.png",
+    "phase": "phase-14-restart-open",
+    "at": "2026-10-16T23:43:49.091Z",
+    "phaseSeconds": 0.61
+  },
+  {
+    "name": "35-assets-library.png",
+    "phase": "phase-15-assets-settings",
+    "at": "2026-10-16T23:43:56.669Z",
+    "phaseSeconds": 0.571
+  },
+  {
+    "name": "36-assets-clip-one-used-duration.png",
+    "phase": "phase-15-assets-settings",
+    "at": "2026-10-16T23:44:09.517Z",
+    "phaseSeconds": 13.419
+  },
+  {
+    "name": "37-assets-clip-two-used-duration.png",
+    "phase": "phase-15-assets-settings",
+    "at": "2026-10-16T23:44:09.635Z",
+    "phaseSeconds": 13.537
+  },
+  {
+    "name": "38-settings-models-after-restart.png",
+    "phase": "phase-15-assets-settings",
+    "at": "2026-10-16T23:44:09.754Z",
+    "phaseSeconds": 13.656
+  },
+  {
+    "name": "39-settings-computer-retained-check.png",
+    "phase": "phase-15-assets-settings",
+    "at": "2026-10-16T23:44:19.956Z",
+    "phaseSeconds": 23.858
+  },
+  {
+    "name": "40-settings-director.png",
+    "phase": "phase-15-assets-settings",
+    "at": "2026-10-16T23:44:20.054Z",
+    "phaseSeconds": 23.956
+  },
+  {
+    "name": "41-settings-models-ready.png",
+    "phase": "phase-15-assets-settings",
+    "at": "2026-10-16T23:44:20.151Z",
+    "phaseSeconds": 24.053
+  },
+  {
+    "name": "42-settings-retained-check-visible.png",
+    "phase": "phase-16-settings-evidence",
+    "at": "2026-10-16T23:44:48.555Z",
+    "phaseSeconds": 0.778
+  }
+]

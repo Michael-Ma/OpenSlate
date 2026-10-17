@@ -45,9 +45,10 @@ export function Thread() {
   const [unseen, setUnseen] = useState(false);
   const projectId = useStudio((s) => s.projectId);
   const last = view.entries.at(-1);
-  const now = { projectId, entries: view.entries.length, questions: view.questions.length, held: view.held.length, working: view.working };
+  const reviewNotesFailures = view.reviewNotesFailures.length + view.entries.filter((entry) => entry.reviewNotesFailure).length;
+  const now = { projectId, entries: view.entries.length, questions: view.questions.length, held: view.held.length, reviewNotesFailures, working: view.working };
   // Mounted with nothing seen yet, so a thread that is already there starts at its bottom.
-  const before = useRef({ ...now, entries: 0, questions: 0, held: 0, working: false });
+  const before = useRef({ ...now, entries: 0, questions: 0, held: 0, reviewNotesFailures: 0, working: false });
 
   useLayoutEffect(() => {
     const element = ref.current;
@@ -57,7 +58,8 @@ export function Thread() {
     // A new film starts at its bottom, with nothing unseen.
     if (was.projectId !== now.projectId) { pinned.current = pinToBottom(element); setUnseen(false); return; }
     // Something new at the bottom: an entry, a question, a held edit, or the Director starting to work.
-    const grew = now.entries > was.entries || now.questions > was.questions || now.held > was.held || (now.working && !was.working);
+    const grew = now.entries > was.entries || now.questions > was.questions || now.held > was.held
+      || now.reviewNotesFailures > was.reviewNotesFailures || (now.working && !was.working);
     if (!grew) return;
     // Follow new content when the reader is at the bottom, and always after the person's own message.
     if (pinned.current || (now.entries > was.entries && last?.who === "you")) { pinned.current = pinToBottom(element); setUnseen(false); }
@@ -100,8 +102,9 @@ export function Thread() {
     <div className="thread-wrap">
       <div className="thread" ref={ref} onScroll={onScroll} role="log" aria-label={t("director.thread")}>
         <div className="thread-body" ref={body}>
-          {!view.entries.length && !view.working && <p className="dir-empty">{t("director.empty")}</p>}
+          {!view.entries.length && !view.working && !view.reviewNotesFailures.length && <p className="dir-empty">{t("director.empty")}</p>}
           {view.entries.map((entry) => <Entry key={entry.id} entry={entry} />)}
+          {view.reviewNotesFailures.map((failure) => <p key={failure.id} className="dir-ending" role="status" data-review-notes="unsaved" data-turn={failure.id}>{tm(failure.message)}</p>)}
           {/* How the latest turn ended reads right under it; a held edit then says what that leaves waiting. */}
           {!view.working && view.ending && <p className="dir-ending" role="status" data-entry="ending">{tm(view.ending)}</p>}
           {view.questions.map((question) => <QuestionCard key={question.id} question={question} />)}
@@ -183,6 +186,7 @@ function Entry({ entry }: { entry: ThreadEntry }) {
     <div className="entry" data-entry={entry.id} data-who="director">
       <Byline who="director" time={entry.time} />
       <Markdown blocks={entry.blocks} />
+      {entry.reviewNotesFailure && <p className="dir-ending" role="status" data-review-notes="unsaved">{tm(entry.reviewNotesFailure)}</p>}
       {entry.attention && <AttentionNote attention={entry.attention} />}
       {entry.scripted && <ScriptedTag />}
       <NoteCards notes={entry.notes} />

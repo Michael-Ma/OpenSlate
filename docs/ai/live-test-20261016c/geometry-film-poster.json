@@ -1,0 +1,70 @@
+[
+  {
+    "tag": "SECTION",
+    "class": "preview player",
+    "text": "1.1\n✓\nClip\n\n0:00\n0:12\nBrowser preview; the exported MP4 is exact",
+    "rect": {
+      "x": 414,
+      "y": 112,
+      "width": 688,
+      "height": 392
+    },
+    "fit": "fill"
+  },
+  {
+    "tag": "IMG",
+    "class": "fv-still",
+    "rect": {
+      "x": 415,
+      "y": 113,
+      "width": 686,
+      "height": 390
+    },
+    "fit": "contain",
+    "naturalWidth": 1254,
+    "naturalHeight": 1254
+  },
+  {
+    "tag": "VIDEO",
+    "class": "fv-clip",
+    "text": "",
+    "rect": {
+      "x": 415,
+      "y": 113,
+      "width": 686,
+      "height": 390
+    },
+    "fit": "contain",
+    "videoWidth": 768,
+    "videoHeight": 768,
+    "currentTime": 0,
+    "ended": false,
+    "paused": true
+  },
+  {
+    "tag": "IMG",
+    "class": "fv-still",
+    "rect": {
+      "x": 522,
+      "y": 614,
+      "width": 433,
+      "height": 130
+    },
+    "fit": "cover",
+    "naturalWidth": 1254,
+    "naturalHeight": 1254
+  },
+  {
+    "tag": "IMG",
+    "class": "fv-still",
+    "rect": {
+      "x": 960,
+      "y": 614,
+      "width": 433,
+      "height": 130
+    },
+    "fit": "cover",
+    "naturalWidth": 1254,
+    "naturalHeight": 1254
+  }
+]

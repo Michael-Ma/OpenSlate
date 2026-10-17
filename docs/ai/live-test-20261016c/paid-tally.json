@@ -1,0 +1,64 @@
+{
+  "checkedAt": "2026-10-16T23:45:02.636Z",
+  "source": "diagnostic-final.json",
+  "submissions": [
+    {
+      "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+      "shot": "1.2",
+      "attemptId": "35c42502-feca-4899-b976-57ed7040aa91",
+      "ordinal": 1,
+      "seconds": 6,
+      "durationFrames": 180,
+      "vendorJobId": "vid_b33d5967-b46e-4d35-82ca-c85c346668db",
+      "outcome": "succeeded",
+      "estimatedCostAtCardRate": 0.06,
+      "submissionEvidence": "persisted vendor job ID"
+    },
+    {
+      "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+      "shot": "1.1",
+      "attemptId": "be48c9ab-85d6-4607-870b-6161a158f666",
+      "ordinal": 1,
+      "seconds": 6,
+      "durationFrames": 180,
+      "vendorJobId": "vid_af346239-e052-4d1f-9efd-54bed8aef874",
+      "outcome": "succeeded",
+      "estimatedCostAtCardRate": 0.06,
+      "submissionEvidence": "persisted vendor job ID"
+    }
+  ],
+  "uncertainOrUnconfirmedAttempts": [],
+  "totalSubmittedSeconds": 12,
+  "conservativelyReservedSeconds": 12,
+  "estimatedTotalAtCardRate": 0.12,
+  "conservativeEstimatedCostAtCardRate": 0.12,
+  "remainingCapAtStart": 0.88,
+  "remainingSecondsAtStart": 88,
+  "ratePerSecond": 0.01,
+  "remainingSecondsAfterConservativeTally": 76,
+  "initialVideoAttempts": 2,
+  "paidRetries": 0,
+  "perShot": [
+    {
+      "shotId": "eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8",
+      "attempts": 1,
+      "paidRetries": 0
+    },
+    {
+      "shotId": "3d899eae-6cee-4443-bb1e-b2e45604f32e",
+      "attempts": 1,
+      "paidRetries": 0
+    }
+  ],
+  "keyframeRegenerations": 0,
+  "actualBillVerified": false,
+  "checks": {
+    "durationEvidenceComplete": true,
+    "withinRemaining88Seconds": true,
+    "initialSubmissionsAtMostTwo": true,
+    "atMostOneRetryPerShot": true,
+    "noDuplicateVendorJobIds": true,
+    "noUnresolvedOutcomes": true
+  },
+  "limitation": "Offline snapshots reconcile persisted attempts; they cannot establish historical retry authorization or the provider bill. This audit never authorizes or performs a retry. Any unconfirmed outcome must be reconciled through the studio."
+}

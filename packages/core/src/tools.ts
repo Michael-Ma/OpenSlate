@@ -1,5 +1,5 @@
-import { Ajv } from "ajv";
-import { canonical, digest, invariant } from "./common.js";
+import { Ajv, type ErrorObject } from "ajv";
+import { canonical, digest, DomainError, invariant } from "./common.js";
 import type { JsonObject } from "./contracts.js";
 import { changeProposalSchema, parseChangeProposal } from "./workflow/index.js";
 import { legacyChangeProposalSchema } from "./legacy-change-schema.js";
@@ -140,12 +140,96 @@ const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: fal
 const validators = new Map(Object.values(TOOL_CATALOGS).map(catalog => [catalog.version,
   new Map(catalog.descriptors.map(tool => [tool.name, ajv.compile(tool.inputSchema)]))]));
 
+/** Explain the frozen notes schema without reflecting payload values or unknown field names. */
+function recordNotesValidationMessage(input: unknown, errors: ErrorObject[] | null | undefined): string {
+  type Schema = { properties?: Record<string, Schema>; items?: Schema; oneOf?: Schema[]; const?: string; enum?: string[]; [key: string]: unknown };
+  const schema = recordNotesSchema as Schema;
+  const choiceSchemas = schema.properties!.notes!.items!.properties!.choices!.items!.oneOf!;
+  const choiceKinds = choiceSchemas.map(choice => choice.properties!.kind!.const!);
+  const knownFields = new Set<string>();
+  const collectFields = (node: Schema): void => {
+    for (const [field, child] of Object.entries(node.properties ?? {})) { knownFields.add(field); collectFields(child); }
+    if (node.items) collectFields(node.items);
+    for (const child of node.oneOf ?? []) collectFields(child);
+  };
+  collectFields(schema);
+  const pointerParts = (path: string): string[] => path.split("/").slice(1).map(part => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+  const safePath = (path: string): string => {
+    const parts = pointerParts(path);
+    return parts.every(part => knownFields.has(part) || /^(0|[1-9][0-9]{0,7})$/.test(part)) ? path || "/" : "/";
+  };
+  const schemaAt = (path: string): Schema => {
+    let node: unknown = schema;
+    for (const part of pointerParts(path)) node = (node as Record<string, unknown> | undefined)?.[part];
+    return (node ?? {}) as Schema;
+  };
+  const valueAt = (path: string): unknown => {
+    let value = input;
+    for (const part of pointerParts(path)) value = (value as Record<string, unknown> | undefined | null)?.[part];
+    return value;
+  };
+  const reasons = new Set<string>();
+  for (const error of errors ?? []) {
+    const path = safePath(error.instancePath);
+    const choiceMatch = error.instancePath.match(/^(\/notes\/\d+\/choices\/\d+)(?:\/|$)/);
+    if (choiceMatch) {
+      const choicePath = safePath(choiceMatch[1]!);
+      const choice = valueAt(choiceMatch[1]!);
+      if (choice === null || typeof choice !== "object" || Array.isArray(choice)) {
+        reasons.add(`${choicePath} must be object`); continue;
+      }
+      const kind = (choice as Record<string, unknown>).kind;
+      const selected = choiceKinds.indexOf(kind as string);
+      if (selected < 0) {
+        reasons.add(kind === undefined ? `${choicePath}/kind is required` : `${choicePath}/kind must be one of: ${choiceKinds.join(", ")}`);
+        continue;
+      }
+      const branch = error.schemaPath.match(/\/properties\/choices\/items\/oneOf\/(\d+)(?:\/|$)/);
+      if (branch && Number(branch[1]) !== selected || error.keyword === "oneOf") continue;
+    }
+    // A scene or shot anchor is an alternative, not two individually required fields.
+    if (/\/properties\/anchor\/anyOf\//.test(error.schemaPath)) continue;
+    const parent = schemaAt(error.schemaPath.slice(0, error.schemaPath.lastIndexOf("/")));
+    const count = (value: unknown): string => typeof value === "number" ? String(value) : "the registered limit";
+    switch (error.keyword) {
+      case "required": {
+        const field = error.params.missingProperty as string;
+        reasons.add(knownFields.has(field) ? `${path === "/" ? "" : path}/${field} is required` : `${path} is missing a required field`); break;
+      }
+      case "additionalProperties": reasons.add(`${path} has unsupported fields; allowed fields: ${Object.keys(parent.properties ?? {}).join(", ")}`); break;
+      case "type": reasons.add(`${path} must be ${String(parent.type)}`); break;
+      case "enum": reasons.add(`${path} must be one of: ${(parent.enum ?? []).join(", ")}`); break;
+      case "const": reasons.add(`${path} must equal ${parent.const ?? "the registered value"}`); break;
+      case "minLength": reasons.add(`${path} must contain at least ${count(parent.minLength)} character${parent.minLength === 1 ? "" : "s"}`); break;
+      case "maxLength": reasons.add(`${path} must contain at most ${count(parent.maxLength)} characters`); break;
+      case "minItems": reasons.add(`${path} must contain at least ${count(parent.minItems)} item${parent.minItems === 1 ? "" : "s"}`); break;
+      case "maxItems": reasons.add(`${path} must contain at most ${count(parent.maxItems)} items`); break;
+      case "uniqueItems": reasons.add(`${path} must contain unique items`); break;
+      case "pattern": reasons.add(`${path} must be a 64-character lowercase hexadecimal SHA-256`); break;
+      case "anyOf": reasons.add(`${path} must include sceneId or shotIds (an array of shot IDs)`); break;
+      default: reasons.add(`${path} must match the registered schema`);
+    }
+  }
+  const selected: string[] = [];
+  for (const reason of reasons) {
+    if (selected.length >= 8 || selected.join("; ").length + reason.length > 1600) break;
+    selected.push(reason);
+  }
+  if (selected.length < reasons.size) selected.push("additional validation errors; correct these fields and retry record_notes");
+  return `record_notes arguments are invalid: ${selected.join("; ") || "use the registered notes schema"}`;
+}
+
 export function parseToolArguments(toolName: string, input: unknown, version: ToolContractVersion = TOOL_CONTRACT_VERSION): ParsedToolCall {
   const catalog = toolCatalog(version);
   invariant(catalog.names.includes(toolName as ToolName), "NOT_FOUND", "Unknown director tool for the locked contract");
   const name = toolName as ToolName;
   const validate = validators.get(catalog.version)!.get(name)!;
-  invariant(validate(input), "VALIDATION_ERROR", "Tool arguments do not match the registered schema");
+  const valid = validate(input);
+  if (!valid && name === "record_notes") {
+    const reason = validate.errors?.some(error => /^\/notes\/\d+\/anchor(?:\/|$)/.test(error.instancePath)) ? "invalid_anchor" : "invalid_arguments";
+    throw new DomainError("VALIDATION_ERROR", recordNotesValidationMessage(input, validate.errors), { reason });
+  }
+  invariant(valid, "VALIDATION_ERROR", "Tool arguments do not match the registered schema");
   // In-process callers must obey the same JSON data boundary as HTTP/MCP callers.
   canonical(input);
   const parsed = name === "prepare_change" ? parseChangeProposal(input) : structuredClone(input);

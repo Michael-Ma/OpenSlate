@@ -1,0 +1,82 @@
+[
+  {
+    "name": "phase-01-start.webm",
+    "startedAt": "2026-10-16T23:35:22.760Z",
+    "endedAt": "2026-10-16T23:35:41.242Z"
+  },
+  {
+    "name": "phase-02-director.webm",
+    "startedAt": "2026-10-16T23:35:44.604Z",
+    "endedAt": "2026-10-16T23:35:52.683Z"
+  },
+  {
+    "name": "phase-03-setup-workaround.webm",
+    "startedAt": "2026-10-16T23:35:59.877Z",
+    "endedAt": "2026-10-16T23:36:24.900Z"
+  },
+  {
+    "name": "phase-04-director-progress.webm",
+    "startedAt": "2026-10-16T23:36:39.570Z",
+    "endedAt": "2026-10-16T23:36:49.080Z"
+  },
+  {
+    "name": "phase-05-plan.webm",
+    "startedAt": "2026-10-16T23:37:10.824Z",
+    "endedAt": "2026-10-16T23:37:44.020Z"
+  },
+  {
+    "name": "phase-06-plan-edit-undo.webm",
+    "startedAt": "2026-10-16T23:37:50.124Z",
+    "endedAt": "2026-10-16T23:38:07.412Z"
+  },
+  {
+    "name": "phase-07-keyframes-progress.webm",
+    "startedAt": "2026-10-16T23:38:10.889Z",
+    "endedAt": "2026-10-16T23:38:15.552Z"
+  },
+  {
+    "name": "phase-08-keyframe-one.webm",
+    "startedAt": "2026-10-16T23:39:04.171Z",
+    "endedAt": "2026-10-16T23:39:05.811Z"
+  },
+  {
+    "name": "phase-09-keyframes-review.webm",
+    "startedAt": "2026-10-16T23:39:21.516Z",
+    "endedAt": "2026-10-16T23:39:27.534Z"
+  },
+  {
+    "name": "phase-10-video.webm",
+    "startedAt": "2026-10-16T23:39:54.456Z",
+    "endedAt": "2026-10-16T23:39:55.918Z"
+  },
+  {
+    "name": "phase-11-video-progress.webm",
+    "startedAt": "2026-10-16T23:40:24.572Z",
+    "endedAt": "2026-10-16T23:40:25.388Z"
+  },
+  {
+    "name": "phase-12-film-export.webm",
+    "startedAt": "2026-10-16T23:42:49.514Z",
+    "endedAt": "2026-10-16T23:43:22.771Z"
+  },
+  {
+    "name": "phase-13-restart-stop.webm",
+    "startedAt": "2026-10-16T23:43:34.254Z",
+    "endedAt": "2026-10-16T23:43:44.169Z"
+  },
+  {
+    "name": "phase-14-restart-open.webm",
+    "startedAt": "2026-10-16T23:43:48.481Z",
+    "endedAt": "2026-10-16T23:43:49.450Z"
+  },
+  {
+    "name": "phase-15-assets-settings.webm",
+    "startedAt": "2026-10-16T23:43:56.098Z",
+    "endedAt": "2026-10-16T23:44:20.910Z"
+  },
+  {
+    "name": "phase-16-settings-evidence.webm",
+    "startedAt": "2026-10-16T23:44:47.777Z",
+    "endedAt": "2026-10-16T23:44:48.776Z"
+  }
+]

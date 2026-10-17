@@ -3,7 +3,7 @@ import type { ProposalPatch } from "@openslate/core";
 import { recordNotes, type NoteInput } from "./director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { canonical, digest, DomainError, invariant, parseToolArguments, toolCatalog, toolHandlerId } from "@openslate/core";
-import type { ActorContext, JsonValue, ToolName, ToolContractVersion } from "@openslate/core";
+import type { ActorContext, JsonValue, ToolName, ToolContractVersion, ReviewNotesFailure } from "@openslate/core";
 import type { SkillCapabilityLock } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { NarrationService } from "../narration/service.js";
@@ -32,7 +32,7 @@ export interface ToolInvocation {
   state: "started" | "succeeded" | "failed" | "unresolved";
   result: JsonValue | null;
   resultDigest: string | null;
-  error: { code: string; message: string } | null;
+  error: { code: string; message: string; reason?: ReviewNotesFailure['reason'] } | null;
   /** Minimal domain correlation; credentials and full context never belong here. */
   recovery?: { preparedId?: string; proposalDigest?: string; narrationCommand?: { key: string; digest: string };
     audioProposalCommand?: { kind: "recording_transcription" | "narration_speech"; key: string; digest: string; requested?: boolean; suggested?: boolean } };
@@ -147,10 +147,36 @@ export class ToolInvocationService {
     invariant(!this.service.store.get("keyframe_review_request", actor.requestId) || ["read_context", "record_notes", "propose_change", "read_skill"].includes(tool),
       "ACTOR_DENIED", "Keyframe reviews may only read context, record notes and propose changes");
     const selected = this.catalog(projectId, actor);
-    const parsed = parseToolArguments(tool, input, selected.catalog.version);
-    const argumentHash = digest(parsed.arguments);
     const id = digest({ projectId, epochId: actor.epochId, callId });
     const store = this.service.store;
+    let parsed: ReturnType<typeof parseToolArguments>;
+    try { parsed = parseToolArguments(tool, input, selected.catalog.version); }
+    catch (error) {
+      // The bridge forwards V5 notes to this authoritative validator. Persist a
+      // known refusal without retaining private arguments or creating any notes.
+      if (tool !== 'record_notes' || selected.catalog.version !== '5.0.0' || !(error instanceof DomainError) || error.code !== 'VALIDATION_ERROR') throw error;
+      const argumentsDigest = digest(input);
+      store.transaction(() => {
+        this.service.assertActor(projectId, actor);
+        invariant(canonical(this.catalog(projectId, actor)) === canonical(selected), 'CAPABILITY_MISMATCH', 'Tool catalog changed before invocation');
+        const previous = store.get<ToolInvocation>('tool_invocation', id);
+        if (previous) {
+          invariant(previous.argumentsDigest === argumentsDigest && previous.tool === tool && previous.requestId === actor.requestId,
+            'IDEMPOTENCY_CONFLICT', 'Tool call identity was already used for different work');
+          invariant(previous.toolContractVersion === selected.catalog.version && previous.catalogDigest === selected.catalog.digest && previous.skillLockId === selected.lockId,
+            'CAPABILITY_MISMATCH', 'Receipt belongs to another tool contract');
+          return;
+        }
+        const reason = (error.details as { reason?: string } | undefined)?.reason === 'invalid_anchor' ? 'invalid_anchor' : 'invalid_arguments';
+        const record: ToolInvocation = { id, projectId, requestId: actor.requestId, epochId: actor.epochId, callId,
+          tool, toolContractVersion: selected.catalog.version, catalogDigest: selected.catalog.digest, skillLockId: selected.lockId,
+          argumentsDigest, state: 'failed', result: null, resultDigest: null, error: { code: error.code, message: error.message, reason } };
+        store.insert('tool_invocation', id, projectId, record);
+        store.appendEvent(projectId, 'tool.finished', { invocationId: id, callId, requestId: actor.requestId, tool, state: 'failed' });
+      });
+      throw error;
+    }
+    const argumentHash = digest(parsed.arguments);
     const commandKey = `director-tool:${id}`, proposalInput = audioTool(parsed.name) ? { ...parsed.arguments, key: commandKey } : null;
     const existing = store.transaction(() => {
       this.service.assertActor(projectId, actor);
@@ -246,7 +272,9 @@ export class ToolInvocationService {
       // proposal calls reconcilable instead of inferring that no effect occurred.
       const known = error instanceof DomainError && !(audioTool(parsed.name) && (error.code.endsWith("CANCELLED") || error.code === "TOOL_CALL_UNRESOLVED"));
       this.finish(id, projectId, known ? "failed" : "unresolved", null,
-        known ? { code: error.code, message: error.message.slice(0, 2000) } : { code: "TOOL_CALL_UNRESOLVED", message: "Tool outcome needs application reconciliation" });
+        known ? { code: error.code, message: error.message.slice(0, 2000), ...(parsed.name === 'record_notes' ? {
+          reason: (error.details as { reason?: ReviewNotesFailure['reason'] } | undefined)?.reason ?? (error.code === 'SCOPE_DENIED' ? 'outside_scope' : error.code === 'VALIDATION_ERROR' ? 'invalid_arguments' : 'unavailable'),
+        } : {}) } : { code: "TOOL_CALL_UNRESOLVED", message: "Tool outcome needs application reconciliation" });
       if (known) throw error;
       throw new DomainError("TOOL_CALL_UNRESOLVED", "Tool outcome needs application reconciliation");
     }

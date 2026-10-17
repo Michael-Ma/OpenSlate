@@ -1,4 +1,4 @@
-import type { AssetItem, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, ShotOverview } from "@openslate/core/public";
+import type { AssetItem, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, ReviewNotesFailure, ShotOverview } from "@openslate/core/public";
 import type { Locale } from "../../shared/locale-preference.ts";
 import { readAllAssets, type AssetPage } from "./assets.ts";
 import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "./markdown.ts";
@@ -329,6 +329,8 @@ export interface ThreadEntry {
   notes: ThreadNote[];
   /** Set on the last entry of a request whose Director turn failed. */
   attention: Attention | null;
+  /** Application-owned reason an ended automatic review could not save notes, independent of the reply's words. */
+  reviewNotesFailure: Msg | null;
 }
 
 export interface QuestionItemView {
@@ -345,6 +347,8 @@ export interface QuestionView {
 
 export interface ThreadView {
   entries: ThreadEntry[];
+  /** Ended automatic reviews without a reply still show their note-save failure. */
+  reviewNotesFailures: { id: string; message: Msg }[];
   questions: QuestionView[];
   /** Unfinished Director edits that hold shots (card B13), with Let it go. */
   held: HeldEdit[];
@@ -363,6 +367,16 @@ const TOOL_ACTIVITY: Record<string, MessageId> = {
   propose_change: "director.activity.proposing",
   prepare_change: "director.activity.proposing",
   apply_change: "director.activity.changing",
+};
+
+const REVIEW_NOTES_FAILURE: Record<ReviewNotesFailure["reason"], MessageId> = {
+  invalid_anchor: "director.review.notes_unsaved_anchor",
+  invalid_arguments: "director.review.notes_unsaved_arguments",
+  outside_scope: "director.review.notes_unsaved_scope",
+  unseen_keyframe: "director.review.notes_unsaved_keyframe",
+  missing_keep_choice: "director.review.notes_unsaved_keep",
+  unavailable: "director.review.notes_unsaved_unavailable",
+  unknown: "director.review.notes_unsaved_unknown",
 };
 
 /** What the latest turn says about itself: its current activity while running, or an honest ending. */
@@ -500,10 +514,23 @@ export function threadView(
       });
       const chips = scoped.map((chip) => chip.label);
       const text = userText(entry.text, chips.length > 0);
-      return { id: entry.id, who: "you", time, chips, chipTargets: scoped.map((chip) => chip.target), paragraphs: text ? [text] : [], user: userMessage(entry.text, chips.length > 0, entry.scopeIds), blocks: [], scripted: false, requestId: entry.requestId ?? null, notes: [], attention: failed };
+      return { id: entry.id, who: "you", time, chips, chipTargets: scoped.map((chip) => chip.target), paragraphs: text ? [text] : [], user: userMessage(entry.text, chips.length > 0, entry.scopeIds), blocks: [], scripted: false, requestId: entry.requestId ?? null, notes: [], attention: failed, reviewNotesFailure: null };
     }
-    return { id: entry.id, who: "director", time, chips: [], chipTargets: [], paragraphs: paragraphs(entry.text), user: noWords, blocks: replyBlocks(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id), attention: failed };
+    return { id: entry.id, who: "director", time, chips: [], chipTargets: [], paragraphs: paragraphs(entry.text), user: noWords, blocks: replyBlocks(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id), attention: failed, reviewNotesFailure: null };
   });
+  const reviewNotesFailures: ThreadView["reviewNotesFailures"] = [];
+  const latestByRequest = new Map<string, TurnView>();
+  for (const turn of snapshot?.turns ?? []) latestByRequest.set(turn.requestId, turn);
+  for (const turn of latestByRequest.values()) {
+    // The Director can correct a refused batch in the same turn. Its completed save outcome owns the app line.
+    if (turn.action !== "keyframe_review" || ["queued", "running"].includes(turn.state) || !turn.notesSaveFailure) continue;
+    const failure = turn.notesSaveFailure;
+    const message = msg(REVIEW_NOTES_FAILURE[failure.reason] ?? "director.review.notes_unsaved_unknown", { code: failure.code });
+    let index = entries.length - 1;
+    while (index >= 0 && (entries[index]!.who !== "director" || entries[index]!.requestId !== turn.requestId)) index--;
+    if (index >= 0) entries[index] = { ...entries[index]!, reviewNotesFailure: message };
+    else reviewNotesFailures.push({ id: turn.id, message });
+  }
   // A failed turn marks the last entry of its request (the reply, or the message when there is none).
   const failures = failedTurns(snapshot?.turns, director);
   for (const [requestId, attention] of failures) {
@@ -516,7 +543,7 @@ export function threadView(
   // The marker says it where the reply is; the ending line would only repeat it.
   const marked = !!latest && failures.has(latest.requestId) && entries.some((entry) => entry.requestId === latest.requestId);
   const working = director?.status === "running" || overview?.director.state === "working";
-  return { entries, questions: pendingQuestions(snapshot?.questions), held: heldEdits(overview, snapshot, director), working, ...status, ending: marked ? null : status.ending };
+  return { entries, reviewNotesFailures, questions: pendingQuestions(snapshot?.questions), held: heldEdits(overview, snapshot, director), working, ...status, ending: marked ? null : status.ending };
 }
 
 const FAILED_STATES = new Set(["failed", "unknown"]);

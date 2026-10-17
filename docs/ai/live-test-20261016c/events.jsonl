@@ -1,0 +1,98 @@
+{"at":"2026-10-16T23:35:18.393Z","kind":"owned-studio-start","pid":27460,"command":"node --env-file=<owner-settings> scripts/start-local.mjs --no-open","data":"/Users/michael/openslate-live-test-20261016c"}
+{"at":"2026-10-16T23:35:23.143Z","kind":"phase-start","phase":"phase-01-start"}
+{"at":"2026-10-16T23:35:29.120Z","kind":"ui-action","phase":"phase-01-start","op":"click","target":{"role":"button","name":"New film"}}
+{"at":"2026-10-16T23:35:34.299Z","kind":"ui-action","phase":"phase-01-start","op":"fill","target":{"css":"[data-act=film-name]"},"value":"Harbour LIVE-3"}
+{"at":"2026-10-16T23:35:34.314Z","kind":"ui-action","phase":"phase-01-start","op":"click","target":{"css":"[data-act=step]","text":"Talk to the Director"}}
+{"at":"2026-10-16T23:35:40.899Z","kind":"ui-action","phase":"phase-01-start","op":"click","target":{"css":"[data-step=director]"}}
+{"at":"2026-10-16T23:35:40.923Z","kind":"ui-action","phase":"phase-01-start","op":"click","target":{"css":"[data-act=see-models]"}}
+{"at":"2026-10-16T23:35:41.010Z","kind":"ui-action","phase":"phase-01-start","op":"click","target":{"css":"[data-act=create-film]"}}
+{"at":"2026-10-16T23:35:41.060Z","kind":"http","phase":"phase-01-start","method":"POST","path":"/api/projects","status":200}
+{"at":"2026-10-16T23:35:41.242Z","kind":"phase-end","phase":"phase-01-start"}
+{"at":"2026-10-16T23:35:45.003Z","kind":"phase-start","phase":"phase-02-director"}
+{"at":"2026-10-16T23:35:51.889Z","kind":"ui-action","phase":"phase-02-director","op":"click","target":{"role":"button","name":"Settings"}}
+{"at":"2026-10-16T23:35:52.683Z","kind":"phase-end","phase":"phase-02-director"}
+{"at":"2026-10-16T23:36:00.246Z","kind":"phase-start","phase":"phase-03-setup-workaround"}
+{"at":"2026-10-16T23:36:00.272Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"click","target":{"css":"[data-act=settings]"}}
+{"at":"2026-10-16T23:36:13.048Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"press","target":{"css":"body"},"key":"Escape"}
+{"at":"2026-10-16T23:36:13.056Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"click","target":{"css":"[data-act=all-films]"}}
+{"at":"2026-10-16T23:36:13.098Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"click","target":{"css":"[data-act=new-film]"}}
+{"at":"2026-10-16T23:36:13.131Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"fill","target":{"css":"[data-act=film-name]"},"value":"Harbour film LIVE-3"}
+{"at":"2026-10-16T23:36:13.137Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"click","target":{"css":"[data-step=director]"}}
+{"at":"2026-10-16T23:36:13.175Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"click","target":{"css":"[data-act=see-models]"}}
+{"at":"2026-10-16T23:36:13.250Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"click","target":{"css":"[data-act=create-film]"}}
+{"at":"2026-10-16T23:36:13.304Z","kind":"http","phase":"phase-03-setup-workaround","method":"POST","path":"/api/projects","status":200}
+{"at":"2026-10-16T23:36:23.589Z","kind":"http","phase":"phase-03-setup-workaround","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/director/setup","status":200}
+{"at":"2026-10-16T23:36:23.821Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"fill","target":{"css":"textarea"},"value":"Make a short silent film about a white paper boat floating in a rain puddle at dusk: two shots, 6 seconds each, total 12 seconds. First a close-up, then a wide view with a gentle slow push-in. Simple, natural, no people, no text, no narration and no music. Save the story, one scene, both shots, prompts and explicit No narration. Use the selected Codex images and Viggle models. Leave media generation for my scene review buttons."}
+{"at":"2026-10-16T23:36:23.876Z","kind":"ui-action","phase":"phase-03-setup-workaround","op":"click","target":{"css":"[data-act=send]"}}
+{"at":"2026-10-16T23:36:23.920Z","kind":"http","phase":"phase-03-setup-workaround","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/messages","status":200}
+{"at":"2026-10-16T23:36:24.900Z","kind":"phase-end","phase":"phase-03-setup-workaround"}
+{"at":"2026-10-16T23:36:39.926Z","kind":"phase-start","phase":"phase-04-director-progress"}
+{"at":"2026-10-16T23:36:49.080Z","kind":"phase-end","phase":"phase-04-director-progress"}
+{"at":"2026-10-16T23:37:11.191Z","kind":"phase-start","phase":"phase-05-plan"}
+{"at":"2026-10-16T23:37:11.215Z","kind":"ui-action","phase":"phase-05-plan","op":"click","target":{"role":"button","name":"Plan"}}
+{"at":"2026-10-16T23:37:28.515Z","kind":"ui-action","phase":"phase-05-plan","op":"click","target":{"role":"button","name":"Plan"}}
+{"at":"2026-10-16T23:37:40.097Z","kind":"ui-action","phase":"phase-05-plan","op":"click","target":{"css":"[data-act=tab]:has-text(\"Plan\")"}}
+{"at":"2026-10-16T23:37:43.537Z","kind":"ui-action","phase":"phase-05-plan","op":"click","target":{"role":"button","name":"Edit shot 1.1"}}
+{"at":"2026-10-16T23:37:44.020Z","kind":"phase-end","phase":"phase-05-plan"}
+{"at":"2026-10-16T23:37:50.462Z","kind":"phase-start","phase":"phase-06-plan-edit-undo"}
+{"at":"2026-10-16T23:37:57.666Z","kind":"ui-action","phase":"phase-06-plan-edit-undo","op":"click","target":{"css":"[data-act=tab]:has-text(\"Plan\")"}}
+{"at":"2026-10-16T23:38:02.858Z","kind":"ui-action","phase":"phase-06-plan-edit-undo","op":"click","target":{"role":"button","name":"Edit shot 1.1"}}
+{"at":"2026-10-16T23:38:02.899Z","kind":"ui-action","phase":"phase-06-plan-edit-undo","op":"fill","target":{"css":"input[placeholder=\"What this shot does in the film\"]"},"value":"Observe the paper boat quietly up close."}
+{"at":"2026-10-16T23:38:02.910Z","kind":"ui-action","phase":"phase-06-plan-edit-undo","op":"click","target":{"role":"button","name":"Save"}}
+{"at":"2026-10-16T23:38:02.954Z","kind":"http","phase":"phase-06-plan-edit-undo","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/storyboard","status":200}
+{"at":"2026-10-16T23:38:03.109Z","kind":"ui-action","phase":"phase-06-plan-edit-undo","op":"click","target":{"css":"[data-act=plan-undo]"}}
+{"at":"2026-10-16T23:38:03.150Z","kind":"http","phase":"phase-06-plan-edit-undo","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/storyboard","status":200}
+{"at":"2026-10-16T23:38:03.292Z","kind":"ui-action","phase":"phase-06-plan-edit-undo","op":"click","target":{"css":"[data-act=tab]:has-text(\"Keyframes\")"}}
+{"at":"2026-10-16T23:38:06.938Z","kind":"ui-action","phase":"phase-06-plan-edit-undo","op":"click","target":{"css":"[data-act=make-keyframes]"}}
+{"at":"2026-10-16T23:38:07.036Z","kind":"http","phase":"phase-06-plan-edit-undo","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/scenes/6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563/generate","status":200}
+{"at":"2026-10-16T23:38:07.412Z","kind":"phase-end","phase":"phase-06-plan-edit-undo"}
+{"at":"2026-10-16T23:38:11.276Z","kind":"phase-start","phase":"phase-07-keyframes-progress"}
+{"at":"2026-10-16T23:38:15.552Z","kind":"phase-end","phase":"phase-07-keyframes-progress"}
+{"at":"2026-10-16T23:39:04.550Z","kind":"phase-start","phase":"phase-08-keyframe-one"}
+{"at":"2026-10-16T23:39:04.648Z","kind":"http","phase":"phase-08-keyframe-one","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/shots/3d899eae-6cee-4443-bb1e-b2e45604f32e/frame-views","status":200}
+{"at":"2026-10-16T23:39:05.811Z","kind":"phase-end","phase":"phase-08-keyframe-one"}
+{"at":"2026-10-16T23:39:21.856Z","kind":"phase-start","phase":"phase-09-keyframes-review"}
+{"at":"2026-10-16T23:39:26.888Z","kind":"ui-action","phase":"phase-09-keyframes-review","op":"click","target":{"css":"[data-act=next-shot]"}}
+{"at":"2026-10-16T23:39:26.983Z","kind":"http","phase":"phase-09-keyframes-review","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/shots/eb54aeb7-b5e0-45fd-bf88-3b8a4e27bee8/frame-views","status":200}
+{"at":"2026-10-16T23:39:27.534Z","kind":"phase-end","phase":"phase-09-keyframes-review"}
+{"at":"2026-10-16T23:39:54.835Z","kind":"phase-start","phase":"phase-10-video"}
+{"at":"2026-10-16T23:39:55.079Z","kind":"ui-action","phase":"phase-10-video","op":"click","target":{"css":"[data-act=confirm-video]"}}
+{"at":"2026-10-16T23:39:55.180Z","kind":"http","phase":"phase-10-video","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/scenes/6df6f2c0-51e2-4f1e-8e94-5ee0bdc66563/confirm","status":200}
+{"at":"2026-10-16T23:39:55.918Z","kind":"phase-end","phase":"phase-10-video"}
+{"at":"2026-10-16T23:40:24.951Z","kind":"phase-start","phase":"phase-11-video-progress"}
+{"at":"2026-10-16T23:40:25.389Z","kind":"phase-end","phase":"phase-11-video-progress"}
+{"at":"2026-10-16T23:42:49.866Z","kind":"phase-start","phase":"phase-12-film-export"}
+{"at":"2026-10-16T23:42:49.938Z","kind":"ui-action","phase":"phase-12-film-export","op":"click","target":{"css":"[data-act=tab]:has-text(\"Film\")"}}
+{"at":"2026-10-16T23:42:50.153Z","kind":"ui-action","phase":"phase-12-film-export","op":"click","target":{"css":"[data-act=play]"}}
+{"at":"2026-10-16T23:43:17.505Z","kind":"ui-action","phase":"phase-12-film-export","op":"click","target":{"css":"[data-act=export]"}}
+{"at":"2026-10-16T23:43:17.618Z","kind":"http","phase":"phase-12-film-export","method":"POST","path":"/api/projects/7c55faa2-cbe7-4ab3-9f6a-2d908b8c5921/exports","status":202}
+{"at":"2026-10-16T23:43:22.664Z","kind":"export-download","path":"/Users/michael/SideProject/OpenSlate/.claude/worktrees/cx-live/docs/ai/live-test-20261016c/harbour-test-c.mp4"}
+{"at":"2026-10-16T23:43:22.773Z","kind":"phase-end","phase":"phase-12-film-export"}
+{"at":"2026-10-16T23:43:34.611Z","kind":"phase-start","phase":"phase-13-restart-stop"}
+{"at":"2026-10-16T23:43:34.675Z","kind":"ui-action","phase":"phase-13-restart-stop","op":"click","target":{"css":"[data-act=tab]:has-text(\"Film\")"}}
+{"at":"2026-10-16T23:43:37.275Z","kind":"owned-studio-exit","code":130,"signal":null}
+{"at":"2026-10-16T23:43:44.169Z","kind":"phase-end","phase":"phase-13-restart-stop"}
+{"at":"2026-10-16T23:43:44.173Z","kind":"owned-studio-start","pid":33893,"command":"node --env-file=<owner-settings> scripts/start-local.mjs --no-open","data":"/Users/michael/openslate-live-test-20261016c"}
+{"at":"2026-10-16T23:43:48.815Z","kind":"phase-start","phase":"phase-14-restart-open"}
+{"at":"2026-10-16T23:43:48.884Z","kind":"ui-action","phase":"phase-14-restart-open","op":"click","target":{"css":"[data-act=tab]:has-text(\"Film\")"}}
+{"at":"2026-10-16T23:43:49.450Z","kind":"phase-end","phase":"phase-14-restart-open"}
+{"at":"2026-10-16T23:43:56.451Z","kind":"phase-start","phase":"phase-15-assets-settings"}
+{"at":"2026-10-16T23:43:56.512Z","kind":"ui-action","phase":"phase-15-assets-settings","op":"click","target":{"css":"[data-act=tab]:has-text(\"Assets\")"}}
+{"at":"2026-10-16T23:44:02.755Z","kind":"ui-action","phase":"phase-15-assets-settings","op":"click","target":{"css":"[data-act=select-asset]:has-text(\"Clip 1.1\")"}}
+{"at":"2026-10-16T23:44:09.524Z","kind":"ui-action","phase":"phase-15-assets-settings","op":"click","target":{"css":"[data-act=select-asset]:has-text(\"Clip 1.2\")"}}
+{"at":"2026-10-16T23:44:09.637Z","kind":"ui-action","phase":"phase-15-assets-settings","op":"click","target":{"css":"[data-act=settings]"}}
+{"at":"2026-10-16T23:44:19.856Z","kind":"ui-action","phase":"phase-15-assets-settings","op":"click","target":{"css":"a[data-section=set-computer]"}}
+{"at":"2026-10-16T23:44:19.958Z","kind":"ui-action","phase":"phase-15-assets-settings","op":"click","target":{"css":"a[data-section=set-director]"}}
+{"at":"2026-10-16T23:44:20.056Z","kind":"ui-action","phase":"phase-15-assets-settings","op":"click","target":{"css":"a[data-section=set-models]"}}
+{"at":"2026-10-16T23:44:20.910Z","kind":"phase-end","phase":"phase-15-assets-settings"}
+{"at":"2026-10-16T23:44:21.186Z","kind":"owned-studio-stop-request","pid":33893}
+{"at":"2026-10-16T23:44:21.198Z","kind":"owned-studio-exit","code":130,"signal":null}
+{"at":"2026-10-16T23:44:21.198Z","kind":"owned-studio-stop-result","stopped":true,"elapsedMs":12,"portFree":true}
+{"at":"2026-10-16T23:44:43.453Z","kind":"owned-studio-start","pid":34795,"command":"node --env-file=<owner-settings> scripts/start-local.mjs --no-open","data":"/Users/michael/openslate-live-test-20261016c"}
+{"at":"2026-10-16T23:44:48.258Z","kind":"phase-start","phase":"phase-16-settings-evidence"}
+{"at":"2026-10-16T23:44:48.328Z","kind":"ui-action","phase":"phase-16-settings-evidence","op":"click","target":{"css":"[data-act=settings]"}}
+{"at":"2026-10-16T23:44:48.467Z","kind":"ui-action","phase":"phase-16-settings-evidence","op":"click","target":{"css":"#set-computer [data-row=codex]"}}
+{"at":"2026-10-16T23:44:48.776Z","kind":"phase-end","phase":"phase-16-settings-evidence"}
+{"at":"2026-10-16T23:44:49.051Z","kind":"owned-studio-stop-request","pid":34795}
+{"at":"2026-10-16T23:44:49.065Z","kind":"owned-studio-exit","code":130,"signal":null}
+{"at":"2026-10-16T23:44:49.065Z","kind":"owned-studio-stop-result","stopped":true,"elapsedMs":14,"portFree":true}
