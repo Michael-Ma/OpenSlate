@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { previewCreativePatch, proposalPreviewDigest, shotIntentDigest, parseToolArguments } from '../dist/index.js';
+import { canonical, previewCreativePatch, proposalPreviewDigest, shotIntentDigest, parseToolArguments } from '../dist/index.js';
 const shot = (id, sceneId) => ({ id, sceneId, revisionId:id, purpose:'Arrival', action:'Board ferry', framing:'Wide', motion:'Slow push', desiredFrames:180, imagePrompt:'Ferry', videoPrompt:'Move forward', referenceArtifactIds:[], cueId:null, promptIntent:{image:'',video:''} });
 function fixture() {
  const project={id:'film',scenes:[{id:'scene',purpose:'Departure'}],shots:[shot('a','scene'),shot('b','scene')],cues:[]};
@@ -26,10 +26,27 @@ test('no-op, absent media, scene purpose and narration effects',()=>{
  const scene=previewCreativePatch(project,{updateScenes:[{id:'scene',purpose:'Arrival'}]},bindings);assert.equal(scene.changes[0].sceneId,'scene');assert.deepEqual(scene.effects,[]);
  project.shots[0].cueId='voice';assert.ok(previewCreativePatch(project,{updateShots:[{id:'a',narration:{mode:'generated',text:'Welcome',voice:'stock'}}]},bindings).effects.some(e=>e.effect==='voice_remade'));
 });
-test('propose_change accepts only bounded creative updates in unreleased V5',()=>{
+test('propose_change accepts only the shipped bounded creative updates in V5',()=>{
  const valid={patch:{updateShots:[{id:'a',desiredFrames:240}]}};assert.deepEqual(parseToolArguments('propose_change',valid,'5.0.0').arguments,valid);
  for(const input of [{patch:{}},{patch:{updateShots:[]}},{patch:{updateShots:[{id:'a'}]}},{...valid,source:'code'}, {patch:{updateShots:[{id:'a',reauthorPrompts:true}]}},{patch:{updateShots:[{id:'a',desiredFrames:0}]}},{patch:{createShots:[]}}, {patch:{updateScenes:[{id:'s',purpose:'ok',paid:true}]}}]) assert.throws(()=>parseToolArguments('propose_change',input,'5.0.0'),{code:'VALIDATION_ERROR'});
  assert.throws(()=>parseToolArguments('propose_change',valid,'4.0.0'),{code:'NOT_FOUND'});
+});
+for (const [field, value] of [['purpose', 'Reveal the passenger'], ['action', 'Passenger turns'], ['framing', 'Close-up']]) test(`V6 ${field} preview includes exact Now/After and media effects`, () => {
+ const {project,bindings}=fixture(), before=structuredClone(project), preview=previewCreativePatch(project,{updateShots:[{id:'a',[field]:value}]},bindings);
+ assert.deepEqual(preview.changes,[{shotId:'a',field,before:project.shots[0][field],after:value}]);
+ assert.deepEqual(preview.effects.map(effect=>effect.effect),['keyframe_remade','clip_remade']);
+ assert.deepEqual(project,before);
+});
+test('V6 scene-title and purpose previews remain independent and describe exact title removal',()=>{
+ const {project}=fixture();project.scenes[0].title='Harbor';
+ assert.deepEqual(previewCreativePatch(project,{updateScenes:[{id:'scene',title:'Last Ferry'}]}).changes,[{sceneId:'scene',field:'title',before:'Harbor',after:'Last Ferry'}]);
+ assert.deepEqual(previewCreativePatch(project,{updateScenes:[{id:'scene',title:'Last Ferry',purpose:'Leaving port'}]}).changes,[{sceneId:'scene',field:'title',before:'Harbor',after:'Last Ferry'},{sceneId:'scene',field:'purpose',before:'Departure',after:'Leaving port'}]);
+ assert.deepEqual(previewCreativePatch(project,{updateScenes:[{id:'scene',title:null}]}).changes,[{sceneId:'scene',field:'title',before:'Harbor',after:'null'}]);
+});
+test('multi-field proposal preview identity survives canonical persistence and input field reordering',()=>{
+ const {project,bindings}=fixture(), patch={updateShots:[{id:'a',purpose:'Reveal passenger',action:'Passenger turns',framing:'Close-up',desiredFrames:240}],updateScenes:[{id:'scene',title:'Last Ferry',purpose:'Leave port'}]};
+ const preview=previewCreativePatch(project,patch,bindings),reloaded=previewCreativePatch(project,JSON.parse(canonical(patch)),bindings);
+ assert.deepEqual(reloaded,preview);assert.equal(proposalPreviewDigest(reloaded),proposalPreviewDigest(preview));
 });
 test('removing legacy audio-led narration previews the same cue removal as publication',()=>{
  const {project,bindings}=fixture(),shot=project.shots[0];shot.cueId='cue';project.cues=[{id:'cue',meaning:'Old line',durationFrames:180}];

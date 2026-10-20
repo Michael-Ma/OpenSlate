@@ -53,8 +53,8 @@ export class ToolBridge implements ToolInvoker {
     // Notes have a durable application-owned refusal state. Let that server
     // validator see the original JSON, including malformed note fields, so a
     // failed review can explain itself to both the Director and the person.
-    // This changes transport only: the locked 5.0.0 schema still governs writes.
-    const body = name === "record_notes" && this.toolContractVersion === "5.0.0"
+    // This changes transport only: the locked schema still governs writes.
+    const body = name === "record_notes" && ["5.0.0", "6.0.0"].includes(this.toolContractVersion)
       ? canonical(input)
       : JSON.stringify(parseToolArguments(name, input, this.toolContractVersion).arguments);
     invariant(Buffer.byteLength(body) <= this.#limits.requestBytes, "TOOL_ARGUMENTS_TOO_LARGE", "Tool arguments exceed the bridge request limit");

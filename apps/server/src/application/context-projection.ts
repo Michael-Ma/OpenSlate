@@ -180,14 +180,14 @@ export function projectDirectorContext(service: ProductionService, projectId: st
       page: page(offset, 0, 0), items: [], messages: [], holds: [], toolCalls: [], workflow: null, work: null,
       execution: { globallyPaused: service.store.get<{ paused: boolean }>("execution_control", projectId)?.paused ?? false,
         scopedHoldSemantics: "Director pause creates a request-owned scope hold. Applying a matching plan releases that request's hold. This is separate from the human global pause. Read current context after mutations before describing execution state." },
-      coverage: { notes: { open: notes.filter(n => n.state === "open").length, resolved: notes.filter(n => n.state === "resolved").length, stale: notes.filter(n => n.state === "stale").length }, sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", ...((SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(toolVersion) ? ["audio_operations"] : []), ...(toolVersion === "5.0.0" ? ["notes"] : [])], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
+      coverage: { notes: { open: notes.filter(n => n.state === "open").length, resolved: notes.filter(n => n.state === "resolved").length, stale: notes.filter(n => n.state === "stale").length }, sections: ["overview", "shots", "scenes", "plan", "aliases", "grants", "receipts", ...((SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(toolVersion) ? ["audio_operations"] : []), ...(["5.0.0", "6.0.0"].includes(toolVersion) ? ["notes"] : [])], maxResponseBytes: DIRECTOR_PROJECTION_LIMITS.bytes, projectShotCount: saved.shots.length, projectSceneCount: saved.scenes.length, pageGuard: "Compare guard headVersion, revisionId, activePlanId, capabilityLockId, applicationCapabilitiesDigest and domainCursor across sections; compare dataDigest within one section. Raw cursor is for SSE only. Restart changed pages.", recordPolicy: "Complete records or an explicit size error; receipt results are summaries. Read-context invocations remain in the audit log but are excluded from model-facing receipt pages. Context reads do not authorize mutations or spending." },
     };
     const itemsPage = (items: unknown[]): DirectorContextProjection => {
       base.guard.dataDigest = digest(items);
       return adaptive(offset, items.length, count => ({ ...base, items: items.slice(offset, offset + count), page: page(offset, count, items.length) }));
     };
     if (section === "notes") {
-      invariant(toolVersion === "5.0.0", "CAPABILITY_MISMATCH", "Notes require the current catalog");
+      invariant(["5.0.0", "6.0.0"].includes(toolVersion), "CAPABILITY_MISMATCH", "Notes require the current catalog");
       return itemsPage(notes);
     }
     if (section === "audio_operations") {

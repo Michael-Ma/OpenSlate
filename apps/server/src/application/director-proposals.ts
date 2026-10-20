@@ -6,7 +6,6 @@ import type { ProductionService, ShotNarrationAcceptance } from './service.js';
 import { requiredCommandKey } from './command-key.js';
 import { derivedShotPrompts } from './shot-prompts.js';
 import { narrationSpeechShotScopes } from '../narration/narration-scope.js';
-import { contextToolVersion } from './audio-operation-context.js';
 
 interface TouchedField { shotId?: string; sceneId?: string; field: string; before: unknown; after: unknown }
 interface NarrationAcceptanceSnapshot { state: ShotNarrationAcceptance; cueDigest: string }
@@ -77,8 +76,10 @@ export function proposeChange(service: ProductionService, projectId: string, act
     service.recovery.assertWritable(projectId, actor.requestId);
     service.assertActor(projectId, actor);
     invariant(actor.kind === 'director', 'ACTOR_DENIED', 'Proposals require a Director epoch');
-    parseToolArguments('propose_change', input, toolCatalog(contextToolVersion(service.store, projectId, actor)).version);
     const store = service.store, project = store.getProject(projectId);
+    const binding = store.get<{ lockId: string }>('director_epoch_lock', actor.epochId);
+    const lock = binding && store.get<{ lock: { compatibility: { toolContract: string } } }>('director_skill_lock', binding.lockId)?.lock;
+    parseToolArguments('propose_change', input, toolCatalog(lock?.compatibility.toolContract ?? '5.0.0').version);
     const turn = store.list<{ id: string; requestId: string; epochId: string }>('director_turn', projectId).find(t => t.requestId === actor.requestId && t.epochId === actor.epochId);
     invariant(turn, 'ACTOR_DENIED', 'Proposals require their application-owned turn');
     const patch = acceptedDirection(project, input.patch);
@@ -137,8 +138,11 @@ function touched(project: ProjectRecord, patch: ProposalPatch): TouchedField[] {
     if (canonical(before) !== canonical(after)) result.push({ shotId: row.id, field, before, after });
   }
   for (const row of patch.updateScenes ?? []) {
-    const before = project.scenes.find(s => s.id === row.id)!.purpose;
-    if (before !== row.purpose) result.push({ sceneId: row.id, field: 'purpose', before, after: row.purpose });
+    const scene = project.scenes.find(s => s.id === row.id)!;
+    for (const field of ['title', 'purpose'] as const) if (Object.hasOwn(row, field)) {
+      const before = scene[field] ?? null, after = row[field] ?? null;
+      if (before !== after) result.push({ sceneId: row.id, field, before, after });
+    }
   }
   return result;
 }
@@ -186,7 +190,11 @@ export function proposalCommand(service: ProductionService, projectId: string, i
           const row = (patch.updateShots ??= []).find(s => s.id === field.shotId) ?? { id: field.shotId };
           if (!patch.updateShots.includes(row)) patch.updateShots.push(row);
           Object.assign(row, { [field.field]: field.before });
-        } else (patch.updateScenes ??= []).push({ id: field.sceneId!, purpose: field.before as string });
+        } else {
+          const row = (patch.updateScenes ??= []).find(scene => scene.id === field.sceneId) ?? { id: field.sceneId! };
+          if (!patch.updateScenes.includes(row)) patch.updateScenes.push(row);
+          Object.assign(row, { [field.field]: field.before });
+        }
       }
     }
     const scopeIds = [...new Set([...(patch.updateShots ?? []).map(s => s.id), ...(patch.updateScenes ?? []).map(s => s.id)])];

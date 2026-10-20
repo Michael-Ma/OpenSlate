@@ -80,7 +80,7 @@ function changeValue(field: string, value: string): Label {
 /** The proposal's own changes, in its order: the web never diffs anything itself. */
 export function proposalChanges(preview: ProposalPreview, overview: GenerationOverview): ProposalChangeRow[] {
   return preview.changes.map((change) => {
-    const field = msg(change.sceneId && !change.shotId ? "plan.scene.direction_label" : FIELD_KEYS[change.field] ?? "note.change.field_other");
+    const field = msg(change.sceneId && !change.shotId ? (change.field === "title" ? "plan.scene.title_label" : "plan.scene.direction_label") : FIELD_KEYS[change.field] ?? "note.change.field_other");
     const owner: Label = change.shotId
       ? { text: overview.shots[change.shotId]?.label ?? "?" }
       : msg("note.change.scene", { scene: overview.scenes.find((s) => s.sceneId === change.sceneId)?.ordinal ?? "?" });

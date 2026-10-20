@@ -152,9 +152,9 @@ export class ToolInvocationService {
     let parsed: ReturnType<typeof parseToolArguments>;
     try { parsed = parseToolArguments(tool, input, selected.catalog.version); }
     catch (error) {
-      // Preserve the same safe, correctable schema refusal on exact retries.
-      // Never retain supplied argument values or create domain work on this path.
-      if ((tool !== 'record_notes' && tool !== 'propose_change' && tool !== 'prepare_change') || selected.catalog.version !== '5.0.0' || !(error instanceof DomainError) || error.code !== 'VALIDATION_ERROR') throw error;
+      // Preserve the same safe, correctable schema refusal on exact retries (the bridge forwards compatible notes to
+      // this authoritative validator). Never retain supplied argument values or create domain work on this path.
+      if ((tool !== 'record_notes' && tool !== 'propose_change' && tool !== 'prepare_change') || !['5.0.0', '6.0.0'].includes(selected.catalog.version) || !(error instanceof DomainError) || error.code !== 'VALIDATION_ERROR') throw error;
       const argumentsDigest = digest(input);
       store.transaction(() => {
         this.service.assertActor(projectId, actor);
@@ -300,7 +300,7 @@ export class ToolInvocationService {
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
         let receipt: unknown = null;
-        if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion === "5.0.0" && call.catalogDigest === toolCatalog("5.0.0").digest) {
+        if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion && ["5.0.0", "6.0.0"].includes(call.toolContractVersion) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>(call.tool === "record_notes" ? "director_notes_receipt" : "director_proposal_receipt", call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
         }

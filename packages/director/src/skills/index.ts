@@ -281,11 +281,16 @@ function publish(prepared: Prepared, root: string): ResolvedSkill {
 }
 
 /** Loads only explicitly trusted local package roots. No discovery, install, or network access. */
-export function loadSkillCatalog(options: SkillEnvironment & { packageRoots: readonly string[] }): SkillCatalog {
+export function loadSkillCatalog(options: SkillEnvironment & { packageRoots: readonly string[]; expectedPackageDigests?: Readonly<Record<string, string>> }): SkillCatalog {
   const expectedCompatibility = compatibility(options.compatibility); const availableToolIds = tools(options.availableToolIds);
   check(Array.isArray(options.packageRoots) && options.packageRoots.length > 0 && options.packageRoots.length <= SKILL_LIMITS.packages, "Provide a bounded nonempty trusted package list");
   const prepared = options.packageRoots.map(root => prepare(root)); unique(prepared.map(item => item.manifest.id), "skill id");
   for (const item of prepared) compatible(item.manifest, options);
+  if (options.expectedPackageDigests !== undefined) {
+    check(canonical(Object.keys(options.expectedPackageDigests).sort()) === canonical(prepared.map(item => item.manifest.id).sort())
+      && prepared.every(item => options.expectedPackageDigests![item.manifest.id] === item.packageDigest),
+      "Instruction packages do not match the shipped package identities", "SKILL_PACKAGE_MISMATCH");
+  }
   const root = directory(options.snapshotRoot, true);
   for (const item of prepared) {
     const nested = relative(item.sourceRoot, root);
@@ -326,19 +331,25 @@ export function createSkillLock(catalog: SkillCatalog, options: { selectedSkillI
   const body = { schemaVersion: 1 as const, id: newId(), compatibility: compatibility(catalog.compatibility), skills: selected.map(item => ({ id: item.id, version: item.version, packageDigest: item.packageDigest })), bindings: capabilityBindings(options.bindings), prompts };
   return freeze({ ...body, lockDigest: digest(body) });
 }
-export function verifySkillLock(lock: SkillCapabilityLock, environment: SkillEnvironment): ResolvedSkill[] {
+/** Verifies saved instruction bytes and lock provenance without requiring a current runtime binding. */
+export function verifySkillLockSnapshots(lock: SkillCapabilityLock, snapshotRoot: string): ResolvedSkill[] {
   const body = lockBody(lock); check(digest(body) === lock.lockDigest, "Capability lock content changed", "SKILL_LOCK_INVALID");
-  check(canonical(body.compatibility) === canonical(compatibility(environment.compatibility)), "Runtime contract versions differ from the lock", "SKILL_COMPATIBILITY_MISMATCH");
-  check(canonical(body.bindings) === canonical(capabilityBindings(environment.bindings ?? [])), "Current implementation bindings differ from the lock", "SKILL_COMPATIBILITY_MISMATCH");
   const skills = body.skills.map(pin => {
-    const skill = verifySkillSnapshot(environment.snapshotRoot, pin.packageDigest);
-    check(skill.id === pin.id && skill.version === pin.version, "Pinned skill identity mismatch", "SKILL_LOCK_INVALID"); compatible(skill.manifest, environment); return skill;
+    const skill = verifySkillSnapshot(snapshotRoot, pin.packageDigest);
+    check(skill.id === pin.id && skill.version === pin.version, "Pinned skill identity mismatch", "SKILL_LOCK_INVALID"); return skill;
   });
   for (const prompt of body.prompts) {
     const file = skills.find(item => item.id === prompt.skillId)?.files.find(item => item.path === prompt.path);
     check(file && prompt.path !== MANIFEST && file.sha256 === prompt.sha256, "Pinned task prompt mismatch", "SKILL_LOCK_INVALID");
   }
   return freeze(skills);
+}
+export function verifySkillLock(lock: SkillCapabilityLock, environment: SkillEnvironment): ResolvedSkill[] {
+  const skills = verifySkillLockSnapshots(lock, environment.snapshotRoot);
+  check(canonical(lock.compatibility) === canonical(compatibility(environment.compatibility)), "Runtime contract versions differ from the lock", "SKILL_COMPATIBILITY_MISMATCH");
+  check(canonical(capabilityBindings(lock.bindings)) === canonical(capabilityBindings(environment.bindings ?? [])), "Current implementation bindings differ from the lock", "SKILL_COMPATIBILITY_MISMATCH");
+  for (const skill of skills) compatible(skill.manifest, environment);
+  return skills;
 }
 /** Records explicit injection, not proof that a model read or followed instructions. */
 export function activateSkills(lock: SkillCapabilityLock, options: SkillEnvironment & { requestId: string; contextDigest: string; selectedSkillIds: readonly string[]; stageBindings?: readonly SkillStageBinding[] }): SkillActivation {

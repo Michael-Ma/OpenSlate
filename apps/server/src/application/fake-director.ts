@@ -41,7 +41,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     const request = this.service.store.get<{ scopeIds: string[] }>("message", input.requestId)!;
     const scene = projectForNotes.scenes.find(scene => request.scopeIds.includes(scene.id) || projectForNotes.shots.some(s => s.sceneId === scene.id && request.scopeIds.includes(s.id)));
     const shots = projectForNotes.shots.filter(shot => shot.sceneId === scene?.id && (request.scopeIds.includes(scene!.id) || request.scopeIds.includes(shot.id)));
-    if ((!command || command.action === "review") && scene && shots.length && input.bridge.toolContractVersion === "5.0.0") {
+    if ((!command || command.action === "review") && scene && shots.length && ["5.0.0", "6.0.0"].includes(input.bridge.toolContractVersion ?? "1.0.0")) {
       const first = shots[0]!, last = shots.at(-1)!;
       const review = this.service.store.get("keyframe_review_request", input.requestId) || command?.action === "review";
       const proposal = review && last.desiredFrames < 240 ? await invoke("propose_change", { patch: { updateShots: [{ id: last.id, desiredFrames: 240 }] } }) as { proposalId: string } : null;
@@ -61,7 +61,9 @@ export class FakeWorkflowDirector implements DirectorRuntime {
       const proposal: ChangeProposal = { variant: "workflow", expectedHeadVersion: project.headVersion };
       if (command.action !== "create") {
         invariant(command.shotId && project.shots.some(shot => shot.id === command.shotId), "SCOPE_DENIED", "Choose a shot in this project");
-        const framing = command.action === "close_up" ? "Extreme close-up of stitching" : "Wide product view";
+        const framing = input.bridge.toolContractVersion === "6.0.0"
+          ? command.action === "close_up" ? "Extreme close-up" : "Wide"
+          : command.action === "close_up" ? "Extreme close-up of stitching" : "Wide product view";
         const creative = { updateShots: [{ id: command.shotId, framing,
           imagePrompt: `Brown leather boot, ${framing.toLowerCase()}`, videoPrompt: `Slow push toward a brown leather boot, ${framing.toLowerCase()}`, reauthorPrompts: true }] };
         proposed = applyCreativePatch(project, creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } }));

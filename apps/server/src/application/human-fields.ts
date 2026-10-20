@@ -34,7 +34,7 @@ export function assertNoHumanFieldConflict(store: Store, projectId: string, acto
   const fields: Field[] = [
     ...(['brief', 'story', 'narrationScript', 'narrationSource'] as const).filter(field => patch[field] !== undefined).map(field => ({ field })),
     ...(patch.updateShots ?? []).flatMap(row => Object.keys(row).filter(key => key !== 'id' && key !== 'reauthorPrompts').map(field => ({ shotId: row.id, field }))),
-    ...(patch.updateScenes ?? []).map(row => ({ sceneId: row.id, field: 'purpose' })),
+    ...(patch.updateScenes ?? []).flatMap(row => Object.keys(row).filter(key => key !== 'id').map(field => ({ sceneId: row.id, field }))),
   ];
   const edited = store.readEvents(projectId, cursor).filter(e => e.kind === 'human.fields_changed')
     .flatMap(e => e.payload.fields as unknown as Field[]);

@@ -1,7 +1,7 @@
 import { Ajv, type ErrorObject } from "ajv";
 import { canonical, digest, DomainError, invariant } from "./common.js";
 import type { JsonObject } from "./contracts.js";
-import { changeProposalSchema, parseChangeProposal } from "./workflow/index.js";
+import { changeProposalSchema, parseChangeProposal, sceneTitleSchema, shortFramingSchema, successorChangeProposalSchema } from "./workflow/index.js";
 import { legacyChangeProposalSchema } from "./legacy-change-schema.js";
 
 export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"] as const);
@@ -10,9 +10,9 @@ const V3_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transc
 export const ALL_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
-export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"] as const);
+export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
 export type ToolContractVersion = typeof SUPPORTED_TOOL_CONTRACTS[number];
-export const CURRENT_TOOL_CONTRACT: ToolContractVersion = "5.0.0";
+export const CURRENT_TOOL_CONTRACT: ToolContractVersion = "6.0.0";
 export interface ParsedToolCall { name: ToolName; arguments: JsonObject }
 export interface ToolDescriptor {
   name: ToolName;
@@ -102,7 +102,7 @@ export const recordNotesSchema = object({ notes: { type: "array", minItems: 1, m
     object({ kind: { const: "reply" } }, ["kind"]),
   ] } },
 }, ["anchor", "kind", "blocking", "text", "choices"]) } }, ["notes"]);
-// B9: 5.0.0 is unreleased; earlier catalogs remain byte-for-byte unchanged.
+// Every shipped catalog, including 5.0.0, remains byte-for-byte unchanged.
 export const proposalPatchSchema = object({
   updateShots: { type: "array", minItems: 1, maxItems: 400, items: { ...object({
     id, desiredFrames: { type: "integer", minimum: 1, maximum: 10800 },
@@ -120,6 +120,24 @@ const v5Descriptors = freeze(v4Descriptors.map(tool => tool.name === "read_conte
   : tool.name === "prepare_narration_speech" ? { ...tool, description: "Save a pending speech suggestion for an exact saved narration section. Only a person's press on the audio request route starts paid work. This tool never generates, attaches or accepts audio. No spending allowance or separate approval is needed." }
   : tool.name === "prepare_recording_transcription" ? { ...tool, description: "Save a pending transcription suggestion for an exact owned recording and optional section. Only a person's press on the audio request route starts paid work. This tool never transcribes, attaches or adopts text. No spending allowance or separate approval is needed." }
   : tool).concat(descriptor("record_notes", "Record one point per shot-anchored note, including typed human choices. Use the returned app-assigned letters. Allowed in discuss-only turns. Notes never edit the film or start paid work. Never judge a picture absent from attachedKeyframes or re-raise settled notes.", recordNotesSchema, false), descriptor("propose_change", "Hold one creative patch for human review with an application-computed Now/After preview. Allowed in discuss-only epochs. No holds, plan, grants or generation. Propose duration, narration and changes that outdate paid media; apply harmless text directly with a receipt.", proposeChangeSchema, false)));
+// Clone each successor schema independently; historical descriptors share no mutable inputs.
+const v6ChangeSchema = structuredClone(successorChangeProposalSchema);
+const v6Creative = (v6ChangeSchema.properties as { creative: { properties: Record<string, unknown> } }).creative.properties;
+delete v6Creative.narrationScript;
+delete v6Creative.narrationSource;
+const v6ProposalPatchSchema = structuredClone(proposalPatchSchema);
+const v6ProposalProperties = v6ProposalPatchSchema.properties as {
+  updateShots: { items: { properties: Record<string, object> } };
+  updateScenes: object;
+};
+Object.assign(v6ProposalProperties.updateShots.items.properties, {
+  purpose: { type: "string", minLength: 1, maxLength: 16000 }, action: { type: "string", minLength: 1, maxLength: 16000 }, framing: structuredClone(shortFramingSchema),
+});
+v6ProposalProperties.updateScenes = { type: "array", minItems: 1, maxItems: 400,
+  items: { ...object({ id, title: structuredClone(sceneTitleSchema), purpose: { type: "string", minLength: 1, maxLength: 16000 } }, ["id"]), minProperties: 2 } };
+const v6ProposeChangeSchema = object({ patch: { ...v6ProposalPatchSchema, minProperties: 1 } }, ["patch"]);
+const v6Descriptors = freeze(v5Descriptors.map(tool => tool.name === "prepare_change" ? { ...tool, inputSchema: v6ChangeSchema }
+  : tool.name === "propose_change" ? { ...tool, inputSchema: v6ProposeChangeSchema } : tool));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },
@@ -127,6 +145,7 @@ export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> =
   "3.0.0": { version: "3.0.0", names: V3_TOOL_NAMES, descriptors: v3Descriptors, digest: digest({ version: "3.0.0", tools: v3Descriptors }) },
   "4.0.0": { version: "4.0.0", names: V3_TOOL_NAMES, descriptors: v4Descriptors, digest: digest({ version: "4.0.0", tools: v4Descriptors }) },
   "5.0.0": { version: "5.0.0", names: ALL_TOOL_NAMES, descriptors: v5Descriptors, digest: digest({ version: "5.0.0", tools: v5Descriptors }) },
+  "6.0.0": { version: "6.0.0", names: ALL_TOOL_NAMES, descriptors: v6Descriptors, digest: digest({ version: "6.0.0", tools: v6Descriptors }) },
 });
 export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalog {
   invariant(Object.hasOwn(TOOL_CATALOGS, version), "CAPABILITY_MISMATCH", "Unsupported director tool contract");
@@ -134,7 +153,7 @@ export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalo
 }
 /** Exact implementation identity for each immutable catalog. */
 export function toolHandlerId(version: ToolContractVersion): string {
-  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4", "5.0.0": "director-tools@5" } as const)[toolCatalog(version).version];
+  return ({ "1.0.0": "five-tools@1", "2.0.0": "director-tools@2", "3.0.0": "director-tools@3", "4.0.0": "director-tools@4", "5.0.0": "director-tools@5", "6.0.0": "director-tools@6" } as const)[toolCatalog(version).version];
 }
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
 const validators = new Map(Object.values(TOOL_CATALOGS).map(catalog => [catalog.version,

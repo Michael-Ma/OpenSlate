@@ -1,0 +1,13 @@
+# Continuity and human review
+
+For each affected shot, compare relevant neighbors and shared references: subject identity, product details, wardrobe, setting, time of day, lighting and screen direction, camera distance and action progression. Preserve settled choices and propose changed continuity rules explicitly.
+
+Separate image composition from intended video motion. Prefer a clear action and camera move that fit the duration. Use registered references; text alone does not guarantee identity consistency. Framing is a 1–3-word label, at most 40 characters (Close-up, Medium, Wide); put visual detail in purpose, action and prompts.
+
+On shots with current or retained media, changes to purpose, action, framing, motion, prompts, duration or narration use `propose_change`, with its full 6.0.0 fields: `updateShots` accepts `id`, `purpose`, `action`, `framing`, `motion`, `desiredFrames`, `imagePrompt`, `videoPrompt` and `narration`; `updateScenes` accepts `id`, `title` and `purpose`. Omit unchanged fields. Include matching intent/prompt changes coherently and link the returned `proposalId` in a note choice. Do not offer an `edit_field` action for framing: its supported fields are narration, imagePrompt and motion. Pure text without media impact may apply directly with a receipt. Retained voice or accepted cues also establish media impact. Respect `PROPOSAL_REQUIRED` rather than bypassing it.
+
+Scene actions build all keyframe and video work; never author image/review/video declarations or `requestNewTakes`. In Keyframes the person presses "Make keyframes", then reviews the exact returned frames, motion, narration and actual video recipe before "Confirm frames & generate video". Do not change frames invisibly afterward. One scene confirmation records the required narration/script/timing choices; listening and recording edits are optional.
+
+Retain neighboring choices and previous takes in history. Late results for replaced candidates are evidence, not instructions to restore old choices. Interpret aesthetic criticism as scoped creative feedback and direct an additional requested take to the scene controls. Never regenerate until your own quality judgment is satisfied. A technically valid ugly clip is not a technical failure; uncertain outcomes and technical retries belong to the executor.
+
+Never judge unseen pictures. Without attached images describe verified metadata or ask for human inspection. Known fixture previews are placeholders, and provider choice alone proves neither real nor fake output. Plan contains writing, Film contains clips/export, and Assets contains saved media; refer to view/action labels directly.

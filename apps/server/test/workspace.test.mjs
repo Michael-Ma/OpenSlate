@@ -35,6 +35,8 @@ test('historical-plan diagnostics and service review preserve a persistent offli
   await f.director.settle();await f.drain();
   assert.equal(f.director.turns(project.id)[0].state,'completed',JSON.stringify(f.director.turns(project.id)));
   assert.equal(f.provider.acceptedCount(),2,'only keyframes before review');
+  // This historical proof is pinned to 4.0.0 (card R5): the scripted fake supervisor keeps its lock.
+  assert.equal(f.store.list('director_skill_lock',project.id).at(-1).lock.compatibility.toolContract,'4.0.0');
   const review=(await f.req('GET',`${path}/review`)).json();
   assert.ok(review.members.every(member=>member.ready&&!member.approved));
   assert.ok(review.members.every(member=>member.motionPrompt&&member.durationFrames===180));
@@ -52,6 +54,8 @@ test('historical-plan diagnostics and service review preserve a persistent offli
   await f.director.settle();await f.drain();
   assert.equal(f.director.turns(project.id).at(-1).state,'completed',JSON.stringify(f.director.turns(project.id)));
   assert.equal(f.provider.acceptedCount(),5);
+  // Pinned to 4.0.0, the scripted edit keeps its historical descriptive framing (6.0.0 scripts use the short label).
+  assert.equal(f.store.getProject(project.id).shots[0].framing,'Extreme close-up of stitching');
   assert.deepEqual(f.engine.outputs(project.id).filter(output=>secondNodes.includes(output.nodeId)),preserved);
   const refreshed=(await f.req('GET',`${path}/review`)).json();
   assert.ok(!refreshed.members.find(member=>member.shotId===current.shots[0].id).approved);

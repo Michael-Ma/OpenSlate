@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { digest, DomainError, invariant, newId } from "@openslate/core";
-import { CODEX_PROTOCOL_VERSION, CodexDirectorRuntime, classifyNativeDiagnostic, setupLocalCodex, verifySkillLock } from "@openslate/director";
+import { CODEX_PROTOCOL_VERSION, CodexDirectorRuntime, classifyNativeDiagnostic, setupLocalCodex, verifySkillLockSnapshots } from "@openslate/director";
 import { toolVersion } from "../installation-status.js";
 import type { DirectorRunInput, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorSupervisor } from "./director-supervisor.js";
@@ -18,7 +18,8 @@ import type { ActorContext, NativeDiagnostic, ToolContractVersion } from "@opens
 import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
-import { createDirectorSkillLock, directorSkillEnvironment } from "./director-capabilities.js";
+import { createDirectorSkillLock } from "./director-capabilities.js";
+import { createCurrentShippedDirectorSkillLock } from "./director-shipped-guidance.js";
 import type { SkillCapabilityLock } from "@openslate/director";
 import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription-records.js";
 import { readCodexStartupTimeout, readDirectorRunTimeout } from "./director-run-config.js";
@@ -84,8 +85,9 @@ export class LocalDirectorController {
       projectId => this.configuring.has(projectId));
     const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint });
     this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: async (turn, human, bridge) => describeUnattachedKeyframes(service, await fakeInput(turn, human, bridge), bridge.actor, "scripted_runtime_not_visually_inspected") });
-    const proxy: DirectorRuntime = { id: "codex-app-server", start: async (input, options) => this.startNative(input, options) };
+    const proxy: DirectorRuntime = { id: "codex-app-server", start: async (input, options) => (await this.prepareNativeStart(input)).start(input, options) };
     this.native = new DirectorSupervisor(service, proxy, { mode: "native", projectFilter: id => this.mode(id) === "native",
+      prepareRuntime: input => this.prepareNativeStart(input),
       prepareInput: async (turn, human, bridge, preparation) => {
         const input = await (await this.ready(turn.projectId)).input(turn, human, bridge);
         if (!this.imageProjector && !service.store.get("request_image_selection", turn.requestId)) return describeUnattachedKeyframes(service, input, bridge.actor, "ffmpeg_unavailable");
@@ -130,7 +132,9 @@ export class LocalDirectorController {
       DIRECTOR_IMAGE_IDENTITY: "The saved image selection or thumbnail receipt no longer matches this request. Start a new discussion with the intended reference.",
       DIRECTOR_IMAGE_TOOL_CHANGED: "The local image tool changed. Restart OpenSlate before preparing a new image discussion.",
       DIRECTOR_IMAGES_UNAVAILABLE: "Image discussion needs a native director and local FFmpeg.",
-      DIRECTOR_GUIDANCE_UNSUPPORTED: "OpenSlate could not verify this project's Director guidance. Saved work is retained. Restore the matching application files, then send a new message.",
+      DIRECTOR_GUIDANCE_UNSUPPORTED: "This film's Director guidance does not match any version this OpenSlate ships. Saved work is retained.",
+      DIRECTOR_GUIDANCE_FILES_UNAVAILABLE: "This OpenSlate installation's current Director guidance files are missing or changed. Saved work is retained. Restore the matching application files, then send a new message.",
+      SKILL_SNAPSHOT_INVALID: "This film's saved Director guidance snapshot is missing or changed. Saved work is retained. Restore the matching saved snapshot, then send a new message.",
       DIRECTOR_GUIDANCE_IN_FLIGHT: "This conversation began with older Director guidance. Send a new message to use the current application; saved work is retained.",
       DIRECTOR_TOOLS_BUSY: "Wait for the current conversation or setup to finish, then send a new message.",
       DIRECTOR_TOOLS_STALE: "Director setup changed while the conversation was being prepared. Send a new message; saved work is retained.",
@@ -246,9 +250,11 @@ export class LocalDirectorController {
       const prepared = selection.mode === "native" ? await this.prepare(projectId, selection) : null;
       const changedMode = before.selection.mode !== selection.mode;
       invariant(!oldLock || (SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(oldLock.lock.compatibility.toolContract), "CAPABILITY_MISMATCH", "Saved director guidance version is unsupported");
-      const replacement = changedMode && oldLock ? createDirectorSkillLock({ repositoryRoot: this.config.repositoryRoot,
+      const replacementConfiguration = { repositoryRoot: this.config.repositoryRoot,
         snapshotRoot: selection.mode === "native" ? join(this.config.dataDirectory, "native", projectId, "workspace", ".agents", "skills") : join(this.config.dataDirectory, "skill-snapshots"),
-        runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" }, oldLock.lock.compatibility.toolContract as ToolContractVersion).lock : null;
+        runtimeId: selection.mode === "native" ? "codex-app-server" : "fake-workflow-v1" };
+      const replacement = changedMode && oldLock ? (oldLock.lock.compatibility.toolContract === "6.0.0"
+        ? createCurrentShippedDirectorSkillLock(replacementConfiguration) : createDirectorSkillLock(replacementConfiguration, oldLock.lock.compatibility.toolContract as ToolContractVersion)).lock : null;
       store.transaction(() => {
         this.service.recovery.assertWritable(projectId);
         store.command(scope, key, requestDigest, () => {
@@ -384,7 +390,7 @@ export class LocalDirectorController {
     void checking.finally(() => this.setupChecks.delete(checking)).catch(() => {});
     return checking;
   }
-  private async startNative(input: DirectorRunInput, options: DirectorStartOptions = {}) {
+  private async prepareNativeStart(input: DirectorRunInput): Promise<DirectorRuntime> {
     invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
     this.service.recovery.assertWritable(input.projectId, input.requestId);
     this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
@@ -397,9 +403,8 @@ export class LocalDirectorController {
       const paths = new Set<string>();
       for (const row of this.service.store.list<{ lock: SkillCapabilityLock }>("director_skill_lock", input.projectId)) {
         if (!row.lock.bindings.some(binding => binding.kind === "runtime" && binding.id === "codex-app-server")) continue;
-        invariant((SUPPORTED_TOOL_CONTRACTS as readonly string[]).includes(row.lock.compatibility.toolContract), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Saved Director guidance is unsupported");
-        const environment = directorSkillEnvironment(configuration, row.lock.compatibility.toolContract as ToolContractVersion);
-        for (const skill of verifySkillLock(row.lock, environment)) paths.add(skill.entryPath);
+        // Disabling an old package needs its retained snapshot, never today's handler catalog.
+        for (const skill of verifySkillLockSnapshots(row.lock, configuration.snapshotRoot)) paths.add(skill.entryPath);
       }
       const policy = prepared.runtimeOptions.policy, configured = policy.config["skills.config"];
       const disabled = new Map<string, { path: string; enabled: false }>();
@@ -419,6 +424,9 @@ export class LocalDirectorController {
     this.service.recovery.assertWritable(input.projectId, input.requestId);
     this.service.recovery.assertFreshAuthority(input.projectId, "director_turn", input.turnId);
     invariant(!this.shutdown.signal.aborted, "DIRECTOR_SHUTTING_DOWN", "Director is shutting down");
+    return { id: "codex-app-server", start: (runInput, options) => this.startNative(runtime, runInput, options) };
+  }
+  private async startNative(runtime: DirectorRuntime, input: DirectorRunInput, options: DirectorStartOptions = {}) {
     this.activeNativeRuntimes.add(runtime);
     try { return await runtime.start(input, { ...options, onEvent: async event => {
       if (event.kind === "runtime_started") this.service.store.transaction(() => {

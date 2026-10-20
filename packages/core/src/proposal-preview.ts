@@ -21,13 +21,16 @@ export function previewCreativePatch(before: ProjectRecord, patch: ProposalPatch
   const display = (value: unknown) => typeof value === 'string' ? value : canonical(value ?? null);
   for (const row of patch.updateScenes ?? []) {
     const scene = before.scenes.find(s => s.id === row.id);
-    if (scene && scene.purpose !== row.purpose) changes.push({ sceneId: row.id, field: 'purpose', before: scene.purpose, after: row.purpose });
+    for (const field of ['title', 'purpose'] as const) if (scene && Object.hasOwn(row, field) && canonical(scene[field] ?? null) !== canonical(row[field] ?? null))
+      changes.push({ sceneId: row.id, field, before: display(scene[field]), after: display(row[field]) });
   }
   const effects: ProposalPreview['effects'] = [];
   const timeline = before.scenes.flatMap((scene, si) => before.shots.filter(s => s.sceneId === scene.id).map((shot, index) => {
     const update = patch.updateShots?.find(row => row.id === shot.id);
+    // The server passes the patch with prompts already derived from changed direction (shot-prompts.ts), so they show here.
     const after = { ...shot, ...update, ...(update?.narration?.mode === 'none' ? { cueId: null } : {}) };
-    const diffs = Object.entries(update ?? {}).filter(([field, value]) => field !== 'id' && canonical(shot[field as keyof typeof shot] ?? null) !== canonical(value ?? null));
+    const diffs = Object.entries(update ?? {}).filter(([field, value]) => field !== 'id' && canonical(shot[field as keyof typeof shot] ?? null) !== canonical(value ?? null))
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
     for (const [field, value] of diffs) changes.push({ shotId: shot.id, field, before: display(shot[field as keyof typeof shot]), after: display(value) });
     if (diffs.length) {
       const allBindings = bindingsByShot[shot.id] ?? [];

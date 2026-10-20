@@ -24,14 +24,15 @@ import { directorProposals, proposeChange, proposalCommand, rebaseProposal } fro
 import { editedPrompt } from '../dist/application/shot-prompts.js';
 import { directorMappedSpeechFixture } from './helpers/director-mapped-speech-fixture.mjs';
 function writable(path) { chmodSync(path, 0o700); for (const e of readdirSync(path, {withFileTypes:true})) if(e.isDirectory()) writable(join(path,e.name)); }
-function fixture(t, {scope=['scene-0'], editing=false, turnState='completed'}={}) {
+function fixture(t, {scope=['scene-0'], editing=false, turnState='completed', toolVersion, sceneTitle}={}) {
  const root=mkdtempSync(join(tmpdir(),'openslate-notes-')),store=new Store(join(root,'state.sqlite')),provider=new FakeProvider(join(root,'fake.sqlite'));
  const engine=new Engine(store,provider,{artifactDir:join(root,'artifacts')}),service=new ProductionService(store,engine);
  let project=service.createProject('Notes');const shape=projectFixture(project.id,2);
+ if(sceneTitle!==undefined) shape.scenes[0].title=sceneTitle;
  project=store.saveProject({...project,...shape,capabilityLockId:project.capabilityLockId,shots:shape.shots.map(s=>({...s,narration:{mode:'none',text:'',voice:'stock'}}))},0);
  store.insert('project_revision',project.revisionId,project.id,{project});
  const config={repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills')};
- const saved=createDirectorSkillLock(config);verifySkillLock(saved.lock,saved.environment);
+ const saved=createDirectorSkillLock(config,toolVersion);verifySkillLock(saved.lock,saved.environment);
  new DirectorContextService(service,saved.environment).bootstrapLock(project.id,saved.lock);
  const human=service.beginRequest(project.id,'local-user','Discuss this scene',{scopeIds:scope==='project'?[project.id]:scope,editing}),bridge=service.openEpoch(project.id,human),turn={id:randomUUID(),projectId:project.id,requestId:human.requestId,epochId:bridge.actor.epochId,state:turnState,runtimeId:"fixture",createdAt:"2026-10-15T00:00:00Z"};
  store.insert('director_turn',turn.id,project.id,turn);
@@ -50,6 +51,64 @@ const propose=(f,input=patch(),key=randomUUID())=>f.tools.invoke(f.project.id,f.
 const accept=(f,p,key=randomUUID())=>f.http('POST',`/director/proposals/${p.proposalId}/accept`,{previewDigest:p.previewDigest},key);
 const edit=(f,id,field,value)=>editStoryboard(f.service,f.project.id,{kind:'shot',id,field,value,expectedHeadVersion:f.store.getProject(f.project.id).headVersion},randomUUID());
 const list=async f=>(await f.http('GET','/director/proposals')).json().proposals;
+
+test('V6 proposal previews and publishes purpose, action, framing and separate scene title; Undo restores an absent title',async t=>{
+ const f=fixture(t),before=f.store.getProject(f.project.id),shot=before.shots[0],scene=before.scenes[0];
+ assert.equal(Object.hasOwn(scene,'title'),false);
+ const input={patch:{updateShots:[{id:shot.id,purpose:'Find the passenger',action:'Passenger turns',framing:'Close-up'}],updateScenes:[{id:scene.id,title:'Last Ferry',purpose:'Departure from the harbor'}]}};
+ const p=await propose(f,input);
+ // Changed direction rewrites both prompts the way a hand edit does (card R5), and the preview shows them.
+ assert.deepEqual(p.preview.changes.map(row=>`${row.shotId?'shot':'scene'}:${row.field}`).sort(),
+  ['scene:purpose','scene:title','shot:action','shot:framing','shot:imagePrompt','shot:purpose','shot:videoPrompt']);
+ assert.deepEqual(f.store.getProject(f.project.id),before,'a proposal only previews');
+ const accepted=await accept(f,p);assert.equal(accepted.statusCode,200,accepted.body);
+ const after=f.store.getProject(f.project.id);
+ assert.equal(after.scenes[0].title,'Last Ferry');assert.equal(after.scenes[0].purpose,'Departure from the harbor');
+ for(const field of ['purpose','action','framing']) assert.equal(after.shots[0][field],input.patch.updateShots[0][field]);
+ const undone=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},'undo-successor');assert.equal(undone.statusCode,200,undone.body);
+ const restored=f.store.getProject(f.project.id);
+ assert.equal(Object.hasOwn(restored.scenes[0],'title'),false);assert.equal(restored.scenes[0].purpose,scene.purpose);
+ for(const field of ['purpose','action','framing']) assert.equal(restored.shots[0][field],shot[field]);
+ assert.equal(f.provider.acceptedCount(),0);assert.equal(f.store.list('grant',f.project.id).length,0);
+});
+
+test('V6 scene-title proposal Undo restores a preexisting long human title exactly',async t=>{
+ const sceneTitle='A human scene title with many words and a detailed description '.repeat(10).trim(),f=fixture(t,{sceneTitle});
+ const before=f.store.getProject(f.project.id),p=await propose(f,{patch:{updateScenes:[{id:'scene-0',title:'Last Ferry'}]}});
+ assert.deepEqual(p.preview.changes,[{sceneId:'scene-0',field:'title',before:sceneTitle,after:'Last Ferry'}]);
+ const accepted=await accept(f,p);assert.equal(accepted.statusCode,200,accepted.body);assert.equal(f.store.getProject(f.project.id).scenes[0].title,'Last Ferry');
+ const undone=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},'undo-long-title');assert.equal(undone.statusCode,200,undone.body);
+ const restored=f.store.getProject(f.project.id);assert.equal(restored.scenes[0].title,sceneTitle);assert.equal(restored.scenes[0].purpose,before.scenes[0].purpose);
+ assert.deepEqual(restored.shots,before.shots);assert.equal(f.provider.acceptedCount(),0);assert.equal(f.store.list('grant',f.project.id).length,0);
+});
+
+test('V6 creative preparation creates and updates the shared scene.title field without replacing purpose',async t=>{
+ const f=fixture(t,{scope:'project',editing:true}),before=f.store.getProject(f.project.id);
+ const prepared=await f.tools.invoke(f.project.id,f.bridge.actor,randomUUID(),'prepare_change',{variant:'project',expectedHeadVersion:before.headVersion,creative:{createScenes:[{key:'new',title:'Last Ferry',purpose:'Depart the harbor'}],updateScenes:[{id:'scene-0',title:'Harbor'}]}});
+ await f.tools.invoke(f.project.id,f.bridge.actor,randomUUID(),'apply_change',{preparedId:prepared.preparedId});
+ const saved=f.store.getProject(f.project.id);
+ assert.equal(saved.scenes[0].title,'Harbor');assert.equal(saved.scenes[0].purpose,before.scenes[0].purpose);
+ assert.equal(saved.scenes.at(-1).title,'Last Ferry');assert.equal(saved.scenes.at(-1).purpose,'Depart the harbor');
+ assert.equal(f.provider.acceptedCount(),0);
+});
+
+test('V5 epoch refuses successor scene and shot fields through tools and direct proposal validation',async t=>{
+ const f=fixture(t,{toolVersion:'5.0.0',editing:true}),before=f.store.getProject(f.project.id);
+ for(const input of [{patch:{updateShots:[{id:'shot-0',framing:'Close-up'}]}},{patch:{updateScenes:[{id:'scene-0',title:'Last Ferry'}]}}]) {
+  await assert.rejects(propose(f,input),{code:'VALIDATION_ERROR'});
+  assert.throws(()=>proposeChange(f.service,f.project.id,f.bridge.actor,randomUUID(),input),{code:'VALIDATION_ERROR'});
+ }
+ await assert.rejects(f.tools.invoke(f.project.id,f.bridge.actor,randomUUID(),'prepare_change',{variant:'project',expectedHeadVersion:before.headVersion,creative:{updateScenes:[{id:'scene-0',title:'Last Ferry'}]}}),{code:'VALIDATION_ERROR'});
+ assert.deepEqual(f.store.getProject(f.project.id),before);assert.equal(f.store.list('director_proposal',f.project.id).length,0);
+});
+
+test('a human scene-title edit fences a later Director title proposal while a purpose edit remains independent',async t=>{
+ const f=fixture(t,{editing:true});
+ editStoryboard(f.service,f.project.id,{kind:'sceneTitle',id:'scene-0',value:'Human title',expectedHeadVersion:f.store.getProject(f.project.id).headVersion},randomUUID());
+ await assert.rejects(propose(f,{patch:{updateScenes:[{id:'scene-0',title:'Director title'}]}}),{code:'HUMAN_EDITED_FIELD'});
+ const p=await propose(f,{patch:{updateScenes:[{id:'scene-0',purpose:'Another direction'}]}});assert.equal(p.state,'held');
+ assert.equal(f.store.getProject(f.project.id).scenes[0].title,'Human title');
+});
 
 test('read-only proposal places no holds or media authority and reconciles a lost receipt',async t=>{
  const f=fixture(t),before=f.store.getProject(f.project.id),holds=f.store.list('hold',f.project.id),p=await propose(f,patch(),'one');
