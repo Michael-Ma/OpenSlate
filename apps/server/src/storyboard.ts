@@ -220,6 +220,7 @@ export function editStoryboard(
         };
       } else if (input.kind === "deleteShot") {
         const row = shot();
+        assertNoRunningAttempts(s, projectId, new Set([row.id]));
         changed.add(row.id);
         next.shots = next.shots.filter((x) => x.id !== row.id);
         global = true;
@@ -424,6 +425,12 @@ export function editStoryboard(
       const effectiveInput = undoing?.input ?? input;
       const shotFields = effectiveInput.kind === "shotFields" ? Object.keys(effectiveInput.fields ?? {}) :
         effectiveInput.kind === "shot" ? [effectiveInput.field ?? ""] : null;
+      const mediaChanged = (shotId: string | null | undefined, kind: "image" | "video") => {
+        const old = before.shots.find(shot => shot.id === shotId);
+        const current = next.shots.find(shot => shot.id === shotId);
+        const prompt = kind === "image" ? "imagePrompt" : "videoPrompt";
+        return !old || !current || intentChanged(shotId, kind) || old[prompt] !== current[prompt];
+      };
       const affected = new Set(
         bindings
           .filter(
@@ -432,9 +439,10 @@ export function editStoryboard(
               ((input.kind === "treatment" || input.kind === "scene") &&
                 (x.node.kind === "image" || x.node.kind === "video") &&
                 intentChanged(x.node.shotId, x.node.kind)) ||
-              (input.kind === "undo" &&
-                (next.brief !== before.brief || next.story !== before.story)) ||
               (input.kind !== "treatment" && input.kind !== "scene" && changed.has(x.node.shotId ?? "") &&
+                // Undo may change only a shot's scene or metadata; media follows its exact intent and prompt.
+                (input.kind !== "undo" || (x.node.kind !== "image" && x.node.kind !== "video") ||
+                  mediaChanged(x.node.shotId, x.node.kind)) &&
                 !(
                   effectiveInput.kind === "narration" &&
                   (x.node.kind === "image" ||

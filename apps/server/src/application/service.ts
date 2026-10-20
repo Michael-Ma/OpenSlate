@@ -574,6 +574,8 @@ export class ProductionService {
       const capture: PreparedChangeCapture = { before, next, lock, proposal: prepared.proposal, proposalDigest: prepared.proposalDigest, compiled: null, logicalIds: prepared.logicalIds };
       const reviewed = this.recordPreparedChange(projectId, human, capture, this.assessCompiledChange(capture, human), {});
       const result = this.apply(projectId, human, reviewed.id);
+      // The reviewed import is complete and authorizes no generation, so its continuation has nothing left to hold.
+      this.releaseOwnedRequestHolds(projectId, human.requestId);
       this.store.put("plan_import", requestId, projectId, { ...material, state: "confirmed", preparedId, confirmation: result });
       this.store.appendEvent(projectId, "plan_import.confirmed", { requestId, preparedId });
       return result;
