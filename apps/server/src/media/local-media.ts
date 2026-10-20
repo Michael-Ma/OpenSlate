@@ -17,6 +17,14 @@ const INPUT_OPTIONS = ["-protocol_whitelist", "file", "-format_whitelist", "mov,
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const FPS = 30, SAMPLE_RATE = 48000, SAMPLES_PER_FRAME = 1600;
+const MAX_TOOL_TIMEOUT_MS = 600000, RENDER_MS_PER_FRAME = 40, RENDER_ENCODER_THREADS = 4;
+
+/** Whole-film encoding gets a frame allowance; other media tools keep their limit. */
+export function renderTimeoutMs(totalFrames: number, baseTimeoutMs = DEFAULTS.timeoutMs): number {
+  integer(totalFrames, 1, 10800, "render frame count");
+  integer(baseTimeoutMs, 50, MAX_TOOL_TIMEOUT_MS, "tool time limit");
+  return Math.min(MAX_TOOL_TIMEOUT_MS, baseTimeoutMs + totalFrames * RENDER_MS_PER_FRAME);
+}
 
 /** Partition by sample intervals so late cues never allocate long delay buffers. */
 function audioLanes(audio: FrozenRenderManifest["audio"]): number[][] {
@@ -72,7 +80,7 @@ export class LocalMediaService {
     integer(this.limits.maxAudioTracks, 0, 8, "audio track limit");
     integer(this.limits.maxAudioSources, 0, 65, "audio source limit");
     integer(this.limits.maxAudioPlacements, 0, 65, "audio placement limit");
-    integer(this.limits.timeoutMs, 50, 600000, "tool time limit");
+    integer(this.limits.timeoutMs, 50, MAX_TOOL_TIMEOUT_MS, "tool time limit");
   }
 
   /** Inspect exactly the configured media tools, without decoding or changing state. */
@@ -427,8 +435,11 @@ export class LocalMediaService {
       args.push("-filter_complex", filters.join(";"), "-map", "[outv]");
       if (manifest.audio.length) args.push("-map", "[outa]", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2");
       else args.push("-an");
-      args.push("-map_metadata", "-1", "-map_chapters", "-1", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30", "-fps_mode", "cfr", "-frames:v", String(manifest.totalFrames), "-movflags", "+faststart", "-fs", String(this.limits.maxOutputBytes), output);
-      await this.run(this.ffmpeg, args, signal);
+      // Fix the encoder thread count so repeated renders use the same x264
+      // recipe regardless of the host's available CPUs. Filtering, decoding and
+      // normalization keep their existing single-threaded behavior.
+      args.push("-map_metadata", "-1", "-map_chapters", "-1", "-c:v", "libx264", "-threads", String(RENDER_ENCODER_THREADS), "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30", "-fps_mode", "cfr", "-frames:v", String(manifest.totalFrames), "-movflags", "+faststart", "-fs", String(this.limits.maxOutputBytes), output);
+      await this.run(this.ffmpeg, args, signal, renderTimeoutMs(manifest.totalFrames, this.limits.timeoutMs));
       const probe = await this.inspect(output, signal);
       invariant(probe.video?.frames === manifest.totalFrames && probe.video.width === manifest.width && probe.video.height === manifest.height && probe.video.frameRate === "30/1" && probe.video.codec === "h264", "MEDIA_VALIDATION_FAILED", "Rendered picture does not match frozen frame count or geometry");
       if (manifest.audio.length) {

@@ -59,6 +59,7 @@ export const errors = {
   // Exports.
   "error.EXPORT_BLOCKED": { en: "The film is not ready to export. Settle the shots in the Export panel first.", zh: "影片还不能导出，请先处理导出面板里的镜头。" },
   "error.MEDIA_RENDER_BUSY": { en: "This export is still rendering. Check again once it stops.", zh: "这次导出还在渲染，停下来后再检查。" },
+  "error.MEDIA_BUSY": { en: "Another media job is using FFmpeg. The export starts when it finishes.", zh: "另一个媒体任务正在使用 FFmpeg，它结束后导出就会开始。" },
   "error.MEDIA_RENDER_NOT_STARTED": { en: "This export never started, so there is no file to find. Export again.", zh: "这次导出没有开始，没有可查找的文件。请重新导出。" },
   "error.MEDIA_HELD": { en: "An edit is still being applied. Export again in a moment.", zh: "还有修改正在生效，请稍后再导出。" },
   "error.MEDIA_PAUSED": { en: "The film is stopped. Continue, then export.", zh: "影片已停止。请先继续，再导出。" },

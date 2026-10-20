@@ -12,9 +12,12 @@ export function storyboardAudioCuts(project: Pick<ProjectRecord, 'scenes' | 'sho
   });
 }
 /** Shared browser/export placement projection. The accepted source range stays immutable; compact narration travels with its shot. */
-export function projectAudioPlacements(segment: AudioSegmentPlacement, cuts: ShotAudioCut[]): AudioSegmentPlacement['audioPlacement'][] {
-  if (segment.placementMode !== 'shot') return [segment.audioPlacement];
-  return cuts.filter(cut => cut.cueId === segment.cue.id).map(cut => {
+export function projectAudioPlacements(segment: AudioSegmentPlacement, cuts: ShotAudioCut[], options: { requireAbsoluteCutStart?: boolean } = {}): AudioSegmentPlacement['audioPlacement'][] {
+  const mapped = cuts.filter(cut => cut.cueId === segment.cue.id);
+  // Storyboard narration must align with its mapped cut. Legacy DSL asset timelines may have no cue mapping.
+  if (segment.placementMode !== 'shot')
+    return !options.requireAbsoluteCutStart || mapped.some(cut => segment.audioPlacement.atSample === cut.startFrame * 1600) ? [segment.audioPlacement] : [];
+  return mapped.map(cut => {
     const withinShot = segment.timingMode === 'within_shot' && cut.timingMode === 'within_shot';
     invariant((withinShot ? cut.durationFrames >= segment.cue.durationFrames : cut.durationFrames === segment.cue.durationFrames) && segment.audioPlacement.durationSamples <= cut.durationFrames * 1600,
       'MEDIA_NARRATION_REQUIRED', 'Accepted shot audio no longer fits its shot timing');

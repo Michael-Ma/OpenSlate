@@ -126,7 +126,7 @@ test("render HTTP returns a job, survives synchronous admission failure, and exp
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.store.list("attempt", f.project.id).length, 0);
 });
 
-test("server close aborts and awaits its background render before returning", async t => {
+test("server close interrupts and awaits its background render without recording a human cancel", async t => {
   const f = await fixture(t); assert.equal((await f.upload()).statusCode, 200); const body = f.install();
   let entered, exited = false;
   const began = new Promise(resolve => { entered = resolve; });
@@ -139,8 +139,32 @@ test("server close aborts and awaits its background render before returning", as
   };
   const response = await f.request("POST", `${f.path}/renders`, body, "close"); assert.equal(response.statusCode, 202, response.body);
   await began; await f.app.close();
-  assert.equal(exited, true); assert.equal(f.store.get("media_render", response.json().job.id).state, "cancelled");
+  const job = f.store.get("media_render", response.json().job.id);
+  assert.equal(exited, true); assert.equal(job.state, "interrupted");
+  assert.equal(job.cancelRequested, false); assert.equal(job.errorCode, null);
+  assert.equal(job.ownerToken, null); assert.equal(job.leaseUntil, null);
   assert.equal(f.store.get("media_preview", f.project.id), undefined);
+});
+
+test("the person's Cancel still aborts a running render and records cancellation", async t => {
+  const f = await fixture(t); assert.equal((await f.upload()).statusCode, 200); const body = f.install();
+  let entered;
+  const began = new Promise(resolve => { entered = resolve; });
+  f.local.render = async (_manifest, { signal }) => {
+    entered();
+    await new Promise((resolve, reject) => {
+      const stop = () => reject(new DomainError('MEDIA_CANCELLED', 'Human cancelled child'));
+      if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true });
+    });
+  };
+  const response = await f.request('POST', `${f.path}/renders`, body, 'human-cancel');
+  assert.equal(response.statusCode, 202, response.body); await began;
+  const id = response.json().job.id;
+  const cancelled = await f.request('POST', `${f.path}/renders/${id}/cancel`, {}, 'cancel-once');
+  assert.equal(cancelled.statusCode, 200, cancelled.body);
+  const job = await waitJob(f, id, job => job.state === 'cancelled');
+  assert.equal(job.cancelRequested, true); assert.equal(job.canRun, false);
+  assert.equal(f.store.get('media_preview', f.project.id), undefined);
 });
 
 test("oversize and empty upload bodies are rejected without canonical artifacts or leftover staging files", async t => {

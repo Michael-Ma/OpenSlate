@@ -138,6 +138,43 @@ test('compact accepted narration follows shot/scene order and covers an exact ra
   assert.equal(f.canonical.workspaceCurrent(project.id).segments[0].audioPlacement.atSample, 0, 'accepted historical source placement remains immutable');
 });
 
+test('playback omits legacy absolute narration after reorder and earlier lengthening without changing accepted history', async t => {
+  const f = await fixture(t), { audio, segment } = await f.ready(), shotId = f.project.shots[0].id;
+  const response = await f.request(`/shots/${shotId}/accept`, f.acceptBody(audio, segment)); assert.equal(response.statusCode, 200, response.body);
+  const saved = f.canonical.workspaceCurrent(f.project.id), legacy = structuredClone(saved);
+  legacy.id = randomUUID();
+  delete legacy.segments[0].placementMode;
+  legacy.segments[0].audioPlacement.atSample = 180 * 1600;
+  let project = f.store.getProject(f.project.id); project.shots.reverse(); f.store.saveProject(project, project.headVersion);
+  f.store.insert('narration_canonical', legacy.id, f.project.id, legacy);
+  f.store.put('narration_canonical_head', f.project.id, f.project.id, { canonicalId: legacy.id });
+  const playback = async () => { const response = await f.request('/playback'); assert.equal(response.statusCode, 200, response.body); return response.json().placements; };
+  assert.deepEqual((await playback()).map(row => [row.atSample, row.shotIds]), [[180 * 1600, [shotId]]]);
+  project = f.store.getProject(f.project.id);
+  editStoryboard(f.production, project.id, { kind: 'moveShot', id: shotId, beforeId: project.shots[0].id, sceneId: project.shots[0].sceneId, expectedHeadVersion: project.headVersion }, randomUUID());
+  assert.deepEqual(await playback(), [], 'the line at its old absolute time is no longer current under another shot');
+  project = f.store.getProject(f.project.id);
+  editStoryboard(f.production, project.id, { kind: 'moveShot', id: project.shots[1].id, beforeId: shotId, sceneId: project.shots[0].sceneId, expectedHeadVersion: project.headVersion }, randomUUID());
+  assert.equal((await playback())[0].atSample, 180 * 1600, 'restoring the cut restores the already accepted absolute placement');
+  project = f.store.getProject(f.project.id); project.shots[0].desiredFrames = 210; f.store.saveProject(project, project.headVersion);
+  const cursor = f.store.cursor(f.project.id);
+  assert.deepEqual(await playback(), [], 'an earlier length change also refuses the stale absolute anchor');
+  assert.equal(f.store.cursor(f.project.id), cursor, 'the playback projection stays read only');
+  assert.deepEqual(f.canonical.workspaceCurrent(f.project.id), legacy); assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('playback maps a shared legacy absolute cue only to the cut aligned with its sample', async t => {
+  const f = await fixture(t), { audio, segment } = await f.ready();
+  const response = await f.request(`/shots/${f.project.shots[0].id}/accept`, f.acceptBody(audio, segment)); assert.equal(response.statusCode, 200, response.body);
+  const saved = structuredClone(f.canonical.workspaceCurrent(f.project.id)); saved.id = randomUUID(); delete saved.segments[0].placementMode;
+  f.store.insert('narration_canonical', saved.id, f.project.id, saved);
+  f.store.put('narration_canonical_head', f.project.id, f.project.id, { canonicalId: saved.id });
+  const project = f.store.getProject(f.project.id); project.shots[1].cueId = saved.segments[0].cue.id; f.store.saveProject(project, project.headVersion);
+  const playback = await f.request('/playback'); assert.equal(playback.statusCode, 200, playback.body);
+  assert.equal(playback.json().placements.length, 1); assert.deepEqual(playback.json().placements[0].shotIds, [project.shots[0].id]);
+  assert.equal(playback.json().placements[0].atSample, 0); assert.deepEqual(f.canonical.workspaceCurrent(project.id), saved);
+});
+
 test('editing and accepting one shot leaves another reviewed video eligible and preserves its uncertain attempt and cue',async t=>{
  const f=await fixture(t),project=f.store.getProject(f.project.id),q=JSON.stringify;
  const human=f.production.beginRequest(project.id,'local-user','Authorize these offline fixture slots'),actor=f.production.openEpoch(project.id,human).actor;

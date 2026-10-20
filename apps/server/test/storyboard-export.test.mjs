@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { compilePlan, DEFAULT_PROFILES, newId, shotIntentDigest } from '@openslate/core';
+import { compilePlan, DEFAULT_PROFILES, DomainError, newId, shotIntentDigest } from '@openslate/core';
 import { FakeProvider } from '@openslate/providers';
 import { createApp } from '../dist/app.js';
 import { Store } from '../dist/persistence/store.js';
@@ -32,7 +32,7 @@ before(async () => {
 });
 after(async () => { await rm(inputs, { recursive: true, force: true }); });
 
-async function fixture(t, { demo = false, narration = true, mixed = false, short = false, absoluteSharedCue = false, mixedAudio = false } = {}) {
+async function fixture(t, { demo = false, narration = true, mixed = false, short = false, absoluteNarration = false, absoluteSharedCue = false, mixedVoice = false, mixedMusic = false, soundtrack = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'openslate-export-')), store = new Store(join(dir, 'db.sqlite'));
   const provider = new FakeProvider(join(dir, 'fake.sqlite')), engine = new Engine(store, provider, { artifactDir: join(dir, 'artifacts') });
   const production = new ProductionService(store, engine), project = production.createProject('Storyboard film');
@@ -50,8 +50,14 @@ async function fixture(t, { demo = false, narration = true, mixed = false, short
   }
   const audio = await media.importMedia({ artifactId: newId(), path: voice, kind: 'audio' });
   const audioRef = { artifactId: audio.artifactId, sha256: audio.sha256, kind: 'audio' };
-  store.insert('artifact', audio.artifactId, project.id, { artifact: audioRef, fixture: demo && !mixedAudio, path: (await media.verifiedSource(audio)).path, mimeType: 'audio/wav' });
+  store.insert('artifact', audio.artifactId, project.id, { artifact: audioRef, fixture: demo && !mixedVoice, path: (await media.verifiedSource(audio)).path, mimeType: 'audio/wav' });
   store.insert('narration_audio', audio.artifactId, project.id, { id: audio.artifactId, projectId: project.id, media: audio });
+  let music = audio;
+  if (mixedMusic) {
+    music = await media.importMedia({ artifactId: newId(), path: voice, kind: 'audio' });
+    store.insert('artifact', music.artifactId, project.id, { artifact: { artifactId: music.artifactId, sha256: music.sha256, kind: 'audio' }, fixture: false, path: (await media.verifiedSource(music)).path, mimeType: 'audio/wav' });
+    store.insert('narration_audio', music.artifactId, project.id, { id: music.artifactId, projectId: project.id, media: music });
+  }
   const scene = { id: newId(), revisionId: newId(), purpose: 'Scene' };
   const cue = { id: newId(), meaning: 'Voice', durationFrames: 15, placementFrames: 30, audio: audioRef, accepted: true, measured: true };
   const shots = refs.map((_, index) => {
@@ -63,9 +69,9 @@ async function fixture(t, { demo = false, narration = true, mixed = false, short
   });
   const frame = { artifactId: newId(), sha256: 'a'.repeat(64), kind: 'image' };
   const saved = store.saveProject({ ...project, revisionId: newId(), scenes: [scene], shots, cues: narration ? [cue] : [], artifacts: [...refs, audioRef, frame],
-    narration: { script: narration ? 'Voice' : '', source: narration ? 'uploaded' : 'undecided' }, soundtrack: { audioId: audio.artifactId, gainMilliDb: -18000, startFrame: 0, muted: false } }, project.headVersion);
+    narration: { script: narration ? 'Voice' : '', source: narration ? 'uploaded' : 'undecided' }, ...(soundtrack ? { soundtrack: { audioId: music.artifactId, gainMilliDb: -18000, startFrame: 0, muted: false } } : {}) }, project.headVersion);
   if (narration) {
-    const id = newId(); store.insert('narration_canonical', id, project.id, { id, script: 'Voice', segments: [{ cue, ...(absoluteSharedCue ? {} : { placementMode: 'shot', timingMode: 'within_shot' }), audioPlacement: { source: audio, startSample: 0, durationSamples: 24000, atSample: 48000, gainMilliDb: 0 } }] });
+    const id = newId(); store.insert('narration_canonical', id, project.id, { id, script: 'Voice', segments: [{ cue, ...(absoluteSharedCue || absoluteNarration ? {} : { placementMode: 'shot', timingMode: 'within_shot' }), audioPlacement: { source: audio, startSample: 0, durationSamples: 24000, atSample: 48000, gainMilliDb: 0 } }] });
     store.put('narration_canonical_head', project.id, project.id, { canonicalId: id });
   }
   const declarations = shots.map((shot, i) => `const s${i}=p.shot(${JSON.stringify(shot.id)});const r${i}=p.humanReview("r${i}",{shots:[{intent:s${i},keyframe:p.asset(${JSON.stringify(frame.artifactId)}),videoProfile:"fake-video-v1",motionPrompt:"Push",seconds:6}]});const v${i}=p.video("v${i}",{intent:s${i},profile:"fake-video-v1",firstFrame:p.approvedImage(p.asset(${JSON.stringify(frame.artifactId)}),r${i}),prompt:"Push",seconds:6});`).join('');
@@ -143,7 +149,7 @@ test('readiness refuses missing/stale/foreign/short clips, unsettled voice, empt
   assert.deepEqual(captureStoryboard(f.store, f.project.id).readiness.blockers, [{ code: 'empty_film' }]);
 });
 
-test('all-fixture exports stretch each clip to its planned length and burn Demo into pixels; mixed films name each shot', async t => {
+test('all-fixture exports stretch each clip to its planned length and burn Demo into pixels', async t => {
   const f = await fixture(t, { demo: true, narration: false });
   const [job, replay] = await Promise.all([f.prepare('demo-once'), f.prepare('demo-once')]); assert.equal(replay.id, job.id); assert.equal(f.store.list('media_render', f.project.id).length, 1); assert.equal(job.manifest.demo, true); assert.equal(job.manifest.totalFrames, 270);
   assert.ok(job.manifest.clips.every(c => c.source.probe.video.frames === 90));
@@ -153,13 +159,34 @@ test('all-fixture exports stretch each clip to its planned length and burn Demo 
   const offset = (16 * 208 + 16) * 3; assert.ok(picture[offset] > 200 && picture[offset + 1] > 200 && picture[offset + 2] > 200, 'white D glyph is burned in');
   const inside = (32 * 208 + 24) * 3; assert.ok(picture[inside] < 100 && picture[inside + 1] < 100 && picture[inside + 2] < 100, 'black background separates the D glyph');
   const library = (await f.request('GET', '/assets?source=export')).json(); assert.match(library.assets[0].label, /Demo export/);
+});
+
+test('mixed clips identify the clip medium on each shot', async t => {
   const mixed = await fixture(t, { demo: true, narration: false, mixed: true });
   const readiness = captureStoryboard(mixed.store, mixed.project.id).readiness;
-  assert.deepEqual(readiness.blockers.filter(b => b.code === 'mixed_demo_media').map(b => b.shotId), mixed.shots.map(s => s.id));
+  assert.deepEqual(readiness.blockers.filter(b => b.code === 'mixed_demo_media'), mixed.shots.map(s => ({ code: 'mixed_demo_media', medium: 'clip', shotId: s.id })));
   await assert.rejects(mixed.prepare(), code('EXPORT_BLOCKED'));
-  const mixedAudio = await fixture(t, { demo: true, narration: true, mixedAudio: true });
-  assert.deepEqual(captureStoryboard(mixedAudio.store, mixedAudio.project.id).readiness.blockers.filter(b => b.code === 'mixed_demo_media').map(b => b.shotId), mixedAudio.shots.map(s => s.id));
-  await assert.rejects(mixedAudio.prepare(), code('EXPORT_BLOCKED'));
+});
+
+test('an imported soundtrack on demo clips reports one music blocker without a shot', async t => {
+  const f = await fixture(t, { demo: true, mixedMusic: true });
+  const readiness = captureStoryboard(f.store, f.project.id).readiness;
+  assert.deepEqual(readiness.blockers, [{ code: 'mixed_demo_media', medium: 'music' }]);
+  assert.equal(readiness.ready, false); assert.equal(readiness.demo, false);
+  await assert.rejects(f.prepare(), code('EXPORT_BLOCKED'));
+});
+
+test('an own recording on demo clips reports a voice blocker only on its mapped shot', async t => {
+  const f = await fixture(t, { demo: true, mixedVoice: true, soundtrack: false });
+  assert.deepEqual(captureStoryboard(f.store, f.project.id).readiness.blockers, [{ code: 'mixed_demo_media', medium: 'voice', shotId: f.shots[1].id }]);
+  await assert.rejects(f.prepare(), code('EXPORT_BLOCKED'));
+});
+
+test('a real recording used as both voice and music identifies each differing use once', async t => {
+  const f = await fixture(t, { demo: true, mixedVoice: true });
+  assert.deepEqual(captureStoryboard(f.store, f.project.id).readiness.blockers, [
+    { code: 'mixed_demo_media', medium: 'voice', shotId: f.shots[1].id }, { code: 'mixed_demo_media', medium: 'music' },
+  ]);
 });
 
 test('HTTP start is authenticated, revision checked and idempotent; music keeps a downloadable outdated export and no holds', async t => {
@@ -254,10 +281,73 @@ test('changed-since fingerprints distinguish shot media, narration and order wit
 });
 
 
-test('legacy absolute narration shared by two shots is mixed once while shot-relative placements still travel with shots', async t => {
-  const f = await fixture(t, { absoluteSharedCue: true }), job = await f.prepare();
-  assert.equal(job.manifest.audio.length, 2, 'one narration placement and one soundtrack');
-  assert.deepEqual(job.manifest.audio.map(a => a.atSample), [48000, 0]);
+test('legacy absolute narration is current only on the shared cue cut at its accepted sample', async t => {
+  const f = await fixture(t, { absoluteSharedCue: true }), capture = captureStoryboard(f.store, f.project.id);
+  assert.deepEqual(capture.readiness.blockers, [{ code: 'voice_unsettled', shotId: f.shots[2].id }]);
+  assert.equal(capture.input.audio.length, 2, 'only the aligned narration placement and soundtrack are projected');
+  assert.deepEqual(capture.input.audio.map(a => a.atSample), [48000, 0]);
+  await assert.rejects(f.prepare(), code('EXPORT_BLOCKED'));
+});
+
+test('legacy absolute narration becomes unsettled after reorder and after an earlier shot is lengthened', async t => {
+  const f = await fixture(t, { absoluteNarration: true });
+  const canonicalId = f.store.get('narration_canonical_head', f.project.id).canonicalId, accepted = f.store.get('narration_canonical', canonicalId);
+  assert.equal(captureStoryboard(f.store, f.project.id).readiness.ready, true);
+  editStoryboard(f.production, f.project.id, { kind: 'moveShot', id: f.shots[1].id, beforeId: f.shots[0].id, sceneId: f.shots[0].sceneId, expectedHeadVersion: f.head().headVersion }, 'move-legacy-voice');
+  let capture = captureStoryboard(f.store, f.project.id);
+  assert.deepEqual(capture.readiness.blockers, [{ code: 'voice_unsettled', shotId: f.shots[1].id }]);
+  assert.equal(capture.input.audio.some(a => a.gainMilliDb === 0), false);
+  await assert.rejects(f.prepare(), code('EXPORT_BLOCKED'));
+  editStoryboard(f.production, f.project.id, { kind: 'moveShot', id: f.shots[0].id, beforeId: f.shots[1].id, sceneId: f.shots[0].sceneId, expectedHeadVersion: f.head().headVersion }, 'restore-legacy-cut');
+  assert.equal(captureStoryboard(f.store, f.project.id).readiness.ready, true);
+  f.mutate(p => { p.shots.find(shot => shot.id === f.shots[0].id).desiredFrames = 45; });
+  capture = captureStoryboard(f.store, f.project.id);
+  assert.deepEqual(capture.readiness.blockers.filter(b => b.code === 'voice_unsettled'), [{ code: 'voice_unsettled', shotId: f.shots[1].id }]);
+  assert.equal(capture.input.audio.some(a => a.gainMilliDb === 0), false);
+  assert.deepEqual(f.store.get('narration_canonical', canonicalId), accepted, 'readiness never moves the accepted absolute source history');
+});
+
+test('demo preparation waits for a busy fixture worker and concurrent same-key requests share one export', async t => {
+  const f = await fixture(t, { demo: true, narration: false }), original = f.media.importFixture.bind(f.media);
+  let calls = 0, busy;
+  const observedBusy = new Promise(resolve => { busy = resolve; });
+  f.media.importFixture = async (...args) => {
+    calls++;
+    if (calls === 1) { busy(); throw new DomainError('MEDIA_BUSY', 'Another media job owns the worker'); }
+    return original(...args);
+  };
+  const first = f.prepare('busy-fixture-once'), replay = f.prepare('busy-fixture-once');
+  await observedBusy;
+  assert.equal(f.store.list('media_render', f.project.id).length, 0, 'busy preparation has not created a failed export');
+  const [job, same] = await Promise.all([first, replay]);
+  assert.equal(job.id, same.id); assert.equal(job.state, 'prepared'); assert.equal(calls, 4, 'one busy response and one import per fixture clip');
+  assert.equal(f.store.list('media_render', f.project.id).length, 1);
+  assert.equal((await f.prepare('busy-fixture-once')).id, job.id); assert.equal(calls, 4, 'same-key replay cannot normalize again');
+  const done = await f.service.run(f.project.id, f.actor, job.id);
+  assert.equal(done.state, 'published'); assert.equal(f.store.list('media_render', f.project.id).length, 1); assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('export view keeps an older rendering export current over a newer failure without duplicating history', async t => {
+  const f = await fixture(t), running = await f.prepare('older-render'), failed = await f.prepare('newer-failure');
+  f.store.put('media_render', running.id, f.project.id, { ...running, state: 'running', ownerToken: 'owned-live-worker', leaseUntil: Date.now() + 15000 });
+  f.store.put('media_render', failed.id, f.project.id, { ...failed, state: 'failed', errorCode: 'MEDIA_RENDER_FAILED', finishedAt: new Date().toISOString() });
+  const view = f.service.exportView(f.project.id);
+  assert.equal(view.current.exportId, running.id); assert.equal(view.current.state, 'rendering');
+  assert.deepEqual(view.history.map(row => row.exportId), [failed.id]);
+  assert.deepEqual([view.current, ...view.history].map(row => row.exportId).sort(), [running.id, failed.id].sort());
+});
+
+test('a shutdown-interrupted export stays publicly recoverable and can publish an already written receipt without rerendering', async t => {
+  const f = await fixture(t), job = await f.prepare('shutdown-receipt');
+  const receipt = await f.media.render(job.manifest);
+  f.store.put('media_render', job.id, f.project.id, { ...job, state: 'interrupted', ownerToken: null, leaseUntil: null, cancelRequested: false, errorCode: null });
+  const view = f.service.exportView(f.project.id); assert.equal(view.current.state, 'rendering'); assert.equal(view.current.failure, undefined);
+  const detail = await f.request('GET', `/media/renders/${job.id}`); assert.equal(detail.statusCode, 200, detail.body);
+  assert.equal(detail.json().job.state, 'interrupted'); assert.equal(detail.json().job.canRecover, true); assert.equal(detail.json().job.cancelRequested, false);
+  f.media.render = async () => { throw new Error('Shutdown receipt recovery must not render again'); };
+  const recovered = await f.request('POST', `/exports/${job.id}/recover`, {}); assert.equal(recovered.statusCode, 200, recovered.body);
+  assert.equal(recovered.json().state, 'done'); assert.equal(recovered.json().artifact.sha256, receipt.artifact.sha256);
+  assert.equal(f.store.get('media_render', job.id).state, 'published'); assert.equal(f.store.get('media_render', job.id).cancelRequested, false);
 });
 
 

@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalMediaService } from "../dist/media/index.js";
+import { renderTimeoutMs } from "../dist/media/local-media.js";
 import { runMediaProcess } from "../dist/media/process.js";
 
 const execute = promisify(execFile);
@@ -87,6 +88,48 @@ test("real FFmpeg render respects exact cut frames, explicit fit and sample-base
   assert.ok(energy(34000, 37000) < 5, "timeline tail should be padded with silence");
   const reopened = service("shared");
   assert.deepEqual(await reopened.readCompletion(frozen.digest, result.artifact.sha256), { manifest: frozen, artifact: result.artifact });
+});
+
+test("export time limits scale with frozen frames and retain the bounded configured base", () => {
+  assert.equal(renderTimeoutMs(1), 120040);
+  assert.equal(renderTimeoutMs(1800), 192000);
+  assert.equal(renderTimeoutMs(10800), 552000);
+  assert.equal(renderTimeoutMs(30, 1000), 2200);
+  assert.equal(renderTimeoutMs(10800, 300000), 600000);
+  assert.equal(renderTimeoutMs(1, 600000), 600000);
+  for (const frames of [0, -1, 1.5, 10801, NaN, Infinity]) assert.throws(() => renderTimeoutMs(frames), code("MEDIA_INVALID_INPUT"));
+  for (const base of [0, 49, 50.5, 600001, NaN, Infinity]) assert.throws(() => renderTimeoutMs(30, base), code("MEDIA_INVALID_INPUT"));
+});
+
+test("detailed 720p footage renders deterministically with parallel encoding and a render-only frame allowance", async () => {
+  const path = join(inputs, "detailed.mp4"), owner = service("detailed", { timeoutMs: 15000 });
+  await execute(ffmpeg, ["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30:duration=0.8", "-vf", "noise=alls=6:all_seed=7", "-an", "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-pix_fmt", "yuv420p", path], { timeout: 15000 });
+  const source = await owner.importMedia({ artifactId: "detailed", path, kind: "video" });
+  const frozen = await owner.freezeManifest({ projectId: "detailed-project", targetRevisionId: "detailed-cut", width: 1280, height: 720, clips: [video(source, 24)] });
+  const calls = [], run = owner.run.bind(owner);
+  owner.run = async (executable, args, signal, timeoutMs) => {
+    calls.push({ args, timeoutMs }); return run(executable, args, signal, timeoutMs);
+  };
+  const first = await owner.render(frozen), second = await owner.render(frozen);
+  assert.equal(first.artifact.probe.video.frames, 24);
+  assert.equal(first.artifact.probe.video.width, 1280);
+  assert.equal(first.artifact.probe.video.height, 720);
+  assert.equal(first.artifact.probe.video.frameRate, "30/1");
+  assert.equal(first.artifact.sha256, second.artifact.sha256, "a fixed encoder thread count must keep repeated frozen renders byte-identical");
+  const encodes = calls.filter(call => call.args.includes("-frames:v"));
+  assert.equal(encodes.length, 2);
+  for (const call of encodes) {
+    assert.equal(call.timeoutMs, renderTimeoutMs(frozen.totalFrames, owner.limits.timeoutMs));
+    assert.equal(call.args[call.args.lastIndexOf("-threads") + 1], "4");
+    assert.equal(call.args[call.args.indexOf("-filter_complex_threads") + 1], "1");
+  }
+  assert.ok(calls.some(call => call.args.includes("-count_frames")), "acceptance must include measured output validation");
+  assert.ok(calls.some(call => call.args.includes("null")), "acceptance must include a complete output decode");
+  assert.ok(calls.filter(call => !call.args.includes("-frames:v")).every(call => call.timeoutMs === undefined), "probes and validation keep the configured per-tool timeout");
+  assert.equal(owner.limits.timeoutMs, 15000);
+  const picture = await execute(ffmpeg, ["-nostdin", "-v", "error", "-i", first.artifact.path, "-frames:v", "1", "-vf", "scale=80:45", "-f", "rawvideo", "-pix_fmt", "gray", "-"], { encoding: "buffer", timeout: 10000 });
+  assert.equal(picture.stdout.length, 80 * 45);
+  assert.ok(new Set(picture.stdout).size > 128, "the acceptance image must retain detailed non-flat content");
 });
 
 test("a target edit during rendering keeps the prior preview and retains a historical output", async () => {
@@ -226,10 +269,13 @@ test("cancellation stops a running render, cleans temporary files, and never pub
 test("process cancellation and timeout await actual child exit, with bounded diagnostics", async () => {
   const controller = new AbortController();
   const pidFile = join(root, "child-pid");
-  const running = runMediaProcess(process.execPath, ["--openssl-config=/dev/null", "-e", "require('node:fs').writeFileSync(process.argv[1], String(process.pid));setInterval(()=>{},1000)", pidFile], { cwd: root, timeoutMs: 5000, signal: controller.signal });
+  // Publish a complete PID atomically: existence alone must not expose an empty
+  // file whose Number('') would make the exit assertion probe process group 0.
+  const running = runMediaProcess(process.execPath, ["--openssl-config=/dev/null", "-e", "const fs=require('node:fs'),file=process.argv[1];fs.writeFileSync(file+'.pending',String(process.pid));fs.renameSync(file+'.pending',file);setInterval(()=>{},1000)", pidFile], { cwd: root, timeoutMs: 5000, signal: controller.signal });
   for (let n = 0; n < 100 && !existsSync(pidFile); n++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(existsSync(pidFile), true);
   const pid = Number(await readFile(pidFile, "utf8"));
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
   controller.abort();
   await assert.rejects(running, code("MEDIA_CANCELLED"));
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
