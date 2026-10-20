@@ -459,6 +459,15 @@ export function editPressId(edit: FilmEdit): string {
 }
 
 /** "0:04" style start times and dB levels are formatted by the caller's clock; toasts take plain values. */
-export function lengthToast(label: string, seconds: number, filmSeconds: number, outdatesClip: boolean): Msg {
-  return msg(outdatesClip ? "film.toast.length_clip" : "film.toast.length", { shot: label, seconds, film: filmSeconds });
+export function lengthToast(label: string, seconds: number, filmSeconds: number, outdatesClip: boolean, clipRunning = false): Msg {
+  return msg(clipRunning ? "film.toast.length_running" : outdatesClip ? "film.toast.length_clip" : "film.toast.length", { shot: label, seconds, film: filmSeconds });
+}
+
+/**
+ * A paid clip for this shot is still out (being made, a replacement being made, or sent with no answer yet): a new
+ * length does not stop it, so it is charged and comes back out of date. Said before the edit, as Plan says it.
+ */
+export function clipStillOut(shot: ShotOverview): boolean {
+  const video = shot.video;
+  return making(video) || video.state === "no_answer" || (!!video.replacement && ["running", "queued", "no_answer"].includes(video.replacement.state));
 }

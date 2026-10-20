@@ -10,9 +10,8 @@ import { displayedGain, musicGainSession, submitGain, type GainDraft } from "../
 import { FilmClock } from "../../model/film-clock.ts";
 import { changeMsg, lastExport, musicMissing, whenMsg, type MediaView } from "../../model/film-export.ts";
 import {
-  editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicMuteEdit, musicStartEdit,
-  soundtrackOf, type FilmEdit,
-} from "../../model/film.ts";
+  clipStillOut, editPressId, filmMusic, filmTimeline, lengthEdit, lengthToast, moveEdit, musicChoiceEdit, musicMuteEdit, musicStartEdit,
+  soundtrackOf, type FilmEdit } from "../../model/film.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 import { msg, type Msg } from "../../model/types.ts";
 import { useMode, useStore, useStudio } from "../../store/react.tsx";
@@ -171,7 +170,7 @@ function FilmWorkspace() {
     const next = shot && lengthEdit(shot, overview.fps, step);
     if (!shot || !next || !selectedShot) return;
     const film = Math.round((timeline.total - selectedShot.seconds + next.seconds) * 10) / 10;
-    void runEdit(next.edit, lengthToast(selectedShot.label, next.seconds, film, selectedShot.picture === "clip"));
+    void runEdit(next.edit, lengthToast(selectedShot.label, next.seconds, film, selectedShot.picture === "clip", clipStillOut(shot)));
   };
   // After a move the playhead follows the shot to its new place.
   const follow = useRef<{ shotId: string; start: number } | null>(null);

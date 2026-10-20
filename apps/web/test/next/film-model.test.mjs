@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   filmTimeline, shotAt, lineAt, previousTime, nextTime, rulerTicks, tickLabels, separatorShown, wordsCut, filmMusic, musicSpan, musicOn, musicLostAt,
-  lengthLimits, lengthEdit, moveEdit, musicStartEdit, musicGainEdit, musicMuteEdit, musicChoiceEdit, editPressId, soundtrackOf, lengthToast,
+  lengthLimits, lengthEdit, moveEdit, musicStartEdit, musicGainEdit, musicMuteEdit, musicChoiceEdit, editPressId, soundtrackOf, lengthToast, clipStillOut,
 } from '../../src/next/model/film.ts';
 import { FilmClock } from '../../src/next/model/film-clock.ts';
 import { lastFerryOverview, lastFerrySnapshot, shotId, sceneId } from '../../src/next/fixtures/last-ferry.ts';
@@ -258,4 +258,20 @@ test('Film preserves proven automatic retry activity while human and stopped wai
   const { lackOf } = await import('../../src/next/model/film.ts');
   assert.equal(en(lackOf(shot)), 'making clip');
   for (const code of ['review', 'stopped', 'unknown', 'timing']) assert.equal(making({ ...shot.video, waiting: { code, since: '' } }), false, code);
+});
+
+test('a new length warns when a paid clip for the shot is still out', () => {
+  const overview = lastFerryOverview();
+  const shot = overview.shots[shotId('2.1')];
+  const at = '2026-10-20T10:00:00.000Z';
+  assert.equal(clipStillOut({ ...shot, video: { state: 'none', takeCount: 0 } }), false);
+  assert.equal(clipStillOut({ ...shot, video: { state: 'running', phase: 'running', startedAt: at, takeCount: 0 } }), true);
+  assert.equal(clipStillOut({ ...shot, video: { state: 'no_answer', attemptId: 'a1', takeCount: 0 } }), true);
+  assert.equal(clipStillOut({ ...shot, video: { state: 'queued', waiting: { code: 'review', since: at }, takeCount: 0 } }), false, 'a clip waiting for a confirm is not out yet');
+  const ready = { state: 'ready', artifact: { artifactId: 'v', sha256: 'a'.repeat(64), kind: 'video' }, takeCount: 1 };
+  assert.equal(clipStillOut({ ...shot, video: ready }), false);
+  assert.equal(clipStillOut({ ...shot, video: { ...ready, replacement: { state: 'running', attemptId: 'a2' } } }), true);
+  assert.equal(clipStillOut({ ...shot, video: { ...ready, replacement: { state: 'failed' } } }), false);
+  assert.equal(en(lengthToast('2.1', 7, 50, false, true)), '2.1 is 7 s. The film is 50 s; the clip being made for 2.1 will be out of date.');
+  assert.equal(zh(lengthToast('2.1', 7, 50, false, true)), '2.1 改为 7 秒，影片 50 秒；2.1 正在生成的视频回来后会过期。');
 });

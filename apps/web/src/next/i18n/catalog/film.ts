@@ -63,6 +63,8 @@ export const filmMessages = {
   "film.why.clips": { en: "{count, plural, one {# shot needs a clip} other {# shots need a clip}}", zh: "{count} 个镜头需要视频" },
   "film.why.voice": { en: "Settle the voice in {shots}", zh: "处理 {shots} 的配音" },
   "film.why.mixed_demo": { en: "Demo clips and made clips can't share one export", zh: "示例视频和生成的视频不能放在同一次导出里" },
+  "film.why.mixed_demo_music": { en: "The demo film can't be exported with your own music; choose No music to export it", zh: "示例影片不能和你自己的音乐一起导出；选择“不要音乐”即可导出" },
+  "film.why.mixed_demo_voice": { en: "The demo film can't be exported with your own recording in {shots}", zh: "示例影片不能和 {shots} 里你自己的录音一起导出" },
   "film.why.too_long": { en: "The film is longer than 6:00", zh: "影片超过 6 分钟" },
   "film.why.empty": { en: "The film has no shots", zh: "影片还没有镜头" },
   "film.why.sep": { en: "; ", zh: "；" },
@@ -179,6 +181,7 @@ export const filmMessages = {
   "film.tools.voice_floor": { en: "at least {seconds} s (voice line)", zh: "至少 {seconds} 秒（配音）" },
   "film.tools.floor_title": { en: "Its voice line needs {seconds} s", zh: "配音需要 {seconds} 秒" },
   "film.tools.outdates_clip": { en: "a new length outdates its clip", zh: "改时长会让视频过期" },
+  "film.tools.clip_running": { en: "its clip is still being made: it is charged and comes back out of date", zh: "它的视频还在生成：会照常计费，回来后已过期" },
   "film.tools.earlier": { en: "Move earlier", zh: "往前移" },
   "film.tools.later": { en: "Move later", zh: "往后移" },
   "film.tools.first": { en: "First in its scene; reorder scenes in the Plan", zh: "已是这一场的第一个；场景顺序在计划里调整" },
@@ -206,6 +209,7 @@ export const filmMessages = {
 
   // ---- edit toasts (free, with Undo)
   "film.toast.length": { en: "{shot} is {seconds} s. The film is {film} s.", zh: "{shot} 改为 {seconds} 秒，影片 {film} 秒。" },
+  "film.toast.length_running": { en: "{shot} is {seconds} s. The film is {film} s; the clip being made for {shot} will be out of date.", zh: "{shot} 改为 {seconds} 秒，影片 {film} 秒；{shot} 正在生成的视频回来后会过期。" },
   "film.toast.length_clip": { en: "{shot} is {seconds} s. The film is {film} s; {shot}'s clip is out of date.", zh: "{shot} 改为 {seconds} 秒，影片 {film} 秒；{shot} 的视频已过期。" },
   "film.toast.moved": { en: "Moved {from}; it is now {to}. Nothing made goes out of date.", zh: "已移动 {from}，现在是 {to}。没有内容过期。" },
   "film.toast.music_start": { en: "Music starts at {time}.", zh: "音乐从 {time} 开始。" },

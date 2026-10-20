@@ -2,7 +2,7 @@ import type { ShotOverview } from "@openslate/core/public";
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useRecoveryLock, useWriteGuard } from "../../app/useWriteGuard.ts";
 import { useI18n } from "../../i18n/I18n.tsx";
-import { lengthLimits, shotSeconds, type FilmMusic, type FilmShot } from "../../model/film.ts";
+import { clipStillOut, lengthLimits, shotSeconds, type FilmMusic, type FilmShot } from "../../model/film.ts";
 import { gainComparison, type GainBaseline, type GainDraft, type GainResult, type GainSession } from "../../model/film-gain.ts";
 import { clock as formatClock } from "../../model/motion.ts";
 
@@ -32,7 +32,7 @@ export function ShotTools({ shot, overview, fps, writable, onLength, onMove, onO
   const paused = useWriteGuard().serverWhy !== null;
   const notes = paused ? "" : [
     limits.voiceFloor ? t("film.tools.voice_floor", { seconds: limits.voiceFloor }) : null,
-    shot.picture === "clip" ? t("film.tools.outdates_clip") : null,
+    clipStillOut(overview) ? t("film.tools.clip_running") : shot.picture === "clip" ? t("film.tools.outdates_clip") : null,
   ].filter(Boolean).join(" · ");
   const first = shot.index === 0;
   const last = shot.index === shot.sceneSize - 1;

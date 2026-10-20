@@ -225,3 +225,14 @@ test('fingerprints tell which of shots, order, music and narration changed', () 
   line.shots[shotId('1.2')].narration = { ...line.shots[shotId('1.2')].narration, text: 'Two for the morning boat.' };
   assert.deepEqual(changedSince(before, filmFingerprint(line, { audioId: 'a', gainMilliDb: -18000 })), ['narration']);
 });
+
+test('a demo export blocked by your own music or recording names it, not the clips', () => {
+  const overview = finished();
+  const why = (blockers, locale = 'en') => whyNotReady({ ready: false, demo: false, seconds: 40, blockers }, overview, locale).map(m => translateMsg(locale, m));
+  assert.deepEqual(why([{ code: 'mixed_demo_media', medium: 'music' }]), ["The demo film can't be exported with your own music; choose No music to export it"]);
+  assert.deepEqual(why([{ code: 'mixed_demo_media', medium: 'music' }], 'zh-CN'), ['示例影片不能和你自己的音乐一起导出；选择“不要音乐”即可导出']);
+  assert.deepEqual(why([{ code: 'mixed_demo_media', shotId: shotId('2.1'), medium: 'voice' }, { code: 'mixed_demo_media', shotId: shotId('3.2'), medium: 'voice' }]),
+    ["The demo film can't be exported with your own recording in 2.1 and 3.2"]);
+  assert.deepEqual(why([{ code: 'mixed_demo_media', shotId: shotId('1.1'), medium: 'clip' }]), ["Demo clips and made clips can't share one export"]);
+  assert.deepEqual(why([{ code: 'mixed_demo_media', shotId: shotId('1.1') }]), ["Demo clips and made clips can't share one export"], 'an older server without a medium keeps the clip wording');
+});

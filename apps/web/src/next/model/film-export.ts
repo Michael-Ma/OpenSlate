@@ -150,7 +150,12 @@ export function whyNotReady(readiness: ExportReadiness, overview: GenerationOver
   if (clips.length && voices.length) reasons.push(msg("film.why.clips_voice", { count: clips.length, shots: list(voices) }));
   else if (clips.length) reasons.push(msg("film.why.clips", { count: clips.length }));
   else if (voices.length) reasons.push(msg("film.why.voice", { shots: list(voices) }));
-  if (readiness.blockers.some((b) => b.code === "mixed_demo_media")) reasons.push(msg("film.why.mixed_demo"));
+  // Name what does not match the demo: the music, a shot's own recording, or (with no medium given) the clips.
+  const mixed = readiness.blockers.filter((b) => b.code === "mixed_demo_media");
+  if (mixed.some((b) => b.medium === "music")) reasons.push(msg("film.why.mixed_demo_music"));
+  const recorded = [...new Set(mixed.filter((b) => b.medium === "voice").map((b) => label(b.shotId)).filter(Boolean))];
+  if (recorded.length) reasons.push(msg("film.why.mixed_demo_voice", { shots: list(recorded) }));
+  if (mixed.some((b) => b.medium === undefined || b.medium === "clip")) reasons.push(msg("film.why.mixed_demo"));
   if (readiness.blockers.some((b) => b.code === "too_long")) reasons.push(msg("film.why.too_long"));
   if (readiness.blockers.some((b) => b.code === "empty_film")) reasons.push(msg("film.why.empty"));
   return reasons;
