@@ -3,8 +3,8 @@ import { keyframeTakeHistory } from "./keyframe-take-history.js";
 import { openBlockingNotes } from "./application/director-notes.js";
 import { confirmationView, type SceneConfirmationRecord } from "./scene-confirmations.js";
 import type { FastifyInstance } from "fastify";
-import { canonical, digest, invariant } from "@openslate/core";
-import type { ArtifactRef, FrameViewInput, FrameViewReceipt, GenerationOverview, MediaSlot, ShotNarration, StudioArtifactRef, WaitingCode } from "@openslate/core";
+import { canonical, digest, DomainError, invariant } from "@openslate/core";
+import type { ArtifactRef, FrameViewInput, FrameViewReceipt, GenerationOverview, MediaSlot, ProviderProfile, ShotNarration, StudioArtifactRef, WaitingCode } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import type { NarrationService } from "./narration/service.js";
 import type { NodeBinding, PlanRecord } from "./execution/engine.js";
@@ -12,7 +12,8 @@ import { profileExecutionIdentity, requestExecutionIdentity } from "@openslate/p
 import type { DirectorTurn } from "./application/director-supervisor.js";
 import { sceneView, sceneGenerationView } from "./scene-generation.js";
 import { generationTargets } from "./scene-row.js";
-import { quote } from "./generation-quotes.js";
+import { quote, unitQuote } from "./generation-quotes.js";
+import { narrationFitFrames } from "./narration-fit.js";
 import { automaticRetriesLeft } from "./execution/retry-eligibility.js";
 import { assertCodexImageRecords } from "./execution/codex-image-lineage.js";
 import { safeNativeDiagnostic } from "./application/native-diagnostics.js";
@@ -27,16 +28,25 @@ const ref = (artifact: ArtifactRef): StudioArtifactRef => ({ artifactId: artifac
 
 type SceneRead = ReturnType<typeof sceneGenerationView>;
 
-export function shotNarration(audio: SceneRead["narrationEvidence"][number]["narration"], frames: number): ShotNarration {
+export function shotNarration(audio: SceneRead["narrationEvidence"][number]["narration"], frames: number, videoProfile?: ProviderProfile): ShotNarration {
   if (audio.mode === "none") return { state: "none", text: audio.text, fits: true };
   const measured = audio.measuredSeconds ?? undefined;
   const cjk = audio.text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) ?? [];
   const words = audio.text.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu, " ").match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? [];
   const estimated = audio.text.trim() ? (cjk.length + words.length) * 0.3 : undefined;
   const seconds = measured === undefined ? estimated : measured;
+  const fits = audio.fit && audio.ready ? (audio.timing.durationFrames ?? Infinity) <= frames : seconds === undefined ? null : seconds <= frames / 30;
+  let fitSeconds: number | undefined;
+  if (fits === false && measured !== undefined && videoProfile) {
+    try { fitSeconds = narrationFitFrames(frames, Math.round(measured * 48000), videoProfile, "extend_shot") / 30; }
+    catch (error) {
+      // An out-of-range line has no valid extend action for the locked model.
+      if (!(error instanceof DomainError && ["PROFILE_INCOMPATIBLE", "NARRATION_RECORDING_REQUIRED"].includes(error.code))) throw error;
+    }
+  }
   return { state: measured !== undefined ? "ready" : audio.text.trim() ? "text_only" : "none", text: audio.text,
     ...(measured !== undefined ? { measuredSeconds: measured } : estimated !== undefined ? { estimatedSeconds: estimated } : {}),
-    fits: audio.fit && audio.ready ? (audio.timing.durationFrames ?? Infinity) <= frames : seconds === undefined ? null : seconds <= frames / 30, ...(audio.fit ? { fit: audio.fit } : {}) };
+    fits, ...(fitSeconds !== undefined ? { fitSeconds } : {}), ...(audio.fit ? { fit: audio.fit } : {}) };
 }
 
 /** One coherent snapshot and one inspection per cursor. Reads never mint authority or persist reviews. */
@@ -144,7 +154,7 @@ export class GenerationOverviewReader {
           };
           const image = slot("image"), video = slot("video");
           const opened = image.state === "ready" && !!image.artifact && views.some(v => v.principal === "local-user" && v.shotId === shot.id && v.artifactId === image.artifact!.artifactId && v.sha256 === image.artifact!.sha256);
-          const audio = shotNarration(view.narrationEvidence.find(e => e.shotId === shot.id)!.narration, shot.desiredFrames);
+          const audio = shotNarration(view.narrationEvidence.find(e => e.shotId === shot.id)!.narration, shot.desiredFrames, captured.profiles.video);
           const speech = snapshot.attempts.filter(a => {
             if (a.released || !a.narrationSpeech) return false;
             const application = store.get<{ review: { id: string } }>("narration_speech_application", a.narrationSpeech.application.id);
@@ -171,8 +181,10 @@ export class GenerationOverviewReader {
         const attention = shots.some(s => [s.keyframe.state, s.video.state, s.keyframe.replacement?.state, s.video.replacement?.state, s.narration.state].some(state => state && ["failed", "no_answer", "outdated", "choose_take", "direction_required"].includes(state)));
         const regenerationQuotes = rows.map(r => quote(captured.lock, [r], "regenerateKeyframe"));
         const commonRegenerationQuote = regenerationQuotes.length && regenerationQuotes.every(q => canonical(q) === canonical(regenerationQuotes[0])) ? regenerationQuotes[0] : undefined;
-        const confirmation = store.list<SceneConfirmationRecord>("scene_confirmation", projectId).filter(r => r.sceneId === scene.id && r.kind === "video").at(-1);
-        if (confirmation?.state === "running") blockers.push({ code: "confirmation_running" });
+        const runs = store.list<SceneConfirmationRecord>("scene_confirmation", projectId).filter(r => r.sceneId === scene.id);
+        const confirmation = runs.filter(r => r.kind === "video").at(-1), keyframesRun = runs.filter(r => r.kind === "keyframes").at(-1);
+        if (runs.some(r => r.state === "running")) blockers.push({ code: "confirmation_running" });
+        const oneClip = unitQuote(captured.lock, "video"), oneVoice = unitQuote(captured.lock, "speech");
         // A bound candidate is not proof that a clip is being made. Only a known execution wait or
         // an in-flight attempt moves on its own; review waits still need the person's decision.
         const moving = (slot: Pick<MediaSlot, "state" | "waiting" | "failure">, pending: boolean) => slot.state === "running" || (slot.state === "queued" && !["review", "stopped", "unknown", "timing"].includes(slot.waiting?.code ?? "") && ((slot.failure?.autoRetriesLeft ?? 0) > 0 || pending && !!slot.waiting && ["capacity", "edit_pending", "input_pending", "voice"].includes(slot.waiting.code)));
@@ -181,8 +193,9 @@ export class GenerationOverviewReader {
           state: attention ? "needs_attention" : shots.length && counts.videosReady === shots.length ? "video_saved" : makingVideo ? "making_video" : shots.length && counts.keyframesReady === shots.length ? "keyframes_back" : counts.keyframesReady ? "keyframes_partial" : "not_started",
           shotIds: rows.map(r => r.shotId), counts,
           videoTargets: generationTargets(rows, "video").map(r => r.shotId), keyframeTargets: generationTargets(rows, "image").map(r => r.shotId),
-          quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), ...(commonRegenerationQuote ? { regenerateKeyframe: commonRegenerationQuote } : {}), confirmVideo: quote(captured.lock, rows, "confirmVideo"), voice: quote(captured.lock, rows, "voice") },
+          quotes: { makeKeyframes: quote(captured.lock, rows, "makeKeyframes"), ...(commonRegenerationQuote ? { regenerateKeyframe: commonRegenerationQuote } : {}), confirmVideo: quote(captured.lock, rows, "confirmVideo"), voice: quote(captured.lock, rows, "voice"), ...(oneClip ? { oneClip } : {}), ...(oneVoice ? { oneVoice } : {}) },
           ...(confirmation ? { confirmation: confirmationView(confirmation) } : {}),
+          ...(keyframesRun ? { keyframesRun: confirmationView(keyframesRun) } : {}),
           blockers, confirmationDigest: shots.some(s => [s.keyframe.state, s.video.state].includes("choose_take")) ? null : view.confirmationDigest });
       }
       this.cache.set(projectId, overview);

@@ -88,9 +88,10 @@ function Changes({ rows, label }: { rows: ProposalChangeRow[]; label: (value: La
   const inline = rows.filter((row) => !CLOSED_HIDDEN.has(row.field)).slice(0, INLINE_CHANGES);
   const shown = open ? rows : inline;
   const hidden = rows.filter((row) => !inline.includes(row));
-  // A lone length change is the strip itself: there is nothing more to open.
   const unseen = hidden.some((row) => row.field !== "desiredFrames");
   const more = unseen || inline.some((row) => row.stacked);
+  // A lone length is the strip itself: nothing to add under it.
+  if (!shown.length && !more) return null;
   return (
     <div className={`chg-wrap${open ? " open" : ""}`}>
       {shown.length ? (

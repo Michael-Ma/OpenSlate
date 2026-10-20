@@ -24,6 +24,8 @@ import type { ProductionService } from "./application/service.js";
 import { ownedTranscriptionCatalog } from "./narration/owned-transcription-records.js";
 import { quote } from "./generation-quotes.js";
 import { generationTargets, sceneRow } from "./scene-row.js";
+import { confirmationFramesCurrent, sceneConfirmationGuard } from "./scene-confirmation-state.js";
+import type { SceneConfirmationRecord } from "./scene-confirmations.js";
 import type { ReviewSnapshot } from "./execution/engine.js";
 import type { NodeBinding } from "./execution/engine.js";
 
@@ -256,13 +258,19 @@ export function registerSceneGeneration(
 }
 
 export type EnqueueSceneVoice = (projectId: string, sceneId: string, shotIds: string[], actor: import("@openslate/core").ActorContext) => void;
+/** Runner receipts bind the reviewed scene and its original authority, not transient film-head tokens. */
+export function sceneGenerationCommandDigest(sceneId: string,
+  input: SceneGenerationInput | Pick<SceneGenerationInput, "kind" | "reviewedFrames">,
+  actor?: import("@openslate/core").ActorContext): string {
+  return digest(actor ? { sceneId, kind: input.kind, reviewedFrames: input.reviewedFrames, actor } : { sceneId, ...input });
+}
 /** Shared command implementation; durable confirmation uses its original human grants. */
 export async function generateScene(production: ProductionService, projectId: string, sceneId: string,
   input: SceneGenerationInput, key: string, narration?: NarrationService,
   options: { actor?: import("@openslate/core").ActorContext; enqueueVoice?: EnqueueSceneVoice } = {}) {
   const store = production.store;
   const scope = `local-user:${projectId}:scene-generation`,
-    commandDigest = digest({ sceneId, ...input });
+    commandDigest = sceneGenerationCommandDigest(sceneId, input, options.actor);
   production.recovery.assertWritable(projectId);
   const replay = store.commandReplay(scope, key, commandDigest);
   if (replay) return replay.result;
@@ -288,13 +296,29 @@ export async function generateScene(production: ProductionService, projectId: st
   );
   const notesDigest = digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open"));
   const fresh = () => {
+    if (input.kind === "image") invariant(
+      !store.list<SceneConfirmationRecord>("scene_confirmation", projectId).some(row =>
+        row.sceneId === sceneId && row.kind === "video" && row.state === "running"),
+      "CONFIRMATION_RUNNING", "Follow the scene's existing confirmation before replacing its keyframes",
+    );
     if (input.kind === "video") {
       invariant(openBlockingNotes(store, projectId, sceneId).length === 0, "RECOMMENDATION_OPEN", "Settle the blocking Director notes before generating video");
       invariant(digest(sceneNotes(store, projectId, sceneId).filter(n => n.state === "open")) === (input.notesDigest ?? notesDigest), "SCENE_REVIEW_STALE", "Director notes changed during scene review");
     }
     assertExpectedHumanRequest(production, projectId, input.expectedRequestId);
-    const now = sceneView(production, projectId, sceneId, undefined, input.targetShotIds).view;
-    invariant(
+    const current = sceneView(production, projectId, sceneId, undefined, input.targetShotIds), now = current.view;
+    if (options.actor) {
+      const confirmation = store.get<SceneConfirmationRecord>("scene_confirmation", options.actor.requestId);
+      invariant(input.kind === "video" && confirmation?.projectId === projectId && confirmation.sceneId === sceneId &&
+        confirmation.kind === "video" && confirmation.state === "running" && canonical(confirmation.actor) === canonical(options.actor),
+      "SCENE_REVIEW_STALE", "This scene confirmation is no longer running");
+      invariant(confirmation.sceneIntentDigest === sceneGenerationView(production, projectId, sceneId, narration, current).sceneIntentDigest &&
+        // Each pinned shot still matches its own per-shot dispatch guard (scene titles and siblings are not part of it).
+        !!confirmation.shotGuardDigests && confirmation.framePins.every(pin =>
+          confirmation.shotGuardDigests![pin.shotId] === sceneConfirmationGuard(current.project, pin.shotId, current.lock, pin)) &&
+        confirmationFramesCurrent(store, current.project, confirmation.framePins),
+      "SCENE_REVIEW_STALE", "The reviewed scene changed");
+    } else invariant(
       now.headVersion === input.headVersion &&
         now.revisionId === input.revisionId &&
         now.reviewedHoldDigest === input.reviewedHoldDigest &&
@@ -329,6 +353,7 @@ export async function generateScene(production: ProductionService, projectId: st
       "ATTEMPT_EXISTS",
       "Follow the existing scene jobs before starting more work",
     );
+    return current;
   };
   fresh();
   invariant(captured.view.rows.length > 0, "SCENE_EMPTY", "Add a shot before generating this scene");
@@ -416,12 +441,12 @@ export async function generateScene(production: ProductionService, projectId: st
         headVersion: project.headVersion, activePlanId: project.activePlanId, cursor: store.cursor(projectId) };
     });
   }
-  const aliases = {
+  const currentAliases = () => ({
     ...(store.get<{ aliases: Record<string, string> }>(
       "logical_ids",
       projectId,
     )?.aliases ?? {}),
-  };
+  });
   const operations: SceneOperation[] = selected.map((row) => ({
     shotId: row.shotId,
     kind: input.kind,
@@ -441,33 +466,34 @@ export async function generateScene(production: ProductionService, projectId: st
         }
       : {}),
   }));
-  const compiled = await composeScenePlanIsolated(
-    captured.plan,
-    operations,
-    {
-      project: captured.project,
-      profiles: captured.lock.profiles,
+  let base = captured, prepared: { compiled: CompiledPlan; aliases: Record<string, string> } | undefined;
+  // Composition is free and precedes publication. A runner can rebase over
+  // unrelated publications without removing their saved media or buying again.
+  const limit = options.actor ? 3 : 1;
+  for (let pass = 0; pass < limit; pass++) {
+    const aliases = currentAliases(), aliasDigest = digest(aliases);
+    const compiled = await composeScenePlanIsolated(base.plan, operations, {
+      project: base.project,
+      profiles: base.lock.profiles,
       logicalIds: aliases,
       allocateId: newId,
-      ...(captured.lock.localExecution
-        ? {
-            localExecution: snapshotLocalExecution(
-              captured.lock.localExecution,
-            ),
-          }
-        : {}),
-      transcriptionInputs: ownedTranscriptionCatalog(
-        store,
-        projectId,
-        captured.plan,
-      ),
-    },
-  );
-  fresh();
+      ...(base.lock.localExecution ? { localExecution: snapshotLocalExecution(base.lock.localExecution) } : {}),
+      transcriptionInputs: ownedTranscriptionCatalog(store, projectId, base.plan),
+    });
+    const latest = fresh();
+    if (!options.actor || latest.project.activePlanId === base.project.activePlanId && digest(currentAliases()) === aliasDigest) {
+      prepared = { compiled, aliases }; break;
+    }
+    base = latest;
+  }
+  invariant(prepared, "SCENE_REVIEW_STALE", "Other scene work kept changing during preparation. Confirm this scene again.");
+  const { compiled, aliases } = prepared;
   // The review installs only this scene. A whole-film planning hold is narrowed to its other scenes.
   return store.transaction(() =>
     store.command(scope, key, commandDigest, () => {
-      fresh();
+      // Another scene may advance while the isolated worker composes. The durable
+      // scene confirmation supplies the fences; publication uses the current head.
+      const publication = fresh();
       assertNoDetachedJobs();
       for (const hold of store
         .list<{
@@ -498,7 +524,7 @@ export async function generateScene(production: ProductionService, projectId: st
         }
         if (hold.scopeId === projectId) {
           production.engine.releaseHold(projectId, hold.id, hold.ownerId);
-          for (const scene of captured.project.scenes.filter(
+          for (const scene of publication.project.scenes.filter(
             (s) => s.id !== sceneId,
           ))
             production.engine.setHold(projectId, {
@@ -581,7 +607,7 @@ export async function generateScene(production: ProductionService, projectId: st
         actor,
         compiled,
         aliases,
-        input.headVersion,
+        options.actor ? publication.view.headVersion : input.headVersion,
         digest(captured.lock),
         input.kind,
       );

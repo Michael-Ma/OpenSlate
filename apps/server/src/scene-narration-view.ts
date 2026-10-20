@@ -9,6 +9,7 @@ import {
 } from "./narration/narration-speech-projection.js";
 import { isVerifiedGeneratedNarrationAudio } from "./narration/generated-audio.js";
 import { shotDraftId } from "./narration/narration-scope.js";
+import { reusableNarrationSpeech } from "./narration-reusable-speech.js";
 
 /** Read-only choices for the scene decision; no session, grant, attachment or generation is created here. */
 export function sceneNarrationView(
@@ -182,6 +183,10 @@ export function sceneNarrationView(
             ? (row?.audio?.media.sha256 ?? null)
             : null,
           recordingCurrent,
+          reusableSpeechTake: !ready && !recordingCurrent && mode === "generated" && !!reusableNarrationSpeech(production, project.id, {
+            segmentId: row?.entry.segmentId ?? null, segmentRevisionId: row?.script.id ?? null,
+            text, voice, profileId, profileRevisionId,
+          }),
           measuredSeconds: (recordingCurrent || ready) && row?.audio?.media.probe.audio?.samples
             ? row.audio.media.probe.audio.samples / 48000
             : durationSamples === null ? null : durationSamples / 48000,

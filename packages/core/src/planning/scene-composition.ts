@@ -246,7 +246,8 @@ function verifyBase(
   context: CompileContext,
 ): void {
   // Verify the immutable source and cached operation shape while permitting the selected shot's
-  // newer intent. Unchanged branches still have to match every cached field.
+  // newer intent. Preserved branches keep their exact operation specifications;
+  // a narration-only revision can update their shot metadata without new work.
   const source = declaration(base.source),
     revision = get(arr(source.arguments)[0]!, "baseRevision").value;
   fail(typeof revision === "string", "Saved revision is missing");
@@ -332,6 +333,8 @@ function verifyBase(
               : {}),
             specDigest: old.specDigest,
           }
+        : next?.specDigest === old.specDigest
+        ? { ...next, shotRevisionId: old.shotRevisionId }
         : next;
     fail(
       next && canonical(value) === canonical(old),
@@ -820,8 +823,7 @@ export function composeScenePlan(
     }
   }
   if (!base) obj(statements.at(-1)).argument = list(outputs);
-  const compiled = compilePlan(printRestrictedPlan(root), working),
-    selectedShots = new Set(operations.map((operation) => operation.shotId));
+  const compiled = compilePlan(printRestrictedPlan(root), working);
   const affected = new Set([...changed, ...changedVideos]);
   for (let pass = 0; pass < (base?.nodes.length ?? 0); pass++)
     for (const node of base!.nodes)
@@ -845,7 +847,7 @@ export function composeScenePlan(
     )
       continue;
     const unchanged =
-      selectedShots.has(old.shotId ?? "") && next!.specDigest === old.specDigest
+      next!.specDigest === old.specDigest
         ? { ...next, shotRevisionId: old.shotRevisionId }
         : next;
     invariant(

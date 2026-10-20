@@ -145,7 +145,16 @@ test('R2 a temporary retained-frame replacement cannot detach a queued confirmat
   await f.tick(10);
   assert.equal(imageAttempts(f, replacementId).length, 2);
   assertRestored(f, current);
-  const view = await f.overview();
+  // A pin that went missing while the confirmation ran stops it visibly (card R4: per-shot regeneration is refused
+  // during a running confirmation, so only this synthetic publication gets here). Nothing paid was lost: a new
+  // Confirm on the restored frame buys the voice line once and makes the clip.
+  let view = await f.overview();
+  assert.equal(view.scenes[0].confirmation.state, 'blocked', JSON.stringify(view.scenes[0].confirmation));
+  assert.equal(view.scenes[0].confirmation.blocker.code, 'SCENE_REVIEW_STALE');
+  assert.equal(f.calls.speech, 0, 'no voice line was bought for the stopped confirmation');
+  await f.openFrames();
+  await f.call('POST', '/scenes/scene-0/confirm', await f.confirmBody()).then(f.ok); await f.tick(10);
+  view = await f.overview();
   assert.equal(view.scenes[0].confirmation.state, 'done', JSON.stringify(view.scenes[0].confirmation));
   assert.equal(view.shots['shot-0'].video.state, 'ready');
   assert.equal(f.calls.speech, 1);

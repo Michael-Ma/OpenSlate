@@ -10,6 +10,7 @@ import { createTranscriptSelection, resolvePublishedTranscriptCandidate } from "
 import type { ResolvedPublishedTranscriptCandidate } from "./transcript-selection.js";
 import { verifyTranscriptSelectionEvidence } from "./transcript-selection-media.js";
 import { assertNarrationAuthority, assertNarrationMutation, shotDraftId } from './narration-scope.js';
+import { completedSceneAttachmentScope, type CompletedSceneAttachment } from '../narration-reusable-speech.js';
 
 export interface AttachGeneratedNarrationAudio {
   expectedVersion: number; segmentId: string; segmentRevisionId: string;
@@ -37,8 +38,9 @@ export function sampleIntervalToFrames(atSample: number, durationSamples: number
 /**
  * Offline narration domain service. It persists a separate narration projection;
  * it never rewrites canonical project shots/cues, changes holds, or buys media.
- * All writes require a current project-scoped application request. Human-only
- * methods are called by trusted host code, never by an agent-supplied actor tag.
+ * Edits require a current scoped application request. The host may finish storing
+ * an exact paid scene take under its original scope; this grants no acceptance or
+ * generation authority. Human-only methods never trust an agent-supplied actor tag.
  */
 export class NarrationService {
   constructor(readonly production: ProductionService, private readonly mediaService?: LocalMediaService) {}
@@ -167,10 +169,13 @@ export class NarrationService {
   }
 
   /** Select an existing generated take. Generation evidence does not accept its words or timing. */
-  async attachGeneratedAudio(projectId: string, human: ActorContext, input: AttachGeneratedNarrationAudio, options: { signal?: AbortSignal } = {}): Promise<NarrationSnapshot> {
+  async attachGeneratedAudio(projectId: string, human: ActorContext, input: AttachGeneratedNarrationAudio, options: { signal?: AbortSignal; completedSceneAttachment?: CompletedSceneAttachment } = {}): Promise<NarrationSnapshot> {
     const signal = options.signal; human = structuredClone(human); input = structuredClone(input);
     const stopped = () => invariant(!signal?.aborted, "NARRATION_CANCELLED", "Generated recording selection was cancelled");
-    this.authority(projectId, human, true, input.segmentId); stopped();
+    const authority = () => options.completedSceneAttachment
+      ? completedSceneAttachmentScope(this.production, projectId, human, input, options.completedSceneAttachment)
+      : this.authority(projectId, human, true, input.segmentId);
+    authority(); stopped();
     invariant(input && Object.keys(input).sort().join("\0") === ["expectedVersion", "segmentId", "segmentRevisionId", "artifactId", "artifactDigest", "generationEvidenceDigest", "key"].sort().join("\0"),
       "NARRATION_INVALID_INPUT", "Choose one exact generated recording for a saved section");
     integer(input.expectedVersion, 0, Number.MAX_SAFE_INTEGER);
@@ -197,10 +202,10 @@ export class NarrationService {
     };
     const selected = resolve();
     await this.verifyGeneratedAudio(selected, signal);
-    stopped(); this.authority(projectId, human, true);
+    stopped(); authority();
     // mutate fences authority, then resolves concurrent successful replay before current-version checks.
     return this.mutate(projectId, human, expectedVersion, key, action, selection, state => {
-      stopped(); this.authority(projectId, human, true);
+      stopped(); authority();
       const entry = section(state), current = resolve();
       invariant(digest(current.audio) === digest(selected.audio), "NARRATION_GENERATED_IDENTITY_CHANGED", "Generated recording changed during verification");
       const existing = this.store.get<NarrationAudio>("narration_audio", selection.artifactId);
@@ -210,7 +215,7 @@ export class NarrationService {
         entry.audioId = current.audio.id; entry.cueId = null; entry.audioAcceptanceId = entry.timingAcceptanceId = null;
       }
       this.store.appendEvent(projectId, "narration.generated_audio_attached", { ...selection, requestId: human.requestId });
-    });
+    }, options.completedSceneAttachment ? { input, completion: options.completedSceneAttachment } : undefined);
   }
 
   private verifyGeneratedAudio(selected: ResolvedGeneratedNarrationAudio, signal?: AbortSignal): Promise<ResolvedGeneratedNarrationAudio> {
@@ -396,14 +401,18 @@ export class NarrationService {
     };
     return { state, segments, readiness, canonicalApplied: false };
   }
-  private mutate(projectId: string, actor: ActorContext, expectedVersion: number, key: string, action: string, argumentsValue: unknown, fn: (state: NarrationState) => void | false): NarrationSnapshot {
-    this.authority(projectId, actor); integer(expectedVersion, 0, Number.MAX_SAFE_INTEGER); text(key, 160);
+  private mutate(projectId: string, actor: ActorContext, expectedVersion: number, key: string, action: string, argumentsValue: unknown, fn: (state: NarrationState) => void | false,
+    completed?: { input: AttachGeneratedNarrationAudio; completion: CompletedSceneAttachment }): NarrationSnapshot {
+    const authority = () => completed
+      ? completedSceneAttachmentScope(this.production, projectId, actor, completed.input, completed.completion)
+      : (this.authority(projectId, actor), assertNarrationAuthority(this.production, projectId, actor));
+    authority(); integer(expectedVersion, 0, Number.MAX_SAFE_INTEGER); text(key, 160);
     return this.store.transaction(() => {
-      this.authority(projectId, actor);
+      authority();
       return this.store.command(`${actor.principalId}:${projectId}:${actor.requestId}:narration`, key, digest({ action, expectedVersion, arguments: argumentsValue }), () => {
         const state = this.read(projectId).state;
         invariant(state.version === expectedVersion, "REVISION_CONFLICT", "Narration changed before this edit");
-        const before = structuredClone(state), scope = assertNarrationAuthority(this.production, projectId, actor);
+        const before = structuredClone(state), scope = authority();
         // Refuse foreign targets before the callback creates any records or verifies media.
         assertNarrationMutation(this.store, scope, before, before, action, argumentsValue);
         // Only new transcript callbacks return false. Legacy no-op mutation behavior is unchanged.
