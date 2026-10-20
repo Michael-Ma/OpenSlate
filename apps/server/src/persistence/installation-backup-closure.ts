@@ -3,7 +3,7 @@ import { assertConfiguredProviderAdmission } from "../execution/provider-use.js"
 import { assertRequestedNarrationShotScope } from "../narration/narration-scope.js";
 import { codexImageBackupClosure } from "./codex-image-backup.js";
 import { CODEX_IMAGE_RECORD_KINDS } from "../execution/codex-image-lineage.js";
-import { composeSpeechPlanIsolated } from "@openslate/core";
+import { composeNarrationSpeechPlan } from "../narration/narration-speech-composition.js";
 import { assertNarrationSpeechProposal } from "../narration/narration-speech-records.js";
 import { assertNarrationSpeechReview, assertNarrationSpeechApplication, assertNarrationSpeechAttemptInput, resolveNarrationSpeechApplication } from "../narration/narration-speech-authorization.js";
 import Database from "better-sqlite3";
@@ -159,7 +159,7 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       const catalog = ownedTranscriptionCatalog(speechReader, projectId, base);
       for (const item of catalog) await ownedSource(get("owned_transcription_source", item.id), projectId);
       const logicalIds = { ...value.logicalIds }, localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
-      const compiled = await composeSpeechPlanIsolated(base, value.operation, { project, profiles: lock.profiles, logicalIds,
+      const compiled = await composeNarrationSpeechPlan(speechReader, base, value.operation, { project, profiles: lock.profiles, logicalIds,
         allocateId: () => { fail(false, "Speech proposal lost its saved logical identity"); return ""; }, transcriptionInputs: catalog,
         ...(localExecution ? { localExecution } : {}) });
       fail(canonical(compiled) === canonical(value.compiled) && canonical(logicalIds) === canonical(value.logicalIds), "Speech proposal differs from isolated historical recomposition");

@@ -1,4 +1,4 @@
-import { canonical, composeSpeechPlanIsolated, digest, diffPlans, invariant, newId, providerProfileArguments, RECIPE_DIGEST,
+import { canonical, digest, diffPlans, invariant, newId, providerProfileArguments, RECIPE_DIGEST,
   requiredStages, snapshotLocalExecution, STAGE_CONTRACTS_DIGEST, validateStageRequirements } from "@openslate/core";
 import type { ActorContext, CompiledPlan, CompileContext, ProviderProfile, StageRequirement } from "@openslate/core";
 import { OPENAI_SPEECH_BUDGET } from "@openslate/providers";
@@ -13,6 +13,7 @@ import { assertPersonalVoiceCurrent } from './personal-voices.js';
 import { assertMappedSpeechPreparation } from './mapped-speech-intent.js';
 import { assertNarrationAuthority } from './narration-scope.js';
 import { requestHoldCutoff } from './request-holds.js';
+import { composeNarrationSpeechPlan } from './narration-speech-composition.js';
 export { narrationSpeechPrepareScope } from "./narration-speech-review-state.js";
 
 interface Lock { projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string; localExecution?: unknown }
@@ -31,7 +32,7 @@ export class NarrationSpeechService {
     assertNarrationAuthority(this.production, projectId, actor, segmentId);
   }
   private compose(base: CompiledPlan | null, operation: NarrationSpeechOperation, context: CompileContext, options: { signal?: AbortSignal }) {
-    return composeSpeechPlanIsolated(base, operation, context, options);
+    return composeNarrationSpeechPlan(this.store, base, operation, context, options);
   }
   private selected(projectId: string, section: NarrationSpeechSection): void {
     const entry = this.store.get<NarrationState>("narration_state", projectId)?.entries.find(item => item.segmentId === section.segmentId);
