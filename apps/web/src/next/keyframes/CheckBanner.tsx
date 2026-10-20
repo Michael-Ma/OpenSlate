@@ -134,7 +134,7 @@ export function CheckBanner({ overview, sceneId, checks, settled, busy, quiet, a
               {tm(actions.extend.label)}
             </button>
           ) : null}
-          <button type="button" className={`pill${actions.extend ? "" : " chosen"}`} data-act="keep-fit" data-shot={check.shotId} {...server} disabled={busy || server.disabled} onClick={() => onKeep(check)}>{tm(actions.keep.label)}</button>
+          {actions.keep ? <button type="button" className={`pill${actions.extend ? "" : " chosen"}`} data-act="keep-fit" data-shot={check.shotId} {...server} disabled={busy || server.disabled} onClick={() => onKeep(check)}>{tm(actions.keep.label)}</button> : null}
           <button type="button" className="pill ghost" data-act="edit-narration" data-shot={check.shotId} {...server} onClick={() => onEditNarration(check)}>{tm(actions.edit.label)}</button>
         </>
       }

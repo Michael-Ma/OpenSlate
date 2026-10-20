@@ -116,7 +116,7 @@ function everyClipMade(world: FixtureWorld): void {
     if (shot.label === "3.2") next = { ...next, narration: { state: "ready", text: shot.narration.text, measuredSeconds: 1.6, fits: true } };
     shots[id] = next;
   }
-  world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? []);
+  world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
   world.snapshot = {
     ...world.snapshot,
     project: { ...world.snapshot.project, shots: world.snapshot.project.shots.map((row) => ({ ...row, desiredFrames: world.overview.shots[row.id]?.durationFrames ?? row.desiredFrames })) },
@@ -166,7 +166,7 @@ function longFilm(world: FixtureWorld): void {
     scenes.push({ ...sceneTemplate, sceneId: id, ordinal, title, purpose: title, shotIds, keyframeTargets: shotIds, counts: { shots: 4, keyframesReady: 0, opened: 0, videosReady: 0 } });
     sceneRows.push({ id, revisionId: `scene-rev-${ordinal}`, purpose: title, title });
   });
-  world.overview = recompute({ ...world.overview, scenes, shots }, world.snapshot.notes ?? []);
+  world.overview = recompute({ ...world.overview, scenes, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
   world.snapshot = { ...world.snapshot, project: { ...world.snapshot.project, shots: rows, scenes: sceneRows } };
 }
 

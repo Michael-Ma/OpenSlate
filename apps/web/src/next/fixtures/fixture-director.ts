@@ -120,10 +120,10 @@ function releaseHolds(world: FixtureWorld, requestId: string, body: unknown): { 
     Object.fromEntries(Object.entries(shots).map(([id, shot]) => [id, held.some((h) => h.shotId === id) ? change(shot) : shot]));
   world.update((w) => {
     w.snapshot = { ...w.snapshot, conversation: (w.snapshot.conversation ?? []).map((entry) => (entry.requestId === requestId && entry.role === "user" ? { ...entry, state: "superseded" } : entry)) };
-    w.overview = recompute({ ...w.overview, shots: withKeyframe(w.overview.shots, (shot) => ({ ...shot, keyframe: { state: "running", phase: "running", startedAt: started, attemptId: `release-${shot.shotId}`, takeCount: shot.keyframe.takeCount, opened: false } })) }, w.snapshot.notes ?? []);
+    w.overview = recompute({ ...w.overview, shots: withKeyframe(w.overview.shots, (shot) => ({ ...shot, keyframe: { state: "running", phase: "running", startedAt: started, attemptId: `release-${shot.shotId}`, takeCount: shot.keyframe.takeCount, opened: false } })) }, w.snapshot.notes ?? [], w.snapshot.project.shots);
   });
   world.later(FIXTURE_TIMING.keyframeMs, (w) => {
-    w.overview = recompute({ ...w.overview, shots: withKeyframe(w.overview.shots, (shot) => (shot.keyframe.state === "running" && shot.keyframe.attemptId === `release-${shot.shotId}` ? { ...shot, keyframe: { state: "ready", artifact: artifactFor(shot.label), takeCount: shot.keyframe.takeCount + 1, opened: false } } : shot)) }, w.snapshot.notes ?? []);
+    w.overview = recompute({ ...w.overview, shots: withKeyframe(w.overview.shots, (shot) => (shot.keyframe.state === "running" && shot.keyframe.attemptId === `release-${shot.shotId}` ? { ...shot, keyframe: { state: "ready", artifact: artifactFor(shot.label), takeCount: shot.keyframe.takeCount + 1, opened: false } } : shot)) }, w.snapshot.notes ?? [], w.snapshot.project.shots);
   });
   return { requestId, releasedHolds: held.length };
 }
@@ -193,7 +193,7 @@ export function applyDirectorPresets(world: FixtureWorld, presets: readonly stri
         const shot = shots[shotId(label)]!;
         shots[shot.shotId] = { ...shot, keyframe: { state: "queued", takeCount: 0, opened: false, waiting: { code: "edit_pending", since, requestId } } };
       }
-      world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? []);
+      world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
     }
     if (preset === "failed") {
       const requestId = "request-failed";

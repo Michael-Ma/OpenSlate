@@ -185,7 +185,7 @@ test('narration fit: extend lengthens the shot to the whole second that fits; cu
   edit(w, { kind: 'undo', commandId: cut.commandId });
   assert.ok(scene(w, 2).blockers.some(b => b.code === 'narration_too_long'));
   assert.throws(() => post(w, `/shots/${shotId('2.3')}/narration-fit`, { fit: 'extend_shot', expectedHeadVersion: 1 }), refused('REVISION_CONFLICT'));
-  assert.throws(() => post(w, `/shots/${shotId('2.1')}/narration-fit`, { fit: 'cut_to_shot', expectedHeadVersion: w.snapshot.project.headVersion }), refused('VALIDATION_ERROR'));
+  assert.throws(() => post(w, `/shots/${shotId('2.1')}/narration-fit`, { fit: 'cut_to_shot', expectedHeadVersion: w.snapshot.project.headVersion }), refused('NARRATION_RECORDING_REQUIRED'));
 });
 
 test('shortening a shot below its line undoes an extend fit', () => {
@@ -204,13 +204,15 @@ test('a confirm is refused while frames are unopened or the line is too long', (
   assert.equal(scene(w, 2).state, 'keyframes_back');
 });
 
-test('Scene 3 makes both keyframes for about $0.08; they come back not opened', () => {
+test('Scene 3 makes both keyframes and its voice for about $0.09; the frames come back not opened', () => {
   const w = world();
-  assert.equal(scene(w, 3).quotes.makeKeyframes.micros, '80000');
-  post(w, `/scenes/${sceneId(3)}/generate`, { ...keyframesBody(read(w, sceneId(3))), expectedEstimateMicros: '80000' });
+  assert.equal(scene(w, 3).quotes.makeKeyframes.micros, '90000');
+  post(w, `/scenes/${sceneId(3)}/generate`, { ...keyframesBody(read(w, sceneId(3))), expectedEstimateMicros: '90000' });
   assert.deepEqual(['3.1', '3.2'].map(l => shot(w, l).keyframe.state), ['running', 'running']);
   assert.deepEqual(scene(w, 3).keyframeTargets, []);
   w.advance(FIXTURE_TIMING.keyframeMs);
+  assert.equal(shot(w, '3.2').narration.state, 'ready');
+  assert.equal(scene(w, 3).keyframesRun.state, 'done');
   assert.deepEqual(['3.1', '3.2'].map(l => [shot(w, l).keyframe.state, shot(w, l).keyframe.artifact.artifactId, shot(w, l).keyframe.opened]), [['ready', 'art-3.1', false], ['ready', 'art-3.2', false]]);
   assert.equal(scene(w, 3).state, 'keyframes_back');
   assert.deepEqual(scene(w, 3).blockers.map(b => b.code), ['frame_not_opened', 'frame_not_opened']);

@@ -38,6 +38,7 @@ interface Props {
   onRetryVideo(): void;
   onEdit(draft: EditDraft | null): void;
   onSaveDraft(draft: EditDraft): void;
+  onNarrationSaved(commandId: string): void;
   onSaveMotion(motion: string, seconds: number): void;
   onRelease(attemptId: string): void;
   /** Open Plan on this shot's row (the prompts are edited there). */
@@ -49,7 +50,7 @@ interface Props {
  * Edits follow the shell's write guard (off while offline or expired); paid makes also stop while the film is
  * stopped. A control the guard turns off says why in its title.
  */
-export function Inspector({ view, shot, fps, draft, narrationDetail, busy, unconfirmed, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onSaveMotion, onRelease, onEditInPlan }: Props) {
+export function Inspector({ view, shot, fps, draft, narrationDetail, busy, unconfirmed, onPoint, onRegenerate, onRetryVideo, onEdit, onSaveDraft, onNarrationSaved, onSaveMotion, onRelease, onEditInPlan }: Props) {
   const { t, tm, locale } = useI18n();
   const store = useStore();
   const snapshot = useStudio(s => s.snapshot);
@@ -168,7 +169,7 @@ export function Inspector({ view, shot, fps, draft, narrationDetail, busy, uncon
       </div> : null}
       {editing && waitingLong ? <p className="hint" role="status" data-act="edit-waiting">{t("error.PROJECTION_CHANGED")}</p> : null}
       {editing?.field === "narration" ? (
-        <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} detail={narrationDetail} saving={busy.edit || !!editing.saving} saveBlocked={saveBlocked} focusTake={listening} onEdit={onEdit} onSaveDraft={onSaveDraft} />
+        <NarrationPanel key={editing.shotId} shot={shot} fps={fps} draft={editing} detail={narrationDetail} saving={busy.edit || !!editing.saving} saveBlocked={saveBlocked} focusTake={listening} onEdit={onEdit} onSaved={onNarrationSaved} />
       ) : editing ? (
         <EditForm key={`${editing.shotId}:${editing.field}`} shot={shot} fps={fps} draft={editing} saving={busy.edit || !!editing.saving} saveBlocked={saveBlocked} onEdit={onEdit} onSaveDraft={onSaveDraft} onSaveMotion={onSaveMotion} />
       ) : strip ? (

@@ -137,15 +137,15 @@ function Workspace() {
   const fit = useCallback(async (check: AppCheck, letter: string, kind: "extended" | "cut") => {
     const actions = checkActions(check, overview.fps);
     const shot = overview.shots[check.shotId];
-    if (!shot || !currentSceneId || (kind === "extended" && !actions.extend)) return;
+    if (!shot || !currentSceneId || (kind === "extended" ? !actions.extend : !actions.keep)) return;
     const ok = kind === "extended"
       ? await store.narrationFit(check.shotId, "extend_shot", msg("toast.fit_extended", { shot: check.label, seconds: actions.extend!.seconds }))
-      : await store.narrationFit(check.shotId, "cut_to_shot", msg("toast.fit_cut", { shot: check.label, seconds: actions.keep.seconds }));
+      : await store.narrationFit(check.shotId, "cut_to_shot", msg("toast.fit_cut", { shot: check.label, seconds: actions.keep!.seconds }));
     if (!ok) return;
     setSettled({
       kind, sceneId: currentSceneId, shotId: check.shotId, label: check.label, letter,
-      seconds: kind === "extended" ? actions.extend!.seconds : actions.keep.cutSeconds,
-      shotSeconds: kind === "extended" ? actions.extend!.seconds : actions.keep.seconds,
+      seconds: kind === "extended" ? actions.extend!.seconds : actions.keep!.cutSeconds,
+      shotSeconds: kind === "extended" ? actions.extend!.seconds : actions.keep!.seconds,
       hadClip: shot.video.state === "ready",
       commandId: store.getState().toast?.undoCommandId ?? null,
       cursor: store.getState().overview?.cursor ?? 0,
@@ -160,23 +160,27 @@ function Workspace() {
     store.setEdit({ shotId: check.shotId, field: "narration", value: wordsOf(shot.narration.text) });
   }, [overview, store, openShot]);
 
-  const saveDraft = useCallback(async (next: EditDraft) => {
+  const draftSaved = useCallback((next: EditDraft, commandId: string) => {
     const shot = overview.shots[next.shotId];
     const fromCheck = narrationFromCheck.current;
     const estimate = shot && next.field === "narration" ? lineEstimate(next.value, shot, overview.fps) : null;
-    const commandId = await store.saveEdit(next);
-    if (!commandId || !shot || !currentSceneId) return;
+    if (!shot || !currentSceneId) return;
     notes.editSaved(next.shotId, next.field, commandId);
     if (next.field === "narration" && fromCheck?.shotId === next.shotId && estimate?.fits) {
       narrationFromCheck.current = null;
       setSettled({
         kind: "edited", sceneId: currentSceneId, shotId: shot.shotId, label: shot.label, letter: fromCheck.letter,
         seconds: estimate.seconds, shotSeconds: estimate.shotSeconds, hadClip: false, text: next.value,
-        commandId: store.getState().toast?.undoCommandId ?? null,
+        commandId: store.getState().toast?.undoCommandId ?? commandId,
         cursor: store.getState().overview?.cursor ?? 0,
       });
     }
   }, [overview, store, currentSceneId, notes]);
+
+  const saveDraft = useCallback(async (next: EditDraft) => {
+    const commandId = await store.saveEdit(next);
+    if (commandId) draftSaved(next, commandId);
+  }, [store, draftSaved]);
 
   /** Motion and duration share one original baseline and one atomic, undoable command. */
   const saveMotion = useCallback(async (motion: string, secondsValue: number) => {
@@ -331,6 +335,7 @@ function Workspace() {
               onRetryVideo={confirm}
               onEdit={editDraft}
               onSaveDraft={(next) => void saveDraft(next)}
+              onNarrationSaved={(commandId) => { if (draft?.field === "narration") draftSaved({ ...draft, value: draft.value.trim() }, commandId); }}
               onSaveMotion={(motion, secondsValue) => void saveMotion(motion, secondsValue)}
               onRelease={(attemptId) => void store.releaseAttempt(attemptId)}
               onEditInPlan={() => editInPlan(selected.shotId)}

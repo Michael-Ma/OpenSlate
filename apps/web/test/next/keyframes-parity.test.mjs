@@ -276,10 +276,10 @@ test('using an earlier take is free; with a finished clip it says the clip must 
   const overview = lastFerryOverview();
   assert.equal(en(takeImpact(overview, shot(overview, '1.1'), 'en-US')), 'Using an earlier take is free, but 1.1\'s clip goes out of date; making it again costs about $0.50.');
   // No clip price anywhere: never $0.00.
-  for (const s of overview.scenes) delete s.quotes.confirmVideo;
+  for (const s of overview.scenes) delete s.quotes.oneClip;
   assert.equal(en(takeImpact(overview, shot(overview, '1.1'), 'en-US')), 'Using an earlier take is free, but 1.1\'s clip goes out of date and needs making again.');
   const unknown = lastFerryOverview();
-  scene(unknown, 2).quotes.confirmVideo = { micros: '0', units: 3, unitMicros: '0', priceUnknown: true };
+  scene(unknown, 1).quotes.oneClip = { micros: '0', units: 1, unitMicros: '0', priceUnknown: true };
   assert.ok(!en(takeImpact(unknown, shot(unknown, '1.1'), 'en-US')).includes('$0.00'));
 });
 

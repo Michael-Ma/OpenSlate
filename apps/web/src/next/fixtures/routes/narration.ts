@@ -110,7 +110,7 @@ function apply(world: FixtureWorld, shotId: string, overviewShot: ShotOverview, 
     const revisionId = `rev-narration-${headVersion}`;
     const shots = w.snapshot.project.shots.map((existing) => (existing.id === shotId ? row : existing));
     w.snapshot = { ...w.snapshot, project: { ...w.snapshot.project, shots, headVersion, revisionId } };
-    w.overview = recompute({ ...w.overview, headVersion, revisionId, shots: { ...w.overview.shots, [shotId]: overviewShot } }, w.snapshot.notes ?? []);
+    w.overview = recompute({ ...w.overview, headVersion, revisionId, shots: { ...w.overview.shots, [shotId]: overviewShot } }, w.snapshot.notes ?? [], w.snapshot.project.shots);
   });
 }
 

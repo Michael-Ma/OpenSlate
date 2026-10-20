@@ -28,13 +28,14 @@ import type {
 } from "@openslate/core/public";
 import { joinPromptParts } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
-import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS, narrationPace } from "../model/checks.ts";
+import { estimateNarrationSeconds, narrationPace } from "../model/checks.ts";
 import type { GenerateBody, SceneGenerationRead, StoryboardEdit } from "../model/commands.ts";
 import { isWorking as mediaWorking, shotHasNoAnswer, unresolvedQueue } from "../model/keyframes.ts";
 import { pendingAutomaticRetry } from "../model/media-state.ts";
 import type { ProjectSnapshot } from "../model/types.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
 import { artifactFor } from "./last-ferry.ts";
+import { fixtureFitSeconds, fixtureNarrationFitFrames } from "./narration-fit.ts";
 
 /**
  * Simulated commands for the fixture film: frame views, scene generation reads and presses, the
@@ -45,7 +46,7 @@ import { artifactFor } from "./last-ferry.ts";
  */
 
 /** Per-unit estimates in micro-dollars, as a host would configure them. */
-export const FIXTURE_PRICES = { keyframe: 40000, clip: 500000 } as const;
+export const FIXTURE_PRICES = { keyframe: 40000, clip: 500000, voice: 10000 } as const;
 /** Simulated provider time; a scene confirm spends `voiceStepMs` on each voice step (make, save, fit) before its clips. */
 export const FIXTURE_TIMING = { keyframeMs: 3000, clipMs: 2000, voiceStepMs: 900 } as const;
 /**
@@ -57,15 +58,29 @@ export const FIXTURE_VOICE_STRETCH = 1.1;
 
 const DIGEST = "f".repeat(64);
 const isWorking = (slot: MediaSlot) => slot.state === "running" || slot.state === "queued";
-const quote = (units: number, unit: number): PriceQuote => ({ micros: String(units * unit), units, unitMicros: String(unit), priceUnknown: false });
+const quote = (units: number, unit: number): PriceQuote => ({ micros: String(units * unit), units, unitMicros: units ? String(unit) : "0", priceUnknown: false });
+const generationQuote = (keyframes: number, voices: number, clips = 0): PriceQuote => {
+  const units = keyframes + voices + clips;
+  const micros = keyframes * FIXTURE_PRICES.keyframe + voices * FIXTURE_PRICES.voice + clips * FIXTURE_PRICES.clip;
+  const kinds = [keyframes, voices, clips].filter((count) => count > 0).length;
+  return { micros: String(micros), units, unitMicros: units && kinds === 1 ? String(micros / units) : "0", priceUnknown: false };
+};
+
+/** Missing generated lines only: choosing a recording or leaving the mode undecided never buys speech. */
+function needsVoice(shot: ShotOverview, projectShots?: ProjectSnapshot["project"]["shots"]): boolean {
+  const mode = projectShots ? projectShots.find((row) => row.id === shot.shotId)?.narration?.mode : "generated";
+  return mode === "generated" && !!shot.narration.text.trim() && ["text_only", "failed"].includes(shot.narration.state);
+}
 
 // ---- recompute ---------------------------------------------------------------------
 
 function narrationFits(narration: ShotNarration, durationFrames: number, fps: number): ShotNarration {
-  if (narration.state === "none" || !narration.text.trim()) return { ...narration, fits: true };
+  const { fitSeconds: _fitSeconds, ...line } = narration;
+  if (narration.state === "none" || !narration.text.trim()) return { ...line, fits: true };
   const length = narration.measuredSeconds ?? narration.estimatedSeconds;
   const fits = length === undefined ? null : length <= durationFrames / fps + 1e-9;
-  return { ...narration, fits };
+  const fitSeconds = fixtureFitSeconds(durationFrames, narration.measuredSeconds, fps);
+  return { ...line, fits, ...(fitSeconds !== undefined ? { fitSeconds } : {}) };
 }
 
 function sceneState(scene: SceneOverview, shots: ShotOverview[]): SceneOverview["state"] {
@@ -90,13 +105,13 @@ function blockingNotes(notes: readonly DirectorNote[], scene: SceneOverview): Di
     && (note.anchor.sceneId === scene.sceneId || (note.anchor.shotIds ?? []).some((id) => scene.shotIds.includes(id))));
 }
 
-function recomputeScene(overview: GenerationOverview, scene: SceneOverview, notes: readonly DirectorNote[]): SceneOverview {
+function recomputeScene(overview: GenerationOverview, scene: SceneOverview, notes: readonly DirectorNote[], projectShots?: ProjectSnapshot["project"]["shots"]): SceneOverview {
   const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
   const state = sceneState(scene, shots);
   const keyframesReady = shots.filter((shot) => shot.keyframe.state === "ready").length;
   const videoTargets = state === "making_video" || keyframesReady > 0 ? shots.filter((shot) => shot.video.state !== "ready").map((shot) => shot.shotId) : [];
   const keyframeTargets = shots
-    .filter((shot) => shot.keyframe.state === "none" || shot.keyframe.state === "outdated" || (shot.keyframe.state === "failed" && shot.keyframe.failure?.retryAllowed !== false))
+    .filter((shot) => shot.keyframe.state === "none" || shot.keyframe.state === "outdated" || (shot.keyframe.state === "failed" && shot.keyframe.failure?.retryAllowed !== false) || needsVoice(shot, projectShots))
     .map((shot) => shot.shotId);
   const blockers: SceneBlocker[] = [];
   if (videoTargets.length) {
@@ -116,11 +131,11 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview, note
     if (shots.some((shot) => shot.keyframe.state === "no_answer" || shot.video.state === "no_answer")) blockers.push({ code: "no_answer_in_scene" });
     if (overview.stopped) blockers.push({ code: "stopped" });
     if (directorCovers(overview, scene)) blockers.push({ code: "director_working" });
-    if (state === "making_video") blockers.push({ code: "confirmation_running" });
   } else if (keyframeTargets.length) {
     if (overview.stopped) blockers.push({ code: "stopped" });
     if (directorCovers(overview, scene)) blockers.push({ code: "director_working" });
   }
+  if (state === "making_video" || scene.keyframesRun?.state === "running") blockers.push({ code: "confirmation_running" });
   return {
     ...scene,
     state,
@@ -134,8 +149,11 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview, note
     keyframeTargets,
     quotes: {
       regenerateKeyframe: quote(1, FIXTURE_PRICES.keyframe),
-      ...(videoTargets.length && state !== "making_video" ? { confirmVideo: quote(videoTargets.length, FIXTURE_PRICES.clip) } : {}),
-      ...(keyframeTargets.length ? { makeKeyframes: quote(keyframeTargets.length, FIXTURE_PRICES.keyframe) } : {}),
+      confirmVideo: generationQuote(0, videoTargets.filter((id) => needsVoice(overview.shots[id]!, projectShots)).length, videoTargets.length),
+      voice: quote(shots.filter((shot) => needsVoice(shot, projectShots)).length, FIXTURE_PRICES.voice),
+      oneClip: quote(1, FIXTURE_PRICES.clip),
+      oneVoice: quote(1, FIXTURE_PRICES.voice),
+      ...(keyframeTargets.length ? { makeKeyframes: generationQuote(keyframeTargets.filter((id) => overview.shots[id]!.keyframe.state !== "ready").length, keyframeTargets.filter((id) => needsVoice(overview.shots[id]!, projectShots)).length) } : {}),
     },
     blockers,
     confirmationDigest: videoTargets.length ? DIGEST : null,
@@ -146,14 +164,14 @@ function recomputeScene(overview: GenerationOverview, scene: SceneOverview, note
  * Pure. Derives every roll-up (narration fit, scene state, counts, targets, quotes, blockers) from the shots,
  * the stop state, the Director's activity and its open blocking notes, the way the server's overview read does.
  */
-export function recompute(overview: GenerationOverview, notes: readonly DirectorNote[] = []): GenerationOverview {
+export function recompute(overview: GenerationOverview, notes: readonly DirectorNote[] = [], projectShots?: ProjectSnapshot["project"]["shots"]): GenerationOverview {
   const shots: Record<string, ShotOverview> = {};
   for (const [id, shot] of Object.entries(overview.shots)) {
     const keyframe: KeyframeSlot = shot.keyframe.state === "ready" ? shot.keyframe : { ...shot.keyframe, opened: false };
-    shots[id] = { ...shot, keyframe, narration: narrationFits(shot.narration, shot.durationFrames, overview.fps) };
+    shots[id] = { ...shot, keyframe, narration: narrationFits(shot.narration, shot.durationFrames, overview.fps), quotes: { ...shot.quotes, regenerateKeyframe: generationQuote(1, needsVoice(shot, projectShots) ? 1 : 0) } };
   }
   const withShots = { ...overview, shots };
-  return { ...withShots, scenes: overview.scenes.map((scene) => recomputeScene(withShots, scene, notes)) };
+  return { ...withShots, scenes: overview.scenes.map((scene) => recomputeScene(withShots, scene, notes, projectShots)) };
 }
 
 // ---- world helpers -----------------------------------------------------------------
@@ -180,12 +198,14 @@ interface Extra {
   edits: Record<string, { shotId: string; field: string }>;
   /** What an accepted proposal changed, for its undo. */
   accepted: Record<string, { shotId: string; before: ShotOverview; after: number }>;
+  /** Which voice run owns a shot's transient making marker. Later runs replace this ownership. */
+  voiceOwners: Record<string, string>;
 }
 
 const extras = new WeakMap<FixtureWorld, Extra>();
 function extra(world: FixtureWorld): Extra {
   let value = extras.get(world);
-  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {} }; extras.set(world, value); }
+  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {}, voiceOwners: {} }; extras.set(world, value); }
   return value;
 }
 const nextId = (world: FixtureWorld, prefix: string) => `${prefix}-${++extra(world).serial}`;
@@ -250,7 +270,7 @@ function settle(w: FixtureWorld, overview: GenerationOverview): void {
   const notes = staleNotes(w.snapshot.notes ?? [], overview);
   if (notes) w.snapshot = { ...w.snapshot, notes };
   w.proposals = staleProposals(w.proposals ?? [], overview);
-  w.overview = recompute(overview, w.snapshot.notes ?? []);
+  w.overview = recompute(overview, w.snapshot.notes ?? [], w.snapshot.project.shots);
 }
 
 function commit(world: FixtureWorld, change: (overview: GenerationOverview, snapshot: ProjectSnapshot) => { overview: GenerationOverview; snapshot?: ProjectSnapshot }): void {
@@ -339,10 +359,13 @@ function generate(world: FixtureWorld, sceneId: string, body: GenerateInput): Ge
 interface GenerateReceipt { accepted: true; requestId?: string; sceneId?: string; kind?: "image"; shotIds?: string[]; targetShotIds: string[] }
 
 function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: GenerateInput): GenerateReceipt {
+  if (scene.blockers.some((blocker) => blocker.code === "confirmation_running")) throw new ApiError("CONFIRMATION_RUNNING", 409);
   if (body.regenerate && !body.targetShotIds?.length) throw new ApiError("VALIDATION_ERROR", 400);
   if (body.targetShotIds?.some((id) => !scene.shotIds.includes(id))) throw new ApiError("SCOPE_DENIED", 403);
   const candidates = body.targetShotIds ?? scene.shotIds;
-  const targets = candidates.filter((id) => body.regenerate || world.overview.shots[id]!.keyframe.state !== "ready");
+  const targets = candidates.filter((id) => body.regenerate || world.overview.shots[id]!.keyframe.state !== "ready" || needsVoice(world.overview.shots[id]!, world.snapshot.project.shots));
+  const images = targets.filter((id) => body.regenerate || world.overview.shots[id]!.keyframe.state !== "ready");
+  const voices = targets.filter((id) => needsVoice(world.overview.shots[id]!, world.snapshot.project.shots));
   if (!targets.length) throw new ApiError("ALREADY_COMPLETE", 409);
   if (targets.some((id) => {
     const shot = world.overview.shots[id]!;
@@ -350,14 +373,14 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
       || pendingAutomaticRetry(shot.keyframe) || unresolvedQueue(shot.keyframe) || unresolvedQueue(shot.video, true);
   }))
     throw new ApiError("ATTEMPT_EXISTS", 409);
-  assertEstimate(body, targets.length, FIXTURE_PRICES.keyframe);
+  if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== generationQuote(images.length, voices.length).micros) throw new ApiError("ESTIMATE_CHANGED", 409);
   extra(world).undo = null;
   const started = now();
   const attempts: Record<string, string> = {};
-  for (const id of targets) attempts[id] = nextId(world, "attempt");
+  for (const id of images) attempts[id] = nextId(world, "attempt");
   commit(world, (overview) => {
     let next = overview;
-    for (const id of targets)
+    for (const id of images)
       next = withShot(next, id, (shot) => {
         const previous = shot.keyframe.state === "ready" ? shot.keyframe.artifact : shot.keyframe.previous;
         return {
@@ -368,9 +391,9 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
       });
     return { overview: next };
   });
-  world.later(FIXTURE_TIMING.keyframeMs, (w) => {
+  if (images.length) world.later(FIXTURE_TIMING.keyframeMs, (w) => {
     let next = w.overview;
-    for (const id of targets)
+    for (const id of images)
       next = withShot(next, id, (shot) => {
         if (shot.keyframe.state !== "running" || shot.keyframe.attemptId !== attempts[id]) return shot;
         const take = shot.keyframe.takeCount + 1;
@@ -380,6 +403,7 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
       });
     settle(w, next);
   });
+  if (voices.length) startVoices(world, scene, [], voices, "keyframes");
   const requestId = nextId(world, "request");
   extra(world).requests[requestId] = { regenerate: !!body.regenerate, shotIds: targets };
   return { accepted: true, requestId, sceneId: scene.sceneId, kind: "image", shotIds: targets, targetShotIds: targets };
@@ -419,9 +443,9 @@ function confirmScene(world: FixtureWorld, sceneId: string, body: ConfirmSceneIn
   if (world.overview.stopped) throw new ApiError("EXECUTION_PAUSED", 409);
   if (!body?.confirmationDigest || body.confirmationDigest !== scene.confirmationDigest) throw new ApiError("SCENE_REVIEW_STALE", 409);
   const targets = clipTargets(world, scene, body.reviewedFrames);
-  if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== String(targets.length * FIXTURE_PRICES.clip)) throw new ApiError("ESTIMATE_CHANGED", 409);
   // Lines with words but no voice yet are voiced first, one shot at a time: make, save, fit (speech, attach, accept).
-  const voices = targets.filter((id) => world.overview.shots[id]!.narration.state === "text_only");
+  const voices = targets.filter((id) => needsVoice(world.overview.shots[id]!, world.snapshot.project.shots));
+  if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== generationQuote(0, voices.length, targets.length).micros) throw new ApiError("ESTIMATE_CHANGED", 409);
   if (!voices.length) {
     const confirmationId = startClips(world, scene, targets);
     return { confirmationId, state: "running", currentShotId: targets[0]!, currentStep: "video" };
@@ -437,6 +461,9 @@ interface VoiceRun {
   voices: string[];
   /** The keyframe each clip was confirmed with; a frame that changes meanwhile stops the confirm. */
   frames: Record<string, string | undefined>;
+  kind: "video" | "keyframes";
+  texts: Record<string, string>;
+  intents: Record<string, string>;
 }
 
 /**
@@ -445,19 +472,23 @@ interface VoiceRun {
  * longer than its shot with no fit chosen (NARRATION_CUE_OUT_OF_RANGE; the fit measures the estimate, stretched a
  * little), and at any step when a confirmed frame changed meanwhile (SCENE_REVIEW_STALE).
  */
-function startVoices(world: FixtureWorld, scene: SceneOverview, targets: string[], voices: string[]): SceneConfirmationView {
+function startVoices(world: FixtureWorld, scene: SceneOverview, targets: string[], voices: string[], kind: VoiceRun["kind"] = "video"): SceneConfirmationView {
   extra(world).undo = null;
   const confirmationId = nextId(world, "confirmation");
   const since = now();
   const first = voices[0]!;
   const frames = Object.fromEntries(targets.map((id) => [id, world.overview.shots[id]!.keyframe.artifact?.artifactId]));
+  const texts = Object.fromEntries(voices.map((id) => [id, world.overview.shots[id]!.narration.text]));
+  const intents = Object.fromEntries(voices.map((id) => [id, JSON.stringify(world.snapshot.project.shots.find((row) => row.id === id)?.narration) ?? ""]));
+  const field = kind === "keyframes" ? "keyframesRun" : "confirmation";
+  extra(world).voiceOwners[first] = confirmationId;
   commit(world, (overview) => {
-    let next = withScene(overview, scene.sceneId, (s) => ({ ...s, confirmation: { confirmationId, state: "running", currentShotId: first, currentStep: "speech" } }));
+    let next = withScene(overview, scene.sceneId, (s) => ({ ...s, [field]: { confirmationId, state: "running", currentShotId: first, currentStep: "speech" } }));
     for (const id of targets)
       next = withShot(next, id, (shot) => ({ ...shot, video: { state: "queued", takeCount: shot.video.takeCount, waiting: { code: "voice", since }, ...(shot.video.previous ? { previous: shot.video.previous } : {}) } }));
     return { overview: withShot(next, first, (shot) => ({ ...shot, narration: { ...shot.narration, state: "making" } })) };
   });
-  scheduleVoice(world, { sceneId: scene.sceneId, confirmationId, targets, voices, frames }, 0, "speech");
+  scheduleVoice(world, { sceneId: scene.sceneId, confirmationId, targets, voices, frames, kind, texts, intents }, 0, "speech");
   return { confirmationId, state: "running", currentShotId: first, currentStep: "speech" };
 }
 
@@ -466,26 +497,37 @@ function blockConfirm(overview: GenerationOverview, run: VoiceRun, code: string,
   let next = overview;
   for (const id of run.targets)
     next = withShot(next, id, (s) => (s.video.state === "queued" ? { ...s, video: { state: "none", takeCount: s.video.takeCount, ...(s.video.previous ? { previous: s.video.previous } : {}) } } : s));
-  return withScene(next, run.sceneId, (s) => ({ ...s, confirmation: { confirmationId: run.confirmationId, state: "blocked", blocker: { code, shotId } } }));
+  const field = run.kind === "keyframes" ? "keyframesRun" : "confirmation";
+  return withScene(next, run.sceneId, (s) => ({ ...s, [field]: { confirmationId: run.confirmationId, state: "blocked", blocker: { code, shotId } } }));
 }
 
 function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: "speech" | "attach" | "accept"): void {
   const { sceneId, confirmationId, targets, voices } = run;
+  const field = run.kind === "keyframes" ? "keyframesRun" : "confirmation";
   world.later(FIXTURE_TIMING.voiceStepMs, (w) => {
     const scene = w.overview.scenes.find((s) => s.sceneId === sceneId);
     const shotId = voices[index]!;
     let next = w.overview;
+    const clearOwnedMaking = (overview: GenerationOverview): GenerationOverview => {
+      if (extra(w).voiceOwners[shotId] !== confirmationId) return overview;
+      delete extra(w).voiceOwners[shotId];
+      return overview.shots[shotId]?.narration.state === "making"
+        ? withShot(overview, shotId, (shot) => ({ ...shot, narration: { ...shot.narration, state: "text_only" } })) : overview;
+    };
     // Stop cancels the confirm; a cancelled or replaced one goes no further. A voice job already sent still finishes.
-    if (!scene || scene.confirmation?.confirmationId !== confirmationId || scene.confirmation.state !== "running") {
-      if (step === "speech" && next.shots[shotId]?.narration.state === "making") settle(w, withShot(next, shotId, (s) => ({ ...s, narration: { ...s.narration, state: "text_only" } })));
+    if (!scene || scene[field]?.confirmationId !== confirmationId || scene[field]?.state !== "running") {
+      const cleared = clearOwnedMaking(next);
+      if (cleared !== next) settle(w, cleared);
       return;
     }
+    if (extra(w).voiceOwners[shotId] !== confirmationId) return;
+    if (next.shots[shotId]?.narration.text !== run.texts[shotId] || (JSON.stringify(w.snapshot.project.shots.find((row) => row.id === shotId)?.narration) ?? "") !== run.intents[shotId]) { settle(w, blockConfirm(clearOwnedMaking(next), run, "SCENE_REVIEW_STALE", shotId)); return; }
     if (step === "speech") next = withShot(next, shotId, (shot) => ({ ...shot, narration: { ...shot.narration, state: "text_only" } }));
     // A confirmed frame that changed meanwhile (a new take, an edited prompt) stops the confirm at its shot.
     const changed = targets.find((id) => { const keyframe = next.shots[id]?.keyframe; return keyframe?.state !== "ready" || keyframe.artifact?.artifactId !== run.frames[id]; });
     if (changed) { settle(w, blockConfirm(next, run, "SCENE_REVIEW_STALE", changed)); return; }
     const at = (currentShotId: string, currentStep: "speech" | "attach" | "accept") =>
-      withScene(next, sceneId, (s) => ({ ...s, confirmation: { confirmationId, state: "running", currentShotId, currentStep } }));
+      withScene(next, sceneId, (s) => ({ ...s, [field]: { confirmationId, state: "running", currentShotId, currentStep } }));
     if (step === "speech" || step === "attach") {
       const following = step === "speech" ? "attach" : "accept";
       settle(w, at(shotId, following));
@@ -498,15 +540,21 @@ function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: 
     const measured = Math.round(estimate * FIXTURE_VOICE_STRETCH * 10) / 10;
     const { estimatedSeconds: _estimate, ...line } = shot.narration;
     next = withShot(next, shotId, (s) => ({ ...s, narration: { ...line, state: "ready", measuredSeconds: measured } }));
+    delete extra(w).voiceOwners[shotId];
     if (measured > shot.durationFrames / w.overview.fps + 1e-9 && !shot.narration.fit) {
       settle(w, blockConfirm(next, run, "NARRATION_CUE_OUT_OF_RANGE", shotId));
       return;
     }
     const following = voices[index + 1];
     if (following) {
+      extra(w).voiceOwners[following] = confirmationId;
       next = withShot(next, following, (s) => ({ ...s, narration: { ...s.narration, state: "making" } }));
       settle(w, at(following, "speech"));
       scheduleVoice(w, run, index + 1, "speech");
+      return;
+    }
+    if (run.kind === "keyframes") {
+      settle(w, withScene(next, sceneId, (s) => ({ ...s, keyframesRun: { confirmationId, state: "done" } })));
       return;
     }
     // Every line is voiced: the clips go out one after another, as without voice steps.
@@ -722,15 +770,14 @@ function narrationFit(world: FixtureWorld, shotId: string, body: NarrationFitInp
   if (body?.fit !== "extend_shot" && body?.fit !== "cut_to_shot") throw new ApiError("VALIDATION_ERROR", 400);
   if (body.expectedHeadVersion !== world.snapshot.project.headVersion) throw new ApiError("REVISION_CONFLICT", 409);
   const shot = findShot(world, shotId);
-  const length = shot.narration.measuredSeconds ?? shot.narration.estimatedSeconds;
-  if (shot.narration.state === "none" || length === undefined) throw new ApiError("VALIDATION_ERROR", 400);
+  if (world.overview.scenes.find((scene) => scene.sceneId === shot.sceneId)?.blockers.some((blocker) => blocker.code === "confirmation_running")) throw new ApiError("CONFIRMATION_RUNNING", 409);
+  const length = shot.narration.measuredSeconds;
+  if (shot.narration.state !== "ready" || length === undefined) throw new ApiError("NARRATION_RECORDING_REQUIRED", 409);
   if (isWorking(shot.video)) throw new ApiError("ATTEMPT_EXISTS", 409);
   const fps = world.overview.fps;
+  const frames = fixtureNarrationFitFrames(shot.durationFrames, length, fps, body.fit);
   let edited: ShotOverview;
   if (body.fit === "extend_shot") {
-    const seconds = Math.min(MAX_SHOT_SECONDS, Math.max(MIN_SHOT_SECONDS, Math.ceil(length + 0.3)));
-    if (seconds + 1e-9 < length) throw new ApiError("SHOT_SHORTER_THAN_NARRATION", 409);
-    const frames = Math.max(shot.durationFrames, seconds * fps);
     edited = { ...shot, durationFrames: frames, narration: { ...shot.narration, fit: "extend_shot" }, video: frames === shot.durationFrames ? shot.video : outdateClip(shot.video, "desiredFrames") };
   } else {
     edited = { ...shot, narration: { ...shot.narration, fit: "cut_to_shot" } };
@@ -868,9 +915,10 @@ function control(world: FixtureWorld, body: ControlInput): ControlReceipt {
         };
         shots[id] = { ...shot, keyframe: detach(shot.keyframe), video: detach(shot.video) };
       }
-      const scenes = overview.scenes.map((scene) => (scene.confirmation?.state === "running" || scene.confirmation?.state === "blocked"
-        ? { ...scene, confirmation: { confirmationId: scene.confirmation.confirmationId, state: "cancelled" as const } }
-        : scene));
+      const scenes = overview.scenes.map((scene) => ({ ...scene,
+        ...(scene.confirmation?.state === "running" || scene.confirmation?.state === "blocked" ? { confirmation: { confirmationId: scene.confirmation.confirmationId, state: "cancelled" as const } } : {}),
+        ...(scene.keyframesRun?.state === "running" || scene.keyframesRun?.state === "blocked" ? { keyframesRun: { confirmationId: scene.keyframesRun.confirmationId, state: "cancelled" as const } } : {}),
+      }));
       const stopped = { stopId: nextId(world, "stop"), at: now(), sentJobs, detachedJobs };
       return {
         overview: { ...overview, shots, scenes, stopped, controlAuthorityId: nextId(world, "authority") },

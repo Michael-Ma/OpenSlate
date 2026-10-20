@@ -6,6 +6,8 @@ import type { MessageId } from "../i18n/messages.ts";
 export interface Msg {
   id: MessageId;
   values?: MessageValues;
+  /** Localized message values, kept as ids until rendering so a later locale switch translates every part. */
+  messages?: Readonly<Record<string, Msg>>;
 }
 
 export const msg = (id: MessageId, values?: MessageValues): Msg => (values ? { id, values } : { id });

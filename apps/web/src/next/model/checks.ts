@@ -13,8 +13,8 @@ export type AppCheck = {
   lineSeconds: number;
   estimated: boolean;
   shotSeconds: number;
-  /** The whole-second length that would fit the line (within the 3–15 s shot range). */
-  fitSeconds: number;
+  /** The server's extension target; absent for estimates or a line outside the model's duration range. */
+  fitSeconds?: number;
   /** The shot's clip is saved: the line is settled before exporting the film, not before making video. */
   hasClip: boolean;
 };
@@ -47,7 +47,7 @@ export function narrationChecks(shots: readonly ShotOverview[], fps: number): Ap
       lineSeconds: round1(lineSeconds),
       estimated: line.measuredSeconds === undefined,
       shotSeconds,
-      fitSeconds: Math.min(MAX_SHOT_SECONDS, Math.max(MIN_SHOT_SECONDS, Math.ceil(lineSeconds + 0.3))),
+      ...(line.fitSeconds !== undefined ? { fitSeconds: line.fitSeconds } : {}),
       hasClip: shot.video.state === "ready",
     });
   }
@@ -179,10 +179,10 @@ export function checkTimeline(check: AppCheck, overview: GenerationOverview): Ch
   const before = beforeId ? overview.shots[beforeId] : undefined;
   const lead = before ? [shotSegment(before, secondsOf(before, overview.fps), false)] : [];
   const tail = tailOf(overview, check.shotId);
-  const added = round1(check.fitSeconds - check.shotSeconds);
+  const added = check.fitSeconds === undefined ? 0 : round1(check.fitSeconds - check.shotSeconds);
   return {
     now: [...lead, shotSegment(shot, check.shotSeconds, false), tailSegment(tail, "now", 0)],
-    after: [...lead, shotSegment(shot, check.fitSeconds, true), tailSegment(tail, "later", added)],
+    after: check.fitSeconds === undefined ? [] : [...lead, shotSegment(shot, check.fitSeconds, true), tailSegment(tail, "later", added)],
   };
 }
 
@@ -208,22 +208,23 @@ export interface CheckActions {
   /** Lengthen the shot to fit the line. Absent when even 15 s is too short. */
   extend: { seconds: number; frames: number; label: Msg } | null;
   /** Keep the shot's length; the line is cut at its end. `cutSeconds` is what will not be heard. */
-  keep: { seconds: number; cutSeconds: number; label: Msg };
+  keep: { seconds: number; cutSeconds: number; label: Msg } | null;
   edit: { label: Msg };
 }
 
 export function checkActions(check: AppCheck, fps: number): CheckActions {
-  const extendFits = check.fitSeconds + 1e-9 >= check.lineSeconds && check.fitSeconds > check.shotSeconds;
+  const target = check.fitSeconds;
+  const extendFits = !check.estimated && target !== undefined && target + 1e-9 >= check.lineSeconds && target > check.shotSeconds;
   return {
-    extend: extendFits ? { seconds: check.fitSeconds, frames: Math.round(check.fitSeconds * fps), label: msg("check.narration.extend", { label: check.label, seconds: check.fitSeconds }) } : null,
-    keep: { seconds: check.shotSeconds, cutSeconds: round1(check.lineSeconds - check.shotSeconds), label: msg("check.narration.keep", { seconds: check.shotSeconds }) },
+    extend: extendFits ? { seconds: target, frames: Math.round(target * fps), label: msg("check.narration.extend", { label: check.label, seconds: target }) } : null,
+    keep: check.estimated ? null : { seconds: check.shotSeconds, cutSeconds: round1(check.lineSeconds - check.shotSeconds), label: msg("check.narration.keep", { seconds: check.shotSeconds }) },
     edit: { label: msg("check.narration.edit") },
   };
 }
 
 /** The banner's line under the title: what the line does, and what settling it comes before. */
 export function checkBody(check: AppCheck): Msg {
-  return msg(check.hasClip ? "check.narration.body_clip" : "check.narration.body", { label: check.label });
+  return msg(check.estimated ? "check.narration.estimated_body" : check.hasClip ? "check.narration.body_clip" : "check.narration.body", { label: check.label });
 }
 
 export function checkTitle(check: AppCheck): Msg {

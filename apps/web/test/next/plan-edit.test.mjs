@@ -29,8 +29,8 @@ test("the editor starts from the shot as it is now, with its action and video pr
   assert.deepEqual([added.action, added.videoPrompt], ['', '']);
 });
 
-test('prices come from the overview quotes: a keyframe and a clip, and no voice price in the sample film', () => {
-  assert.deepEqual(prices('1.2'), { keyframe: 40000, clip: 500000, voice: null });
+test('prices come from the overview unit quotes, even for a fully made scene', () => {
+  assert.deepEqual(prices('1.2'), { keyframe: 40000, clip: 500000, voice: 10000 });
 });
 
 test('purpose, action or framing outdates the keyframe and the clip, and says they are written into both prompts', () => {
@@ -56,7 +56,7 @@ test('B22: Plan keyframe impact keeps subscription usage distinct from an unset 
   const overview = lastFerryOverview(), shot = overview.shots[shotId('2.1')], scene = overview.scenes.find(scene => scene.sceneId === shot.sceneId);
   scene.quotes.regenerateKeyframe = { micros: '0', unitMicros: '0', units: 1, priceUnknown: false, subscription: 'codex' };
   const prices = unitPrices(overview, shot.sceneId);
-  assert.deepEqual(prices, { keyframe: null, clip: 500000, voice: null, keyframeSubscription: 'codex' });
+  assert.deepEqual(prices, { keyframe: null, clip: 500000, voice: 10000, keyframeSubscription: 'codex' });
   const base = draftOf(shot, 'none', 30), result = shotImpact(shot, base, { ...base, prompt: 'The harbour at dawn.' }, prices, 'en-US');
   assert.match(text(result), /remaking it uses your Codex plan/);
   assert.doesNotMatch(text(result), /no price set|\$0\.00/);
@@ -87,7 +87,7 @@ test('motion or length outdates only the clip; with no clip yet nothing goes out
 });
 
 test('a new line outdates the voice line; the price shows only when one is set (never $0.00)', () => {
-  assert.equal(text(impact('1.2', { line: 'One ticket, please.' })), 'The voice line needs making again; until then its length is an estimate.');
+  assert.equal(text(impact('1.2', { line: 'One ticket, please.' }, { voice: null })), 'The voice line needs making again; until then its length is an estimate.');
   assert.equal(text(impact('1.2', { line: 'One ticket, please.' }, { voice: 10000 })), 'The voice line needs making again (**about $0.01**); until then its length is an estimate.');
   assert.equal(text(impact('1.2', { narration: 'none' })), '1.2 will have no narration. Its voice line stays in Assets.');
   const unpriced = impact('1.2', { prompt: 'Coins on the counter.' }, { keyframe: null });

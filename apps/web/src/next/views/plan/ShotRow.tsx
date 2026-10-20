@@ -112,13 +112,14 @@ export function ShotRow({ row, guard, busy, flash, canMoveScene, dropBefore, dro
   // An unwritten framing or motion says which one is missing: the meta line has no labels.
   const motion = row.motion ? row.motion.charAt(0).toLocaleLowerCase(locale) + row.motion.slice(1) : t("plan.shot.no_motion");
   const offTitle = guard ? { title: guard } : {};
+  const deleteReason = row.deleteIssue ? tm(row.deleteIssue) : guard;
   const items: MenuItem[] = [
     { act: "shot-earlier", label: t("plan.shot.earlier"), onSelect: () => onMove(-1), disabled: off || row.first, ...offTitle },
     { act: "shot-later", label: t("plan.shot.later"), onSelect: () => onMove(1), disabled: off || row.last, ...offTitle },
     { act: "shot-move-scene", label: t("plan.shot.move_scene"), onSelect: onMoveScene, disabled: off || !canMoveScene, ...(guard ? offTitle : canMoveScene ? {} : { title: t("plan.move.only_scene") }) },
     { act: "point-shot", label: t("plan.shot.point", { shot: row.label }), onSelect: onPoint },
     { act: "open-keyframes", label: t("plan.shot.open_keyframes", { shot: row.label }), onSelect: onOpenKeyframes },
-    { act: "delete-shot", label: t("plan.shot.delete", { shot: row.label }), onSelect: onDelete, disabled: off, separated: true, ...(guard ? { title: guard } : {}) },
+    { act: "delete-shot", label: t("plan.shot.delete", { shot: row.label }), onSelect: onDelete, disabled: off || !!deleteReason, separated: true, ...(deleteReason ? { title: deleteReason } : {}) },
   ];
   return (
     <li className={`shot-row${flash ? " flash" : ""}${dropBefore ? " drop-before" : ""}`} id={rowId(row.shotId)} data-shot={row.shotId} {...drop}>
