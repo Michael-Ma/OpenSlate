@@ -1,9 +1,12 @@
-import { canonical, digest, invariant, newId, parseChangeProposal, parseToolArguments, previewCreativePatch, proposalPreviewDigest } from '@openslate/core';
+import { canonical, digest, DomainError, invariant, newId, parseChangeProposal, parseToolArguments, previewCreativePatch, proposalPreviewDigest, toolCatalog } from '@openslate/core';
 import type { ActorContext, CreativePatch, DirectorNote, DirectorProposal, ProjectRecord, ProposalPatch, ProposalPreview, ProposalReceipt, PreviewBindings } from '@openslate/core';
 import type { FastifyInstance } from 'fastify';
 import type { NodeBinding } from '../execution/engine.js';
 import type { ProductionService, ShotNarrationAcceptance } from './service.js';
 import { requiredCommandKey } from './command-key.js';
+import { derivedShotPrompts } from './shot-prompts.js';
+import { narrationSpeechShotScopes } from '../narration/narration-scope.js';
+import { contextToolVersion } from './audio-operation-context.js';
 
 interface TouchedField { shotId?: string; sceneId?: string; field: string; before: unknown; after: unknown }
 interface NarrationAcceptanceSnapshot { state: ShotNarrationAcceptance; cueDigest: string }
@@ -17,10 +20,24 @@ export interface ProposalRecord {
   accepted?: { at: string; touchedFields: TouchedField[]; cursor?: number; narration?: NarrationProposalUndo[] }; noteId?: string;
 }
 const creative = (patch: ProposalPatch): CreativePatch => ({ ...patch, ...(patch.updateShots ? { updateShots: patch.updateShots.map(row => { const copy = { ...row, reauthorPrompts: true }; if (copy.narration === null) delete copy.narration; return copy; }) } : {}) });
+function acceptedDirection(project: ProjectRecord, input: ProposalPatch): ProposalPatch {
+  const patch = structuredClone(input);
+  for (const row of patch.updateShots ?? []) {
+    const shot = project.shots.find(s => s.id === row.id);
+    invariant(shot, 'SCOPE_DENIED', 'Shot does not belong to project');
+    for (const field of ['purpose', 'action', 'framing', 'motion', 'imagePrompt', 'videoPrompt'] as const) if (row[field] !== undefined) row[field] = row[field].trim();
+    Object.assign(row, derivedShotPrompts(shot, row));
+  }
+  return patch;
+}
 function bindings(service: ProductionService, project: ProjectRecord): PreviewBindings {
   const result: PreviewBindings = {};
-  for (const b of service.store.list<NodeBinding>('node_binding', project.id)) if (b.state === 'active' && b.planId === project.activePlanId && b.node.shotId) {
-    result[b.node.shotId] = [...(result[b.node.shotId] ?? []), { ...b, outputs: { ...b.retainedTake?.outputs, ...b.outputs } }];
+  const attempts = service.engine.attempts(project.id).filter(a => !a.released && !['succeeded', 'failed'].includes(a.phase));
+  for (const b of service.store.list<NodeBinding>('node_binding', project.id)) if (b.state === 'active' && b.planId === project.activePlanId) {
+    const shotIds = b.node.shotId ? [b.node.shotId] : b.node.kind === 'speech'
+      ? [...new Set([...narrationSpeechShotScopes(service.store, project.id, b.candidateId), ...narrationSpeechShotScopes(service.store, project.id, b.retainedTake?.candidateId ?? null)])] : [];
+    const running = ['image', 'video', 'speech'].includes(b.node.kind) && attempts.some(a => a.nodeId === b.id && a.candidateId === b.candidateId && a.specDigest === b.node.specDigest);
+    for (const shotId of shotIds) result[shotId] = [...(result[shotId] ?? []), { node: b.node, outputs: { ...b.retainedTake?.outputs, ...b.outputs }, ...(running ? { running: true } : {}) }];
   }
   return result;
 }
@@ -33,9 +50,20 @@ export function rebaseProposal(project: ProjectRecord, proposal: ProposalRecord)
 }
 function view(service: ProductionService, record: ProposalRecord): DirectorProposal {
   const project = service.store.getProject(record.projectId);
-  const state = service.recovery.isImported(record.projectId, 'message', record.requestId)
+  let state = service.recovery.isImported(record.projectId, 'message', record.requestId)
     ? { state: 'stale' as const, staleReason: 'RESTORED_PROJECT' } : rebaseProposal(project, record);
-  const preview = state.state === 'held' ? previewCreativePatch(project, record.patch, bindings(service, project)) : record.preview;
+  let patch = record.patch;
+  if (state.state === 'held') {
+    try {
+      patch = acceptedDirection(project, record.patch);
+      service.validateHeldCreativePublication(record.projectId, creative(patch));
+    }
+    catch (error) {
+      if (!(error instanceof DomainError)) throw error;
+      state = { state: 'stale', staleReason: error.code };
+    }
+  }
+  const preview = state.state === 'held' ? previewCreativePatch(project, patch, bindings(service, project)) : record.preview;
   const noteId = service.store.list<DirectorNote>('director_note', record.projectId).find(n => n.choices.some(c => c.kind === 'proposal' && c.proposalId === record.id))?.noteId;
   return { proposalId: record.id, requestId: record.requestId, ...(noteId ? { noteId } : {}), ...state, preview, previewDigest: proposalPreviewDigest(preview), createdAt: record.createdAt,
     ...(record.accepted ? { accepted: { at: record.accepted.at, touchedFields: record.accepted.touchedFields.map(({ before: _b, after: _a, ...field }) => field) } } : {}) };
@@ -49,11 +77,12 @@ export function proposeChange(service: ProductionService, projectId: string, act
     service.recovery.assertWritable(projectId, actor.requestId);
     service.assertActor(projectId, actor);
     invariant(actor.kind === 'director', 'ACTOR_DENIED', 'Proposals require a Director epoch');
-    parseToolArguments('propose_change', input, '5.0.0');
+    parseToolArguments('propose_change', input, toolCatalog(contextToolVersion(service.store, projectId, actor)).version);
     const store = service.store, project = store.getProject(projectId);
     const turn = store.list<{ id: string; requestId: string; epochId: string }>('director_turn', projectId).find(t => t.requestId === actor.requestId && t.epochId === actor.epochId);
     invariant(turn, 'ACTOR_DENIED', 'Proposals require their application-owned turn');
-    const patch = structuredClone(input.patch), prepared = parseChangeProposal({ variant: 'project', expectedHeadVersion: project.headVersion, creative: creative(patch) });
+    const patch = acceptedDirection(project, input.patch);
+    const prepared = parseChangeProposal({ variant: 'project', expectedHeadVersion: project.headVersion, creative: creative(patch) });
     service.validateHeldCreativePatch(projectId, actor, prepared.creative!);
     const preview = previewCreativePatch(project, patch, bindings(service, project));
     invariant(preview.changes.length, 'VALIDATION_ERROR', 'A held proposal must change a field');
@@ -86,6 +115,14 @@ function noteTransition(service: ProductionService, proposal: ProposalRecord, re
     const next: DirectorNote = { ...base, state: reopen ? 'open' : 'resolved', version: note.version + 1,
       ...(!reopen ? { resolution: { choiceIndex, at: new Date().toISOString(), resultRef: proposal.id } } : {}) };
     service.store.put('director_note', note.noteId, proposal.projectId, next);
+    if (!reopen) for (const choice of note.choices) {
+      if (choice.kind !== 'proposal' || choice.proposalId === proposal.id) continue;
+      const other = service.store.get<ProposalRecord>('director_proposal', choice.proposalId);
+      if (other?.projectId !== proposal.projectId || other.principalId !== proposal.principalId || other.state !== 'held') continue;
+      service.store.put('director_proposal', other.id, proposal.projectId, { ...other, state: 'rejected' });
+      service.store.appendEvent(proposal.projectId, 'proposal.changed', { proposalId: other.id, state: 'rejected', requestId: proposal.requestId });
+      service.releaseFinishedRequestHolds(proposal.projectId, other.requestId);
+    }
     if (reopen) {
       const basis = service.store.get<{ shots: { id: string; revisionId: string }[] }>('director_note_basis', note.noteId);
       if (basis) service.store.put('director_note_basis', note.noteId, proposal.projectId, { ...basis, shots: basis.shots.map(pin => ({ ...pin, revisionId: service.store.getProject(proposal.projectId).shots.find(s => s.id === pin.id)?.revisionId ?? pin.revisionId })) });
@@ -128,7 +165,7 @@ export function proposalCommand(service: ProductionService, projectId: string, i
     invariant(action === 'undo' ? proposal.state === 'accepted' : current.state === 'held', 'PROPOSAL_STALE', 'This proposal is no longer available for this action');
     if (action === 'accept') invariant(previewDigest === current.previewDigest, 'PROPOSAL_PREVIEW_CHANGED', 'The Now/After preview changed. Review it again.');
     const project = store.getProject(projectId);
-    let patch = proposal.patch;
+    let patch = action === 'accept' ? acceptedDirection(project, proposal.patch) : proposal.patch;
     const leftAlone: NonNullable<ProposalReceipt['leftAlone']> = [];
     if (action === 'undo') {
       patch = {};
@@ -164,7 +201,7 @@ export function proposalCommand(service: ProductionService, projectId: string, i
       if (preview.changes.length) service.publishHumanCreativePatch(projectId, actor, creative(patch), (patch.updateShots ?? []).filter(s => s.narration === null).map(s => s.id), restoreNarration);
       const touchedFields = action === 'accept' ? touched(project, patch) : [];
       const narration = touchedFields.filter(field => field.field === 'narration' && field.shotId).map(field => ({ shotId: field.shotId!, before: narrationAcceptance(project, field.shotId!)!, after: narrationAcceptance(store.getProject(projectId), field.shotId!)! }));
-      next = { ...proposal, state: action === 'accept' ? 'accepted' : 'undone', preview, previewDigest: proposalPreviewDigest(preview),
+      next = { ...proposal, ...(action === 'accept' ? { patch } : {}), state: action === 'accept' ? 'accepted' : 'undone', preview, previewDigest: proposalPreviewDigest(preview),
         ...(action === 'accept' ? { accepted: { at: new Date().toISOString(), touchedFields, cursor: store.cursor(projectId), narration } } : {}) };
       noteTransition(service, next, action === 'undo');
     } else next = { ...proposal, state: 'rejected', preview: current.preview, previewDigest: current.previewDigest };

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { digest, parseToolArguments, shotVideoTiming } from '@openslate/core';
+import { digest, parseToolArguments, shotVideoTiming, toolCatalog, toolHandlerId } from '@openslate/core';
 import { FakeProvider } from '@openslate/providers';
 import { verifySkillLock } from '@openslate/director';
 import { Store } from '../dist/persistence/store.js';
@@ -20,7 +20,9 @@ import { createApp } from '../dist/app.js';
 import { projectFixture } from './execution-fixture.mjs';
 import { directorNotes } from '../dist/application/director-notes.js';
 import { editStoryboard } from '../dist/storyboard.js';
-import { proposalCommand, rebaseProposal } from '../dist/application/director-proposals.js';
+import { directorProposals, proposeChange, proposalCommand, rebaseProposal } from '../dist/application/director-proposals.js';
+import { editedPrompt } from '../dist/application/shot-prompts.js';
+import { directorMappedSpeechFixture } from './helpers/director-mapped-speech-fixture.mjs';
 function writable(path) { chmodSync(path, 0o700); for (const e of readdirSync(path, {withFileTypes:true})) if(e.isDirectory()) writable(join(path,e.name)); }
 function fixture(t, {scope=['scene-0'], editing=false, turnState='completed'}={}) {
  const root=mkdtempSync(join(tmpdir(),'openslate-notes-')),store=new Store(join(root,'state.sqlite')),provider=new FakeProvider(join(root,'fake.sqlite'));
@@ -122,7 +124,7 @@ test('accept resolves its proposal note; undo is selective, reports leftAlone an
  assert.equal(f.service.snapshot(f.project.id).notes.find(x=>x.noteId===n.noteId).state,'resolved');
  edit(f,'shot-0','motion','Human pan right');
  const key=randomUUID(),undone=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},key);assert.equal(undone.statusCode,200,undone.body);
- assert.deepEqual(undone.json().leftAlone,[{shotId:'shot-0',field:'motion'}]);assert.equal(undone.json().proposal.state,'undone');
+ assert.deepEqual(undone.json().leftAlone,[{shotId:'shot-0',field:'motion'},{shotId:'shot-0',field:'videoPrompt'}]);assert.equal(undone.json().proposal.state,'undone');
  const shot=f.store.getProject(f.project.id).shots[0];assert.equal(shot.desiredFrames,180);assert.equal(shot.motion,'Human pan right');
  const note=f.service.snapshot(f.project.id).notes.find(x=>x.noteId===n.noteId);assert.equal(note.state,'open');assert.equal(note.resolution,undefined);assert.equal(note.version,3);
  assert.deepEqual((await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},key)).json(),undone.json());
@@ -273,14 +275,116 @@ function acceptedNarration(f) {
  project.cues.push({id:shot.cueId,meaning:shot.narration.text,durationFrames:210,placementFrames:0,audio:{artifactId:'original-audio',sha256:'a'.repeat(64),kind:'audio'},accepted:true,measured:true});
  f.store.saveProject(project,project.headVersion);return f.store.getProject(project.id);
 }
-test('proposal acceptance and prepared publication refuse a shot shorter than its accepted narration',async t=>{
- const f=fixture(t),before=acceptedNarration(f),p=await propose(f,patch({desiredFrames:180}));
- const response=await accept(f,p);assert.equal(response.json().error?.code,'SHOT_SHORTER_THAN_NARRATION',response.body);
- assert.deepEqual(f.store.getProject(f.project.id),before);assert.equal((await list(f))[0].state,'held');
+test('proposal creation and prepared publication refuse a shot shorter than its accepted narration',async t=>{
+ const f=fixture(t),before=acceptedNarration(f);
+ await assert.rejects(propose(f,patch({desiredFrames:180})),{code:'SHOT_SHORTER_THAN_NARRATION'});
+ assert.deepEqual(f.store.getProject(f.project.id),before);assert.deepEqual(await list(f),[]);
  const human=f.service.beginRequest(f.project.id,'local-user','Shorten through shared publication',{source:'app',concurrency:'alongside',editing:true,scopeIds:['shot-0']});
  const prepared=await f.service.prepare(f.project.id,human,{variant:'project',expectedHeadVersion:before.headVersion,creative:{updateShots:[{id:'shot-0',desiredFrames:180,reauthorPrompts:true}]}});
  assert.throws(()=>f.service.apply(f.project.id,human,prepared.id),{code:'SHOT_SHORTER_THAN_NARRATION'});
  assert.deepEqual(f.store.getProject(f.project.id),before);assert.equal(f.provider.acceptedCount(),0);
+});
+test('propose_change rejects person and locked-profile duration bounds before holding a proposal',async t=>{
+ const f=fixture(t),before=f.store.getProject(f.project.id);
+ for(const [desiredFrames,code] of [[89,'VALIDATION_ERROR'],[451,'VALIDATION_ERROR'],[119,'PROFILE_INCOMPATIBLE']]) {
+  await assert.rejects(propose(f,patch({desiredFrames})),error=>{assert.equal(error.code,code);assert.match(error.message,/desiredFrames/);return true;});
+ }
+ assert.deepEqual(await list(f),[]);assert.deepEqual(f.store.getProject(f.project.id),before);assert.equal(f.provider.acceptedCount(),0);
+});
+
+test('held proposals become stale with a reason when accepted cue data makes publication impossible',async t=>{
+ const f=fixture(t),project=acceptedNarration(f);project.shots[0].desiredFrames=300;f.store.saveProject(project,project.headVersion);
+ const p=await propose(f,patch({desiredFrames:270}));
+ // Keep the pinned shot intact; acceptance evidence can change independently of its revision.
+ const later=f.store.getProject(f.project.id);later.cues[0].durationFrames=285;f.store.saveProject(later,later.headVersion);
+ const [stale]=await list(f);assert.equal(stale.state,'stale');assert.equal(stale.staleReason,'SHOT_SHORTER_THAN_NARRATION');
+ assert.equal((await accept(f,p)).json().error.code,'PROPOSAL_STALE');assert.equal(f.provider.acceptedCount(),0);
+});
+test('a held proposal reads stale when unrelated writing removes its planning prerequisite',async t=>{
+ const f=fixture(t),p=await propose(f),project=f.store.getProject(f.project.id);
+ project.brief='';project.narration.script='';f.store.saveProject(project,project.headVersion);
+ const [stale]=await list(f);assert.equal(stale.state,'stale');assert.equal(stale.staleReason,'WORKFLOW_REQUIREMENT');
+ assert.equal((await accept(f,p)).json().error.code,'PROPOSAL_STALE');
+});
+
+test('motion-only proposals show and save the same derived video prompt as a storyboard edit',async t=>{
+ const f=fixture(t),before=f.store.getProject(f.project.id),shot=before.shots[0],motion='Pan left…';
+ const p=await propose(f,patch({motion})),expected=editedPrompt(shot.videoPrompt,{...shot,motion},'video');
+ assert.deepEqual(p.preview.changes.map(c=>[c.field,c.after]),[['motion',motion],['videoPrompt',expected]]);
+ assert.equal((await accept(f,p)).statusCode,200);
+ const saved=f.store.getProject(f.project.id).shots[0];assert.equal(saved.videoPrompt,expected);assert.equal(saved.imagePrompt,shot.imagePrompt);
+ assert.equal((await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},randomUUID())).statusCode,200);
+ assert.equal(f.store.getProject(f.project.id).shots[0].videoPrompt,shot.videoPrompt);
+});
+test('an explicit proposed prompt wins over direction derivation and is shown verbatim',async t=>{
+ const f=fixture(t),p=await propose(f,patch({motion:'Pan left',videoPrompt:'Explicit video recipe'}));
+ assert.equal(p.preview.changes.find(c=>c.field==='videoPrompt').after,'Explicit video recipe');
+ assert.equal((await accept(f,p)).statusCode,200);assert.equal(f.store.getProject(f.project.id).shots[0].videoPrompt,'Explicit video recipe');
+});
+test('a saved legacy motion proposal gains a derived prompt in its preview before acceptance',async t=>{
+ const f=fixture(t),p=await propose(f,patch({motion:'Pan left'})),record=f.store.get('director_proposal',p.proposalId);
+ delete record.patch.updateShots[0].videoPrompt;
+ f.store.put('director_proposal',record.id,f.project.id,record);
+ const [fresh]=await list(f);assert.equal(fresh.state,'held');
+ const expected=editedPrompt(f.project.shots[0].videoPrompt,{...f.project.shots[0],motion:'Pan left'},'video');
+ assert.equal(fresh.preview.changes.find(c=>c.field==='videoPrompt').after,expected);
+ assert.equal((await accept(f,fresh)).statusCode,200);assert.equal(f.store.getProject(f.project.id).shots[0].videoPrompt,expected);
+});
+test('accepting one proposal choice rejects its linked alternatives in the same command',async t=>{
+ const f=fixture(t),p=await propose(f),other=await propose(f,patch({desiredFrames:270}));
+ const note=(await f.record([f.note({choices:[{kind:'proposal',proposalId:p.proposalId},{kind:'proposal',proposalId:other.proposalId}]})])).notes[0];
+ assert.equal((await accept(f,p)).statusCode,200);
+ assert.equal(f.store.get('director_proposal',other.proposalId).state,'rejected');
+ assert.equal(f.store.get('director_note',note.noteId).resolution.resultRef,p.proposalId);
+ assert.equal((await accept(f,other)).json().error.code,'PROPOSAL_STALE');
+});
+
+function reviewActor(f) {
+ const human=f.service.beginRequest(f.project.id,'local-user','Discuss this shot',{editing:false,scopeIds:['shot-0']}),bridge=f.service.openEpoch(f.project.id,human);
+ f.store.insert('director_turn',randomUUID(),f.project.id,{requestId:human.requestId,epochId:bridge.actor.epochId,state:'completed'});
+ new DirectorContextService(f.service,f.saved.environment).capture(f.project.id,bridge.actor,{lockId:f.saved.lock.id,selectedSkillIds:['production','plan-authoring']});
+ return bridge.actor;
+}
+test('an in-flight fake clip changes the preview digest and acceptance stays a human decision without resubmission',async t=>{
+ const f=fixture(t);
+ for(const kind of ['image','video']) {
+  const view=(await f.http('GET','/scenes/scene-0/generation')).json();
+  const response=await f.http('POST','/scenes/scene-0/generate',{kind,headVersion:view.headVersion,revisionId:view.revisionId,reviewedHoldDigest:view.reviewedHoldDigest,reviewedControlAuthorityId:view.reviewedControlAuthorityId,reviewedFrames:kind==='video'?view.rows.map(r=>({shotId:r.shotId,artifactId:r.image.artifactId,sha256:r.image.sha256})):[]},randomUUID());assert.equal(response.statusCode,200,response.body);
+  if(kind==='image')for(let i=0;i<6;i++){await f.engine.runReady();await f.engine.reconcile();}
+ }
+ const binding=f.store.list('node_binding',f.project.id).find(b=>b.state==='active'&&b.node.kind==='video');f.provider.setMode(binding.id,'pending');
+ const actor=reviewActor(f),p=await f.tools.invoke(f.project.id,actor,'pending-clip-proposal','propose_change',patch());
+ assert.ok(!p.preview.effects.some(e=>e.effect==='discards_running'));
+ await f.engine.runReady();const attempt=f.engine.attempts(f.project.id).find(a=>a.nodeId===binding.id);assert.equal(attempt.phase,'remote_pending');
+ const [fresh]=await list(f);assert.equal(fresh.state,'held');assert.ok(fresh.preview.effects.some(e=>e.effect==='discards_running'));assert.notEqual(fresh.previewDigest,p.previewDigest);
+ assert.equal((await accept(f,p)).json().error.code,'PROPOSAL_PREVIEW_CHANGED');
+ const count=f.provider.acceptedCount();assert.equal(count,2);assert.equal((await accept(f,fresh)).statusCode,200);assert.equal(f.provider.acceptedCount(),count);
+ f.provider.complete(attempt.taskId);await f.engine.reconcile();assert.equal(f.engine.attempts(f.project.id).find(a=>a.id===attempt.id).phase,'succeeded');
+ await f.engine.runReady();assert.equal(f.provider.acceptedCount(),count);
+});
+for (const kind of ['image','speech']) test(`a running ${kind} replacement is included even before it returns output`,async t=>{
+ const f=fixture(t),project=f.store.getProject(f.project.id),shot=project.shots[0],id=`running-${kind}`;
+ const binding={id,state:'active',planId:project.activePlanId,candidateId:`candidate-${kind}`,node:{kind,shotId:shot.id,specDigest:'exact-spec',intentDigest:shot.promptIntent.image,args:{prompt:shot.imagePrompt}},outputs:{},retainedTake:{candidateId:'old',outputs:{main:{artifactId:'retained'}}}};
+ f.store.insert('node_binding',id,project.id,binding);
+ const grant=f.engine.createGrant(project.id,shot.id,kind,f.human.requestId);
+ f.store.insert('candidate',binding.candidateId,project.id,{grantId:grant.id,nodeId:id,origin:grant.origin});
+ f.store.insert('attempt',`attempt-${kind}`,project.id,{nodeId:id,candidateId:binding.candidateId,specDigest:'exact-spec',phase:'submission_unknown',ordinal:1,
+  request:{attemptId:`attempt-${kind}`,nodeId:id,kind,fingerprint:'fixture',args:{},inputs:[]}});
+ const p=await propose(f,patch(kind==='image'?{imagePrompt:'New image'}:{narration:{mode:'generated',text:'New line',voice:'stock'}}));
+ assert.ok(p.preview.effects.some(e=>e.effect==='discards_running'));
+});
+test('running application-owned speech without a shotId appears in the mapped shot preview',async t=>{
+ const f=await directorMappedSpeechFixture(t,{admit:true});assert.equal(f.binding.node.shotId,null);assert.deepEqual(f.shotScopes,['shot-0']);
+ const human=f.service.beginRequest(f.project.id,'local-user','Consider this voice line',{editing:false,scopeIds:['shot-0']}),{actor}=f.service.openEpoch(f.project.id,human);
+ const body={id:randomUUID(),compatibility:{toolContract:'5.0.0'},skills:[],bindings:[{kind:'handler',id:toolHandlerId('5.0.0'),digest:toolCatalog('5.0.0').digest}]};
+ f.store.insert('director_skill_lock',body.id,f.project.id,{projectId:f.project.id,lock:{...body,lockDigest:digest(body)}});
+ f.store.insert('director_epoch_lock',actor.epochId,f.project.id,{projectId:f.project.id,epochId:actor.epochId,requestId:actor.requestId,lockId:body.id});
+ f.store.insert('director_turn',randomUUID(),f.project.id,{requestId:human.requestId,epochId:actor.epochId,state:'completed'});
+ const p=proposeChange(f.service,f.project.id,actor,randomUUID(),patch({narration:{mode:'generated',text:'New voice words',voice:'stock'}}));
+ assert.deepEqual(p.preview.effects.filter(e=>e.effect==='discards_running'),[{shotId:'shot-0',effect:'discards_running'}]);
+ assert.deepEqual(directorProposals(f.service,f.project.id).proposals[0].preview,p.preview);
+ const receipt=proposalCommand(f.service,f.project.id,p.proposalId,'accept',randomUUID(),p.previewDigest);
+ assert.equal(receipt.proposal.state,'accepted');assert.deepEqual(f.calls,{http:0,credentials:0});
 });
 for (const mode of ['generated','none']) test(`undo of a ${mode} narration proposal restores exact accepted readiness and fit`,async t=>{
  const f=fixture(t),before=acceptedNarration(f),p=await propose(f,patch({narration:{mode,text:mode==='none'?'':'Proposed replacement line',voice:'stock'}}));

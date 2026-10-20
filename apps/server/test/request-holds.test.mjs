@@ -5,6 +5,7 @@ import { DirectorSupervisor } from '../dist/application/director-supervisor.js';
 import { proposeChange, proposalCommand, directorProposals } from '../dist/application/director-proposals.js';
 import { editStoryboard } from '../dist/storyboard.js';
 import { fixture } from './helpers/generation-fixture.mjs';
+import { digest, toolCatalog, toolHandlerId } from '@openslate/core';
 
 const identity = input => Object.fromEntries(['projectId', 'requestId', 'epochId', 'turnId'].map(key => [key, input[key]]));
 const completed = input => ({ ...identity(input), status: 'completed', text: 'Discussed.', dispatched: true });
@@ -12,7 +13,16 @@ const holds = (f, requestId) => f.store.list('hold', f.project.id).filter(h => h
 const actor = (f, text = 'Consider this scene', options = {}) => f.service.beginRequest(f.project.id, 'local-user', text, { scopeIds: ['scene-0'], ...options });
 const release = (f, requestId, key = randomUUID(), payload) => f.call('POST', `/requests/${requestId}/release-holds`, payload, key);
 function supervisor(t, f, start, options = {}) {
-  const s = new DirectorSupervisor(f.service, { id: 'offline-holds', start }, { mode: 'fake', ...options });
+  const s = new DirectorSupervisor(f.service, { id: 'offline-holds', start: async (input, context) => {
+    // These proposal fixtures exercise the current, immutable tool contract.
+    const body = { id: randomUUID(), compatibility: { toolContract: '5.0.0' }, skills: [],
+      bindings: [{ kind: 'handler', id: toolHandlerId('5.0.0'), digest: toolCatalog('5.0.0').digest }] };
+    const lock = { ...body, lockDigest: digest(body) };
+    f.store.insert('director_skill_lock', lock.id, f.project.id, { projectId: f.project.id, lock });
+    f.store.insert('director_epoch_lock', input.epochId, f.project.id,
+      { projectId: f.project.id, epochId: input.epochId, requestId: input.requestId, lockId: lock.id });
+    return start(input, context);
+  } }, { mode: 'fake', ...options });
   t.after(() => s.close());
   return s;
 }
@@ -66,14 +76,14 @@ test('a pending Director question retains holds until its exact request is let g
   assert.equal(s.status(f.project.id).status, 'idle'); assert.equal(s.status(f.project.id).activeRequestId, null);
 });
 
-for (const action of ['accept', 'reject']) test(`a held proposal retains terminal holds until ${action} resolves it`, async t => {
+for (const action of ['accept', 'reject']) test(`a held proposal releases terminal holds before ${action} resolves it`, async t => {
   const f = fixture(t), human = actor(f); let proposal;
   const s = supervisor(t, f, async input => {
     proposal = proposeChange(f.service, f.project.id, f.service.actorForBridge(f.project.id, input.bridge.credential), randomUUID(), { patch: { updateShots: [{ id: 'shot-0', motion: 'Pan toward the ferry' }] } });
     return completed(input);
   });
   assert.equal((await run(s, f, human)).state, 'completed');
-  assert.equal(holds(f, human.requestId).length, 1);
+  assert.equal(holds(f, human.requestId).length, 0);
   proposalCommand(f.service, f.project.id, proposal.proposalId, action, randomUUID(), proposal.previewDigest);
   assert.equal(holds(f, human.requestId).length, 0);
   assert.equal(f.provider.acceptedCount(), 0);
@@ -92,14 +102,14 @@ test('a proposal made stale by an alongside human edit does not retain terminal 
   assert.equal(holds(f, human.requestId).length, 0);
 });
 
-test('a later alongside edit frees a terminal proposal hold on the next supervisor tick without replaying the turn', async t => {
+test('a later alongside edit does not restore terminal proposal holds or replay the turn', async t => {
   const f = fixture(t), human = actor(f); let calls = 0;
   const s = supervisor(t, f, async input => {
     calls++;
     proposeChange(f.service, f.project.id, f.service.actorForBridge(f.project.id, input.bridge.credential), randomUUID(), { patch: { updateShots: [{ id: 'shot-0', motion: 'Director movement' }] } });
     return completed(input);
   });
-  await run(s, f, human); assert.equal(holds(f, human.requestId).length, 1);
+  await run(s, f, human); assert.equal(holds(f, human.requestId).length, 0);
   editStoryboard(f.service, f.project.id, { kind: 'shot', id: 'shot-0', field: 'motion', value: 'Human movement', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }, randomUUID());
   s.tick(); await s.settle();
   assert.equal(holds(f, human.requestId).length, 0); assert.equal(calls, 1);
@@ -210,4 +220,19 @@ test('edit_pending overview names the exact scoped owner and releasing it lets a
   assert.notEqual((await f.overview()).shots['shot-0'].keyframe.waiting?.code, 'edit_pending', 'an old persisted wait does not resurrect a released hold');
   assert.equal((await f.engine.runReady()).dispatched, 1);
   assert.equal(holds(f, other.requestId).length, 1); assert.equal(f.provider.acceptedCount(), 1);
+});
+
+test('an unlinked held proposal does not hold queued keyframe work after reasoning finishes', async t => {
+  const f = fixture(t), generated = await f.post(await f.get(), 'image'); assert.equal(generated.statusCode, 200, generated.body);
+  const human = actor(f); let proposal;
+  const s = supervisor(t, f, async input => {
+    proposal = proposeChange(f.service, f.project.id, f.service.actorForBridge(f.project.id, input.bridge.credential), randomUUID(),
+      { patch: { updateShots: [{ id: 'shot-0', motion: 'Pan toward the ferry' }] } });
+    return completed(input);
+  });
+  await f.engine.runReady(); assert.equal(f.provider.acceptedCount(), 0);
+  assert.equal((await run(s, f, human)).state, 'completed');
+  assert.equal(directorProposals(f.service, f.project.id).proposals.find(p => p.proposalId === proposal.proposalId).state, 'held');
+  assert.equal(holds(f, human.requestId).length, 0);
+  assert.equal((await f.engine.runReady()).dispatched, 1); assert.equal(f.provider.acceptedCount(), 1);
 });

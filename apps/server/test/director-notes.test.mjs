@@ -29,7 +29,7 @@ function fixture(t, {scope=['scene-0'], editing=false}={}) {
  const config={repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills')};
  const saved=createDirectorSkillLock(config);verifySkillLock(saved.lock,saved.environment);
  new DirectorContextService(service,saved.environment).bootstrapLock(project.id,saved.lock);
- const human=service.beginRequest(project.id,'local-user','Discuss this scene',{scopeIds:scope,editing}),bridge=service.openEpoch(project.id,human),turn={id:randomUUID(),projectId:project.id,requestId:human.requestId,epochId:bridge.actor.epochId,state:"completed"};
+ const human=service.beginRequest(project.id,'local-user','Discuss this scene',{scopeIds:scope==='project'?[project.id]:scope,editing}),bridge=service.openEpoch(project.id,human),turn={id:randomUUID(),projectId:project.id,requestId:human.requestId,epochId:bridge.actor.epochId,state:"completed"};
  store.insert('director_turn',turn.id,project.id,turn);
  new DirectorContextService(service,saved.environment).capture(project.id,bridge.actor,{lockId:saved.lock.id,selectedSkillIds:['production','plan-authoring']});
  const token='notes_fixture_token_123456789',app=createApp({service,localToken:token});
@@ -74,6 +74,38 @@ test('note domain refusals identify the failed field and correction without losi
   assert.deepEqual(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,{code,reason});
  }
  assert.equal(f.store.list('director_note',f.project.id).length,0);
+});
+test('regeneration choices refuse cross-scene shots at their exact path without saving any notes',async t=>{
+ const f=fixture(t,{scope:'project'}),cross=f.note({anchor:{shotIds:['shot-0','shot-1']},choices:[{kind:'regenerate_keyframe',shotIds:['shot-0','shot-1']}]});
+ await assert.rejects(f.record([f.note(),cross],'cross-scene'),error=>error.code==='VALIDATION_ERROR'&&error.details?.reason==='invalid_arguments'
+   &&/\/notes\/1\/choices\/0\/shotIds.*one scene.*separate choices or notes/i.test(error.message));
+ assert.equal(f.store.list('director_note',f.project.id).length,0);
+ assert.equal(f.store.list('director_notes_receipt',f.project.id).length,0);
+ assert.deepEqual(f.service.snapshot(f.project.id).turns[0].notesSaveFailure,{code:'VALIDATION_ERROR',reason:'invalid_arguments'});
+ assert.equal(f.provider.acceptedCount(),0);
+});
+test('a cross-scene anchor may offer separate feasible regeneration choices per scene',async t=>{
+ const f=fixture(t,{scope:'project'}),choices=[{kind:'regenerate_keyframe',shotIds:['shot-0']},{kind:'regenerate_keyframe',shotIds:['shot-1']}];
+ await f.record([f.note({anchor:{shotIds:['shot-0','shot-1']},choices})]);
+ assert.deepEqual(f.store.list('director_note',f.project.id)[0].choices,choices);
+ assert.equal(f.provider.acceptedCount(),0);
+});
+test('proposal and preparation schema refusals persist safe correctable receipts and never create work',async t=>{
+ const f=fixture(t),before=f.store.getProject(f.project.id);
+ for(const tool of ['propose_change','prepare_change']){
+  const changes={updateShots:[{id:'private-shot',motion:'private motion','private/key~field':'private value'}]};
+  const input=tool==='propose_change'?{patch:changes}:{variant:'project',expectedHeadVersion:before.headVersion,creative:changes};
+  const invoke=()=>f.tools.invoke(f.project.id,f.bridge.actor,`invalid-${tool}`,tool,input);
+  await assert.rejects(invoke(),error=>error.code==='VALIDATION_ERROR'&&new RegExp(`/${tool==='propose_change'?'patch':'creative'}/updateShots/0.*allowed fields:`).test(error.message)&&!/private/.test(error.message));
+  const receipt=f.store.list('tool_invocation',f.project.id).find(row=>row.callId===`invalid-${tool}`);
+  assert.equal(receipt.state,'failed');assert.equal(receipt.error.code,'VALIDATION_ERROR');
+  assert.doesNotMatch(JSON.stringify(receipt),/private/);
+  const cursor=f.store.cursor(f.project.id);await assert.rejects(invoke(),{code:'VALIDATION_ERROR'});assert.equal(f.store.cursor(f.project.id),cursor);
+  await assert.rejects(f.tools.invoke(f.project.id,f.bridge.actor,`invalid-${tool}`,tool,{...input,extra:'changed'}),{code:'IDEMPOTENCY_CONFLICT'});
+ }
+ assert.deepEqual(f.store.getProject(f.project.id),before);
+ for(const kind of ['prepared','director_proposal','director_note','grant','candidate','attempt'])assert.equal(f.store.list(kind,f.project.id).length,0,kind);
+ assert.equal(f.provider.acceptedCount(),0);
 });
 test('corrected LIVE-3 payload preserves exact seen-keyframe evidence and refuses a fabricated replacement',async t=>{
  const f=fixture(t),seen={shotId:'shot-0',artifactId:'fixture-frame',sha256:'a'.repeat(64)};
@@ -129,6 +161,50 @@ test('accept is keyed, preserves resolution in context, unaccepted proposals ref
  await assert.rejects(f.record([f.note({choices:[{kind:'proposal',proposalId:'future'}]})]),{code:'SCOPE_DENIED'});
  const stale=(await f.record()).notes[0],p=f.store.getProject(f.project.id);f.store.saveProject({...p,shots:p.shots.map(s=>s.id==='shot-0'?{...s,revisionId:randomUUID()}:s)},p.headVersion);
  assert.equal(f.service.snapshot(f.project.id).notes.find(n=>n.noteId===stale.noteId).state,'stale');assert.equal((await f.resolve(stale.noteId,input,'stale')).json().error.code,'NOTE_STALE');
+});
+test('Keep it rejects every linked held proposal in the same keyed command and leaves unlinked proposals alone',async t=>{
+ const f=fixture(t,{editing:true}),propose=motion=>f.tools.invoke(f.project.id,f.bridge.actor,randomUUID(),'propose_change',{patch:{updateShots:[{id:'shot-0',motion}]}});
+ const linked=[await propose('Slow drift'),await propose('Hold steady')],unlinked=await propose('Soft tracking');
+ const note=(await f.record([f.note({choices:[...linked.map(proposal=>({kind:'proposal',proposalId:proposal.proposalId})),{kind:'accept',label:'Keep it'}]})])).notes[0];
+ f.service.releaseFinishedRequestHolds(f.project.id,f.human.requestId);
+ assert.equal(f.store.list('hold',f.project.id).filter(hold=>hold.active&&hold.requestId===f.human.requestId).length,0);
+ const input={choiceIndex:2,expectedVersion:1},response=await f.resolve(note.noteId,input,'keep');
+ assert.equal(response.statusCode,200,response.body);assert.equal(response.json().state,'resolved');
+ for(const proposal of linked)assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'rejected');
+ assert.equal(f.store.get('director_proposal',unlinked.proposalId).state,'held');
+ assert.equal(f.store.list('hold',f.project.id).filter(hold=>hold.active).length,0);
+ const cursor=f.store.cursor(f.project.id);assert.deepEqual((await f.resolve(note.noteId,input,'keep')).json(),response.json());assert.equal(f.store.cursor(f.project.id),cursor);
+ assert.equal(f.store.readEvents(f.project.id).filter(event=>event.kind==='proposal.changed'&&event.payload.state==='rejected').length,2);
+ assert.equal(f.provider.acceptedCount(),0);
+});
+test('an alternate human field edit rejects a linked stale held proposal only after validating the result',async t=>{
+ const f=fixture(t),proposal=await f.tools.invoke(f.project.id,f.bridge.actor,'proposal','propose_change',{patch:{updateShots:[{id:'shot-0',motion:'A slower drift'}]}});
+ const note=(await f.record([f.note({choices:[{kind:'proposal',proposalId:proposal.proposalId},{kind:'edit_field',shotId:'shot-0',field:'motion'}]})])).notes[0];
+ const input={choiceIndex:1,expectedVersion:1,resultRef:'invented'};
+ assert.equal((await f.resolve(note.noteId,input,'invalid-edit')).json().error.code,'NOTE_RESULT_INVALID');
+ assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'held');
+ const edit=await f.http('POST','/storyboard',{kind:'shot',id:'shot-0',field:'motion',value:'The person chose a still frame',expectedHeadVersion:f.store.getProject(f.project.id).headVersion},'alternate-edit');
+ assert.equal(edit.statusCode,200,edit.body);
+ assert.equal((await f.http('GET','/director/proposals')).json().proposals[0].state,'stale');
+ const resolved=await f.resolve(note.noteId,{...input,resultRef:edit.json().commandId},'valid-edit');assert.equal(resolved.statusCode,200,resolved.body);
+ assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'rejected');
+ assert.equal(f.store.getProject(f.project.id).shots.find(shot=>shot.id==='shot-0').motion,'The person chose a still frame');
+});
+test('an alternate human reply rejects its linked held proposal',async t=>{
+ const f=fixture(t),proposal=await f.tools.invoke(f.project.id,f.bridge.actor,'proposal','propose_change',{patch:{updateShots:[{id:'shot-0',motion:'Slow drift'}]}});
+ const note=(await f.record([f.note({choices:[{kind:'proposal',proposalId:proposal.proposalId},{kind:'reply'}]})])).notes[0];
+ const reply=f.service.beginRequest(f.project.id,'local-user','Use the first direction',{editing:false,scopeIds:['shot-0']});
+ const resolved=await f.resolve(note.noteId,{choiceIndex:1,expectedVersion:1,resultRef:reply.requestId},'alternate-reply');assert.equal(resolved.statusCode,200,resolved.body);
+ assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'rejected');
+});
+test('a rejection write failure rolls back both the note resolution and proposal changes',async t=>{
+ const f=fixture(t),proposal=await f.tools.invoke(f.project.id,f.bridge.actor,'proposal','propose_change',{patch:{updateShots:[{id:'shot-0',motion:'Slow drift'}]}});
+ const note=(await f.record([f.note({choices:[{kind:'proposal',proposalId:proposal.proposalId},{kind:'accept',label:'Keep it'}]})])).notes[0],before=f.store.cursor(f.project.id);
+ const put=f.store.put.bind(f.store);f.store.put=(kind,...args)=>{if(kind==='director_proposal')throw Error('synthetic write refusal');return put(kind,...args);};
+ const input={choiceIndex:1,expectedVersion:1},failed=await f.resolve(note.noteId,input,'atomic-resolution');assert.equal(failed.statusCode,500);f.store.put=put;
+ assert.equal(f.store.get('director_note',note.noteId).state,'open');assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'held');assert.equal(f.store.cursor(f.project.id),before);
+ const resolved=await f.resolve(note.noteId,input,'atomic-resolution');assert.equal(resolved.statusCode,200,resolved.body);
+ assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'rejected');
 });
 test('blocking open notes gate video on the server and overview; accept unblocks while nonblocking notes stay open',async t=>{
  const f=fixture(t);await f.record();const blocking=(await f.record([f.note({kind:'recommendation',blocking:true})])).notes[0];
@@ -195,6 +271,15 @@ test('regenerate choice accepts only the subsequent exact human regeneration pre
  const regen=await scenePress(f,'image',{regenerate:true,targetShotIds:['shot-0']});assert.equal(regen.statusCode,200,regen.body);
  const before=f.provider.acceptedCount(),resolved=await f.resolve(note.noteId,{...input,resultRef:regen.json().requestId},'regeneration');
  assert.equal(resolved.statusCode,200,resolved.body);assert.equal(resolved.json().resolution.resultRef,regen.json().requestId);assert.equal(f.provider.acceptedCount(),before);
+});
+test('an alternate human keyframe regeneration rejects the linked held proposal without dispatching extra work',async t=>{
+ const f=fixture(t),proposal=await f.tools.invoke(f.project.id,f.bridge.actor,'proposal','propose_change',{patch:{updateShots:[{id:'shot-0',motion:'Slow drift'}]}});
+ const note=(await f.record([f.note({choices:[{kind:'proposal',proposalId:proposal.proposalId},{kind:'regenerate_keyframe',shotIds:['shot-0']}]})])).notes[0];
+ const image=await scenePress(f,'image');assert.equal(image.statusCode,200,image.body);await finish(f);
+ const regen=await scenePress(f,'image',{regenerate:true,targetShotIds:['shot-0']});assert.equal(regen.statusCode,200,regen.body);
+ const before=f.provider.acceptedCount(),resolved=await f.resolve(note.noteId,{choiceIndex:1,expectedVersion:1,resultRef:regen.json().requestId},'alternate-regeneration');
+ assert.equal(resolved.statusCode,200,resolved.body);assert.equal(f.provider.acceptedCount(),before);
+ assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'rejected');
 });
 test('reply choices require a saved human reply and preserve it in the resolution',async t=>{
  const f=fixture(t),note=(await f.record([f.note({choices:[{kind:'reply'}]})])).notes[0],input={choiceIndex:0,expectedVersion:1};

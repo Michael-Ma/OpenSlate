@@ -15,10 +15,10 @@ import { createDirectorInput } from '../dist/application/director-input.js';
 import { createApp } from '../dist/app.js';
 
 function writable(path){chmodSync(path,0o755);for(const item of readdirSync(path,{withFileTypes:true}))if(item.isDirectory())writable(join(path,item.name));}
-function fixture(t){
+function fixture(t,{toolContract='5.0.0'}={}){
   const root=mkdtempSync(join(tmpdir(),'openslate-workspace-')),store=new Store(join(root,'app.sqlite')),provider=new FakeProvider(join(root,'provider.sqlite'));
   const engine=new Engine(store,provider,{artifactDir:join(root,'artifacts')}),service=new ProductionService(store,engine);
-  const director=new DirectorSupervisor(service,new FakeWorkflowDirector(service),{mode:'fake',prepareInput:createDirectorInput(service,{repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills'),endpoint:'http://127.0.0.1:3001'})});
+  const director=new DirectorSupervisor(service,new FakeWorkflowDirector(service),{mode:'fake',prepareInput:createDirectorInput(service,{repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills'),endpoint:'http://127.0.0.1:3001',defaultToolContract:toolContract})});
   const token=randomBytes(32).toString('base64url'),app=createApp({service,director,localToken:token});
   const req=(method,url,payload,key='')=>app.inject({method,url,payload,headers:{host:'127.0.0.1',authorization:`Bearer ${token}`,...(key?{'idempotency-key':key}:{})}});
   t.after(async()=>{await director.close();await app.close();store.close();provider.close();writable(root);rmSync(root,{recursive:true,force:true});});
@@ -27,7 +27,7 @@ function fixture(t){
 }
 
 test('historical-plan diagnostics and service review preserve a persistent offline demo and scoped replacement',async t=>{
-  const f=fixture(t);
+  const f=fixture(t,{toolContract:'4.0.0'});
   const project=(await f.req('POST','/api/projects',{name:'My boots demo'})).json(),path=`/api/projects/${project.id}`;
   assert.equal((await f.req('GET','/api/projects')).json().projects[0].id,project.id);
   assert.deepEqual((await f.req('GET',`${path}/review`)).json().members,[]);
@@ -64,6 +64,7 @@ test('historical-plan diagnostics and service review preserve a persistent offli
   assert.equal((await f.req('GET',`${path}/artifacts/${response.previousPreviews[0].artifact.artifactId}/content`)).statusCode,200);
   assert.equal(f.store.list('skill_activation',project.id).length,2);
   assert.equal(f.store.list('director_skill_lock',project.id).length,1);
+  assert.equal(f.store.list('director_skill_lock',project.id)[0].lock.compatibility.toolContract,'4.0.0','historical plan replacement keeps its exact legacy contract');
   const reads=f.store.list('skill_read',project.id);
   for(const {activation} of f.store.list('skill_activation',project.id)) {
     const expected=activation.skills.flatMap(skill=>{
@@ -74,6 +75,18 @@ test('historical-plan diagnostics and service review preserve a persistent offli
     const sort=rows=>rows.sort((a,b)=>`${a.skillId}:${a.path}`.localeCompare(`${b.skillId}:${b.path}`));
     assert.deepEqual(sort(actual),sort(expected),'each turn receives every declared immutable reference exactly once');
   }
+});
+
+test('current demo Director cannot directly outdate paid frames through its historical close-up script',async t=>{
+  const f=fixture(t),project=f.service.createProject('Modern demo'),path=`/api/projects/${project.id}`;
+  const created=await f.req('POST',`${path}/demo`,{action:'create'},'create');assert.equal(created.statusCode,200,created.body);
+  await f.director.settle();await f.drain();
+  const before=f.store.getProject(project.id),outputs=f.engine.outputs(project.id),count=f.provider.acceptedCount();assert.equal(count,2);
+  const edit=await f.req('POST',`${path}/demo`,{action:'close_up',shotId:before.shots[0].id},'edit');assert.equal(edit.statusCode,200,edit.body);
+  await f.director.settle();await f.drain();
+  assert.equal(f.director.turns(project.id).at(-1).errorCode,'PROPOSAL_REQUIRED');
+  assert.deepEqual(f.store.getProject(project.id),before);assert.deepEqual(f.engine.outputs(project.id),outputs);assert.equal(f.provider.acceptedCount(),count);
+  assert.equal(f.store.list('director_skill_lock',project.id)[0].lock.compatibility.toolContract,'5.0.0');
 });
 
 test('demo retries preserve one turn and one set of generation grants',async t=>{

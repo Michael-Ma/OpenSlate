@@ -152,9 +152,9 @@ export class ToolInvocationService {
     let parsed: ReturnType<typeof parseToolArguments>;
     try { parsed = parseToolArguments(tool, input, selected.catalog.version); }
     catch (error) {
-      // The bridge forwards V5 notes to this authoritative validator. Persist a
-      // known refusal without retaining private arguments or creating any notes.
-      if (tool !== 'record_notes' || selected.catalog.version !== '5.0.0' || !(error instanceof DomainError) || error.code !== 'VALIDATION_ERROR') throw error;
+      // Preserve the same safe, correctable schema refusal on exact retries.
+      // Never retain supplied argument values or create domain work on this path.
+      if ((tool !== 'record_notes' && tool !== 'propose_change' && tool !== 'prepare_change') || selected.catalog.version !== '5.0.0' || !(error instanceof DomainError) || error.code !== 'VALIDATION_ERROR') throw error;
       const argumentsDigest = digest(input);
       store.transaction(() => {
         this.service.assertActor(projectId, actor);
@@ -170,7 +170,7 @@ export class ToolInvocationService {
         const reason = (error.details as { reason?: string } | undefined)?.reason === 'invalid_anchor' ? 'invalid_anchor' : 'invalid_arguments';
         const record: ToolInvocation = { id, projectId, requestId: actor.requestId, epochId: actor.epochId, callId,
           tool, toolContractVersion: selected.catalog.version, catalogDigest: selected.catalog.digest, skillLockId: selected.lockId,
-          argumentsDigest, state: 'failed', result: null, resultDigest: null, error: { code: error.code, message: error.message, reason } };
+          argumentsDigest, state: 'failed', result: null, resultDigest: null, error: { code: error.code, message: error.message, ...(tool === 'record_notes' ? { reason } : {}) } };
         store.insert('tool_invocation', id, projectId, record);
         store.appendEvent(projectId, 'tool.finished', { invocationId: id, callId, requestId: actor.requestId, tool, state: 'failed' });
       });

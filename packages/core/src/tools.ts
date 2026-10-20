@@ -140,11 +140,11 @@ const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: fal
 const validators = new Map(Object.values(TOOL_CATALOGS).map(catalog => [catalog.version,
   new Map(catalog.descriptors.map(tool => [tool.name, ajv.compile(tool.inputSchema)]))]));
 
-/** Explain the frozen notes schema without reflecting payload values or unknown field names. */
-function recordNotesValidationMessage(input: unknown, errors: ErrorObject[] | null | undefined): string {
+/** Explain the registered schema without reflecting payload values or unknown field names. */
+function toolValidationMessage(name: ToolName, input: unknown, registeredSchema: object, errors: ErrorObject[] | null | undefined): string {
   type Schema = { properties?: Record<string, Schema>; items?: Schema; oneOf?: Schema[]; const?: string; enum?: string[]; [key: string]: unknown };
-  const schema = recordNotesSchema as Schema;
-  const choiceSchemas = schema.properties!.notes!.items!.properties!.choices!.items!.oneOf!;
+  const schema = registeredSchema as Schema;
+  const choiceSchemas = name === 'record_notes' ? schema.properties!.notes!.items!.properties!.choices!.items!.oneOf! : [];
   const choiceKinds = choiceSchemas.map(choice => choice.properties!.kind!.const!);
   const knownFields = new Set<string>();
   const collectFields = (node: Schema): void => {
@@ -163,6 +163,15 @@ function recordNotesValidationMessage(input: unknown, errors: ErrorObject[] | nu
     for (const part of pointerParts(path)) node = (node as Record<string, unknown> | undefined)?.[part];
     return (node ?? {}) as Schema;
   };
+  const allowedFields = (schemaPath: string): string[] => {
+    const parts = schemaPath.split('/');
+    while (parts.length) {
+      const fields = Object.keys(schemaAt(parts.join('/')).properties ?? {});
+      if (fields.length) return fields;
+      parts.pop();
+    }
+    return [];
+  };
   const valueAt = (path: string): unknown => {
     let value = input;
     for (const part of pointerParts(path)) value = (value as Record<string, unknown> | undefined | null)?.[part];
@@ -171,7 +180,7 @@ function recordNotesValidationMessage(input: unknown, errors: ErrorObject[] | nu
   const reasons = new Set<string>();
   for (const error of errors ?? []) {
     const path = safePath(error.instancePath);
-    const choiceMatch = error.instancePath.match(/^(\/notes\/\d+\/choices\/\d+)(?:\/|$)/);
+    const choiceMatch = name === 'record_notes' && error.instancePath.match(/^(\/notes\/\d+\/choices\/\d+)(?:\/|$)/);
     if (choiceMatch) {
       const choicePath = safePath(choiceMatch[1]!);
       const choice = valueAt(choiceMatch[1]!);
@@ -188,26 +197,31 @@ function recordNotesValidationMessage(input: unknown, errors: ErrorObject[] | nu
       if (branch && Number(branch[1]) !== selected || error.keyword === "oneOf") continue;
     }
     // A scene or shot anchor is an alternative, not two individually required fields.
-    if (/\/properties\/anchor\/anyOf\//.test(error.schemaPath)) continue;
+    if (name === 'record_notes' && /\/properties\/anchor\/anyOf\//.test(error.schemaPath)) continue;
     const parent = schemaAt(error.schemaPath.slice(0, error.schemaPath.lastIndexOf("/")));
     const count = (value: unknown): string => typeof value === "number" ? String(value) : "the registered limit";
+    const fields = name !== 'record_notes' ? allowedFields(error.schemaPath) : [];
+    const add = (reason: string): void => { reasons.add(`${reason}${fields.length && error.keyword !== 'additionalProperties' ? `; allowed fields: ${fields.join(', ')}` : ''}`); };
     switch (error.keyword) {
       case "required": {
         const field = error.params.missingProperty as string;
-        reasons.add(knownFields.has(field) ? `${path === "/" ? "" : path}/${field} is required` : `${path} is missing a required field`); break;
+        add(knownFields.has(field) ? `${path === "/" ? "" : path}/${field} is required` : `${path} is missing a required field`); break;
       }
-      case "additionalProperties": reasons.add(`${path} has unsupported fields; allowed fields: ${Object.keys(parent.properties ?? {}).join(", ")}`); break;
-      case "type": reasons.add(`${path} must be ${String(parent.type)}`); break;
-      case "enum": reasons.add(`${path} must be one of: ${(parent.enum ?? []).join(", ")}`); break;
-      case "const": reasons.add(`${path} must equal ${parent.const ?? "the registered value"}`); break;
-      case "minLength": reasons.add(`${path} must contain at least ${count(parent.minLength)} character${parent.minLength === 1 ? "" : "s"}`); break;
-      case "maxLength": reasons.add(`${path} must contain at most ${count(parent.maxLength)} characters`); break;
-      case "minItems": reasons.add(`${path} must contain at least ${count(parent.minItems)} item${parent.minItems === 1 ? "" : "s"}`); break;
-      case "maxItems": reasons.add(`${path} must contain at most ${count(parent.maxItems)} items`); break;
-      case "uniqueItems": reasons.add(`${path} must contain unique items`); break;
-      case "pattern": reasons.add(`${path} must be a 64-character lowercase hexadecimal SHA-256`); break;
-      case "anyOf": reasons.add(`${path} must include sceneId or shotIds (an array of shot IDs)`); break;
-      default: reasons.add(`${path} must match the registered schema`);
+      case "additionalProperties": add(`${path} has unsupported fields; allowed fields: ${Object.keys(parent.properties ?? {}).join(", ")}`); break;
+      case "type": add(`${path} must be ${String(parent.type)}`); break;
+      case "enum": add(`${path} must be one of: ${(parent.enum ?? []).join(", ")}`); break;
+      case "const": add(`${path} must equal ${parent.const ?? "the registered value"}`); break;
+      case "minLength": add(`${path} must contain at least ${count(parent.minLength)} character${parent.minLength === 1 ? "" : "s"}`); break;
+      case "maxLength": add(`${path} must contain at most ${count(parent.maxLength)} characters`); break;
+      case "minItems": add(`${path} must contain at least ${count(parent.minItems)} item${parent.minItems === 1 ? "" : "s"}`); break;
+      case "maxItems": add(`${path} must contain at most ${count(parent.maxItems)} items`); break;
+      case "uniqueItems": add(`${path} must contain unique items`); break;
+      case "minimum": add(`${path} must be at least ${count(parent.minimum)}`); break;
+      case "maximum": add(`${path} must be at most ${count(parent.maximum)}`); break;
+      case "minProperties": add(`${path} must contain at least ${count(parent.minProperties)} field${parent.minProperties === 1 ? "" : "s"}`); break;
+      case "pattern": add(`${path} must be a 64-character lowercase hexadecimal SHA-256`); break;
+      case "anyOf": add(`${path} must include sceneId or shotIds (an array of shot IDs)`); break;
+      default: add(`${path} must match the registered schema`);
     }
   }
   const selected: string[] = [];
@@ -215,8 +229,8 @@ function recordNotesValidationMessage(input: unknown, errors: ErrorObject[] | nu
     if (selected.length >= 8 || selected.join("; ").length + reason.length > 1600) break;
     selected.push(reason);
   }
-  if (selected.length < reasons.size) selected.push("additional validation errors; correct these fields and retry record_notes");
-  return `record_notes arguments are invalid: ${selected.join("; ") || "use the registered notes schema"}`;
+  if (selected.length < reasons.size) selected.push(`additional validation errors; correct these fields and retry ${name}`);
+  return `${name} arguments are invalid: ${selected.join("; ") || "use the registered schema"}`;
 }
 
 export function parseToolArguments(toolName: string, input: unknown, version: ToolContractVersion = TOOL_CONTRACT_VERSION): ParsedToolCall {
@@ -225,9 +239,10 @@ export function parseToolArguments(toolName: string, input: unknown, version: To
   const name = toolName as ToolName;
   const validate = validators.get(catalog.version)!.get(name)!;
   const valid = validate(input);
-  if (!valid && name === "record_notes") {
+  if (!valid && (name === 'record_notes' || name === 'propose_change' || name === 'prepare_change')) {
     const reason = validate.errors?.some(error => /^\/notes\/\d+\/anchor(?:\/|$)/.test(error.instancePath)) ? "invalid_anchor" : "invalid_arguments";
-    throw new DomainError("VALIDATION_ERROR", recordNotesValidationMessage(input, validate.errors), { reason });
+    const schema = catalog.descriptors.find(tool => tool.name === name)!.inputSchema;
+    throw new DomainError("VALIDATION_ERROR", toolValidationMessage(name, input, schema, validate.errors), name === 'record_notes' ? { reason } : undefined);
   }
   invariant(valid, "VALIDATION_ERROR", "Tool arguments do not match the registered schema");
   // In-process callers must obey the same JSON data boundary as HTTP/MCP callers.

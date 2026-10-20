@@ -91,9 +91,12 @@ test('diagnostics never echo extra property names or user text and remain bounde
   assert.match(reason, /additional validation errors/);
 });
 
-test('non-note tool errors and registered V5 input schema are unchanged', () => {
-  assert.throws(() => parseToolArguments('propose_change', { patch: {} }, '5.0.0'), {
+test('other tool errors remain generic and the registered V5 notes schema is unchanged', () => {
+  assert.throws(() => parseToolArguments('apply_change', { extra: 'private value' }, '5.0.0'), {
     code: 'VALIDATION_ERROR', message: 'Tool arguments do not match the registered schema',
+  });
+  assert.throws(() => parseToolArguments('propose_change', { patch: {} }, '5.0.0'), {
+    code: 'VALIDATION_ERROR', message: 'propose_change arguments are invalid: /patch must contain at least 1 field; allowed fields: updateShots, updateScenes',
   });
   const schema = toolCatalog('5.0.0').descriptors.find(tool => tool.name === 'record_notes').inputSchema;
   assert.deepEqual(Object.keys(schema.properties.notes.items.properties.anchor.properties), ['sceneId', 'shotIds']);
