@@ -106,7 +106,10 @@ export class GenerationOverviewReader {
               const failure = last.failure ?? (evidence?.outcome.failureId ? { id: evidence.outcome.failureId, technical: evidence.outcome.technical === true, retryAllowed: false } : null);
               const profile = captured.lock.profiles.find(p => p.id === binding?.node.profileId);
               const retriesLeft = automaticRetriesLeft(store, last, profile?.maxRetries ?? 0);
-              const native = last.request.execution?.adapter === "codex-image" ? assertCodexImageRecords(store, last).result?.observation : undefined;
+              // Diagnostic only: an older or inconsistent native record must not fail the whole overview read.
+              const native = last.request.execution?.adapter === "codex-image" ? (() => {
+                try { return assertCodexImageRecords(store, last).result?.observation; } catch { return undefined; }
+              })() : undefined;
               const nativeDiagnostic = native?.kind === "not_dispatched" ? safeNativeDiagnostic(native.nativeDiagnostic) : undefined;
               return progress({ ...base, state: retriesLeft ? "queued" : "failed", attemptId: last.id, phase: last.phase, failure: { code: failure?.id ?? "EXECUTION_FAILED", technical: failure?.technical ?? false,
                 retryAllowed: retriesLeft > 0, autoRetriesLeft: retriesLeft,

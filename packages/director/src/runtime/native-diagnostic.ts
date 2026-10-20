@@ -19,9 +19,11 @@ export function classifyNativeDiagnostic(error: unknown): NativeDiagnostic {
   // Structured native error identifiers/statuses are sufficient for common account/quota failures.
   const data = record(value.data), statuses = [value.status, value.statusCode, data.status, data.statusCode, value.code, data.code];
   // A generic JSON-RPC numeric envelope must not mask its structured native cause.
-  const nativeCodes = [value.code, data.code, value.type, data.type].filter(item => typeof item === "string").map(item => String(item).toLowerCase());
-  if (statuses.includes(429) || nativeCodes.some(item => /rate.?limit|usage.?limit|quota.?exceeded/.test(item))) return { category: "native_rate_limited" };
-  if (statuses.includes(401) || statuses.includes(403) || nativeCodes.some(item => /auth|unauthorized|not.?logged.?in/.test(item))) return { category: "native_auth_required" };
+  // Words, not substrings: "AUTHORIZATION_EPOCH_REVOKED" is the app's own authority fence, not a Codex sign-in.
+  const nativeCodes = [value.code, data.code, value.type, data.type].filter(item => typeof item === "string").map(item => String(item).replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().replace(/[_\-.]+/g, " "));
+  if (statuses.includes(429) || nativeCodes.some(item => /\b(rate ?limit(ed)?|usage ?limit|quota ?exceeded)\b/.test(item))) return { category: "native_rate_limited" };
+  if (statuses.includes(401) || nativeCodes.some(item => /\b(unauthori[sz]ed|unauthenticated|not ?logged ?in|login ?required|auth(entication)? ?(required|expired|failed|invalid))\b/.test(item)))
+    return { category: "native_auth_required" };
   if (/^(RUNTIME_(PROTOCOL|VERSION_MISMATCH|POLICY|CONFIG_MISMATCH|CATALOG|SKILLS|BRIDGE|INSTRUCTIONS)|SETUP_(VERSION_MISMATCH|POLICY_MISMATCH|CONFIG_MISMATCH|CATALOG|SKILLS|MCP|MODEL_)|CODEX_IMAGE_(CONFIG_MISMATCH|THREAD_INVALID|CAPABILITY_UNAVAILABLE))/.test(code) || typeof value.code === "number" && [-32700, -32600, -32601, -32602, -32603].includes(value.code)) return { category: "native_protocol" };
   return { category: "native_unknown" };
 }

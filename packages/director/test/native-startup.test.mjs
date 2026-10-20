@@ -91,3 +91,14 @@ test("native diagnostic classifier projects only allowlisted categories and fini
   assert.deepEqual(classifyNativeDiagnostic({ code: -32000, data: { code: "rate_limit_exceeded" } }), { category: "native_rate_limited" });
   assert.deepEqual(classifyNativeDiagnostic({ code: -32000, data: { type: "auth_required" } }), { category: "native_auth_required" });
 });
+
+test("the classifier reads whole words: the app's authority errors are not a Codex sign-in (lead review)", () => {
+  for (const code of ["AUTHORIZATION_EPOCH_REVOKED", "AUTHORIZATION_EPOCH_READ_ONLY", "RETRY_NOT_AUTHORIZED", "ORIGIN_NOT_AUTHORIZED", "SCENE_AUTHORITY_CHANGED"])
+    assert.notEqual(classifyNativeDiagnostic({ code }).category, "native_auth_required", code);
+  assert.equal(classifyNativeDiagnostic({ code: "SETUP_AUTH_REQUIRED" }).category, "native_auth_required");
+  assert.equal(classifyNativeDiagnostic({ code: -32000, data: { code: "unauthorized" } }).category, "native_auth_required");
+  assert.equal(classifyNativeDiagnostic({ code: -32000, data: { code: "not_logged_in" } }).category, "native_auth_required");
+  assert.equal(classifyNativeDiagnostic({ code: -32000, data: { status: 401 } }).category, "native_auth_required");
+  assert.equal(classifyNativeDiagnostic({ code: -32000, data: { code: "usage_limit_reached" } }).category, "native_rate_limited");
+  assert.equal(classifyNativeDiagnostic({ code: -32000, data: { code: "rate-limited" } }).category, "native_rate_limited");
+});

@@ -82,6 +82,17 @@ test('first Codex route rejects project-scoped images before consuming their usa
   assert.equal(f.store.list('external_allowance',selected.projectId).length,1);assert.equal(f.calls.prepare,0);assert.equal(f.calls.start,0);assert.equal(f.calls.api,0);
 });
 
+test('an inconsistent native image record leaves the overview readable, without its diagnostic (lead review)',async t=>{
+  const f=fixture(t);
+  f.transport.prepare=async()=>{f.calls.prepare++;throw Object.assign(Error('slow start'),{code:'RUNTIME_RPC_TIMEOUT'});};
+  f.build();const selected=await f.seed();await f.runtime.engine.runReady();
+  const attempt=f.store.list('attempt',selected.projectId)[0];
+  // An older or damaged receipt: the strict lineage check refuses it. The read must still answer.
+  f.store.db.prepare("UPDATE entities SET body=json_set(body,'$.observation.kind','completed') WHERE kind='codex_image_execution_result' AND id=?").run(attempt.id);
+  const view=new GenerationOverviewReader(f.production).read(selected.projectId),failure=view.shots['shot-0'].keyframe.failure;
+  assert.equal(view.shots['shot-0'].keyframe.state,'failed');assert.equal(failure.nativeDiagnostic,undefined);assert.equal(failure.notDispatched,undefined);
+});
+
 for(const [code,category] of [['RUNTIME_RPC_TIMEOUT','native_timeout'],['ENOENT','native_spawn_failed'],['SETUP_AUTH_REQUIRED','native_auth_required'],
   ['RUNTIME_PROTOCOL_INVALID','native_protocol'],[429,'native_rate_limited'],['UNRECOGNIZED','native_unknown']])
 test(`native preparation ${category} is retained and publicly projected without raw data or a retry`,async t=>{
