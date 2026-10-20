@@ -4,7 +4,7 @@ import { normalizePermissionProfile, toml, validateOptions } from "./policy.js";
 import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
 import { prepareDirectorImages } from "./images.js";
-import { fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
+import { beforeDispatch, fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
 import { classifyNativeDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
 import type { DirectorQuestion, DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent, DirectorStartOptions } from "./types.js";
 
@@ -79,9 +79,13 @@ export class CodexDirectorRuntime implements DirectorRuntime {
   constructor(options: CodexDirectorOptions) { this.#options = validateOptions(options); }
 
   async start(supplied: DirectorRunInput, options: DirectorStartOptions = {}): Promise<DirectorRunResult> {
-    requireRuntime(!this.#closed, "RUNTIME_CLOSED", "Director runtime is shutting down");
-    const input = validateInput(supplied); const base = identity(input);
-    requireRuntime(!this.#projects.has(input.projectId), "RUNTIME_BUSY", "This project already has an active director run");
+    const input = beforeDispatch(() => {
+      requireRuntime(!this.#closed, "RUNTIME_CLOSED", "Director runtime is shutting down");
+      const input = validateInput(supplied);
+      requireRuntime(!this.#projects.has(input.projectId), "RUNTIME_BUSY", "This project already has an active director run");
+      return input;
+    });
+    const base = identity(input);
     this.#projects.add(input.projectId);
     const config = this.#options; const secrets = [input.bridge.credential, ...Object.values(config.env).filter(value => value.length >= 12)];
     let nativeThreadId: string | undefined; let nativeTurnId: string | undefined;

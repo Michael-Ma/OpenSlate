@@ -1,6 +1,7 @@
 import { canonical, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent } from "@openslate/director";
+import { DirectorStartRefusal } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
 import { directorInputDigest } from "./director-input-identity.js";
@@ -134,7 +135,7 @@ export class DirectorSupervisor {
             }
             this.save({ ...turn, leaseExpiresAt: this.now() + this.leaseMs });
           } else if (turn.leaseExpiresAt <= this.now()) {
-            this.terminal(turn, "unknown", "OWNER_LOST");
+            this.terminal(turn, turn.dispatched ? "unknown" : "failed", "OWNER_LOST");
             if (turn.epochId) new ToolInvocationService(this.service).reconcileEpoch(project.id, turn.epochId);
           }
         }
@@ -260,7 +261,8 @@ export class DirectorSupervisor {
       service.store.transaction(() => {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
         if (turn.state !== "running" || turn.owner !== this.owner) return;
-        this.terminal(turn, attempted ? "unknown" : abort.signal.aborted ? "interrupted" : "failed",
+        const refused = error instanceof DirectorStartRefusal;
+        this.terminal(refused ? { ...turn, dispatched: false } : turn, refused ? "failed" : attempted ? "unknown" : abort.signal.aborted ? "interrupted" : "failed",
           error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "DIRECTOR_RUN_FAILED");
         if (turn.epochId) new ToolInvocationService(service).reconcileEpoch(claimed.projectId, turn.epochId);
       });
