@@ -1,4 +1,5 @@
 export * from "./types.js";
+export { DirectorStartRefusal } from "./validation.js";
 export { FakeDirectorRuntime } from "./fake.js";
 export type { FakeDirectorHandler, FakeDirectorOutcome } from "./fake.js";
 export { CodexDirectorRuntime } from "./codex.js";

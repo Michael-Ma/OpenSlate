@@ -1,8 +1,10 @@
 import { applyCreativePatch, invariant, shotIntentDigest } from "@openslate/core";
 import type { ChangeProposal, ProjectRecord } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
+import { DirectorStartRefusal } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
+import { derivedShotPrompts } from "./shot-prompts.js";
 
 export interface DemoCommand { action: "create" | "close_up" | "wide" | "review"; shotId?: string; sceneId?: string }
 
@@ -26,8 +28,13 @@ export class FakeWorkflowDirector implements DirectorRuntime {
   async start(input: DirectorRunInput, options: DirectorStartOptions = {}): Promise<DirectorRunResult> {
     const identity = { projectId: input.projectId, requestId: input.requestId, epochId: input.epochId, turnId: input.turnId };
     if (options.signal?.aborted) return { ...identity, status: "interrupted", text: "", dispatched: false };
-    const actor = this.service.actorForBridge(input.projectId, input.bridge.credential);
-    invariant(actor.kind === "director" && actor.epochId === input.epochId, "EPOCH_REVOKED", "Fake runtime must retain the active epoch");
+    const actor = (() => {
+      try {
+        const actor = this.service.actorForBridge(input.projectId, input.bridge.credential);
+        invariant(actor.kind === "director" && actor.epochId === input.epochId, "EPOCH_REVOKED", "Fake runtime must retain the active epoch");
+        return actor;
+      } catch (error) { throw new DirectorStartRefusal(error); }
+    })();
     const calls = new ToolInvocationService(this.service);
     let ordinal = 0;
     const invoke = async (tool: string, args: unknown) => {
@@ -57,24 +64,47 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     }
     if (command && command.action !== "review") {
       const project = this.service.store.getProject(input.projectId);
-      let proposed = project;
-      const proposal: ChangeProposal = { variant: "workflow", expectedHeadVersion: project.headVersion };
-      if (command.action !== "create") {
-        invariant(command.shotId && project.shots.some(shot => shot.id === command.shotId), "SCOPE_DENIED", "Choose a shot in this project");
-        const framing = input.bridge.toolContractVersion === "6.0.0"
-          ? command.action === "close_up" ? "Extreme close-up" : "Wide"
-          : command.action === "close_up" ? "Extreme close-up of stitching" : "Wide product view";
-        const creative = { updateShots: [{ id: command.shotId, framing,
-          imagePrompt: `Brown leather boot, ${framing.toLowerCase()}`, videoPrompt: `Slow push toward a brown leather boot, ${framing.toLowerCase()}`, reauthorPrompts: true }] };
-        proposed = applyCreativePatch(project, creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } }));
-        proposal.creative = creative;
+      if (command.action !== "create" && ["5.0.0", "6.0.0"].includes(input.bridge.toolContractVersion ?? "1.0.0")) {
+        const shot = project.shots.find(shot => shot.id === command.shotId);
+        invariant(shot, "SCOPE_DENIED", "Choose a shot in this project");
+        const framing = command.action === "close_up" ? "Extreme close-up" : "Wide";
+        // V5 cannot propose a framing field. Keep its catalog immutable and offer
+        // the corresponding prompt direction using the same derivation as V6.
+        const update = input.bridge.toolContractVersion === "6.0.0"
+          ? { id: shot.id, framing }
+          : { id: shot.id, ...derivedShotPrompts(shot, { framing }) };
+        const changed = Object.entries(update).some(([field, value]) => field !== "id" && shot[field as keyof typeof shot] !== value);
+        const held = changed ? await invoke("propose_change", { patch: { updateShots: [update] } }) as { proposalId: string } : null;
+        await invoke("record_notes", { notes: [{
+          anchor: { shotIds: [shot.id] }, kind: held ? "recommendation" : "observation", blocking: !!held,
+          text: held
+            ? `Scripted demo recommendation: try ${command.action === "close_up" ? "an extreme close-up" : "a wide view"} for this shot. Review the Now/After preview before accepting; no replacement media has been made.`
+            : "Scripted demo note: this shot already has the requested direction. No change or replacement media is needed.",
+          choices: [...(held ? [{ kind: "proposal", proposalId: held.proposalId }] : []), { kind: "accept", label: "Keep current direction" }],
+        }] });
+        text = held
+          ? "A scripted demo proposal is ready for the selected shot. Review its Now/After preview, then accept it or keep the current direction. Accepting changes the saved direction; replacement frames and clips still need your generation decision."
+          : "The selected shot already has this scripted demo direction. No change was made.";
+      } else {
+        let proposed = project;
+        const proposal: ChangeProposal = { variant: "workflow", expectedHeadVersion: project.headVersion };
+        if (command.action !== "create") {
+          invariant(command.shotId && project.shots.some(shot => shot.id === command.shotId), "SCOPE_DENIED", "Choose a shot in this project");
+          const framing = input.bridge.toolContractVersion === "6.0.0"
+            ? command.action === "close_up" ? "Extreme close-up" : "Wide"
+            : command.action === "close_up" ? "Extreme close-up of stitching" : "Wide product view";
+          const creative = { updateShots: [{ id: command.shotId, framing,
+            imagePrompt: `Brown leather boot, ${framing.toLowerCase()}`, videoPrompt: `Slow push toward a brown leather boot, ${framing.toLowerCase()}`, reauthorPrompts: true }] };
+          proposed = applyCreativePatch(project, creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } }));
+          proposal.creative = creative;
+        }
+        proposal.source = source(proposed);
+        const prepared = await invoke("prepare_change", proposal) as { preparedId: string };
+        await invoke("apply_change", { preparedId: prepared.preparedId });
+        text = command.action === "create"
+          ? "The two-shot fixture plan is ready. OpenSlate will prepare the sample frames and wait for your review before making sample videos. The pictures and one-second clips demonstrate the pipeline; they are not AI-generated creative results."
+          : "The selected shot's framing and prompts were updated. Unchanged shots keep their saved work. Review the replacement sample frame before its video can run.";
       }
-      proposal.source = source(proposed);
-      const prepared = await invoke("prepare_change", proposal) as { preparedId: string };
-      await invoke("apply_change", { preparedId: prepared.preparedId });
-      text = command.action === "create"
-        ? "The two-shot fixture plan is ready. OpenSlate will prepare the sample frames and wait for your review before making sample videos. The pictures and one-second clips demonstrate the pipeline; they are not AI-generated creative results."
-        : "The selected shot's framing and prompts were updated. Unchanged shots keep their saved work. Review the replacement sample frame before its video can run.";
     }
     await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
     return { ...identity, status: "completed", text, dispatched: true };

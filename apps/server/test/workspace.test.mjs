@@ -13,6 +13,7 @@ import { DirectorSupervisor } from '../dist/application/director-supervisor.js';
 import { FakeWorkflowDirector } from '../dist/application/fake-director.js';
 import { createDirectorInput } from '../dist/application/director-input.js';
 import { createApp } from '../dist/app.js';
+import { derivedShotPrompts } from '../dist/application/shot-prompts.js';
 
 function writable(path){chmodSync(path,0o755);for(const item of readdirSync(path,{withFileTypes:true}))if(item.isDirectory())writable(join(path,item.name));}
 function fixture(t,{toolContract='5.0.0'}={}){
@@ -81,16 +82,54 @@ test('historical-plan diagnostics and service review preserve a persistent offli
   }
 });
 
-test('current demo Director cannot directly outdate paid frames through its historical close-up script',async t=>{
-  const f=fixture(t),project=f.service.createProject('Modern demo'),path=`/api/projects/${project.id}`;
+for(const toolContract of ['5.0.0','6.0.0']) for(const action of ['close_up','wide']) test(`${toolContract} demo ${action} holds a noted proposal with paid-media effects; accepting publishes without generation`,async t=>{
+  const f=fixture(t,{toolContract}),project=f.service.createProject('Modern demo'),path=`/api/projects/${project.id}`;
   const created=await f.req('POST',`${path}/demo`,{action:'create'},'create');assert.equal(created.statusCode,200,created.body);
   await f.director.settle();await f.drain();
-  const before=f.store.getProject(project.id),outputs=f.engine.outputs(project.id),count=f.provider.acceptedCount();assert.equal(count,2);
-  const edit=await f.req('POST',`${path}/demo`,{action:'close_up',shotId:before.shots[0].id},'edit');assert.equal(edit.statusCode,200,edit.body);
+  const review=f.engine.reviewSnapshot(project.id),reviewer=f.service.beginRequest(project.id,'local-user','Review exact demo frames',{editing:false});
+  f.service.approve(project.id,reviewer,review.id,review.members.map(member=>member.videoNodeId));
+  await f.drain();
+  const before=f.store.getProject(project.id),outputs=f.engine.outputs(project.id),count=f.provider.acceptedCount(),attempts=f.engine.attempts(project.id);
+  assert.equal(count,4,'both shots have returned frames and clips before the demo edit');
+  const shot=before.shots[0],other=before.shots[1],framing=action==='close_up'?'Extreme close-up':'Wide';
+  const prompts=derivedShotPrompts(shot,{framing});
+  const edit=await f.req('POST',`${path}/demo`,{action,shotId:shot.id},'edit');assert.equal(edit.statusCode,200,edit.body);
   await f.director.settle();await f.drain();
-  assert.equal(f.director.turns(project.id).at(-1).errorCode,'PROPOSAL_REQUIRED');
+  const turn=f.director.turns(project.id).at(-1);assert.equal(turn.state,'completed',JSON.stringify(turn));
   assert.deepEqual(f.store.getProject(project.id),before);assert.deepEqual(f.engine.outputs(project.id),outputs);assert.equal(f.provider.acceptedCount(),count);
-  assert.equal(f.store.list('director_skill_lock',project.id)[0].lock.compatibility.toolContract,'5.0.0');
+  assert.deepEqual(f.engine.attempts(project.id),attempts,'proposing never dispatches or charges replacement work');
+  const proposals=(await f.req('GET',`${path}/director/proposals`)).json().proposals;assert.equal(proposals.length,1);
+  const proposal=proposals[0];assert.equal(proposal.state,'held');assert.equal(proposal.requestId,turn.requestId);
+  assert.deepEqual(proposal.preview.effects,[{shotId:shot.id,effect:'keyframe_remade'},{shotId:shot.id,effect:'clip_remade'}]);
+  for(const [field,after] of Object.entries(prompts)) {
+    assert.deepEqual(proposal.preview.changes.find(row=>row.field===field),{shotId:shot.id,field,before:shot[field],after});
+    assert.match(after,/OpenSlate current direction:/);assert.ok(after.includes(framing));assert.ok(after.endsWith(shot[field]),'independent reference details survive');
+  }
+  assert.deepEqual(proposal.preview.changes.map(row=>row.field).sort(),toolContract==='6.0.0'?['framing','imagePrompt','videoPrompt']:['imagePrompt','videoPrompt']);
+  const notes=f.service.snapshot(project.id).notes;assert.equal(notes.length,1);assert.equal(notes[0].kind,'recommendation');assert.equal(notes[0].blocking,true);
+  assert.equal(notes[0].noteId,proposal.noteId);assert.deepEqual(notes[0].anchor,{shotIds:[shot.id]});
+  assert.deepEqual(notes[0].choices,[{kind:'proposal',proposalId:proposal.proposalId},{kind:'accept',label:'Keep current direction'}]);
+  assert.match(f.service.snapshot(project.id).conversation.at(-1).text,/proposal is ready/);
+  const tools=f.store.list('tool_invocation',project.id).filter(call=>call.requestId===turn.requestId);
+  assert.deepEqual(tools.map(call=>call.tool),['read_context','propose_change','record_notes']);assert.ok(tools.every(call=>call.state==='succeeded'));
+  const replay=await f.req('POST',`${path}/demo`,{action,shotId:shot.id},'edit');assert.deepEqual(replay.json(),edit.json());
+  await f.director.settle();assert.equal(f.store.list('director_proposal',project.id).length,1);assert.equal(f.service.snapshot(project.id).notes.length,1);
+  const accepted=await f.req('POST',`${path}/director/proposals/${proposal.proposalId}/accept`,{previewDigest:proposal.previewDigest},'accept');
+  assert.equal(accepted.statusCode,200,accepted.body);assert.equal(accepted.json().proposal.state,'accepted');
+  await f.drain();
+  const after=f.store.getProject(project.id);assert.equal(after.shots[0].framing,toolContract==='6.0.0'?framing:shot.framing);
+  for(const [field,value] of Object.entries(prompts)) assert.equal(after.shots[0][field],value);
+  assert.deepEqual(after.shots[1],other);assert.equal(f.service.snapshot(project.id).notes[0].state,'resolved');
+  assert.equal(f.provider.acceptedCount(),count);assert.deepEqual(f.engine.attempts(project.id),attempts,'acceptance publishes direction without paid submissions');
+  assert.deepEqual((await f.req('POST',`${path}/director/proposals/${proposal.proposalId}/accept`,{previewDigest:proposal.previewDigest},'accept')).json(),accepted.json());
+  assert.equal(f.store.getProject(project.id).headVersion,after.headVersion);assert.equal(f.provider.acceptedCount(),count);
+  const repeated=await f.req('POST',`${path}/demo`,{action,shotId:shot.id},'already-current');assert.equal(repeated.statusCode,200,repeated.body);
+  await f.director.settle();await f.drain();assert.equal(f.director.turns(project.id).at(-1).state,'completed');
+  assert.deepEqual(f.store.getProject(project.id),after);assert.equal(f.store.list('director_proposal',project.id).length,1,'a no-op cannot create an empty proposal');
+  const noOpNote=f.service.snapshot(project.id).notes.at(-1);assert.equal(noOpNote.kind,'observation');assert.equal(noOpNote.blocking,false);
+  assert.deepEqual(noOpNote.choices,[{kind:'accept',label:'Keep current direction'}]);assert.match(f.service.snapshot(project.id).conversation.at(-1).text,/already has/);
+  assert.deepEqual(f.engine.attempts(project.id),attempts);assert.equal(f.provider.acceptedCount(),count);
+  assert.equal(f.store.list('director_skill_lock',project.id)[0].lock.compatibility.toolContract,toolContract);
 });
 
 test('demo retries preserve one turn and one set of generation grants',async t=>{

@@ -133,7 +133,10 @@ test('R2 a temporary retained-frame replacement cannot detach a queued confirmat
     const replacement = f.store.get('node_binding', current.id);
     f.store.put('node_binding', current.id, project.id, { ...replacement,
       retainedTake: { candidateId: current.candidateId, outputs: current.outputs } });
-    f.store.saveProject({ ...project, activePlanId: planId }, project.headVersion);
+    // Match a real publication: the new plan/head has its own immutable revision.
+    // Reusing the old revision leaves invalid speech evidence on the next Confirm.
+    const saved = f.store.saveProject({ ...project, revisionId: randomUUID(), activePlanId: planId }, project.headVersion);
+    f.store.insert('project_revision', saved.revisionId, project.id, { project: saved });
     for (const hold of f.store.list('hold', project.id).filter(h => h.active)) f.engine.releaseHold(project.id, hold.id, hold.ownerId);
   });
   f.provider.setMode(current.id, ['technical_failure', 'technical_failure']);
