@@ -40,7 +40,8 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
     const dependencyNodeIds = new Set<string>(), fixtureClips: FixtureClip[] = [], fixtureAudio: FixtureAudio[] = [];
     const clips: RenderManifestInput["clips"] = [], audio: NonNullable<RenderManifestInput["audio"]> = [];
     const selected: { shotId: string; fixture: boolean }[] = [];
-    const placedAbsoluteCues = new Set<string>(), mediaFlavors: boolean[] = [];
+    const placedAbsoluteCues = new Set<string>(), voices: { shotId: string; fixture: boolean }[] = [];
+    let musicFixture: boolean | undefined;
     const shotFingerprints: unknown[] = [], voiceFingerprints: unknown[] = [];
     const ownedArtifact = (ref: ArtifactRef) => {
       const row = store.get<Artifact>("artifact", ref.artifactId);
@@ -71,7 +72,6 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
         blockers.push({ code: "clip_outdated", shotId: shot.id });
       if (ref && artifact) {
         selected.push({ shotId: shot.id, fixture: artifact.fixture });
-        mediaFlavors.push(artifact.fixture);
         inputs.push({ nodeId: node?.id ?? null, port: "video", artifact: ref });
         if (node) dependencyNodeIds.add(node.id);
         if (artifact.fixture) fixtureClips.push({ artifact: ref, durationFrames: shot.desiredFrames });
@@ -84,12 +84,15 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
         ? narration.segments.filter(s => canonical(s.cue) === canonical(cue)) : [];
       if (cue && settled) {
         const record = ownedArtifact(cue.audio), accepted = segment.length === 1 ? segment[0] : undefined;
-        if (record) mediaFlavors.push(record.fixture);
+        if (record) voices.push({ shotId: shot.id, fixture: record.fixture });
         if (accepted && record && accepted.audioPlacement.source.kind === "audio" && accepted.audioPlacement.source.artifactId === cue.audio.artifactId && accepted.audioPlacement.source.sha256 === cue.audio.sha256) {
           try {
-            if (accepted.placementMode === "shot" || !placedAbsoluteCues.has(cue.id))
-              audio.push(...projectAudioPlacements(accepted, [cuts[index]!]));
-            placedAbsoluteCues.add(cue.id);
+            const placements = projectAudioPlacements(accepted, [cuts[index]!], { requireAbsoluteCutStart: true });
+            if (!placements.length) settled = false;
+            else if (accepted.placementMode === "shot" || !placedAbsoluteCues.has(cue.id)) {
+              audio.push(...placements);
+              placedAbsoluteCues.add(cue.id);
+            }
           }
           catch { settled = false; }
           inputs.push({ nodeId: null, port: "audio", artifact: cue.audio });
@@ -109,7 +112,7 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
     if (project.soundtrack) {
       const recording = store.get<NarrationAudio>("narration_audio", project.soundtrack.audioId);
       invariant(recording?.projectId === projectId && recording.media.kind === "audio", "MEDIA_ARTIFACT_UNAVAILABLE", "Selected soundtrack is unavailable");
-      mediaFlavors.push(store.get<Artifact>("artifact", recording.media.artifactId)?.fixture === true);
+      musicFixture = store.get<Artifact>("artifact", recording.media.artifactId)?.fixture === true;
       const samples = recording.media.probe.audio?.samples;
       invariant(Number.isSafeInteger(samples) && samples! > 0, "MEDIA_SOURCE_UNAVAILABLE", "Soundtrack duration is not measured");
       inputs.push({ nodeId: null, port: "soundtrack", artifact: { artifactId: recording.id, sha256: recording.media.sha256, kind: "audio" } });
@@ -117,9 +120,17 @@ export function captureStoryboard(store: Store, projectId: string): StoryboardCa
       if (placement) audio.push({ source: recording.media, ...placement });
       music = { settings: project.soundtrack, source: recording.media.id };
     }
+    const mediaFlavors = [...selected.map(clip => clip.fixture), ...voices.map(voice => voice.fixture), ...(musicFixture === undefined ? [] : [musicFixture])];
     const demo = selected.length === shots.length && shots.length > 0 && mediaFlavors.every(fixture => fixture);
-    if (mediaFlavors.some(fixture => fixture) && mediaFlavors.some(fixture => !fixture))
-      for (const shot of shots) blockers.push({ code: "mixed_demo_media", shotId: shot.id });
+    const clipFlavors = new Set(selected.map(clip => clip.fixture));
+    if (clipFlavors.size > 1) {
+      for (const shot of shots) blockers.push({ code: "mixed_demo_media", medium: "clip", shotId: shot.id });
+    } else if (clipFlavors.size === 1) {
+      const clipFixture = selected[0]!.fixture;
+      for (const voice of voices)
+        if (voice.fixture !== clipFixture) blockers.push({ code: "mixed_demo_media", medium: "voice", shotId: voice.shotId });
+      if (musicFixture !== undefined && musicFixture !== clipFixture) blockers.push({ code: "mixed_demo_media", medium: "music" });
+    }
     const film: FilmFingerprint = {
       shots: digest(shotFingerprints.sort((a, b) => canonical(a).localeCompare(canonical(b)))),
       order: digest(shots.map(s => s.id)), music: digest(music),

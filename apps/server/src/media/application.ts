@@ -1,4 +1,5 @@
 import { canonical, digest, DomainError, invariant, newId } from "@openslate/core";
+import { setTimeout as delay } from "node:timers/promises";
 import type { ActorContext, ArtifactRef } from "@openslate/core";
 import type { ProductionService } from "../application/service.js";
 import { LocalMediaService } from "./local-media.js";
@@ -123,15 +124,20 @@ export class MediaApplicationService {
 
   private async freezeExport(projectId: string, authority: ActorContext, reserved: { id: string; outputArtifactId: string; capture: StoryboardCapture }): Promise<MediaRenderJob> {
     const { capture } = reserved, renderInput = structuredClone(capture.input);
+    const assertCurrent = () => this.store.transaction(() => {
+      this.authorize(projectId, authority);
+      invariant(canonical(captureStoryboard(this.store, projectId).target) === canonical(capture.target), "REVISION_CONFLICT", "Film changed while freezing export");
+      this.assertUnpaused({ projectId, target: capture.target });
+    });
     for (const clip of capture.fixtureClips) {
-      const source = await fixtureSource(this.store, this.media, projectId, clip.artifact, clip.durationFrames);
+      const source = await this.whenMediaAvailable(() => fixtureSource(this.store, this.media, projectId, clip.artifact, clip.durationFrames), assertCurrent);
       renderInput.clips.push({ source, startFrame: 0, durationFrames: clip.durationFrames, fit: "contain" });
     }
     const fixtureAudioSources = new Map<string, Awaited<ReturnType<typeof fixtureSource>>>();
     for (const placement of capture.fixtureAudio) {
       let source = fixtureAudioSources.get(placement.artifact.artifactId);
       if (!source) {
-        source = await fixtureSource(this.store, this.media, projectId, placement.artifact, Math.round(capture.readiness.seconds * 30));
+        source = await this.whenMediaAvailable(() => fixtureSource(this.store, this.media, projectId, placement.artifact, Math.round(capture.readiness.seconds * 30)), assertCurrent);
         fixtureAudioSources.set(placement.artifact.artifactId, source);
       }
       renderInput.audio!.push({ source, startSample: placement.startSample, durationSamples: placement.durationSamples, atSample: placement.atSample });
@@ -153,7 +159,7 @@ export class MediaApplicationService {
     const job = this.job(projectId, jobId), target = job.target;
     invariant("kind" in target && target.kind === "storyboard", "NOT_FOUND", "Export does not belong to the storyboard");
     return { exportId: job.id, state: terminal(job) ? "done" : job.cancelRequested || job.state === "cancelled" ? "cancelled" :
-      ["failed", "interrupted"].includes(job.state) || job.errorCode ? "failed" : "rendering",
+      job.state === "failed" || job.errorCode ? "failed" : "rendering",
       headVersion: target.headVersion, demo: target.demo, startedAt: job.createdAt,
       ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}), ...(job.artifact ? { artifact: { ...job.artifact, kind: "video" as const } } : {}),
       ...(job.errorCode ? { failure: { code: job.errorCode } } : {}),
@@ -165,7 +171,8 @@ export class MediaApplicationService {
       const capture = captureStoryboard(this.store, projectId);
       const records = this.store.list<MediaRenderJob>("media_render", projectId).filter(job => "kind" in job.target && job.target.kind === "storyboard").reverse()
         .map(job => this.exportRecord(projectId, job.id));
-      return { readiness: capture.readiness, current: records[0] ?? null, history: records.slice(1) };
+      const current = records.find(record => record.state === "rendering") ?? records[0] ?? null;
+      return { readiness: capture.readiness, current, history: records.filter(record => record !== current) };
     });
   }
 
@@ -194,7 +201,14 @@ export class MediaApplicationService {
     }, Math.max(250, Math.floor(this.leaseMs / 3)));
     heartbeat.unref();
     try {
-      const completion = await this.media.render(job.manifest, { signal: abort.signal });
+      const completion = await this.whenMediaAvailable(() => this.media.render(job.manifest, { signal: abort.signal }), () => this.store.transaction(() => {
+        const current = this.job(projectId, jobId);
+        invariant(current.ownerToken === job.ownerToken && current.state === "running", "MEDIA_LEASE_LOST", "Render ownership changed while waiting for FFmpeg");
+        invariant(!current.cancelRequested, "MEDIA_CANCELLED", "Render was cancelled while waiting for FFmpeg");
+        this.authorize(projectId, actor); this.authorize(projectId, current.actor);
+        invariant(this.matches(current), "MEDIA_STALE_TARGET", "Render target changed while waiting for FFmpeg");
+        this.assertUnpaused(current);
+      }), abort.signal);
       const path = await installManagedVideo(this.production.engine.artifactDir, projectId, completion.artifact, this.media.limits.maxOutputBytes);
       return this.finish(job, completion, path);
     } catch (error) {
@@ -203,8 +217,12 @@ export class MediaApplicationService {
         if (current.ownerToken === job.ownerToken && current.state === "running") {
           // A receipt may already exist (for example after SQL failure). Recovery scans
           // it before any retry; there is never an automatic second FFmpeg dispatch.
-          this.store.put("media_render", jobId, projectId, { ...current, state: abort.signal.aborted ? "cancelled" : "failed", ownerToken: null,
-            leaseUntil: null, cancelRequested: current.cancelRequested || abort.signal.aborted, errorCode: errorCode(error), finishedAt: new Date().toISOString() });
+          // Only the explicit human cancel command sets cancelRequested. A host
+          // shutdown leaves receipt recovery available, including the narrow
+          // window where FFmpeg finished before its publication was interrupted.
+          const interrupted = abort.signal.aborted && !current.cancelRequested;
+          this.store.put("media_render", jobId, projectId, { ...current, state: current.cancelRequested ? "cancelled" : interrupted ? "interrupted" : "failed", ownerToken: null,
+            leaseUntil: null, errorCode: interrupted ? null : errorCode(error), finishedAt: new Date().toISOString() });
         }
       });
       throw error;
@@ -261,6 +279,21 @@ export class MediaApplicationService {
 
   private job(projectId: string, id: string): MediaRenderJob {
     const job = this.store.get<MediaRenderJob>("media_render", id); invariant(job?.projectId === projectId, "NOT_FOUND", "Render does not belong to this project"); return job;
+  }
+
+  private async whenMediaAvailable<T>(operation: () => Promise<T>, assertCurrent: () => void, signal?: AbortSignal): Promise<T> {
+    for (;;) {
+      invariant(!signal?.aborted, "MEDIA_CANCELLED", "Local render interrupted");
+      assertCurrent();
+      try { return await operation(); }
+      catch (error) {
+        // MEDIA_BUSY is emitted only before LocalMediaService takes its worker
+        // or dispatches FFmpeg. Every other outcome needs explicit recovery.
+        if (!(error instanceof DomainError) || error.code !== "MEDIA_BUSY") throw error;
+      }
+      try { await delay(50, undefined, signal ? { signal } : {}); }
+      catch { throw new DomainError("MEDIA_CANCELLED", "Local render interrupted while waiting for FFmpeg"); }
+    }
   }
 
   private validateRequest(input: { expectedHeadVersion: number; key: string }, fields: string[]): void {

@@ -58,7 +58,7 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
       tasks.set(job.id, { abort, promise });
     };
     scope.addHook("onClose", async () => {
-      closing = true; const owned = [...tasks.values()]; owned.forEach(task => task.abort.abort());
+      closing = true; const owned = [...tasks.values()]; owned.forEach(task => task.abort.abort(new DomainError("MEDIA_INTERRUPTED", "Renderer is shutting down")));
       await Promise.allSettled(owned.map(task => task.promise));
     });
     // Stream bodies without buffering or touching files before inherited auth.

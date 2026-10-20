@@ -619,6 +619,7 @@ export function registerShotAudioRoutes(
         const { projectId } = request.params,
           project = store.getProject(projectId),
           saved = commits.workspaceCurrent(projectId);
+        const cuts = storyboardAudioCuts(project);
         const placements = (saved?.segments ?? [])
           .filter(
             (segment) =>
@@ -632,7 +633,7 @@ export function registerShotAudioRoutes(
               ),
           )
           .flatMap((segment) =>
-            projectAudioPlacements(segment, storyboardAudioCuts(project)).map(
+            projectAudioPlacements(segment, cuts, { requireAbsoluteCutStart: true }).map(
               (placement) => ({
                 id:
                   segment.placementMode === "shot"
@@ -646,7 +647,8 @@ export function registerShotAudioRoutes(
                 gainMilliDb: placement.gainMilliDb,
                 ...(placement.fadeOutSamples ? { fadeOutSamples: placement.fadeOutSamples } : {}),
                 shotIds: project.shots
-                  .filter((shot) => shot.cueId === segment.cue.id)
+                  .filter((shot) => shot.cueId === segment.cue.id &&
+                    (segment.placementMode === "shot" || cuts.some(cut => cut.shotId === shot.id && cut.startFrame * 1600 === placement.atSample)))
                   .map((shot) => shot.id),
               }),
             ),
