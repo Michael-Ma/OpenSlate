@@ -102,8 +102,17 @@ export interface MediaSlot {
   outdatedFields?: string[];
   /** A released no-answer attempt is still polled; a late result becomes an earlier take. */
   releasedAttemptIds?: string[];
-  /** The slot was taken off by Stop or by giving up on a job with no answer; it needs a new press. */
-  takenOff?: "stopped" | "released";
+  /**
+   * The slot was taken off and needs a new press: by Stop, by giving up on a job with no answer, or because
+   * the scene confirmation it was queued under no longer matches this shot (confirmation_stale).
+   */
+  takenOff?: "stopped" | "released" | "confirmation_stale";
+  /**
+   * The provider finished but the studio could not store the output yet (state stays "running", phase "ingesting").
+   * `code` is a sanitized id such as OUTPUT_DOWNLOAD_LOCATOR or OUTPUT_DOWNLOAD_EXPIRED, mapped to words by the web.
+   * It is not an unknown submission: never offer give-up for it.
+   */
+  ingestionIssue?: { code: string; at: string };
   /**
    * A replacement take in progress while the current output stays shown (state "ready"): its own state,
    * so a no-answer replacement can be given up (attemptId) and a failed one explained.
@@ -131,6 +140,11 @@ export interface ShotNarration {
   fits: boolean | null;
   /** How a too-long line was settled, if it was. */
   fit?: "cut_to_shot" | "extend_shot";
+  /**
+   * The whole-second shot length the server's extend fit would set for a measured line that does not fit,
+   * by its own rule and profile bounds. Absent for an estimated line: fit needs a measured voice line.
+   */
+  fitSeconds?: number;
 }
 
 export interface ShotOverview {
@@ -203,12 +217,19 @@ export interface SceneOverview {
     regenerateKeyframe?: PriceQuote;
     confirmVideo?: PriceQuote;
     voice?: PriceQuote;
+    /** One clip at this scene's video profile, whether or not any clip is pending: the price of remaking one. */
+    oneClip?: PriceQuote;
+    /** One voice line at this scene's speech profile, whether or not any line is pending. */
+    oneVoice?: PriceQuote;
   };
   /** Why confirm is unavailable right now (empty when it is available). */
   blockers: SceneBlocker[];
   /** Freshness token the confirm command must echo. */
   confirmationDigest: string | null;
+  /** The latest video confirmation (Confirm frames & generate video). */
   confirmation?: SceneConfirmationView;
+  /** The latest voice-line run started by Make keyframes; it never makes a clip. */
+  keyframesRun?: SceneConfirmationView;
 }
 
 export interface SceneConfirmationView {
@@ -367,7 +388,8 @@ export interface ExportReadiness {
   /** Every shot's clip is a demo fixture: the export is stamped "Demo". */
   demo: boolean;
   seconds: number;
-  blockers: { code: ExportBlockerCode; shotId?: string }[];
+  /** mixed_demo_media names the medium that differs from the rest (`medium`), so the reason can point at it. */
+  blockers: { code: ExportBlockerCode; shotId?: string; medium?: "clip" | "voice" | "music" }[];
 }
 
 export interface ExportRecord {
@@ -446,7 +468,8 @@ export interface ShotTakes {
 // Held Director proposals (phase P4: DC-2, DC-3, DC-4, DC-5; decision D1)
 // ---------------------------------------------------------------------------
 
-export type MediaEffect = "keeps_keyframe" | "keyframe_remade" | "clip_remade" | "voice_remade" | "no_media_yet";
+/** discards_running: a paid job for this shot is still running; it is charged and its result comes back out of date. */
+export type MediaEffect = "keeps_keyframe" | "keyframe_remade" | "clip_remade" | "voice_remade" | "no_media_yet" | "discards_running";
 
 /** App-computed preview of a proposal; the web draws Now / After from it without diffing anything itself. */
 export interface ProposalPreview {

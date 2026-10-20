@@ -54,6 +54,7 @@ export const notes = {
   "note.proposal.clip_remade": { en: "Clip will need remaking", zh: "视频需要重新生成" },
   "note.proposal.voice_remade": { en: "Voice line will be remade", zh: "配音需要重新生成" },
   "note.proposal.no_media_yet": { en: "No media yet", zh: "还没有素材" },
+  "note.proposal.discards_running": { en: "Work still running is charged and comes back out of date", zh: "仍在生成的内容会照常计费，但结果会过时" },
   "note.proposal.film_length": { en: "Film {now} s → {after} s", zh: "影片 {now} 秒 → {after} 秒" },
   "note.proposal.reject": { en: "Not now", zh: "暂不采用" },
   "note.proposal.undone": { en: "Change undone.", zh: "已撤销修改。" },
