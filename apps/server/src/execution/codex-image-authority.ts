@@ -98,16 +98,21 @@ export function resolveCodexImageAdmission(store: CodexImageAuthorityStore, inpu
   assertCodexImageAdmission(admission); return structuredClone(admission);
 }
 
-/** Use inside the short pre-marker/local-failure transaction; late provider observations use no first-submit check. */
-export function assertCodexImageFirstDispatch(store: Store, original: CodexImageAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
-  new InstallationRecoveryGuard(store).assertFirstSubmit(original.attempt.projectId, original.attempt.id);
+/** Lease authority is independent of current selection, pause and holds. */
+export function assertCodexImageLease(store: Store, original: CodexImageAdmission, expectedLease: ExecutionCallOptions["expectedLease"], reconciling = false): CodexImageAdmission {
   const current = resolveCodexImageAdmission(store, original.attempt.request, { capabilityLockId: original.capabilityLock.id,
     capabilityLockDigest: digest(original.capabilityLock), profileDefinition: original.profile });
   invariant(expectedLease && Object.keys(expectedLease).length === 2 && expectedLease.owner === original.attempt.leaseOwner
     && expectedLease.epoch === original.attempt.leaseEpoch && current.attempt.leaseOwner === expectedLease.owner
     && current.attempt.leaseEpoch === expectedLease.epoch && current.attempt.leaseExpiresAt > Date.now()
-    && current.attempt.phase === "submitting" && current.reservation.state === "reserved",
+    && (current.attempt.phase === "submitting" || reconciling && current.attempt.phase === "submission_unknown") && current.reservation.state === "reserved",
   "CODEX_IMAGE_EXECUTION_NOT_DISPATCHABLE", "Codex image no longer owns its original unexpired submitting lease");
+  return current;
+}
+/** Use inside the short pre-marker transaction; late provider observations use no first-submit check. */
+export function assertCodexImageFirstDispatch(store: Store, original: CodexImageAdmission, expectedLease: ExecutionCallOptions["expectedLease"]): void {
+  new InstallationRecoveryGuard(store).assertFirstSubmit(original.attempt.projectId, original.attempt.id);
+  const current = assertCodexImageLease(store, original, expectedLease);
   const lock = store.get<CodexImageCapabilityLock>("capability_lock", store.getProject(current.attempt.projectId).capabilityLockId);
   invariant(lock?.profiles.some(profile => canonical(profile) === canonical(current.profile)), "CODEX_IMAGE_SELECTION_CHANGED", "The current profile changed");
   assertCodexImageCurrentSelection(store, current.attempt);

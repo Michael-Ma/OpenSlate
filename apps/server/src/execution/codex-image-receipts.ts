@@ -16,8 +16,8 @@ export interface CodexImageExecutionMapping extends Identity {
 }
 export interface CodexImageExecutionDispatch extends Identity { mappingDigest:string;threadId:string;turnInputDigest:string;createdAt:string }
 export interface CodexImageExecutionRun extends Identity { mappingDigest:string;dispatchDigest:string;threadId:string;turnId:string }
-export type CodexImageObservation = {kind:'not_dispatched';code:'LOCAL_INPUT_INVALID'|'LOCAL_NATIVE_UNAVAILABLE'|'LOCAL_CANCELLED';nativeDiagnostic?:NativeDiagnostic}
-  | {kind:'failed';code:'USAGE_LIMIT'|'TURN_FAILED'|'IMAGE_FAILED';threadId:string;turnId:string}
+export type CodexImageObservation = {kind:'not_dispatched';code:'LOCAL_INPUT_INVALID'|'LOCAL_NATIVE_UNAVAILABLE'|'LOCAL_CANCELLED'|'SELECTION_CHANGED';nativeDiagnostic?:NativeDiagnostic}
+  | {kind:'failed';code:'USAGE_LIMIT'|'TURN_FAILED'|'IMAGE_FAILED'|'TURN_INTERRUPTED'|'NO_IMAGE';threadId:string;turnId:string}
   | {kind:'completed';threadId:string;turnId:string;itemId:string;revisedPrompt:string|null;outputReceiptId:string;
       output:{sha256:string;byteLength:number;width:number;height:number}};
 export interface CodexImageExecutionResult extends Identity { mappingDigest:string|null;dispatchDigest:string|null;runDigest:string|null;observation:CodexImageObservation }
@@ -97,10 +97,10 @@ export function assertCodexImageExecutionResult(attempt:Attempt,mapping:CodexIma
   if(value.kind==='not_dispatched') {codexFields(value,['kind','code',...(value.nativeDiagnostic===undefined?[]:['nativeDiagnostic'])]);
     if(value.nativeDiagnostic!==undefined)invariant(value.code==='LOCAL_NATIVE_UNAVAILABLE'&&canonical(value.nativeDiagnostic)===canonical(safeNativeDiagnostic(value.nativeDiagnostic)??null),
       'CODEX_IMAGE_EXECUTION_CONFLICT','Native preparation diagnostic must contain only safe evidence');
-    invariant(!dispatch&&!run&&['LOCAL_INPUT_INVALID','LOCAL_NATIVE_UNAVAILABLE','LOCAL_CANCELLED'].includes(value.code),
+    invariant(!dispatch&&!run&&['LOCAL_INPUT_INVALID','LOCAL_NATIVE_UNAVAILABLE','LOCAL_CANCELLED','SELECTION_CHANGED'].includes(value.code),
     'CODEX_IMAGE_EXECUTION_CONFLICT','Only a pre-marker local failure proves no start');return;}
   invariant(mapping&&dispatch&&run&&value.threadId===run.threadId&&value.turnId===run.turnId,'CODEX_IMAGE_EXECUTION_CONFLICT','Result belongs to another native turn');
-  if(value.kind==='failed'){codexFields(value,['kind','code','threadId','turnId']);invariant(['USAGE_LIMIT','TURN_FAILED','IMAGE_FAILED'].includes(value.code),'CODEX_IMAGE_EXECUTION_CONFLICT','Invalid terminal native failure');return;}
+  if(value.kind==='failed'){codexFields(value,['kind','code','threadId','turnId']);invariant(['USAGE_LIMIT','TURN_FAILED','IMAGE_FAILED','TURN_INTERRUPTED','NO_IMAGE'].includes(value.code),'CODEX_IMAGE_EXECUTION_CONFLICT','Invalid terminal native failure');return;}
   codexFields(value,['kind','threadId','turnId','itemId','revisedPrompt','outputReceiptId','output']);codexFields(value.output,['sha256','byteLength','width','height']);
   invariant(value.kind==='completed'&&codexId(value.itemId)&&(value.revisedPrompt===null||typeof value.revisedPrompt==='string'&&Buffer.byteLength(value.revisedPrompt)<=32768)
     &&codexHash(value.output.sha256)&&Number.isSafeInteger(value.output.byteLength)&&value.output.byteLength>=33&&value.output.byteLength<=32*1024**2

@@ -59,11 +59,51 @@ test("native default generated_images path is read exactly and survives worker r
  await f.set("api-key");const before=await f.records(),recovered=await f.make().lookup(prepared,{turnId:"turn-1"});assert.equal(recovered.kind,"completed",recovered.code);assert.deepEqual(recovered.bytes,outcome.bytes);
  const extra=methods((await f.records()).slice(before.length));assert.deepEqual(extra,["initialize","initialized","thread/read"]);
 });
-for(const scenario of ["symlink","outside","no-bytes","no-image","multiple","conflicting-item","wrong-event"])test(`no image is selected from ${scenario}`,async t=>{
+for(const scenario of ["symlink","outside","no-bytes","multiple","conflicting-item","wrong-event"])test(`no image is selected from ${scenario}`,async t=>{
  const f=await fixture(t,scenario),{outcome}=await run(f);assert.equal(outcome.kind,"unknown");assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
 });
-for(const [scenario,code]of [["usage","USAGE_LIMIT"],["image-failed","IMAGE_FAILED"]])test(`${scenario} remains a typed observed terminal result, without retry`,async t=>{
- const f=await fixture(t,scenario),{outcome}=await run(f);assert.equal(outcome.kind,"failed");assert.equal(outcome.code,code);assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+for(const [scenario,code]of [["usage","USAGE_LIMIT"],["image-failed","IMAGE_FAILED"],["image-refusal","IMAGE_FAILED"],["turn-failed","TURN_FAILED"],["turn-interrupted","TURN_INTERRUPTED"],["no-image","NO_IMAGE"]])test(`${scenario} remains a typed observed terminal result, without retry`,async t=>{
+ const f=await fixture(t,scenario),{prepared,outcome}=await run(f);assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code});
+ assert.deepEqual(await f.make().lookup(prepared,{turnId:"turn-1"}),outcome);
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.ok(!calls.includes("thread/resume"));assert.ok(!JSON.stringify(outcome).includes("PRIVATE"));
+});
+test("worker deadline settles only an interrupt proven terminal in exact native history",async t=>{
+ const f=await fixture(t,"deadline-interrupted"),{prepared,outcome}=await run(f);
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"TURN_INTERRUPTED"});
+ assert.deepEqual(await f.make().lookup(prepared,{turnId:"turn-1"}),outcome);
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.equal(calls.filter(x=>x==="turn/interrupt").length,1);assert.equal(calls.filter(x=>x==="thread/read").length,2);
+});
+for(const scenario of ["deadline-no-evidence","interrupt-lost-reply"])test(`worker deadline with ${scenario} stays unknown without terminal native evidence`,async t=>{
+ const f=await fixture(t,scenario),{prepared,outcome}=await run(f);assert.deepEqual(outcome,{kind:"unknown",code:"CODEX_IMAGE_TIMEOUT"});
+ assert.equal((await f.make().lookup(prepared,{turnId:"turn-1"})).kind,"pending");
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.equal(calls.filter(x=>x==="turn/interrupt").length,1);
+});
+for(const operation of ["start","lookup"])for(const boundary of ["cleanup-error","late-abort"])test(`${operation} preserves saved native failure through ${boundary}`,async t=>{
+ const f=await fixture(t,"usage"),value=input(),controller=new AbortController();
+ const prepared=operation==="start"?await f.worker.prepare(value):(await run(f,value)).prepared;
+ const close=ImageRpc.prototype.close;
+ ImageRpc.prototype.close=async function(){if(boundary==="late-abort")controller.abort();await close.call(this);if(boundary==="cleanup-error")throw Error("PRIVATE_CLEANUP_ERROR");};
+ let outcome;try{outcome=operation==="start"?await f.worker.start(prepared,value,{signal:controller.signal,observeTurn:async()=>{}}):await f.make().lookup(prepared,{turnId:"turn-1",signal:controller.signal});}
+ finally{ImageRpc.prototype.close=close;}
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+});
+test("observed terminal failure stays definite when the observation sink reaches the worker deadline",async t=>{
+ const f=await fixture(t,"usage"),{prepared,outcome}=await run(f,input(),{observeTurn:()=>new Promise(()=>{})});
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+});
+test("saved terminal history stays definite when cancellation follows the native read",async t=>{
+ const f=await fixture(t,"usage"),{prepared}=await run(f),controller=new AbortController(),request=ImageRpc.prototype.request;
+ ImageRpc.prototype.request=async function(method,...args){const result=await request.call(this,method,...args);if(method==="thread/read")controller.abort();return result;};
+ let outcome;try{outcome=await f.make().lookup(prepared,{turnId:"turn-1",signal:controller.signal});}finally{ImageRpc.prototype.request=request;}
+ assert.deepEqual(outcome,{kind:"failed",threadId:prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});assert.equal(methods(await f.records()).filter(x=>x==="turn/start").length,1);
+});
+test("terminal usage failure stays definite when its observation callback cancels the worker",async t=>{
+ const f=await fixture(t,"usage"),controller=new AbortController(),setHandler=ImageRpc.prototype.setMessageHandler;let completed;
+ const completion=new Promise(resolve=>{completed=resolve;});
+ ImageRpc.prototype.setMessageHandler=function(receive){return setHandler.call(this,message=>{receive(message);if(message.method==="turn/completed")completed();});};
+ let result;try{result=await run(f,input(),{signal:controller.signal,observeTurn:async()=>{await completion;controller.abort();}});}finally{ImageRpc.prototype.setMessageHandler=setHandler;}
+ assert.deepEqual(result.outcome,{kind:"failed",threadId:result.prepared.session.threadId,turnId:"turn-1",code:"USAGE_LIMIT"});
+ const calls=methods(await f.records());assert.equal(calls.filter(x=>x==="turn/start").length,1);assert.ok(!calls.includes("turn/interrupt"));
 });
 test("lost turn acknowledgement recovers exact recorded result via history with no new prepare or turn",async t=>{
  const f=await fixture(t,"lost-ack"),{prepared,outcome,turns}=await run(f);assert.equal(outcome.kind,"unknown");assert.deepEqual(turns,["turn-1"]);

@@ -28,7 +28,7 @@ type Configuration = { version: 1; config: Record<string, CodexConfigValue>; wor
 type Held = { prepared: CodexImagePrepared; rpc: ImageRpc; config: Configuration; timer: NodeJS.Timeout };
 const READ = ["initialize", "thread/read"];
 const CHECK = ["initialize", "config/read", "account/read", "modelProvider/capabilities/read"];
-const ACTIVE = [...CHECK, "thread/start", "turn/start", "turn/interrupt"];
+const ACTIVE = [...CHECK, "thread/start", "thread/read", "turn/start", "turn/interrupt"];
 const PROFILE = "openslate_local";
 const MODEL = "gpt-6-astra";
 const validId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
@@ -225,15 +225,18 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
   }
   async #result(prepared: CodexImagePrepared, turn: Record<string, unknown>, images: readonly Record<string, unknown>[], workspace: string,
     signal?: AbortSignal): Promise<CodexImageOutcome> {
-    imageStopped(signal); const threadId = prepared.session.threadId, turnId = turn.id;
+    const threadId = prepared.session.threadId, turnId = turn.id;
     requireRuntime(validId(turnId), "CODEX_IMAGE_TURN_INVALID", "Image turn identity is invalid");
     requireRuntime(images.length <= 1, "CODEX_IMAGE_MULTIPLE_OUTPUTS", "Image turn produced multiple image items; no result was selected");
-    if (turn.status === "inProgress") return { kind: "pending", threadId, turnId };
+    if (turn.status === "inProgress") { imageStopped(signal); return { kind: "pending", threadId, turnId }; }
     const image = images[0];
     if (object(image?.failure).type === "usageLimitExceeded") return { kind: "failed", threadId, turnId, code: "USAGE_LIMIT" };
-    if (turn.status === "failed" || turn.status === "interrupted") return { kind: "failed", threadId, turnId, code: "TURN_FAILED" };
+    if (turn.status === "failed") return { kind: "failed", threadId, turnId, code: "TURN_FAILED" };
+    if (turn.status === "interrupted") return { kind: "failed", threadId, turnId, code: "TURN_INTERRUPTED" };
     requireRuntime(turn.status === "completed", "CODEX_IMAGE_TURN_INVALID", "Image turn did not report a supported terminal state");
     if (image?.status === "failed") return { kind: "failed", threadId, turnId, code: "IMAGE_FAILED" };
+    if (!image) return { kind: "failed", threadId, turnId, code: "NO_IMAGE" };
+    imageStopped(signal);
     requireRuntime(image && validId(image.id) && image.type === "imageGeneration" && image.status === "completed" &&
       typeof image.result === "string" && (image.failure === undefined || image.failure === null),
     "CODEX_IMAGE_COMPLETION_MISSING", "Completed turn has no unique successful image item");
@@ -260,6 +263,17 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
     }
     inspectCodexImagePng(bytes); imageStopped(signal);
     return { kind: "completed", threadId, turnId, itemId: image.id, bytes: new Uint8Array(bytes), revisedPrompt: typeof image.revisedPrompt === "string" ? image.revisedPrompt : null };
+  }
+  async #history(rpc: ImageRpc, prepared: CodexImagePrepared, config: Configuration, selectedTurn?: string, signal?: AbortSignal): Promise<CodexImageOutcome> {
+    // Pinned 0.153.4 advertises items/list but returns -32601. Its legacy history mode supports this bounded read.
+    // Never fall back to resume/start when history is unavailable, incomplete, oversized or ambiguous.
+    const response = object(await rpc.request("thread/read", { threadId: prepared.session.threadId, includeTurns: true }, signal));
+    const thread = object(response.thread);
+    requireRuntime(thread.id === prepared.session.threadId && thread.cwd === config.workspace && thread.modelProvider === "openai" &&
+      Array.isArray(thread.turns) && thread.turns.length <= 1, "CODEX_IMAGE_HISTORY_INVALID", "Saved native history is not the dedicated image thread");
+    const turn = thread.turns.map(object).find(value => selectedTurn === undefined || value.id === selectedTurn);
+    requireRuntime(turn && Array.isArray(turn.items) && turn.items.length <= 128, "CODEX_IMAGE_TURN_MISSING", "Exact original image turn is unavailable");
+    return this.#result(prepared, turn, turn.items.map(object).filter(value => value.type === "imageGeneration"), config.workspace, signal);
   }
   async start(suppliedPrepared: CodexImagePrepared, suppliedInput: CodexImageInput,
     suppliedOptions: { signal?: AbortSignal; observeTurn: (turnId: string) => Promise<void> }): Promise<CodexImageOutcome> {
@@ -308,7 +322,7 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
         }
       } catch (error) { eventFault = error; wake(); }
     });
-    let outcome: CodexImageOutcome;
+    let outcome: CodexImageOutcome = unknown("CODEX_IMAGE_UNAVAILABLE");
     try {
       await this.#load(prepared, cancellation.signal); await this.#check(rpc, held.config, cancellation.signal);
       for (const [index, image] of input.images.entries()) {
@@ -333,34 +347,49 @@ export class CodexImageWorkerTransport implements CodexImageTransport {
       outcome = await this.#result(prepared, finished, [...images.values()], held.config.workspace, signal);
     } catch (error) {
       outcome = unknown(safeCode(error));
-      if (turnId && !rpc.closed) await rpc.request("turn/interrupt", { threadId, turnId }).catch(() => {});
+      if (finished && !eventFault) {
+        try {
+          // Cancellation can fence image ingestion after a completion without undoing a native
+          // terminal failure. The signal still prevents reading successful image bytes here.
+          const saved = await this.#result(prepared, finished, [...images.values()], held.config.workspace, signal);
+          if (saved.kind === "failed") outcome = saved;
+        } catch { /* Invalid or unavailable native output still needs read-only reconciliation. */ }
+      }
+      if (outcome.kind !== "failed" && turnId) {
+        let acknowledged = false;
+        if (!rpc.closed) try {
+          await rpc.request("turn/interrupt", { threadId, turnId });
+          acknowledged = true;
+        } catch { /* A lost interrupt reply does not establish a terminal state. */ }
+        if (deadline && !signal?.aborted && !eventFault) {
+          try {
+            // An interrupt acknowledgement alone does not prove the turn ended. A native terminal
+            // completion or exact saved history settles a consumed failure; never resend the turn.
+            const saved = finished ? await this.#result(prepared, finished, [...images.values()], held.config.workspace) :
+              acknowledged ? await this.#history(rpc, prepared, held.config, turnId) : undefined;
+            if (saved?.kind === "failed") outcome = saved;
+          } catch { /* Missing native evidence remains unknown for read-only reconciliation. */ }
+        }
+      }
     } finally {
       clearTimeout(timer); signal?.removeEventListener("abort", abort); cancellation.signal.removeEventListener("abort", aborted);
-      try { await this.#close(rpc); } catch { outcome = unknown("CODEX_IMAGE_CLEANUP_FAILED"); }
+      try { await this.#close(rpc); } catch { if (outcome?.kind !== "failed") outcome = unknown("CODEX_IMAGE_CLEANUP_FAILED"); }
       this.#turnRunning = false;
     }
-    return signal?.aborted ? unknown("CODEX_IMAGE_ABORTED") : outcome!;
+    return signal?.aborted && outcome!.kind !== "failed" ? unknown("CODEX_IMAGE_ABORTED") : outcome!;
   }
   async lookup(suppliedPrepared: CodexImagePrepared, options: { turnId?: string; signal?: AbortSignal } = {}): Promise<CodexImageOutcome> {
-    const signal = options.signal, selectedTurn = options.turnId; let rpc: ImageRpc | undefined, outcome: CodexImageOutcome;
+    const signal = options.signal, selectedTurn = options.turnId; let rpc: ImageRpc | undefined, outcome: CodexImageOutcome = unknown("CODEX_IMAGE_UNAVAILABLE");
     try {
       const prepared = preparedValue(suppliedPrepared); imageStopped(signal);
       requireRuntime(selectedTurn === undefined || validId(selectedTurn), "CODEX_IMAGE_TURN_INVALID", "Saved native turn identity is invalid");
       const config = await this.#load(prepared, signal);
       rpc = this.#launch(config, READ); await this.#initialize(rpc, signal);
       rpc.finishStartup();
-      // Pinned 0.153.4 advertises items/list but returns -32601. Its legacy history mode supports this bounded read.
-      // Never fall back to resume/start when history is unavailable, incomplete, oversized or ambiguous.
-      const response = object(await rpc.request("thread/read", { threadId: prepared.session.threadId, includeTurns: true }, signal));
-      const thread = object(response.thread);
-      requireRuntime(thread.id === prepared.session.threadId && thread.cwd === config.workspace && thread.modelProvider === "openai" &&
-        Array.isArray(thread.turns) && thread.turns.length <= 1, "CODEX_IMAGE_HISTORY_INVALID", "Saved native history is not the dedicated image thread");
-      const turn = thread.turns.map(object).find(value => selectedTurn === undefined || value.id === selectedTurn);
-      requireRuntime(turn && Array.isArray(turn.items) && turn.items.length <= 128, "CODEX_IMAGE_TURN_MISSING", "Exact original image turn is unavailable");
-      outcome = await this.#result(prepared, turn, turn.items.map(object).filter(value => value.type === "imageGeneration"), config.workspace, signal);
+      outcome = await this.#history(rpc, prepared, config, selectedTurn, signal);
     } catch (error) { outcome = unknown(safeCode(error)); }
-    finally { if (rpc) { try { await this.#close(rpc); } catch { outcome = unknown("CODEX_IMAGE_CLEANUP_FAILED"); } } }
-    return signal?.aborted ? unknown("CODEX_IMAGE_ABORTED") : outcome!;
+    finally { if (rpc) { try { await this.#close(rpc); } catch { if (outcome?.kind !== "failed") outcome = unknown("CODEX_IMAGE_CLEANUP_FAILED"); } } }
+    return signal?.aborted && outcome!.kind !== "failed" ? unknown("CODEX_IMAGE_ABORTED") : outcome!;
   }
   async release(supplied: CodexImagePrepared): Promise<void> {
     const prepared = preparedValue(supplied), held = this.#held;

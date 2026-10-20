@@ -12,7 +12,7 @@ export interface CodexImageDescription { version: 1; policy: 'codex-image-turn-v
 export interface CodexImagePrepared { runtime: { version: 1; runtimeVersion: '0.153.4'; runtimeDigest: string; configurationDigest: string; model: 'gpt-6-astra'; authMode: 'chatgpt' };
   session: { threadId: string; turnInputDigest: string } }
 export type CodexImageOutcome = { kind: 'unknown'; code: string } | { kind: 'pending'; threadId: string; turnId: string }
-  | { kind: 'failed'; threadId: string; turnId: string; code: 'USAGE_LIMIT' | 'TURN_FAILED' | 'IMAGE_FAILED' }
+  | { kind: 'failed'; threadId: string; turnId: string; code: 'USAGE_LIMIT' | 'TURN_FAILED' | 'TURN_INTERRUPTED' | 'IMAGE_FAILED' | 'NO_IMAGE' }
   | { kind: 'completed'; threadId: string; turnId: string; itemId: string; bytes: Uint8Array; revisedPrompt: string | null };
 /** prepare performs no model turn. start performs at most one turn/start. lookup only reads saved history/files. */
 export interface CodexImageTransport {

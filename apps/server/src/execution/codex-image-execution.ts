@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants,mkdirSync,realpathSync } from 'node:fs';
 import { open,realpath } from 'node:fs/promises';
 import { isAbsolute,relative,sep } from 'node:path';
-import { canonical,digest,invariant } from '@openslate/core';
+import { canonical,digest,DomainError,invariant } from '@openslate/core';
 import type { NativeDiagnostic } from '@openslate/core';
 import { classifyNativeDiagnostic } from '@openslate/director';
 import { logNativeDiagnostic } from '../application/native-diagnostics.js';
@@ -12,7 +12,7 @@ import { InstallationRecoveryGuard } from '../application/installation-recovery.
 import type { Store } from '../persistence/store.js';
 import type { Attempt } from './engine.js';
 import { ExecutionOutputStore } from './output-store.js';
-import { assertCodexImageFirstDispatch,resolveCodexImageAdmission,resolveCodexImageReferences } from './codex-image-authority.js';
+import { assertCodexImageFirstDispatch,assertCodexImageLease,resolveCodexImageAdmission,resolveCodexImageReferences } from './codex-image-authority.js';
 import type { CodexImageAdmission } from './codex-image-authority.js';
 import { assertCodexImageOperationOptions } from './codex-image-receipts.js';
 import type { CodexImageExecutionMapping,CodexImageExecutionDispatch,CodexImageExecutionRun,CodexImageExecutionResult,CodexImageObservation } from './codex-image-receipts.js';
@@ -20,6 +20,7 @@ import { assertCodexImageRecords,assertCodexImageSpoolLineage } from './codex-im
 const unknown=():ExecutionOutcome=>({type:'unknown',diagnostic:'Codex image outcome is unresolved; no automatic turn restart'});
 const stopped=(signal?:AbortSignal):void=>invariant(!signal?.aborted,'CODEX_IMAGE_CANCELLED','Codex image work was cancelled');
 const identity=(attempt:Attempt)=>({id:attempt.id,projectId:attempt.projectId,version:1 as const,attemptId:attempt.id,requestDigest:digest(attempt.request)});
+const selectionChanged=(error:unknown):boolean=>error instanceof DomainError&&['CODEX_IMAGE_SELECTION_CHANGED','EXECUTION_PAUSED','EXECUTION_HELD'].includes(error.code);
 
 /** Separate ChatGPT-usage adapter. One irreversible turn/start marker, never an Images API fallback. */
 export class CodexImageExecution implements ExecutionProvider {
@@ -57,8 +58,8 @@ export class CodexImageExecution implements ExecutionProvider {
         invariant(!this.marked(attempt.id),'CODEX_IMAGE_EXECUTION_CONFLICT','Native turn was already claimed');
         return this.#store.insert('codex_image_execution_mapping',attempt.id,attempt.projectId,value);
       });
-    }catch(error){await release();return this.notDispatched(admission,lease,signal?.aborted?'LOCAL_CANCELLED':'LOCAL_NATIVE_UNAVAILABLE',signal,
-      signal?.aborted?undefined:classifyNativeDiagnostic(error));}
+    }catch(error){await release();return this.notDispatched(admission,lease,signal?.aborted?'LOCAL_CANCELLED':selectionChanged(error)?'SELECTION_CHANGED':'LOCAL_NATIVE_UNAVAILABLE',signal,
+      signal?.aborted||selectionChanged(error)?undefined:classifyNativeDiagnostic(error));}
     let claimed:boolean;
     try {claimed=this.#store.transaction(()=>{
       if(this.marked(attempt.id))return false;
@@ -66,7 +67,7 @@ export class CodexImageExecution implements ExecutionProvider {
       assertCodexImageRecords(this.#store,attempt);
       this.#store.insert('codex_image_execution_dispatch',attempt.id,attempt.projectId,{...identity(attempt),mappingDigest:digest(mapping),
         threadId:mapping.native.session.threadId,turnInputDigest:mapping.transport.turnInputDigest,createdAt:new Date().toISOString()});return true;
-    });}catch{await release();return unknown();}
+    });}catch(error){await release();return this.notDispatched(admission,lease,selectionChanged(error)?'SELECTION_CHANGED':'LOCAL_CANCELLED',signal);}
     if(!claimed)return this.recover(attempt,signal);
     try {
       const observation=await this.#transport.start(structuredClone(mapping.native),structuredClone(prepared),{...(signal?{signal}:{}),
@@ -80,7 +81,7 @@ export class CodexImageExecution implements ExecutionProvider {
     invariant(saved&&saved.id===attemptId&&(!input||input.attemptId===attemptId),'CODEX_IMAGE_EXECUTION_CONFLICT','Unknown native image attempt');
     const request=structuredClone(input??saved.request);assertExecutionRequest(this,request);
     const mapping=this.#store.get<CodexImageExecutionMapping>('codex_image_execution_mapping',attemptId);
-    return this.recover(resolveCodexImageAdmission(this.#store,request,mapping).attempt,signal);
+    return this.recover(resolveCodexImageAdmission(this.#store,request,mapping).attempt,signal,true,options.expectedLease);
   }
   async poll(_taskId:string,input?:Readonly<ExecutionRequest>,options:ExecutionCallOptions={}):Promise<ExecutionOutcome> {
     this.#recovery.assertWritable();return input?this.lookup(input.attemptId,input,options):unknown();
@@ -117,22 +118,26 @@ export class CodexImageExecution implements ExecutionProvider {
     const result=this.#store.get<CodexImageExecutionResult>('codex_image_execution_result',attempt.id)!;
     if(result.observation.kind==='completed')await this.#outputs.spool(attempt.projectId,result.observation.outputReceiptId,async function*(){for(let offset=0;offset<bytes.byteLength;offset+=1024*1024)yield bytes.subarray(offset,offset+1024*1024);},signal?{signal}:{});
   }
-  private async notDispatched(admission:CodexImageAdmission,lease:ExecutionCallOptions['expectedLease'],code:Extract<CodexImageObservation,{kind:'not_dispatched'}>['code'],signal?:AbortSignal,nativeDiagnostic?:NativeDiagnostic):Promise<ExecutionOutcome> {
+  private async notDispatched(admission:CodexImageAdmission,lease:ExecutionCallOptions['expectedLease'],code:Extract<CodexImageObservation,{kind:'not_dispatched'}>['code'],signal?:AbortSignal,nativeDiagnostic?:NativeDiagnostic,reconciling=false):Promise<ExecutionOutcome> {
     this.#store.transaction(()=>{
       if(this.marked(admission.attempt.id))return;
-      try{assertCodexImageFirstDispatch(this.#store,admission,lease);}catch{return;}
+      try{assertCodexImageLease(this.#store,admission,lease,reconciling);}catch{return;}
       this.saveResult(admission.attempt,{kind:'not_dispatched',code,...(nativeDiagnostic?{nativeDiagnostic}:{})});
       if(nativeDiagnostic)logNativeDiagnostic('codex_image_prepare',admission.attempt.projectId,nativeDiagnostic,admission.attempt.id);
     });
     return this.recover(admission.attempt,signal,false);
   }
-  private async recover(attempt:Attempt,signal?:AbortSignal,allowNative=true):Promise<ExecutionOutcome> {
+  private async recover(attempt:Attempt,signal?:AbortSignal,allowNative=true,lease?:ExecutionCallOptions['expectedLease']):Promise<ExecutionOutcome> {
     this.#recovery.assertWritable();let records=assertCodexImageRecords(this.#store,attempt);
+    // A newly leased reconciler fences every old marker writer. Without the marker,
+    // turn/start could never have run; recovery records no-start and never starts it.
+    if(allowNative&&lease&&!records.dispatch&&!records.result)
+      return this.notDispatched(records.admission,lease,'LOCAL_CANCELLED',signal,undefined,true);
     const local=async():Promise<ExecutionOutcome|null>=>{
       const value=records.result?.observation;
       if(value?.kind==='not_dispatched')return {type:'rejected',certainty:'not_accepted',failureId:`codex-image-${digest(records.result).slice(0,32)}`,technical:true,retryAllowed:false};
       // A model turn consumed usage even when the image tool failed. Never reinterpret it as a pre-start rejection.
-      if(value?.kind==='failed')return unknown();
+      if(value?.kind==='failed')return {type:'failed',taskId:null,failureId:value.code,technical:false,retryAllowed:false};
       if(value?.kind!=='completed')return null;
       try {
         await this.#outputs.recover(attempt.projectId,value.outputReceiptId,signal?{signal}:{});
