@@ -66,6 +66,9 @@ for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0']) test(`next native ${
   assert.equal(context.snapshot.applicationCapabilities.narration.transcription.toolAvailable, true);
   assert.equal(context.snapshot.guard.applicationCapabilitiesDigest, digest(context.snapshot.applicationCapabilities));
   assert.ok(context.filmPlanning.procedure.some(text => text.includes('Writing needs no generation or spending permission')));
+  // The Director names the studio's actual views and actions, not the retired Storyboard/Timeline or a button color.
+  assert.match(context.filmPlanning.surface, /^Plan: .*Keyframes: .*"Confirm frames & generate video".*Film: .*Assets/);
+  assert.doesNotMatch(context.filmPlanning.surface, /Storyboard|Timeline|green/);
   assert.equal(f.store.get('director_epoch_lock', input.epochId).lockId, successor.id);
   assert.deepEqual(f.store.get('director_skill_lock', saved.lock.id).lock, saved.lock);
   assert.equal(f.store.get('director_epoch_lock', oldBridge.actor.epochId).lockId, saved.lock.id);
