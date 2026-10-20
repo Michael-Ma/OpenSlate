@@ -131,7 +131,7 @@ export const scenarios = [
       const options = await page.locator(".insp select[data-act='narr-voice'] option").allInnerTexts();
       expect(options[0] === "Same as the film (Cedar)" && options.includes("Cedar · film default") && options.includes("Ash"), `Voice options: ${options.join(", ")}`);
       await page.selectOption(".insp select[data-act='narr-voice']", "ash");
-      await expectText(page, '.insp form[data-form="narration"] .stale[id^="narr-impact"]', /^The voice line will be made again in this voice, with the scene's next keyframes or video\.$/);
+      await expectText(page, '.insp form[data-form="narration"] .stale[id^="narr-impact"]', /^The voice line will be made again in this voice, about \$0\.01, with the scene's next keyframes or video\.$/);
       // What Save will do is in sight above the sticky buttons, with the voice; the buttons are never faded.
       const sight = await page.evaluate(() => {
         const r = (sel) => document.querySelector(sel).getBoundingClientRect();

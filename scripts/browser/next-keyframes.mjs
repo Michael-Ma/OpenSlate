@@ -265,6 +265,12 @@ export const scenarios = [
       await page.click('.banner[data-note="note-a"][data-state="settled"] [data-act="note-next"]');
       await page.waitForSelector('.banner.check[data-state="open"]');
       await expectText(page, ".banner.check h2", /^Narration about [\d.]+ s, shot 6 s$/);
+      // New words are only an estimate: fitting needs the measured voice line, so the check offers no Make or Keep yet.
+      await expectText(page, ".banner.check .sub", /2\.3's line looks longer than the shot\. Make its voice line to measure it/);
+      if (await page.locator('[data-act="keep-fit"][data-shot="shot-2-3"]').count()) throw new Error("An estimated line offers Keep");
+      await expectText(page, '[data-act="make-keyframes"]', /^Make 1 voice line/);
+      await page.click('[data-act="make-keyframes"]');
+      await expectText(page, ".banner.check h2", /^Narration [\d.]+ s, shot 6 s$/, 15000);
       await page.click('[data-act="keep-fit"][data-shot="shot-2-3"]');
       await page.waitForSelector('.banner.check[data-state="settled"] [data-act="undo"]');
       await expectText(page, ".banner", /2\.3 stays 6 s; the line is cut there/);
@@ -413,9 +419,10 @@ export const scenarios = [
       await ready(page);
       await page.click(`[data-act="scene"][data-scene="${scene(3)}"]`);
       await page.waitForSelector('.preview .dashed-frame');
-      await expectText(page, '[data-act="make-keyframes"]', /^Make 2 keyframes · about \$0\.08$/);
+      // Two keyframes and 3.2's voice line, priced together as the server quotes the press.
+      await expectText(page, '[data-act="make-keyframes"]', /^Make 2 keyframes · about \$0\.09$/);
       // "about" stays on the line of its price, and the seconds on a card stay with their unit.
-      if (!(await page.locator('[data-act="make-keyframes"]').textContent()).includes("about\u00a0$0.08")) throw new Error("The price can break away from its about");
+      if (!(await page.locator('[data-act="make-keyframes"]').textContent()).includes("about\u00a0$0.09")) throw new Error("The price can break away from its about");
       if (!(await page.locator('.card .ttl').first().textContent()).includes("\u00a0s")) throw new Error("A card's seconds can break away from their unit");
       await expectText(page, ".kf-row", /No more shots in this scene/);
       await screenshot(page, "scene-3-1440");

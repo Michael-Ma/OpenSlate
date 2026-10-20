@@ -156,7 +156,7 @@ export const scenarios = [
       await expectText(page, '[data-note="line"]', /^Voice line 2\.1 s · fits 5 s$/);
       await page.fill('[data-field="line"]', "One for the morning boat, please.");
       await expectText(page, '[data-note="line"]', /About 1\.8 s \(estimate, 0\.3 s a word; measured once the voice line is made\) · fits 5 s/);
-      await expectText(page, '[data-impact="cost"] .txt', /The voice line needs making again; until then its length is an estimate\./);
+      await expectText(page, '[data-impact="cost"] .txt', /The voice line needs making again \(about \$0\.01\); until then its length is an estimate\./);
       await expectText(page, '[data-hint="multi"]', /^Saves as 2 changes; Undo reverts only the last one \(1\.2 line\)\.$/);
       await page.fill('[data-field="line"]', "One for the morning boat.");
       await screenshot(page, "editing-1440");
