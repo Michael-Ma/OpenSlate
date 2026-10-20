@@ -21,6 +21,8 @@ export interface SupervisorOptions {
   /** Local controllers may share one store while owning disjoint project sets. */
   projectFilter?: (projectId: string) => boolean;
   prepareInput?: (turn: DirectorTurn, human: ActorContext, bridge: { actor: ActorContext; token: string }, preparation?: { signal: AbortSignal }) => Promise<DirectorRunInput> | DirectorRunInput;
+  /** Host-only preflight; refusals happen before dispatch intent and cannot become unknown submissions. */
+  prepareRuntime?: (input: DirectorRunInput) => Promise<DirectorRuntime> | DirectorRuntime;
   now?: () => number; leaseMs?: number; owner?: string;
 }
 
@@ -191,11 +193,15 @@ export class DirectorSupervisor {
       invariant(Object.entries(identity).every(([key, value]) => input[key as keyof typeof identity] === value), "RUNTIME_IDENTITY_MISMATCH", "Runtime input belongs to another request");
       if (abort.signal.aborted) throw new Error("Interrupted before dispatch");
       service.assertActor(claimed.projectId, bridge.actor);
+      const runtime = this.options.prepareRuntime ? await this.options.prepareRuntime(input) : this.runtime;
+      invariant(runtime.id === this.runtime.id, "RUNTIME_MISMATCH", "Prepared runtime differs from the queued Director");
+      if (abort.signal.aborted) throw new Error("Interrupted before dispatch");
       // Persist intent before the adapter may write turn/start. No credentials are persisted.
       service.store.transaction(() => {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;
         service.recovery.assertWritable(claimed.projectId, claimed.requestId);
         service.recovery.assertFreshAuthority(claimed.projectId, "director_turn", claimed.id);
+        service.assertActor(claimed.projectId, bridge.actor);
         invariant(turn.owner === this.owner && turn.state === "running", "DIRECTOR_LEASE_LOST", "Director turn ownership changed");
         this.save({ ...turn, dispatched: true });
         service.store.appendEvent(claimed.projectId, "director.dispatch_intent", { turnId: claimed.id, requestId: claimed.requestId, contextDigest: digest(input.context), inputDigest: directorInputDigest(input) });
@@ -231,7 +237,7 @@ export class DirectorSupervisor {
           }
         });
       };
-      const result: DirectorRunResult = await this.runtime.start(input, { signal: abort.signal, onEvent });
+      const result: DirectorRunResult = await runtime.start(input, { signal: abort.signal, onEvent });
       invariant(Object.entries(identity).every(([key, value]) => result[key as keyof typeof identity] === value), "RUNTIME_IDENTITY_MISMATCH", "Runtime result belongs to another request");
       service.store.transaction(() => {
         const turn = service.store.get<DirectorTurn>("director_turn", claimed.id)!;

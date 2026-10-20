@@ -35,6 +35,7 @@ test('historical-plan diagnostics and service review preserve a persistent offli
   await f.director.settle();await f.drain();
   assert.equal(f.director.turns(project.id)[0].state,'completed',JSON.stringify(f.director.turns(project.id)));
   assert.equal(f.provider.acceptedCount(),2,'only keyframes before review');
+  assert.equal(f.store.list('director_skill_lock',project.id).at(-1).lock.compatibility.toolContract,'6.0.0');
   const review=(await f.req('GET',`${path}/review`)).json();
   assert.ok(review.members.every(member=>member.ready&&!member.approved));
   assert.ok(review.members.every(member=>member.motionPrompt&&member.durationFrames===180));
@@ -52,6 +53,7 @@ test('historical-plan diagnostics and service review preserve a persistent offli
   await f.director.settle();await f.drain();
   assert.equal(f.director.turns(project.id).at(-1).state,'completed',JSON.stringify(f.director.turns(project.id)));
   assert.equal(f.provider.acceptedCount(),5);
+  assert.equal(f.store.getProject(project.id).shots[0].framing,'Extreme close-up','scripted successor edits obey the short-label schema');
   assert.deepEqual(f.engine.outputs(project.id).filter(output=>secondNodes.includes(output.nodeId)),preserved);
   const refreshed=(await f.req('GET',`${path}/review`)).json();
   assert.ok(!refreshed.members.find(member=>member.shotId===current.shots[0].id).approved);

@@ -4,12 +4,14 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { dirname } from "node:path";
+import { chmodSync, cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { PassThrough, Writable } from "node:stream";
 import { TOOL_NAMES, TOOL_DESCRIPTORS, TOOL_CATALOG_DIGEST, TOOL_CONTRACT_VERSION, parseToolArguments, changeProposalSchema, digest, toolCatalog, toolHandlerId } from "@openslate/core";
 import { ToolBridge, runStdioToolBridge, STDIO_LIMITS } from "../dist/tools/index.js";
+import { loadSkillCatalog } from "../dist/skills/index.js";
 
 const entry = fileURLToPath(new URL("../dist/tools/mcp.js", import.meta.url));
 const code = expected => error => error.code === expected;
@@ -325,6 +327,7 @@ test("actual V4 stdio child advertises the saved catalog and forwards compact wr
 
 test("every shipped tool catalog has an immutable complete catalog and handler digest", () => {
   const hashes = {
+    "6.0.0": ["cdcdbdd52bdc451888a76867f5f08af2d063f692346a6c9a63eb0226724295db", "282275ce2d97c274f0e064357dac77a8d06e57fd8a58de37e187faf79e5a97ec"],
     "5.0.0": ["271ad801bf43075bcb1ed0188fd8ca5822f3845f903a9ee2d4cca92fb910530c", "e696fa1999ff0d088ba7ef9a6b64d42af111fb0e5af7a927973999e843f8914e"],
     "1.0.0": ["b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa", "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec"],
     "2.0.0": ["c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df", "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e"],
@@ -335,6 +338,40 @@ test("every shipped tool catalog has an immutable complete catalog and handler d
     assert.equal(digest(toolCatalog(version)), wholeCatalog, `${version} complete saved catalog`);
     assert.equal(toolCatalog(version).digest, handlerSchema, `${version} schema handler binding`);
   }
+});
+
+const shippedPackages = {
+  '1': ['f0284e141496a4b2ee6e19be5903e78c03c412df1614958ba3257f295347378a', 'a0ee6a6b355eb340ea18de2e4adcdeb9ab1cb5102d7cda6eac0209442c2197b2'],
+  '2': ['5c1eb0c1e4cd7aa80b9ef381cc78132b9f5780e78373ccdac86001299798c888', 'eb9f48f8678f87843ee1da6a15f89e20c8310956f58b6b692dd6fa37e9afea43'],
+  '3': ['4fa616046fe7c2e0a05b8a9dc81ae215ae7ba5e396667f57ab1f8bbcc2570f06', '25189e7debe84a82877515a39cd092ac3bee34abadd84489779783032f7416e8'],
+  '4': ['25f6c9e86417c128a69c39586bab717edcf6148144947d1c31ba14f0fa463981', '6b67cf6e4252c79d9d97fb1906fdfee88ed6f192b4487dbb5e7e0a7a49a353cc'],
+  '5': ['206b5110da0b22965e89a4c30ab1ce3866ad913a2b6fae0ebe1db43f345c45c7', 'd61e3c6581a23bb6c46419d10a7a9d26979edacd6ab5885bd1c551d7ede53a20'],
+  '6': ['b1747d2be71665532b92a3cf2827b860c354cbf59a66911aacc46f83edbeaa3e', '828e671fb1eb191c8c668fcc946d273e5c22c60ff6b948029a348122f9214c4d'],
+};
+function writableSkillDirectories(root) {
+  chmodSync(root, 0o700);
+  for (const entry of readdirSync(root, { withFileTypes: true })) if (entry.isDirectory()) writableSkillDirectories(join(root, entry.name));
+}
+function packageIdentity(source, snapshotRoot) {
+  const manifest = JSON.parse(readFileSync(join(source, 'openslate.skill.json'), 'utf8'));
+  return loadSkillCatalog({ snapshotRoot, compatibility: manifest.compatibility, availableToolIds: toolCatalog(manifest.compatibility.toolContract).names, packageRoots: [source] }).skills[0].packageDigest;
+}
+test('every shipped skill package has an immutable packageDigest', t => {
+  const temporary = mkdtempSync(join(tmpdir(), 'openslate-package-pins-'));
+  t.after(() => { writableSkillDirectories(temporary); rmSync(temporary, { recursive: true, force: true }); });
+  for (const [version, pins] of Object.entries(shippedPackages)) for (const [index, name] of ['plan-authoring', 'production'].entries()) {
+    const source = fileURLToPath(new URL(`../../../skills/${version === '1' ? '' : `v${version}/`}${name}`, import.meta.url));
+    assert.equal(packageIdentity(source, join(temporary, 'snapshots')), pins[index], `${version}/${name} shipped package bytes`);
+  }
+});
+test('the historical package pin detects an instruction edit', t => {
+  const temporary = mkdtempSync(join(tmpdir(), 'openslate-package-pin-edit-'));
+  t.after(() => { writableSkillDirectories(temporary); rmSync(temporary, { recursive: true, force: true }); });
+  const source = join(temporary, 'production');
+  cpSync(fileURLToPath(new URL('../../../skills/v4/production', import.meta.url)), source, { recursive: true });
+  const entry = join(source, 'SKILL.md');
+  writeFileSync(entry, `${readFileSync(entry, 'utf8')}\nChanged historical guidance.\n`);
+  assert.throws(() => assert.equal(packageIdentity(source, join(temporary, 'snapshots')), shippedPackages['4'][1]), { code: 'ERR_ASSERTION' });
 });
 
 test('V5 stdio advertises notes/proposals and truthful audio suggestions, forwarding each once', async t => {
@@ -363,15 +400,15 @@ const liveReviewNotes = () => ({ notes: ['shot-one', 'shot-two'].map((shotId, in
   choices: [{ kind: 'accept', label: 'Keep this frame' }, { kind: 'reply' }],
 })) });
 
-test('V5 stdio forwards the LIVE-3 invalid note shape and its precise refusal, then accepts a corrected new call', async t => {
+for (const version of ['5.0.0', '6.0.0']) test(`${version} stdio forwards the LIVE-3 invalid note shape and its precise refusal, then accepts a corrected new call`, async t => {
   const refusal = { error: { code: 'VALIDATION_ERROR',
     message: 'record_notes /notes/0/anchor: replace shotId with shotIds: [shotId]. No notes were saved; correct the payload and call record_notes again.' } };
   const f = await fixture(t, (_req, res, call) => {
     res.setHeader('content-type', 'application/json');
     if ('shotId' in call.body.notes[0].anchor) { res.statusCode = 400; res.end(JSON.stringify(refusal)); }
-    else { parseToolArguments('record_notes', call.body, '5.0.0'); res.end(JSON.stringify({ notes: [{ noteId: 'note-one', letter: 'a' }, { noteId: 'note-two', letter: 'b' }] })); }
+    else { parseToolArguments('record_notes', call.body, version); res.end(JSON.stringify({ notes: [{ noteId: 'note-one', letter: 'a' }, { noteId: 'note-two', letter: 'b' }] })); }
   });
-  const c = await childFixture(t, { ...f.options, toolContractVersion: '5.0.0' }); await c.initialize();
+  const c = await childFixture(t, { ...f.options, toolContractVersion: version }); await c.initialize();
   const invalid = liveReviewNotes();
   const denied = await c.request('tools/call', { name: 'record_notes', arguments: invalid }).response;
   assert.equal(denied.result.isError, true);
@@ -388,8 +425,8 @@ test('V5 stdio forwards the LIVE-3 invalid note shape and its precise refusal, t
   assert.notEqual(saved.result._meta['openslate/callId'], rejectedCallId, 'corrected payload receives a fresh application invocation identity');
 });
 
-test('server note validation is limited to known V5 record_notes; other schemas and tools still refuse locally', async t => {
-  const f = await fixture(t), bridge = new ToolBridge({ ...f.options, toolContractVersion: '5.0.0' });
+for (const version of ['5.0.0', '6.0.0']) test(`${version} server note validation is limited to record_notes; other schemas and tools still refuse locally`, async t => {
+  const f = await fixture(t), bridge = new ToolBridge({ ...f.options, toolContractVersion: version });
   await assert.rejects(bridge.call('unknown_notes', liveReviewNotes()), code('NOT_FOUND'));
   await assert.rejects(bridge.call('read_context', { actor: 'human' }), code('VALIDATION_ERROR'));
   await assert.rejects(bridge.call('propose_change', { patch: {} }), code('VALIDATION_ERROR'));
@@ -399,8 +436,8 @@ test('server note validation is limited to known V5 record_notes; other schemas 
   assert.equal(f.calls.length, 0);
 });
 
-test('V5 notes retain JSON, request-size, cancellation and concurrency guards before dispatch', async t => {
-  const f = await fixture(t, () => {}), options = { ...f.options, toolContractVersion: '5.0.0' };
+for (const version of ['5.0.0', '6.0.0']) test(`${version} notes retain JSON, request-size, cancellation and concurrency guards before dispatch`, async t => {
+  const f = await fixture(t, () => {}), options = { ...f.options, toolContractVersion: version };
   const bridge = new ToolBridge({ ...options, limits: { timeoutMs: 150, concurrency: 1 } });
   for (const value of [undefined, () => {}, 1n, NaN, Infinity, new Date()]) {
     await assert.rejects(bridge.call('record_notes', { notes: [], extra: value }), code('VALIDATION_ERROR'));

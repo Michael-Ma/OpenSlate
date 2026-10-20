@@ -5,7 +5,7 @@ import type { ProposalPreview } from './studio-api.js';
 import { shotIntentDigest } from './planning/index.js';
 
 export type ProposalPatch = Pick<CreativePatch, 'updateScenes'> & {
-  updateShots?: ({ id: string } & Partial<Pick<ProjectRecord['shots'][number], 'desiredFrames' | 'motion' | 'imagePrompt' | 'videoPrompt' | 'narration'>>)[];
+  updateShots?: ({ id: string } & Partial<Pick<ProjectRecord['shots'][number], 'purpose' | 'action' | 'framing' | 'desiredFrames' | 'motion' | 'imagePrompt' | 'videoPrompt' | 'narration'>>)[];
 };
 export interface PreviewBinding { node: Pick<PlanNode, 'kind' | 'intentDigest' | 'args'>; outputs: Record<string, unknown> }
 export type PreviewBindings = Record<string, readonly PreviewBinding[]>;
@@ -16,13 +16,16 @@ export function previewCreativePatch(before: ProjectRecord, patch: ProposalPatch
   const display = (value: unknown) => typeof value === 'string' ? value : canonical(value ?? null);
   for (const row of patch.updateScenes ?? []) {
     const scene = before.scenes.find(s => s.id === row.id);
-    if (scene && scene.purpose !== row.purpose) changes.push({ sceneId: row.id, field: 'purpose', before: scene.purpose, after: row.purpose });
+    for (const field of ['title', 'purpose'] as const) if (scene && Object.hasOwn(row, field) && canonical(scene[field] ?? null) !== canonical(row[field] ?? null))
+      changes.push({ sceneId: row.id, field, before: display(scene[field]), after: display(row[field]) });
   }
   const effects: ProposalPreview['effects'] = [];
   const timeline = before.scenes.flatMap((scene, si) => before.shots.filter(s => s.sceneId === scene.id).map((shot, index) => {
     const update = patch.updateShots?.find(row => row.id === shot.id);
+    // TODO(R5 integration): use the shared prompt-derivation helper for purpose/action/framing edits when available.
     const after = { ...shot, ...update, ...(update?.narration?.mode === 'none' ? { cueId: null } : {}) };
-    const diffs = Object.entries(update ?? {}).filter(([field, value]) => field !== 'id' && canonical(shot[field as keyof typeof shot] ?? null) !== canonical(value ?? null));
+    const diffs = Object.entries(update ?? {}).filter(([field, value]) => field !== 'id' && canonical(shot[field as keyof typeof shot] ?? null) !== canonical(value ?? null))
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
     for (const [field, value] of diffs) changes.push({ shotId: shot.id, field, before: display(shot[field as keyof typeof shot]), after: display(value) });
     if (diffs.length) {
       const bindings = (bindingsByShot[shot.id] ?? []).filter(b => Object.keys(b.outputs).length);

@@ -39,7 +39,7 @@ function fixture(t) {
 test("tool status is read-only and new projects use the current contract without an upgrade", async t => {
   const f = fixture(t), project = f.service.createProject("New project"), cursor = f.store.cursor(project.id);
   const status = f.director.tools(project.id);
-  assert.deepEqual(status, { currentVersion: "5.0.0", lockId: null, lockDigest: null, availableVersion: "5.0.0", upgradeAvailable: false, busy: false });
+  assert.deepEqual(status, { currentVersion: "6.0.0", lockId: null, lockDigest: null, availableVersion: "6.0.0", upgradeAvailable: false, busy: false });
   assert.equal(f.store.cursor(project.id), cursor); assert.equal(f.store.list("director_skill_lock", project.id).length, 0);
 });
 test("explicit upgrade installs one successor while preserving old locks, canonical state and edit authority", async t => {
@@ -127,7 +127,7 @@ test("historical V2 upgrade replay survives a later V3 update without accessing 
   assert.throws(() => f.director.upgradeTools(project.id, { expectedLockId: second.lockId, expectedLockDigest: second.lockDigest, targetVersion: "2.0.0" }, "downgrade"), { code: "DIRECTOR_TOOLS_STALE" });
 });
 
-for (const version of ["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"]) test(
+for (const version of ["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"]) test(
   `director receives every declared reference from its immutable ${version} skill lock`, t => {
     const f = fixture(t), project = f.service.createProject("Complete references");
     const saved = createDirectorSkillLock(f.configuration, version);
@@ -137,7 +137,7 @@ for (const version of ["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"]) test(
     const prepare = createDirectorInput(f.service, { ...f.configuration, endpoint: "http://127.0.0.1:3001" });
     const input = prepare({ id: newId(), projectId: project.id, requestId: human.requestId }, human, bridge);
     const context = JSON.parse(input.context), reads = f.store.list("skill_read", project.id);
-    assert.equal(context.snapshot.applicationCapabilities.narration.speechSynthesis.toolAvailable, ["3.0.0", "4.0.0", "5.0.0"].includes(version),
+    assert.equal(context.snapshot.applicationCapabilities.narration.speechSynthesis.toolAvailable, ["3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(version),
       "the first captured snapshot must advertise the exact catalog bound to its activation and MCP bridge");
     let count = 0;
     for (const skill of saved.lock.skills) {

@@ -27,7 +27,7 @@ function fixture(t, {scope=['scene-0'], editing=false}={}) {
  project=store.saveProject({...project,...shape,capabilityLockId:project.capabilityLockId,shots:shape.shots.map(s=>({...s,narration:{mode:'none',text:'',voice:'stock'}}))},0);
  store.insert('project_revision',project.revisionId,project.id,{project});
  const config={repositoryRoot:fileURLToPath(new URL('../../../',import.meta.url)),snapshotRoot:join(root,'skills')};
- const saved=createDirectorSkillLock(config);verifySkillLock(saved.lock,saved.environment);
+ const saved=createDirectorSkillLock(config,'5.0.0');verifySkillLock(saved.lock,saved.environment);
  new DirectorContextService(service,saved.environment).bootstrapLock(project.id,saved.lock);
  const human=service.beginRequest(project.id,'local-user','Discuss this scene',{scopeIds:scope,editing}),bridge=service.openEpoch(project.id,human),turn={id:randomUUID(),projectId:project.id,requestId:human.requestId,epochId:bridge.actor.epochId,state:"completed"};
  store.insert('director_turn',turn.id,project.id,turn);

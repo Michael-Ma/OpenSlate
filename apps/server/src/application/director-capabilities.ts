@@ -17,11 +17,11 @@ export function directorSkillEnvironment(options: DirectorSkillConfiguration, ve
 }
 
 /** Trusted configuration helper. Creates/verifies snapshots but does not install or upgrade a project lock. */
-export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "5.0.0", guidanceVersion = version === "5.0.0" ? "6" : version === "4.0.0" ? "5" : version.split(".")[0]): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
+export function createDirectorSkillLock(options: DirectorSkillConfiguration, version: ToolContractVersion = "6.0.0", guidanceVersion = version === "6.0.0" ? "7" : version === "5.0.0" ? "6" : version === "4.0.0" ? "5" : version.split(".")[0], expectedPackageDigests?: Readonly<Record<string, string>>): { lock: SkillCapabilityLock; environment: SkillEnvironment } {
   const environment = directorSkillEnvironment(options, version);
-  invariant([version.split(".")[0], ...(version === "4.0.0" ? ["5"] : version === "5.0.0" ? ["6"] : [])].includes(guidanceVersion), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance package");
+  invariant([version.split(".")[0], ...(version === "4.0.0" ? ["5"] : version === "5.0.0" ? ["6"] : version === "6.0.0" ? ["7"] : [])].includes(guidanceVersion), "DIRECTOR_GUIDANCE_UNSUPPORTED", "Unsupported guidance package");
   const root = version === "1.0.0" ? join(options.repositoryRoot, "skills") : join(options.repositoryRoot, `skills/v${guidanceVersion}`);
-  const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(root, "production"), join(root, "plan-authoring")] });
+  const catalog = loadSkillCatalog({ ...environment, packageRoots: [join(root, "production"), join(root, "plan-authoring")], ...(expectedPackageDigests ? { expectedPackageDigests } : {}) });
   return { environment, lock: createSkillLock(catalog, { selectedSkillIds: ["production", "plan-authoring"], bindings: environment.bindings!,
     prompts: STAGES.map(stage => ({ id: `production/${stage}@1`, skillId: "production", path: `references/stages/${stage}.md` })) }) };
 }

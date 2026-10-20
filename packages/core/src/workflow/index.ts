@@ -52,8 +52,8 @@ export interface ShotUpdate {
 export interface CreativePatch {
   brief?: string;
   story?: string;
-  createScenes?: Array<{ key: string; purpose: string }>;
-  updateScenes?: Array<{ id: string; purpose: string }>;
+  createScenes?: Array<{ key: string; title?: string; purpose: string }>;
+  updateScenes?: Array<{ id: string; title?: string | null; purpose?: string }>;
   createShots?: ShotDraft[];
   updateShots?: ShotUpdate[];
   narrationScript?: string;
@@ -95,8 +95,25 @@ export const changeProposalSchema = object({
   }),
 }, ["variant", "expectedHeadVersion"]);
 
+/** Shipped catalogs copy changeProposalSchema. Additions must never mutate it. */
+export const shortFramingSchema = { type: "string", minLength: 1, maxLength: 40, pattern: "^\\S+(?: \\S+){0,2}(?![\\s\\S])", examples: ["Close-up", "Medium", "Wide"] };
+export const sceneTitleSchema = { type: "string", minLength: 1, maxLength: 60, pattern: "^\\S+(?: \\S+){0,5}(?![\\s\\S])" };
+const compatibleChangeProposalSchema = structuredClone(changeProposalSchema);
+type CreativeSchema = { properties: Record<string, { items: { properties: Record<string, object>; required: string[] } }> };
+const compatibleCreative = (compatibleChangeProposalSchema.properties as { creative: { properties: Record<string, object> } }).creative.properties;
+compatibleCreative.createScenes = arr(object({ key: short, title: text, purpose: text }, ["key", "purpose"]));
+compatibleCreative.updateScenes = arr({ ...object({ id: short, title: { anyOf: [text, { type: 'null' }] }, purpose: text }, ["id"]), minProperties: 2 });
+export const successorChangeProposalSchema = structuredClone(compatibleChangeProposalSchema);
+const successorCreative = (successorChangeProposalSchema.properties as { creative: CreativeSchema }).creative.properties;
+successorCreative.createScenes!.items.properties.title = structuredClone(sceneTitleSchema);
+successorCreative.updateScenes!.items.properties.title = structuredClone(sceneTitleSchema);
+successorCreative.createShots!.items.properties.framing = structuredClone(shortFramingSchema);
+successorCreative.updateShots!.items.properties.framing = structuredClone(shortFramingSchema);
+
 const ajv = new Ajv({ allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
-const validate = ajv.compile(changeProposalSchema);
+// The application also reads historical preparations and restores human titles,
+// which may exceed the Director's short-label bounds. Epoch-specific tools validate first.
+const validate = ajv.compile(compatibleChangeProposalSchema);
 
 export function parseChangeProposal(value: unknown): ChangeProposal {
   invariant(validate(value), "VALIDATION_ERROR", ajv.errorsText(validate.errors));
@@ -125,7 +142,7 @@ export function applyCreativePatch(
     invariant(!sceneKeys.has(scene.key), "VALIDATION_ERROR", "Duplicate scene key");
     const id = newId();
     sceneKeys.set(scene.key, id);
-    next.scenes.push({ id, revisionId: newId(), purpose: scene.purpose });
+    next.scenes.push({ id, revisionId: newId(), purpose: scene.purpose, ...(scene.title !== undefined ? { title: scene.title } : {}) });
   }
   const changedScenes = new Set<string>();
   for (const update of patch.updateScenes ?? []) {
@@ -133,7 +150,9 @@ export function applyCreativePatch(
     changedScenes.add(update.id);
     const scene = next.scenes.find(item => item.id === update.id);
     invariant(scene, "SCOPE_DENIED", "Scene does not belong to project");
-    scene.purpose = update.purpose;
+    if (update.purpose !== undefined) scene.purpose = update.purpose;
+    if (update.title === null) delete scene.title;
+    else if (update.title !== undefined) scene.title = update.title;
     scene.revisionId = newId();
   }
   const keys = new Set<string>();
