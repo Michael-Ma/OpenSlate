@@ -5,7 +5,7 @@ import { EnvironmentMediaCredentials } from "../application/provider-credentials
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
 import type { Store } from "../persistence/store.js";
 import type { Attempt } from "./engine.js";
-import { ExecutionOutputStore } from "./output-store.js";
+import { ExecutionOutputStore, isOutputStoreCapacityError } from "./output-store.js";
 import { assertSpeechFirstDispatch, assertSpeechMappingAdmission, resolveSpeechAdmission } from "./audio-execution-authority.js";
 import { assertSpeechExecutionDispatch, assertSpeechExecutionMapping, assertSpeechExecutionResult, prepareSpeechExecutionRequest } from "./audio-execution-receipts.js";
 import type { SpeechExecutionDispatch, SpeechExecutionMapping, SpeechExecutionObservation, SpeechExecutionResult } from "./audio-execution-receipts.js";
@@ -22,6 +22,8 @@ export class OpenAISpeechExecution implements ExecutionProvider {
   readonly #recovery: InstallationRecoveryGuard;
   readonly #fetch: typeof globalThis.fetch | undefined;
   readonly #timeoutMs: number | undefined;
+  /** Retain charged responses until a durable spool exists, including a deferred local capacity retry. */
+  readonly #returnedBytes = new Map<string, Uint8Array>();
   constructor(options: { store: Store; outputStore: ExecutionOutputStore; credentials: EnvironmentMediaCredentials;
     fetch?: typeof globalThis.fetch; timeoutMs?: number }) {
     invariant(options.outputStore.store === options.store, "SPEECH_EXECUTION_CONFIGURATION", "Speech requires one application store and its owned output store");
@@ -103,17 +105,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
       // An irreversible marker cannot be turned into a definite local non-dispatch after the fact.
       return unknown("Speech dispatch has no durable outcome; automatic resubmission is disabled");
     }
-    if (bytes) {
-      const result = this.#store.get<SpeechExecutionResult>("speech_execution_result", attempt.id)!;
-      if (result.observation.kind === "completed") {
-        try {
-          const saved = bytes;
-          await this.#outputs.spool(attempt.projectId, result.observation.outputReceiptId, async function* () {
-            for (let offset = 0; offset < saved.byteLength; offset += 1024 * 1024) yield saved.subarray(offset, offset + 1024 * 1024);
-          }, signal ? { signal } : {});
-        } catch { return unknown("Speech completed; owned output storage needs recovery without resubmission"); }
-      }
-    }
+    if (bytes) this.#returnedBytes.set(attempt.id, bytes);
     return this.recover(attempt, signal);
   }
 
@@ -185,12 +177,24 @@ export class OpenAISpeechExecution implements ExecutionProvider {
       failureId: `speech-${digest(result).slice(0, 32)}`, technical: observation.kind === "not_dispatched" || observation.source === "local", retryAllowed: false };
     if (observation.kind === "unknown") return unknown(`Speech submission unresolved: ${observation.code}`);
     try {
+      const saved = this.#returnedBytes.get(attempt.id);
+      if (saved) {
+        // The paid response must become durable even if the submitting caller is stopped
+        // while it waits for a writer. Publication remains fenced by its original lease.
+        await this.#outputs.spool(attempt.projectId, observation.outputReceiptId, async function* () {
+          for (let offset = 0; offset < saved.byteLength; offset += 1024 * 1024) yield saved.subarray(offset, offset + 1024 * 1024);
+        });
+        this.#returnedBytes.delete(attempt.id);
+      }
       await this.#outputs.recover(attempt.projectId, observation.outputReceiptId, signal ? { signal } : {});
       const completion = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {});
       stopped(signal);
       invariant(completion && completion.receiptId === observation.outputReceiptId && completion.vendorTaskId === null && completion.outputs[0].sha256 === observation.result.sha256
         && completion.outputs[0].byteLength === observation.result.byteLength, "SPEECH_EXECUTION_CONFLICT", "Winning speech output differs from its observed returned bytes");
       return completion;
-    } catch { return unknown("Speech completed; owned output storage needs recovery without resubmission"); }
+    } catch (error) {
+      if (isOutputStoreCapacityError(error)) throw error;
+      return unknown("Speech completed; owned output storage needs recovery without resubmission");
+    }
   }
 }

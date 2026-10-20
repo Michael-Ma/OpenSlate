@@ -97,11 +97,12 @@ export async function fixture(t, options = {}) {
   const media = options.ingest ? new LocalMediaService({ rootDir: join(directory, 'media'), allowedInputRoots: [outputs.rootDir], ffmpegPath: tool('ffmpeg'), ffprobePath: tool('ffprobe') }) : undefined;
   if (media) { const original = media.importMedia.bind(media); media.importMedia = async (...args) => { calls.normalization++; return original(...args); }; }
   const ingester = media ? new SpoolVideoIngestor(outputs, media, { rootDir: join(directory, 'video-derivations') }) : undefined;
-  const engineOptions = { artifactDir: artifactRoot, profiles: [profile], outputStore: outputs,
+  const profiles = [profile, ...(options.additionalProfiles ?? [])];
+  const engineOptions = { artifactDir: artifactRoot, profiles, outputStore: outputs,
     ...(ingester ? { outputIngestor: ingester } : {}), externalAdmission: new DurableExternalAdmission(store, () => {}) };
-  const engine = new Engine(store, bridge, engineOptions), production = new ProductionService(store, engine, [profile]), allowances = new ExternalAllowanceService(store);
+  const engine = new Engine(store, bridge, engineOptions), production = new ProductionService(store, engine, profiles), allowances = new ExternalAllowanceService(store);
   let project = projectFixture(randomUUID(), 1); project.name = 'Offline Viggle bridge'; project.shots[0].desiredFrames = seconds * 30; refreshIntent(project.shots[0]);
-  store.createProject(project); store.insert('capability_lock', project.capabilityLockId, project.id, { profiles: [profile] });
+  store.createProject(project); store.insert('capability_lock', project.capabilityLockId, project.id, { profiles });
   store.insert('project_revision', project.revisionId, project.id, { project });
   const human = production.beginRequest(project.id, 'offline-human', 'Import and approve this exact synthetic first frame', { scopeIds: [project.id], editing: true });
   const images = new LocalImageStore({ rootDir: join(artifactRoot, 'images'), ffmpegPath: tool('ffmpeg'), ffprobePath: tool('ffprobe') });
@@ -110,7 +111,7 @@ export async function fixture(t, options = {}) {
   project = store.getProject(project.id); const reference = imported.artifact, image = store.get('artifact', reference.artifactId), imagePath = image.path;
   const q = JSON.stringify, shot = project.shots[0], settings = options.shotSettings ? `,settings:${q(options.shotSettings)}` : '';
   const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});const frame=p.asset(${q(reference.artifactId)});const review=p.humanReview("review",{shots:[{intent:shot,keyframe:frame,videoProfile:${q(profile.id)},motionPrompt:${q(shot.videoPrompt)},seconds:${seconds}${settings}}]});return p.video("video",{intent:shot,profile:${q(profile.id)},firstFrame:p.approvedImage(frame,review),prompt:${q(shot.videoPrompt)},seconds:${seconds}${settings}});});`;
-  const plan = compilePlan(source, { project, profiles: [profile], logicalIds: {}, allocateId: randomUUID }), node = plan.nodes.find(value => value.kind === 'video');
+  const plan = compilePlan(source, { project, profiles, logicalIds: {}, allocateId: randomUUID }), node = plan.nodes.find(value => value.kind === 'video');
   const grant = engine.createGrant(project.id, shot.id, 'video', human.requestId, 'initial_slot'), planId = randomUUID();
   store.transaction(() => { engine.installPlan(project.id, planId, plan, { [node.id]: grant.id }); project = store.saveProject({ ...project, activePlanId: planId }, project.headVersion); });
   const review = engine.reviewSnapshot(project.id), approval = production.approve(project.id, human, review.id, [node.id])[0];

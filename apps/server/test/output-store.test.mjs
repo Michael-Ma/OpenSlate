@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { getEventListeners } from "node:events";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ExecutionOutputStore, OUTPUT_STORE_LIMITS } from "../dist/execution/output-store.js";
+import { ExecutionOutputStore, OUTPUT_STORE_LIMITS, isOutputStoreCapacityError } from "../dist/execution/output-store.js";
 import { digest } from "../../../packages/core/dist/index.js";
 import { setup, projectFixture } from "./execution-fixture.mjs";
 
@@ -103,7 +103,7 @@ test("pre-abort and stalled streams cancel within the deadline and free writer c
   assert.equal((await normal.spool(f.projectId, receipt.id, source(bytes))).sha256, hash(bytes));
 });
 
-test("two concurrent writers are shared across store instances without opening a third stream", async t => {
+test("writer capacity is shared across instances and a third stream waits for a slot", async t => {
   const f = await fixture(t), receipt = f.output.recordReceipt(f.projectId, f.input(bytes));
   const second = new ExecutionOutputStore(f.store, { rootDir: f.rootDir }), controllers = [new AbortController(), new AbortController()];
   let started = 0, allStarted; const ready = new Promise(resolve => { allStarted = resolve; });
@@ -111,10 +111,46 @@ test("two concurrent writers are shared across store instances without opening a
   const first = f.output.spool(f.projectId, receipt.id, blocked, { signal: controllers[0].signal });
   const next = second.spool(f.projectId, receipt.id, blocked, { signal: controllers[1].signal });
   const settled = Promise.allSettled([first, next]); await ready;
-  await assert.rejects(f.output.spool(f.projectId, receipt.id, blocked), { code: "OUTPUT_STORE_BUSY" });
-  assert.equal(started, 2); controllers.forEach(controller => controller.abort());
+  let thirdOpened = false;
+  const third = f.output.spool(f.projectId, receipt.id, () => { thirdOpened = true; return source(bytes)(); });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(started, 2); assert.equal(thirdOpened, false); controllers.forEach(controller => controller.abort());
   assert.ok((await settled).every(result => result.status === "rejected"));
+  assert.equal((await third).sha256, hash(bytes)); assert.equal(thirdOpened, true);
   assert.equal((await second.spool(f.projectId, receipt.id, source(bytes))).sha256, hash(bytes));
+});
+
+test("queued recovery and completion wait fairly and cancelled queued work never opens its source", async t => {
+  const f = await fixture(t), receipt = f.output.recordReceipt(f.projectId, f.input(bytes));
+  const controllers = [new AbortController(), new AbortController()], ready = Promise.withResolvers(); let started = 0;
+  const blocked = async function* () { if (++started === 2) ready.resolve(); await new Promise(() => {}); };
+  const running = Promise.allSettled(controllers.map(controller => f.output.spool(f.projectId, receipt.id, blocked, { signal: controller.signal })));
+  await ready.promise;
+  const queued = new AbortController(); let opened = false;
+  const cancelled = assert.rejects(f.output.spool(f.projectId, receipt.id, () => { opened = true; return source(bytes)(); }, { signal: queued.signal }), { code: "OUTPUT_STORE_CANCELLED" });
+  queued.abort(); await cancelled; assert.equal(opened, false); assert.equal(getEventListeners(queued.signal, "abort").length, 0);
+  const finished = [];
+  const recover = f.output.recover(f.projectId, receipt.id).then(value => { finished.push("recover"); return value; });
+  const completion = f.output.recoverCompletion(f.projectId, f.attempt.id).then(value => { finished.push("completion"); return value; });
+  await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(finished, []);
+  controllers.forEach(controller => controller.abort()); await running;
+  assert.deepEqual(await Promise.all([recover, completion]), [null, null]); assert.equal(finished.length, 2);
+  assert.equal((await f.output.spool(f.projectId, receipt.id, source(bytes))).sha256, hash(bytes));
+});
+
+test("abort immediately after acquiring a writer cannot open a source or retain its slot", async t => {
+  const f = await fixture(t), receipt = f.output.recordReceipt(f.projectId, f.input(bytes)), controller = new AbortController(); let opened = false;
+  const running = f.output.spool(f.projectId, receipt.id, () => { opened = true; return source(bytes)(); }, { signal: controller.signal });
+  controller.abort(); await assert.rejects(running, { code: "OUTPUT_STORE_CANCELLED" });
+  assert.equal(opened, false); assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  assert.equal((await f.output.spool(f.projectId, receipt.id, source(bytes))).sha256, hash(bytes));
+});
+
+test("raw filesystem resource exhaustion is local capacity rather than a provider outcome", () => {
+  for (const code of ["ENOSPC", "EDQUOT", "EMFILE", "ENFILE", "ENOMEM"])
+    assert.equal(isOutputStoreCapacityError(Object.assign(new Error("synthetic resource exhaustion"), { code })), true, code);
+  for (const value of [null, { code: "ENOSPC" }, new Error("ENOSPC"), Object.assign(new Error("synthetic read failure"), { code: "EIO" })])
+    assert.equal(isOutputStoreCapacityError(value), false);
 });
 
 test("a byte-source factory that resolves after cancellation is closed without writing its bytes", async t => {
@@ -180,11 +216,12 @@ test("cancellation retains both writer slots until owned recovery work settles",
   };
   const runs = Promise.allSettled([f.output.spool(f.projectId, receipt.id, source(bytes)), f.output.spool(f.projectId, receipt.id, source(bytes))]);
   await ready; await new Promise(resolve => setTimeout(resolve, 80));
-  await assert.rejects(f.output.spool(f.projectId, receipt.id, source(bytes)), { code: "OUTPUT_STORE_BUSY" });
+  const normal = new ExecutionOutputStore(f.store, { rootDir: f.rootDir }); let nextOpened = false;
+  const next = normal.spool(f.projectId, receipt.id, () => { nextOpened = true; return source(bytes)(); });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(nextOpened, false);
   const results = await runs;
   assert.ok(results.every(result => result.status === "rejected" && result.reason.code === "OUTPUT_STORE_CANCELLED"));
-  const normal = new ExecutionOutputStore(f.store, { rootDir: f.rootDir });
-  assert.equal((await normal.spool(f.projectId, receipt.id, source(bytes))).sha256, hash(bytes));
+  assert.equal((await next).sha256, hash(bytes)); assert.equal(nextOpened, true);
 });
 
 test("durable manifests recover after a database publication failure without another byte source", async t => {

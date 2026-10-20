@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonical, digest } from '@openslate/core';
+import { canonical, digest, DomainError } from '@openslate/core';
 import { describeViggleH3Request } from '@openslate/providers';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
-import { ViggleH3Execution } from '../dist/execution/viggle-h3-execution.js';
+import { ViggleH3Execution, ViggleDownloadPending, viggleHasCompletedObservation } from '../dist/execution/viggle-h3-execution.js';
 import { ExecutionOutputStore } from '../dist/execution/output-store.js';
 import { EnvironmentMediaCredentials } from '../dist/application/provider-credentials.js';
 import { assertViggleRecords, assertViggleSpoolLineage } from '../dist/execution/viggle-h3-lineage.js';
@@ -144,12 +144,88 @@ test('known polling cooldown is durable and a late worker cannot shorten a repla
 test('expired signed locator refreshes only through another known-task GET and retains both immutable observations', async t => {
   let f, status = 400;
   f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed(String(f.calls.query)), downloadStatus: () => status });
-  assert.equal((await ready(f)).type, 'unknown'); const first = rows(f, 'execution_output_receipt')[0];
+  await assert.rejects(ready(f), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_FAILED' && error.taskId === taskId);
+  const first = rows(f, 'execution_output_receipt')[0];
   status = 200; due(f); const result = await f.bridge.poll(taskId, f.request); assert.equal(result.type, 'completed');
   assert.equal(rows(f, 'execution_output_receipt').length, 2); assert.equal(rows(f, 'viggle_h3_execution_observation').length, 2);
   assert.deepEqual(f.store.get('execution_output_receipt', first.id), first); assertViggleSpoolLineage(f.store, f.attempt, result.outputs[0].storage.spoolId);
   const before = { ...f.calls }; assert.deepEqual(await f.bridge.lookup(f.attempt.id), result); assert.deepEqual(await f.bridge.poll(taskId, f.request), result);
   assert.deepEqual(f.calls, before); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 2);
+});
+
+test('completed clip with an unapproved download host retains its known task and sanitized local cause', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted()
+    : json({ ...await completed().json(), video_url: 'https://unapproved.example.test/clip.mp4?private-signature=fixture' }) });
+  await assert.rejects(ready(f), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_LOCATOR'
+    && error.taskId === taskId && !error.message.includes('private-signature'));
+  assert.equal(rows(f, 'viggle_h3_execution_observation')[0].observation.kind, 'completed');
+  assert.equal(rows(f, 'execution_output_receipt').length, 1); assert.equal(rows(f, 'execution_output_spool').length, 0);
+  assert.equal(f.calls.download, 0); assert.deepEqual(await f.bridge.lookup(f.attempt.id), { type: 'accepted', taskId });
+  assert.equal(f.calls.post, 1);
+});
+
+test('completed clip with an expired protected locator preserves the expiry code without an unknown result', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  const source = f.downloader.source.bind(f.downloader);
+  // H3 currently reports no expiry; a trusted downloader may know that this signed locator has expired.
+  f.downloader.source = receipt => source({ ...receipt, source: { ...receipt.source, expiresAt: '2000-01-01T00:00:00.000Z' } });
+  await assert.rejects(ready(f), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_EXPIRED' && error.taskId === taskId);
+  assert.equal(rows(f, 'viggle_h3_execution_observation')[0].observation.kind, 'completed'); assert.equal(f.calls.download, 0);
+  assert.equal(rows(f, 'execution_output_receipt').length, 1); assert.equal(f.calls.post, 1);
+});
+
+test('Viggle local spool and recovery capacity errors pass through without becoming provider unknowns', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  const spool = f.outputs.spool.bind(f.outputs);
+  f.outputs.spool = async () => { throw new DomainError('OUTPUT_STORE_BUSY', 'synthetic writer capacity'); };
+  await assert.rejects(ready(f), error => error.code === 'OUTPUT_STORE_BUSY' && !(error instanceof ViggleDownloadPending));
+  assert.equal(rows(f, 'viggle_h3_execution_observation')[0].observation.kind, 'completed');
+  f.outputs.spool = spool;
+  const recover = f.outputs.recoverCompletion.bind(f.outputs);
+  f.outputs.recoverCompletion = async () => { throw new DomainError('OUTPUT_STORE_BUSY', 'synthetic recovery capacity'); };
+  await assert.rejects(f.bridge.lookup(f.attempt.id), { code: 'OUTPUT_STORE_BUSY' }); f.outputs.recoverCompletion = recover;
+  due(f); const result = await f.bridge.poll(taskId, f.request); assert.equal(result.type, 'completed'); assert.equal(f.calls.post, 1);
+});
+
+test('a durable completed observation survives lease loss and later unavailable task queries', async t => {
+  let unavailable = false;
+  const f = await fixture(t, { fetch: async (_url, init) => {
+    if (init.method === 'POST') return accepted();
+    if (unavailable) throw Error('synthetic unavailable task lookup');
+    return json({ ...await completed().json(), video_url: 'https://unapproved.example.test/clip.mp4' });
+  } });
+  assert.equal(viggleHasCompletedObservation(f.store, f.attempt), false);
+  const source = f.downloader.source.bind(f.downloader);
+  f.downloader.source = receipt => {
+    f.store.put('attempt', f.attempt.id, f.project.id, { ...current(f), leaseOwner: 'replacement', leaseEpoch: f.attempt.leaseEpoch + 1 });
+    return source(receipt);
+  };
+  await assert.rejects(ready(f), { code: 'OUTPUT_DOWNLOAD_LOCATOR' });
+  assert.equal(viggleHasCompletedObservation(f.store, current(f)), true);
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), { type: 'accepted', taskId });
+  unavailable = true; due(f);
+  await assert.rejects(f.bridge.poll(taskId, f.request), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_FAILED');
+  assert.equal(rows(f, 'viggle_h3_execution_observation').filter(value => value.observation.kind === 'completed').length, 1);
+  assert.equal(f.calls.post, 1);
+});
+
+test('finished task storage corruption stays a local ingestion issue and repairs without a provider request', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  const completion = await ready(f), owned = await f.outputs.resolveOwned(f.project.id, completion.receiptId), before = { ...f.calls };
+  chmodSync(owned.path, 0o600); writeFileSync(owned.path, 'synthetic local corruption');
+  await assert.rejects(f.bridge.lookup(f.attempt.id), error => error instanceof ViggleDownloadPending && error.code === 'OUTPUT_DOWNLOAD_FAILED');
+  assert.equal(viggleHasCompletedObservation(f.store, f.attempt), true); assert.deepEqual(f.calls, before);
+  writeFileSync(owned.path, f.video); chmodSync(owned.path, 0o444);
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), completion); assert.deepEqual(f.calls, before);
+});
+
+test('completion helper refuses a mismatched request or corrupted provider receipt', async t => {
+  const f = await fixture(t, { fetch: async (_url, init) => init.method === 'POST' ? accepted() : completed() });
+  await ready(f); assert.equal(viggleHasCompletedObservation(f.store, f.attempt), true);
+  assert.equal(viggleHasCompletedObservation(f.store, { ...f.attempt, request: { ...f.request, fingerprint: 'mismatched' } }), false);
+  assert.equal(viggleHasCompletedObservation(f.store, { ...f.attempt, taskId: 'vid_other' }), false);
+  const receipt = rows(f, 'execution_output_receipt')[0]; tamper(f, 'execution_output_receipt', { ...receipt, requestDigest: '0'.repeat(64) });
+  assert.equal(viggleHasCompletedObservation(f.store, f.attempt), false); assert.equal(f.calls.post, 1);
 });
 
 test('identical bytes from an alternate winning receipt cannot bypass Viggle completed-observation lineage', async t => {
@@ -160,9 +236,9 @@ test('identical bytes from an alternate winning receipt cannot bypass Viggle com
       await spool(f.project.id, other.id, async function* () { yield f.video; }); }
     return spool(...args);
   };
-  assert.equal((await ready(f)).type, 'unknown'); const winner = rows(f, 'execution_output_slot')[0];
+  await assert.rejects(ready(f), { code: 'OUTPUT_DOWNLOAD_FAILED' }); const winner = rows(f, 'execution_output_slot')[0];
   assert.throws(() => assertViggleSpoolLineage(f.store, f.attempt, winner.spoolId), /Viggle/);
-  const before = { ...f.calls }; assert.equal((await f.bridge.lookup(f.attempt.id)).type, 'unknown'); assert.deepEqual(f.calls, before);
+  const before = { ...f.calls }; await assert.rejects(f.bridge.lookup(f.attempt.id), { code: 'OUTPUT_DOWNLOAD_FAILED' }); assert.deepEqual(f.calls, before);
   assert.equal(rows(f, 'video_derivation_intent').length, 0);
 });
 

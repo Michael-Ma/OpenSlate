@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { digest } from "../../../packages/core/dist/index.js";
+import { digest, DomainError } from "../../../packages/core/dist/index.js";
 import { Store } from "../dist/persistence/store.js";
 import { OpenAISpeechExecution } from "../dist/execution/openai-speech-execution.js";
 import { ExecutionOutputStore } from "../dist/execution/output-store.js";
@@ -48,6 +48,40 @@ test("real consumed admission precedes exact single speech POST, then raw owned 
   assert.ok(!evidence.includes(key) && !evidence.includes(f.directory) && !evidence.includes("bytesBase64"));
   assert.equal(rows(f, "speech_execution_result")[0].observation.result.usage, null);
   assert.deepEqual(await restart(f).bridge.lookup(f.attempt.id), completed);
+});
+
+test("a charged speech response waits for busy writers and remains recoverable without another POST", async t => {
+  const f = speechFixture(t), controllers = [new AbortController(), new AbortController()], ready = Promise.withResolvers(); let opened = 0;
+  const blockers = controllers.map((controller, index) => {
+    const receipt = f.outputs.recordReceipt(f.project.id, { attemptId: f.attempt.id, expectedRequestDigest: digest(f.request),
+      port: "audio", kind: "audio", mimeType: "audio/wav", vendorTaskId: null, diagnosticRequestId: `writer-${index}`,
+      source: { kind: "returned_bytes", sha256: hash(bytes), byteLength: bytes.length } });
+    return f.outputs.spool(f.project.id, receipt.id, async function* () { if (++opened === 2) ready.resolve(); await new Promise(() => {}); }, { signal: controller.signal });
+  });
+  const blocked = Promise.allSettled(blockers); await ready.promise;
+  const queued = Promise.withResolvers(), spool = f.outputs.spool.bind(f.outputs); let settled = false;
+  f.outputs.spool = (...args) => { queued.resolve(); return spool(...args); };
+  const pending = f.bridge.submit(f.request, context(f)).then(result => { settled = true; return result; }); await queued.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false); assert.equal(f.calls.http, 1); assert.equal(rows(f, "speech_execution_result")[0].observation.kind, "completed");
+  assert.equal(rows(f, "execution_output_spool").length, 0);
+  controllers.forEach(controller => controller.abort()); await blocked;
+  const completed = await pending; assert.equal(completed.type, "completed");
+  assert.deepEqual(readFileSync((await f.outputs.resolveOwned(f.project.id, completed.receiptId)).path), bytes);
+  assert.deepEqual(await restart(f).bridge.lookup(f.attempt.id), completed); assert.equal(f.calls.http, 1);
+});
+
+for (const code of ["OUTPUT_STORE_BUSY", "ENOSPC", "EMFILE", "ENFILE"]) test(`local ${code} retains charged speech bytes for the next lookup`, async t => {
+  const f = speechFixture(t), spool = f.outputs.spool.bind(f.outputs); let busy = true;
+  f.outputs.spool = (...args) => {
+    if (busy) { busy = false; throw code === "OUTPUT_STORE_BUSY" ? new DomainError(code, "synthetic local writer pressure")
+      : Object.assign(new Error("synthetic local filesystem pressure"), { code }); }
+    return spool(...args);
+  };
+  await assert.rejects(f.bridge.submit(f.request, context(f)), { code });
+  assert.equal(rows(f, "speech_execution_result")[0].observation.kind, "completed"); assert.equal(rows(f, "execution_output_spool").length, 0);
+  const completed = await f.bridge.lookup(f.attempt.id); assert.equal(completed.type, "completed");
+  assert.deepEqual(readFileSync((await f.outputs.resolveOwned(f.project.id, completed.receiptId)).path), bytes); assert.equal(f.calls.http, 1);
 });
 
 test("registered speech does not substitute an allowance correlation for actual consumption", async t => {

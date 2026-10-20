@@ -30,6 +30,8 @@ export interface SceneConfirmationRecord {
   id: string; projectId: string; sceneId: string; kind: "keyframes" | "video";
   actor: ActorContext; state: SceneConfirmationView["state"]; createdAt: string;
   sceneIntentDigest: string; guardDigest: string; framePins: ConfirmationFramePin[]; frames: ConfirmSceneInput["reviewedFrames"];
+  /** Per-shot dispatch guards. Older scene-wide checkpoints require a fresh confirmation. */
+  shotGuardDigests?: Record<string, string>;
   steps: SceneAudioStep[]; videoInput?: SceneGenerationInput; videoResult?: unknown;
   blocker?: SceneConfirmationView["blocker"];
 }
@@ -68,8 +70,10 @@ export class SceneConfirmationRunner {
     invariant(this.audio?.narrationSpeech, "NARRATION_SPEECH_UNAVAILABLE", "Configure narration before generating keyframes with voice lines");
     this.assertNoOpen(projectId, sceneId, rows.map(r => r.shotId));
     this.assertNoVoiceInFlight(projectId, rows.map(r => r.shotId));
+    const project = this.store.getProject(projectId), lock = this.store.get("capability_lock", project.capabilityLockId);
+    const shotGuardDigests = Object.fromEntries(shotIds.map(shotId => [shotId, sceneConfirmationGuard(project, shotId, lock)]));
     this.save({ id: actor.requestId, actor, projectId, sceneId, kind: "keyframes", state: "running", createdAt: new Date().toISOString(),
-      sceneIntentDigest: view.sceneIntentDigest, guardDigest: sceneConfirmationGuard(this.store.getProject(projectId), sceneId, this.store.get("capability_lock", this.store.getProject(projectId).capabilityLockId)), framePins: [], frames: [], steps: rows.map(r => ({ shotId: r.shotId, step: r.narration.recordingCurrent ? "accept" : "speech", ...(r.narration.voice ? { voice: r.narration.voice } : {}) })) });
+      sceneIntentDigest: view.sceneIntentDigest, guardDigest: digest(shotGuardDigests), shotGuardDigests, framePins: [], frames: [], steps: rows.map(r => ({ shotId: r.shotId, step: r.narration.recordingCurrent ? "accept" : "speech", ...(r.narration.voice ? { voice: r.narration.voice } : {}) })) });
   };
   private assertNoVoiceInFlight(projectId: string, shotIds: string[]) {
     const segments = new Set(this.store.list<{ shotId: string; segmentId: string }>("narration_shot_draft", projectId).filter(d => shotIds.includes(d.shotId)).map(d => d.segmentId));
@@ -110,8 +114,11 @@ export class SceneConfirmationRunner {
       const actor = this.production.beginRequest(projectId, "local-user", "Confirm the reviewed scene frames, narration and video recipe.",
         { source: "app", concurrency: "alongside", holdScopeIds: [], scopeIds: [sceneId], key: `scene-confirm:${key}` });
       this.production.authorize(projectId, actor, targets.map(r => ({ scopeId: r.shotId, kind: "video" as const })), `confirm:${key}`);
+      const project = this.store.getProject(projectId), lock = this.store.get("capability_lock", project.capabilityLockId);
+      const framePins = targets.map(r => ({ shotId: r.shotId, artifactId: r.image!.artifactId, sha256: r.image!.sha256, nodeId: r.frameNodeId }));
+      const shotGuardDigests = Object.fromEntries(framePins.map(pin => [pin.shotId, sceneConfirmationGuard(project, pin.shotId, lock, pin)]));
       const row: SceneConfirmationRecord = { id: actor.requestId, actor, projectId, sceneId, kind: "video", state: "running", createdAt: new Date().toISOString(),
-        sceneIntentDigest: view.sceneIntentDigest, guardDigest: sceneConfirmationGuard(this.store.getProject(projectId), sceneId, this.store.get("capability_lock", this.store.getProject(projectId).capabilityLockId)), framePins: targets.map(r => ({ shotId: r.shotId, artifactId: r.image!.artifactId, sha256: r.image!.sha256, nodeId: r.frameNodeId })), frames: input.reviewedFrames,
+        sceneIntentDigest: view.sceneIntentDigest, guardDigest: digest(shotGuardDigests), shotGuardDigests, framePins, frames: input.reviewedFrames,
         steps: targets.filter(r => !r.narration.ready).map(r => ({ shotId: r.shotId,
           step: r.narration.mode === "generated" && !r.narration.recordingCurrent ? "speech" : "accept", ...(r.narration.voice ? { voice: r.narration.voice } : {}) })) };
       this.production.engine.setHold(projectId, { scopeId: sceneId, ownerId: row.id });
@@ -139,6 +146,9 @@ export class SceneConfirmationRunner {
   private fresh(row: SceneConfirmationRecord) {
     const latest = this.store.get<SceneConfirmationRecord>("scene_confirmation", row.id);
     invariant(latest?.state === "running" && !this.store.get<{ paused: boolean }>("execution_control", row.projectId)?.paused, "EXECUTION_PAUSED", "This confirmation was stopped");
+    const shotIds = [...row.framePins.map(pin => pin.shotId), ...row.steps.map(step => step.shotId)];
+    invariant(row.shotGuardDigests && shotIds.every(shotId => typeof row.shotGuardDigests![shotId] === "string"),
+      "SCENE_REVIEW_STALE", "Review this scene again to refresh its dispatch confirmation");
     this.production.assertActor(row.projectId, row.actor, true);
     const view = sceneGenerationView(this.production, row.projectId, row.sceneId, this.audio?.narration);
     invariant(view.sceneIntentDigest === row.sceneIntentDigest && row.frames.every(f => view.rows.some(r => r.shotId === f.shotId && r.image?.artifactId === f.artifactId && r.image.sha256 === f.sha256)), "SCENE_REVIEW_STALE", "The reviewed scene changed");
@@ -218,7 +228,9 @@ export class SceneConfirmationRunner {
     }
     const result = await workspace.accept(projectId, shotId, step.acceptInput, stepKey(row, shotId, "accept"));
     this.fresh(row);
-    row.guardDigest = sceneConfirmationGuard(this.store.getProject(projectId), row.sceneId, this.store.get("capability_lock", this.store.getProject(projectId).capabilityLockId)); step.results = { ...step.results, accepted: result.receipt }; step.step = "done"; this.save(row);
+    const project = this.store.getProject(projectId);
+    row.shotGuardDigests = { ...row.shotGuardDigests, [shotId]: sceneConfirmationGuard(project, shotId, this.store.get("capability_lock", project.capabilityLockId), row.framePins.find(pin => pin.shotId === shotId)) };
+    row.guardDigest = digest(row.shotGuardDigests); step.results = { ...step.results, accepted: result.receipt }; step.step = "done"; this.save(row);
   }
 }
 
