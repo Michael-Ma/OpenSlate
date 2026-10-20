@@ -469,9 +469,10 @@ test('a retained frame exposes queued, running and unknown replacement identity 
   assert.deepEqual(slot.releasedAttemptIds, [attempt.id]);
 });
 
-test('a retained frame explains a failed replacement and keeps its paid take available', async t => {
+test('a terminal replacement refusal restores its retained frame as the real current selection', async t => {
   const f = fixture(t); await make(f); await f.finish();
   const original = (await f.overview()).shots['shot-0'].keyframe.artifact;
+  const selected = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'image' && b.node.shotId === 'shot-0');
   await ok(await f.post(await f.get(), 'image', randomUUID(), { targetShotIds: ['shot-0'], regenerate: true }));
   const binding = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'image' && b.node.shotId === 'shot-0');
   const submit = f.provider.submit.bind(f.provider);
@@ -479,9 +480,12 @@ test('a retained frame explains a failed replacement and keeps its paid take ava
   f.provider.setMode(binding.id, 'reject_before_accept'); await f.engine.runReady();
   const slot = (await f.overview()).shots['shot-0'].keyframe;
   assert.equal(slot.state, 'ready'); assert.deepEqual(slot.artifact, original);
-  assert.equal(slot.replacement?.state, 'failed');
-  assert.equal(slot.replacement.attemptId, f.engine.attempts(f.project.id).at(-1).id);
-  assert.ok(slot.replacement.failure.code); assert.equal(slot.replacement.failure.charged, false);
+  assert.equal(slot.replacement, undefined);
+  const restored = f.store.get('node_binding', binding.id), refused = f.engine.attempts(f.project.id).at(-1);
+  assert.deepEqual(restored.outputs, selected.outputs); assert.equal(restored.candidateId, selected.candidateId);
+  assert.equal(restored.retainedTake, undefined);
+  assert.equal(refused.phase, 'failed'); assert.equal(refused.failure.retryAllowed, false);
+  assert.equal(f.store.get('reservation', refused.reservationId).state, 'released');
 });
 
 test('a Stop-fenced technical failure never advertises queued retries after Continue', async t => {

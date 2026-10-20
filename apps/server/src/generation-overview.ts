@@ -16,6 +16,7 @@ import { quote } from "./generation-quotes.js";
 import { automaticRetriesLeft } from "./execution/retry-eligibility.js";
 import { assertCodexImageRecords } from "./execution/codex-image-lineage.js";
 import { safeNativeDiagnostic } from "./application/native-diagnostics.js";
+import { activeAttemptIngestionIssue } from "./execution/ingestion-issue.js";
 
 /** Existing scenes retain their purpose-derived label until named. */
 export function sceneTitle(purpose: string, title?: string): string {
@@ -93,13 +94,16 @@ export class GenerationOverviewReader {
             // The selected paid take and the replacement have independent status.
             // Keep showing the selected output while exposing the replacement's recovery identity.
             const progress = (pending: MediaSlot & { state: "running" | "queued" | "failed" | "no_answer" }): MediaSlot => current && output
-              ? { ...base, state: "ready", artifact: ref(output), replacement: { state: pending.state,
+              ? { ...base, ...(pending.ingestionIssue ? { ingestionIssue: pending.ingestionIssue } : {}), state: "ready", artifact: ref(output), replacement: { state: pending.state,
                 ...(pending.attemptId ? { attemptId: pending.attemptId } : {}), ...(pending.phase ? { phase: pending.phase } : {}),
                 ...(pending.failure ? { failure: pending.failure } : {}), ...(pending.waiting ? { waiting: pending.waiting } : {}) } }
               : pending;
             // Detached, still-live attempts are honest in-flight work; they must never look safe to resubmit.
             const active = history.filter(a => !a.released && !["failed", "succeeded"].includes(a.phase)).at(-1);
-            if (active) return progress({ ...base, state: active.phase === "submission_unknown" ? "no_answer" : "running", phase: active.phase, startedAt: active.createdAt, attemptId: active.id });
+            if (active) {
+              const issue = activeAttemptIngestionIssue(store, active);
+              return progress({ ...base, ...(issue ? { ingestionIssue: { code: issue.code, at: issue.observedAt } } : {}), state: active.phase === "submission_unknown" ? "no_answer" : "running", phase: active.phase, startedAt: active.createdAt, attemptId: active.id });
+            }
             const last = history.filter(a => !a.released && a.candidateId === binding?.candidateId).at(-1);
             if (last?.phase === "failed") {
               const evidence = store.list<{ attemptId: string; outcome: { type: string; failureId?: string; technical?: boolean; retryAllowed?: boolean }; recordedAt: string }>("execution_evidence", projectId).filter(e => e.attemptId === last.id).at(-1);

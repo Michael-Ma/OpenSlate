@@ -41,7 +41,39 @@ interface OutputSlot {
   spoolId: string; sha256: string; byteLength: number;
 }
 export type OutputByteSource = (signal: AbortSignal) => AsyncIterable<Uint8Array> | Promise<AsyncIterable<Uint8Array>>;
-const activeWriters = new Map<string, number>();
+interface WriterQueue { active: number; waiting: (() => void)[] }
+const writerQueues = new Map<string, WriterQueue>();
+/** Capacity is local scheduling pressure, never evidence about a paid provider call. */
+export function isOutputStoreCapacityError(error: unknown): error is Error & { code: string } {
+  return error instanceof Error && ["OUTPUT_STORE_BUSY", "OUTPUT_STORE_DISK_FULL", "MEDIA_BUSY", "ENOSPC", "EDQUOT", "EMFILE", "ENFILE", "ENOMEM"]
+    .includes(String((error as NodeJS.ErrnoException).code));
+}
+/** FIFO across all store instances sharing a root; a queued source is never opened early. */
+async function acquireWriter(root: string, signal?: AbortSignal): Promise<() => void> {
+  stopped(signal);
+  let queue = writerQueues.get(root);
+  if (!queue) { queue = { active: 0, waiting: [] }; writerQueues.set(root, queue); }
+  const shared = queue;
+  if (shared.active >= OUTPUT_STORE_LIMITS.concurrentWriters || shared.waiting.length > 0) {
+    await new Promise<void>((resolve, reject) => {
+      const ready = (): void => { signal?.removeEventListener("abort", abort); shared.active++; resolve(); };
+      const abort = (): void => {
+        const index = shared.waiting.indexOf(ready);
+        if (index < 0) return;
+        shared.waiting.splice(index, 1); signal?.removeEventListener("abort", abort);
+        reject(new DomainError("OUTPUT_STORE_CANCELLED", "Output storage was cancelled while waiting for capacity"));
+      };
+      shared.waiting.push(ready); signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+    });
+  } else shared.active++;
+  return () => {
+    shared.active--;
+    const next = shared.waiting.shift();
+    if (next) next();
+    else if (shared.active === 0) writerQueues.delete(root);
+  };
+}
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 function exact(value: unknown, fields: string[]): asserts value is Record<string, unknown> {
   invariant(object(value) && Object.keys(value).every(key => fields.includes(key)), "OUTPUT_RECEIPT_INVALID", "Unsupported output receipt fields");
@@ -153,9 +185,7 @@ export class ExecutionOutputStore {
     const receipt = this.receipt(projectId, receiptId);
     stopped(externalSignal);
     invariant(typeof source === "function", "OUTPUT_RECEIPT_INVALID", "Supply a trusted byte-stream factory");
-    const active = activeWriters.get(this.rootDir) ?? 0;
-    invariant(active < OUTPUT_STORE_LIMITS.concurrentWriters, "OUTPUT_STORE_BUSY", "Two output storage operations are already active");
-    activeWriters.set(this.rootDir, active + 1);
+    const releaseWriter = await acquireWriter(this.rootDir, externalSignal);
     let wasCancelled = false;
     const controller = new AbortController(), abort = (): void => { wasCancelled = true; controller.abort(); };
     externalSignal?.addEventListener("abort", abort, { once: true });
@@ -165,6 +195,7 @@ export class ExecutionOutputStore {
     // Recovery is deliberately awaited without a race; observe cancellation while it retains ownership.
     void cancelled.catch(() => {});
     controller.signal.addEventListener("abort", interrupt, { once: true });
+    if (externalSignal?.aborted) abort();
     const wait = <T>(operation: Promise<T>): Promise<T> => Promise.race([operation, cancelled]);
     let directory: string | undefined, iterator: AsyncIterator<Uint8Array> | undefined, result: OutputSpool | undefined;
     try {
@@ -221,8 +252,7 @@ export class ExecutionOutputStore {
       try { if (directory) await rm(directory, { recursive: true, force: true }); }
       finally {
         clearTimeout(timer); externalSignal?.removeEventListener("abort", abort);
-        const remaining = (activeWriters.get(this.rootDir) ?? 1) - 1;
-        if (remaining === 0) activeWriters.delete(this.rootDir); else activeWriters.set(this.rootDir, remaining);
+        releaseWriter();
       }
     }
     stopped(externalSignal);
@@ -235,11 +265,9 @@ export class ExecutionOutputStore {
   async recover(projectId: string, receiptId: string, options: { signal?: AbortSignal } = {}): Promise<OutputSpool | null> {
     const signal = options.signal;
     stopped(signal);
-    const active = activeWriters.get(this.rootDir) ?? 0;
-    invariant(active < OUTPUT_STORE_LIMITS.concurrentWriters, "OUTPUT_STORE_BUSY", "Two output storage operations are already active");
-    activeWriters.set(this.rootDir, active + 1);
+    const releaseWriter = await acquireWriter(this.rootDir, signal);
     try { const result = await this.recoverInternal(projectId, receiptId, signal); stopped(signal); return result; }
-    finally { const remaining = (activeWriters.get(this.rootDir) ?? 1) - 1; if (remaining === 0) activeWriters.delete(this.rootDir); else activeWriters.set(this.rootDir, remaining); }
+    finally { releaseWriter(); }
   }
 
   private async recoverInternal(projectId: string, receiptId: string, signal?: AbortSignal): Promise<OutputSpool | null> {
@@ -275,9 +303,7 @@ export class ExecutionOutputStore {
     const role = executionSpoolRole(attempt.request.kind);
     if (!role) return null;
     const port = role.port;
-    const active = activeWriters.get(this.rootDir) ?? 0;
-    invariant(active < OUTPUT_STORE_LIMITS.concurrentWriters, "OUTPUT_STORE_BUSY", "Two output storage operations are already active");
-    activeWriters.set(this.rootDir, active + 1);
+    const releaseWriter = await acquireWriter(this.rootDir, signal);
     try {
       const id = digest({ projectId, attemptId, port });
       const slot = await this.readJson<OutputSlot>(join(this.rootDir, "slots", `${id}.json`));
@@ -289,8 +315,7 @@ export class ExecutionOutputStore {
       stopped(signal);
       return this.completion(projectId, attemptId, slot.spoolId);
     } finally {
-      const remaining = (activeWriters.get(this.rootDir) ?? 1) - 1;
-      if (remaining === 0) activeWriters.delete(this.rootDir); else activeWriters.set(this.rootDir, remaining);
+      releaseWriter();
     }
   }
 

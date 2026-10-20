@@ -13,7 +13,8 @@ import { ExecutionRegistry, executionFailureSource, executionIdentity, execution
 import type { ExecutionCallOptions, ExecutionOutcome, IngestibleExecutionOutput, ExecutionProvider, ExecutionRequest, ExecutionSpoolCompletion } from "@openslate/providers";
 import { Store } from "../persistence/store.js";
 import { InstallationRecoveryGuard } from "../application/installation-recovery.js";
-import { ExecutionOutputStore } from "./output-store.js";
+import { ExecutionOutputStore, isOutputStoreCapacityError } from "./output-store.js";
+import { ViggleDownloadPending, viggleHasCompletedObservation } from "./viggle-h3-execution.js";
 import { materializeFixtureOutput } from "./fixture-ingester.js";
 import { assertNormalizedVideoIngestion } from "./video-derivation.js";
 import { assertViggleSpoolLineage } from "./viggle-h3-lineage.js";
@@ -41,7 +42,7 @@ export interface NodeBinding {
   id: string; projectId: string; planId: string; node: PlanNode;
   outdated?: { at: string; fields: string[]; previous: ArtifactRef };
   candidateId: string | null; state: "active" | "retired"; outputs: Record<string, ArtifactRef>;
-  outdatedReason?: "stopped" | "released";
+  outdatedReason?: "stopped" | "released" | "confirmation_stale";
   /** Display-only current take while its replacement candidate runs. Never execution input. */
   retainedTake?: { candidateId: string | null; outputs: Record<string, ArtifactRef> };
 }
@@ -49,6 +50,12 @@ export interface NodeBinding {
 function bindingWithOutputs(binding: NodeBinding, outputs: NodeBinding["outputs"]): NodeBinding {
   const { outdated: _outdated, retainedTake: _retained, ...current } = binding;
   return { ...current, outputs };
+}
+/** A replacement that has ended cannot leave its selected take display-only. */
+function restoreRetainedTake(binding: NodeBinding): NodeBinding | null {
+  if (!binding.retainedTake || Object.keys(binding.outputs).length || !Object.keys(binding.retainedTake.outputs).length) return null;
+  const { retainedTake, outdated: _outdated, outdatedReason: _reason, ...current } = binding;
+  return { ...current, candidateId: retainedTake.candidateId, outputs: retainedTake.outputs };
 }
 export type AttemptPhase = "submitting" | "preparing" | "remote_pending" | "submission_unknown" | "ingesting" | "succeeded" | "failed";
 export interface Attempt {
@@ -388,7 +395,8 @@ export class Engine {
             this.store.insert("candidate_stop", binding.candidateId, projectId, { stopId });
           continue;
         }
-        this.store.put("node_binding", binding.id, projectId, { ...binding, candidateId: null, outdatedReason: "stopped" });
+        this.store.put("node_binding", binding.id, projectId, restoreRetainedTake(binding) ?? { ...binding, candidateId: null, outdatedReason: "stopped" });
+        this.clearNodeWait(projectId, binding.id);
         detachedJobs++;
       }
       for (const row of this.store.list<import("../scene-confirmations.js").SceneConfirmationRecord>("scene_confirmation", projectId)) {
@@ -408,12 +416,14 @@ export class Engine {
       invariant(acknowledgeDoubleCharge === true, "DOUBLE_CHARGE_NOT_ACKNOWLEDGED", "Acknowledge that both jobs may be charged");
       const attempt = this.store.get<Attempt>("attempt", attemptId);
       invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
-      invariant(attempt.phase === "submission_unknown" && !attempt.released, "ATTEMPT_NOT_RELEASABLE", "Only an unreleased unconfirmed submission can be released");
+      invariant(attempt.phase === "submission_unknown" && !attempt.released && !viggleHasCompletedObservation(this.store, attempt),
+        "ATTEMPT_NOT_RELEASABLE", "Only an unreleased unconfirmed submission can be released");
       const at = new Date().toISOString();
       this.store.put("attempt", attempt.id, projectId, { ...attempt, released: { by, at } });
       const binding = this.store.get<NodeBinding>("node_binding", attempt.nodeId);
       if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId)
-        this.store.put("node_binding", binding.id, projectId, { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
+        this.store.put("node_binding", binding.id, projectId, restoreRetainedTake(binding) ?? { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
+      if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId) this.clearNodeWait(projectId, binding.id);
       this.store.appendEvent(projectId, "attempt.released", { attemptId, by, at, acknowledgeDoubleCharge: true });
       return { attemptId, shotId: binding?.node.shotId ?? null, releasedAt: at };
     });
@@ -493,7 +503,14 @@ export class Engine {
         if (this.reuseLocal(binding, prepared.fingerprint)) { reused++; return; }
         attempt = this.admit(binding.projectId, binding.id, prepared.fingerprint);
       }
-      catch (error) { if (error instanceof DomainError) { this.recordNodeWait(binding, error.code); blocked.push({ nodeId: binding.id, code: error.code }); return; } throw error; }
+      catch (error) { if (error instanceof DomainError) {
+        if (error.code === "SCENE_REVIEW_STALE") {
+          if (binding.node.kind === "video") this.takeOffStaleConfirmation(binding);
+          else this.clearNodeWait(binding.projectId, binding.id);
+        }
+        else this.recordNodeWait(binding, error.code);
+        blocked.push({ nodeId: binding.id, code: error.code }); return;
+      } throw error; }
       dispatched++;
       if (attempt.candidateId === null) {
         await this.handle(attempt, { type: "completed", taskId: `local:${attempt.id}`, outputs: fixtureOutputs(attempt.request) }); return;
@@ -524,10 +541,29 @@ export class Engine {
     this.store.appendEvent(projectId, "node.wait_changed", { nodeId, code: null });
   }
 
+  private takeOffStaleConfirmation(observed: NodeBinding): void {
+    this.store.transaction(() => {
+      const binding = this.store.get<NodeBinding>("node_binding", observed.id);
+      if (!binding || binding.state !== "active" || binding.planId !== observed.planId || binding.candidateId !== observed.candidateId) return;
+      this.store.put("node_binding", binding.id, binding.projectId, { ...binding, candidateId: null, outdatedReason: "confirmation_stale" });
+      this.clearNodeWait(binding.projectId, binding.id);
+      this.store.appendEvent(binding.projectId, "node.confirmation_stale", { nodeId: binding.id });
+    });
+  }
+
+  /** Local contention changes neither provider evidence nor publication authority. */
+  private deferOutputCapacity(attempt: Attempt, phase = attempt.phase): void {
+    this.store.transaction(() => {
+      const current = this.owns(attempt); if (!current) return;
+      this.store.put("attempt", current.id, current.projectId, { ...current, phase, leaseExpiresAt: 0 });
+    });
+  }
+
   async reconcile(): Promise<{ reconciled: number; blocked?: { attemptId: string; code: string }[] }> {
     if (this.stopping) return { reconciled: 0 };
     this.recovery.assertWritable();
-    const pending = this.projects().flatMap(project => this.attempts(project.id)).filter(attempt => !TERMINAL.has(attempt.phase));
+    const pending = this.projects().flatMap(project => this.attempts(project.id)).filter(attempt => !TERMINAL.has(attempt.phase))
+      .sort((a, b) => Number(!!a.released) - Number(!!b.released));
     let reconciled = 0; const blocked: { attemptId: string; code: string }[] = [];
     const settled = await Promise.allSettled(pending.map(async observed => {
       if (isLocalExecutionAttempt(observed)) {
@@ -564,7 +600,19 @@ export class Engine {
       let recovered: ExecutionSpoolCompletion | null = null;
       if (!completed && this.outputStore) {
         try { recovered = await this.withLease(attempt, signal => this.outputStore!.recoverCompletion(attempt.projectId, attempt.id, { signal })); }
-        catch {
+        catch (error) {
+          if (isOutputStoreCapacityError(error)) { this.deferOutputCapacity(attempt, observed.phase); return; }
+          // A validated finished task remains finished even when its owned
+          // files need repair. Conflicting, unbound receipts still fail closed.
+          if (viggleHasCompletedObservation(this.store, attempt)) {
+            this.store.transaction(() => {
+              const current = this.owns(attempt); if (!current) return;
+              this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting" });
+              this.recordIngestionIssue(attempt, error instanceof DomainError ? error.code : "OUTPUT_INGESTION_FAILED");
+            });
+            this.deferOutputCapacity(attempt, "ingesting");
+            blocked.push({ attemptId: attempt.id, code: error instanceof DomainError ? error.code : "OUTPUT_INGESTION_FAILED" }); return;
+          }
           await this.handle(attempt, { type: "unknown", diagnostic: "Owned output recovery requires attention" }); reconciled++; return;
         }
         if (!this.owns(attempt)) return;
@@ -916,9 +964,15 @@ export class Engine {
       invariant(!binding.candidateId || !this.store.get("candidate_stop", binding.candidateId),
         "RETRY_NOT_AUTHORIZED", "Stop ended this candidate's dispatch authority; generate again with a new press");
       const confirmationId = sceneConfirmationIdForCandidate(this.store, projectId, binding.candidateId);
-      const confirmation = confirmationId ? this.store.get<{ state: string; sceneId: string; guardDigest: string; framePins: ConfirmationFramePin[] }>("scene_confirmation", confirmationId) : undefined;
-      if (confirmation) invariant(["running", "done"].includes(confirmation.state) && confirmation.guardDigest === sceneConfirmationGuard(project, confirmation.sceneId, this.store.get("capability_lock", project.capabilityLockId)) && confirmationFramesCurrent(this.store, project, confirmation.framePins),
+      const confirmation = confirmationId ? this.store.get<{ state: string; sceneId: string; shotGuardDigests?: Record<string, string>; framePins: ConfirmationFramePin[] }>("scene_confirmation", confirmationId) : undefined;
+      if (confirmation) {
+        const shotIds = node.shotId ? [node.shotId] : node.kind === "speech" ? narrationSpeechShotScopes(this.store, projectId, binding.candidateId) : [];
+        const pins = confirmation.framePins.filter(pin => shotIds.includes(pin.shotId));
+        invariant(["running", "done"].includes(confirmation.state) && shotIds.length > 0
+          && shotIds.every(id => confirmation.shotGuardDigests?.[id] === sceneConfirmationGuard(project, id, this.store.get("capability_lock", project.capabilityLockId), pins.find(pin => pin.shotId === id)))
+          && (node.kind !== "video" || pins.length === shotIds.length) && confirmationFramesCurrent(this.store, project, pins),
         "SCENE_REVIEW_STALE", "The scene confirmation changed before dispatch");
+      }
 
       if (speechInput) assertNarrationSpeechCurrent(this.store, project, node, binding.candidateId, speechInput.resolved);
       invariant(Object.keys(binding.outputs).length === 0, "ALREADY_COMPLETE", "Current output is already usable");
@@ -1175,12 +1229,29 @@ export class Engine {
       if (outcome.type === "completed") {
         this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting", taskId: executionTaskId(outcome) }); return true;
       }
-      const phase: AttemptPhase = outcome.type === "accepted" ? "remote_pending" : outcome.type === "unknown" ? "submission_unknown" : "failed";
+      const issue = activeAttemptIngestionIssue(this.store, current);
+      const ingesting = (issue || viggleHasCompletedObservation(this.store, current)) && (outcome.type === "accepted" || outcome.type === "unknown");
+      const phase: AttemptPhase = ingesting ? "ingesting" : outcome.type === "accepted" ? "remote_pending" : outcome.type === "unknown" ? "submission_unknown" : "failed";
       const failure = outcome.type === "failed" || outcome.type === "rejected"
         ? { id: outcome.failureId, technical: outcome.technical, source: executionFailureSource(provider),
           retryAllowed: outcome.technical === true && outcome.retryAllowed === true } : null;
       const taskId = outcome.type === "accepted" || outcome.type === "failed" || outcome.type === "unknown" ? outcome.taskId ?? current.taskId : current.taskId;
-      this.store.put("attempt", current.id, current.projectId, { ...current, phase, taskId, failure, leaseExpiresAt: 0 });
+      const updated: Attempt = { ...current, phase, taskId, failure, leaseExpiresAt: ingesting && !issue ? current.leaseExpiresAt : 0 };
+      this.store.put("attempt", current.id, current.projectId, updated);
+      if (ingesting && !issue) {
+        // Immutable provider completion survives a lost polling lease. The new
+        // owner must not turn a later transport failure into a no-answer job.
+        this.recordIngestionIssue(attempt, "OUTPUT_DOWNLOAD_FAILED");
+        this.deferOutputCapacity(attempt, "ingesting");
+      }
+      if (phase === "failed") {
+        const binding = this.store.get<NodeBinding>("node_binding", current.nodeId);
+        const profile = this.lockedProfiles(this.store.getProject(current.projectId)).find(p => p.id === current.request.args.profileIdentity);
+        if (binding?.state === "active" && binding.candidateId === current.candidateId && automaticRetriesLeft(this.store, updated, profile?.maxRetries ?? 0) === 0) {
+          const restored = restoreRetainedTake(binding);
+          if (restored) { this.store.put("node_binding", binding.id, current.projectId, restored); this.clearNodeWait(current.projectId, binding.id); }
+        }
+      }
       if (outcome.type === "rejected" && !current.released) this.setReservation(current, "released");
       if (outcome.type === "failed") this.setReservation(current, "charged");
       this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase }); return false;
@@ -1316,7 +1387,20 @@ export class Engine {
       // observation so an accepted task arriving after lease loss remains evidence.
       try { return await operation(Object.freeze({ signal: controller.signal,
         expectedLease: Object.freeze({ owner: attempt.leaseOwner, epoch: attempt.leaseEpoch }) })); }
-      catch { return { type: "unknown", diagnostic }; }
+      catch (error) {
+        if (isOutputStoreCapacityError(error)) { this.deferOutputCapacity(attempt); return null; }
+        if (error instanceof ViggleDownloadPending && requestExecutionIdentity(attempt.request).adapter === "viggle-h3") {
+          this.store.transaction(() => {
+            const current = this.owns(attempt);
+            if (!current || current.taskId !== error.taskId) return;
+            this.store.put("attempt", current.id, current.projectId, { ...current, phase: "ingesting" });
+            this.recordIngestionIssue(attempt, error.code);
+            this.deferOutputCapacity(attempt, "ingesting");
+          });
+          return null;
+        }
+        return { type: "unknown", diagnostic };
+      }
     } finally { clearInterval(timer); clearTimeout(deadline); this.finishOperation(controller); }
   }
 

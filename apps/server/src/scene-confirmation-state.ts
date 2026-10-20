@@ -1,10 +1,13 @@
-import { digest } from "@openslate/core";
+import { digest, shotIntentDigest } from "@openslate/core";
 import type { ProjectRecord } from "@openslate/core";
-/** Execution guard excludes the runner's derived cue/pending/plan fields. */
-export function sceneConfirmationGuard(project: ProjectRecord, sceneId: string, lock: unknown): string {
-  return digest({ scene: project.scenes.find(s => s.id === sceneId) ?? null, lock,
-    shots: project.shots.filter(s => s.sceneId === sceneId).map(s => ({ id: s.id, purpose: s.purpose, action: s.action, framing: s.framing, motion: s.motion,
-      desiredFrames: s.desiredFrames, references: s.referenceArtifactIds, imagePrompt: s.imagePrompt, videoPrompt: s.videoPrompt, narration: s.narration ?? null })) });
+/** Pins this shot's creative inputs and frame; derived voice-overlay and plan metadata are excluded. */
+export function sceneConfirmationGuard(project: ProjectRecord, shotId: string, lock: unknown, framePin?: ConfirmationFramePin): string {
+  const shot = project.shots.find(s => s.id === shotId);
+  const cue = shot?.cueId ? project.cues.find(c => c.id === shot.cueId) : undefined;
+  return digest({ lock, framePin: framePin ?? null, shot: shot ? { id: shot.id, sceneId: shot.sceneId,
+    intent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) }, purpose: shot.purpose, action: shot.action,
+    framing: shot.framing, motion: shot.motion, desiredFrames: shot.desiredFrames, references: shot.referenceArtifactIds,
+    imagePrompt: shot.imagePrompt, videoPrompt: shot.videoPrompt, narration: shot.narration ?? null } : null });
 }
 
 export interface ConfirmationFramePin { shotId: string; artifactId: string; sha256: string; nodeId: string | null }
