@@ -5,6 +5,7 @@ import { regenerationState, regenerationSummary, type NoteAction, type NoteView 
 import { pendingAutomaticRetry } from "./media-state.ts";
 import { formatMicros, keyframeEstimate, priceMsg } from "./price.ts";
 import { msg, type Msg } from "./types.ts";
+import type { MessageId } from "../i18n/messages.ts";
 
 /**
  * The Director's notes in the Keyframes view (plan items DC-18, WA-10): the amber banner, one note at a time,
@@ -35,10 +36,60 @@ export interface NoteBannerView {
   /** One line: the anchor, "settle before making video", the film length and the media effects; or how it was settled. */
   sub: Msg[];
   timeline: { now: TimelineSegment[]; after: TimelineSegment[] | null } | null;
+  /** Every field a held proposal changes, Now → After, so the person sees the whole change before accepting it. */
+  changes: ProposalChangeRow[];
   actions: NoteBannerAction[];
 }
 
+export interface ProposalChangeRow {
+  /** Shown joined by " · ": ["2.3", Narration], [Scene 2, Scene direction]. */
+  key: Label[];
+  before: Label;
+  after: Label;
+  /** Long values (prompts, lines) go on their own lines when the list is opened in full; short ones read inline. */
+  stacked: boolean;
+  /** The preview's field id ("desiredFrames", "videoPrompt", …). */
+  field: string;
+}
+
 const round1 = (value: number) => Math.round(value * 10) / 10;
+
+const FIELD_KEYS: Record<string, MessageId> = {
+  desiredFrames: "plan.field.length", motion: "plan.field.motion", imagePrompt: "plan.field.prompt", videoPrompt: "plan.field.video_prompt",
+  narration: "plan.field.narration", purpose: "plan.field.purpose", action: "plan.field.action", framing: "plan.field.framing",
+};
+
+/** A narration value as the preview carries it (canonical JSON of mode, text and voice), said the way Plan says it. */
+function narrationValue(value: string): Label {
+  let raw: unknown;
+  try { raw = JSON.parse(value); } catch { return { text: value }; }
+  if (!raw || typeof raw !== "object") return msg("note.change.no_line");
+  const parsed = raw as { mode?: string; text?: string; voice?: string };
+  if (parsed.mode === "none") return msg("narr.choice.none");
+  const text = parsed.text?.trim() ?? "";
+  if (!text) return msg(parsed.mode === "uploaded" ? "narr.choice.recording" : "note.change.no_line");
+  return parsed.voice === "personal" ? msg("note.change.line_personal", { text }) : { text };
+}
+
+function changeValue(field: string, value: string): Label {
+  if (field === "desiredFrames") return msg("note.change.seconds", { seconds: round1(Number(value) / 30) });
+  if (field === "narration") return narrationValue(value);
+  return { text: value };
+}
+
+/** The proposal's own changes, in its order: the web never diffs anything itself. */
+export function proposalChanges(preview: ProposalPreview, overview: GenerationOverview): ProposalChangeRow[] {
+  return preview.changes.map((change) => {
+    const field = msg(change.sceneId && !change.shotId ? "plan.scene.direction_label" : FIELD_KEYS[change.field] ?? "note.change.field_other");
+    const owner: Label = change.shotId
+      ? { text: overview.shots[change.shotId]?.label ?? "?" }
+      : msg("note.change.scene", { scene: overview.scenes.find((s) => s.sceneId === change.sceneId)?.ordinal ?? "?" });
+    const before = changeValue(change.field, change.before), after = changeValue(change.field, change.after);
+    // A worded value (a mode name, "No line yet") is short in both languages.
+    const length = (value: Label) => ("text" in value ? value.text.length : 12);
+    return { key: [owner, field], before, after, stacked: length(before) + length(after) > 56, field: change.field };
+  });
+}
 
 /** The proposal a note's choices carry, if the proposals read has it. */
 export function noteProposal(note: NoteView, proposals: readonly DirectorProposal[]): DirectorProposal | null {
@@ -144,6 +195,7 @@ export function noteBanner(note: NoteView, overview: GenerationOverview, proposa
       eyebrow: msg(note.kind === "observation" ? "note.eyebrow.observation_done" : "note.eyebrow.done"),
       sub: [chosen ? settledMsg(chosen.action, chosen.label, overview) : note.settled ?? msg("note.settled.applied")],
       timeline: applied ? { now: proposalTimeline(proposal.preview, overview, note.sceneId).after, after: null } : null,
+      changes: [],
       actions: [],
     };
   }
@@ -160,6 +212,7 @@ export function noteBanner(note: NoteView, overview: GenerationOverview, proposa
     eyebrow: msg(note.kind === "observation" ? "note.eyebrow.observation" : "note.eyebrow"),
     sub,
     timeline: proposal && proposal.state === "held" ? proposalTimeline(proposal.preview, overview, note.sceneId) : null,
+    changes: proposal && proposal.state === "held" ? proposalChanges(proposal.preview, overview) : [],
     actions: note.choices.map((_, index) => choiceAction(note, index, overview, proposals, locale)),
   };
 }

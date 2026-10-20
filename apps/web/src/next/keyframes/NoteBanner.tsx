@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import type { Label, NoteBannerAction, NoteBannerView } from "../model/note-banner.ts";
+import type { Label, NoteBannerAction, NoteBannerView, ProposalChangeRow } from "../model/note-banner.ts";
 import { BannerFrame } from "./BannerFrame.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
 
@@ -36,6 +37,7 @@ export function NoteBanner({ view, busy, nextLetter, canUndo, onChoose, onNext, 
       title={view.title}
       sub={view.sub.map(tm).join(" · ")}
       timeline={view.timeline}
+      extra={view.changes.length ? <Changes rows={view.changes} label={label} /> : null}
       anchor={{ attribute: "data-note", value: view.noteId }}
       actions={view.state === "open" ? (
         view.actions.map((action, index) => {
@@ -66,5 +68,53 @@ export function NoteBanner({ view, busy, nextLetter, canUndo, onChoose, onNext, 
         </>
       )}
     />
+  );
+}
+
+/** Closed, the banner names this many changes inline; the rest wait behind "Show all N changes". */
+const INLINE_CHANGES = 2;
+/** Not inline while closed: a length is drawn by the Now / After strip, and model prompts are long. */
+const CLOSED_HIDDEN = new Set(["desiredFrames", "imagePrompt", "videoPrompt"]);
+
+/**
+ * Every field the proposal changes, Now → After, from the server's own preview: the person accepts exactly this.
+ * Closed, the first direction changes read one line each and the button counts every change, rewritten model
+ * prompts included, so the banner stays short; opened, every value is whole. A cut value stays whole in the page
+ * for screen readers and in its tooltip.
+ */
+function Changes({ rows, label }: { rows: ProposalChangeRow[]; label: (value: Label) => string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const inline = rows.filter((row) => !CLOSED_HIDDEN.has(row.field)).slice(0, INLINE_CHANGES);
+  const shown = open ? rows : inline;
+  const hidden = rows.filter((row) => !inline.includes(row));
+  // A lone length change is the strip itself: there is nothing more to open.
+  const unseen = hidden.some((row) => row.field !== "desiredFrames");
+  const more = unseen || inline.some((row) => row.stacked);
+  return (
+    <div className={`chg-wrap${open ? " open" : ""}`}>
+      {shown.length ? (
+        <dl className="chg" aria-label={t("note.change.label")}>
+          {shown.map((row, index) => {
+            const before = label(row.before), after = label(row.after);
+            return (
+              <div key={index} className={`chg-row${open && row.stacked ? " stacked" : ""}`} data-chg={index}>
+                <dt>{row.key.map(label).join(" · ")}</dt>
+                <dd title={`${before} → ${after}`}>
+                  <span className="chg-was"><span className="sr-only">{t("note.change.before")}: </span>{before}</span>
+                  <span className="chg-arrow" aria-hidden="true">→</span>
+                  <span className="chg-now"><span className="sr-only">{t("note.change.after")}: </span>{after}</span>
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      ) : null}
+      {more ? (
+        <button type="button" className="chg-more" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          {open ? t("note.change.less") : unseen ? t("note.change.all", { count: rows.length }) : t("note.change.more")}
+        </button>
+      ) : null}
+    </div>
   );
 }

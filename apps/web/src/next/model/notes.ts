@@ -57,9 +57,11 @@ function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals
     case "reply": return msg("note.choice.reply");
     case "proposal": {
       const proposal = proposals.find((p) => p.proposalId === choice.proposalId);
-      const duration = proposal?.preview.timeline.find((row) => row.changed && row.nowSeconds !== row.afterSeconds);
+      const changes = proposal?.preview.changes ?? [];
+      // Name the change only when it is the whole change; anything more is "Apply N changes", listed in the banner.
+      const duration = changes.length === 1 && changes[0]!.field === "desiredFrames" ? proposal!.preview.timeline.find((row) => row.shotId === changes[0]!.shotId) : undefined;
       if (duration) return msg("note.choice.make_seconds", { shot: duration.label, seconds: duration.afterSeconds });
-      return msg("note.choice.apply");
+      return changes.length > 1 ? msg("note.choice.apply_count", { count: changes.length }) : msg("note.choice.apply");
     }
   }
 }

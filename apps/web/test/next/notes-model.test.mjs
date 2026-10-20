@@ -9,7 +9,7 @@ const note = (patch) => ({ noteId: 'n', requestId: 'r', turnId: 't', letter: 'a'
   blocking: false, text: 'Coat came out maroon.', choices: [{ kind: 'accept', label: 'Keep maroon' }, { kind: 'regenerate_keyframe', shotIds: [shotId('2.2')] }],
   state: 'open', version: 1, createdAt: 'x', ...patch });
 const proposal = { proposalId: 'p1', requestId: 'r', state: 'held', previewDigest: 'd', createdAt: 'x',
-  preview: { changes: [], effects: [], filmSecondsNow: 48, filmSecondsAfter: 50,
+  preview: { changes: [{ shotId: shotId('2.3'), field: 'desiredFrames', before: '180', after: '240' }], effects: [], filmSecondsNow: 48, filmSecondsAfter: 50,
     timeline: [{ shotId: shotId('2.3'), sceneId: sceneId(2), label: '2.3', nowSeconds: 6, afterSeconds: 8, changed: true }] } };
 
 test('note choices are labelled by the app from their typed action', () => {

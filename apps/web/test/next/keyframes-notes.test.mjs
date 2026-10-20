@@ -116,3 +116,42 @@ test('a proposal strip ends at the film when its scene is the last one', () => {
   const strip = proposalTimeline(preview, overview, sceneId(3));
   assert.deepEqual([...strip.now, ...strip.after].map(s => en(s.text)), ['3.1 · 8 s', 'End of film', '3.1 · 6 s', 'Ends 2 s earlier']);
 });
+
+test('a held proposal lists every field it changes, Now → After, and names the button only for a lone duration', () => {
+  const { overview, proposals, views } = golden();
+  const b = noteBanner(view(views, 'b'), overview, proposals, 'en-US');
+  const rows = r => r.changes.map(c => [c.key.map(label).join(' · '), label(c.before), label(c.after), c.stacked]);
+  assert.deepEqual(b.changes.map(c => c.field), ['desiredFrames']);
+  assert.deepEqual(rows(b), [['2.3 · Length', '6 s', '8 s', false]]);
+  assert.equal(label(b.actions[0].label), 'Make 2.3 8 s');
+
+  // Duration and new words together: the button no longer names only the duration, and the words are shown.
+  const words = 'Rain crosses the harbour lights as the last ferry turns for home, slower than the tide.';
+  const narration = JSON.stringify({ mode: 'generated', text: words, voice: 'stock' });
+  const both = proposals.map(p => p.proposalId !== 'p1' ? p : { ...p, preview: { ...p.preview, changes: [...p.preview.changes,
+    { shotId: shotId('2.3'), field: 'narration', before: JSON.stringify({ mode: 'undecided', text: '', voice: 'stock' }), after: narration },
+    { sceneId: sceneId(2), field: 'purpose', before: 'Crossing', after: 'Night crossing' }] } });
+  const banner = noteBanner(noteViews(lastFerryNotes(), overview, both).find(v => v.letter === 'b'), overview, both, 'en-US');
+  assert.deepEqual(rows(banner), [
+    ['2.3 · Length', '6 s', '8 s', false],
+    ['2.3 · Narration', 'No line yet', words, true],
+    ['Scene 2 · Scene direction', 'Crossing', 'Night crossing', false],
+  ]);
+  assert.equal(label(banner.actions[0].label), 'Apply 3 changes');
+  assert.equal(zh(banner.actions[0].label), '采用这 3 处修改');
+  assert.deepEqual(banner.changes.map(c => zh(c.key[1])), ['时长', '旁白', '场景方向']);
+
+  // A personal voice and an explicit "no narration" are said the way Plan says them.
+  const voices = proposals.map(p => p.proposalId !== 'p1' ? p : { ...p, preview: { ...p.preview, changes: [
+    { shotId: shotId('2.3'), field: 'narration', before: JSON.stringify({ mode: 'generated', text: 'Home.', voice: 'personal' }), after: JSON.stringify({ mode: 'none', text: '', voice: 'stock' }) }] } });
+  const one = noteBanner(noteViews(lastFerryNotes(), overview, voices).find(v => v.letter === 'b'), overview, voices, 'en-US');
+  assert.deepEqual(rows(one), [['2.3 · Narration', 'Home. (your personal voice)', 'None', false]]);
+  assert.equal(label(one.actions[0].label), 'Apply the change');
+});
+
+test('a settled or unavailable proposal lists no changes', () => {
+  const { overview, proposals, views } = golden();
+  assert.deepEqual(noteBanner(view(views, 'b'), overview, proposals, 'en-US', 0).changes, []);
+  const stale = proposals.map(p => ({ ...p, state: 'stale', staleReason: 'SHOT_CHANGED' }));
+  assert.deepEqual(noteBanner(noteViews(lastFerryNotes(), overview, stale).find(v => v.letter === 'b'), overview, stale, 'en-US').changes, []);
+});
