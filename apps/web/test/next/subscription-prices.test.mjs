@@ -52,7 +52,10 @@ test('B22: scene keyframe panel shows subscription use for one or many frames, a
     assert.equal(panel.action, 'make_keyframes');
     assert.equal(en(panel.price), en(priceMsg(quote, 'en-US')));
     assert.equal(en(panel.priceTotal), en(priceMsg(quote, 'en-US')));
-    assert.equal(panel.priceEach, null, 'a mixed subscription quote never assigns the paid voice price to each keyframe');
+    if (quote.units > 2) {
+      assert.equal(en(panel.priceEach), '2 keyframes and 1 voice line');
+      assert.equal(zh(panel.priceEach), '2 张关键帧和 1 条配音');
+    } else assert.equal(panel.priceEach, null, 'subscription work never assigns a voice price to each keyframe');
   }
 });
 

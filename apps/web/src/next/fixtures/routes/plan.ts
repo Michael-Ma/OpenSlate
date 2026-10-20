@@ -3,6 +3,7 @@ import { joinPromptParts } from "@openslate/core/public";
 import { ApiError } from "../../api/client.ts";
 import { estimateNarrationSeconds, MAX_SHOT_SECONDS, MIN_SHOT_SECONDS } from "../../model/checks.ts";
 import type { PendingImport } from "../../model/plan-import.ts";
+import { shotDeleteIssue } from "../../model/plan.ts";
 import type { ConversationEntry, ProjectSnapshot } from "../../model/types.ts";
 import { canonicalJson } from "../../store/press-keys.ts";
 import { directedPrompt, fixtureCommand, recompute } from "../fixture-commands.ts";
@@ -106,7 +107,7 @@ function mediaSignature(overview: GenerationOverview): string {
 }
 
 /** Scene ordinals, shot labels and the snapshot's shot order follow the outline's order. */
-function relabel(overview: GenerationOverview, notes: Parameters<typeof recompute>[1]): GenerationOverview {
+function relabel(overview: GenerationOverview, notes: Parameters<typeof recompute>[1], projectShots: ProjectShot[]): GenerationOverview {
   const shots: Record<string, ShotOverview> = {};
   const scenes = overview.scenes.map((scene, index) => {
     scene.shotIds.forEach((id, position) => {
@@ -116,7 +117,7 @@ function relabel(overview: GenerationOverview, notes: Parameters<typeof recomput
     return { ...scene, ordinal: index + 1 };
   });
   // The Director's open notes still gate their scenes' video (DC-9).
-  return recompute({ ...overview, scenes, shots }, notes);
+  return recompute({ ...overview, scenes, shots }, notes, projectShots);
 }
 
 function orderedShots(overview: GenerationOverview, project: Project): ProjectShot[] {
@@ -205,7 +206,7 @@ function change(world: FixtureWorld, edit: (overview: GenerationOverview, projec
     const next = edit(w.overview, w.snapshot.project);
     const headVersion = w.snapshot.project.headVersion + 1;
     const revisionId = `rev-plan-${headVersion}`;
-    const overview = relabel(next.overview, w.snapshot.notes ?? []);
+    const overview = relabel(next.overview, w.snapshot.notes ?? [], next.project.shots);
     w.overview = { ...overview, headVersion, revisionId };
     w.snapshot = { ...w.snapshot, project: { ...next.project, shots: orderedShots(overview, next.project), headVersion, revisionId } };
   });
@@ -303,7 +304,7 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
     const receipt = fixtureCommand(world, "POST", "/storyboard", body) as { commandId: string };
     // A written picture prompt lifts a new shot out of "needs direction".
     if (body.field === "imagePrompt" && shot.keyframe.state === "direction_required")
-      world.update((w) => { w.overview = recompute({ ...w.overview, shots: { ...w.overview.shots, [shot.shotId]: directed(w.overview.shots[shot.shotId]!) } }); });
+      world.update((w) => { w.overview = recompute({ ...w.overview, shots: { ...w.overview.shots, [shot.shotId]: directed(w.overview.shots[shot.shotId]!) } }, w.snapshot.notes ?? [], w.snapshot.project.shots); });
     return commit(world, "keyframes", receipt.commandId, null);
   }
   if (body.kind === "narration" && body.field === "text") {
@@ -405,6 +406,7 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
     case "deleteShot": {
       const shot = world.overview.shots[body.id ?? ""];
       if (!shot) throw new ApiError("NOT_FOUND", 404);
+      if (shotDeleteIssue(shot)) throw new ApiError("ATTEMPTS_RUNNING", 409);
       deleteShotIn(world, shot.shotId);
       break;
     }
@@ -605,7 +607,7 @@ function createImport(world: FixtureWorld, raw: unknown): unknown {
   plan.pending = { id, name, text: source, baseVersion: head(world), ready: false, draft: null };
   world.update((w) => {
     w.director = { ...w.director, status: "running", activeRequestId: id };
-    w.overview = recompute({ ...w.overview, director: { state: "working", scopeIds: [], requestId: id } });
+    w.overview = recompute({ ...w.overview, director: { state: "working", scopeIds: [], requestId: id } }, w.snapshot.notes ?? [], w.snapshot.project.shots);
   });
   world.later(IMPORT_READ_MS, (w) => {
     const current = state(w).pending;
@@ -615,7 +617,7 @@ function createImport(world: FixtureWorld, raw: unknown): unknown {
     const note: ConversationEntry = { id: `${id}-note`, role: "assistant", text: DIRECTOR_NOTES, requestId: id, at: new Date().toISOString(), runtime: "scripted" };
     w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), note] };
     w.director = { ...w.director, status: "idle", activeRequestId: null };
-    w.overview = recompute({ ...w.overview, director: { state: "idle", scopeIds: [] } });
+    w.overview = recompute({ ...w.overview, director: { state: "idle", scopeIds: [] } }, w.snapshot.notes ?? [], w.snapshot.project.shots);
   });
   return { requestId: id };
 }
@@ -664,7 +666,7 @@ function discardImport(world: FixtureWorld, requestId: string): unknown {
   state(world).pending = null;
   world.update((w) => {
     if (w.director.activeRequestId === requestId) w.director = { ...w.director, status: "idle", activeRequestId: null };
-    if (w.overview.director.requestId === requestId) w.overview = recompute({ ...w.overview, director: { state: "idle", scopeIds: [] } });
+    if (w.overview.director.requestId === requestId) w.overview = recompute({ ...w.overview, director: { state: "idle", scopeIds: [] } }, w.snapshot.notes ?? [], w.snapshot.project.shots);
   });
   return { discarded: true };
 }

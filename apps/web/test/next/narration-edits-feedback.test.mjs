@@ -63,7 +63,7 @@ test('composite narration has no intermediate success toast while its final sett
   await held.entered.promise;
   assert.deepEqual(success(feedback), [], 'the text is an internal pre-save, not a finished user action');
   held.response.resolve();
-  assert.equal(await saving, true);
+  assert.equal(await saving, receipts[0].commandId, 'the returned command proves the text edit, not the later voice setting');
   const shown = success(feedback);
   assert.equal(feedback.length, 1, "the entire composite publishes one user-visible result");
   assert.equal(shown.length, 1);
@@ -75,7 +75,7 @@ test('composite narration has no intermediate success toast while its final sett
 test('a failed final narration setting never leaves a success toast for its partial text save', async t => {
   const { store, posts, feedback, draft } = await studio(t, (_path, options) =>
     options?.method === 'POST' && options.body?.field === 'voice' ? Promise.reject(new ApiError('REVISION_CONFLICT', 409)) : undefined);
-  assert.equal(await runNarrationEdits(store, draft, steps(draft)), false);
+  assert.equal(await runNarrationEdits(store, draft, steps(draft)), null);
   assert.deepEqual(success(feedback), []);
   assert.equal(feedback.length, 1);
   assert.equal(feedback[0].tone, "error");
@@ -90,7 +90,7 @@ test('newer typing during the final narration step prevents composite success fe
   await held.entered.promise;
   store.setEdit({ ...store.getState().edit, value: 'Newer unsaved narration while voice was saving.' });
   held.response.resolve();
-  assert.equal(await saving, false);
+  assert.equal(await saving, null);
   assert.deepEqual(success(feedback), []);
   assert.equal(store.getState().edit.value, 'Newer unsaved narration while voice was saving.');
 });
@@ -102,7 +102,7 @@ test('a superseded film selection cannot receive composite narration success fee
   await held.entered.promise;
   store.dispatch({ type: 'project', projectId: 'another-film' });
   held.response.resolve();
-  assert.equal(await saving, false);
+  assert.equal(await saving, null);
   assert.deepEqual(success(feedback), []);
   assert.equal(store.getState().projectId, 'another-film');
 });
@@ -115,7 +115,7 @@ test('a cancelled and reopened narration form cannot inherit an older composite 
   store.setEdit(null);
   store.setEdit({ shotId: draft.shotId, field: 'narration', value: 'A new editor has its own text.' });
   held.response.resolve();
-  assert.equal(await saving, false);
+  assert.equal(await saving, null);
   assert.deepEqual(success(feedback), []);
   assert.equal(store.getState().edit.value, 'A new editor has its own text.');
 });
@@ -123,18 +123,38 @@ test('a cancelled and reopened narration form cannot inherit an older composite 
 test('a final text command publishes exactly its supplied success message and Undo', async t => {
   const { store, feedback, receipts, draft } = await studio(t);
   const final = { edit: { kind: 'narration', id: draft.shotId, field: 'text', value: draft.value }, toast: { id: 'narr.toast.line', values: { shot: '2.3' } } };
-  assert.equal(await runNarrationEdits(store, draft, [final]), true);
+  const commandId = await runNarrationEdits(store, draft, [final]);
+  assert.equal(commandId, receipts[0].commandId);
   assert.equal(feedback.length, 1);
   assert.equal(success(feedback).length, 1);
   assert.deepEqual(success(feedback)[0].message, final.toast);
   assert.equal(success(feedback)[0].undoCommandId, receipts[0].commandId);
 });
 
+test('a narration settings-only save returns its last command when there is no text edit', async t => {
+  const { store, feedback, receipts, draft } = await studio(t);
+  const changes = [
+    { edit: { kind: 'narration', id: draft.shotId, field: 'voice', value: 'cedar' }, toast: { id: 'narr.toast.voice' } },
+    { edit: { kind: 'narration', id: draft.shotId, field: 'mode', value: 'none' }, toast: { id: 'narr.toast.none' } },
+  ];
+  const commandId = await runNarrationEdits(store, draft, changes);
+  assert.equal(commandId, receipts.at(-1).commandId);
+  assert.notEqual(commandId, receipts[0].commandId);
+  assert.equal(success(feedback)[0].undoCommandId, commandId);
+});
+
+test('an empty narration save produces no command or success feedback', async t => {
+  const { store, feedback, posts, draft } = await studio(t);
+  assert.equal(await runNarrationEdits(store, draft, []), null);
+  assert.deepEqual(posts, []);
+  assert.deepEqual(feedback, []);
+});
+
 
 test('a refused text pre-save reports one overall error and never posts later narration settings', async t => {
   const { store, posts, feedback, draft } = await studio(t, (_path, options) =>
     options?.method === 'POST' && options.body?.field === 'text' ? Promise.reject(new ApiError('REVISION_CONFLICT', 409)) : undefined);
-  assert.equal(await runNarrationEdits(store, draft, steps(draft)), false);
+  assert.equal(await runNarrationEdits(store, draft, steps(draft)), null);
   assert.equal(posts.length, 1);
   assert.equal(posts[0].body.field, 'text');
   assert.equal(feedback.length, 1, '{toast:null} suppresses intermediate success while preserving the action refusal');

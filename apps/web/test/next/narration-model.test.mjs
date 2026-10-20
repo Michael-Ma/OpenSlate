@@ -51,12 +51,12 @@ test('stock voices: following the film first, the film default marked, a pinned 
 
 test('a new voice remakes a voiced line at the voice-line price, never $0.00', () => {
   const overview = lastFerryOverview();
-  assert.equal(voiceUnit(overview, 'scene-2'), null, 'no voice price set');
+  assert.equal(voiceUnit(overview, 'scene-2'), 10000, 'the per-line price exists even when all voices are made');
   assert.equal(en(voiceImpact(shot('2.3'), null, 'en-US')), "The voice line will be made again in this voice, with the scene's next keyframes or video.");
   assert.equal(en(voiceImpact(shot('2.3'), 10000, 'en-US')), "The voice line will be made again in this voice, about $0.01, with the scene's next keyframes or video.");
   assert.equal(en(voiceImpact(shot('3.2'), 10000, 'en-US')), 'The voice line of 3.2 will be made in this voice.');
-  overview.scenes[0].quotes.voice = { micros: '0', units: 1, unitMicros: '0', priceUnknown: false };
-  overview.scenes[1].quotes.voice = { micros: '12000', units: 1, unitMicros: '12000', priceUnknown: false };
+  delete overview.scenes[0].quotes.oneVoice;
+  overview.scenes[1].quotes.oneVoice = { micros: '12000', units: 1, unitMicros: '12000', priceUnknown: false };
   assert.equal(voiceUnit(overview, 'scene-1'), 12000, "a scene without a price uses another scene's");
   assert.equal(en(noneImpact(shot('2.3'))), '2.3 will have no narration. Its voice line stays in Assets.');
   assert.equal(en(noneImpact(shot('3.2'))), '3.2 will have no narration.');

@@ -54,23 +54,31 @@ function scene3Ready(w) {
   open(w, '3.1'); open(w, '3.2');
 }
 
-test('a confirm voices a line with no voice yet step by step (make, save, fit) before its clips', () => {
+/** Legacy confirm fallback: a voice was removed after the keyframes decision completed. */
+function missingVoice(w, estimate = 1.6) {
+  shot(w, '3.2').narration = { state: 'text_only', text: shot(w, '3.2').narration.text, estimatedSeconds: estimate, fits: true };
+  w.overview = recompute(w.overview, w.snapshot.notes, w.snapshot.project.shots);
+}
+
+test('Make keyframes voices its line step by step without making clips; confirm later makes only clips', () => {
   const w = world();
-  scene3Ready(w);
-  assert.equal(shot(w, '3.2').narration.state, 'text_only');
-  const view = post(w, `/scenes/${sceneId(3)}/confirm`, confirmBody(w.overview, scene(w, 3)));
-  assert.deepEqual([view.state, view.currentShotId, view.currentStep], ['running', shotId('3.2'), 'speech']);
-  assert.deepEqual(step(w, 3), ['running', shotId('3.2'), 'speech']);
+  post(w, `/scenes/${sceneId(3)}/generate`, keyframesBody(read(w, sceneId(3))));
+  const voiceStep = () => { const run = scene(w, 3).keyframesRun; return [run.state, run.currentShotId, run.currentStep]; };
+  assert.deepEqual(voiceStep(), ['running', shotId('3.2'), 'speech']);
   assert.equal(shot(w, '3.2').narration.state, 'making');
-  assert.deepEqual(['3.1', '3.2'].map(l => [shot(w, l).video.state, shot(w, l).video.waiting.code]), [['queued', 'voice'], ['queued', 'voice']]);
-  assert.equal(scene(w, 3).state, 'making_video');
+  assert.deepEqual(['3.1', '3.2'].map(l => shot(w, l).video.state), ['none', 'none']);
+  assert.notEqual(scene(w, 3).state, 'making_video');
   w.advance(FIXTURE_TIMING.voiceStepMs);
-  assert.deepEqual(step(w, 3), ['running', shotId('3.2'), 'attach']);
+  assert.deepEqual(voiceStep(), ['running', shotId('3.2'), 'attach']);
   w.advance(FIXTURE_TIMING.voiceStepMs);
-  assert.deepEqual(step(w, 3), ['running', shotId('3.2'), 'accept']);
+  assert.deepEqual(voiceStep(), ['running', shotId('3.2'), 'accept']);
   w.advance(FIXTURE_TIMING.voiceStepMs);
-  // "I didn't look back." measures 1.8 s, well inside 8 s: the clips follow.
   assert.deepEqual([shot(w, '3.2').narration.state, shot(w, '3.2').narration.measuredSeconds, shot(w, '3.2').narration.fits], ['ready', 1.8, true]);
+  assert.equal(scene(w, 3).keyframesRun.state, 'done');
+  assert.deepEqual(['3.1', '3.2'].map(l => shot(w, l).video.state), ['none', 'none']);
+  w.advance(FIXTURE_TIMING.keyframeMs);
+  open(w, '3.1'); open(w, '3.2');
+  post(w, `/scenes/${sceneId(3)}/confirm`, confirmBody(w.overview, scene(w, 3)));
   assert.deepEqual(step(w, 3), ['running', shotId('3.1'), 'video']);
   assert.deepEqual(['3.1', '3.2'].map(l => shot(w, l).video.state), ['running', 'queued']);
   w.advance(FIXTURE_TIMING.clipMs * 2);
@@ -78,21 +86,20 @@ test('a confirm voices a line with no voice yet step by step (make, save, fit) b
   assert.equal(scene(w, 3).state, 'video_saved');
 });
 
-test('a line that comes back longer than its shot stops the confirm at the fit step; fitted, the scene confirms', () => {
+test('a line that comes back longer stops the keyframes voice run; fitted, the scene confirms', () => {
   const w = world();
   edit(w, { kind: 'narration', id: shotId('3.2'), field: 'text', value: 'I stood at the rail until the town was only a line of lights, and then not even that.' });
   assert.equal(shot(w, '3.2').narration.fits, true, 'its estimate fits the 8 s shot');
   scene3Ready(w);
-  post(w, `/scenes/${sceneId(3)}/confirm`, confirmBody(w.overview, scene(w, 3)));
-  w.advance(FIXTURE_TIMING.voiceStepMs * 3);
-  assert.deepEqual([confirmation(w, 3).state, confirmation(w, 3).blocker], ['blocked', { code: 'NARRATION_CUE_OUT_OF_RANGE', shotId: shotId('3.2') }]);
+  const run = () => scene(w, 3).keyframesRun;
+  assert.deepEqual([run().state, run().blocker], ['blocked', { code: 'NARRATION_CUE_OUT_OF_RANGE', shotId: shotId('3.2') }]);
   assert.deepEqual([shot(w, '3.2').narration.measuredSeconds, shot(w, '3.2').narration.fits], [8.4, false]);
   assert.deepEqual(['3.1', '3.2'].map(l => shot(w, l).video.state), ['none', 'none'], 'the clips are taken off; nothing was sent');
   assert.ok(scene(w, 3).blockers.some(b => b.code === 'narration_too_long' && b.shotId === shotId('3.2')));
   const stop = confirmationStop(w.overview, scene(w, 3));
   assert.equal(en(stop.reason), 'The 3.2 voice line came out at 8.4 s, longer than its shot.');
   w.advance(FIXTURE_TIMING.clipMs * 4);
-  assert.equal(confirmation(w, 3).state, 'blocked', 'nothing runs on');
+  assert.equal(run().state, 'blocked', 'nothing runs on');
   // Make 3.2 9 s (free), then confirm again: the line is voiced already, so the clips go straight out.
   post(w, `/shots/${shotId('3.2')}/narration-fit`, { fit: 'extend_shot', expectedHeadVersion: w.snapshot.project.headVersion });
   assert.equal(en(confirmationStop(w.overview, scene(w, 3)).next), 'It fits now: confirm again.');
@@ -106,6 +113,7 @@ test('a line that comes back longer than its shot stops the confirm at the fit s
 test('a confirmed frame that changes during the voice steps stops the confirm at that shot (frames changed)', () => {
   const w = world();
   scene3Ready(w);
+  missingVoice(w);
   post(w, `/scenes/${sceneId(3)}/confirm`, confirmBody(w.overview, scene(w, 3)));
   w.advance(FIXTURE_TIMING.voiceStepMs);
   // Another take of 3.1 lands meanwhile (as a Director change could do).
@@ -119,6 +127,7 @@ test('a confirmed frame that changes during the voice steps stops the confirm at
 test('Stop cancels a confirm during its voice steps; the voice job already sent still finishes', () => {
   const w = world();
   scene3Ready(w);
+  missingVoice(w);
   post(w, `/scenes/${sceneId(3)}/confirm`, confirmBody(w.overview, scene(w, 3)));
   post(w, '/controls', { action: 'stop' });
   assert.equal(confirmation(w, 3).state, 'cancelled');
@@ -238,7 +247,12 @@ test('a paid press that failed before it was sent, or a free press whose reply w
 async function clockedStudio(t, lose) {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const studio = await lossyStudio(t, lose);
-  const tick = async (ms) => { t.mock.timers.tick(ms); await studio.store.refresh(); };
+  // MockTimers schedules a newly queued timeout relative to the current tick, so advance in small increments
+  // instead of collapsing several chained speech/attach/accept callbacks into one large jump.
+  const tick = async (ms) => {
+    for (let remaining = ms; remaining > 0;) { const step = Math.min(100, remaining); t.mock.timers.tick(step); remaining -= step; }
+    await studio.store.refresh();
+  };
   return { ...studio, tick };
 }
 
@@ -254,6 +268,7 @@ test('a Confirm whose reply was lost: the notice holds until its confirmation sh
   await tick(FIXTURE_TIMING.keyframeMs);
   await store.openFrame(shotId('3.1'));
   await store.openFrame(shotId('3.2'));
+  port.world.update((w) => missingVoice(w, 7.6));
   await store.refresh();
   // Confirm: the request lands, the reply is lost.
   losing = true;
@@ -290,7 +305,7 @@ test('a Confirm whose reply was lost: the notice holds until its confirmation sh
 
 test('a Make keyframes whose reply was lost: the notice goes once the keyframes are being made; after they fail, a press is a new request', async (t) => {
   let losing = true;
-  const { store, port, sent } = await clockedStudio(t, (path, options) => (losing && options?.method === 'POST' && path.endsWith('/generate') ? 'reply' : null));
+  const { store, port, sent, tick } = await clockedStudio(t, (path, options) => (losing && options?.method === 'POST' && path.endsWith('/generate') ? 'reply' : null));
   await store.makeKeyframes(sceneId(3));
   losing = false;
   assert.equal(store.getState().toast.message.id, 'error.PAID_UNCONFIRMED');
@@ -298,6 +313,7 @@ test('a Make keyframes whose reply was lost: the notice goes once the keyframes 
   assert.equal(holds(store), true);
   await store.refresh();
   assert.equal(holds(store), false, 'the keyframes are being made: the notice goes');
+  await tick(FIXTURE_TIMING.voiceStepMs * 3);
   // Both fail before they are made: Make keyframes is offered again, and it is a new request.
   port.world.update((w) => {
     const shots = { ...w.overview.shots };

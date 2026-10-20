@@ -7,7 +7,7 @@ import { afterSave, editedKeys, touched, type Held, type HeldFields } from "../.
 import { dropLost, dropLostAt, placeOf, placeView, putLost, sayLost, type Editing, type KeptField, type PlaceView } from "../../model/plan-drafts.ts";
 import { DRAFT_FIELD, draftEdits, editChange, FIELD_LABEL, savedMessage, storedShot, unitPrices, type DraftCommand, type ShotDraft } from "../../model/plan-edit.ts";
 import { importName, importNotes, importReview, importStage, type PlanImportsRead } from "../../model/plan-import.ts";
-import { addedScene, addedShot, deleteSceneFacts, deleteShotFacts, locate, planOutline, sceneChoices, sceneMove, shotDrop, shotMove, type SceneView, type ShotMoveTarget, type ShotRowView, type SnapshotShot } from "../../model/plan.ts";
+import { addedScene, addedShot, deleteSceneFacts, deleteShotFacts, locate, planOutline, sceneChoices, sceneMove, shotDeleteIssue, shotDrop, shotMove, type SceneView, type ShotMoveTarget, type ShotRowView, type SnapshotShot } from "../../model/plan.ts";
 import { planSession, projectionBaseline, receiptBaseline, type PlanBaseline } from "../../model/plan-session.ts";
 import { NARROW_QUERY } from "../../model/shell.ts";
 import { msg, type Msg, type ProjectSnapshot, type Target } from "../../model/types.ts";
@@ -429,6 +429,9 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
   };
 
   const deleteShot = async (row: ShotRowView) => {
+    const currentShot = store.getState().overview?.shots[row.shotId];
+    const issue = currentShot ? shotDeleteIssue(currentShot) : null;
+    if (issue) { setDeleteError(issue); return; }
     const change = msg("plan.change.delete_shot", { shot: row.label });
     const out = await sendStoryboard(`deleteShot:${row.shotId}`, { kind: "deleteShot", id: row.shotId });
     if (out.kind === "lost") setConfirming(null);
@@ -761,7 +764,7 @@ function Workspace({ overview, snapshot }: { overview: GenerationOverview; snaps
           onCancel={() => setConfirming(null)} onConfirm={() => void deleteScene(confirmScene)} />
       ) : null}
       {confirmRow && shotFacts ? (
-        <DeleteDialog kind="shot" name={confirmRow.label} title={confirmRow.purpose} facts={shotFacts} busy={busy} guard={guard} error={deleteError}
+        <DeleteDialog kind="shot" name={confirmRow.label} title={confirmRow.purpose} facts={shotFacts} busy={busy} guard={confirmRow.deleteIssue ? tm(confirmRow.deleteIssue) : guard} error={deleteError}
           onCancel={() => setConfirming(null)} onConfirm={() => void deleteShot(confirmRow)} />
       ) : null}
       {moving && moveWhere ? (

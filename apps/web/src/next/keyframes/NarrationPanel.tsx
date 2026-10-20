@@ -82,8 +82,8 @@ interface Props {
   /** Opened from the row's Listen: the player takes focus once the take has loaded. */
   focusTake: boolean;
   onEdit(draft: EditDraft | null): void;
-  /** Saves the line through the view, so a check or a Director note it came from is settled too. Closes on success. */
-  onSaveDraft(draft: EditDraft): void;
+  /** Settles the check or Director note before the successfully saved panel closes. */
+  onSaved(commandId: string): void;
 }
 
 /** What became of the words saved for a recording that was not added; "restoring" while that save is undone. */
@@ -110,7 +110,7 @@ const aborted = (error: unknown, signal: AbortSignal) => signal.aborted || (erro
  * Leaving the person's recording says so (it stays in Assets) and, for a line, prices the voice line to be made.
  * A shot set to "My recording" whose take is still a voice line says that the voice line plays until one is added.
  */
-export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, focusTake, onEdit, onSaveDraft }: Props) {
+export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, focusTake, onEdit, onSaved }: Props) {
   const { t, tm, locale } = useI18n();
   const store = useStore();
   const mode = useMode();
@@ -186,8 +186,13 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
     return mounted.current && state.projectId === draft.projectId && state.edit?.revision === draft.revision
       && (reconcile || editConflict(draft, state.overview, displayedHead(state.projectId, state.snapshot, state.overview)).kind === "none");
   };
-  const run = (edits: { edit: StoryboardEdit; toast: Msg }[]): Promise<boolean> => canWrite()
-    ? runNarrationEdits(store, draft, edits) : Promise.resolve(false);
+  const run = (edits: { edit: StoryboardEdit; toast: Msg }[]): Promise<string | null> => canWrite()
+    ? runNarrationEdits(store, draft, edits) : Promise.resolve(null);
+  const saved = (commandId: string | null) => {
+    if (!commandId) return;
+    onSaved(commandId);
+    close();
+  };
 
   return (
     <form className="edit-form narr-panel" data-form="narration" data-choice={choice} onKeyDown={onKey} onSubmit={(event: FormEvent) => event.preventDefault()} aria-label={t("narr.panel.label", { shot: shot.label })}>
@@ -243,14 +248,9 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
             if (voice !== currentVoice) edits.push({ edit: { kind: "narration", id: shot.shotId, field: "voice", value: voice }, toast: msg(edits.length ? "narr.toast.voice_more" : "narr.toast.voice", values) });
             const modeValue = modeEdit("line", narrationMode);
             if (modeValue) edits.push({ edit: { kind: "narration", id: shot.shotId, field: "mode", value: modeValue }, toast: msg(edits.length ? "narr.toast.line_more" : "narr.toast.line", values) });
-            // The line alone goes through the view: it closes the panel and settles a check or a note it came from.
-            if (edits.length === 1 && textChanged) {
-              onSaveDraft({ ...draft, value: text });
-              return;
-            }
             setBusy(true);
             try {
-              if (await run(edits)) close();
+              saved(await run(edits));
             } finally {
               if (mounted.current) setBusy(false);
             }
@@ -290,7 +290,7 @@ export function NarrationPanel({ shot, fps, draft, detail, saving, saveBlocked, 
               onClick={async () => {
                 setBusy(true);
                 try {
-                  if (await run([{ edit: { kind: "narration", id: shot.shotId, field: "mode", value: "none" }, toast: msg("narr.toast.none", { shot: shot.label }) }])) close();
+                  saved(await run([{ edit: { kind: "narration", id: shot.shotId, field: "mode", value: "none" }, toast: msg("narr.toast.none", { shot: shot.label }) }]));
                 } finally {
                   if (mounted.current) setBusy(false);
                 }
@@ -611,12 +611,6 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
   const sending = phase.state === "sending" ? sendingMsg(phase.loaded, phase.total) : null;
   const retry = phase.state === "refused" && phase.retry;
   const wordsSaid = (phase.state === "refused" || phase.state === "stopped") && phase.words !== "restoring" ? wordsNote(phase.words) : null;
-  const chooseButton = (className: string) => (
-    <button type="button" className={className} data-act="narr-choose" disabled={sendingNow} autoFocus={focusField} onClick={() => input.current?.click()}>
-      {t(file ? "narr.choose_other" : take?.origin === "recording" ? "narr.choose_new" : "narr.choose")}
-    </button>
-  );
-
   return (
     <>
       <span className="label" id={id("file-label")}>{t("narr.recording_label")}</span>
@@ -627,7 +621,10 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
           <span className="name">{tm(recordingFileMsg(file, length))}</span>
         </div>
       ) : null}
-      {refusal ? null : chooseButton("pill narr-choose")}
+      {/* Keep this node mounted through refusals: a file dialog returns keyboard focus to this same button. */}
+      <button type="button" className="pill narr-choose" data-act="narr-choose" disabled={sendingNow} autoFocus={focusField} aria-describedby={refusal ? id("refusal") : undefined} onClick={() => input.current?.click()}>
+        {t(file ? "narr.choose_other" : take?.origin === "recording" ? "narr.choose_new" : "narr.choose")}
+      </button>
       {reading.state === "reading" ? <span className="stale" role="status">{t("narr.reading")}</span> : null}
       {fitNote ? <span className="stale" data-note="long">{tm(fitNote)}</span> : null}
       <label htmlFor={id("words")}>{t("narr.words_label")}</label>
@@ -637,13 +634,12 @@ function RecordingPart({ draft, shot, fps, words: savedWords, take, focusField, 
       {/* What is happening to the file stays in view with the buttons while the panel scrolls. */}
       <div className="narr-foot">
       {refusal ? (
-        <div className="narr-refusal" role="alert" data-state="refused">
+        <div className="narr-refusal" role="alert" data-state="refused" id={id("refusal")}>
           <span className="ic" aria-hidden="true">!</span>
           <div className="narr-refusal-body">
             {file ? <span className="name" data-field="refused-file">{tm(recordingFileMsg(file, length))}</span> : null}
             <span>{tm(refusal)}</span>
             {wordsSaid ? <span className="narr-words-note" data-words={phase.state === "refused" ? phase.words : undefined}>{tm(wordsSaid)}</span> : null}
-            {chooseButton("pill sm narr-choose")}
           </div>
         </div>
       ) : null}

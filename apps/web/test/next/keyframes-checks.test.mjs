@@ -24,12 +24,12 @@ test('the Now / After strip shows the shot before, the shot, and Scene 3 startin
 test('the strip ends with the next shot, or the end of the film, when there is no next scene', () => {
   const overview = golden();
   // A too-long line on 2.1: no shot before it, and 2.2 follows inside the scene.
-  overview.shots[shotId('2.1')].narration = { state: 'ready', text: 'A long line', measuredSeconds: 6.2, fits: false };
+  overview.shots[shotId('2.1')].narration = { state: 'ready', text: 'A long line', measuredSeconds: 6.2, fits: false, fitSeconds: 7 };
   const first = checkTimeline(checkFor(overview, '2.1'), overview);
   assert.deepEqual(first.now.map(s => en(s.text)), ['2.1 · 5 s', '2.2']);
   assert.deepEqual(first.after.map(s => en(s.text)), ['2.1 · 7 s', '2.2 · 2 s later']);
   // The last shot of the film.
-  overview.shots[shotId('3.2')].narration = { state: 'ready', text: 'Long', measuredSeconds: 9.1, fits: false };
+  overview.shots[shotId('3.2')].narration = { state: 'ready', text: 'Long', measuredSeconds: 9.1, fits: false, fitSeconds: 10 };
   const last = checkTimeline(checkFor(overview, '3.2'), overview);
   assert.deepEqual(last.after.map(s => en(s.text)), ['3.1 · 8 s', '3.2 · 10 s', 'Ends 2 s later']);
 });

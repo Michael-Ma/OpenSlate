@@ -1,4 +1,4 @@
-import type { GenerationOverview, PriceQuote, ShotNarration, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import type { GenerationOverview, ShotNarration, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { lineEstimate, lineEstimateMsg } from "./checks.ts";
 import { seconds } from "./keyframes.ts";
 import type { InspectorRow } from "./inspector.ts";
@@ -96,9 +96,9 @@ export function voiceOptions(read: StockVoicesRead | null, current: VoiceSelecto
 
 /** One voice line's price for this scene (any scene's when it has none); null when no price is set. Never $0.00. */
 export function voiceUnit(overview: GenerationOverview, sceneId: string): number | null {
-  const unit = (quote: PriceQuote | undefined) => (!quote || quote.priceUnknown || !(Number(quote.unitMicros) > 0) ? null : Number(quote.unitMicros));
-  const own = unit(overview.scenes.find((scene) => scene.sceneId === sceneId)?.quotes.voice);
-  return own ?? overview.scenes.map((scene) => unit(scene.quotes.voice)).find((value) => value !== null) ?? null;
+  const quote = overview.scenes.find((scene) => scene.sceneId === sceneId)?.quotes.oneVoice
+    ?? overview.scenes.find((scene) => scene.quotes.oneVoice)?.quotes.oneVoice;
+  return !quote || quote.priceUnknown || !(Number(quote.unitMicros) > 0) ? null : Number(quote.unitMicros);
 }
 
 /**

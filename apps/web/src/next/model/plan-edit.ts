@@ -255,7 +255,7 @@ export function unitPrices(overview: GenerationOverview, sceneId: string): UnitP
   return {
     keyframe: unit(keyframe),
     clip: clip && !clip.unknown && Number(clip.unitMicros) > 0 ? Number(clip.unitMicros) : null,
-    voice: unit(scene?.quotes.voice ?? anyScene((s) => s.quotes.voice)),
+    voice: unit(scene?.quotes.oneVoice ?? anyScene((s) => s.quotes.oneVoice)),
     ...(keyframe?.subscription ? { keyframeSubscription: keyframe.subscription } : {}),
   };
 }

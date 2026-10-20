@@ -1,6 +1,6 @@
 // Next UI, Keyframes view: what the classic studio had and the new one lacked (parity audit, area "keyframes").
 // Moving through the whole film (buttons, counter, arrow keys), the Keyframe / Video toggle, the takes strip with
-// "Use this take" and its Undo, the prompts in the inspector with Edit in Plan, a scene confirm's voice steps and
+// "Use this take" and its Undo, the prompts in the inspector with Edit in Plan, the keyframe run's voice steps and
 // why it stopped, and a paid press whose reply was lost. The sample film (?ui=next&fixture=last-ferry) unless a
 // scenario says otherwise; the lost reply runs against the disposable fake-provider studio.
 import { execFileSync } from "node:child_process";
@@ -89,8 +89,8 @@ async function panelFits(page) {
   expect(!outside.length, `The video panel overflows: ${JSON.stringify({ panel: [out.top, out.bottom], outside })}`);
 }
 
-/** Scene 3 of the sample film with 3.2's line made longer in Plan, its keyframes made and both opened. */
-async function scene3ToConfirm(page) {
+/** Scene 3 with 3.2's longer line saved in Plan, ready for the keyframes-and-voice generation decision. */
+async function scene3ToMake(page) {
   // 3.2 gets a longer line in Plan: estimated at 7.6 s, it fits its 8 s shot on paper.
   await page.click('[data-act="tab"][data-view="plan"]');
   await page.click(`[data-act="edit-shot"][data-shot="${shot("3.2")}"]`);
@@ -99,13 +99,17 @@ async function scene3ToConfirm(page) {
   await expectText(page, ".toast", /Saved 3\.2/);
   await page.click('[data-act="tab"][data-view="keyframes"]');
   await page.click('[data-act="scene"][data-scene="scene-3"]');
-  await page.click('[data-act="make-keyframes"]');
+  await page.click('.card [data-act="open-shot"][data-shot="shot-3-2"]');
+  await expectText(page, '[data-act="make-keyframes"]', /^Make 2 keyframes/);
+}
+
+/** Review the returned frames after the voice run has stopped, without making another generation decision. */
+async function openScene3Frames(page) {
   await page.waitForSelector('[data-card="shot-3-2"] .pic-img', { timeout: 10000 });
   await page.click('.card [data-act="open-shot"][data-shot="shot-3-1"]');
   await expectText(page, '[data-card="shot-3-1"] .stl', /Opened/);
   await page.click('.card [data-act="open-shot"][data-shot="shot-3-2"]');
   await expectText(page, '[data-card="shot-3-2"] .stl', /Opened/);
-  await expectText(page, '[data-act="confirm-video"]', /^Confirm frames & generate video · about \$1\.00$/);
 }
 
 /**
@@ -306,22 +310,23 @@ export const scenarios = [
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await scene3ToConfirm(page);
-      await page.click('[data-act="confirm-video"]');
-      // The confirm voices 3.2's line first, step by step, before any clip.
+      await scene3ToMake(page);
+      await page.click('[data-act="make-keyframes"]');
+      // The keyframe decision makes 3.2's voice too, step by step, before any video confirm.
       await expectText(page, '[data-card="shot-3-2"] .stl', /Making voice line…/);
-      await expectText(page, ".vpanel p", /^Making the voice line for 3\.2; the clips follow\.$/);
-      await expectText(page, '[data-card="shot-3-1"] .stl', /^Waiting for voice/);
-      // The waiting pill leaves the motion its room: both read whole.
+      await expectText(page, ".vpanel p", /^Making voice line…$/);
+      await expectText(page, '.vpanel [data-act="video-busy"]', /^Making voice lines…$/);
+      // The other keyframe's status leaves the motion its room: both read whole.
       const footer = await page.locator('[data-card="shot-3-1"] .stl').evaluate((row) => [...row.children].map((part) => [part.textContent, part.scrollWidth <= part.clientWidth + 1]));
       expect(footer.every(([, whole]) => whole), `3.1's status row is cut: ${JSON.stringify(footer)}`);
       await screenshot(page, "confirm-step-speech-1440");
       await expectText(page, '[data-card="shot-3-2"] .stl', /Saving voice line…/);
-      await expectText(page, ".vpanel p", /^Saving the voice line for 3\.2; the clips follow\.$/);
+      await expectText(page, ".vpanel p", /^Saving voice line…$/);
       await expectText(page, '[data-card="shot-3-2"] .stl', /Fitting voice line…/);
-      await expectText(page, ".vpanel p", /^Fitting the voice line to 3\.2; the clips follow\.$/);
-      // Voiced, the line runs 8.4 s: the confirm stops there and says why and what to do.
+      await expectText(page, ".vpanel p", /^Fitting voice line…$/);
+      // Voiced, the line runs 8.4 s: the keyframe run stops there and says why and what to do.
       await page.waitForSelector('.vpanel[data-stopped="NARRATION_CUE_OUT_OF_RANGE"]', { timeout: 6000 });
+      await openScene3Frames(page);
       await expectText(page, ".vpanel .vcount", /^Stopped\s*at 3\.2$/);
       await expectText(page, ".vpanel .vstop", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
       expect(!(await page.locator(".vpanel .vstop-act").count()), "A too-long line offers another view; its choices are in the check");
@@ -354,7 +359,7 @@ export const scenarios = [
       // Lengthen the shot (free), then confirm again: the clips are made.
       await page.click('.banner.check [data-act="make-fit"]');
       await expectText(page, '[data-act="confirm-video"]', /^Confirm frames & generate video · about \$1\.00$/);
-      // The stop stays until the scene is confirmed again: it still explains the last confirm, and says it fits now.
+      // The stop stays until the scene is confirmed: it still explains the voice run, and says it fits now.
       await expectText(page, ".vpanel .vstop", /The 3\.2 voice line came out at 8\.4 s, longer than its shot\. It fits now: confirm again\.$/);
       await screenshot(page, "confirm-stopped-fitted-1440");
       await page.click('[data-act="confirm-video"]');
@@ -399,21 +404,22 @@ export const scenarios = [
     },
   },
   {
-    // A phone: a confirm running its voice steps, then stopped, with the panel and the inspector's one line and Why.
-    // Scene 3 is prepared at 1440 (the Plan tab), then the phone takes over before the confirm.
+    // A phone: keyframes running voice steps, then stopped, with the panel and the inspector's one line and Why.
+    // Scene 3 is prepared at 1440 (the Plan tab), then the phone takes over before Make keyframes.
     name: "next-keyframes-parity-confirm-narrow",
     query,
     viewport: { width: 1440, height: 900 },
     async run({ page }) {
       await ready(page);
-      await scene3ToConfirm(page);
+      await scene3ToMake(page);
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.click('[data-act="confirm-video"]');
-      await expectText(page, ".vpanel p", /^Making the voice line for 3\.2; the clips follow\.$/);
+      await page.click('[data-act="make-keyframes"]');
+      await expectText(page, ".vpanel p", /^Making voice line…$/);
       await page.locator(".vpanel").scrollIntoViewIfNeeded();
       await noSideScroll(page, 390);
       await screenshot(page, "confirm-running-390");
       await page.waitForSelector('.vpanel[data-stopped="NARRATION_CUE_OUT_OF_RANGE"]', { timeout: 8000 });
+      await openScene3Frames(page);
       await expectText(page, ".vpanel .vstop", /^The 3\.2 voice line came out at 8\.4 s, longer than its shot\. Choose how to fit it, then confirm again\.$/);
       await page.locator(".vpanel").scrollIntoViewIfNeeded();
       await noSideScroll(page, 390);

@@ -85,6 +85,8 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
   const durationSeconds = Math.round((shot.durationFrames / fps) * 10) / 10;
   const armed = !!intent && intent.shotId === shot.shotId && consumed !== intent.nonce;
   const clip = shotClip(shot);
+  const clipReady = shot.video.state === "ready" && !!shot.video.artifact;
+  const skippedClip = useRef<string | null>(null);
   // A playback (motion preview or the scene's clips) shows the keyframe side; the Video side plays one clip.
   const showVideo = media === "video" && !!clip && !playing;
   // The live studio plays the clip with native controls; the sample film has no clip files, so the keyframe's
@@ -93,6 +95,15 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
   // A decoded frame behind a player has not been reviewed on screen. Keep its navigation intent armed until
   // the person returns to the frame, including while scene playback covers it with the finished clip.
   const keyframeVisible = !player && playing !== "clip";
+
+  // Scene playback can reach a clip that an edit or Undo has since outdated. There is no Clip to emit its end,
+  // so skip this shot once; a new shot or a change in ready availability is a new playback boundary.
+  useEffect(() => {
+    if (playing !== "clip" || clipReady) { skippedClip.current = null; return; }
+    if (skippedClip.current === shot.shotId) return;
+    skippedClip.current = shot.shotId;
+    ended.current();
+  }, [playing, shot.shotId, clipReady]);
 
   // Opened (WA-9): only for the frame the person navigated to, and only once it has really been shown.
   useEffect(() => {
@@ -191,7 +202,7 @@ export function Preview({ shot, card, fps, playing, intent, position, onTogglePl
           ) : !making ? (
             <div className="dashed-frame"><div><b>{t("preview.no_keyframe")}</b>{shot.imagePrompt}</div></div>
           ) : null}
-          {playing === "clip" && shot.video.state === "ready" && shot.video.artifact ? <Clip shot={shot} onEnded={onEnded} bar={bar} time={time} /> : null}
+          {playing === "clip" && clipReady ? <Clip shot={shot} onEnded={onEnded} bar={bar} time={time} /> : null}
           {making && !player ? (
             <div className={`making${picture ? " over" : ""}`}>
               <div>{t("preview.making", { shot: shot.label })}<div className="bar indeterminate" role="progressbar" aria-label={t("card.progress", { shot: shot.label })}><i /></div></div>

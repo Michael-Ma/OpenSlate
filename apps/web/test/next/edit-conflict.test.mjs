@@ -123,10 +123,10 @@ test('B18 multi-field narration saves text through the same comparison before vo
   const { runNarrationEdits } = await import('../../src/next/model/narration-edits.ts');
   const { store, port, posts } = await studio(t); edit(store, 'narration');
   install(store, advance(port)); const draft = store.getState().edit;
-  assert.equal(await runNarrationEdits(store, draft, [
+  assert.ok(await runNarrationEdits(store, draft, [
     { edit: { kind: 'narration', id: draft.shotId, field: 'text', value: draft.value }, toast: { id: 'toast.saved' } },
     { edit: { kind: 'narration', id: draft.shotId, field: 'voice', value: 'cedar' }, toast: { id: 'toast.saved' } },
-  ]), true);
+  ]));
   assert.equal(posts.length, 2); assert.equal(posts[0].body.expectedHeadVersion, 13); assert.equal(posts[1].body.expectedHeadVersion, 14);
   assert.equal(store.getState().edit.baselineValue, draft.value);
 });
@@ -139,7 +139,7 @@ test('B18 narration with another setting cannot bypass a changed text baseline',
   assert.equal(await runNarrationEdits(store, draft, [
     { edit: { kind: 'narration', id: draft.shotId, field: 'text', value: draft.value }, toast: { id: 'toast.saved' } },
     { edit: { kind: 'narration', id: draft.shotId, field: 'voice', value: 'cedar' }, toast: { id: 'toast.saved' } },
-  ]), false);
+  ]), null);
   assert.equal(posts.length, 0); assert.equal(store.getState().edit.value, draft.value);
 });
 
@@ -182,7 +182,7 @@ test('B18 new typing during a composite narration save stops its old continuatio
     { edit: { kind: 'narration', id: draft.shotId, field: 'voice', value: 'cedar' }, toast: { id: 'toast.saved' } },
   ]);
   store.setEdit({ ...store.getState().edit, value: 'New typing while saving' }); release();
-  assert.equal(await saving, false); assert.equal(posts.length, 1);
+  assert.equal(await saving, null); assert.equal(posts.length, 1);
   assert.equal(store.getState().edit.value, 'New typing while saving');
 });
 

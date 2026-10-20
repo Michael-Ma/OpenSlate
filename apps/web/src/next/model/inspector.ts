@@ -31,6 +31,7 @@ export function editImpact(shot: ShotOverview, fields: readonly EditableField[])
   const keyframe = touchesKeyframe && shot.keyframe.state === "ready";
   const clip = touchesVideo && shot.video.state === "ready";
   if (touchesKeyframe && isWorking(shot.keyframe)) return msg("inspector.outdates.running");
+  if (touchesVideo && (isWorking(shot.video) || shot.video.state === "no_answer" || shot.video.replacement?.state === "no_answer")) return msg("inspector.outdates.running_clip");
   if (keyframe && clip) return msg("inspector.outdates.keyframe_and_clip");
   if (keyframe) return msg("inspector.outdates.keyframe");
   if (clip) return msg("inspector.outdates.video");
@@ -119,9 +120,9 @@ function costFrom(unit: { unitMicros: string; unknown: boolean; subscription?: P
 
 const quoteUnit = (quote: PriceQuote | undefined): { unitMicros: string; unknown: boolean } | null => quote ? { unitMicros: quote.unitMicros, unknown: quote.priceUnknown } : null;
 
-/** One clip's price: from this scene's video quote, else any scene's (the video model is film-wide). */
+/** One clip's price, independent of the scene's unfinished or mixed-unit confirmation quote. */
 export function clipUnit(overview: GenerationOverview, scene: SceneOverview | undefined): { unitMicros: string; unknown: boolean } | null {
-  return quoteUnit(scene?.quotes.confirmVideo) ?? quoteUnit(overview.scenes.find((s) => s.quotes.confirmVideo)?.quotes.confirmVideo);
+  return quoteUnit(scene?.quotes.oneClip) ?? quoteUnit(overview.scenes.find((s) => s.quotes.oneClip)?.quotes.oneClip);
 }
 
 /**
@@ -153,6 +154,7 @@ function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scen
   const take = costFrom(unit, "regenerate", locale);
   const first = costFrom(unit, "make", locale);
   const base = { clipNote: null, reason: null, working: false };
+  if (scene?.blockers.some((blocker) => blocker.code === "confirmation_running")) return { ...base, kind: keyframe.takeCount ? "regenerate" : "make", label: msg(keyframe.takeCount ? "inspector.regenerate" : "inspector.make_keyframe"), cost: null, primary: false, enabled: false, reason: msg("error.CONFIRMATION_RUNNING") };
   if (shotHasNoAnswer(shot)) return { ...base, kind: "regenerate", label: msg("inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("scene.unknown_outcome", { shots: shot.label }) };
   const retrying = pendingAutomaticRetry(keyframe);
   if (retrying) return { ...base, kind: keyframe.state === "failed" ? "make" : "regenerate", label: msg(keyframe.state === "failed" ? "inspector.make_again" : "inspector.regenerate"), cost: null, primary: false, enabled: false, reason: msg("inspector.failed.retrying", { count: retrying.autoRetriesLeft }) };
@@ -199,7 +201,7 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
   if (shot.keyframe.state === "failed") failure = { slot: "keyframe", message: failureMessage(shot.keyframe, "keyframe"), retryVideo: null };
   else if (shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "failed" && shot.keyframe.replacement.failure?.nativeDiagnostic)
     failure = { slot: "keyframe", message: failureMessage({ ...shot.keyframe, failure: shot.keyframe.replacement.failure }, "keyframe"), retryVideo: null };
-  else if (shot.video.state === "failed") {
+  else if (shot.video.state === "failed" && !shot.video.ingestionIssue) {
     const clip = clipUnit(overview, scene);
     const panel = scene ? videoPanel(overview, scene, locale) : null;
     failure = {
@@ -211,8 +213,8 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
   // A replacement take with no answer can be given up too, while the current keyframe stays (card B15).
   const noAnswerSlot = shot.keyframe.state === "no_answer" && shot.keyframe.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.attemptId }
     : shot.keyframe.replacement?.state === "no_answer" && shot.keyframe.replacement.attemptId ? { slot: "keyframe" as const, attemptId: shot.keyframe.replacement.attemptId }
-    : shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId }
-    : shot.video.replacement?.state === "no_answer" && shot.video.replacement.attemptId ? { slot: "video" as const, attemptId: shot.video.replacement.attemptId } : null;
+    : !shot.video.ingestionIssue && shot.video.state === "no_answer" && shot.video.attemptId ? { slot: "video" as const, attemptId: shot.video.attemptId }
+    : !shot.video.ingestionIssue && shot.video.replacement?.state === "no_answer" && shot.video.replacement.attemptId ? { slot: "video" as const, attemptId: shot.video.replacement.attemptId } : null;
 
   // An outdated keyframe is explained next to its Regenerate button; an outdated clip here.
   const notes: Msg[] = [];

@@ -59,8 +59,9 @@ test('Scene 3 offers its keyframes with a price, and Scene 1 offers playback', (
   const three = keyframesView(overview, sceneId(3), null, 'en-US').panel;
   assert.equal(three.action, 'make_keyframes');
   assert.equal(en(three.label), 'Make 2 keyframes');
-  assert.equal(en(three.price), 'about $0.08 · 2 at about $0.04');
-  assert.equal(`${en(three.label)} · ${en(three.priceTotal)}`, 'Make 2 keyframes · about $0.08');
+  assert.equal(en(three.price), 'about $0.09');
+  assert.equal(`${en(three.label)} · ${en(three.priceTotal)}`, 'Make 2 keyframes · about $0.09');
+  assert.equal(en(three.priceEach), '2 keyframes and 1 voice line');
   assert.equal(en(three.eyebrow), 'Scene 3 keyframes');
   const one = keyframesView(overview, sceneId(1), null, 'en-US').panel;
   assert.equal(one.action, 'play');

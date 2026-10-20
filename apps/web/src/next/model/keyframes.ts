@@ -1,4 +1,4 @@
-import type { GenerationOverview, MediaSlot, PriceQuote, SceneBlocker, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
+import type { GenerationOverview, MediaSlot, PriceQuote, SceneBlocker, SceneConfirmationView, SceneOverview, ShotOverview, StudioArtifactRef } from "@openslate/core/public";
 import { errorMsg, nativeDiagnosticMsg } from "../i18n/translate.ts";
 import { formatList } from "../i18n/typeset.ts";
 import { msg, type Msg } from "./types.ts";
@@ -81,9 +81,16 @@ export interface VideoPanel {
 
 export type ConfirmStep = "speech" | "attach" | "accept" | "video";
 
+/** A running operation takes precedence over a prior stopped operation. Voice-only targets belong to their run. */
+function sceneRun(scene: SceneOverview, state: "running" | "blocked"): SceneConfirmationView | undefined {
+  const video = scene.confirmation?.state === state ? scene.confirmation : undefined;
+  const keyframes = scene.keyframesRun?.state === state ? scene.keyframesRun : undefined;
+  return state === "blocked" && scene.keyframeTargets.length ? keyframes ?? video : video ?? keyframes;
+}
+
 /** The step a running confirm is on, and for which shot (voice steps name their shot; the video step may not). */
 export function confirmationStep(overview: GenerationOverview, scene: SceneOverview): { step: ConfirmStep; shotId: string | null; label: string | null } | null {
-  const confirmation = scene.confirmation;
+  const confirmation = sceneRun(scene, "running");
   if (confirmation?.state !== "running" || !confirmation.currentStep) return null;
   const shot = confirmation.currentShotId ? overview.shots[confirmation.currentShotId] : undefined;
   return { step: confirmation.currentStep, shotId: shot?.shotId ?? null, label: shot?.label ?? null };
@@ -125,9 +132,12 @@ function stopCode(code: string): StopCode | null {
  * being made again.
  */
 export function confirmationStop(overview: GenerationOverview, scene: SceneOverview): ConfirmationStop | null {
-  const confirmation = scene.confirmation;
+  const confirmation = sceneRun(scene, "running") ? undefined : sceneRun(scene, "blocked");
   const blocker = confirmation?.state === "blocked" ? confirmation.blocker : undefined;
-  if (!blocker || scene.state === "video_saved") return null;
+  const blockedLine = blocker?.shotId ? overview.shots[blocker.shotId]?.narration : undefined;
+  const narrationPending = !!blockedLine && (["text_only", "failed", "no_answer"].includes(blockedLine.state)
+    || blockedLine.measuredSeconds !== undefined && blockedLine.fits === false && !blockedLine.fit);
+  if (!blocker || scene.state === "video_saved" && (confirmation !== scene.keyframesRun || !scene.keyframeTargets.length && !narrationPending)) return null;
   const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
   if (shots.some((shot) => shot.video.state === "running")) return null;
   const shot = blocker.shotId ? overview.shots[blocker.shotId] : undefined;
@@ -209,8 +219,9 @@ export function unresolvedQueue(slot: MediaSlot, allowInputWait = false): Pick<M
       && (!allowInputWait || pending.waiting?.code !== "input_pending")) ?? null;
 }
 
-export const shotHasNoAnswer = (shot: ShotOverview) => shot.keyframe.state === "no_answer" || shot.video.state === "no_answer"
-  || shot.keyframe.replacement?.state === "no_answer" || shot.video.replacement?.state === "no_answer" || shot.narration.state === "no_answer";
+export const shotHasNoAnswer = (shot: ShotOverview) => shot.keyframe.state === "no_answer"
+  || !shot.video.ingestionIssue && (shot.video.state === "no_answer" || shot.video.replacement?.state === "no_answer")
+  || shot.keyframe.replacement?.state === "no_answer" || shot.narration.state === "no_answer";
 
 /** The current slots are evidence even when an older scene aggregate has not caught up. */
 function unansweredShots(overview: GenerationOverview, scene: SceneOverview): ShotOverview[] {
@@ -271,7 +282,7 @@ function pillStatus(overview: GenerationOverview, scene: SceneOverview, selected
  * studio, or running a confirm, and at least one keyframe or clip is held.
  */
 export function heldOnly(overview: GenerationOverview, scene: SceneOverview): boolean {
-  if (scene.confirmation?.state === "running") return false;
+  if (sceneRun(scene, "running")) return false;
   const shots = scene.shotIds.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
   const slots = shots.flatMap((shot) => [shot.keyframe, shot.video].flatMap((slot) => [slot, ...(slot.replacement ? [slot.replacement] : [])]));
   return slots.some(heldByEdit) && !slots.some((slot) => (slot.state === "running" || queuedToRun(slot)) && !heldByEdit(slot));
@@ -321,6 +332,12 @@ function waiting(slot: MediaSlot): ShotStatus {
 
 export function cardStatus(shot: ShotOverview): ShotStatus {
   const { keyframe, video } = shot;
+  if (video.ingestionIssue) {
+    const code = video.ingestionIssue.code;
+    const reason = ["OUTPUT_DOWNLOAD_LOCATOR", "OUTPUT_DOWNLOAD_EXPIRED", "OUTPUT_DOWNLOAD_ADDRESS"].includes(code) ? errorMsg(code) : msg("error.OUTPUT_DOWNLOAD_FAILED");
+    return { status: { id: "card.video.download_issue", messages: { reason } }, tone: "attention" };
+  }
+  if (video.takenOff === "confirmation_stale") return { status: msg("card.video.confirmation_stale"), tone: "attention" };
   if (keyframe.state === "running") return { status: msg("card.keyframe.making"), tone: "working" };
   // A clip waiting for the person's confirm is not being made: the card says what its keyframe needs (opened or not),
   // as before any confirm, and the video panel offers the confirm itself.
@@ -373,7 +390,7 @@ function blockerMsg(blockers: readonly SceneBlocker[], overview: GenerationOverv
   return msg(`panel.blocker.${first.code}`, { shot: listLabels(labels(first.code), locale) });
 }
 
-type PriceKind = "clips" | "keyframes";
+type PriceKind = "clips" | "keyframes" | "voice_lines";
 
 function prices(quote: PriceQuote | undefined, kind: PriceKind, locale: string): Pick<VideoPanel, "price" | "priceTotal" | "priceEach"> {
   if (!quote) return { price: null, priceTotal: null, priceEach: null };
@@ -399,17 +416,28 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   const keyframeHeadline = { value: msg("panel.count", { value: scene.counts.keyframesReady, total: shots.length }), unit: msg("panel.unit.keyframes", { count: shots.length }) };
 
   const state = sceneStateOf(overview, scene);
+  const stopped = confirmationStop(overview, scene);
   // An opened frame is not permission to resend its unanswered clip (or another unanswered paid job in the scene).
   // Inspect current slots as well as blockers: restart projections may still carry older counts, targets or state.
   const unknown = sceneUnknownOutcome(overview, scene, locale);
   if (unknown) return {
-    ...base, ...noPrice,
+    ...base, ...noPrice, stopped,
     action: null, enabled: false, label: msg("panel.unknown_wait"), reason: msg("panel.unknown_reason"), note: unknown,
     headline: { value: msg("panel.unknown_headline"), unit: null },
   };
   // Video targets can already exist while their conditioning frames are still being made. Current frame work
   // precedes unopened counts, passive downstream input waits, and older saved-video aggregates.
   const keyframesWorking = shots.some((shot) => isWorking(shot.keyframe));
+  // Make keyframes also runs speech/attach/accept. It never promises clips, even if an older video confirm exists.
+  if (scene.keyframesRun?.state === "running" && scene.confirmation?.state !== "running") {
+    const step = confirmationStep(overview, scene);
+    return {
+      ...base, ...noPrice, segments: segmentsOf(shots), eyebrow: msg("panel.title_keyframes", { scene: scene.ordinal }),
+      action: null, enabled: false, label: msg("panel.voice_run.making"), reason: errorMsg("CONFIRMATION_RUNNING"),
+      note: step && step.step !== "video" ? msg(`card.step.${step.step}`) : msg("panel.voice_run.making"),
+      headline: { value: msg("panel.voice_run.making"), unit: null },
+    };
+  }
   if (keyframesWorking && !heldOnly(overview, scene)) return {
     ...base, ...noPrice, segments: segmentsOf(shots), eyebrow: msg("panel.title_keyframes", { scene: scene.ordinal }),
     action: null, enabled: false, label: msg("panel.making_keyframes"), reason: msg("panel.making_keyframes_reason"), note: msg("panel.making_keyframes_note"),
@@ -423,13 +451,13 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   const sameWait = (code: string | undefined) => waitCode === "timing" || waitCode === "stopped" ? code === waitCode : code !== "timing" && code !== "stopped";
   const waitingLabels = listLabels([...new Set(waiting.filter(({ slot }) => sameWait(slot.waiting?.code)).map(({ shot }) => shot.label))], locale);
   if (waiting.length) return {
-    ...base, ...noPrice,
+    ...base, ...noPrice, stopped,
     action: null, enabled: false, label: waitingMsg(waiting[0]!.slot),
     reason: msg(waitCode === "stopped" ? "panel.blocker.stopped" : waitCode === "timing" ? "panel.timing_reason" : "panel.waiting_reason"),
     note: waitCode === "stopped" ? null : msg(waitCode === "timing" ? "panel.timing_shots" : "panel.waiting_shots", { shots: waitingLabels }),
     headline: { value: waitingMsg(waiting[0]!.slot), unit: null },
   };
-  if (state === "video_saved" && !heldOnly(overview, scene)) {
+  if (!stopped && state === "video_saved" && !heldOnly(overview, scene)) {
     const total = shots.reduce((sum, shot) => sum + shot.durationFrames, 0);
     return {
       ...base, ...noPrice, segments: segmentsOf(shots),
@@ -439,7 +467,6 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     };
   }
   // A confirm that stopped partway says so, even while the studio still lists its clips as waiting.
-  const stopped = confirmationStop(overview, scene);
   // Nothing moves until an unfinished Director edit ends: the panel says it waits for that edit, not that work runs.
   if (!stopped && heldOnly(overview, scene)) {
     const heldSlot = (slot: MediaSlot) => heldByEdit(slot) || !!slot.replacement && heldByEdit(slot.replacement);
@@ -469,10 +496,10 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
     };
   }
   if (scene.keyframeTargets.length && !keyframesWorking)
-    return makeKeyframes({ ...base, segments: segmentsOf(shots), headline: keyframeHeadline }, scene, locale);
+    return makeKeyframes({ ...base, segments: segmentsOf(shots), headline: keyframeHeadline, stopped }, overview, scene, locale);
   if (!targets.length) {
-    if (scene.keyframeTargets.length) return makeKeyframes({ ...base, segments: segmentsOf(shots), headline: keyframeHeadline }, scene, locale);
-    return { ...base, ...noPrice, action: null, enabled: false, label: msg("panel.confirm"), reason: msg("panel.nothing_to_make"), note: null, headline: keyframeHeadline };
+    if (scene.keyframeTargets.length) return makeKeyframes({ ...base, segments: segmentsOf(shots), headline: keyframeHeadline, stopped }, overview, scene, locale);
+    return { ...base, ...noPrice, stopped, action: null, enabled: false, label: msg("panel.confirm"), reason: msg("panel.nothing_to_make"), note: null, headline: keyframeHeadline };
   }
   const blockers = scene.blockers;
   const enabled = blockers.length === 0;
@@ -500,18 +527,33 @@ export function videoPanel(overview: GenerationOverview, scene: SceneOverview, l
   };
 }
 
-function makeKeyframes(base: Omit<VideoPanel, "action" | "enabled" | "label" | "price" | "priceTotal" | "priceEach" | "reason" | "note">, scene: SceneOverview, locale: string): VideoPanel {
+function makeKeyframes(base: Omit<VideoPanel, "action" | "enabled" | "label" | "price" | "priceTotal" | "priceEach" | "reason" | "note">, overview: GenerationOverview, scene: SceneOverview, locale: string): VideoPanel {
   const blocked = scene.blockers.find((b) => b.code === "direction_required" || b.code === "stopped" || b.code === "director_working" || b.code === "no_answer_in_scene" || b.code === "narration_making" || b.code === "confirmation_running");
   const enabled = !blocked && scene.keyframeTargets.length > 0;
+  const targets = scene.keyframeTargets.map((id) => overview.shots[id]).filter((shot): shot is ShotOverview => !!shot);
+  const keyframes = targets.filter((shot) => shot.keyframe.state !== "ready").length;
+  const voiceOnly = keyframes === 0;
+  // The quote excludes uploaded narration and already-returned recordings awaiting attachment, neither of which
+  // buys a speech call. The overview does not expose narration mode, so its exact paid units disambiguate a mixed
+  // make. A voice-only target still needs its line attached or fitted even if speech has already returned.
+  const voices = voiceOnly ? targets.length : scene.quotes.makeKeyframes ? Math.max(0, scene.quotes.makeKeyframes.units - keyframes)
+    : targets.filter((shot) => shot.narration.state !== "none" && shot.narration.state !== "ready").length;
+  const price = enabled ? prices(scene.quotes.makeKeyframes, voiceOnly ? "voice_lines" : "keyframes", locale) : noPrice;
+  const quote = scene.quotes.makeKeyframes;
+  const priceEach = enabled && keyframes && voices ? msg("panel.each.keyframes_voices", { keyframes, voices })
+    : enabled && voiceOnly && quote && Number(quote.unitMicros) > 0 && !quote.priceUnknown
+      ? msg("panel.each.voice_lines", { count: voices, each: formatMicros(quote.unitMicros, locale) }) : price.priceEach;
   return {
     ...base,
     eyebrow: msg("panel.title_keyframes", { scene: scene.ordinal }),
-    ...(enabled ? prices(scene.quotes.makeKeyframes, "keyframes", locale) : noPrice),
+    ...price,
+    priceEach,
     action: "make_keyframes",
     enabled,
-    label: msg("panel.make_keyframes", { count: scene.keyframeTargets.length }),
+    label: msg(voiceOnly ? "panel.make_voice_lines" : "panel.make_keyframes", { count: voiceOnly ? voices : keyframes }),
     reason: blocked ? msg(`panel.blocker.${blocked.code}`, { shot: "" }) : null,
-    note: msg("panel.make_keyframes_note"),
+    note: msg(voiceOnly ? "panel.make_voice_lines_note" : "panel.make_keyframes_note"),
+    ...(base.stopped ? { headline: { value: msg("panel.stopped_headline"), unit: base.stopped.label ? msg("panel.stopped_at", { shot: base.stopped.label }) : null } } : {}),
   };
 }
 

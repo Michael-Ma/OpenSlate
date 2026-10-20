@@ -255,26 +255,30 @@ export const scenarios = [
       await openCard(page, "2.2");
       await page.click('.insp [data-act="narration-edit"]');
       await page.click('.insp [data-act="narr-choice"][data-choice="recording"]');
+      const choose = await page.locator('.insp [data-act="narr-choose"]').elementHandle();
+      await choose.focus();
       // Refused before anything is sent: not audio.
       await chooseFile(page, "notes.txt", "text/plain", Buffer.from("not audio"));
       await expectText(page, '.insp .narr-refusal[role="alert"]', /Choose an audio file \(WAV, MP3, M4A, FLAC…\)\./);
+      expect(await choose.evaluate((button) => button.isConnected && document.activeElement === button), "The file refusal replaced or unfocused Choose a file");
       expect(await page.locator('.insp [data-act="narr-add"]').isDisabled(), "Add is on for a text file");
       const tone = await page.locator(".insp .narr-refusal").evaluate((el) => `${getComputedStyle(el).borderColor} ${getComputedStyle(el).color}`);
       expect(!/240, 178, 74|200, 16, 46/.test(tone), `A refusal is drawn amber or red: ${tone}`);
       // Refused by the studio: a file it cannot read. No Try again for that file.
       await chooseFile(page, "broken.wav", "audio/wav", Buffer.from("RIFF0000WAVEjunkjunkjunk"));
       await page.waitForFunction(() => !document.querySelector('.insp [data-act="narr-add"]')?.disabled, null, { timeout: 5000 });
+      expect(await choose.evaluate((button) => button.isConnected && document.activeElement === button), "Clearing the refusal replaced or unfocused Choose a file");
       await page.click('.insp [data-act="narr-add"]');
       await expectText(page, '.insp .narr-refusal[role="alert"]', /The studio could not read this recording\. Try another file\./, 6000);
       expect(await page.locator('.insp [data-act="narr-add"]').isDisabled(), "Add stays on after a final refusal");
       expect(await page.locator(".toast").count() === 0, "A refusal also showed as a toast");
       await screenshot(page, "recording-refused-1440");
-      // The refused file and Choose another… stay in view with the refusal, above the buttons.
+      // The refused file stays with its refusal; Choose a file keeps its stable place in the editor.
       const inView = await page.evaluate(() => {
         const body = document.querySelector(".insp .insp-body").getBoundingClientRect();
-        return ['[data-field="refused-file"]', '[data-act="narr-choose"]'].map((sel) => { const box = document.querySelector(`.insp .narr-refusal ${sel}`)?.getBoundingClientRect(); return !!box && box.top >= body.top && box.bottom <= body.bottom; });
+        return ['.narr-refusal [data-field="refused-file"]', '[data-act="narr-choose"]'].map((sel) => { const box = document.querySelector(`.insp ${sel}`)?.getBoundingClientRect(); return !!box && box.top >= body.top && box.bottom <= body.bottom; });
       });
-      expect(inView.every(Boolean), `The refused file or Choose another… is out of view: ${inView}`);
+      expect(inView.every(Boolean), `The refused file or Choose a file is out of view: ${inView}`);
       expect(await page.locator('.insp .narr-refusal [data-field="refused-file"]').innerText() === "broken.wav · 24 B", "The refused file is not named with its refusal");
       // Escape closes the panel; the focus goes back to Edit.
       await page.locator('.insp [data-act="narr-choose"]').focus();

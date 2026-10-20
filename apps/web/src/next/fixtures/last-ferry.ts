@@ -1,5 +1,6 @@
 import type { DirectorNote, DirectorProposal, GenerationOverview, KeyframeSlot, MediaSlot, SceneOverview, ShotNarration, ShotOverview } from "@openslate/core/public";
 import type { DirectorStatus, ProjectSnapshot } from "../model/types.ts";
+import { fixtureFitSeconds } from "./narration-fit.ts";
 
 /**
  * The Last Ferry: the fictional film from the chosen design (docs/ai/prototypes/last-ferry).
@@ -62,7 +63,9 @@ function video(row: Row): MediaSlot {
 function narration(row: Row): ShotNarration {
   if (!row.narration) return { state: "none", text: "", fits: true };
   if (row.keyframe === "none") return { state: "text_only", text: row.narration, estimatedSeconds: row.narrationSeconds, fits: row.narrationSeconds <= row.seconds };
-  return { state: "ready", text: row.narration, measuredSeconds: row.narrationSeconds, fits: row.narrationSeconds <= row.seconds };
+  const fitSeconds = fixtureFitSeconds(row.seconds * FPS, row.narrationSeconds, FPS);
+  return { state: "ready", text: row.narration, measuredSeconds: row.narrationSeconds, fits: row.narrationSeconds <= row.seconds,
+    ...(fitSeconds !== undefined ? { fitSeconds } : {}) };
 }
 
 export function lastFerryOverview(): GenerationOverview {
@@ -80,6 +83,7 @@ export function lastFerryOverview(): GenerationOverview {
       keyframe: keyframe(row),
       video: video(row),
       narration: narration(row),
+      quotes: { regenerateKeyframe: { micros: row.narration && row.keyframe === "none" ? "50000" : "40000", units: row.narration && row.keyframe === "none" ? 2 : 1, unitMicros: row.narration && row.keyframe === "none" ? "0" : "40000", priceUnknown: false } },
     };
   const scenes: SceneOverview[] = [1, 2, 3].map((ordinal) => {
     const inScene = rows.filter((row) => row.scene === ordinal);
@@ -87,6 +91,7 @@ export function lastFerryOverview(): GenerationOverview {
     const state = sceneStates[ordinal - 1]!;
     const videoTargets = state === "keyframes_back" ? ids : [];
     const keyframeTargets = state === "not_started" ? ids : [];
+    const missingVoices = inScene.filter((row) => row.narration && row.keyframe === "none").length;
     const scene: SceneOverview = {
       sceneId: sceneId(ordinal),
       ordinal,
@@ -104,8 +109,11 @@ export function lastFerryOverview(): GenerationOverview {
       keyframeTargets,
       quotes: {
         regenerateKeyframe: { micros: "40000", units: 1, unitMicros: "40000", priceUnknown: false },
-        ...(videoTargets.length ? { confirmVideo: { micros: String(videoTargets.length * 500000), units: videoTargets.length, unitMicros: "500000", priceUnknown: false } } : {}),
-        ...(keyframeTargets.length ? { makeKeyframes: { micros: String(keyframeTargets.length * 40000), units: keyframeTargets.length, unitMicros: "40000", priceUnknown: false } } : {}),
+        confirmVideo: { micros: String(videoTargets.length * 500000), units: videoTargets.length, unitMicros: videoTargets.length ? "500000" : "0", priceUnknown: false },
+        oneClip: { micros: "500000", units: 1, unitMicros: "500000", priceUnknown: false },
+        oneVoice: { micros: "10000", units: 1, unitMicros: "10000", priceUnknown: false },
+        voice: { micros: String(missingVoices * 10000), units: missingVoices, unitMicros: missingVoices ? "10000" : "0", priceUnknown: false },
+        ...(keyframeTargets.length ? { makeKeyframes: { micros: String(keyframeTargets.length * 40000 + missingVoices * 10000), units: keyframeTargets.length + missingVoices, unitMicros: missingVoices ? "0" : "40000", priceUnknown: false } } : {}),
       },
       blockers: state === "keyframes_back"
         ? [

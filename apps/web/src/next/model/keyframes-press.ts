@@ -26,6 +26,11 @@ function keyframeJob(overview: GenerationOverview, shotId: string) {
     failedAt: slot.failure?.at ?? null,
     artifactId: slot.artifact?.artifactId ?? null,
     takenOff: slot.takenOff ?? null,
+    replacement: slot.replacement ? {
+      state: slot.replacement.state,
+      attemptId: slot.replacement.attemptId ?? null,
+      failedAt: slot.replacement.failure?.at ?? null,
+    } : null,
     voice: shot.narration.state,
   };
 }

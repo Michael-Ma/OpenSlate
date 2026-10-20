@@ -125,7 +125,7 @@ test('B20 an own voice or mode setting retains the narration text baseline', asy
   const { store } = await studio(t, 'shot-2-3');
   for (const [field, value] of [['voice', 'cedar'], ['mode', 'uploaded'], ['mode', 'generated'], ['mode', 'none']]) {
     const draft = store.getState().edit;
-    assert.equal(await runNarrationEdits(store, draft, [{ edit: { kind: 'narration', id: draft.shotId, field, value }, toast: { id: 'toast.saved' } }]), true);
+    assert.ok(await runNarrationEdits(store, draft, [{ edit: { kind: 'narration', id: draft.shotId, field, value }, toast: { id: 'toast.saved' } }]));
     await store.refresh();
     assert.equal(store.getState().edit.baselineValue, draft.baselineValue);
     assert.equal(comparison(store).kind, 'none', `${field}=${value} does not rewrite the line`);

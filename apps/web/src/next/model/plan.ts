@@ -195,6 +195,8 @@ export interface ShotRowView {
   pills: StatusPillView[];
   /** App-computed fact (neutral): the line is longer than the shot. */
   check: Msg | null;
+  /** Deleting must keep running or uncertain paid work reachable for reconciliation. */
+  deleteIssue: Msg | null;
   notes: NoteChip[];
   /** Position inside its scene. */
   index: number;
@@ -257,6 +259,7 @@ export function shotRow(shot: ShotOverview, snapshotShot: SnapshotShot | undefin
     narration: narrationView(shot, snapshotShot?.narration?.mode, fps),
     pills: clip ? [keyframePill(shot), clip] : [keyframePill(shot)],
     check: check ? msg(check.estimated ? "plan.check.narration_estimated" : "plan.check.narration", { line: check.lineSeconds, shot: check.shotSeconds }) : null,
+    deleteIssue: shotDeleteIssue(shot),
     notes: shotCallouts(notes, shot.shotId).map(chip),
     index,
     first: index === 0,
@@ -354,6 +357,14 @@ export interface DeleteFacts {
   /** Later scenes (or shots) are renumbered. */
   renumbers: boolean;
   shots: number;
+}
+
+/** Retained replacements and exposed voice work still belong to this shot, even with a ready picture. */
+export function shotDeleteIssue(shot: ShotOverview): Msg | null {
+  const pending = [shot.keyframe, shot.keyframe.replacement, shot.video, shot.video.replacement]
+    .some((slot) => slot?.state === "running" || slot?.state === "no_answer");
+  return pending || shot.narration.state === "making" || shot.narration.state === "no_answer"
+    ? msg("error.ATTEMPTS_RUNNING") : null;
 }
 
 export function deleteSceneFacts(outline: PlanOutline, overview: GenerationOverview, sceneId: string): DeleteFacts | null {

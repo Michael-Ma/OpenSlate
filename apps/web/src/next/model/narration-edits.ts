@@ -11,7 +11,7 @@ type NarrationStore = Pick<StudioStore, "getState" | "refresh" | "saveEdit" | "e
  * A line plus its settings shares the original field comparison and keeps newer typing through every await.
  * Intermediate commands are silent successes; only the completed human action gets its final command's Undo.
  */
-export async function runNarrationEdits(store: NarrationStore, draft: EditDraft, edits: { edit: StoryboardEdit; toast: Msg }[]): Promise<boolean> {
+export async function runNarrationEdits(store: NarrationStore, draft: EditDraft, edits: { edit: StoryboardEdit; toast: Msg }[]): Promise<string | null> {
   const epoch = store.getState().projectEpoch;
   const active = () => {
     const state = store.getState();
@@ -19,19 +19,22 @@ export async function runNarrationEdits(store: NarrationStore, draft: EditDraft,
       && state.edit?.shotId === draft.shotId && state.edit?.field === "narration";
   };
   let completed: { commandId: string; toast: Msg } | null = null;
+  let textCommandId: string | null = null;
   for (const [index, { edit, toast }] of edits.entries()) {
     if (index > 0) await store.refresh();
-    if (!active()) return false;
+    if (!active()) return null;
     const state = store.getState();
     const head = displayedHead(state.projectId, state.snapshot, state.overview);
-    if (editConflict(state.edit!, state.overview, head).kind !== "none") return false;
+    if (editConflict(state.edit!, state.overview, head).kind !== "none") return null;
     const commandId = edit.kind === "narration" && edit.field === "text"
       ? await store.saveEdit({ ...state.edit!, value: edit.value }, undefined, true, false, { toast: null })
       : await store.edit(edit);
-    if (!commandId) return false;
+    if (!commandId) return null;
+    if (edit.kind === "narration" && edit.field === "text") textCommandId = commandId;
     completed = { commandId, toast };
   }
-  if (!active()) return false;
+  if (!active()) return null;
   if (completed) store.dispatch({ type: "toast", message: completed.toast, tone: "info", undoCommandId: completed.commandId });
-  return true;
+  // A note's edit-field proof names the command that actually changed its words. Undo still names the last step.
+  return textCommandId ?? completed?.commandId ?? null;
 }

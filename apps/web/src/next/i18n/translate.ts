@@ -22,7 +22,9 @@ export function translate(locale: Locale, id: MessageId, values?: MessageValues)
 }
 
 export function translateMsg(locale: Locale, message: Msg): string {
-  return translate(locale, message.id, message.values);
+  if (!message.messages) return translate(locale, message.id, message.values);
+  const messages = Object.fromEntries(Object.entries(message.messages ?? {}).map(([key, value]) => [key, translateMsg(locale, value)]));
+  return translate(locale, message.id, { ...message.values, ...messages });
 }
 
 /** Server codes map to messages by id; an unknown code still says which code it was. */
