@@ -37,3 +37,20 @@ test('removing legacy audio-led narration previews the same cue removal as publi
  const result=previewCreativePatch(project,{updateShots:[{id:'a',narration:{mode:'none',text:'',voice:'stock'}}]},bindings);
  assert.deepEqual(result.effects.map(e=>e.effect),['keeps_keyframe','clip_remade','voice_remade']);
 });
+
+for (const kind of ['image', 'video', 'speech']) test(`running ${kind} without returned output warns when its result would be outdated`, () => {
+ const {project,bindings}=fixture(),shot=project.shots[0];
+ const running={node:{kind,intentDigest:kind==='speech'?'':shotIntentDigest(shot,kind),args:{prompt:kind==='image'?shot.imagePrompt:shot.videoPrompt}},outputs:{},running:true};
+ const row=kind==='image'?{imagePrompt:'New frame'}:kind==='video'?{desiredFrames:240}:{narration:{mode:'generated',text:'New line',voice:'stock'}};
+ const preview=previewCreativePatch(project,{updateShots:[{id:shot.id,...row}]},{a:[...bindings.a,running]});
+ assert.equal(preview.effects.filter(e=>e.effect==='discards_running').length,1);
+ assert.ok(!previewCreativePatch(project,{updateShots:[{id:shot.id,...row}]},bindings).effects.some(e=>e.effect==='discards_running'));
+});
+test('running replacement warns once, while unrelated running work and non-media changes do not',()=>{
+ const {project,bindings}=fixture();
+ const image={...bindings.a[0],running:true},video={...bindings.a[1],running:true};
+ assert.equal(previewCreativePatch(project,{updateShots:[{id:'a',imagePrompt:'New frame'}]},{a:[image,video]}).effects.filter(e=>e.effect==='discards_running').length,1);
+ assert.ok(!previewCreativePatch(project,{updateShots:[{id:'a',desiredFrames:240}]},{a:[image]}).effects.some(e=>e.effect==='discards_running'));
+ assert.ok(!previewCreativePatch(project,{updateShots:[{id:'b',motion:'Pan'}]},{a:[video]}).effects.some(e=>e.effect==='discards_running'));
+ assert.ok(!previewCreativePatch(project,{updateScenes:[{id:'scene',purpose:'New scene text'}]},{a:[video]}).effects.some(e=>e.effect==='discards_running'));
+});

@@ -3,6 +3,7 @@ import type { ActorContext, DirectorNote, ProjectRecord, ResolveNoteInput, Revie
 import type { FastifyInstance } from 'fastify';
 import type { Store } from '../persistence/store.js';
 import type { ProductionService, RequestRecord } from './service.js';
+import type { ProposalRecord } from './director-proposals.js';
 import { requiredCommandKey } from './command-key.js';
 
 export type NoteInput = Pick<DirectorNote, 'anchor' | 'kind' | 'blocking' | 'text' | 'seenKeyframe' | 'choices'>;
@@ -61,7 +62,11 @@ export function recordNotes(service: ProductionService, projectId: string, actor
             && (proposal.patch.updateScenes ?? []).every(s => s.id === anchor.sceneId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/proposalId`, 'Link an owned proposal within this note anchor. Use the proposalId returned by propose_change.');
         }
         if (choice.kind === 'edit_field') check(ids.has(choice.shotId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotId`, 'Edit choice must target an anchored shot. Use an ID from this note anchor.');
-        if (choice.kind === 'regenerate_keyframe') check(choice.shotIds.every(id => ids.has(id)), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotIds`, 'Regeneration choice must target anchored shots. Use IDs from this note anchor.');
+        if (choice.kind === 'regenerate_keyframe') {
+          check(choice.shotIds.every(id => ids.has(id)), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotIds`, 'Regeneration choice must target anchored shots. Use IDs from this note anchor.');
+          check(new Set(shots.filter(shot => choice.shotIds.includes(shot.id)).map(shot => shot.sceneId)).size === 1,
+            'VALIDATION_ERROR', 'invalid_arguments', `choices/${choiceIndex}/shotIds`, 'Regeneration choice must target shots from one scene. Record separate choices or notes for shots in different scenes.');
+        }
       }
       check(!input.blocking || input.choices.some(c => c.kind === 'accept'), 'VALIDATION_ERROR', 'missing_keep_choice', 'choices', 'Blocking notes must offer an accept choice with a short keep label.');
       if (input.seenKeyframe) {
@@ -133,6 +138,16 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
     const actor = service.beginRequest(projectId, 'local-user', 'Resolve this Director note.', { source: 'app', concurrency: 'alongside', scopeIds: note.anchor.shotIds?.length ? note.anchor.shotIds : note.anchor.sceneId ? [note.anchor.sceneId] : [projectId], key: `resolve-note:${key}` });
     const resolved: DirectorNote = { ...note, state: 'resolved', version: note.version + 1, resolution: { choiceIndex: input.choiceIndex, at: new Date().toISOString(), ...(input.resultRef ? { resultRef: input.resultRef } : {}) } };
     store.put('director_note', noteId, projectId, resolved);
+    // The person's alternate choice settles every held proposal linked from this
+    // note, including stale held records. Do this inside the resolution command.
+    const proposalIds = new Set(note.choices.flatMap(choice => choice.kind === 'proposal' ? [choice.proposalId] : []));
+    for (const proposalId of proposalIds) {
+      const proposal = store.get<ProposalRecord>('director_proposal', proposalId);
+      if (proposal?.projectId !== projectId || proposal.principalId !== 'local-user' || proposal.state !== 'held') continue;
+      store.put('director_proposal', proposal.id, projectId, { ...proposal, state: 'rejected' });
+      store.appendEvent(projectId, 'proposal.changed', { proposalId: proposal.id, state: 'rejected', requestId: actor.requestId });
+      service.releaseFinishedRequestHolds(projectId, proposal.requestId);
+    }
     service.releaseAlongsideHolds(projectId, actor);
     store.appendEvent(projectId, 'director.note_resolved', { noteId, resolution: resolved.resolution! });
     return resolved;

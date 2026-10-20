@@ -3,7 +3,7 @@ import { rebaseCreativeDraft } from "./creative-rebase.js";
 import { recordHumanFields, assertNoHumanFieldConflict } from "./human-fields.js";
 import { assertAcceptedNarrationDurationFloor } from "./publication-validation.js";
 import { directorNotes } from "./director-notes.js";
-import { rebaseProposal, type ProposalRecord } from "./director-proposals.js";
+import { contextToolVersion } from "./audio-operation-context.js";
 import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
@@ -32,7 +32,7 @@ import type { OwnedTranscriptionApplication, OwnedTranscriptionApplyReceipt, Own
 import { assertContinueEdits, continuationCovers, continuedRequestAuthorities, pendingEditContinuations, reviewPendingEdits } from './pending-edit-continuation.js';
 import type { ContinueEdits } from './pending-edit-continuation.js';
 import { isScopedAssemblyRebuild } from './scoped-assembly.js';
-import { assertNarrationAuthority } from '../narration/narration-scope.js';
+import { assertNarrationAuthority, narrationSpeechShotScopes } from '../narration/narration-scope.js';
 
 export interface RequestRecord { source?: RequestSource | "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; concurrency?: "alongside"; state: "active" | "superseded"; contextDigest: string | null }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
@@ -298,7 +298,11 @@ export class ProductionService {
     invariant(!proposal.source || !proposal.creative?.createShots?.length, "VALIDATION_ERROR", "Create shot intents first, then reference their saved IDs in the executable plan");
     const proposalDigest = digest(proposal);
     const same = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
-    if (same) return same;
+    if (same) {
+      const current = this.store.getProject(projectId);
+      if (current.headVersion === same.baseVersion) this.assertDirectorProposalRequired(projectId, actor, current, same.next, same.proposal.creative);
+      return same;
+    }
     this.holdRequest(projectId, actor);
     const before = this.store.getProject(projectId);
     const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
@@ -306,6 +310,7 @@ export class ProductionService {
     const localExecution = Object.hasOwn(lock, "localExecution") ? snapshotLocalExecution(lock.localExecution) : undefined;
     invariant(before.headVersion === proposal.expectedHeadVersion, "REVISION_CONFLICT", "Project changed before preparation");
     const next = proposal.creative ? applyCreativePatch(before, proposal.creative, (shot, cue) => ({ ...shot, promptIntent: { image: shotIntentDigest(shot, "image", cue), video: shotIntentDigest(shot, "video", cue) } })) : structuredClone(before);
+    this.assertDirectorProposalRequired(projectId, actor, before, next, proposal.creative);
     const logicalIds = { ...(this.store.get<{ aliases: Record<string, string> }>("logical_ids", projectId)?.aliases ?? {}) };
     const basePlan = before.activePlanId ? this.store.get<PlanRecord>("plan", before.activePlanId)?.compiled ?? null : null;
     const transcriptionInputs = ownedTranscriptionCatalog(this.store, projectId, basePlan);
@@ -355,6 +360,7 @@ export class ProductionService {
     this.assertActor(projectId, actor, true);
     assertNoHumanFieldConflict(this.store, projectId, actor, proposal.creative);
     invariant(this.store.getProject(projectId).headVersion === before.headVersion, "REVISION_CONFLICT", "Project changed during preparation");
+    this.assertDirectorProposalRequired(projectId, actor, before, next, proposal.creative);
     const duplicate = this.store.list<Prepared>("prepared", projectId).find(item => item.requestId === actor.requestId && item.epochId === (actor.kind === "director" ? actor.epochId : null) && item.proposalDigest === proposalDigest);
     if (duplicate) return duplicate;
     const noProgress = digest(before) === digest(next) && !compiled;
@@ -588,7 +594,64 @@ export class ProductionService {
     const before = this.store.getProject(projectId);
     const next = applyCreativePatch(before, patch, shot => shot);
     this.checkFootprint(before, next, actor, null, []);
+    this.validateHeldCreativePublication(projectId, patch);
+  }
+
+  /** Read-only publication checks also apply when projecting a held proposal after later changes. */
+  validateHeldCreativePublication(projectId: string, patch: import('@openslate/core').CreativePatch): void {
+    const before = this.store.getProject(projectId), next = applyCreativePatch(before, patch, shot => shot);
+    const lock = this.store.get<ProjectCapabilityLock>("capability_lock", before.capabilityLockId);
+    invariant(lock?.projectId === projectId && lock.recipeDigest === RECIPE_DIGEST && lock.stageContractsDigest === STAGE_CONTRACTS_DIGEST, "CAPABILITY_MISMATCH", "Project workflow lock is unsupported");
+    for (const [index, update] of (patch.updateShots ?? []).entries()) if (update.desiredFrames !== undefined) {
+      invariant(Number.isSafeInteger(update.desiredFrames) && update.desiredFrames >= 90 && update.desiredFrames <= 450,
+        "VALIDATION_ERROR", `patch.updateShots[${index}].desiredFrames: use 90–450 frames (3–15 seconds) per shot.`);
+      for (const profile of lock.profiles.filter(profile => profile.kind === "video"))
+        invariant(update.desiredFrames >= (profile.minFrames ?? 1) && update.desiredFrames <= (profile.maxFrames ?? 10800),
+          "PROFILE_INCOMPATIBLE", `patch.updateShots[${index}].desiredFrames: use a duration within the locked video profile bounds (${profile.minFrames ?? 1}–${profile.maxFrames ?? 10800} frames).`);
+    }
+    assertAcceptedNarrationDurationFloor(next);
     validateStageRequirements(next, requiredStages(before, next, null));
+  }
+
+  /** Current catalogs require the person's preview decision before invalidating existing media. */
+  private assertDirectorProposalRequired(projectId: string, actor: ActorContext, before: ProjectRecord, next: ProjectRecord, patch?: import('@openslate/core').CreativePatch): void {
+    if (actor.kind !== "director" || !patch || Number(contextToolVersion(this.store, projectId, actor).split(".")[0]) < 5) return;
+    const media = new Map<string, Set<OperationKind>>();
+    const add = (shotId: string, kind: OperationKind) => {
+      const kinds = media.get(shotId) ?? new Set<OperationKind>(); kinds.add(kind); media.set(shotId, kinds);
+    };
+    const attempts = this.engine.attempts(projectId);
+    for (const binding of this.store.list<NodeBinding>("node_binding", projectId)) {
+      if (binding.state !== "active" || binding.planId !== before.activePlanId) continue;
+      const outputs = { ...binding.retainedTake?.outputs, ...binding.outputs };
+      const artifactKind = binding.node.kind === "image" ? "image" : binding.node.kind === "video" ? "video" : binding.node.kind === "speech" ? "audio" : null;
+      const running = attempts.some(attempt => attempt.nodeId === binding.id && attempt.candidateId === binding.candidateId
+        && attempt.specDigest === binding.node.specDigest && !attempt.released && !["failed", "succeeded"].includes(attempt.phase));
+      if (!artifactKind || !running && !Object.values(outputs).some(output => output.kind === artifactKind)) continue;
+      if (binding.node.shotId) add(binding.node.shotId, binding.node.kind);
+      else if (binding.node.kind === "speech") for (const candidateId of new Set([binding.candidateId, binding.retainedTake?.candidateId ?? null]))
+        for (const shotId of narrationSpeechShotScopes(this.store, projectId, candidateId)) add(shotId, "speech");
+    }
+    const refused = new Set<string>();
+    for (const original of before.shots) {
+      const updated = next.shots.find(shot => shot.id === original.id);
+      if (!updated) continue;
+      const cue = before.cues.find(cue => cue.id === original.cueId), nextCue = next.cues.find(cue => cue.id === updated.cueId);
+      const kinds = media.get(original.id);
+      const imageChanged = kinds?.has("image") && (shotIntentDigest(original, "image", cue) !== shotIntentDigest(updated, "image", nextCue) || original.imagePrompt !== updated.imagePrompt);
+      const videoChanged = kinds?.has("video") && (shotIntentDigest(original, "video", cue) !== shotIntentDigest(updated, "video", nextCue) || original.videoPrompt !== updated.videoPrompt);
+      const narrationChanged = (kinds?.has("speech") || cue?.accepted) && (digest(original.narration ?? null) !== digest(updated.narration ?? null)
+        || original.cueId !== updated.cueId || cue?.accepted && !nextCue?.accepted);
+      for (const field of ["purpose", "action", "framing", "motion", "desiredFrames", "imagePrompt", "videoPrompt", "referenceArtifactIds", "cueId", "narration"] as const) {
+        if (digest(original[field] ?? null) === digest(updated[field] ?? null)) continue;
+        if (imageChanged && ["purpose", "action", "framing", "imagePrompt", "referenceArtifactIds"].includes(field)
+          || videoChanged && ["purpose", "action", "framing", "motion", "desiredFrames", "videoPrompt", "referenceArtifactIds", "cueId"].includes(field)
+          || narrationChanged && ["narration", "cueId"].includes(field)) refused.add(field);
+      }
+      if (narrationChanged && digest(cue ?? null) !== digest(nextCue ?? null)) refused.add("narration");
+      if (narrationChanged && before.narration.script !== next.narration.script) refused.add("narrationScript");
+    }
+    invariant(refused.size === 0, "PROPOSAL_REQUIRED", `These fields would outdate existing paid media or accepted narration: ${[...refused].join(", ")}. Use propose_change, or ask the person to edit these fields in Plan.`);
   }
 
   /** Held creative changes use the same validated Prepared/publication kernel, without generation authority. */
@@ -641,8 +704,6 @@ export class ProductionService {
       if (request.state !== "superseded") {
         const turns = this.store.list<{ requestId: string; state: string }>("director_turn", projectId).filter(turn => turn.requestId === requestId);
         if (!turns.length || turns.some(turn => ["queued", "running", "waiting_user"].includes(turn.state))) return;
-        const project = this.store.getProject(projectId);
-        if (this.store.list<ProposalRecord>("director_proposal", projectId).some(proposal => proposal.requestId === requestId && rebaseProposal(project, proposal).state === "held")) return;
         const applied = new Set(this.store.readEvents(projectId).filter(event => event.kind === "change.applied").map(event => event.payload.preparedId));
         if (this.store.list<Prepared>("prepared", projectId).some(prepared => prepared.requestId === requestId && !applied.has(prepared.id))) return;
       }
@@ -683,6 +744,7 @@ export class ProductionService {
     invariant(digest(this.store.get("capability_lock", before.capabilityLockId) ?? null) === prepared.capabilityDigest, "CAPABILITY_MISMATCH", "Project capability lock changed");
     validateStageRequirements(prepared.next, prepared.stages);
     invariant(before.headVersion === prepared.baseVersion, "REVISION_CONFLICT", "Prepared change is stale");
+    this.assertDirectorProposalRequired(projectId, actor, before, prepared.next, prepared.proposal.creative);
     assertAcceptedNarrationDurationFloor(prepared.next);
     for (const [id, version] of Object.entries(prepared.stageVersions)) invariant((this.store.get<StageBinding>("stage", id)?.bindingVersion ?? 0) === version, "STAGE_BINDING_CONFLICT", "Stage binding changed");
     let planId = before.activePlanId;
