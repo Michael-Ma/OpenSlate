@@ -110,10 +110,11 @@ export class GenerationOverviewReader {
               const native = last.request.execution?.adapter === "codex-image" ? (() => {
                 try { return assertCodexImageRecords(store, last).result?.observation; } catch { return undefined; }
               })() : undefined;
-              const nativeDiagnostic = native?.kind === "not_dispatched" ? safeNativeDiagnostic(native.nativeDiagnostic) : undefined;
+              const nativeDiagnostic = native?.kind === "not_dispatched" ? safeNativeDiagnostic(native.nativeDiagnostic)
+                : native?.kind === "failed" && native.code === "USAGE_LIMIT" ? { category: "native_rate_limited" as const } : undefined;
               return progress({ ...base, state: retriesLeft ? "queued" : "failed", attemptId: last.id, phase: last.phase, failure: { code: failure?.id ?? "EXECUTION_FAILED", technical: failure?.technical ?? false,
                 retryAllowed: retriesLeft > 0, autoRetriesLeft: retriesLeft,
-                ...(nativeDiagnostic ? { nativeDiagnostic, notDispatched: true } : {}),
+                ...(nativeDiagnostic ? { nativeDiagnostic, ...(native?.kind === "not_dispatched" ? { notDispatched: true } : {}) } : {}),
                 charged: !last.reservationId || store.get<{ state: string }>("reservation", last.reservationId)?.state !== "released",
                 at: evidence?.recordedAt ?? last.createdAt } });
             }

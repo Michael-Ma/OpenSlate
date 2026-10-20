@@ -47,7 +47,8 @@ export type ExecutionOutcome =
   | { type: "accepted"; taskId: string }
   | { type: "completed"; taskId: string; outputs: ExecutionOutput[] }
   | ExecutionSpoolCompletion
-  | { type: "failed"; taskId: string; failureId: string; technical: boolean; retryAllowed?: boolean }
+  // A native Codex image turn has no vendor job id. Only its scoped normalizer accepts null.
+  | { type: "failed"; taskId: string | null; failureId: string; technical: boolean; retryAllowed?: boolean }
   | { type: "rejected"; certainty: "not_accepted"; failureId: string; technical: boolean; retryAllowed?: boolean }
   | { type: "unknown"; diagnostic: string; taskId?: string };
 export interface ExecutionProvider {
@@ -202,7 +203,9 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
       : ["type", "certainty", "failureId", "technical", "retryAllowed"];
     if (!exact(value, fields) || !id(value.failureId) || typeof value.technical !== "boolean"
       || (value.retryAllowed !== undefined && typeof value.retryAllowed !== "boolean")
-      || (value.type === "failed" ? !id(value.taskId) : value.certainty !== "not_accepted")) return invalid();
+      || (value.type === "failed" ? !(id(value.taskId) || value.taskId === null && request?.kind === "image"
+        && request.execution?.adapter === "codex-image" && request.execution.version === "1"
+        && value.technical === false && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
     // Missing retryAllowed remains missing for historical evidence; the engine requires explicit true.
     return structuredClone(value) as unknown as ExecutionOutcome;
   }

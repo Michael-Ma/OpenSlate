@@ -99,7 +99,13 @@ lines.on("line", line => {
     if(imageScenario==="multiple-turns")thread.turns.push({...thread.turns[0],id:"another-turn"});
     return respond(id,{thread});
   }
-  if (method === "turn/interrupt") return respond(id,{});
+  if (method === "turn/interrupt") {
+    if(imageScenario==="deadline-interrupted") {
+      const thread=readHistory();thread.turns[0]={...thread.turns[0],status:"interrupted",items:[]};saveHistory(thread);
+    }
+    if(imageScenario==="interrupt-lost-reply")return process.exit(0);
+    return respond(id,{});
+  }
   if (method === "turn/start") {
     const thread=readHistory(),threadId=thread.id,turnId="turn-1";
     let bytes=imageScenario==="large"?largePng():png;
@@ -113,14 +119,17 @@ lines.on("line", line => {
     if(imageScenario==="no-bytes")item.result="assistant said see /tmp/result.png";
     if(imageScenario==="usage")Object.assign(item,{status:"failed",result:"",failure:{type:"usageLimitExceeded",limitId:"images"}});
     if(imageScenario==="image-failed")Object.assign(item,{status:"failed",result:""});
-    const turn={id:turnId,status:imageScenario==="pending"?"inProgress":"completed",items:[item]};
+    if(imageScenario==="image-refusal")Object.assign(item,{status:"failed",result:"",failure:{type:"refused",message:"PRIVATE_NATIVE_REFUSAL",prompt:"PRIVATE_PROMPT"}});
+    const pending=["pending","deadline-interrupted","deadline-no-evidence","interrupt-lost-reply"].includes(imageScenario);
+    const turn={id:turnId,status:pending?"inProgress":imageScenario==="turn-interrupted"?"interrupted":imageScenario==="turn-failed"?"failed":"completed",items:[item]};
+    if(["turn-interrupted","turn-failed"].includes(imageScenario))turn.items=[];
     if(imageScenario==="multiple")turn.items.push({...item,id:"image-2"});
     if(imageScenario==="no-image")turn.items=[{type:"agentMessage",id:"message-1",text:"/tmp/result.png"}];
     thread.turns=[turn];saveHistory(thread);
     const startedThread=imageScenario==="wrong-event"?"other-thread":threadId;
     send({method:"turn/started",params:{threadId:startedThread,turn:{id:turnId,status:"inProgress",items:[]}}});
     if(imageScenario!=="lost-ack")respond(id,{turn:{id:turnId,status:"inProgress",items:[]}});
-    if(imageScenario==="pending")return;
+    if(pending)return;
     for(const row of turn.items)send({method:"item/completed",params:{threadId,turnId,item:row}});
     if(imageScenario==="conflicting-item")turn.items[0]={...item,revisedPrompt:"Changed completion"};
     send({method:"turn/completed",params:{threadId,turn}});return;
