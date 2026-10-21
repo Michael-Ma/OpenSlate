@@ -1,3 +1,4 @@
+import { useState, type DragEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { headerScope, labelList } from "../model/director.ts";
 import { currentScene } from "../model/keyframes.ts";
@@ -7,6 +8,8 @@ import { Composer } from "./Composer.tsx";
 import { DirectorNotices } from "./DirectorNotices.tsx";
 import { Thread } from "./Thread.tsx";
 import { useComposerDraft } from "./useComposerDraft.ts";
+import { useComposerUploads } from "./useComposerUploads.ts";
+import { droppedFiles } from "../model/composer-files.ts";
 import "./director.css";
 
 /**
@@ -27,11 +30,26 @@ export function DirectorColumn() {
   const hasFilm = useStudio(directorHasFilm);
   const scene = overview ? currentScene(overview, sceneId) : null;
   const draft = useComposerDraft();
+  const uploads = useComposerUploads();
+  // Files dragged over the column: the whole column takes them, with a quiet outline while they hover.
+  const [dragging, setDragging] = useState(false);
+  const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+  const drop = hasFilm ? {
+    onDragEnter: (event: DragEvent) => { if (carriesFiles(event)) { event.preventDefault(); setDragging(true); } },
+    onDragOver: (event: DragEvent) => { if (carriesFiles(event)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } },
+    onDragLeave: (event: DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); },
+    onDrop: (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      setDragging(false);
+      uploads.attach(droppedFiles(Array.from(event.dataTransfer.items ?? []), event.dataTransfer.files));
+    },
+  } : {};
   const scope = headerScope({ hasFilm, sceneOrdinal: view === "keyframes" && scene ? scene.ordinal : null, composer, overview });
   const scopeText = scope.kind === "message" ? t("director.scope.points", { targets: labelList(scope.labels.map(tm), locale) }) : tm(scope.label);
 
   return (
-    <aside className="director" id="director" aria-label={t("director.title")} data-film={hasFilm ? "open" : "none"} data-draft-ready={draft.ready}>
+    <aside className="director" id="director" aria-label={t("director.title")} data-film={hasFilm ? "open" : "none"} data-draft-ready={draft.ready} data-dragging={dragging ? "true" : undefined} {...drop}>
       <div className="dir-head">
         <span className="avatar" aria-hidden="true">{t("director.avatar")}</span>
         <b>{t("director.title")}</b>
@@ -51,7 +69,8 @@ export function DirectorColumn() {
           </div>
         </div>
       )}
-      <Composer hasFilm={hasFilm} restored={draft.restored} />
+      <Composer hasFilm={hasFilm} restored={draft.restored} uploads={uploads} />
+      {dragging ? <div className="dir-drop" aria-hidden="true"><span>{t("director.file.drop")}</span></div> : null}
     </aside>
   );
 }

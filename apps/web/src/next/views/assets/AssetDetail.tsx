@@ -42,10 +42,10 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
   const mode = useMode();
   const reduced = useReducedMotion();
   const kind = detail.item.artifact.kind;
-  const simulated = mode === "fixture" && kind !== "image";
+  const simulated = mode === "fixture" && kind !== "image" && kind !== "document";
   // Pictures show through AssetPicture; clips and audio load their file once Play is pressed.
   const [wanted, setWanted] = useState(false);
-  const file = useAssetFile(kind === "image" ? null : detail.item, wanted);
+  const file = useAssetFile(kind === "image" || kind === "document" ? null : detail.item, wanted);
   const autoplay = useRef(false);
   const media = useRef<HTMLMediaElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -111,11 +111,12 @@ function AssetPreview({ detail, tile, title }: { detail: AssetDetailView; tile: 
     face = <video ref={(el) => { media.current = el; }} className="av-video" src={file.url} playsInline preload="metadata" aria-label={title} {...events} />;
   else if (kind === "video")
     face = <span className="av-anim" style={{ transform: simulated && !reduced && detail.motion ? motionTransform(motionKind(detail.motion), fraction) : "none" }}><AssetFace tile={tile} alt={title} bars={60} /></span>;
+  else if (kind === "document") face = <AssetFace tile={tile} alt={title} bars={60} />;
   else face = <Wave seed={detail.item.artifact.artifactId} bars={60} />;
 
   let note = null;
   if (simulated) note = t(kind === "audio" ? "assets.player.no_sound" : "assets.player.motion_only");
-  else if (kind !== "image" && file.status === "failed") note = fileFailure(t, file.code);
+  else if (kind !== "image" && kind !== "document" && file.status === "failed") note = fileFailure(t, file.code);
   else if (kind !== "image" && loading) note = t("assets.player.loading");
 
   return (

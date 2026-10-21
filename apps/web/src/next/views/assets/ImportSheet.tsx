@@ -8,6 +8,7 @@ import {
   checkFile,
   DEFAULT_CAPABILITIES,
   fileKindMsg,
+  IMPORT_ACCEPT,
   formatBytes,
   importedArtifactId,
   importIdentity,
@@ -47,7 +48,7 @@ type Phase =
 /** What the browser read from the chosen file before anything is sent (a PNG's size, a clip's length). */
 type Reading = { state: "none" } | { state: "reading" } | ({ state: "done" } & Inspection);
 
-const ACCEPT = "image/png,video/*,audio/*,.png,.mp4,.mov,.m4v,.webm,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus";
+const ACCEPT = IMPORT_ACCEPT;
 
 const aborted = (error: unknown, signal: AbortSignal) => signal.aborted || (error instanceof DOMException && error.name === "AbortError");
 

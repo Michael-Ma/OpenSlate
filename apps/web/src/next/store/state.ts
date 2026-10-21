@@ -1,3 +1,4 @@
+import type { ComposerFile } from "../model/composer-files.ts";
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
 import { NO_RECOVERY, type RecoveryState } from "../model/recovery.ts";
@@ -78,7 +79,7 @@ export interface StudioState {
   /** Narrow layouts show the Director as a drawer. */
   directorOpen: boolean;
   /** The message being written: its words, what it points at, and the pictures it shows the Director (at most four). */
-  composer: { text: string; targets: Target[]; sending: boolean; images: ComposerImage[] };
+  composer: { text: string; targets: Target[]; sending: boolean; images: ComposerImage[]; files: ComposerFile[] };
   edit: EditDraft | null;
   inspectorDrafts: Record<string, EditDraft>;
   /** Presses in flight, keyed by press id (e.g. "confirm:scene-2"); a control is disabled while its press is pending. */
@@ -104,7 +105,7 @@ export const initialState: StudioState = {
   focus: null,
   assetsFilter: null,
   directorOpen: false,
-  composer: { text: "", targets: [], sending: false, images: [] },
+  composer: { text: "", targets: [], sending: false, images: [], files: [] },
   edit: null,
   inspectorDrafts: {},
   pending: {},

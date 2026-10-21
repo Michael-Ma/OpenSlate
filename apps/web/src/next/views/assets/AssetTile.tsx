@@ -69,10 +69,12 @@ export function Wave({ seed, bars }: { seed: string; bars: number }) {
 
 const PlayGlyph = () => <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor" /></svg>;
 const NoteGlyph = () => <span aria-hidden="true">♪</span>;
+const DocGlyph = ({ size = 10 }: { size?: number }) => <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5l2.5 2.5v8.5H4zM9.5 2.5V5H12M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" /></svg>;
 
 /** What a tile or the detail shows for an asset: the picture, a clip's keyframe, or a waveform. */
 export function AssetFace({ tile, alt, bars, lazy = false, near = true }: { tile: AssetTile; alt: string; bars: number; lazy?: boolean; near?: boolean }) {
   if (tile.item.artifact.kind === "audio") return <Wave seed={tile.item.artifact.artifactId} bars={bars} />;
+  if (tile.item.artifact.kind === "document") return <span className="av-pic-note av-doc-face" aria-hidden="true"><DocGlyph size={28} /></span>;
   if (tile.item.artifact.kind === "video" && !tile.picture) return <span className="av-pic-note av-video-face" aria-hidden="true"><PlayGlyph /></span>;
   return <AssetPicture artifact={tile.picture} alt={alt} lazy={lazy} near={near} />;
 }
@@ -98,7 +100,7 @@ export const AssetTileButton = memo(function AssetTileButton({ tile, selected, o
     >
       <span className="tile-pic" ref={picture}>
         <AssetFace tile={tile} alt="" bars={28} lazy near={near} />
-        {tile.tag && <span className="kind">{tile.tag.glyph === "play" ? <PlayGlyph /> : <NoteGlyph />} {tm(tile.tag.label)}</span>}
+        {tile.tag && <span className="kind">{tile.tag.glyph === "play" ? <PlayGlyph /> : tile.tag.glyph === "doc" ? <DocGlyph /> : <NoteGlyph />} {tm(tile.tag.label)}</span>}
         {tile.duration && <span className="dur">{tm(tile.duration)}</span>}
       </span>
       <b>{tm(tile.title)}</b>

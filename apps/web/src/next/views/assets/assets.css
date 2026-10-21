@@ -85,6 +85,7 @@
 .assets-work .av-pic-loading{background:var(--surface-stripe)}
 .assets-work .av-video-face{background:var(--raised);color:var(--text-2)}
 .assets-work .av-video-face svg{width:18px;height:18px}
+.assets-work .av-doc-face{background:var(--raised);color:var(--text-2)}
 .assets-work .wave{display:flex;align-items:center;gap:2px;height:100%;padding:0 8px;background:var(--raised)}
 .assets-work .wave i{flex:1;background:var(--text-2);border-radius:1px;min-width:2px;opacity:.75}
 

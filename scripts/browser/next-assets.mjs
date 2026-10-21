@@ -128,7 +128,7 @@ export const scenarios = [
       expect((await page.locator(".topbar [data-view='assets']").getAttribute("aria-selected")) === "true", "Assets is not the selected tab");
       await expectText(page, "main[data-view='assets'] .view-head", /Assets[\s\S]*16 items in this film, each on the shot it belongs to/);
       const counts = await page.locator("[data-act='role-filter']").allInnerTexts();
-      expect(counts.map((text) => text.replace(/\s+/g, " ").trim()).join(" | ") === "All 16 | Keyframes 6 | Clips 3 | Voice lines 3 | Music 2 | Uploads 2 | Exports 0", `Role filters read ${JSON.stringify(counts)}`);
+      expect(counts.map((text) => text.replace(/\s+/g, " ").trim()).join(" | ") === "All 16 | Keyframes 6 | Clips 3 | Voice lines 3 | Music 2 | Uploads 2 | Documents 0 | Exports 0", `Role filters read ${JSON.stringify(counts)}`);
       await expectText(page, ".filters .count", /^Showing 16 of 16$/);
       const groups = await page.locator("main[data-view='assets'] .group > h2").allInnerTexts();
       expect(groups.map((g) => g.replace(/\s+/g, " ").trim()).join(" / ") === "Whole film music, uploads and exports / 1 Closing time Scene 1 / 2 Harbour at dawn Scene 2 / 3 Departure Scene 3", `Groups read ${JSON.stringify(groups)}`);
@@ -262,8 +262,8 @@ export const scenarios = [
       expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on before a file is chosen");
       await shot(page, "next-assets-1440-import");
       // Refused before sending: not a PNG.
-      await chooseFile(page, { name: "pier-sketch.jpg", mimeType: "image/jpeg", buffer: Buffer.from([255, 216, 255, 0]) });
-      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /Only PNG images can be imported/);
+      await chooseFile(page, { name: "pier-sketch.gif", mimeType: "image/gif", buffer: Buffer.from("GIF89a") });
+      await expectText(page, "dialog[data-act='import-sheet'] .av-refusal", /This picture format can’t be imported\. Use PNG, JPEG, WebP or HEIC/);
       expect(await page.locator("[data-act='import-go']").isDisabled(), "Import is on for a refused file");
       // Refused before sending, from the file's first bytes: not a PNG, or more pixels than the studio takes.
       await chooseFile(page, { name: "broken.png", mimeType: "image/png", buffer: Buffer.from("not a png") });

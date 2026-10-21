@@ -231,21 +231,21 @@ test('the reducer keeps pictures with the composer, restores a draft, and emptie
   state = reducer(state, { type: 'composerText', text: 'hi' });
   assert.deepEqual(state.composer.images, [uploadImage]);
   state = reducer(state, { type: 'composerSent' });
-  assert.deepEqual(state.composer, { text: '', targets: [], sending: false, images: [] });
+  assert.deepEqual(state.composer, { text: '', targets: [], sending: false, images: [], files: [] });
   state = reducer(state, { type: 'composerRestore', text: 'back', targets: [{ kind: 'scene', id: sceneId(1) }], images: [keyframe22] });
-  assert.deepEqual(state.composer, { text: 'back', targets: [{ kind: 'scene', id: sceneId(1) }], images: [keyframe22], sending: false });
+  assert.deepEqual(state.composer, { text: 'back', targets: [{ kind: 'scene', id: sceneId(1) }], images: [keyframe22], files: [], sending: false });
   state = reducer(state, { type: 'project', projectId: 'other' });
-  assert.deepEqual(state.composer, { text: '', targets: [], sending: false, images: [] });
+  assert.deepEqual(state.composer, { text: '', targets: [], sending: false, images: [], files: [] });
 });
 
 test('sending takes away only what was sent: a picture or @ target added meanwhile stays for the next message', () => {
   const sent = { text: 'Colder', targets: [{ kind: 'scene', id: sceneId(2) }], images: [uploadImage] };
   const meanwhile = { text: 'Colder', targets: [{ kind: 'scene', id: sceneId(2) }, { kind: 'shot', id: shotId('2.3') }], sending: true, images: [uploadImage, keyframe22] };
-  assert.deepEqual(afterSend(meanwhile, sent), { text: '', targets: [{ kind: 'shot', id: shotId('2.3') }], sending: false, images: [keyframe22] });
+  assert.deepEqual(afterSend(meanwhile, sent), { text: '', targets: [{ kind: 'shot', id: shotId('2.3') }], sending: false, images: [keyframe22], files: [] });
   let state = reducer(initialState, { type: 'project', projectId: PROJECT_ID });
   state = reducer(state, { type: 'composerRestore', ...meanwhile });
   state = reducer(state, { type: 'composerSent', sent });
-  assert.deepEqual(state.composer, { text: '', targets: [{ kind: 'shot', id: shotId('2.3') }], sending: false, images: [keyframe22] });
+  assert.deepEqual(state.composer, { text: '', targets: [{ kind: 'shot', id: shotId('2.3') }], sending: false, images: [keyframe22], files: [] });
 });
 
 test('a failed turn marks the last entry of its request, with the catalog\'s words or the Director\'s own', () => {
@@ -375,7 +375,7 @@ test('sending pictures through the store: the fixture Codex Director takes them;
   assert.deepEqual(sent.body.images, [{ artifactId: ref.artifactId, sha256: ref.sha256 }]);
   assert.deepEqual(sent.body.scopeIds, [shotId('2.2')]);
   assert.match(sent.body.text, /^\[@coat-colours\.png\]\(#openslate-ref\/last-ferry\/image\/art-ref\/[a-f0-9]{64}\) \[@2\.2\]\(#openslate-ref\//);
-  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [] });
+  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [], files: [] });
   await new Promise(done => setTimeout(done, FIXTURE_REPLY_MS + 300));
   assert.match(port.world.snapshot.conversation.at(-1).text, /I looked at the 2 pictures you showed me/);
   await store.refresh();
@@ -411,7 +411,7 @@ test('a message that finishes sending after another film opened leaves that film
   store.restoreDraft({ text: 'For the bus', targets: [], images: [] });
   release();
   assert.equal(await sending, true);
-  assert.deepEqual(store.getState().composer, { text: 'For the bus', targets: [], sending: false, images: [] });
+  assert.deepEqual(store.getState().composer, { text: 'For the bus', targets: [], sending: false, images: [], files: [] });
 });
 
 test('a picture shown while a message is sending is not lost: it waits in the composer for the next one', async t => {
@@ -435,7 +435,7 @@ test('a picture shown while a message is sending is not lost: it waits in the co
   release();
   assert.equal(await sending, true);
   assert.deepEqual(bodies[0].images, [{ artifactId: ref.artifactId, sha256: ref.sha256 }]);
-  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [keyframe22] });
+  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [keyframe22], files: [] });
 });
 
 test('Let it go: release-holds takes no body and a key, refuses while the Director works, and frees the shots', async t => {

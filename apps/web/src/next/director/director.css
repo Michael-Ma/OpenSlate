@@ -152,3 +152,37 @@ button.atchip:hover{background:var(--track)}
 
 /* A turn that ended without a reply says so, quietly (DC-16). */
 .dir-ending{margin:10px 0 0;color:var(--muted);font-size:12.5px;line-height:1.45}
+
+/* Files sent with a message: one row each (picture or kind icon, name, how the upload goes), a thin bar while sending. */
+.attach-btn{display:inline-grid;place-items:center}
+.attach-btn:disabled{color:var(--muted);cursor:not-allowed}
+.file-chips{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;width:100%}
+.file-chip{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:center;gap:8px;background:var(--chip);border-radius:10px;padding:5px 4px 5px 5px;font-size:12.5px;overflow:hidden}
+.file-chip.failed{background:transparent;outline:1px dashed var(--text-2);outline-offset:-1px}
+.file-ic{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;background:var(--raised-2);color:var(--text-2);overflow:hidden}
+.file-ic img{width:100%;height:100%;object-fit:cover;display:block}
+.file-text{display:flex;flex-direction:column;min-width:0;line-height:1.3}
+.file-name{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-status{color:var(--text-2);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-chip.failed .file-status{white-space:normal}
+.file-bar{position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--track)}
+.file-bar i{display:block;height:100%;background:var(--text-2);transition:width .2s}
+.file-chip button{background:none;border:0;color:var(--text-2);padding:0;border-radius:4px;line-height:1;display:inline-grid;place-items:center;min-width:28px;min-height:28px}
+.file-chip button:hover{color:var(--text)}
+.composer-tokens .file-chips{margin:0}
+
+/* Files dragged over the column: a quiet outline over the whole column with one line in the middle. */
+:where(.director){position:relative} /* the narrow drawer keeps its own fixed position */
+.dir-drop{position:absolute;inset:6px;z-index:20;display:grid;place-items:center;border:1.5px dashed var(--text-2);border-radius:14px;background:color-mix(in srgb,var(--surface) 86%,transparent);pointer-events:none}
+.dir-drop span{color:var(--text);font-size:13.5px;font-weight:600;padding:0 24px;text-align:center}
+
+/* Files a sent message carried: kind and name, one per line, under its words. */
+.sent-files{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.sent-file{display:inline-flex;gap:6px;align-items:baseline;max-width:100%;font-size:12px;color:var(--text-2)}
+.sent-kind{flex:none;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.sent-name{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sent-file.unreadable .sent-name{color:var(--muted)}
+
+/* What the Director started (keyframes, voice lines) and its price; Stop while some of it is still being made. */
+.gen-note{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:8px;padding:8px 10px;border:1px solid var(--track);border-radius:10px;background:var(--raised);font-size:12.5px;line-height:1.45;color:var(--text-2)}
+.gen-note span{flex:1;min-width:0}

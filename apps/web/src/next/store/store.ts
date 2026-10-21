@@ -467,7 +467,7 @@ export class StudioStore {
     // Another film opened while this was sending: its composer is that film's, not this message's.
     const same = this.#state.projectId === snapshot.project.id && this.#state.projectEpoch === projectEpoch;
     if (receipt === undefined) { if (same) this.dispatch({ type: "composerSending", sending: false }); return false; }
-    if (same) this.dispatch({ type: "composerSent", sent: { text: composer.text, targets: composer.targets, images: composer.images } });
+    if (same) this.dispatch({ type: "composerSent", sent: { text: composer.text, targets: composer.targets, images: composer.images, files: composer.files } });
     return true;
   }
 

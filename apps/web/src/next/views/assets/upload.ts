@@ -115,6 +115,9 @@ export interface Inspection {
  * the length of video and audio (their metadata). Anything the browser cannot read is left to the studio.
  */
 export async function inspectFile(file: File, kind: ImportKind): Promise<Inspection> {
+  if (kind === "document") return { check: { ok: true, kind }, seconds: null };
+  // Other picture formats are decoded and checked by the studio; a PNG's size can be read here.
+  if (kind === "image" && file.type && file.type !== "image/png") return { check: { ok: true, kind }, seconds: null };
   if (kind === "image") {
     const header = await file.slice(0, PNG_HEADER_BYTES).arrayBuffer().then((bytes) => new Uint8Array(bytes), () => null);
     return { check: checkPngHeader(header), seconds: null };
@@ -128,7 +131,7 @@ export async function inspectFile(file: File, kind: ImportKind): Promise<Inspect
  * it is sent. Null when the browser cannot tell (the studio then decides).
  */
 function probeLength(file: File, kind: ImportKind): Promise<number | null> {
-  if (kind === "image") return Promise.resolve(null);
+  if (kind === "image" || kind === "document") return Promise.resolve(null);
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const element = document.createElement(kind === "video" ? "video" : "audio");

@@ -1,7 +1,9 @@
 import type { ShotOverview } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import type { ConversationEntry, DirectorStatus, TurnView } from "../model/types.ts";
-import { FIXTURE_TIMING, recompute } from "./fixture-commands.ts";
+import { FIXTURE_TIMING, fixtureDirectorKeyframes, recompute } from "./fixture-commands.ts";
+import type { MessageAttachmentView } from "@openslate/core/public";
+import { fixtureAsset } from "./routes/assets.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
 import { artifactFor, sceneId, shotId } from "./last-ferry.ts";
 import { fixtureAssetPicture, isFixtureImport } from "./routes/assets.ts";
@@ -19,6 +21,29 @@ interface MessageBody {
   scopeIds?: unknown;
   replyToQuestionId?: unknown;
   images?: unknown;
+  attachments?: unknown;
+}
+
+/** Asking for keyframes ("make the keyframes", "生成关键帧"): the scripted Director starts them. */
+const ASKS_FOR_KEYFRAMES = /(make|generate|create|start)\b[^.?!]*\bkeyframes?\b|keyframes?\b[^.?!]*\b(please|now)|(生成|做|出)[^。？！]*关键帧/i;
+
+/**
+ * The server's checks on message attachments: one to eight distinct owned files saved in this film's Assets (the
+ * sample's own and those imported in this tab). Each is listed on the message by name and kind.
+ */
+function checkAttachments(world: FixtureWorld, value: unknown): MessageAttachmentView[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) throw new ApiError("VALIDATION_ERROR", 400);
+  const seen = new Set<string>();
+  return value.map((item: unknown) => {
+    const file = item as { artifactId?: unknown; sha256?: unknown } | null;
+    if (!file || typeof file.artifactId !== "string" || typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(file.sha256)) throw new ApiError("VALIDATION_ERROR", 400);
+    if (seen.has(file.artifactId)) throw new ApiError("DIRECTOR_ATTACHMENTS_INVALID", 409);
+    seen.add(file.artifactId);
+    const asset = fixtureAsset(world, file.artifactId);
+    if (!asset || asset.artifact.sha256 !== file.sha256) throw new ApiError("DIRECTOR_ATTACHMENT_SCOPE", 409);
+    return { artifact: asset.artifact, name: asset.label, readable: true };
+  });
 }
 
 /** "Scene 2" or "2.2" for a scope id, as the scripted reply names it; null for the whole film. */
@@ -29,11 +54,13 @@ function scopeName(world: FixtureWorld, id: string): string | null {
 }
 
 /** Sample film content, like the fixture conversation: it stays English in both interface languages. */
-function scriptedReply(names: string[], answer: boolean, pictures: number): string {
+function scriptedReply(names: string[], answer: boolean, pictures: number, files = 0, started = false): string {
   if (answer) return "Thanks, noted. I would carry that into the next keyframes.";
   const pointed = names.length ? ` for ${names.join(", ")}` : "";
   const looked = pictures ? ` I looked at ${pictures === 1 ? "the picture" : `the ${pictures} pictures`} you showed me.` : "";
-  return `Noted${pointed}.${looked} I would make that change in the prompts and show you new keyframes.`;
+  const read = files ? ` I went through ${files === 1 ? "the file" : `the ${files} files`} you sent.` : "";
+  if (started) return `Starting the keyframes now${pointed}.${read} Open each frame when it is back; video waits for your confirm in each scene.`;
+  return `Noted${pointed}.${looked}${read} I would make that change in the prompts and show you new keyframes.`;
 }
 
 /**
@@ -67,7 +94,8 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
   const questionId = typeof input.replyToQuestionId === "string" ? input.replyToQuestionId : null;
   if (questionId && !world.snapshot.questions?.some((q) => q.id === questionId && q.state === "pending"))
     throw new ApiError("VALIDATION_ERROR", 400, { replyToQuestionId: questionId });
-  if (questionId && input.images !== undefined) throw new ApiError("DIRECTOR_IMAGES_UNAVAILABLE", 409);
+  if (questionId && (input.images !== undefined || input.attachments !== undefined)) throw new ApiError("DIRECTOR_IMAGES_UNAVAILABLE", 409);
+  const attachments = checkAttachments(world, input.attachments);
   // Imported pictures come as images; keyframes through their shots. Both lead the text as picture links.
   const pictures = Math.max(checkImages(world, input.images), (text.match(/\]\(#openslate-ref\/[^/)]+\/image\//g) ?? []).length);
   const scopeIds = !questionId && Array.isArray(input.scopeIds) ? input.scopeIds.filter((id): id is string => typeof id === "string") : [];
@@ -76,7 +104,7 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
   const names = filmScope.map((id) => scopeName(world, id)).filter((name): name is string => name !== null);
 
   world.update((w) => {
-    const entry: ConversationEntry = { id: requestId, role: "user", text, requestId, at: new Date().toISOString(), ...(questionId || !filmScope.length ? {} : { scopeIds: filmScope }) };
+    const entry: ConversationEntry = { id: requestId, role: "user", text, requestId, at: new Date().toISOString(), ...(questionId || !filmScope.length ? {} : { scopeIds: filmScope }), ...(attachments.length ? { attachments } : {}) };
     w.snapshot = {
       ...w.snapshot,
       conversation: [...(w.snapshot.conversation ?? []), entry],
@@ -90,8 +118,13 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
   world.later(FIXTURE_REPLY_MS, (w) => {
     const left = Math.max(0, (turns.get(w) ?? 1) - 1);
     turns.set(w, left);
-    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: scriptedReply(names, !!questionId, pictures), requestId, at: new Date().toISOString(), runtime: "scripted" };
-    w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), reply] };
+    // Asked for keyframes: the scripted Director starts them as the person's press would, and says what and the price.
+    const started = !questionId && ASKS_FOR_KEYFRAMES.test(text) ? fixtureDirectorKeyframes(w) : null;
+    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: scriptedReply(names, !!questionId, pictures, attachments.length, !!started), requestId, at: new Date().toISOString(), runtime: "scripted" };
+    const at = new Date().toISOString();
+    const turn: TurnView | null = started ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
+      effects: { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [{ kind: "keyframes", ...started, at }] } } : null;
+    w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), reply], ...(turn ? { turns: [...(w.snapshot.turns ?? []), turn] } : {}) };
     if (left === 0) {
       w.director = { ...w.director, status: "idle", activeRequestId: null };
       w.overview = { ...w.overview, director: { state: "idle", scopeIds: [] } };

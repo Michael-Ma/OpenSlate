@@ -1,4 +1,6 @@
-import type { AssetItem, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, ReviewNotesFailure, ShotOverview } from "@openslate/core/public";
+import { filesAfterSend, filesProblem, readyRefs, type ComposerFile } from "./composer-files.ts";
+import type { AssetItem, DirectorGenerationEffect, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, MessageAttachmentView, ReviewNotesFailure, ShotOverview } from "@openslate/core/public";
+import { priceMsg } from "./price.ts";
 import type { Locale } from "../../shared/locale-preference.ts";
 import { readAllAssets, type AssetPage } from "./assets.ts";
 import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "./markdown.ts";
@@ -331,6 +333,33 @@ export interface ThreadEntry {
   attention: Attention | null;
   /** Application-owned reason an ended automatic review could not save notes, independent of the reply's words. */
   reviewNotesFailure: Msg | null;
+  /** A person's message: the files it carried. */
+  attachments: MessageAttachmentView[];
+  /** Director replies: the paid work its turn started (keyframes and voice lines, a transcription), priced. */
+  generation: GenerationLine[];
+}
+
+export interface GenerationLine {
+  text: Msg;
+  /** Some of it is still being made: Stop can halt what has not been sent. */
+  running: boolean;
+}
+
+/**
+ * "Started 8 keyframes and 2 voice lines in Scenes 1 and 3 · about $0.36". The Director starts keyframes and voice
+ * lines when the person asks for them; the line names what and the price, and says when Stop can still halt it.
+ */
+export function generationLines(effects: readonly DirectorGenerationEffect[] | undefined, overview: GenerationOverview | null, locale: Locale): GenerationLine[] {
+  return (effects ?? []).map((effect) => {
+    const scenes = effect.sceneIds.flatMap((id) => { const scene = overview?.scenes.find((s) => s.sceneId === id); return scene ? [String(scene.ordinal)] : []; });
+    const price = priceMsg(effect.quote, locale);
+    const where = scenes.length ? labelList(scenes, locale) : "";
+    const text = effect.kind === "transcription"
+      ? msg("director.generation.transcription", { price: "" })
+      : msg(scenes.length ? "director.generation.keyframes_in" : "director.generation.keyframes", { keyframes: effect.keyframes, voices: effect.voiceLines, scenes: where, count: scenes.length });
+    const running = !!overview && effect.shotIds.some((id) => { const shot = overview.shots[id]; return !!shot && (shot.keyframe.state === "running" || queuedToRun(shot.keyframe) || shot.narration.state === "making"); });
+    return { text: { ...text, messages: { price } }, running };
+  });
 }
 
 export interface QuestionItemView {
@@ -527,10 +556,18 @@ export function threadView(
       });
       const chips = scoped.map((chip) => chip.label);
       const text = userText(entry.text, chips.length > 0);
-      return { id: entry.id, who: "you", time, chips, chipTargets: scoped.map((chip) => chip.target), paragraphs: text ? [text] : [], user: userMessage(entry.text, chips.length > 0, entry.scopeIds), blocks: [], scripted: false, requestId: entry.requestId ?? null, notes: [], attention: failed, reviewNotesFailure: null };
+      return { id: entry.id, who: "you", time, chips, chipTargets: scoped.map((chip) => chip.target), paragraphs: text ? [text] : [], user: userMessage(entry.text, chips.length > 0, entry.scopeIds), blocks: [], scripted: false, requestId: entry.requestId ?? null, notes: [], attention: failed, reviewNotesFailure: null, attachments: entry.attachments ?? [], generation: [] };
     }
-    return { id: entry.id, who: "director", time, chips: [], chipTargets: [], paragraphs: paragraphs(entry.text), user: noWords, blocks: replyBlocks(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id), attention: failed, reviewNotesFailure: null };
+    return { id: entry.id, who: "director", time, chips: [], chipTargets: [], paragraphs: paragraphs(entry.text), user: noWords, blocks: replyBlocks(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id), attention: failed, reviewNotesFailure: null, attachments: [], generation: [] };
   });
+  // What each turn started is said under its last reply.
+  const turnsByRequest = new Map<string, TurnView>();
+  for (const turn of snapshot?.turns ?? []) if (turn.effects?.generation?.length) turnsByRequest.set(turn.requestId, turn);
+  for (const [requestId, turn] of turnsByRequest) {
+    let index = entries.length - 1;
+    while (index >= 0 && (entries[index]!.who !== "director" || entries[index]!.requestId !== requestId)) index--;
+    if (index >= 0) entries[index] = { ...entries[index]!, generation: generationLines(turn.effects!.generation, overview, locale) };
+  }
   const reviewNotesFailures: ThreadView["reviewNotesFailures"] = [];
   const latestByRequest = new Map<string, TurnView>();
   for (const turn of snapshot?.turns ?? []) latestByRequest.set(turn.requestId, turn);
@@ -697,13 +734,16 @@ export function composerView(
   const tooLong = (overview ? messageText(composer, overview) : text).length > MESSAGE_LIMIT;
   // Pictures the Director cannot take now (its mode changed, or a keyframe was replaced) keep the draft but hold Send.
   const pictureProblem = !pictures.length ? null : pictureRefusal(director) ?? pictures.find((picture) => picture.problem)?.problem ?? null;
-  const problem = tooLong ? msg("director.composer.too_long") : pictureProblem;
+  // Files still uploading hold Send (the hint says so); a failed file or too many attachments is a problem to fix.
+  const files = filesProblem(composer.files, pictures.length);
+  const problem = tooLong ? msg("director.composer.too_long") : pictureProblem ?? (files && !files.waiting ? files.reason : null);
   const hint = !film.open ? null
     : !reachable ? msg("director.composer.hint_offline")
+    : files?.waiting ? files.reason
     : film.stopped ? msg("director.composer.hint_stopped")
     : msg("director.composer.hint");
   const narrowed = pointsAt.length > 0 && composer.targets.length === 0;
-  return { chips, pictures, pointsAt, narrowed, canSend: film.open && !!text && !problem && reachable && !composer.sending, problem, hint, off: !film.open };
+  return { chips, pictures, pointsAt, narrowed, canSend: film.open && !!text && !problem && !files && reachable && !composer.sending, problem, hint, off: !film.open };
 }
 
 /** "Keep the whole film": the message's pictures without its keyframes, so it points at the whole film again. */
@@ -736,13 +776,15 @@ export interface ComposerState {
   targets: readonly Target[];
   sending: boolean;
   images?: readonly ComposerImage[];
+  /** Files attached, dropped or pasted into this message (model/composer-files.ts). */
+  files?: readonly ComposerFile[];
 }
 
 /**
  * The composer once its message was sent: only what was sent goes. The words go (the box is read-only while
  * sending); an @ target or a picture added while it was sending stays for the next message.
  */
-export function afterSend(composer: ComposerState, sent: Pick<ComposerState, "text" | "targets" | "images">): { text: string; targets: Target[]; sending: false; images: ComposerImage[] } {
+export function afterSend(composer: ComposerState, sent: Pick<ComposerState, "text" | "targets" | "images" | "files">): { text: string; targets: Target[]; sending: false; images: ComposerImage[]; files: ComposerFile[] } {
   const sentTargets = new Set(sent.targets.map(targetKey));
   const sentImages = new Set((sent.images ?? []).map(pictureKey));
   return {
@@ -750,6 +792,7 @@ export function afterSend(composer: ComposerState, sent: Pick<ComposerState, "te
     targets: composer.targets.filter((target) => !sentTargets.has(targetKey(target))),
     sending: false,
     images: (composer.images ?? []).filter((image) => !sentImages.has(pictureKey(image))),
+    files: filesAfterSend(composer.files, sent.files),
   };
 }
 
@@ -890,6 +933,8 @@ export interface MessageBody {
   editing: true;
   /** Imported pictures, as the server takes them ({ artifactId, sha256 }, one to four). */
   images?: { artifactId: string; sha256: string }[];
+  /** Files sent with the message (any kind), saved to Assets first. */
+  attachments?: { artifactId: string; sha256: string }[];
 }
 
 /**
@@ -902,11 +947,13 @@ export function messageBody(composer: ComposerState, overview: Pick<GenerationOv
   const keyframeShots = images.flatMap((image) => (image.source === "keyframe" && image.shotId ? [image.shotId] : []));
   const scoped = [...new Set([...composer.targets.map((target) => target.id), ...keyframeShots])];
   const uploads = images.filter((image) => image.source === "upload").map(({ artifactId, sha256 }) => ({ artifactId, sha256 }));
+  const attachments = readyRefs(composer.files);
   return {
     text: messageText(composer, overview),
     scopeIds: scoped.length ? scoped : [overview.projectId],
     editing: true,
     ...(uploads.length ? { images: uploads } : {}),
+    ...(attachments.length ? { attachments } : {}),
   };
 }
 

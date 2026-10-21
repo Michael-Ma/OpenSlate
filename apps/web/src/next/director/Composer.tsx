@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
 import { composerView, filterPicker, labelList, mentionAt, pickerItems, removeMention, withoutKeyframes, type PickerItem } from "../model/director.ts";
 import { msg } from "../model/types.ts";
@@ -7,6 +7,9 @@ import { useGuarded, useRecoveryLock } from "../app/useWriteGuard.ts";
 import { AtPicker, pickerOptionId } from "./AtPicker.tsx";
 import { PictureThumb, RefChip } from "./RefChip.tsx";
 import { forgetDraft, keptDraftVersion } from "./useComposerDraft.ts";
+import { droppedFiles, fileStatus, roomFor, type ComposerFile } from "../model/composer-files.ts";
+import type { useComposerUploads } from "./useComposerUploads.ts";
+import { IMPORT_ACCEPT } from "../model/assets-import.ts";
 
 /** About six lines; past that the textarea scrolls. */
 const MAX_LINES = 6;
@@ -19,7 +22,7 @@ const RECOVERY_HINT = msg("guard.recovery_short");
  * Sending follows the shell's write guard (offline or expired turns it off, the draft stays); while the film is
  * stopped Send stays on and the hint says the Director waits for Continue. With no film open (Start) it is off.
  */
-export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: boolean }) {
+export function Composer({ hasFilm, restored, uploads }: { hasFilm: boolean; restored: boolean; uploads: ReturnType<typeof useComposerUploads> }) {
   const { t, tm, locale } = useI18n();
   const store = useStore();
   const mode = useMode();
@@ -45,6 +48,9 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
   // The hint describes the textarea when it says why a message waits (offline, stopped), not when it explains @.
   const hintDescribes = !!hint && hint.id !== "director.composer.hint";
   const showDraft = restored && !view.off && (!!composer.text || composer.targets.length > 0 || composer.images.length > 0);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const files = composer.files;
+  const full = roomFor(files, composer.images.length) === 0;
   // Focus lands here after "Show the Director" (on a phone with no toast), so the box names the pictures it carries.
   const describedBy = [view.pictures.length ? picturesId : null, view.problem ? noteId : null, hintDescribes ? hintId : null, view.pointsAt.length ? scopeId : null, showDraft ? draftId : null].filter(Boolean).join(" ") || undefined;
   const pictureNames = view.pictures.map((picture) => tm(picture.label));
@@ -153,6 +159,14 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
     }
   };
 
+  // Pasted files (a screenshot, a copied file) attach; pasted text stays text.
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = droppedFiles(Array.from(event.clipboardData?.items ?? []), event.clipboardData?.files ?? null);
+    if (!pasted.length) return;
+    event.preventDefault();
+    uploads.attach(pasted);
+  };
+
   const toggleFromButton = () => {
     setPicker((current) => ({ open: !current.open, active: 0 }));
     const element = textarea.current;
@@ -164,8 +178,13 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
       {picker.open && <AtPicker listId={listId} items={shown} active={active} query={query} onPick={pick} onActive={(index) => setPicker({ open: true, active: index })} />}
       <div className="composer">
         {/* Pictures and @ targets share one wrapping row (and one size) while they fit. */}
-        {(view.pictures.length > 0 || view.chips.length > 0) && (
+        {(view.pictures.length > 0 || view.chips.length > 0 || files.length > 0) && (
           <div className="composer-tokens">
+            {files.length > 0 && (
+              <ul className="file-chips" aria-label={t("director.file.group")}>
+                {files.map((file) => <FileChip key={file.key} file={file} onRemove={() => { uploads.remove(file.key); textarea.current?.focus(); }} />)}
+              </ul>
+            )}
             {view.pictures.length > 0 && (
               <ul className="pic-chips" aria-label={t("director.picture.group")}>
                 {view.pictures.map((picture, index) => {
@@ -213,9 +232,14 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
           onChange={onChange}
           onKeyDown={onKeyDown}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+          onPaste={onPaste}
         />
         <div className="composer-foot">
           <button type="button" className="at-btn" data-act="at" aria-label={t("director.composer.pick")} aria-haspopup="listbox" aria-expanded={picker.open} aria-controls={picker.open && shown.length ? listId : undefined} disabled={view.off} onClick={toggleFromButton}>@</button>
+          <button type="button" className="at-btn attach-btn" data-act="attach" aria-label={t("director.file.attach")} title={full ? t("director.file.full", { max: 8 }) : t("director.file.attach")} disabled={view.off || composer.sending || full} onClick={() => fileInput.current?.click()}>
+            <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 4.5 5.4 9.6a1.6 1.6 0 0 0 2.3 2.3l5.4-5.4a3 3 0 0 0-4.3-4.3L3.4 7.6a4.4 4.4 0 0 0 6.2 6.2l4.2-4.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <input ref={fileInput} type="file" multiple hidden accept={IMPORT_ACCEPT} data-act="attach-input" tabIndex={-1} onChange={(event) => { uploads.attach(Array.from(event.target.files ?? [])); event.target.value = ""; textarea.current?.focus(); }} />
           <span id={hintId} data-hint={hint?.id ?? "none"}>{hint ? tm(hint) : ""}</span>
           <button type="button" className="send" data-act="send" aria-label={t("director.composer.send")} {...sendGuard} disabled={!view.canSend} onClick={send}>
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 12V2M2.5 6.5 7 2l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -237,5 +261,34 @@ export function Composer({ hasFilm, restored }: { hasFilm: boolean; restored: bo
       {showDraft && <p className="composer-draft" id={draftId} data-draft="restored">{t("director.draft.restored")}</p>}
       {view.pictures.length > 0 && <span className="sr" id={picturesId}>{t("director.picture.in_message", { names: labelList(pictureNames, locale) })}</span>}
     </div>
+  );
+}
+
+/** The kind of a file, drawn small; an image shows itself once its preview is read. */
+function KindIcon({ kind }: { kind: ComposerFile["kind"] }) {
+  const paths: Record<ComposerFile["kind"], string> = {
+    image: "M2.5 3.5h11v9h-11zM2.5 10.5l3-3 3 3 2-2 3 3",
+    video: "M2.5 4h8v8h-8zM10.5 7l3-2v6l-3-2",
+    audio: "M6 11.5V4l6-1.5V10M6 11.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zM12 10a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z",
+    document: "M4 2.5h5.5l2.5 2.5v8.5H4zM9.5 2.5V5H12M6 8h4M6 10.5h4",
+  };
+  return <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d={paths[kind]} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" /></svg>;
+}
+
+/** One attached file: what it is, how its upload goes (or why it failed), and remove. */
+function FileChip({ file, onRemove }: { file: ComposerFile; onRemove(): void }) {
+  const { t, tm } = useI18n();
+  const status = tm(fileStatus(file));
+  const fraction = file.state === "uploading" ? Math.min(1, file.loaded / Math.max(1, file.size)) : null;
+  return (
+    <li className={`file-chip ${file.state}`} data-file={file.key} data-kind={file.kind} data-state={file.state}>
+      <span className="file-ic">{file.preview ? <img src={file.preview} alt="" /> : <KindIcon kind={file.kind} />}</span>
+      <span className="file-text">
+        <span className="file-name" title={file.name}>{file.name}</span>
+        <span className="file-status" role={file.state === "failed" ? "alert" : undefined}>{status}</span>
+      </span>
+      {fraction !== null ? <span className="file-bar" aria-hidden="true"><i style={{ width: `${Math.round(fraction * 100)}%` }} /></span> : null}
+      <button type="button" data-act="remove-file" aria-label={t("director.file.remove", { name: file.name })} onClick={onRemove}>×</button>
+    </li>
   );
 }

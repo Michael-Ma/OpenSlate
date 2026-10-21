@@ -161,6 +161,11 @@ function query(raw: string | undefined): URLSearchParams {
   return new URLSearchParams(raw ?? "");
 }
 
+/** One of this film's assets by artifact id (the sample's own or imported in this tab), or null. */
+export function fixtureAsset(world: FixtureWorld, artifactId: string): AssetItem | null {
+  return fixtureAssets(world).find((item) => item.artifact.artifactId === artifactId) ?? null;
+}
+
 function listAssets(world: FixtureWorld, raw: string | undefined) {
   const q = query(raw);
   const offset = Number(q.get("offset") ?? 0);
@@ -262,8 +267,8 @@ function requireLength(body: UploadBody): number {
 function importImage(world: FixtureWorld, raw: string | undefined, body: UploadBody) {
   requireHead(world, raw);
   const size = Number(body.size ?? 0);
-  // The studio refuses anything that is not a readable PNG (a PNG header alone is 33 bytes).
-  if (body.type !== "image/png" || size <= 32) throw new ApiError("IMAGE_INPUT_INVALID", 409);
+  // The studio stores PNG, JPEG, WebP and HEIC pictures as PNG; anything else, or too small to hold a picture, is refused.
+  if (!["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"].includes(String(body.type)) || size <= 32) throw new ApiError("IMAGE_INPUT_INVALID", 409);
   if (size > 32 * MIB) throw new ApiError("UPLOAD_TOO_LARGE", 409);
   const fixture = state(world);
   const artifact: StudioArtifactRef = { ...artifactFor(`import-${fixture.tag}-${++fixture.serial}`), kind: "image" };
@@ -303,6 +308,20 @@ function importAudio(world: FixtureWorld, raw: string | undefined, body: UploadB
   return { recording: { id, label, sha256: artifact.sha256, durationSeconds: seconds, samples: 0, byteLength: size, origin: "uploaded", role } };
 }
 
+/** PDF, TXT or MD up to 32 MiB; the sample film pretends to read a few pages of text from each. */
+function importDocument(world: FixtureWorld, raw: string | undefined, body: UploadBody) {
+  requireHead(world, raw);
+  const size = Number(body.size ?? 0);
+  if (size <= 0) throw new ApiError("DOCUMENT_INVALID", 409);
+  if (size > 32 * MIB) throw new ApiError("UPLOAD_TOO_LARGE", 409);
+  const fixture = state(world);
+  const artifact = ref(`art-document-import-${fixture.tag}-${++fixture.serial}`, "document");
+  const name = query(raw).get("name")?.trim() || "Document";
+  const pdf = body.type === "application/pdf" || /\.pdf$/i.test(name);
+  add(world, { artifact, role: "document", current: false, source: "imported", label: name, createdAt: localNow() }, true);
+  return { artifact, name, ...(pdf ? { pages: Math.max(1, Math.round(size / 40000)) } : {}), characters: Math.min(200000, Math.round(size / 2)), truncated: size / 2 > 200000 };
+}
+
 /** Simulated server routes the Assets view needs in the sample film. */
 export const assetsRoutes: FixtureRoute[] = [
   {
@@ -328,5 +347,6 @@ export const assetsRoutes: FixtureRoute[] = [
   },
   { method: "POST", match: /^\/images\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importImage(world, raw, input)) },
   { method: "POST", match: /^\/media\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importVideo(world, raw, input)) },
+  { method: "POST", match: /^\/documents\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importDocument(world, raw, input)) },
   { method: "POST", match: /^\/audio-library\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importAudio(world, raw, input)) },
 ];

@@ -14,18 +14,27 @@ const MIB = 1024 * 1024;
 test('a file goes to the route for its kind, by type or extension', () => {
   assert.equal(importKind({ name: 'a.png', type: 'image/png' }), 'image');
   assert.equal(importKind({ name: 'a.PNG', type: '' }), 'image');
-  assert.equal(importKind({ name: 'a.jpg', type: 'image/jpeg' }), 'other_image');
+  assert.equal(importKind({ name: 'a.jpg', type: 'image/jpeg' }), 'image', 'JPEG, WebP and HEIC are stored as PNG by the studio');
+  assert.equal(importKind({ name: 'a.webp', type: '' }), 'image');
+  assert.equal(importKind({ name: 'a.HEIC', type: 'application/octet-stream' }), 'image');
+  assert.equal(importKind({ name: 'a.gif', type: 'image/gif' }), 'other_image');
   assert.equal(importKind({ name: 'a.mp4', type: 'video/mp4' }), 'video');
   assert.equal(importKind({ name: 'a.mov', type: '' }), 'video');
   assert.equal(importKind({ name: 'a.wav', type: 'audio/wav' }), 'audio');
   assert.equal(importKind({ name: 'a.m4a', type: 'application/octet-stream' }), 'audio');
-  assert.equal(importKind({ name: 'notes.txt', type: 'text/plain' }), null);
+  assert.equal(importKind({ name: 'notes.txt', type: 'text/plain' }), 'document');
+  assert.equal(importKind({ name: 'brief.pdf', type: 'application/pdf' }), 'document');
+  assert.equal(importKind({ name: 'plan.md', type: '' }), 'document');
+  assert.equal(importKind({ name: 'sheet.xlsx', type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), null);
 });
 
-test('files are refused before sending: wrong kind, not PNG, empty, too large, not importable here', () => {
+test('files are refused before sending: wrong kind, unsupported picture, empty, too large, not importable here', () => {
   assert.deepEqual(checkFile({ name: 'a.png', type: 'image/png', size: 1000 }), { ok: true, kind: 'image' });
-  assert.equal(en(checkFile({ name: 'a.jpg', type: 'image/jpeg', size: 1000 }).refusal), 'Only PNG images can be imported. Save the picture as PNG and choose it again.');
-  assert.equal(checkFile({ name: 'a.txt', type: 'text/plain', size: 10 }).refusal.id, 'assets.refusal.type');
+  assert.deepEqual(checkFile({ name: 'a.jpg', type: 'image/jpeg', size: 1000 }), { ok: true, kind: 'image' });
+  assert.equal(en(checkFile({ name: 'a.gif', type: 'image/gif', size: 1000 }).refusal), 'This picture format can’t be imported. Use PNG, JPEG, WebP or HEIC.');
+  assert.deepEqual(checkFile({ name: 'a.txt', type: 'text/plain', size: 10 }), { ok: true, kind: 'document' });
+  assert.equal(checkFile({ name: 'a.zip', type: 'application/zip', size: 10 }).refusal.id, 'assets.refusal.type');
+  assert.equal(checkFile({ name: 'a.pdf', type: 'application/pdf', size: 33 * MIB }).refusal.id, 'assets.refusal.too_large');
   assert.equal(checkFile({ name: 'a.wav', type: 'audio/wav', size: 0 }).refusal.id, 'assets.refusal.empty');
   const big = checkFile({ name: 'a.png', type: 'image/png', size: 33 * MIB });
   assert.equal(en(big.refusal), 'This file is 33 MB; the studio takes up to 32 MB for this kind of file.');

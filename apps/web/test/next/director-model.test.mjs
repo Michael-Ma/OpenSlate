@@ -136,7 +136,7 @@ test('Stop counts only real work: Director turns, running or queued media, runni
 
 test('the mode line: scripted, not connected, error and unreadable; nothing for a working real Director', () => {
   // Only where nothing in the film changes (the sample film, no held edit on screen) does it say so; else only that replies are scripted.
-  assert.equal(en(modeLine(idle, undefined, { filmUnchanged: true }).message), 'Scripted Director: replies are canned and nothing in the film changes.');
+  assert.equal(en(modeLine(idle, undefined, { filmUnchanged: true }).message), 'Scripted Director: replies are canned. It changes the film only to make keyframes you ask for.');
   assert.equal(en(modeLine(idle, undefined).message), 'Scripted Director: its replies are scripted.');
   assert.equal(zh(modeLine(idle, undefined).message), '示例导演：回复是预设的。');
   assert.equal(modeLine(idle, undefined).tone, 'info');
@@ -241,7 +241,7 @@ test('the fixture Director records the message with its scope, works, then repli
   store.pointAt({ kind: 'shot', id: shotId('2.2') });
   store.setComposerText('Make the coat brighter');
   assert.equal(await store.sendMessage(), true);
-  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [] });
+  assert.deepEqual(store.getState().composer, { text: '', targets: [], sending: false, images: [], files: [] });
   const sent = port.world.snapshot.conversation.at(-1);
   assert.deepEqual([sent.role, sent.text, sent.scopeIds], ['user', 'Make the coat brighter', [shotId('2.2')]]);
   assert.equal(port.world.director.status, 'running');

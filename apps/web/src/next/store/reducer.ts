@@ -1,3 +1,4 @@
+import type { ComposerFile } from "../model/composer-files.ts";
 import type { DirectorProposal, GenerationOverview } from "@openslate/core/public";
 import type { RoleFilter } from "../model/assets.ts";
 import type { RecoveryState } from "../model/recovery.ts";
@@ -25,10 +26,12 @@ export type Action =
   | { type: "composerSending"; sending: boolean }
   /** The composer's pictures for the Director, replaced as a whole (the Director model decides what may be added). */
   | { type: "composerImages"; images: ComposerImage[] }
+  /** Add, update (same key) or remove (`remove`) one attached file. */
+  | { type: "composerFile"; file: ComposerFile; remove?: boolean }
   /** A film's unsent draft, read back from this browser after a reload or a film switch. */
   | { type: "composerRestore"; text: string; targets: Target[]; images: ComposerImage[] }
   /** A message was sent: what it carried leaves the composer (all of it when `sent` is left out). */
-  | { type: "composerSent"; sent?: { text: string; targets: readonly Target[]; images: readonly ComposerImage[] } }
+  | { type: "composerSent"; sent?: { text: string; targets: readonly Target[]; images: readonly ComposerImage[]; files?: readonly ComposerFile[] } }
   | { type: "edit"; edit: EditDraft | null }
   | { type: "pending"; pressId: string; pending: boolean }
   | { type: "toast"; message: Msg; tone: "info" | "error"; undoCommandId?: string; undoKey?: number }
@@ -46,7 +49,7 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, projects: action.projects };
     case "project":
       if (action.projectId === state.projectId) return state;
-      return { ...state, projectId: action.projectId, projectEpoch: state.projectEpoch + 1, toast: null, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: state.inspectorDrafts[action.projectId]?.shotId ?? null, focus: null, edit: state.inspectorDrafts[action.projectId] ? { ...state.inspectorDrafts[action.projectId]!, saving: false } : null, pending: {}, composer: { text: "", targets: [], sending: false, images: [] } };
+      return { ...state, projectId: action.projectId, projectEpoch: state.projectEpoch + 1, toast: null, snapshot: null, overview: null, director: null, proposals: [], loadErrors: {}, sceneId: null, shotId: state.inspectorDrafts[action.projectId]?.shotId ?? null, focus: null, edit: state.inspectorDrafts[action.projectId] ? { ...state.inspectorDrafts[action.projectId]!, saving: false } : null, pending: {}, composer: { text: "", targets: [], sending: false, images: [], files: [] } };
     case "snapshot":
       if (action.snapshot.project.id !== state.projectId) return state;
       // A stale read (lower cursor) never replaces a newer one.
@@ -109,11 +112,18 @@ export function reducer(state: StudioState, action: Action): StudioState {
       return { ...state, composer: { ...state.composer, sending: action.sending } };
     case "composerImages":
       return { ...state, composer: { ...state.composer, images: action.images } };
+    case "composerFile": {
+      const files = state.composer.files.filter((file) => file.key !== action.file.key);
+      if (action.remove) return { ...state, composer: { ...state.composer, files } };
+      const at = state.composer.files.findIndex((file) => file.key === action.file.key);
+      // An update keeps the chip where it was; a new file goes last.
+      return { ...state, composer: { ...state.composer, files: at < 0 ? [...files, action.file] : state.composer.files.map((file, index) => (index === at ? action.file : file)) } };
+    }
     case "composerRestore":
-      return { ...state, composer: { text: action.text, targets: action.targets, images: action.images, sending: false } };
+      return { ...state, composer: { text: action.text, targets: action.targets, images: action.images, files: [], sending: false } };
     case "composerSent":
       // A picture or @ target added while the message was sending stays for the next one.
-      return { ...state, composer: action.sent ? afterSend(state.composer, action.sent) : { text: "", targets: [], sending: false, images: [] } };
+      return { ...state, composer: action.sent ? afterSend(state.composer, action.sent) : { text: "", targets: [], sending: false, images: [], files: [] } };
     case "edit": {
       const inspectorDrafts = { ...state.inspectorDrafts };
       if (state.projectId) {

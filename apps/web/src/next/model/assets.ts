@@ -58,7 +58,7 @@ export interface AssetTile {
   use: { label: Msg; on: boolean };
   source: Msg;
   /** The kind tag over the picture: clips and audio only. */
-  tag: { label: Msg; glyph: "play" | "note" } | null;
+  tag: { label: Msg; glyph: "play" | "note" | "doc" } | null;
   duration: Msg | null;
   /** The picture to show: the image itself, or the keyframe a clip was most likely made from. */
   picture: StudioArtifactRef | null;
@@ -117,6 +117,8 @@ export function titleMsg(item: AssetItem, overview: GenerationOverview, items: r
     case "export":
       return msg(item.source === "demo" ? "assets.label.demo_export" : "assets.label.export");
     default:
+      // A document keeps the name it was sent with.
+      if (item.artifact.kind === "document") return item.label.trim() ? msg("assets.raw", { text: item.label.trim() }) : msg("assets.kind.document");
       // Music and uploads. Imported audio carries the name it was imported with; image and video imports keep none today.
       if (item.artifact.kind === "audio") {
         const name = item.label.trim();
@@ -146,6 +148,7 @@ export function useMsg(item: AssetItem): { label: Msg; on: boolean } {
 function tagFor(item: AssetItem): AssetTile["tag"] {
   if (item.artifact.kind === "video") return { label: msg(item.role === "clip" ? "assets.kind.clip" : item.role === "export" ? "assets.kind.export" : "assets.tag.video"), glyph: "play" };
   if (item.artifact.kind === "audio") return { label: item.role === "music" || item.role === "voice" ? kindMsg(item.role) : msg("assets.tag.audio"), glyph: "note" };
+  if (item.artifact.kind === "document") return { label: kindMsg("document"), glyph: "doc" };
   return null;
 }
 
@@ -370,7 +373,7 @@ export function assetDetail(item: AssetItem, items: readonly AssetItem[], overvi
     rows,
     point,
     open,
-    playable: item.artifact.kind !== "image",
+    playable: item.artifact.kind !== "image" && item.artifact.kind !== "document",
     picture: pictureFor(item, items, overview),
     motion: shot ? shot.motion : null,
   };

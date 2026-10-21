@@ -134,6 +134,7 @@ export const assetsMessages = {
   "assets.import.kind.image": { en: "image · {size}", zh: "图片 · {size}" },
   "assets.import.kind.video": { en: "video · {size}", zh: "视频 · {size}" },
   "assets.import.kind.audio": { en: "audio · {size}", zh: "音频 · {size}" },
+  "assets.import.kind.document": { en: "document · {size}", zh: "文档 · {size}" },
   "assets.import.use_as": { en: "Use it as", zh: "用作" },
   "assets.import.use.music": { en: "Music", zh: "音乐" },
   "assets.import.use.upload": { en: "Other audio", zh: "其他音频" },
@@ -157,9 +158,11 @@ export const assetsMessages = {
   "assets.import.done.audio": { en: "Imported {name} as other audio.", zh: "已导入 {name}，用作其他音频。" },
   "assets.import.done.image": { en: "Imported {name}.", zh: "已导入 {name}。" },
   "assets.import.done.video": { en: "Imported {name}.", zh: "已导入 {name}。" },
+  "assets.import.done.document": { en: "Imported {name}.", zh: "已导入 {name}。" },
 
   // ---- import refusals: neutral, an icon and words ----
   "assets.refusal.type": { en: "This kind of file can’t be imported. Choose a PNG image, a video or an audio file.", zh: "这种文件不能导入。请选择 PNG 图片、视频或音频文件。" },
+  "assets.refusal.image_format": { en: "This picture format can’t be imported. Use PNG, JPEG, WebP or HEIC.", zh: "不支持这种图片格式。请使用 PNG、JPEG、WebP 或 HEIC。" },
   "assets.refusal.png_only": { en: "Only PNG images can be imported. Save the picture as PNG and choose it again.", zh: "只能导入 PNG 图片。请把图片存成 PNG 后重新选择。" },
   "assets.refusal.empty": { en: "This file is empty.", zh: "这个文件是空的。" },
   "assets.refusal.too_large": { en: "This file is {size}; the studio takes up to {limit} for this kind of file.", zh: "这个文件有 {size}，工作室对这类文件的上限是 {limit}。" },

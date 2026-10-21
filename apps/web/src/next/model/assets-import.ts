@@ -3,20 +3,23 @@ import { msg, type Msg } from "./types.ts";
 
 /**
  * Importing a file into the film's assets through the existing upload routes:
- *   image  POST /images/uploads?expectedHeadVersion=N        (PNG only, up to 32 MiB)
- *   video  POST /media/uploads?expectedHeadVersion=N         (up to 128 MiB)
- *   audio  POST /audio-library/uploads?role=music|upload&name= (up to 128 MiB)
+ *   image     POST /images/uploads?expectedHeadVersion=N           (PNG, JPEG, WebP or HEIC, up to 32 MiB)
+ *   video     POST /media/uploads?expectedHeadVersion=N            (up to 128 MiB)
+ *   audio     POST /audio-library/uploads?role=music|upload&name=  (up to 128 MiB)
+ *   document  POST /documents/uploads?expectedHeadVersion=N&name=  (PDF, TXT or MD, up to 32 MiB)
  * Video and audio are taken up to 6 minutes long.
  * Each takes the raw bytes as application/octet-stream with an Idempotency-Key. Imports are free and
  * are not put on a shot. Voice lines are made or uploaded on a shot, in Keyframes.
  */
 
-export type ImportKind = "image" | "video" | "audio";
+export type ImportKind = "image" | "video" | "audio" | "document";
 /** How imported audio is tagged: the film's music, or other audio. */
 export type AudioUse = "music" | "upload";
 
 const MIB = 1024 * 1024;
-export const IMPORT_LIMITS: Readonly<Record<ImportKind, number>> = { image: 32 * MIB, video: 128 * MIB, audio: 128 * MIB };
+/** Everything the studio imports, for a file chooser; the composer takes the same files. */
+export const IMPORT_ACCEPT = "image/png,image/jpeg,image/webp,image/heic,image/heif,video/*,audio/*,application/pdf,text/plain,text/markdown,.png,.jpg,.jpeg,.webp,.heic,.heif,.mp4,.mov,.m4v,.webm,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.pdf,.txt,.md";
+export const IMPORT_LIMITS: Readonly<Record<ImportKind, number>> = { image: 32 * MIB, video: 128 * MIB, audio: 128 * MIB, document: 32 * MIB };
 
 export interface ChosenFile {
   name: string;
@@ -32,7 +35,7 @@ export interface ImportCapabilities {
   limits: Record<ImportKind, number>;
 }
 
-export const DEFAULT_CAPABILITIES: ImportCapabilities = { available: { image: true, video: true, audio: true }, limits: { ...IMPORT_LIMITS } };
+export const DEFAULT_CAPABILITIES: ImportCapabilities = { available: { image: true, video: true, audio: true, document: true }, limits: { ...IMPORT_LIMITS } };
 
 interface CapabilityRead {
   capabilities?: { import?: boolean; maxBytes?: number };
@@ -49,22 +52,29 @@ export function capabilitiesFrom(images: CapabilityRead | null, audio: Capabilit
   };
   const toolchain = images?.capabilities?.import !== false;
   return {
-    available: { image: toolchain, video: toolchain, audio: audio?.capabilities?.import !== false },
-    limits: { image: limit(images, "image"), video: IMPORT_LIMITS.video, audio: limit(audio, "audio") },
+    // Documents are read as text by the studio itself; they need no media tools.
+    available: { image: toolchain, video: toolchain, audio: audio?.capabilities?.import !== false, document: true },
+    limits: { image: limit(images, "image"), video: IMPORT_LIMITS.video, audio: limit(audio, "audio"), document: IMPORT_LIMITS.document },
   };
 }
 
 const ext = (name: string) => /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase() ?? "";
 const VIDEO_EXT = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi"]);
 const AUDIO_EXT = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "oga", "opus", "aif", "aiff", "weba"]);
-const IMAGE_EXT = new Set(["jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tif", "tiff", "avif", "svg"]);
+/** Pictures the studio stores (as PNG); other picture formats are refused with a clear reason. */
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp", "image/heic", "image/heif"]);
+const IMAGE_OK_EXT = new Set(["png", "jpg", "jpeg", "webp", "heic", "heif"]);
+const IMAGE_OTHER_EXT = new Set(["gif", "bmp", "tif", "tiff", "avif", "svg"]);
+const DOCUMENT_TYPES = new Set(["application/pdf", "text/plain", "text/markdown", "text/x-markdown"]);
+const DOCUMENT_EXT = new Set(["pdf", "txt", "md", "markdown"]);
 
 /** Which route a file goes to, from its type or (when the browser gives none) its extension. */
 export function importKind(file: Pick<ChosenFile, "name" | "type">): ImportKind | "other_image" | null {
   const type = file.type.toLowerCase();
   const extension = ext(file.name);
-  if (type === "image/png" || (!type && extension === "png")) return "image";
-  if (type.startsWith("image/") || (!type && IMAGE_EXT.has(extension))) return "other_image";
+  if (IMAGE_TYPES.has(type) || ((!type || type === "application/octet-stream") && IMAGE_OK_EXT.has(extension))) return "image";
+  if (type.startsWith("image/") || (!type && IMAGE_OTHER_EXT.has(extension))) return "other_image";
+  if (DOCUMENT_TYPES.has(type) || ((!type || type === "application/octet-stream") && DOCUMENT_EXT.has(extension))) return "document";
   if (type.startsWith("video/") || (!type && VIDEO_EXT.has(extension))) return "video";
   if (type.startsWith("audio/") || (!type && AUDIO_EXT.has(extension))) return "audio";
   // Some systems label audio and video files with a generic type; trust a known extension then.
@@ -83,7 +93,7 @@ export function formatBytes(bytes: number): string {
 /** Refused before anything is sent: wrong kind, empty, too large, or not importable on this computer. */
 export function checkFile(file: ChosenFile, capabilities: ImportCapabilities = DEFAULT_CAPABILITIES): FileCheck {
   const kind = importKind(file);
-  if (kind === "other_image") return { ok: false, refusal: msg("assets.refusal.png_only") };
+  if (kind === "other_image") return { ok: false, refusal: msg("assets.refusal.image_format") };
   if (!kind) return { ok: false, refusal: msg("assets.refusal.type") };
   if (!capabilities.available[kind]) return { ok: false, refusal: msg("assets.refusal.unavailable") };
   if (file.size <= 0) return { ok: false, refusal: msg("assets.refusal.empty") };
@@ -106,7 +116,24 @@ export function uploadPath(kind: ImportKind, headVersion: number, use: AudioUse,
     if (clean) query.set("name", clean);
     return `/audio-library/uploads?${query.toString()}`;
   }
+  if (kind === "document") {
+    const query = new URLSearchParams({ expectedHeadVersion: String(headVersion) });
+    const clean = cleanName(name);
+    if (clean) query.set("name", clean);
+    return `/documents/uploads?${query.toString()}`;
+  }
   return `/${kind === "image" ? "images" : "media"}/uploads?expectedHeadVersion=${headVersion}`;
+}
+
+/**
+ * The stored file's identity from the route's receipt, as a message attachment names it: an artifact for pictures,
+ * video and documents, the library recording for audio (its normalized bytes' hash).
+ */
+export function importedRef(kind: ImportKind, receipt: unknown): { artifactId: string; sha256: string } | null {
+  const value = receipt as { artifact?: { artifactId?: unknown; sha256?: unknown }; recording?: { id?: unknown; sha256?: unknown } } | null;
+  const id = kind === "audio" ? value?.recording?.id : value?.artifact?.artifactId;
+  const sha256 = kind === "audio" ? value?.recording?.sha256 : value?.artifact?.sha256;
+  return typeof id === "string" && id && typeof sha256 === "string" && /^[a-f0-9]{64}$/.test(sha256) ? { artifactId: id, sha256 } : null;
 }
 
 /** The new file's artifact id from the route's receipt, so the view can select it. */
@@ -249,7 +276,7 @@ export const IMPORT_MAX_SECONDS = 360;
 
 /** Refused before sending when the browser can read the length and it is over the limit; unknown lengths are left to the studio. */
 export function checkLength(kind: ImportKind, seconds: number | null): FileCheck {
-  if (kind === "image" || seconds === null || !Number.isFinite(seconds) || seconds <= IMPORT_MAX_SECONDS + 0.05) return { ok: true, kind };
+  if (kind === "image" || kind === "document" || seconds === null || !Number.isFinite(seconds) || seconds <= IMPORT_MAX_SECONDS + 0.05) return { ok: true, kind };
   return { ok: false, refusal: msg("assets.refusal.too_long_length", { length: clock(seconds) }) };
 }
 

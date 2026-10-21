@@ -409,6 +409,26 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
   return { accepted: true, requestId, sceneId: scene.sceneId, kind: "image", shotIds: targets, targetShotIds: targets };
 }
 
+/**
+ * The scripted Director starting keyframes (and their voice lines) because the person asked in the conversation:
+ * each scene that still has keyframes to make starts the way its Make keyframes press would. Scenes that cannot
+ * start (working, stopped, nothing to make) are left out. Returns what started, with its estimate.
+ */
+export function fixtureDirectorKeyframes(world: FixtureWorld): { sceneIds: string[]; shotIds: string[]; keyframes: number; voiceLines: number; quote: PriceQuote } | null {
+  if (world.overview.stopped) return null;
+  const started = { sceneIds: [] as string[], shotIds: [] as string[], keyframes: 0, voiceLines: 0 };
+  for (const scene of [...world.overview.scenes].sort((a, b) => a.ordinal - b.ordinal)) {
+    if (!scene.keyframeTargets.length) continue;
+    const images = scene.keyframeTargets.filter((id) => world.overview.shots[id]!.keyframe.state !== "ready").length;
+    const voices = scene.keyframeTargets.filter((id) => needsVoice(world.overview.shots[id]!, world.snapshot.project.shots)).length;
+    try { generateKeyframes(world, scene, { kind: "image" } as GenerateInput); }
+    catch (error) { if (error instanceof ApiError) continue; throw error; }
+    started.sceneIds.push(scene.sceneId); started.shotIds.push(...scene.keyframeTargets);
+    started.keyframes += images; started.voiceLines += voices;
+  }
+  return started.sceneIds.length ? { ...started, quote: generationQuote(started.keyframes, started.voiceLines) } : null;
+}
+
 /** The browser-run video press (before phase P3). Kept for older clients; new ones confirm through /confirm. */
 function generateVideo(world: FixtureWorld, scene: SceneOverview, body: GenerateInput): { accepted: true; targetShotIds: string[] } {
   if (body.targetShotIds !== undefined || body.regenerate !== undefined) throw new ApiError("VALIDATION_ERROR", 400);

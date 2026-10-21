@@ -1,4 +1,4 @@
-import type { DirectorNote, GenerationOverview, ReviewNotesFailure } from "@openslate/core/public";
+import type { DirectorGenerationEffect, DirectorNote, GenerationOverview, MessageAttachmentView, ReviewNotesFailure } from "@openslate/core/public";
 import type { MessageValues } from "../i18n/format.ts";
 import type { MessageId } from "../i18n/messages.ts";
 
@@ -56,6 +56,8 @@ export interface ConversationEntry {
   at?: string;
   /** Which Director runtime wrote an assistant entry, when the server reports it (DC-15). */
   runtime?: "scripted" | "live";
+  /** A person's message: the files it carried. */
+  attachments?: MessageAttachmentView[];
 }
 
 export interface TurnView {
@@ -67,7 +69,7 @@ export interface TurnView {
   action?: "conversation" | "keyframe_review";
   /** Why a turn ended other than with a reply: no_reply, failed, timeout, superseded, interrupted, owner_lost. */
   reason?: string | null;
-  effects?: { notesCreated: number; proposalsHeld: number; changesApplied: number };
+  effects?: { notesCreated: number; proposalsHeld: number; changesApplied: number; generation?: DirectorGenerationEffect[] };
   /** Safe native phase metadata; no reasoning text, arguments or diagnostics. */
   activity?: { phase: "reasoning" | "tool"; state: "started" | "completed"; at: string } | null;
   progress?: { tool: string; state: string } | null;

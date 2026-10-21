@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import { directorElapsed, resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type ThreadBox, type ThreadEntry } from "../model/director.ts";
-import { useMode, useStudio } from "../store/react.tsx";
+import type { MessageAttachmentView } from "@openslate/core/public";
+import { directorElapsed, resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type GenerationLine, type ThreadBox, type ThreadEntry } from "../model/director.ts";
+import { useMode, useStore, useStudio } from "../store/react.tsx";
+import { useGuarded } from "../app/useWriteGuard.ts";
 import { HeldEdits } from "./HeldEdits.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { NoteCards } from "./NoteCards.tsx";
@@ -178,6 +180,7 @@ function Entry({ entry }: { entry: ThreadEntry }) {
             ? <span key={index}>{segment.text}</span>
             : <RefChip key={index} label={segment.label} target={resolveRef(segment.ref, overview).open} />)}
         </div>
+        {entry.attachments.length > 0 && <SentFiles files={entry.attachments} />}
         {entry.attention && <AttentionNote attention={entry.attention} />}
       </div>
     );
@@ -188,8 +191,40 @@ function Entry({ entry }: { entry: ThreadEntry }) {
       <Markdown blocks={entry.blocks} />
       {entry.reviewNotesFailure && <p className="dir-ending" role="status" data-review-notes="unsaved">{tm(entry.reviewNotesFailure)}</p>}
       {entry.attention && <AttentionNote attention={entry.attention} />}
-      {entry.scripted && <ScriptedTag />}
+      {entry.generation.map((line, index) => <GenerationNote key={index} line={line} />)}
+      {/* A reply that started work says so in its line; "nothing was changed" would then be untrue. */}
+      {entry.scripted && !entry.generation.length && <ScriptedTag />}
       <NoteCards notes={entry.notes} />
+    </div>
+  );
+}
+
+/** The files a message carried, by name and kind; a picture shows itself. */
+function SentFiles({ files }: { files: MessageAttachmentView[] }) {
+  const { t } = useI18n();
+  return (
+    <ul className="sent-files" aria-label={t("director.attachment.group")}>
+      {files.map((file) => (
+        <li key={file.artifact.artifactId} className={`sent-file${file.readable ? "" : " unreadable"}`} data-kind={file.artifact.kind}>
+          <span className="sent-kind">{t(`director.attachment.kind.${file.artifact.kind}` as const)}</span>
+          <span className="sent-name" title={file.name}>{file.readable ? file.name : t("director.attachment.unreadable", { name: file.name })}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** What the Director started, with its price; Stop halts the film while some of it is still being made. */
+function GenerationNote({ line }: { line: GenerationLine }) {
+  const { t, tm } = useI18n();
+  const store = useStore();
+  const guard = useGuarded("server");
+  return (
+    <div className="gen-note" role="status" data-generation={line.running ? "running" : "done"}>
+      <span>{tm(line.text)}</span>
+      {line.running ? (
+        <button type="button" className="pill sm" data-act="stop-generation" {...guard} title={guard.title ?? t("director.generation.stop_hint")} disabled={guard.disabled} onClick={() => void store.stopFilm()}>{t("director.generation.stop")}</button>
+      ) : null}
     </div>
   );
 }
