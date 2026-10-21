@@ -17,11 +17,19 @@ import { newId } from "@openslate/core";
 
 const ffmpegPath = process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg");
 const ffprobePath = process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync("/opt/homebrew/bin/ffprobe") ? "/opt/homebrew/bin/ffprobe" : "/usr/bin/ffprobe");
-let inputs, png, blue;
+let inputs, png, blue, jpeg;
+// Generated with Pillow 9.5: a lossless 2x2 red WebP, requiring no WebP encoder on the host.
+const webp = Buffer.from('UklGRhwAAABXRUJQVlA4TA8AAAAvAUAAAAcQ/Y/+ByKi/wEA', 'base64');
+const heic = Buffer.alloc(48); heic.writeUInt32BE(24); heic.write('ftypheic', 4); heic.write('heicmif1', 16); heic.writeUInt32BE(24, 24); heic.write('mdat', 28);
+// Synthetic 16x16 red picture: FFmpeg libx265 (info=0), wrapped in the
+// ISO-BMFF HEIF item/property boxes. Independently decoded by FFmpeg to PNG.
+const validHeic = Buffer.from('AAAAGGZ0eXBoZWljAAAAAGhlaWNtaWYxAAABOm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAHBpY3QAAAAAAAAAAAAAAAAAAAAADnBpdG0AAAAAAAEAAAAeaWxvYwAAAABEAAABAAEAAAABAAABWgAAABQAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAL5pcHJwAAAAoGlwY28AAAB0aHZjQwEBYAAAAJAAAAAAAB7wAPz9+PgAAA8DoAABABhAAQwB//8BYAAAAwCQAAADAAADAB6VmAmhAAEAKEIBAQFgAAADAJAAAAMAAAMAHqCIRZZWaryvAWgIAAADAAgAAAMAyECiAAEABkQBwXPQiQAAABRpc3BlAAAAAAAAABAAAAAQAAAAEHBpeGkAAAAAAwgICAAAABZpcG1hAAAAAAAAAAEAAQOBggMAAAAcbWRhdAAAABAoAa8dgPAOCP+JeffqFlh4', 'base64');
 before(async () => {
   inputs = await mkdtemp(join(tmpdir(), "openslate-image-http-input-"));
   for (const color of ["red", "blue"]) await promisify(execFile)(ffmpegPath, ["-nostdin", "-v", "error", "-f", "lavfi", "-i", `color=c=${color}:s=320x180`, "-frames:v", "1", "-threads", "1", join(inputs, `${color}.png`)], { timeout: 15000 });
   png = await readFile(join(inputs, "red.png")); blue = await readFile(join(inputs, "blue.png"));
+  await promisify(execFile)(ffmpegPath, ['-nostdin', '-v', 'error', '-i', join(inputs, 'red.png'), '-frames:v', '1', '-threads', '1', join(inputs, 'reference.jpg')], { timeout: 15000 });
+  jpeg = await readFile(join(inputs, 'reference.jpg'));
 });
 after(async () => rm(inputs, { recursive: true, force: true }));
 async function fixture(t, { maxBytes = PNG_IMPORT_MAX_BYTES, available = true } = {}) {
@@ -49,6 +57,41 @@ test("authenticated upload preserves PNG content and returns a path-free library
   assert.equal((await f.request("GET", `/api/projects/${foreign.id}/artifacts/${result.artifact.artifactId}/content`)).statusCode, 404);
   assert.deepEqual(await readdir(f.uploads.rootDir), []);
   for (const family of ["approval", "grant", "attempt"]) assert.equal(f.store.list(family, f.project.id).length, 0); assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('JPEG and WebP uploads become owned PNG references and replay their original upload identity', async t => {
+  const f = await fixture(t);
+  for (const [name, bytes, width, height] of [['JPEG', jpeg, 320, 180], ['WebP', webp, 2, 2]]) {
+    const version = f.head().headVersion, response = await f.upload(name, undefined, bytes, version);
+    assert.equal(response.statusCode, 200, response.body);
+    const result = response.json(), record = f.store.get('artifact', result.artifact.artifactId);
+    assert.equal(record.mimeType, 'image/png'); assert.equal(result.width, width); assert.equal(result.height, height);
+    assert.deepEqual((await readFile(record.path)).subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const replay = await f.upload(name, undefined, bytes, version); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), result);
+  }
+  assert.equal(f.head().artifacts.length, 2); assert.deepEqual(await readdir(f.uploads.rootDir), []);
+  const list = await f.request('GET', f.path); assert.deepEqual(list.json().capabilities.acceptedFormats, ['image/png', 'image/jpeg', 'image/webp', 'image/heic']);
+});
+
+test('an undecodable generated HEIC container gives IMAGE_FORMAT_UNSUPPORTED and publishes nothing', async t => {
+  const f = await fixture(t), response = await f.upload('heic', undefined, heic);
+  assert.equal(response.statusCode, 409, response.body); assert.equal(response.json().error.code, 'IMAGE_FORMAT_UNSUPPORTED');
+  assert.match(response.json().error.message, /HEIC.*PNG, JPEG or WebP/);
+  assert.equal(f.head().artifacts.length, 0); assert.deepEqual(await readdir(f.uploads.rootDir), []);
+});
+
+test('a valid generated HEIC picture normalizes to PNG or clearly reports an unavailable decoder', async t => {
+  const f = await fixture(t), response = await f.upload('valid-heic', undefined, validHeic);
+  if (response.statusCode === 200) {
+    t.diagnostic('Installed FFmpeg decoded the valid HEIC fixture and published PNG');
+    const result = response.json(), record = f.store.get('artifact', result.artifact.artifactId);
+    assert.equal(result.width, 16); assert.equal(result.height, 16); assert.equal(record.mimeType, 'image/png');
+    assert.deepEqual((await readFile(record.path)).subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  } else {
+    t.diagnostic('Installed FFmpeg does not decode the valid HEIC fixture; the explicit unsupported code was returned');
+    assert.equal(response.statusCode, 409, response.body); assert.equal(response.json().error.code, 'IMAGE_FORMAT_UNSUPPORTED', response.body); assert.equal(f.head().artifacts.length, 0);
+  }
+  assert.deepEqual(await readdir(f.uploads.rootDir), []);
 });
 
 test("local token, Host and Origin are enforced before messages or staging, with no path or actor overrides", async t => {

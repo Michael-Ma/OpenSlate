@@ -106,6 +106,8 @@ export class FakeWorkflowDirector implements DirectorRuntime {
           : "The selected shot's framing and prompts were updated. Unchanged shots keep their saved work. Review the replacement sample frame before its video can run.";
       }
     }
+    const attached = JSON.parse(input.context).attachedMaterial?.attachments as Array<{ name: string; readable: boolean }> | undefined;
+    if (attached?.length) text += ` Attached files received: ${attached.map(item => `${item.name}${item.readable ? "" : " (content unreadable)"}`).join(", ")}. This scripted Director acknowledges the files without interpreting their contents.`;
     await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
     return { ...identity, status: "completed", text, dispatched: true };
   }

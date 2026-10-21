@@ -12,13 +12,14 @@
   },
   "dependencies": {
     "@openslate/core": "workspace:*",
-    "@openslate/providers": "workspace:*",
     "@openslate/director": "workspace:*",
+    "@openslate/providers": "workspace:*",
+    "better-sqlite3": "13.0.3",
     "fastify": "5.12.3",
-    "better-sqlite3": "13.0.3"
+    "pdfjs-dist": "5.4.296"
   },
   "devDependencies": {
-    "tsx": "4.23.13",
-    "@types/better-sqlite3": "9.6.0"
+    "@types/better-sqlite3": "9.6.0",
+    "tsx": "4.23.13"
   }
 }

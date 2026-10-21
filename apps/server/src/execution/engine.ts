@@ -74,7 +74,7 @@ export interface Attempt {
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
-  origin?: "supplied_video" | "supplied_image" | "local_render" | "narration_audio" | "generated_video" | "generated_audio" | "transcription_response";
+  origin?: "supplied_video" | "supplied_image" | "supplied_document" | "local_render" | "narration_audio" | "generated_video" | "generated_audio" | "transcription_response";
   outputReceiptId?: string; outputSpoolId?: string; byteLength?: number;
   width?: number; height?: number; validationDigest?: string;
   derivationId?: string; sourceDescriptorId?: string;

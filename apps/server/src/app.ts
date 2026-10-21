@@ -25,9 +25,9 @@ import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync }
 import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
-import type { ControlInput, InstallationStatus, ReleaseAttemptInput } from "@openslate/core/public";
+import type { ControlInput, DirectorAttachmentRef, InstallationStatus, ReleaseAttemptInput } from "@openslate/core/public";
 import { ToolInvocationService } from "./application/tool-invocations.js";
-import { imageMessageContext, selectedDirectorImages } from "./application/director-images.js";
+import { attachmentMessageContext, selectedDirectorAttachments, selectedDirectorImages } from "./application/director-images.js";
 import type { SelectedDirectorImage } from "./application/director-images.js";
 import type { ProductionService } from "./application/service.js";
 import type { DirectorSupervisor } from "./application/director-supervisor.js";
@@ -39,6 +39,7 @@ import { registerNarrationRoutes } from "./narration/routes.js";
 import { registerStockVoices } from "./narration/shot-recording-routes.js";
 import { registerMediaRoutes } from "./media/routes.js";
 import { registerImageRoutes } from "./media/image-routes.js";
+import { registerDocumentRoutes } from "./media/document-routes.js";
 import { isPublicWebRequest, type WebAssets } from "./web-assets.js";
 import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./application/provider-catalog.js";
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
@@ -56,6 +57,7 @@ interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: Produc
   runtimeSettings?: LocalDirectorController;
   narrationRoutes?: Parameters<typeof registerNarrationRoutes>[1];
   imageRoutes?: Parameters<typeof registerImageRoutes>[1];
+  documentRoutes?: Parameters<typeof registerDocumentRoutes>[1];
   mediaRoutes?: Parameters<typeof registerMediaRoutes>[1] }
 const DEFAULT_ALLOWED_ORIGINS = ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3001", "http://localhost:3001"];
 const string = { type: "string", minLength: 1, maxLength: 160 };
@@ -144,6 +146,7 @@ export function createApp(options: AppOptions = {}) {
   if (options.narrationRoutes) registerNarrationRoutes(app, options.narrationRoutes);
   if (options.mediaRoutes) registerMediaRoutes(app, options.mediaRoutes);
   if (options.imageRoutes) registerImageRoutes(app, options.imageRoutes);
+  if (options.documentRoutes) registerDocumentRoutes(app, options.documentRoutes);
   registerProjectLibrary(app, service);
   app.get("/api/providers", async () => providerCatalog().view());
   app.get<{ Reply: InstallationStatus }>("/api/installation/status", async (_request, reply) => {
@@ -214,17 +217,22 @@ export function createApp(options: AppOptions = {}) {
     return options.runtimeSettings.changeSelection(request.params.projectId, request.body, request.headers["idempotency-key"] as string | undefined ?? newId());
   });
   registerDirectorReviewSetting(app, service);
-  app.post<{ Params: { projectId: string }; Body: { text?: string; answers?: import("./application/director-supervisor.js").StructuredAnswer[]; scopeIds?: string[]; editing?: boolean; continueEdits?: ContinueEdits; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[] } }>("/api/projects/:projectId/messages", {
-    schema: { body: object({ text: { type: "string", minLength: 1, maxLength: 16000 }, answers: { type: "array", minItems: 1, maxItems: 8, items: object({ questionId: string, optionIndex: { type: "integer", minimum: 0, maximum: 9 }, optionLabel: string, text: { type: "string", minLength: 1, maxLength: 16000 } }, ["questionId"]) }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continueEdits: continueEditsSchema, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
-      images: { type: "array", minItems: 1, maxItems: 4, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, []) },
+  app.post<{ Params: { projectId: string }; Body: { text?: string; answers?: import("./application/director-supervisor.js").StructuredAnswer[]; scopeIds?: string[]; editing?: boolean; continueEdits?: ContinueEdits; continuationRequestId?: string; resumeFromStopId?: string; replyToReviewId?: string; replyToQuestionId?: string; images?: SelectedDirectorImage[]; attachments?: DirectorAttachmentRef[] } }>("/api/projects/:projectId/messages", {
+    schema: { body: object({ text: { type: "string", minLength: 0, maxLength: 16000 }, answers: { type: "array", minItems: 1, maxItems: 8, items: object({ questionId: string, optionIndex: { type: "integer", minimum: 0, maximum: 9 }, optionLabel: string, text: { type: "string", minLength: 1, maxLength: 16000 } }, ["questionId"]) }, scopeIds: { type: "array", minItems: 1, maxItems: 400, items: string }, editing: { type: "boolean" }, continueEdits: continueEditsSchema, continuationRequestId: string, resumeFromStopId: string, replyToReviewId: string, replyToQuestionId: string,
+      images: { type: "array", minItems: 1, maxItems: 8, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) },
+      attachments: { type: "array", minItems: 1, maxItems: 8, items: object({ artifactId: { type: "string", minLength: 1, maxLength: 160 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["artifactId", "sha256"]) } }, []) },
   }, async request => {
     const text = request.body.text ?? "";
-    invariant(text.trim().length > 0 || request.body.answers?.length && request.body.replyToQuestionId, "VALIDATION_ERROR", "Write a message or answer a pending question");
+    invariant(text.trim().length > 0 || request.body.attachments?.length || request.body.answers?.length && request.body.replyToQuestionId, "VALIDATION_ERROR", "Write a message, attach files or answer a pending question");
     invariant(!request.body.resumeFromStopId || (!request.body.replyToQuestionId && !request.body.replyToReviewId), "VALIDATION_ERROR", "Continue stopped work with a fresh conversation message");
     invariant(!request.body.continueEdits || (!request.body.replyToQuestionId && !request.body.replyToReviewId && !request.body.resumeFromStopId && !request.body.continuationRequestId), "VALIDATION_ERROR", "Continue reviewed edits with one fresh covering message");
     invariant(!request.body.answers || request.body.replyToQuestionId, "VALIDATION_ERROR", "Structured answers require a pending question");
     const images = request.body.images ? selectedDirectorImages(request.body.images) : undefined;
+    const attachments = request.body.attachments ? selectedDirectorAttachments(request.body.attachments) : undefined;
+    const selected = [...(images ?? []), ...(attachments ?? [])];
+    invariant(selected.length <= 8 && new Set(selected.map(item => item.artifactId)).size === selected.length, "DIRECTOR_ATTACHMENTS_INVALID", "Attach at most eight different files to one message");
     invariant(!images || (options.director && options.runtimeSettings && directorMode(request.params.projectId) === "native" && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_IMAGES_UNAVAILABLE", "Attach references to a new native conversation request");
+    invariant(!attachments || (options.director && options.runtimeSettings && !request.body.replyToQuestionId && !request.body.replyToReviewId), "DIRECTOR_ATTACHMENTS_UNAVAILABLE", "Attach files to a new Director conversation request");
     if (request.body.replyToQuestionId) {
       invariant(options.director && !request.body.replyToReviewId && !request.body.scopeIds && !request.body.continuationRequestId && request.body.editing === undefined, "VALIDATION_ERROR", "Reply to one pending question using its original scope");
       const actor = options.director.answerQuestion(request.params.projectId, "local-user", request.body.replyToQuestionId, request.body.answers ? { text, answers: request.body.answers } : text, request.headers["idempotency-key"] as string | undefined ?? newId());
@@ -232,8 +240,9 @@ export function createApp(options: AppOptions = {}) {
     }
     const actor = service().store.transaction(() => {
       const actor = service().beginRequest(request.params.projectId, "local-user", text,
-        { ...request.body, contextDigest: imageMessageContext(images, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
-      if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
+        { ...request.body, contextDigest: attachmentMessageContext(images, attachments, request.body.replyToReviewId), editing: request.body.replyToReviewId ? false : request.body.editing ?? true, key: request.headers["idempotency-key"] as string | undefined ?? newId() });
+      if (attachments) options.runtimeSettings!.recordAttachments(request.params.projectId, actor, attachments, images);
+      else if (images) options.runtimeSettings!.recordImages(request.params.projectId, actor, images);
       if (!request.body.replyToReviewId) options.director?.enqueue(request.params.projectId, actor);
       return actor;
     });
@@ -306,7 +315,12 @@ export function createApp(options: AppOptions = {}) {
       const bytes = readFileSync(fd);
       invariant(createHash("sha256").update(bytes).digest("hex") === artifact.artifact.sha256, "ARTIFACT_CORRUPT", "Artifact bytes changed");
       const allowed = ["image/svg+xml", "image/png", "image/jpeg", "video/mp4", "audio/wav", "audio/mpeg"];
-      invariant(allowed.includes(artifact.mimeType), "ARTIFACT_TYPE_UNSUPPORTED", "Artifact is not a supported preview");
+      const document = artifact.artifact.kind === "document" && ["application/pdf", "text/plain", "text/markdown"].includes(artifact.mimeType);
+      invariant(document || allowed.includes(artifact.mimeType), "ARTIFACT_TYPE_UNSUPPORTED", "Artifact is not a supported preview");
+      if (document) {
+        const name = (artifact as ArtifactRecord & { name?: string }).name ?? "document";
+        reply.header("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`);
+      }
       return reply.header("X-Content-Type-Options", "nosniff").header("Cache-Control", "private, no-store").header("Content-Security-Policy", "sandbox; default-src 'none'").type(artifact.mimeType).send(bytes);
     } finally { closeSync(fd); }
   });

@@ -47,11 +47,12 @@ export function installationBackupFileKind(path: string): BackupFileKind | null 
   if (path === "fake-provider.sqlite") return "fixture_db";
   if (new RegExp(`^artifacts/${ID}/${HASH}\\.(svg|wav|mp4|json)$`).test(path)
     || new RegExp(`^artifacts/images/blobs/${HASH}\\.png$`).test(path)
+    || new RegExp(`^artifacts/documents/blobs/${HASH}$`).test(path)
     || new RegExp(`^media/blobs/${HASH}\\.(source|wav|mp4)$`).test(path)
     || new RegExp(`^execution-output/blobs/${HASH}\\.blob$`).test(path)
     || new RegExp(`^audio-derivatives/blobs/${HASH}\\.wav$`).test(path)
     || new RegExp(`^(?:artifacts/${ID}/)?fixture-imports/(product-reference\\.svg|silent-narration-fixture\\.wav)$`).test(path)
-    || new RegExp(`^native/${ID}/workspace/image-attachments/${HASH}/[0-3]-${HASH}\\.jpg$`).test(path)) return "owned_media";
+    || new RegExp(`^native/${ID}/workspace/(image|material)-attachments/${HASH}/[0-7]-${HASH}\\.jpg$`).test(path)) return "owned_media";
   if (new RegExp(`^artifacts/local-timelines/documents/${HASH}\\.json$`).test(path)
     || new RegExp(`^media/(sources|manifests)/${HASH}\\.json$`).test(path)
     || new RegExp(`^media/completions/${HASH}-${HASH}\\.json$`).test(path)
@@ -94,10 +95,10 @@ async function enumerate(root: string, bound: InstallationBackupLimits, signal: 
     for await (const item of stream) {
       invariant(++entries <= bound.files * 4 + 64, "BACKUP_LIMIT_EXCEEDED", "Backup directory entry count exceeds its limit");
       const path = `${prefix}/${item.name}`;
-      if (!strict && (/^artifacts\/(?:images|local-timelines)\/tmp$/.test(path)
+      if (!strict && (/^artifacts\/(?:images|documents|local-timelines)\/tmp$/.test(path)
         || /^artifacts\/[^/]+\/(?:[^/]+\.partial|\.(?:media|narration)-[^/]+\.tmp)$/.test(path)
         || /^(?:skill-snapshots|native\/[^/]+\/workspace\/\.agents\/skills)\/\.[a-f0-9]{64}\.[^/]+\.tmp$/.test(path)
-        || /^native\/[^/]+\/workspace\/image-attachments\/[a-f0-9]{64}\/prepare-[^/]+$/.test(path))) continue;
+        || /^native\/[^/]+\/workspace\/(?:image|material)-attachments\/[a-f0-9]{64}\/prepare-[^/]+$/.test(path))) continue;
       await walk(path);
     }
   };
@@ -112,7 +113,7 @@ async function enumerate(root: string, bound: InstallationBackupLimits, signal: 
       for await (const entry of stream) {
         invariant(++entries <= bound.files * 4 + 64, "BACKUP_LIMIT_EXCEEDED", "Backup directory entry count exceeds its limit");
         invariant(new RegExp(`^${ID}$`).test(entry.name) && entry.isDirectory(), "BACKUP_PATH_INVALID", "Invalid native project directory");
-        for (const tail of [".agents/skills", "image-attachments"]) await walk(`native/${entry.name}/workspace/${tail}`);
+        for (const tail of [".agents/skills", "image-attachments", "material-attachments"]) await walk(`native/${entry.name}/workspace/${tail}`);
       }
     }
   }

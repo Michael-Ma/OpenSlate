@@ -15,6 +15,7 @@ import { triggerKeyframeReviews } from "./keyframe-review.js";
 import { DirectorImageProjector } from "./director-images.js";
 import type { SelectedDirectorImage } from "./director-images.js";
 import type { ActorContext, NativeDiagnostic, ToolContractVersion } from "@openslate/core";
+import type { DirectorAttachmentRef } from "@openslate/core/public";
 import { DirectorToolSettings } from "./director-tools-upgrade.js";
 import type { DirectorToolsUpgrade } from "./director-tools-upgrade.js";
 import type { ProductionService } from "./service.js";
@@ -25,6 +26,7 @@ import { snapshotOwnedTranscriptionData } from "../narration/owned-transcription
 import { readCodexStartupTimeout, readDirectorRunTimeout } from "./director-run-config.js";
 import { logNativeDiagnostic, safeNativeDiagnostic } from "./native-diagnostics.js";
 import { findLocalCodexBinary, supportedCodexInstall } from "./codex-binary.js";
+import type { LocalMediaService } from "../media/local-media.js";
 
 export interface LocalDirectorSelection { mode: "fake" | "native"; binaryPath?: string; model?: string; codexHome?: string }
 interface SavedSelection { id: string; projectId: string; selection: LocalDirectorSelection; digest: string }
@@ -53,6 +55,7 @@ export interface LocalDirectorOptions {
   defaults?: { binaryPath: string; model: string; codexHome?: string };
   /** Trusted local executable for selected-reference thumbnails. No browser path input. */
   ffmpegPath?: string;
+  media?: LocalMediaService;
 }
 
 /** One computer, persistent project choices, separate fake/native queues. */
@@ -72,25 +75,39 @@ export class LocalDirectorController {
   readonly defaults: NonNullable<LocalDirectorOptions["defaults"]>;
   private readonly toolSettings: DirectorToolSettings;
   private readonly imageProjector: DirectorImageProjector | null;
+  private readonly attachmentProjector: DirectorImageProjector;
   constructor(readonly service: ProductionService, readonly config: LocalDirectorOptions) {
     if (config.runTimeoutMs !== undefined) readDirectorRunTimeout({ OPENSLATE_DIRECTOR_RUN_TIMEOUT_MS: String(config.runTimeoutMs) });
     if (config.startupTimeoutMs !== undefined) readCodexStartupTimeout({ OPENSLATE_CODEX_STARTUP_TIMEOUT_MS: String(config.startupTimeoutMs) });
     this.setup = config.setup ?? setupLocalCodex;
     this.defaults = config.defaults ?? { binaryPath: findLocalCodexBinary(), model: "gpt-6-astra" };
-    try { this.imageProjector = config.ffmpegPath ? new KeyframeProjector(service, { ffmpegPath: config.ffmpegPath }) : null; }
+    try { this.imageProjector = config.ffmpegPath ? new KeyframeProjector(service, { ffmpegPath: config.ffmpegPath, ...(config.media ? { media: config.media } : {}) }) : null; }
     catch (error) { if (!['ENOENT', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; this.imageProjector = null; }
+    this.attachmentProjector = new DirectorImageProjector(service, { ...(this.imageProjector && config.ffmpegPath ? { ffmpegPath: config.ffmpegPath } : {}), ...(config.media ? { media: config.media } : {}) });
     this.toolSettings = new DirectorToolSettings(service, projectId => this.mode(projectId) === "native"
       ? { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "native", projectId, "workspace", ".agents", "skills"), runtimeId: "codex-app-server" }
       : { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), runtimeId: "fake-workflow-v1" },
       projectId => this.configuring.has(projectId));
     const fakeInput = createDirectorInput(service, { repositoryRoot: config.repositoryRoot, snapshotRoot: join(config.dataDirectory, "skill-snapshots"), endpoint: config.endpoint });
-    this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: async (turn, human, bridge) => describeUnattachedKeyframes(service, await fakeInput(turn, human, bridge), bridge.actor, "scripted_runtime_not_visually_inspected") });
+    this.fake = new DirectorSupervisor(service, new FakeWorkflowDirector(service), { mode: "fake", projectFilter: id => this.mode(id) === "fake", prepareInput: async (turn, human, bridge, preparation) => {
+      let input = await fakeInput(turn, human, bridge);
+      if (service.store.get("request_attachment_selection", turn.requestId)) {
+        const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
+        mkdirSync(projection, { recursive: true, mode: 0o700 });
+        input = await this.attachmentProjector.prepare(input, bridge.actor, projection, preparation);
+      }
+      return describeUnattachedKeyframes(service, input, bridge.actor, "scripted_runtime_not_visually_inspected");
+    } });
     const proxy: DirectorRuntime = { id: "codex-app-server", start: async (input, options) => (await this.prepareNativeStart(input)).start(input, options) };
     this.native = new DirectorSupervisor(service, proxy, { mode: "native", projectFilter: id => this.mode(id) === "native",
       prepareRuntime: input => this.prepareNativeStart(input),
       prepareInput: async (turn, human, bridge, preparation) => {
         const input = await (await this.ready(turn.projectId)).input(turn, human, bridge);
-        if (!this.imageProjector && !service.store.get("request_image_selection", turn.requestId)) return describeUnattachedKeyframes(service, input, bridge.actor, "ffmpeg_unavailable");
+        if (!this.imageProjector && !service.store.get("request_image_selection", turn.requestId)) {
+          const projection = join(config.dataDirectory, "native", turn.projectId, "workspace");
+          mkdirSync(projection, { recursive: true, mode: 0o700 });
+          return describeUnattachedKeyframes(service, await this.attachmentProjector.prepare(input, bridge.actor, projection, preparation), bridge.actor, "ffmpeg_unavailable");
+        }
         invariant(this.imageProjector, "DIRECTOR_IMAGES_UNAVAILABLE", "Local FFmpeg is required to prepare reference images");
         return this.imageProjector.prepare(input, bridge.actor, join(config.dataDirectory, "native", turn.projectId, "workspace"), preparation);
       } });
@@ -145,6 +162,9 @@ export class LocalDirectorController {
   recordImages(projectId: string, actor: ActorContext, images: SelectedDirectorImage[]) {
     invariant(this.mode(projectId) === "native" && this.imageProjector, "DIRECTOR_IMAGES_UNAVAILABLE", "Image discussion requires a native director and local FFmpeg");
     return this.imageProjector.record(projectId, actor, images);
+  }
+  recordAttachments(projectId: string, actor: ActorContext, attachments: DirectorAttachmentRef[], images?: SelectedDirectorImage[]) {
+    return this.attachmentProjector.recordAttachments(projectId, actor, attachments, images);
   }
   enqueue(...args: Parameters<DirectorSupervisor["enqueue"]>) { return this.controller(args[0]).enqueue(...args); }
   answerQuestion(...args: Parameters<DirectorSupervisor["answerQuestion"]>) { return this.controller(args[0]).answerQuestion(...args); }
