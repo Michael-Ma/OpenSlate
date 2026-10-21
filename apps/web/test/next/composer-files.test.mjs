@@ -69,7 +69,7 @@ test('drops and pastes take real files only; uploads go to the route for their k
   assert.deepEqual(droppedFiles([{ kind: 'string', getAsFile: () => null }, { kind: 'file', getAsFile: () => pdf }], null), [pdf]);
   assert.deepEqual(droppedFiles([], [pdf]), [pdf]);
   assert.equal(uploadPath('document', 7, 'upload', 'Treatment v2.pdf'), '/documents/uploads?expectedHeadVersion=7&name=Treatment+v2.pdf');
-  assert.equal(uploadPath('image', 7, 'upload', 'a.jpg'), '/images/uploads?expectedHeadVersion=7');
+  assert.equal(uploadPath('image', 7, 'upload', 'a.jpg'), '/images/uploads?expectedHeadVersion=7&name=a.jpg');
   assert.deepEqual(importedRef('document', { artifact: { artifactId: 'd1', sha256: hash('b'), kind: 'document' }, characters: 10 }), { artifactId: 'd1', sha256: hash('b') });
   assert.deepEqual(importedRef('audio', { recording: { id: 'rec-1', sha256: hash('c') } }), { artifactId: 'rec-1', sha256: hash('c') }, 'audio is named by its library recording');
   assert.equal(importedRef('image', { artifact: { artifactId: 'x' } }), null, 'a receipt without a hash names nothing');

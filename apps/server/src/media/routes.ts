@@ -6,6 +6,7 @@ import type { ProductionService } from "../application/service.js";
 import type { ManagedUploadStore } from "../narration/managed-upload.js";
 import type { MediaApplicationService } from "./application.js";
 import type { MediaRenderJob, OwnedMediaSource } from "./application-types.js";
+import { uploadNameSchema } from "./upload-name.js";
 
 interface RouteOptions { production: ProductionService; media: MediaApplicationService; uploads: ManagedUploadStore }
 type ProjectParams = { projectId: string };
@@ -95,16 +96,17 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
         return reply.code(200).send(media.exportRecord(projectId, exportId));
       });
     }
-    scope.post<{ Params: ProjectParams; Querystring: { expectedHeadVersion: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/media/uploads", {
+    scope.post<{ Params: ProjectParams; Querystring: { expectedHeadVersion: string; name?: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/media/uploads", {
       bodyLimit: uploads.maxBytes,
-      schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },
+      schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, name: uploadNameSchema, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },
     }, async (request, reply) => {
       invariant(request.headers["content-type"]?.split(";")[0] === "application/octet-stream", "VALIDATION_ERROR", "Upload video bytes as application/octet-stream");
       const { projectId } = request.params, expectedHeadVersion = Number(request.query.expectedHeadVersion), key = idempotencyKey(request);
+      const name = request.query.name === undefined ? {} : { name: request.query.name };
       invariant(!(request.query.requestId && request.query.continuationRequestId), "VALIDATION_ERROR", "Choose one existing import request or an explicit continuation");
       const actor: ActorContext = request.query.requestId ? { kind: "human", principalId: "local-user", requestId: request.query.requestId }
         : production.beginRequest(projectId, "local-user", "Import supplied video", { source: "app", key: `video-upload:${key}`, editing: true,
-          ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion }) });
+          ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion, ...name }) });
       const assertCurrent = () => {
         production.assertActor(projectId, actor, true);
         const message = production.store.get<{ scopeIds: string[] }>("message", actor.requestId);
@@ -113,7 +115,7 @@ export function registerMediaRoutes(app: FastifyInstance, options: RouteOptions)
       assertCurrent();
       try {
         const uploaded = await uploads.receive(request.body, digest({ projectId, principalId: "local-user", key }), assertCurrent);
-        try { return { ...await media.importVideo(projectId, actor, { expectedHeadVersion, path: uploaded.path, key }), requestId: actor.requestId }; }
+        try { return { ...await media.importVideo(projectId, actor, { expectedHeadVersion, path: uploaded.path, key, ...name }), requestId: actor.requestId }; }
         finally { await uploaded.release(); }
       } catch (error) {
         if (!(error instanceof DomainError)) throw error;

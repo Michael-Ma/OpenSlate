@@ -67,6 +67,29 @@ test("caller mutations during validation cannot replace import identity, bytes, 
   assert.equal(f.store.list("image_import", f.project.id)[0].requestId, f.human.requestId);
 });
 
+test("an image name is captured before validation yields and remains bound to its immutable import", async t => {
+  const f = await fixture(t), name = "渡口 · dusk.png", input = { ...f.input("named-frozen"), name };
+  const running = f.app.importImage(f.project.id, f.human, input);
+  input.name = "changed.png";
+  const result = await running, record = f.store.get("artifact", result.artifact.artifactId);
+  const intent = f.store.list("image_import", f.project.id)[0];
+  assert.equal(record.name, name); assert.equal(intent.name, name);
+  assert.deepEqual(await f.app.importImage(f.project.id, f.human, { ...input, name }), result);
+  await assert.rejects(f.app.importImage(f.project.id, f.human, input), code("IDEMPOTENCY_CONFLICT"));
+  assert.throws(() => f.store.put("artifact", record.id, f.project.id, { ...record, name: input.name }), code("IMMUTABLE_RECORD"));
+  assert.throws(() => f.store.put("image_import", intent.id, f.project.id, { ...intent, name: input.name }), code("IMMUTABLE_RECORD"));
+  assert.equal(f.head().headVersion, 1); assert.equal(f.store.list("artifact", f.project.id).length, 1);
+});
+
+test("invalid image names are refused before reserving an import or decoding bytes", async t => {
+  const f = await fixture(t);
+  f.images.normalizeUpload = () => { throw new Error("invalid names must not decode"); };
+  for (const name of ["", "a".repeat(121), "a/b.png", "a\\b.png", "nul\u0000.png", "line\n.png", "del\u007f.png", null, 1]) {
+    await assert.rejects(f.app.importImage(f.project.id, f.human, { ...f.input(), name }), code("VALIDATION_ERROR"));
+  }
+  assert.equal(f.store.list("image_import", f.project.id).length, 0); noPublication(f);
+});
+
 test("only a current editing human with project scope can import; invalid callers never decode", async t => {
   const f = await fixture(t), epoch = f.production.openEpoch(f.project.id, f.human).actor;
   f.images.ingest = () => { throw new Error("authority must be checked before decode"); };

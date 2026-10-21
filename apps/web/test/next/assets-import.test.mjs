@@ -84,12 +84,21 @@ test('capabilities only ever tighten the limits', () => {
 });
 
 test('upload paths match the studio routes', () => {
-  assert.equal(uploadPath('image', 12, 'music', 'x.png'), '/images/uploads?expectedHeadVersion=12');
-  assert.equal(uploadPath('video', 3, 'music', 'x.mp4'), '/media/uploads?expectedHeadVersion=3');
+  assert.equal(uploadPath('image', 12, 'music', 'x.png'), '/images/uploads?expectedHeadVersion=12&name=x.png');
+  assert.equal(uploadPath('video', 3, 'music', 'x.mp4'), '/media/uploads?expectedHeadVersion=3&name=x.mp4');
   assert.equal(uploadPath('audio', 3, 'music', 'low tide.mp3'), '/audio-library/uploads?role=music&name=low+tide.mp3');
   assert.equal(uploadPath('audio', 3, 'upload', 'a/b\u0001c.wav'), '/audio-library/uploads?role=upload&name=abc.wav');
   assert.equal(cleanName('x'.repeat(200)).length, 120);
   assert.equal(uploadPath('audio', 0, 'upload', '\u0002'), '/audio-library/uploads?role=upload', 'an empty name is left to the server');
+});
+
+test('every upload kind sends a sanitized optional name with query escaping', () => {
+  for (const kind of ['image', 'video', 'audio', 'document']) {
+    const named = new URLSearchParams(uploadPath(kind, 5, 'upload', '  pier/\\\u0001\u007f & tide.png  ').split('?')[1]);
+    assert.equal(named.get('name'), 'pier & tide.png', kind);
+    assert.equal(new URLSearchParams(uploadPath(kind, 5, 'upload', '/\\\u0000  ').split('?')[1]).has('name'), false, kind);
+    assert.equal(new URLSearchParams(uploadPath(kind, 5, 'upload', 'x'.repeat(121)).split('?')[1]).get('name').length, 120, kind);
+  }
 });
 
 test('receipts name the new file', () => {
@@ -135,6 +144,17 @@ test('a lost reply is resent exactly as first sent, found by the file, even afte
   // Settled: the next import of the same file is a new one.
   keys.settle(identity);
   assert.deepEqual(keys.begin(identity, '/images/uploads?expectedHeadVersion=3'), { key: 'key-2', path: '/images/uploads?expectedHeadVersion=3', resent: false });
+});
+
+test('an uncertain named picture import retains its original name and head after reload', () => {
+  const storage = memoryStorage();
+  const file = { name: 'pier & tide.png', size: 5000, lastModified: 42 };
+  const identity = importIdentity(file, 'image', 'upload');
+  const keys = new ImportKeys('p1', storage, () => 'named-key', () => 1000);
+  const original = keys.begin(identity, uploadPath('image', 2, 'upload', file.name));
+  const reloaded = new ImportKeys('p1', storage, () => 'another-key', () => 2000);
+  assert.deepEqual(reloaded.begin(identity, uploadPath('image', 9, 'upload', 'a later name.png')), { ...original, resent: true });
+  assert.equal(new URLSearchParams(original.path.split('?')[1]).get('name'), file.name);
 });
 
 test('the file identity separates files, kinds and audio uses; old saved requests are forgotten', () => {

@@ -12,6 +12,7 @@ import { captureStoryboard, changedFilm } from "./storyboard-capture.js";
 import { fixtureSource } from "./demo-source.js";
 import { captureRender } from "./timeline-capture.js";
 import type { CapturedRender } from "./timeline-capture.js";
+import { validateUploadName } from "./upload-name.js";
 
 interface Request { projectId: string; principalId: string; scopeIds: string[]; state: string }
 const errorCode = (error: unknown): string => error instanceof DomainError ? error.code : "MEDIA_RENDER_FAILED";
@@ -40,14 +41,16 @@ export class MediaApplicationService {
   /** Host-selected path, authenticated human only; never add this path field to a model tool. */
   async importVideo(projectId: string, actor: ActorContext, input: ImportVideoInput, options: { signal?: AbortSignal } = {}): Promise<ImportedVideo> {
     const request = structuredClone(input), authority = structuredClone(actor);
-    this.validateRequest(request, ["expectedHeadVersion", "path", "key"]);
+    this.validateRequest(request, ["expectedHeadVersion", "path", "key", "name"]);
+    validateUploadName(request.name);
+    if (request.name === undefined) delete request.name;
     invariant(typeof request.path === "string" && request.path.length > 0 && request.path.length <= 4096, "MEDIA_INVALID_INPUT", "A bounded host-selected file path is required");
     const intent = this.store.transaction(() => {
       this.authorize(projectId, authority); this.production.assertActor(projectId, authority, true);
       invariant(authority.kind === "human", "ACTOR_DENIED", "Only a human can choose a supplied file");
       return this.store.command(`${authority.principalId}:${projectId}:media_import`, request.key, digest({ request, authority }), () => {
         invariant(this.store.getProject(projectId).headVersion === request.expectedHeadVersion, "REVISION_CONFLICT", "Project changed before media import");
-        const row = { id: newId(), projectId, artifactId: newId(), requestId: authority.requestId };
+        const row = { id: newId(), projectId, artifactId: newId(), requestId: authority.requestId, ...(request.name === undefined ? {} : { name: request.name }) };
         this.store.insert("media_import", row.id, projectId, row); return row;
       });
     });
@@ -63,7 +66,8 @@ export class MediaApplicationService {
       invariant(project.headVersion === request.expectedHeadVersion, "REVISION_CONFLICT", "Project changed while importing media");
       const artifact: ArtifactRef = { artifactId: source.artifactId, sha256: source.sha256, kind: "video" };
       const record: RealVideoArtifact = { id: source.artifactId, projectId, artifact, path, mimeType: "video/mp4", fixture: false, attemptId: null,
-        origin: "supplied_video", byteLength: source.byteLength, physicalDurationSeconds: source.probe.video!.frames / 30, sourceDescriptorId: source.id };
+        origin: "supplied_video", byteLength: source.byteLength, physicalDurationSeconds: source.probe.video!.frames / 30, sourceDescriptorId: source.id,
+        ...(request.name === undefined ? {} : { name: request.name }) };
       this.store.insert("artifact", record.id, projectId, record);
       this.store.insert<OwnedMediaSource>("media_source", source.artifactId, projectId, { id: source.artifactId, projectId, source, requestId: authority.requestId });
       const saved = this.store.saveProject({ ...project, revisionId: newId(), artifacts: [...project.artifacts, artifact] }, project.headVersion);

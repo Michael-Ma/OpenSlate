@@ -67,7 +67,7 @@ export function projectAssets(production: ProductionService, project: ProjectRec
     const scene = shot ? scenes.get(shot.sceneId) : undefined;
     const document = role === "document" ? record as SuppliedDocumentArtifact : undefined;
     const label = document ? `${document.name}${document.pages !== undefined ? ` · ${document.pages} ${document.pages === 1 ? "page" : "pages"}` : ""}`
-      : labels.get(record.id)?.label ?? (role === "export" ? `${record.fixture ? "Demo export" : "Export"} · ${project.name}` : `${scene?.title || scene?.purpose || project.name}${shot ? ` · ${shot.purpose}` : ""} · ${role}${role === "keyframe" || role === "clip" ? ` ${takeIndex}` : ""}`);
+      : (role === "upload" ? record.name : undefined) ?? labels.get(record.id)?.label ?? (role === "export" ? `${record.fixture ? "Demo export" : "Export"} · ${project.name}` : `${scene?.title || scene?.purpose || project.name}${shot ? ` · ${shot.purpose}` : ""} · ${role}${role === "keyframe" || role === "clip" ? ` ${takeIndex}` : ""}`);
     items.push({ artifact: { artifactId: record.artifact.artifactId, sha256: record.artifact.sha256, kind: record.artifact.kind as StudioArtifactRef["kind"] }, role, ...(shotId ? { shotId } : {}), ...(shot ? { sceneId: shot.sceneId } : {}),
       ...(role === "keyframe" || role === "clip" ? { takeIndex } : {}), current: current.has(record.id), source, label,
       createdAt: metadata.get(`artifact:${record.id}`) ?? attempt?.createdAt ?? firstEvent,

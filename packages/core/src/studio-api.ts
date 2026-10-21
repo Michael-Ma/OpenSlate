@@ -535,11 +535,12 @@ export type AssetRole = "keyframe" | "clip" | "voice" | "music" | "upload" | "do
 
 /**
  * Uploads, each saved to the film's Assets first:
- *   image     POST /images/uploads?expectedHeadVersion=N            PNG, JPEG, WebP or HEIC (stored as PNG), up to 32 MiB
- *   video     POST /media/uploads?expectedHeadVersion=N             up to 128 MiB
+ *   image     POST /images/uploads?expectedHeadVersion=N&name=      PNG, JPEG, WebP or HEIC (stored as PNG), up to 32 MiB
+ *   video     POST /media/uploads?expectedHeadVersion=N&name=       up to 128 MiB
  *   audio     POST /audio-library/uploads?role=upload&name=         up to 128 MiB
  *   document  POST /documents/uploads?expectedHeadVersion=N&name=   PDF, TXT or MD, up to 32 MiB
  * A document upload answers with its artifact and what was extracted.
+ * Image/video names are optional (1–120 characters, no control characters or slashes) and bind replay identity.
  */
 export interface DocumentUploadResult {
   artifact: StudioArtifactRef;

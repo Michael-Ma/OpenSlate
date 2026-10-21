@@ -16,7 +16,7 @@ export interface RealVideoArtifact {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: "video/mp4";
   fixture: boolean; attemptId: null; origin: "supplied_video" | "local_render";
   byteLength: number; physicalDurationSeconds: number;
-  sourceDescriptorId?: string; manifestDigest?: string; renderJobId?: string;
+  sourceDescriptorId?: string; manifestDigest?: string; renderJobId?: string; name?: string;
 }
 export interface RenderTarget {
   revisionId: string; headVersion: number; planId: string; graphDigest: string;
@@ -38,6 +38,6 @@ export interface MediaPreview {
   fixture: boolean;
 }
 export interface PrepareMediaRender { expectedHeadVersion: number; renderNodeId: string; key: string }
-export interface ImportVideoInput { expectedHeadVersion: number; path: string; key: string }
+export interface ImportVideoInput { expectedHeadVersion: number; path: string; key: string; name?: string }
 export interface ImportedVideo { artifact: ArtifactRef; sourceId: string; revisionId: string; headVersion: number }
 export type RenderedVideoInput = Pick<RenderedMedia, "path" | "sha256" | "byteLength" | "probe">;

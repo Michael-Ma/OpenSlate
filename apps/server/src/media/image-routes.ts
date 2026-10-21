@@ -7,6 +7,7 @@ import type { ProductionService } from "../application/service.js";
 import type { ManagedUpload, ManagedUploadStore } from "../narration/managed-upload.js";
 import { ImageApplicationService, PNG_IMPORT_MAX_BYTES } from "./image-application.js";
 import type { SuppliedImageArtifact } from "./image-application.js";
+import { uploadNameSchema } from "./upload-name.js";
 
 interface ImageRouteOptions { production: ProductionService; images: ImageApplicationService | null; uploads: ManagedUploadStore }
 const text = { type: "string", minLength: 1, maxLength: 160 };
@@ -44,17 +45,18 @@ export function registerImageRoutes(app: FastifyInstance, options: ImageRouteOpt
         images: selected.map(record => ({ artifact: record.artifact, mimeType: record.mimeType, width: record.width, height: record.height, byteLength: record.byteLength, fixture: false, origin: record.origin })),
         coverage: { offset, returned: selected.length, total: owned.length, nextOffset: offset + selected.length < owned.length ? offset + selected.length : null } };
     });
-    scope.post<{ Params: { projectId: string }; Querystring: { expectedHeadVersion: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/images/uploads", {
+    scope.post<{ Params: { projectId: string }; Querystring: { expectedHeadVersion: string; name?: string; requestId?: string; continuationRequestId?: string }; Body: AsyncIterable<Uint8Array> }>("/api/projects/:projectId/images/uploads", {
       bodyLimit: uploads.maxBytes,
-      schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },
+      schema: { querystring: object({ expectedHeadVersion: { type: "string", pattern: "^(0|[1-9][0-9]{0,14})$" }, name: uploadNameSchema, requestId: text, continuationRequestId: text }, ["expectedHeadVersion"]) },
     }, async (request, reply) => {
       invariant(images, "SERVICE_UNAVAILABLE", "Image reference import requires local FFmpeg and ffprobe");
       invariant(request.headers["content-type"]?.split(";")[0] === "application/octet-stream", "VALIDATION_ERROR", "Upload image bytes as application/octet-stream");
       const projectId = request.params.projectId, key = commandKey(request), expectedHeadVersion = Number(request.query.expectedHeadVersion);
+      const name = request.query.name === undefined ? {} : { name: request.query.name };
       invariant(!(request.query.requestId && request.query.continuationRequestId), "VALIDATION_ERROR", "Choose an existing request or an explicit continuation");
       const actor: ActorContext = request.query.requestId ? { kind: "human", principalId: "local-user", requestId: request.query.requestId }
         : production.beginRequest(projectId, "local-user", "Import a supplied image reference", { source: "app", key: `image-upload:${key}`, editing: true,
-          ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion }) });
+          ...(request.query.continuationRequestId ? { continuationRequestId: request.query.continuationRequestId } : {}), contextDigest: digest({ expectedHeadVersion, ...name }) });
       const abort = new AbortController(), disconnected = () => { if (!reply.raw.writableFinished) abort.abort(); };
       const assertCurrent = () => {
         invariant(!abort.signal.aborted, "MEDIA_CANCELLED", "Image reference upload cancelled");
@@ -67,7 +69,7 @@ export function registerImageRoutes(app: FastifyInstance, options: ImageRouteOpt
         const uploaded = await uploads.receive(request.body, digest({ kind: "png-reference", projectId, principalId: "local-user", key }), assertCurrent);
         try {
           const bytes = await readUpload(uploaded); assertCurrent();
-          return { ...await images.importImage(projectId, actor, { bytes, sha256: uploaded.sha256, expectedHeadVersion, key }, { signal: abort.signal }), requestId: actor.requestId };
+          return { ...await images.importImage(projectId, actor, { bytes, sha256: uploaded.sha256, expectedHeadVersion, key, ...name }, { signal: abort.signal }), requestId: actor.requestId };
         } finally { await uploaded.release(); }
       } catch (error) {
         if (!(error instanceof DomainError)) throw error;
