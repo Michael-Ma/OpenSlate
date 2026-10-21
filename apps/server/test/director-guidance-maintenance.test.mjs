@@ -4,7 +4,7 @@ import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, r
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { digest, newId } from '@openslate/core';
+import { digest, newId, toolCatalog } from '@openslate/core';
 import { FakeProvider } from '@openslate/providers';
 import { CodexDirectorRuntime } from '@openslate/director';
 import { Store } from '../dist/persistence/store.js';
@@ -13,13 +13,14 @@ import { ProductionService } from '../dist/application/service.js';
 import { LocalDirectorController } from '../dist/application/local-director.js';
 import { DirectorContextService } from '../dist/application/director-context.js';
 import { DirectorToolSettings } from '../dist/application/director-tools-upgrade.js';
-import { SHIPPED_DIRECTOR_GUIDANCE } from '../dist/application/director-shipped-guidance.js';
+import { SHIPPED_DIRECTOR_GUIDANCE, isCurrentShippedDirectorGuidance, verifyShippedDirectorGuidance } from '../dist/application/director-shipped-guidance.js';
 import { createDirectorInput } from '../dist/application/director-input.js';
 import { createDirectorSkillLock } from '../dist/application/director-capabilities.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
 import { installRecoveryQuarantine } from '../dist/application/installation-recovery.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
+const earlierV7 = JSON.parse(readFileSync(new URL('./fixtures/director-guidance-v7-before-k1.json', import.meta.url), 'utf8'));
 const earlierV6 = JSON.parse(readFileSync(new URL('./fixtures/director-guidance-v6-3b3edf7.json', import.meta.url), 'utf8'));
 test('shipped Director guidance identities cannot be changed at runtime', () => {
   assert.ok(Object.isFrozen(SHIPPED_DIRECTOR_GUIDANCE)); assert.ok(SHIPPED_DIRECTOR_GUIDANCE.every(Object.isFrozen));
@@ -336,3 +337,89 @@ test('native projection disables late historical packages while retaining their 
   assert.deepEqual(f.store.getProject(f.project.id),before);
   for(const kind of ['grant','candidate','attempt','external_allowance'])assert.equal(f.store.list(kind,f.project.id).length,0);
  });
+
+
+function installEarlierV7(f) {
+  const earlierRoot = join(f.root, 'earlier-v7-before-k1');
+  for (const [path, bytes] of Object.entries(earlierV7.files)) {
+    const target = join(earlierRoot, 'skills', 'v7', path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, bytes);
+  }
+  const saved = createDirectorSkillLock({ ...f.configuration, repositoryRoot: earlierRoot }, '6.0.0');
+  const { lockDigest: _, ...body } = structuredClone(saved.lock);
+  body.bindings = body.bindings.map(binding => binding.kind === 'handler' ? { ...binding, digest: earlierV7.catalog.digest } : binding);
+  const lock = { ...body, lockDigest: digest(body) };
+  new DirectorContextService(f.service, { ...saved.environment, bindings: lock.bindings }).bootstrapLock(f.project.id, lock);
+  return lock;
+}
+
+test('K1 preserves the exact earlier 6.0.0 catalog and V7 package identity alongside the amended current pins', t => {
+  const f = fixture(t), previous = installEarlierV7(f);
+  assert.equal(digest(earlierV7.catalog), 'cdcdbdd52bdc451888a76867f5f08af2d063f692346a6c9a63eb0226724295db');
+  assert.equal(earlierV7.catalog.digest, '282275ce2d97c274f0e064357dac77a8d06e57fd8a58de37e187faf79e5a97ec');
+  assert.deepEqual(previous.skills.map(({ id, packageDigest }) => ({ id, packageDigest })), [
+    { id: 'plan-authoring', packageDigest: 'a618b775c426712398ede04c0db8d36b647792adbd3ae1dff263507b19498fdf' },
+    { id: 'production', packageDigest: '545d188a97105db9f78d43c5f8ebd260357a537b036e670fdef9158ee6fd80e8' },
+  ]);
+  verifyShippedDirectorGuidance(previous, f.configuration);
+  assert.equal(isCurrentShippedDirectorGuidance(previous), false);
+  const current = createDirectorSkillLock(f.configuration, '6.0.0').lock;
+  verifyShippedDirectorGuidance(current, f.configuration);
+  assert.equal(isCurrentShippedDirectorGuidance(current), true);
+  const pins = SHIPPED_DIRECTOR_GUIDANCE.filter(row => row.toolContract === '6.0.0');
+  assert.equal(pins.length, 2);
+  assert.equal(pins[0].handlerDigest, earlierV7.catalog.digest);
+  assert.equal(pins[1].handlerDigest, toolCatalog('6.0.0').digest);
+  assert.equal(pins[1].planAuthoringDigest, current.skills.find(skill => skill.id === 'plan-authoring').packageDigest);
+  assert.equal(pins[1].productionDigest, current.skills.find(skill => skill.id === 'production').packageDigest);
+});
+
+test('a saved pre-K1 6.0.0/V7 project upgrades on its fresh native turn without changing old locks or snapshot bytes', t => {
+  const f = fixture(t), previous = installEarlierV7(f);
+  const snapshotFiles = previous.skills.flatMap(skill => {
+    const root = join(f.configuration.snapshotRoot, skill.packageDigest);
+    return readdirSync(root, { recursive: true }).filter(path => path.endsWith('.md') || path.endsWith('.json')).map(path => [join(root, path), readFileSync(join(root, path), 'utf8')]);
+  });
+  const fresh = f.fresh('Make keyframes for the whole film');
+  const input = f.prepareInput(fresh.turn, fresh.human, fresh.bridge), current = f.store.list('director_skill_lock', f.project.id).at(-1).lock;
+  assert.notEqual(current.id, previous.id); assert.equal(isCurrentShippedDirectorGuidance(current), true);
+  assert.equal(JSON.parse(input.context).toolContract.digest, toolCatalog('6.0.0').digest);
+  assert.equal(f.store.get('director_epoch_lock', fresh.bridge.actor.epochId).lockId, current.id);
+  assert.deepEqual(f.store.get('director_skill_lock', previous.id).lock, previous);
+  for (const [path, content] of snapshotFiles) assert.equal(readFileSync(path, 'utf8'), content);
+  assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
+  f.prepareInput(fresh.turn, fresh.human, fresh.bridge);
+  assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2, 'repeated preparation keeps one amendment lock');
+  for (const kind of ['grant', 'candidate', 'attempt', 'reservation']) assert.equal(f.store.list(kind, f.project.id).length, 0, 'upgrading guidance grants no generation authority');
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('an explicit pre-K1 6.0.0 amendment reports its availability and replays without reinstalling', t => {
+  const f = fixture(t), previous = installEarlierV7(f), before = f.store.getProject(f.project.id);
+  assert.equal(f.settings.status(f.project.id).upgradeAvailable, true);
+  const input = { expectedLockId: previous.id, expectedLockDigest: previous.lockDigest, targetVersion: '6.0.0' };
+  const result = f.settings.upgrade(f.project.id, input, 'explicit-k1-amendment');
+  assert.equal(result.upgradeAvailable, false); assert.notEqual(result.lockId, previous.id);
+  assert.equal(isCurrentShippedDirectorGuidance(f.store.get('director_skill_lock', result.lockId).lock), true);
+  assert.deepEqual(f.store.get('director_skill_lock', previous.id).lock, previous);
+  assert.deepEqual(f.store.getProject(f.project.id), before);
+  const cursor = f.store.cursor(f.project.id);
+  const replay = new DirectorToolSettings(f.service, () => { throw Error('Replay must not reload packages'); });
+  assert.deepEqual(replay.upgrade(f.project.id, input, 'explicit-k1-amendment'), result);
+  assert.equal(f.store.cursor(f.project.id), cursor); assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
+  assert.throws(() => f.settings.upgrade(f.project.id, { expectedLockId: result.lockId,
+    expectedLockDigest: result.lockDigest, targetVersion: '6.0.0' }, 'already-current'), { code: 'DIRECTOR_TOOLS_STALE' });
+  for (const kind of ['message', 'epoch', 'grant', 'candidate', 'attempt', 'reservation'])
+    assert.equal(f.store.list(kind, f.project.id).length, 0);
+});
+
+test('an explicit same-version amendment refuses an unrecognized predecessor identity', t => {
+  const f = fixture(t), previous = installEarlierV7(f), { lockDigest: _, ...body } = structuredClone(previous);
+  body.id = newId(); body.bindings = body.bindings.map(binding => binding.kind === 'handler'
+    ? { ...binding, digest: 'a'.repeat(64) } : binding);
+  const custom = { ...body, lockDigest: digest(body) };
+  f.store.insert('director_skill_lock', custom.id, f.project.id, { id: custom.id, projectId: f.project.id, lock: custom });
+  assert.throws(() => f.settings.upgrade(f.project.id, { expectedLockId: custom.id,
+    expectedLockDigest: custom.lockDigest, targetVersion: '6.0.0' }, 'unknown-amendment'), { code: 'DIRECTOR_GUIDANCE_UNSUPPORTED' });
+  assert.equal(f.store.list('director_skill_lock', f.project.id).length, 2);
+  for (const kind of ['grant', 'candidate', 'attempt', 'reservation']) assert.equal(f.store.list(kind, f.project.id).length, 0);
+});

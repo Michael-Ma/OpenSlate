@@ -7,7 +7,8 @@ import { legacyChangeProposalSchema } from "./legacy-change-schema.js";
 export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"] as const);
 export const V2_TOOL_NAMES = Object.freeze([...TOOL_NAMES, "revise_narration_draft"] as const);
 const V3_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transcription", "prepare_narration_speech"] as const);
-export const ALL_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
+const V5_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
+export const ALL_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes"] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
 export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
@@ -136,15 +137,26 @@ Object.assign(v6ProposalProperties.updateShots.items.properties, {
 v6ProposalProperties.updateScenes = { type: "array", minItems: 1, maxItems: 400,
   items: { ...object({ id, title: structuredClone(sceneTitleSchema), purpose: { type: "string", minLength: 1, maxLength: 16000 } }, ["id"]), minProperties: 2 } };
 const v6ProposeChangeSchema = object({ patch: { ...v6ProposalPatchSchema, minProperties: 1 } }, ["patch"]);
-const v6Descriptors = freeze(v5Descriptors.map(tool => tool.name === "prepare_change" ? { ...tool, inputSchema: v6ChangeSchema }
-  : tool.name === "propose_change" ? { ...tool, inputSchema: v6ProposeChangeSchema } : tool));
+const generationIds = { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: id };
+export const makeKeyframesSchema = {
+  ...object({ sceneIds: generationIds, shotIds: generationIds, regenerate: { type: "boolean" } }),
+  oneOf: [{ required: ["sceneIds"] }, { required: ["shotIds"] }],
+  // A new take must name the precise shots requested by the person.
+  if: { properties: { regenerate: { const: true } }, required: ["regenerate"] },
+  then: { required: ["shotIds"] },
+};
+const v6Descriptors = freeze(v5Descriptors.map(tool => tool.name === "read_context" ? { ...tool, description: tool.description.replace("Preparing an audio proposal never approves or starts generation.", "Audio operations report pending suggestions and actual request-owned transcription outcomes; only an eligible current human attachment can start transcription from conversation.") }
+  : tool.name === "prepare_change" ? { ...tool, inputSchema: v6ChangeSchema }
+  : tool.name === "propose_change" ? { ...tool, inputSchema: v6ProposeChangeSchema }
+  : tool.name === "prepare_recording_transcription" ? { ...tool, description: "Prepare transcription of an exact owned recording. In a fresh human editing conversation, an audio attachment sent with that request may be transcribed when the person asks what it says or its line is needed. The application prices and records the operation under that human request. Other recordings remain pending suggestions for a human press. Never attach, adopt or accept the returned text, or blindly resubmit an unknown outcome." }
+  : tool).concat(descriptor("make_keyframes", "Start only the keyframes and needed voice lines the person's fresh editing conversation requested. Pass exactly one of sceneIds or shotIds using saved IDs within that request's scope. regenerate: true requires explicit shotIds and the person's request for new takes of those shots; never regenerate for your own quality judgment. Reports started work, quotes and per-scene refusal codes. Review, read-only and automatic turns cannot start work. Video always requires the person's Confirm frames & generate video action. Reconcile unknown outcomes before retrying.", makeKeyframesSchema, false)));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },
   "2.0.0": { version: "2.0.0", names: V2_TOOL_NAMES, descriptors: v2Descriptors, digest: digest({ version: "2.0.0", tools: v2Descriptors }) },
   "3.0.0": { version: "3.0.0", names: V3_TOOL_NAMES, descriptors: v3Descriptors, digest: digest({ version: "3.0.0", tools: v3Descriptors }) },
   "4.0.0": { version: "4.0.0", names: V3_TOOL_NAMES, descriptors: v4Descriptors, digest: digest({ version: "4.0.0", tools: v4Descriptors }) },
-  "5.0.0": { version: "5.0.0", names: ALL_TOOL_NAMES, descriptors: v5Descriptors, digest: digest({ version: "5.0.0", tools: v5Descriptors }) },
+  "5.0.0": { version: "5.0.0", names: V5_TOOL_NAMES, descriptors: v5Descriptors, digest: digest({ version: "5.0.0", tools: v5Descriptors }) },
   "6.0.0": { version: "6.0.0", names: ALL_TOOL_NAMES, descriptors: v6Descriptors, digest: digest({ version: "6.0.0", tools: v6Descriptors }) },
 });
 export function toolCatalog(version: string = TOOL_CONTRACT_VERSION): ToolCatalog {

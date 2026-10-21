@@ -56,6 +56,10 @@ export function completedSceneAttachmentScope(production: ProductionService, pro
     shot?.sceneId === run.sceneId && step.intentDigest === digest({ shotId: shot.id, narration: shot.narration ?? null }) &&
     step.speechInput?.segmentId === input.segmentId && step.speechInput.segmentRevisionId === input.segmentRevisionId,
   "NARRATION_SPEECH_STALE", "The paid voice line no longer matches this shot's narration");
+  if (step.attachmentCursor !== undefined) invariant(!store.readEvents(projectId, step.attachmentCursor).some(event =>
+    event.kind === "narration.generated_audio_attached" && event.payload.segmentId === input.segmentId &&
+    !(event.payload.requestId === actor.requestId && event.payload.artifactId === input.artifactId)),
+  "NARRATION_SPEECH_STALE", "A later recording selection owns this voice line");
   const draft = store.get<{ segmentId: string }>("narration_shot_draft", shotDraftId(projectId, shot.id));
   const current = production.store.get<{ entries: { segmentId: string; segmentRevisionId: string; audioId: string | null }[] }>("narration_state", projectId)?.entries.find(entry => entry.segmentId === input.segmentId);
   const proposal = step.speechResult?.proposal;
@@ -63,7 +67,7 @@ export function completedSceneAttachmentScope(production: ProductionService, pro
   const attempt = production.engine.attempts(projectId).find(attempt => attempt.phase === "succeeded" &&
     attempt.candidateId === step.speechResult?.receipt.candidateId && attempt.outputs.audio?.artifactId === input.artifactId);
   invariant(draft?.segmentId === input.segmentId && current?.segmentRevisionId === input.segmentRevisionId &&
-    (!current.audioId || current.audioId === input.artifactId) && attempt && proposal?.section.segmentId === input.segmentId &&
+    (!current.audioId || current.audioId === input.artifactId || Object.hasOwn(step, "attachmentAudioId") && current.audioId === step.attachmentAudioId) && attempt && proposal?.section.segmentId === input.segmentId &&
     proposal.section.segmentRevisionId === input.segmentRevisionId && proposal.operation.text === shot.narration?.text &&
     proposal.operation.voice === step.voice && proposal.profile.id === step.profileId && proposal.profile.revision === step.profileRevisionId &&
     lock?.profiles.some(profile => profile.id === proposal.profile.id && profile.revision === proposal.profile.revision) &&

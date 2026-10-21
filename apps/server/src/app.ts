@@ -355,6 +355,7 @@ export function createApp(options: AppOptions = {}) {
     request.raw.on("aborted", disconnected); reply.raw.on("close", disconnected);
     const ports = options.narrationRoutes;
     try { return await new ToolInvocationService(service(), {
+      ...(sceneCommands ? { enqueueVoice: sceneCommands.enqueueKeyframes } : {}),
       ...(ports?.ownedTranscription ? { ownedTranscription: ports.ownedTranscription } : {}),
       ...(ports?.narrationSpeech ? { narrationSpeech: ports.narrationSpeech } : {}),
     }).invoke(projectId, actor, callId, tool, request.body, { signal: abort.signal }); }

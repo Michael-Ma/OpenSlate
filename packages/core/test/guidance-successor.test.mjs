@@ -10,7 +10,7 @@ test('V6 proposes all creative shot fields and scene title independently of purp
   assert.deepEqual(parseToolArguments('propose_change', { patch }, '6.0.0').arguments, { patch });
   assert.deepEqual(parseToolArguments('propose_change', { patch: { updateScenes: [{ id: 'scene', title: 'Last Ferry' }] } }, '6.0.0').arguments.patch.updateScenes, [{ id: 'scene', title: 'Last Ferry' }]);
   assert.equal(toolHandlerId('6.0.0'), 'director-tools@6');
-  assert.deepEqual(toolCatalog('6.0.0').names, toolCatalog('5.0.0').names);
+  assert.deepEqual(toolCatalog('6.0.0').names, [...toolCatalog('5.0.0').names, 'make_keyframes']);
   for (const row of [{ id: 'scene' }, { id: 'scene', title: null }]) assert.throws(() => parseToolArguments('propose_change', { patch: { updateScenes: [row] } }, '6.0.0'), { code: 'VALIDATION_ERROR' });
   assert.throws(() => parseToolArguments('propose_change', { patch: { updateShots: [{ id: 'shot', framing: 'Wide', reauthorPrompts: true }] } }, '6.0.0'), { code: 'VALIDATION_ERROR' });
 });

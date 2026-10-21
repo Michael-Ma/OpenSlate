@@ -53,7 +53,7 @@ test('terminal fake press queues one read-only app review, writes two honest not
  f.director.tick();assert.equal(f.store.list('director_turn',f.project.id).length,0);
  await f.finish();f.director.tick();await f.director.settle();
  const snapshot=f.service.snapshot(f.project.id);assert.equal(snapshot.turns.length,1);assert.equal(snapshot.turns[0].state,'completed');
- assert.deepEqual(snapshot.turns[0].effects,{notesCreated:2,proposalsHeld:1,changesApplied:0});
+ assert.deepEqual(snapshot.turns[0].effects,{notesCreated:2,proposalsHeld:1,changesApplied:0,generation:[]});
  const turn=f.store.list('director_turn',f.project.id)[0], request=f.store.get('message',turn.requestId);
  assert.equal(request.source,'app');assert.equal(request.editing,false);assert.deepEqual(request.scopeIds,f.project.shots.map(s=>s.id));
  assert.equal(f.store.get('epoch',turn.epochId).state,'revoked');assert.equal(f.store.list('hold',f.project.id).filter(h=>h.ownerId===request.id).length,0);

@@ -5,7 +5,7 @@ import type { SkillCapabilityLock } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { createDirectorSkillLock } from "./director-capabilities.js";
 import type { DirectorSkillConfiguration } from "./director-capabilities.js";
-import { createCurrentShippedDirectorSkillLock, verifyShippedDirectorGuidance } from "./director-shipped-guidance.js";
+import { createCurrentShippedDirectorSkillLock, isCurrentShippedDirectorGuidance, verifyShippedDirectorGuidance } from "./director-shipped-guidance.js";
 
 export interface DirectorToolsUpgrade {
   expectedLockId: string;
@@ -34,7 +34,7 @@ export class DirectorToolSettings {
     const saved = this.latest(projectId);
     return { currentVersion: saved?.lock.compatibility.toolContract ?? "6.0.0", lockId: saved?.id ?? null,
       lockDigest: saved?.lock.lockDigest ?? null, availableVersion: "6.0.0" as const,
-      upgradeAvailable: !!saved && saved.lock.compatibility.toolContract !== "6.0.0", busy: this.busy(projectId) };
+      upgradeAvailable: !!saved && !isCurrentShippedDirectorGuidance(saved.lock), busy: this.busy(projectId) };
   }
 
   /** Application maintenance at the first input of a new native turn, never a model tool. */
@@ -79,7 +79,7 @@ export class DirectorToolSettings {
       throw new DomainError("DIRECTOR_GUIDANCE_UNSUPPORTED", "This film's Director guidance does not match any version this OpenSlate ships. Saved work is retained.",
         { cause: error instanceof DomainError ? error.code : "GUIDANCE_VERIFICATION_FAILED" });
     }
-    const successor = saved.lock.compatibility.toolContract === "6.0.0" ? saved.lock : createCurrentShippedDirectorSkillLock(configuration).lock;
+    const successor = isCurrentShippedDirectorGuidance(saved.lock) ? saved.lock : createCurrentShippedDirectorSkillLock(configuration).lock;
     fresh();
     invariant(digest(this.configuration(projectId)) === configurationDigest, "DIRECTOR_TOOLS_STALE", "Director setup changed while the new conversation was being prepared. Send a new message.");
     if (successor === saved.lock) return successor;
@@ -115,11 +115,17 @@ export class DirectorToolSettings {
     const check = () => {
       const current = this.latest(projectId);
       invariant(current?.id === payload.expectedLockId && current.lock.lockDigest === payload.expectedLockDigest
-        && upgradeTargets[current.lock.compatibility.toolContract]?.includes(payload.targetVersion), "DIRECTOR_TOOLS_STALE", "The project's saved tools changed; reload before updating");
+        && (upgradeTargets[current.lock.compatibility.toolContract]?.includes(payload.targetVersion)
+          || payload.targetVersion === "6.0.0" && current.lock.compatibility.toolContract === "6.0.0"
+            && !isCurrentShippedDirectorGuidance(current.lock)), "DIRECTOR_TOOLS_STALE", "The project's saved tools changed; reload before updating");
       invariant(!this.busy(projectId), "DIRECTOR_TOOLS_BUSY", "Wait for the current conversation and setup to finish before updating tools");
+      return current;
     };
-    check();
+    const predecessor = check();
     const configuration = this.configuration(projectId), configurationDigest = digest(configuration);
+    // Same-version amendments are limited to retained shipped identities and their exact saved snapshots.
+    if (predecessor.lock.compatibility.toolContract === payload.targetVersion)
+      verifyShippedDirectorGuidance(predecessor.lock, configuration);
     // Verify and snapshot shipped packages outside the write transaction.
     const { lock } = payload.targetVersion === "6.0.0" ? createCurrentShippedDirectorSkillLock(configuration) : createDirectorSkillLock(configuration, payload.targetVersion);
     const receipt = store.command(scope, key, requestDigest, (): UpgradeReceipt => {

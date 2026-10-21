@@ -23,6 +23,9 @@ export interface SceneAudioStep {
   /** Freeze the effective voice at the human press; later defaults apply to new commands only. */
   voice?: string;
   intentDigest?: string; profileId?: string; profileRevisionId?: string;
+  /** Exact recording present when this run began; a later selection cannot be replaced. */
+  attachmentAudioId?: string | null;
+  attachmentCursor?: number;
   blocker?: { code: string; shotId: string };
   sessionId?: string; speechInput?: PrepareNarrationSpeech;
   speechResult?: Awaited<ReturnType<NarrationSpeechService["request"]>>;
@@ -51,7 +54,8 @@ const stepKey = (row: SceneConfirmationRecord, shotId: string, action: string) =
 function audioStep(production: ProductionService, projectId: string, row: { shotId: string; narration: SpeechIntent & { recordingCurrent: boolean; intentDigest: string } }): SceneAudioStep {
   const audio = row.narration;
   const reusable = !audio.recordingCurrent ? reusableNarrationSpeech(production, projectId, audio) : undefined;
-  return { shotId: row.shotId, step: audio.recordingCurrent ? "accept" : reusable ? "attach" : "speech",
+  const entry = production.store.get<{ entries: { segmentId: string; audioId: string | null }[] }>("narration_state", projectId)?.entries.find(entry => entry.segmentId === audio.segmentId);
+  return { shotId: row.shotId, attachmentAudioId: entry?.audioId ?? null, attachmentCursor: production.store.cursor(projectId), step: audio.recordingCurrent ? "accept" : reusable ? "attach" : "speech",
     intentDigest: audio.intentDigest, ...(audio.voice ? { voice: audio.voice } : {}),
     ...(audio.profileId ? { profileId: audio.profileId } : {}), ...(audio.profileRevisionId ? { profileRevisionId: audio.profileRevisionId } : {}),
     ...reusable };
@@ -77,7 +81,7 @@ export class SceneConfirmationRunner {
       this.store.appendEvent(row.projectId, "scene.confirmation_changed", { ...confirmationView(row), sceneId: row.sceneId });
     });
   }
-  enqueueKeyframes = (projectId: string, sceneId: string, shotIds: string[], actor: ActorContext): void => {
+  enqueueKeyframes = (projectId: string, sceneId: string, shotIds: string[], actor: ActorContext, runId?: string): void => {
     const view = sceneGenerationView(this.production, projectId, sceneId, this.audio?.narration);
     const rows = view.narrationEvidence.filter(r => shotIds.includes(r.shotId) && r.narration.mode === "generated" && !r.narration.ready);
     if (!rows.length) return;
@@ -86,8 +90,16 @@ export class SceneConfirmationRunner {
     this.assertNoVoiceInFlight(projectId, rows.map(r => r.shotId));
     const project = this.store.getProject(projectId), lock = this.store.get("capability_lock", project.capabilityLockId);
     const shotGuardDigests = Object.fromEntries(shotIds.map(shotId => [shotId, sceneConfirmationGuard(project, shotId, lock)]));
-    this.save({ id: actor.requestId, actor, projectId, sceneId, kind: "keyframes", state: "running", createdAt: new Date().toISOString(),
-      sceneIntentDigest: view.sceneIntentDigest, guardDigest: digest(shotGuardDigests), shotGuardDigests, framePins: [], frames: [], steps: rows.map(r => audioStep(this.production, projectId, r)) });
+    this.store.transaction(() => {
+      const id = runId ?? actor.requestId;
+      this.save({ id, actor, projectId, sceneId, kind: "keyframes", state: "running", createdAt: new Date().toISOString(),
+        sceneIntentDigest: view.sceneIntentDigest, guardDigest: digest(shotGuardDigests), shotGuardDigests, framePins: [], frames: [], steps: rows.map(r => audioStep(this.production, projectId, r)) });
+      // Conversation scenes share their human request, but each voice run owns its
+      // own dispatch guards and retry policy. Keep grants under that human request.
+      const action = this.store.get<{ imageNodes?: { candidateId: string | null }[] }>("scene_generation_action", id);
+      for (const pin of action?.imageNodes ?? []) if (pin.candidateId)
+        this.store.insert("scene_confirmation_candidate", pin.candidateId, projectId, { candidateId: pin.candidateId, confirmationId: id });
+    });
   };
   private assertNoVoiceInFlight(projectId: string, shotIds: string[]) {
     const segments = new Set(this.store.list<{ shotId: string; segmentId: string }>("narration_shot_draft", projectId).filter(d => shotIds.includes(d.shotId)).map(d => d.segmentId));

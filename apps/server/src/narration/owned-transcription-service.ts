@@ -12,7 +12,7 @@ import { captureOwnedTranscriptionReviewInput, currentOwnedTranscriptionReview, 
 import type { NarrationAudio, NarrationState } from "./types.js";
 import type { NarrationService } from "./service.js";
 import { installNarrationAudio } from "./verified-audio.js";
-import { requestHoldCutoff } from './request-holds.js';
+import { assertRequestHoldCutoff, requestHoldCutoff } from './request-holds.js';
 
 interface Lock { projectId: string; profiles: ProviderProfile[]; recipeDigest: string; stageContractsDigest: string; localExecution?: unknown }
 const stageId = (projectId: string, stage: StageRequirement) => digest({ projectId, stageId: stage.stageId, scopeId: stage.scopeId });
@@ -60,20 +60,22 @@ export class OwnedTranscriptionService {
     return this.publish(projectId, human, input, options, false);
   }
   async request(projectId: string, actor: ActorContext, input: PrepareOwnedTranscription,
-    options: { signal?: AbortSignal } = {}): Promise<{ proposal: OwnedTranscriptionProposal; receipt: OwnedTranscriptionApplyReceipt }> {
+    options: { signal?: AbortSignal; requestedAtCursor?: number; onPublished?: (receipt: OwnedTranscriptionApplyReceipt) => void } = {}): Promise<{ proposal: OwnedTranscriptionProposal; receipt: OwnedTranscriptionApplyReceipt }> {
     actor = snapshotOwnedTranscriptionData(actor, 16384); input = snapshotOwnedTranscriptionData(input, 16384);
-    const signal = options.signal; options = signal ? { signal } : {};
+    const signal = options.signal, onPublished = options.onPublished, suppliedCutoff = options.requestedAtCursor;
+    options = { ...(signal ? { signal } : {}), ...(onPublished ? { onPublished } : {}) };
     invariant(actor.kind === "human", "ACTOR_DENIED", "Only a human press may request paid transcription");
     this.authority(projectId,actor);
+    if (suppliedCutoff !== undefined) assertRequestHoldCutoff(this.store, projectId, actor.requestId, suppliedCutoff);
     const scope=`${actor.principalId}:${projectId}:${actor.requestId}:owned-transcription-request:${epoch(actor)??'human'}`;
-    const requestedAtCursor=this.store.command(`${scope}-cursor`,input.key,digest(input),()=>requestHoldCutoff(this.store,projectId,actor));
+    const requestedAtCursor=this.store.command(`${scope}-cursor`,input.key,digest(input),()=>suppliedCutoff ?? requestHoldCutoff(this.store,projectId,actor));
     const proposal = await this.prepare(projectId, actor, input, options);
     const receipt = await this.publish(projectId, actor, { key: digest({ key: input.key, action: 'request-transcription' }), proposalId: proposal.id, proposalDigest: digest(proposal) }, options, true, requestedAtCursor);
     return { proposal, receipt };
   }
   private async publish(projectId: string, human: ActorContext, input: ReviewOwnedTranscription,
-    options: { signal?: AbortSignal }, automatic: boolean, requestedAtCursor?: number): Promise<OwnedTranscriptionApplyReceipt> {
-    const signal = options.signal, artifactDir = this.artifactDir, cancellation = signal ? { signal } : {};
+    options: { signal?: AbortSignal; onPublished?: (receipt: OwnedTranscriptionApplyReceipt) => void }, automatic: boolean, requestedAtCursor?: number): Promise<OwnedTranscriptionApplyReceipt> {
+    const signal = options.signal, onPublished = options.onPublished, artifactDir = this.artifactDir, cancellation = signal ? { signal } : {};
     const stopped = (): void => invariant(!signal?.aborted, "OWNED_TRANSCRIPTION_CANCELLED", "Recording review was cancelled");
     try {
       stopped(); human = snapshotOwnedTranscriptionData(human, 16384); input = captureOwnedTranscriptionReviewInput(input);
@@ -110,7 +112,7 @@ export class OwnedTranscriptionService {
       replay = checkpoint(); if (replay) return replay;
       invariant(canonical(compiled) === canonical(proposal.compiled) && canonical(logicalIds) === canonical(proposal.logicalIds),
         "OWNED_TRANSCRIPTION_STALE", "Saved recording code no longer reproduces the exact reviewed plan");
-      return this.production.commitOwnedTranscriptionReview(projectId, human, input, { ...cancellation, ...(automatic ? { requested: true as const, ...(requestedAtCursor !== undefined ? { requestedAtCursor } : {}) } : {}) });
+      return this.production.commitOwnedTranscriptionReview(projectId, human, input, { ...cancellation, ...(onPublished ? { onPublished } : {}), ...(automatic ? { requested: true as const, ...(requestedAtCursor !== undefined ? { requestedAtCursor } : {}) } : {}) });
     } finally { stopped(); }
   }
 

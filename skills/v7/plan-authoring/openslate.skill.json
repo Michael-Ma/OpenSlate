@@ -22,6 +22,7 @@
     "prepare_recording_transcription",
     "prepare_narration_speech",
     "record_notes",
-    "propose_change"
+    "propose_change",
+    "make_keyframes"
   ]
 }
