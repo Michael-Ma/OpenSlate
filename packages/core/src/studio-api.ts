@@ -19,7 +19,8 @@ export interface NativeDiagnostic {
 export interface StudioArtifactRef {
   artifactId: string;
   sha256: string;
-  kind: "image" | "video" | "audio";
+  /** document: an imported PDF, TXT or MD file; its extracted text is what the Director reads. */
+  kind: "image" | "video" | "audio" | "document";
 }
 
 // ---------------------------------------------------------------------------
@@ -526,7 +527,62 @@ export interface ProjectListItem {
   updatedAt: string;
 }
 
-export type AssetRole = "keyframe" | "clip" | "voice" | "music" | "upload" | "export";
+export type AssetRole = "keyframe" | "clip" | "voice" | "music" | "upload" | "document" | "export";
+
+// ---------------------------------------------------------------------------
+// Files sent with a Director message (composer attach, drop and paste)
+// ---------------------------------------------------------------------------
+
+/**
+ * Uploads, each saved to the film's Assets first:
+ *   image     POST /images/uploads?expectedHeadVersion=N            PNG, JPEG, WebP or HEIC (stored as PNG), up to 32 MiB
+ *   video     POST /media/uploads?expectedHeadVersion=N             up to 128 MiB
+ *   audio     POST /audio-library/uploads?role=upload&name=         up to 128 MiB
+ *   document  POST /documents/uploads?expectedHeadVersion=N&name=   PDF, TXT or MD, up to 32 MiB
+ * A document upload answers with its artifact and what was extracted.
+ */
+export interface DocumentUploadResult {
+  artifact: StudioArtifactRef;
+  name: string;
+  pages?: number;
+  /** Characters of text the Director can read; 0 for a PDF with no text layer (scanned pages). */
+  characters: number;
+  /** The text was longer than the Director's limit and was cut there. */
+  truncated: boolean;
+}
+
+/**
+ * POST /api/projects/:projectId/messages may carry `attachments` (1 to 8 owned artifacts, any kind) next to its text.
+ * What the Director receives: an image as a picture; a video as a few still frames with its length and size; an audio
+ * file as its length and format (it may transcribe it, which is paid and shown); a document as its extracted text.
+ */
+export interface DirectorAttachmentRef {
+  artifactId: string;
+  sha256: string;
+}
+
+/** A person's message in the thread lists what it carried. */
+export interface MessageAttachmentView {
+  artifact: StudioArtifactRef;
+  name: string;
+  /** Picture frames or document text the Director actually received; false when it could not be read. */
+  readable: boolean;
+}
+
+/**
+ * Paid work the Director started inside a turn (keyframes and voice lines, or a transcription of a file the person
+ * sent). Shown in the thread with its price; Stop halts what has not been sent. Video is never started by the Director.
+ */
+export interface DirectorGenerationEffect {
+  kind: "keyframes" | "transcription";
+  sceneIds: string[];
+  shotIds: string[];
+  keyframes: number;
+  voiceLines: number;
+  /** Total estimate of what was started. */
+  quote: PriceQuote;
+  at: string;
+}
 
 /** GET /api/projects/:projectId/assets?sceneId=&shotId=&role= */
 export interface AssetItem {

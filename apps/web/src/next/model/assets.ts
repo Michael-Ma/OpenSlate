@@ -8,7 +8,7 @@ import { msg, type Msg, type Target } from "./types.ts";
  * overview's scenes and shots are read; nothing here talks to the server.
  */
 
-export const ROLE_FILTERS = ["all", "keyframe", "clip", "voice", "music", "upload", "export"] as const;
+export const ROLE_FILTERS = ["all", "keyframe", "clip", "voice", "music", "upload", "document", "export"] as const;
 export type RoleFilter = (typeof ROLE_FILTERS)[number];
 /** "all", "film" (whole film only) or a scene id. */
 export type SceneFilter = string;
@@ -18,7 +18,7 @@ export interface AssetFilters {
 }
 export const ALL_ASSETS: AssetFilters = { role: "all", scene: "all" };
 
-const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, clip: 1, voice: 2, music: 3, upload: 4, export: 5 };
+const ROLE_ORDER: Record<AssetRole, number> = { keyframe: 0, clip: 1, voice: 2, music: 3, upload: 4, document: 5, export: 6 };
 
 /** Unique per stored file. Artifact ids alone are not enough: a take can reuse its id with new bytes. */
 export const assetKey = (item: Pick<AssetItem, "artifact">): string => `${item.artifact.kind}:${item.artifact.artifactId}:${item.artifact.sha256}`;

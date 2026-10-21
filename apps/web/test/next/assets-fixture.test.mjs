@@ -17,7 +17,7 @@ test('the sample library is the design study’s: 16 items, grouped by scene and
   const { items } = await all(port);
   assert.equal(items.length, 16);
   const view = assetLibrary(items, port.world.overview, ALL_ASSETS);
-  assert.deepEqual(view.counts, { all: 16, keyframe: 6, clip: 3, voice: 3, music: 2, upload: 2, export: 0 });
+  assert.deepEqual(view.counts, { all: 16, keyframe: 6, clip: 3, voice: 3, music: 2, upload: 2, document: 0, export: 0 });
   assert.deepEqual(view.film.tiles.map((t) => en(t.title)), ['low-tide.mp3', 'foghorn-theme.wav', 'Imported image 1', 'Imported image 2']);
   assert.deepEqual(view.scenes[0].sets[1].tiles.map((t) => [en(t.title), en(t.use.label)]), [
     ['Keyframe 1.2 · take 1', 'Current'], ['Clip 1.2 · take 1', 'Current'], ['Voice line 1.2', 'Earlier'], ['Voice line 1.2', 'Current'],

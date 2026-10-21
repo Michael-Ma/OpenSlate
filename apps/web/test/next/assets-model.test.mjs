@@ -32,7 +32,7 @@ test('the library groups the whole film first, then each scene and shot in film 
   const view = assetLibrary(library(), overview, ALL_ASSETS);
   assert.equal(view.total, 16);
   assert.equal(view.shown, 16);
-  assert.deepEqual(view.counts, { all: 16, keyframe: 6, clip: 3, voice: 3, music: 2, upload: 2, export: 0 });
+  assert.deepEqual(view.counts, { all: 16, keyframe: 6, clip: 3, voice: 3, music: 2, upload: 2, document: 0, export: 0 });
   assert.ok(view.film);
   // Imported pictures keep no file name in the library, so the two are numbered, oldest first.
   assert.deepEqual(view.film.tiles.map((t) => en(t.title)), ['low-tide.mp3', 'foghorn-theme.wav', 'Imported image 1', 'Imported image 2']);

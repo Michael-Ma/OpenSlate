@@ -36,7 +36,9 @@ export function useShotTake(s: ProductionService, projectId: string, shotId: str
     invariant(!queuedReplacement && !attempts.some(a => !a.released && !["failed", "succeeded"].includes(a.phase)),
       "ATTEMPT_EXISTS", "Resolve the current keyframe job before switching takes");
     invariant(!take.current, "ALREADY_COMPLETE", "This keyframe is already current");
-    s.engine.verifyArtifact(projectId, take.artifact);
+    const artifact = take.artifact;
+    invariant(artifact.kind === "image", "VALIDATION_ERROR", "Only a keyframe can be used as a keyframe take");
+    s.engine.verifyArtifact(projectId, { ...artifact, kind: "image" });
     const undo = captureMediaUndo(s, projectId);
     const actor = s.beginRequest(projectId, "local-user", "Use the selected earlier keyframe. Its clip needs generating again.",
       { source: "app", concurrency: "alongside", holdScopeIds: [], editing: true, scopeIds: [shotId], key: `use-take:${key}` });
