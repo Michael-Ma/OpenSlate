@@ -110,10 +110,13 @@ async function openScene3Frames(page) {
   // renders while something asks for frames, so wait on animation frames rather than polling text.
   const opened = (label) => page.waitForFunction((id) => /Opened/.test(document.querySelector(`[data-card="${id}"] .stl`)?.textContent ?? ""),
     shot(label), { polling: "raf", timeout: 15000 });
-  await page.click('.card [data-act="open-shot"][data-shot="shot-3-1"]');
-  await opened("3.1");
-  await page.click('.card [data-act="open-shot"][data-shot="shot-3-2"]');
-  await opened("3.2");
+  // The app reveals the preview with a smooth scroll; under load headless Chrome may not finish it, so the test
+  // brings the preview on screen the way a person would before checking that the frame counts as opened.
+  for (const label of ["3.1", "3.2"]) {
+    await page.click(`.card [data-act="open-shot"][data-shot="${shot(label)}"]`);
+    await page.locator("main.work .preview").first().scrollIntoViewIfNeeded();
+    await opened(label);
+  }
 }
 
 /**
