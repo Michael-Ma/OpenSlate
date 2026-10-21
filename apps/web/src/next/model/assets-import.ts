@@ -3,8 +3,8 @@ import { msg, type Msg } from "./types.ts";
 
 /**
  * Importing a file into the film's assets through the existing upload routes:
- *   image     POST /images/uploads?expectedHeadVersion=N           (PNG, JPEG, WebP or HEIC, up to 32 MiB)
- *   video     POST /media/uploads?expectedHeadVersion=N            (up to 128 MiB)
+ *   image     POST /images/uploads?expectedHeadVersion=N&name=     (PNG, JPEG, WebP or HEIC, up to 32 MiB)
+ *   video     POST /media/uploads?expectedHeadVersion=N&name=      (up to 128 MiB)
  *   audio     POST /audio-library/uploads?role=music|upload&name=  (up to 128 MiB)
  *   document  POST /documents/uploads?expectedHeadVersion=N&name=  (PDF, TXT or MD, up to 32 MiB)
  * Video and audio are taken up to 6 minutes long.
@@ -110,19 +110,11 @@ export function cleanName(name: string): string {
 
 /** The project-relative upload path, query included. */
 export function uploadPath(kind: ImportKind, headVersion: number, use: AudioUse, name: string): string {
-  if (kind === "audio") {
-    const query = new URLSearchParams({ role: use });
-    const clean = cleanName(name);
-    if (clean) query.set("name", clean);
-    return `/audio-library/uploads?${query.toString()}`;
-  }
-  if (kind === "document") {
-    const query = new URLSearchParams({ expectedHeadVersion: String(headVersion) });
-    const clean = cleanName(name);
-    if (clean) query.set("name", clean);
-    return `/documents/uploads?${query.toString()}`;
-  }
-  return `/${kind === "image" ? "images" : "media"}/uploads?expectedHeadVersion=${headVersion}`;
+  const query = new URLSearchParams(kind === "audio" ? { role: use } : { expectedHeadVersion: String(headVersion) });
+  const clean = cleanName(name);
+  if (clean) query.set("name", clean);
+  const route = { image: "images", video: "media", audio: "audio-library", document: "documents" }[kind];
+  return `/${route}/uploads?${query.toString()}`;
 }
 
 /**

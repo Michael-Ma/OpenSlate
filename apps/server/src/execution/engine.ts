@@ -79,6 +79,7 @@ export interface ArtifactRecord {
   width?: number; height?: number; validationDigest?: string;
   derivationId?: string; sourceDescriptorId?: string;
   transcriptCandidateId?: string;
+  name?: string;
 }
 interface Reservation { id: string; projectId: string; attemptId: string; micros: string; state: "reserved" | "charged" | "released" }
 interface Hold { id: string; projectId: string; scopeId: string; ownerId: string; active: boolean }

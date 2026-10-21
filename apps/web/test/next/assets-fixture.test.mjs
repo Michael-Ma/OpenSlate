@@ -4,6 +4,7 @@ import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { FIXTURE_PICTURE_ROUTE, fixtureAssetPicture, isFixtureImport, stageFixturePreview } from '../../src/next/fixtures/routes/assets.ts';
 import { PROJECT_ID, shotId, sceneId } from '../../src/next/fixtures/last-ferry.ts';
 import { ALL_ASSETS, assetLibrary, readAllAssets } from '../../src/next/model/assets.ts';
+import { uploadPath } from '../../src/next/model/assets-import.ts';
 import { translate } from '../../src/next/i18n/translate.ts';
 
 const base = `/api/projects/${PROJECT_ID}`;
@@ -101,6 +102,92 @@ test('imports add to the library through the simulated upload routes, and refuse
   const audioCaps = await get(port, '/audio-library?role=music');
   assert.equal(audioCaps.capabilities.maxSeconds, 360);
   port.close();
+});
+
+test('named PNG, JPEG and video imports keep their names in Assets and message attachments', async t => {
+  const port = new FixturePort();
+  t.after(() => port.close());
+  const imports = [];
+  for (const [kind, name, type] of [['image', 'Pier & tide.png', 'image/png'], ['image', '码头.jpg', 'image/jpeg'], ['video', 'Gangway clip.mp4', 'video/mp4']]) {
+    const receipt = await post(port, uploadPath(kind, port.world.snapshot.project.headVersion, 'upload', name), { name, type, size: 5000, key: name, ...(kind === 'video' ? { durationSeconds: 4 } : {}) });
+    imports.push({ artifact: receipt.artifact, name });
+  }
+  const { items } = await all(port);
+  const view = assetLibrary(items, port.world.overview, ALL_ASSETS);
+  for (const { artifact, name } of imports) {
+    const item = items.find(item => item.artifact.artifactId === artifact.artifactId);
+    assert.equal(item.label, name);
+    const tile = view.film.tiles.find(tile => tile.item.artifact.artifactId === artifact.artifactId);
+    assert.equal(en(tile.title), name);
+  }
+  await post(port, '/messages', { text: 'Look at these files', attachments: imports.map(({ artifact }) => ({ artifactId: artifact.artifactId, sha256: artifact.sha256 })) });
+  assert.deepEqual(port.world.snapshot.conversation.at(-1).attachments.map(({ name, artifact }) => [name, artifact.kind]), imports.map(({ name, artifact }) => [name, artifact.kind]));
+});
+
+test('unnamed picture and video imports retain their library and message fallback labels', async t => {
+  const port = new FixturePort();
+  t.after(() => port.close());
+  const imports = [];
+  for (const route of ['images', 'media']) {
+    const receipt = await post(port, `/${route}/uploads?expectedHeadVersion=${port.world.snapshot.project.headVersion}`, { name: route === 'images' ? 'not-a-query-name.png' : 'not-a-query-name.mp4', type: route === 'images' ? 'image/png' : 'video/mp4', size: 5000, key: route });
+    imports.push(receipt.artifact);
+  }
+  const { items } = await all(port);
+  for (const artifact of imports) assert.equal(items.find(item => item.artifact.artifactId === artifact.artifactId).label, `${port.world.snapshot.project.name} · upload`);
+  const titles = assetLibrary(items, port.world.overview, ALL_ASSETS).film.tiles.map(tile => en(tile.title));
+  assert.ok(titles.includes('Imported image 3'));
+  assert.ok(titles.includes('Imported video'));
+  await post(port, '/messages', { text: 'Look at these files', attachments: imports.map(({ artifactId, sha256 }) => ({ artifactId, sha256 })) });
+  assert.deepEqual(port.world.snapshot.conversation.at(-1).attachments.map(({ name }) => name), imports.map(() => `${port.world.snapshot.project.name} · upload`));
+});
+
+test('picture and video names reject empty, oversized, control and slash values without importing', async t => {
+  const port = new FixturePort();
+  t.after(() => port.close());
+  await all(port);
+  const head = port.world.snapshot.project.headVersion;
+  const cursor = port.world.overview.cursor;
+  const invalid = ['', 'x'.repeat(121), 'pier/a.png', 'pier\\a.png', 'a\u0000.png', 'a\n.png', 'a\u001f.png', 'a\u007f.png'];
+  for (const route of ['images', 'media']) {
+    for (const name of invalid) {
+      const path = `/${route}/uploads?${new URLSearchParams({ expectedHeadVersion: String(head), name })}`;
+      const body = { name: 'fixture-file', type: route === 'images' ? 'image/png' : 'video/mp4', size: 5000, key: `${route}:${name}` };
+      await assert.rejects(post(port, path, body), error => error.code === 'VALIDATION_ERROR' && error.status === 400);
+      assert.deepEqual(await post(port, path, { ...body, refusalInBody: true }), { refused: { code: 'VALIDATION_ERROR' } });
+    }
+  }
+  assert.equal((await all(port)).items.length, 16);
+  assert.equal(port.world.snapshot.project.headVersion, head);
+  assert.equal(port.world.overview.cursor, cursor);
+});
+
+test('picture and video names preserve exact valid names at the length boundary', async t => {
+  const port = new FixturePort();
+  t.after(() => port.close());
+  for (const [route, name] of [['images', 'a'.repeat(120)], ['media', '  clip · preview.mp4  ']]) {
+    const receipt = await post(port, `/${route}/uploads?${new URLSearchParams({ expectedHeadVersion: String(port.world.snapshot.project.headVersion), name })}`, { name: 'fixture-file', type: route === 'images' ? 'image/png' : 'video/mp4', size: 5000, key: route });
+    assert.equal((await all(port)).items.find(item => item.artifact.artifactId === receipt.artifact.artifactId).label, name);
+  }
+});
+
+test('named picture and video replays are exact and reject another name, missing name or changed file', async t => {
+  const port = new FixturePort();
+  t.after(() => port.close());
+  for (const route of ['images', 'media']) {
+    const query = new URLSearchParams({ expectedHeadVersion: String(port.world.snapshot.project.headVersion), name: route === 'images' ? 'pier.png' : 'pier.mp4' });
+    const path = `/${route}/uploads?${query}`;
+    const body = { name: 'fixture-file', type: route === 'images' ? 'image/png' : 'video/mp4', size: 5000, key: route };
+    const first = await post(port, path, body);
+    assert.deepEqual(await post(port, path, body), first, 'the original head still replays after the film moved');
+    const head = port.world.snapshot.project.headVersion;
+    query.set('name', route === 'images' ? 'another.png' : 'another.mp4');
+    await assert.rejects(post(port, `/${route}/uploads?${query}`, body), error => error.code === 'IDEMPOTENCY_CONFLICT');
+    query.delete('name');
+    assert.deepEqual(await post(port, `/${route}/uploads?${query}`, { ...body, refusalInBody: true }), { refused: { code: 'IDEMPOTENCY_CONFLICT' } });
+    await assert.rejects(post(port, path, { ...body, size: 5001 }), error => error.code === 'IDEMPOTENCY_CONFLICT');
+    assert.equal(port.world.snapshot.project.headVersion, head);
+  }
+  assert.equal((await all(port)).items.length, 18, 'only the two original imports were saved');
 });
 
 test('a request sent again with the same key replays its receipt instead of importing twice', async () => {

@@ -44,8 +44,8 @@ interface AssetsFixture {
   serial: number;
   /** Makes this world's imported artifact ids unique, so their pictures never mix with another world's. */
   tag: string;
-  /** Receipts by Idempotency-Key. */
-  receipts: Map<string, unknown>;
+  /** Receipts by Idempotency-Key, with exact image/video import identities. */
+  receipts: Map<string, { receipt: unknown; identity?: string }>;
   /** Pictures of the PNGs imported into this sample film, by artifact id (standalone SVGs). */
   pictures: Map<string, string>;
 }
@@ -230,14 +230,33 @@ function requireHead(world: FixtureWorld, raw: string | undefined): void {
   if (expected !== world.snapshot.project.headVersion) throw new ApiError("REVISION_CONFLICT", 409);
 }
 
-/** The studio's replay and refusal behaviour around one upload: a known key replays its receipt. */
-function upload(world: FixtureWorld, input: unknown, run: (body: UploadBody) => unknown): unknown {
+/** The same optional name accepted by the studio's image and video upload routes. */
+function uploadName(raw: string | undefined): string | undefined {
+  const name = query(raw).get("name");
+  if (name === null) return undefined;
+  if (name.length < 1 || [...name].length > 120 || /[\u0000-\u001f\u007f/\\]/.test(name)) throw new ApiError("VALIDATION_ERROR", 400);
+  return name;
+}
+
+/** Simulated file metadata stands in for the exact bytes a live upload binds to its key. */
+function uploadIdentity(kind: "image" | "video", raw: string | undefined, input: unknown): string {
+  const body = bodyOf(input);
+  return JSON.stringify([kind, query(raw).get("expectedHeadVersion"), uploadName(raw), body.name, body.size, body.type, body.durationSeconds]);
+}
+
+/** The studio's replay and refusal behaviour around one upload: a known exact request replays its receipt. */
+function upload(world: FixtureWorld, input: unknown, run: (body: UploadBody) => unknown, identify?: () => string): unknown {
   const body = bodyOf(input);
   const fixture = state(world);
-  if (body.key && fixture.receipts.has(body.key)) return fixture.receipts.get(body.key);
   try {
+    const identity = identify?.();
+    const prior = body.key ? fixture.receipts.get(body.key) : undefined;
+    if (prior) {
+      if (identity !== undefined && identity !== prior.identity) throw new ApiError("IDEMPOTENCY_CONFLICT", 409);
+      return prior.receipt;
+    }
     const receipt = run(body);
-    if (body.key) fixture.receipts.set(body.key, receipt);
+    if (body.key) fixture.receipts.set(body.key, { receipt, ...(identity !== undefined ? { identity } : {}) });
     return receipt;
   } catch (error) {
     if (body.refusalInBody && error instanceof ApiError) return { refused: { code: error.code } };
@@ -266,6 +285,7 @@ function requireLength(body: UploadBody): number {
 
 function importImage(world: FixtureWorld, raw: string | undefined, body: UploadBody) {
   requireHead(world, raw);
+  const name = uploadName(raw);
   const size = Number(body.size ?? 0);
   // The studio stores PNG, JPEG, WebP and HEIC pictures as PNG; anything else, or too small to hold a picture, is refused.
   if (!["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"].includes(String(body.type)) || size <= 32) throw new ApiError("IMAGE_INPUT_INVALID", 409);
@@ -275,19 +295,20 @@ function importImage(world: FixtureWorld, raw: string | undefined, body: UploadB
   const preview = body.key ? stagedPreviews.get(body.key) : undefined;
   if (preview)
     remember(fixture.pictures, artifact.artifactId, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice"><image href="${preview}" width="320" height="180" preserveAspectRatio="xMidYMid slice"/></svg>`, PICTURE_LIMIT);
-  add(world, { artifact, role: "upload", current: false, source: "imported", label: `${world.snapshot.project.name} · upload`, createdAt: localNow() }, true);
+  add(world, { artifact, role: "upload", current: false, source: "imported", label: name ?? `${world.snapshot.project.name} · upload`, createdAt: localNow() }, true);
   return { artifact, revisionId: world.snapshot.project.revisionId, headVersion: world.snapshot.project.headVersion, width: 1600, height: 900, byteLength: size, requestId: `fixture-request-${fixture.serial}` };
 }
 
 function importVideo(world: FixtureWorld, raw: string | undefined, body: UploadBody) {
   requireHead(world, raw);
+  const name = uploadName(raw);
   const size = Number(body.size ?? 0);
   if (size <= 0) throw new ApiError("MEDIA_INVALID_INPUT", 409);
   if (size > 128 * MIB) throw new ApiError("UPLOAD_TOO_LARGE", 409);
   const seconds = requireLength(body);
   const fixture = state(world);
   const artifact = ref(`art-video-import-${fixture.tag}-${++fixture.serial}`, "video");
-  add(world, { artifact, role: "upload", current: false, source: "imported", label: `${world.snapshot.project.name} · upload`, createdAt: localNow(), ...(seconds ? { durationSeconds: seconds } : {}) }, true);
+  add(world, { artifact, role: "upload", current: false, source: "imported", label: name ?? `${world.snapshot.project.name} · upload`, createdAt: localNow(), ...(seconds ? { durationSeconds: seconds } : {}) }, true);
   return { artifact, sourceId: `source-${fixture.serial}`, revisionId: world.snapshot.project.revisionId, headVersion: world.snapshot.project.headVersion, requestId: `fixture-request-${fixture.serial}` };
 }
 
@@ -345,8 +366,8 @@ export const assetsRoutes: FixtureRoute[] = [
       return { headVersion: world.snapshot.project.headVersion, revisionId: world.snapshot.project.revisionId, capabilities: { import: true, format: "image/png", maxBytes: 32 * MIB, unavailableReason: null }, images: [], coverage: { offset: 0, returned: 0, total: 0, nextOffset: null } };
     },
   },
-  { method: "POST", match: /^\/images\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importImage(world, raw, input)) },
-  { method: "POST", match: /^\/media\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importVideo(world, raw, input)) },
+  { method: "POST", match: /^\/images\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importImage(world, raw, input), () => uploadIdentity("image", raw, body)) },
+  { method: "POST", match: /^\/media\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importVideo(world, raw, input), () => uploadIdentity("video", raw, body)) },
   { method: "POST", match: /^\/documents\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importDocument(world, raw, input)) },
   { method: "POST", match: /^\/audio-library\/uploads(?:\?(.*))?$/, handle: (world, [raw], body) => upload(world, body, (input) => importAudio(world, raw, input)) },
 ];

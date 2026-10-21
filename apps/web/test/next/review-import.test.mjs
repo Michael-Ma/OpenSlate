@@ -14,7 +14,7 @@ test('B17 #12 an absolute import request keeps its originating project after sel
 test('B17 #12 stale replay refresh reads only its original film and preserves that path',async()=>{
   const {refreshedUploadPath}=await import('../../src/next/model/import-flight.ts'); const reads=[];
   const path=await refreshedUploadPath(async path=>{reads.push(path);return {project:{id:'film-a',headVersion:14}};},'film-a','image','music','a.png');
-  assert.deepEqual(reads,['/api/projects/film-a']); assert.equal(path,'/api/projects/film-a/images/uploads?expectedHeadVersion=14');
+  assert.deepEqual(reads,['/api/projects/film-a']); assert.equal(path,'/api/projects/film-a/images/uploads?expectedHeadVersion=14&name=a.png');
 });
 
 test('B17 #12 fresh import reconciliation failures become a retryable refusal and never a new upload',async()=>{

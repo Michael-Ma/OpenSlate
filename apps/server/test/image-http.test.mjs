@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { createApp } from "../dist/app.js";
 import { Store } from "../dist/persistence/index.js";
 import { Engine } from "../dist/execution/index.js";
 import { ProductionService } from "../dist/application/service.js";
+import { LocalDirectorController } from "../dist/application/local-director.js";
 import { ImageApplicationService, LocalImageStore, PNG_IMPORT_MAX_BYTES } from "../dist/media/index.js";
 import { ManagedUploadStore } from "../dist/narration/managed-upload.js";
 import { FakeProvider } from "@openslate/providers";
@@ -32,18 +34,80 @@ before(async () => {
   jpeg = await readFile(join(inputs, 'reference.jpg'));
 });
 after(async () => rm(inputs, { recursive: true, force: true }));
-async function fixture(t, { maxBytes = PNG_IMPORT_MAX_BYTES, available = true } = {}) {
+async function writable(path) {
+  await chmod(path, 0o700);
+  for (const entry of await readdir(path, { withFileTypes: true })) if (entry.isDirectory()) await writable(join(path, entry.name));
+}
+async function fixture(t, { maxBytes = PNG_IMPORT_MAX_BYTES, available = true, withDirector = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "openslate-image-http-")), store = new Store(join(dir, "db.sqlite")), provider = new FakeProvider(join(dir, "fake.sqlite"));
   const engine = new Engine(store, provider, { artifactDir: join(dir, "artifacts") }), production = new ProductionService(store, engine);
   const project = production.createProject("HTTP reference images"), uploads = new ManagedUploadStore({ rootDir: join(dir, "uploads"), maxBytes });
   const local = new LocalImageStore({ rootDir: join(engine.artifactDir, "images"), ffmpegPath, ffprobePath }), images = new ImageApplicationService(production, local);
-  const token = "test-local-token-with-enough-characters", app = createApp({ service: production, localToken: token, imageRoutes: { production, images: available ? images : null, uploads } });
+  const director = withDirector ? new LocalDirectorController(production, {
+    repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: dir, endpoint: "http://127.0.0.1:3101", ffmpegPath,
+    defaults: { binaryPath: process.execPath, model: "test-model" }, setup: async () => { throw new Error("Image HTTP tests must keep the scripted Director"); },
+  }) : undefined;
+  const token = "test-local-token-with-enough-characters", app = createApp({ service: production, localToken: token, ...(director ? { director, runtimeSettings: director } : {}), imageRoutes: { production, images: available ? images : null, uploads } });
   const path = `/api/projects/${project.id}/images`, head = () => store.getProject(project.id);
   const request = (method, url, payload, key = newId(), extra = {}) => app.inject({ method, url, ...(payload !== undefined ? { payload } : {}), headers: { host: "127.0.0.1", authorization: `Bearer ${token}`, "idempotency-key": key, ...extra } });
-  const upload = (key = newId(), requestId, payload = png, version = head().headVersion) => request("POST", `${path}/uploads?expectedHeadVersion=${version}${requestId ? `&requestId=${requestId}` : ""}`, payload, key, { "content-type": "application/octet-stream" });
-  t.after(async () => { await app.close(); store.close(); provider.close(); await rm(dir, { recursive: true, force: true }); });
-  return { dir, store, provider, engine, production, project, uploads, local, images, app, path, request, upload, head };
+  const upload = (key = newId(), requestId, payload = png, version = head().headVersion, name) => request("POST", `${path}/uploads?expectedHeadVersion=${version}${requestId ? `&requestId=${requestId}` : ""}${name === undefined ? "" : `&name=${encodeURIComponent(name)}`}`, payload, key, { "content-type": "application/octet-stream" });
+  t.after(async () => { await director?.close(); await app.close(); store.close(); provider.close(); if (director) await writable(dir); await rm(dir, { recursive: true, force: true }); });
+  return { dir, store, provider, engine, production, project, uploads, local, images, director, app, path, request, upload, head };
 }
+
+test("named PNG and JPEG imports retain their file names in Assets and Director messages", async t => {
+  const f = await fixture(t, { withDirector: true }), imported = [];
+  for (const [name, payload] of [["渡口 reference.PNG", png], ["人物 portrait.jpeg", jpeg]]) {
+    const response = await f.upload(newId(), undefined, payload, f.head().headVersion, name); assert.equal(response.statusCode, 200, response.body);
+    imported.push({ artifact: response.json().artifact, name });
+  }
+  const assets = await f.request("GET", `/api/projects/${f.project.id}/assets`); assert.equal(assets.statusCode, 200, assets.body);
+  for (const item of imported) assert.equal(assets.json().assets.find(asset => asset.artifact.artifactId === item.artifact.artifactId)?.label, item.name);
+  const message = await f.request("POST", `/api/projects/${f.project.id}/messages`, { text: "Discuss these references.", editing: false, attachments: imported.map(({ artifact }) => ({ artifactId: artifact.artifactId, sha256: artifact.sha256 })) });
+  assert.equal(message.statusCode, 200, message.body); await f.director.settle();
+  const snapshot = await f.request("GET", `/api/projects/${f.project.id}`); assert.equal(snapshot.statusCode, 200, snapshot.body);
+  const user = snapshot.json().conversation.find(item => item.role === "user" && item.requestId === message.json().requestId);
+  assert.deepEqual(user.attachments, imported.map(item => ({ ...item, readable: true })));
+  assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.store.list("native_model_start", f.project.id).length, 0);
+});
+
+test("unnamed images retain the original Assets and message attachment labels", async t => {
+  const f = await fixture(t, { withDirector: true }), upload = await f.upload(); assert.equal(upload.statusCode, 200, upload.body);
+  const artifact = upload.json().artifact, assets = await f.request("GET", `/api/projects/${f.project.id}/assets`);
+  assert.equal(assets.statusCode, 200, assets.body); assert.equal(assets.json().assets[0].label, `${f.project.name} · upload`);
+  const message = await f.request("POST", `/api/projects/${f.project.id}/messages`, { editing: false, attachments: [{ artifactId: artifact.artifactId, sha256: artifact.sha256 }] });
+  assert.equal(message.statusCode, 200, message.body); await f.director.settle();
+  const snapshot = await f.request("GET", `/api/projects/${f.project.id}`); assert.equal(snapshot.statusCode, 200, snapshot.body);
+  assert.deepEqual(snapshot.json().conversation.find(item => item.role === "user" && item.requestId === message.json().requestId).attachments, [{ artifact, name: `image ${artifact.artifactId}`, readable: true }]);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test("image upload names accept both length boundaries and reject empty, long, control and path names before staging", async t => {
+  const f = await fixture(t);
+  for (const name of ["", "x".repeat(121), "a\u0000b.png", "a\tb.png", "a\nb.png", "a\u007fb.png", "folder/image.png", "folder\\image.png"]) {
+    const response = await f.upload(newId(), undefined, png, 0, name);
+    assert.equal(response.statusCode, 400, response.body); assert.equal(response.json().error.code, "VALIDATION_ERROR");
+  }
+  for (const kind of ["message", "image_import", "artifact"]) assert.equal(f.store.list(kind, f.project.id).length, 0);
+  assert.deepEqual(await readdir(f.uploads.rootDir), []);
+  for (const name of ["x", "x".repeat(120)]) {
+    const response = await f.upload(newId(), undefined, png, f.head().headVersion, name); assert.equal(response.statusCode, 200, response.body);
+  }
+  assert.equal(f.head().artifacts.length, 2); assert.deepEqual(await readdir(f.uploads.rootDir), []);
+});
+
+for (const explicit of [false, true]) test(`image upload name binds ${explicit ? "explicit" : "automatic"} request replay without duplicating an import`, async t => {
+  const f = await fixture(t), actor = explicit ? f.production.beginRequest(f.project.id, "local-user", "Import reference pictures") : undefined;
+  const first = await f.upload("named-once", actor?.requestId, png, 0, "reference.png"); assert.equal(first.statusCode, 200, first.body);
+  f.local.normalizeUpload = () => { throw new Error("A completed upload replay must not decode again"); };
+  const replay = await f.upload("named-once", actor?.requestId, png, 0, "reference.png"); assert.equal(replay.statusCode, 200, replay.body); assert.deepEqual(replay.json(), first.json());
+  for (const name of ["renamed.png", undefined]) {
+    const changed = await f.upload("named-once", actor?.requestId, png, 0, name);
+    assert.equal(changed.statusCode, 409, changed.body); assert.equal(changed.json().error.code, "IDEMPOTENCY_CONFLICT");
+  }
+  for (const kind of ["message", "image_import", "image_import_receipt", "artifact"]) assert.equal(f.store.list(kind, f.project.id).length, 1);
+  assert.equal(f.head().artifacts.length, 1); assert.deepEqual(await readdir(f.uploads.rootDir), []); assert.equal(f.provider.acceptedCount(), 0);
+});
 
 test("authenticated upload preserves PNG content and returns a path-free library without creating read requests", async t => {
   const f = await fixture(t), first = await f.upload("first"); assert.equal(first.statusCode, 200, first.body);
