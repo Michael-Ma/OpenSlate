@@ -84,3 +84,34 @@ test("V7 notes exercise the complete coherent proposal field set and earlier cat
   wrongFraming.patch.updateShots[0].framing = "A long descriptive framing label";
   assert.throws(() => parseToolArguments("propose_change", wrongFraming, "6.0.0"), { code: "VALIDATION_ERROR" });
 });
+
+
+test('V7 keyframe examples name one requested scope and reserve regeneration for explicit shots', () => {
+  const examples = jsonExamples('production/references/keyframes.md');
+  assert.equal(examples.length, 3);
+  for (const input of examples) assert.deepEqual(parseToolArguments('make_keyframes', input, '6.0.0').arguments, input);
+  assert.deepEqual(examples, [{ sceneIds: ['requested-scene-id'] }, { shotIds: ['requested-shot-id'] }, { shotIds: ['requested-shot-id'], regenerate: true }]);
+  const keyframes = skillFile('production/references/keyframes.md');
+  assert.match(keyframes, /fresh human conversation request in an editing turn/);
+  assert.match(keyframes, /Never send both lists/);
+  assert.match(keyframes, /Report the actual returned keyframe and voice-line work, its price\/quote/);
+  assert.match(keyframes, /per-scene refusal code/);
+  assert.match(keyframes, /replies to a review.*read-only turns.*discuss-only turns.*cannot start/);
+  assert.match(keyframes, /Video is always human-only/);
+  assert.match(keyframes, /Never blindly resubmit an unknown outcome/);
+  for (const name of ['production', 'plan-authoring']) {
+    const manifest = JSON.parse(skillFile(`${name}/openslate.skill.json`));
+    assert.ok(manifest.requiredToolIds.includes('make_keyframes'));
+    assert.match(skillFile(`${name}/SKILL.md`), /make_keyframes/);
+  }
+});
+
+test('V7 audio guidance permits only eligible current-request transcription and preserves explicit adoption', () => {
+  const text = skillFile('production/references/audio-proposals.md');
+  assert.match(text, /audio attachment sent by the person with this fresh editing conversation/);
+  assert.match(text, /asks what it says or its line is needed/);
+  assert.match(text, /Automatic, review, review-reply, read-only and discuss-only turns never start transcription/);
+  assert.match(text, /Other recordings remain pending transcription suggestions/);
+  assert.match(text, /transcripts never attach, adopt or accept themselves/);
+  assert.match(text, /never resubmit blindly/);
+});

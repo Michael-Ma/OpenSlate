@@ -16,7 +16,7 @@ import type {
   ActorContext, ArtifactRef, ChangeProposal, CompiledPlan, NodeImpact, OperationKind, ProjectRecord,
   LocalExecutionIdentity, ProviderProfile, ShotRecord, StageRequirement,
 } from "@openslate/core";
-import type { RequestSource } from "@openslate/core/public";
+import type { DirectorAttachmentRef, RequestSource } from "@openslate/core/public";
 import { projectRequest, migrateLegacyRequestSources } from "./request-source.js";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
@@ -34,7 +34,7 @@ import type { ContinueEdits } from './pending-edit-continuation.js';
 import { isScopedAssemblyRebuild } from './scoped-assembly.js';
 import { assertNarrationAuthority, narrationSpeechShotScopes } from '../narration/narration-scope.js';
 
-export interface RequestRecord { source?: RequestSource | "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; concurrency?: "alongside"; state: "active" | "superseded"; contextDigest: string | null }
+export interface RequestRecord { source?: RequestSource | "storyboard"; id: string; projectId: string; principalId: string; text: string; scopeIds: string[]; editing: boolean; concurrency?: "alongside"; state: "active" | "superseded"; contextDigest: string | null; attachments?: DirectorAttachmentRef[] }
 interface Epoch { id: string; projectId: string; requestId: string; principalId: string; tokenHash: string; state: "active" | "read_only" | "revoked"; scopeIds: string[] }
 interface PlanRecord { id: string; projectId: string; compiled: CompiledPlan }
 interface Grant { id: string; scopeId: string; kind: OperationKind; authorityId: string; origin: "initial_slot" | "user_change" }
@@ -114,14 +114,22 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; concurrency?: "alongside"; holdScopeIds?: string[]; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; concurrency?: "alongside"; holdScopeIds?: string[]; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string; attachments?: DirectorAttachmentRef[] } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
     invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
     invariant(options.source === undefined || ["user", "app", "director"].includes(options.source), "VALIDATION_ERROR", "Use a supported request source");
     invariant(options.concurrency !== "alongside" || !options.resumeFromStopId && !options.continueEdits, "VALIDATION_ERROR", "Alongside work cannot replace stopped or continued conversation authority");
     invariant(options.concurrency === undefined || options.concurrency === "alongside", "VALIDATION_ERROR", "Unsupported request concurrency");
+    const attachments = options.attachments === undefined ? undefined : snapshotOwnedTranscriptionData(options.attachments, 16384);
+    invariant(attachments === undefined || Array.isArray(attachments) && attachments.length > 0 && attachments.length <= 8
+      && attachments.every(ref => ref !== null && typeof ref === 'object' && !Array.isArray(ref)
+        && Object.keys(ref).sort().join('\0') === ['artifactId', 'sha256'].join('\0')
+        && typeof ref.artifactId === 'string' && ref.artifactId.length > 0 && ref.artifactId.length <= 160
+        && typeof ref.sha256 === 'string' && /^[a-f0-9]{64}$/.test(ref.sha256))
+      && new Set(attachments.map(ref => ref.artifactId)).size === attachments.length,
+    'VALIDATION_ERROR', 'Attach one to eight exact owned artifact identities');
     const key = options.key ?? newId();
-    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ ...(options.concurrency ? { concurrency: options.concurrency } : {}), ...(options.holdScopeIds ? { holdScopeIds: options.holdScopeIds } : {}), ...(options.supersede ? { supersede: options.supersede } : {}), text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
+    const actor = this.store.command<ActorContext>(`${principalId}:${projectId}:message`, key, digest({ ...(options.concurrency ? { concurrency: options.concurrency } : {}), ...(options.holdScopeIds ? { holdScopeIds: options.holdScopeIds } : {}), ...(options.supersede ? { supersede: options.supersede } : {}), ...(attachments ? { attachments } : {}), text, scopeIds: options.scopeIds ?? [projectId], editing: options.editing ?? true, continuationRequestId: options.continuationRequestId ?? null, contextDigest: options.contextDigest ?? null, ...(options.continueEdits ? { continueEdits: options.continueEdits } : {}), ...(options.resumeFromStopId ? { resumeFromStopId: options.resumeFromStopId } : {}) }), () => {
       const project = this.store.getProject(projectId);
       if (options.resumeFromStopId) {
         const control = this.store.get<{ paused: boolean; authorityId: string }>("execution_control", projectId);
@@ -138,7 +146,7 @@ export class ProductionService {
       invariant(!options.holdScopeIds || options.concurrency === "alongside" && options.holdScopeIds.every(id => scopeIds.includes(id) || project.shots.some(s => s.id === id && scopeIds.includes(s.sceneId))), "SCOPE_DENIED", "Holds must belong to this alongside scope");
       invariant(!options.continueEdits || (options.editing !== false && !options.continuationRequestId && !options.resumeFromStopId), 'VALIDATION_ERROR', 'Continue selected edits using one fresh editable conversation.');
       if (options.continueEdits) assertContinueEdits(this.store, project, principalId, scopeIds, options.continueEdits);
-      const request: RequestRecord = { source: options.source ?? "user", ...(options.concurrency ? { concurrency: options.concurrency } : {}), id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
+      const request: RequestRecord = { source: options.source ?? "user", ...(options.concurrency ? { concurrency: options.concurrency } : {}), ...(attachments ? { attachments } : {}), id: newId(), projectId, principalId, text, scopeIds, editing: options.editing ?? true, state: "active", contextDigest: options.contextDigest ?? null };
       this.store.insert("message", request.id, projectId, request);
       const supersededRequestIds = new Set<string>();
       // A fresh user message also ends application-only reviews, including discuss-only messages.
@@ -438,7 +446,9 @@ export class ProductionService {
    * This method is never a model tool; admission independently verifies the exact owned bytes again.
    */
   commitOwnedTranscriptionReview(projectId: string, human: ActorContext, input: ReviewOwnedTranscription,
-    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number } = {}): OwnedTranscriptionApplyReceipt {
+    options: { signal?: AbortSignal; requested?: true; requestedAtCursor?: number;
+      /** Trusted host hook: authority and visible effects commit with the paid operation. */
+      onPublished?: (receipt: OwnedTranscriptionApplyReceipt) => void } = {}): OwnedTranscriptionApplyReceipt {
     const signal = options.signal, requested = options.requested === true, requestedAtCursor = options.requestedAtCursor;
     const stopped = (): void => invariant(!signal?.aborted, "OWNED_TRANSCRIPTION_CANCELLED", "Recording review was cancelled");
     stopped();
@@ -481,7 +491,7 @@ export class ProductionService {
         return { proposalId: owned.id, proposalDigest: input.proposalDigest, reviewId: review.id,
           applicationId: application.id, grantId: grant.id, candidateId: binding.candidateId, applied };
       });
-      stopped(); return receipt;
+      stopped(); options.onPublished?.(receipt); stopped(); return receipt;
     });
   }
 

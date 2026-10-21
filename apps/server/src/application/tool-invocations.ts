@@ -1,3 +1,10 @@
+import type { DirectorGenerationEffectRecord } from "./director-generation-effects.js";
+import { hasDirectorAudioAttachment, startDirectorAttachmentTranscription, readDirectorAttachmentTranscription, type DirectorAttachmentTranscriptionRecord } from "./director-attachment-transcription.js";
+import { makeDirectorKeyframes, type DirectorKeyframesReceipt } from "./director-keyframes.js";
+import { assertDirectorGenerationAuthority } from "./director-generation-authority.js";
+import { SceneConfirmationRunner } from "../scene-confirmations.js";
+import { NarrationCanonicalService } from "../narration/canonical.js";
+import type { EnqueueSceneVoice } from "../scene-generation.js";
 import { proposeChange } from "./director-proposals.js";
 import type { ProposalPatch } from "@openslate/core";
 import { recordNotes, type NoteInput } from "./director-notes.js";
@@ -110,9 +117,13 @@ export class ToolInvocationService {
   readonly narration: NarrationService;
   readonly #ownedTranscription: OwnedTranscriptionService | undefined;
   readonly #narrationSpeech: NarrationSpeechService | undefined;
-  constructor(readonly service: ProductionService, options: { ownedTranscription?: OwnedTranscriptionService; narrationSpeech?: NarrationSpeechService } = {}) {
+  readonly #enqueueVoice: EnqueueSceneVoice;
+  constructor(readonly service: ProductionService, options: { ownedTranscription?: OwnedTranscriptionService; narrationSpeech?: NarrationSpeechService; enqueueVoice?: EnqueueSceneVoice } = {}) {
     this.narration = new NarrationService(service);
     this.#ownedTranscription = options.ownedTranscription; this.#narrationSpeech = options.narrationSpeech;
+    this.#enqueueVoice = options.enqueueVoice ?? new SceneConfirmationRunner(service, options.narrationSpeech ? {
+      narration: this.narration, canonical: new NarrationCanonicalService(this.narration), narrationSpeech: options.narrationSpeech,
+    } : undefined).enqueueKeyframes;
     invariant([this.#ownedTranscription, this.#narrationSpeech].every(port => !port || port.narration.production === service),
       "TOOL_CONFIGURATION_INVALID", "Audio proposal tools must use this application's production service");
   }
@@ -144,6 +155,7 @@ export class ToolInvocationService {
     invariant(actor.kind === "director", "ACTOR_DENIED", "Tool transport requires a director epoch");
     this.service.assertActor(projectId, actor);
     invariant(/^[A-Za-z0-9_-]{1,160}$/.test(callId), "VALIDATION_ERROR", "Invalid tool call identity");
+    if (tool === "make_keyframes") assertDirectorGenerationAuthority(this.service, projectId, actor);
     invariant(!this.service.store.get("keyframe_review_request", actor.requestId) || ["read_context", "record_notes", "propose_change", "read_skill"].includes(tool),
       "ACTOR_DENIED", "Keyframe reviews may only read context, record notes and propose changes");
     const selected = this.catalog(projectId, actor);
@@ -214,6 +226,8 @@ export class ToolInvocationService {
       if (store.get("plan_import", actor.requestId)) invariant(["read_context", "prepare_change", "inspect_artifact", "control_execution"].includes(parsed.name),
         "IMPORT_REVIEW_REQUIRED", "Interpret supplied material with prepare_change, then wait for human confirmation in Film plan. Other mutations and generation proposals are unavailable for this request.");
       switch (parsed.name) {
+        case "make_keyframes": value = await makeDirectorKeyframes(this.service, projectId, actor, id, parsed.arguments,
+          this.narration, this.#enqueueVoice, signal); break;
         case "propose_change": value = proposeChange(this.service, projectId, actor, id, parsed.arguments as unknown as { patch: ProposalPatch }); break;
         case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
@@ -249,6 +263,15 @@ export class ToolInvocationService {
         case "prepare_recording_transcription": {
           const port = this.#ownedTranscription;
           invariant(port, "TOOL_CAPABILITY_UNAVAILABLE", "Recording proposal preparation is not configured on this server");
+          if (selected.catalog.version === '6.0.0' && hasDirectorAudioAttachment(this.service, projectId, actor, parsed.arguments.audioId as string)) {
+            const result = await startDirectorAttachmentTranscription({ service: this.service, transcriptions: port, projectId, actor,
+              key: commandKey, input: proposalInput as unknown as PrepareOwnedTranscription, ...(signal ? { signal } : {}) });
+            const resolved = resolveOwnedTranscriptionApplication(store, projectId, result.receipt.candidateId);
+            value = { state: 'requested', proposalId: result.proposal.id, proposalDigest: digest(result.proposal),
+              candidateId: result.receipt.candidateId, operationId: resolved.review.nodeId, activePlanId: result.receipt.applied.activePlanId,
+              generation: result.effect, next: 'Follow this exact transcription job. Its words never attach, adopt or accept themselves.' };
+            break;
+          }
           const proposal = await port.prepare(projectId, actor, proposalInput as unknown as PrepareOwnedTranscription, signal ? { signal } : {});
           stopped(); value = pendingAudioReceipt(store, proposal, "recording_transcription", projectId, actor, actor.epochId, digest(proposalInput), commandKey);
           break;
@@ -270,7 +293,7 @@ export class ToolInvocationService {
       // not proof that the application had no effects. Unexpected failures stay unresolved.
       // A late cancellation can follow a committed domain command. Keep new
       // proposal calls reconcilable instead of inferring that no effect occurred.
-      const known = error instanceof DomainError && !(audioTool(parsed.name) && (error.code.endsWith("CANCELLED") || error.code === "TOOL_CALL_UNRESOLVED"));
+      const known = error instanceof DomainError && !((audioTool(parsed.name) || parsed.name === "make_keyframes") && (error.code.endsWith("CANCELLED") || error.code === "TOOL_CALL_UNRESOLVED"));
       this.finish(id, projectId, known ? "failed" : "unresolved", null,
         known ? { code: error.code, message: error.message.slice(0, 2000), ...(parsed.name === 'record_notes' ? {
           reason: (error.details as { reason?: ReviewNotesFailure['reason'] } | undefined)?.reason ?? (error.code === 'SCOPE_DENIED' ? 'outside_scope' : error.code === 'VALIDATION_ERROR' ? 'invalid_arguments' : 'unavailable'),
@@ -300,6 +323,16 @@ export class ToolInvocationService {
       for (const call of store.list<ToolInvocation>("tool_invocation", projectId).filter(call => call.epochId === epochId && ["started", "unresolved"].includes(call.state))) {
         if (store.get("tool_reconciliation", call.id)) continue;
         let receipt: unknown = null;
+        if (call.tool === 'make_keyframes' && call.toolContractVersion === '6.0.0' && call.catalogDigest === toolCatalog('6.0.0').digest) {
+          const saved = store.get<DirectorKeyframesReceipt>('director_keyframes_receipt', call.id);
+          if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) {
+            // The effect commits with scene publication; progress can be lost just after that commit.
+            const effects = store.list<DirectorGenerationEffectRecord>('director_generation_effect', projectId)
+              .filter(row => row.requestId === call.requestId && row.epochId === epochId && row.key.startsWith(`director-keyframes:${call.id}:`));
+            if (saved.complete || effects.length) receipt = { started: effects.map(row => ({ ...row.effect, sceneId: row.effect.sceneIds[0] })),
+              refused: saved.refused, complete: saved.complete };
+          }
+        }
         if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion && ["5.0.0", "6.0.0"].includes(call.toolContractVersion) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>(call.tool === "record_notes" ? "director_notes_receipt" : "director_proposal_receipt", call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
@@ -328,7 +361,17 @@ export class ToolInvocationService {
             }
           }
         }
-        if ((call.toolContractVersion && (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(call.toolContractVersion)) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
+        if (call.tool === 'prepare_recording_transcription' && call.toolContractVersion === '6.0.0' && call.catalogDigest === toolCatalog('6.0.0').digest) {
+          const saved = store.list<DirectorAttachmentTranscriptionRecord>('director_attachment_transcription', projectId)
+            .find(row => row.requestId === call.requestId && row.epochId === epochId && row.key === `director-tool:${call.id}` && row.state === 'succeeded');
+          if (saved) {
+            try {
+              const result = readDirectorAttachmentTranscription(this.service, projectId, saved);
+              receipt = { state: 'requested', proposalId: result.proposal.id, candidateId: result.receipt.candidateId, generation: result.effect };
+            } catch { /* Only exact retained application evidence settles a lost response. */ }
+          }
+        }
+        if (!receipt && (call.toolContractVersion && (SUPPORTED_TOOL_CONTRACTS.slice(2) as readonly string[]).includes(call.toolContractVersion)) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest && audioTool(call.tool) && call.recovery?.audioProposalCommand) {
           const command = call.recovery.audioProposalCommand, kind = audioKind(call.tool);
           if (command.kind === kind && command.key === `director-tool:${call.id}`) {
             const suffix = kind === "recording_transcription" ? "owned-transcription" : "narration-speech";

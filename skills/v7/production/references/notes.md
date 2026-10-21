@@ -10,7 +10,7 @@ Each proposal is one coherent change with no plan, new takes or generation. The 
 
 Never judge a picture absent from exact `attachedKeyframes` evidence. Metadata, prompts and frame-view receipts are not visual access. Only copy `seenKeyframe` from an attached entry. Without images, discuss writing or ask the person to inspect the picture.
 
-Notes never start generation. In Keyframes the person uses "Make keyframes" and "Confirm frames & generate video" for the two scene decisions. Paid audio suggestions likewise need a human press. A person can keep, regenerate, edit or reply; the application resolves the note and stales it when anchored evidence changes. A resolution is not new authority to edit or spend.
+Notes never start generation. A fresh human editing request may ask for keyframes through `make_keyframes`; video always needs the person's "Confirm frames & generate video" action. Notes, review turns and replies to reviews never start paid work. Audio transcription can start only for an eligible audio attachment sent with that fresh editing request; other audio suggestions need a human press. A person can keep, regenerate, edit or reply; the application resolves the note and stales it when anchored evidence changes. A resolution is not new authority to edit or spend.
 
 ## Coherent media-edit example
 

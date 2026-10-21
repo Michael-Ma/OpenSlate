@@ -2,6 +2,7 @@ import type { ProductionService } from './service.js';
 import type { DirectorTurn } from './director-supervisor.js';
 import type { ToolInvocation } from './tool-invocations.js';
 import type { ReviewNotesFailure } from '@openslate/core';
+import type { DirectorGenerationEffectRecord } from './director-generation-effects.js';
 
 const reasons: Record<string, string> = { RUNTIME_RUN_TIMEOUT: 'timeout', REQUEST_SUPERSEDED: 'superseded', OWNER_LOST: 'owner_lost' };
 /** Public progress has names/counts only, never tool arguments or native diagnostics. */
@@ -34,7 +35,10 @@ export function directorTurnViews(service: ProductionService, projectId: string)
       runtime: turn.runtimeId === 'codex-app-server' ? 'live' : 'scripted',
       action: store.get('keyframe_review_request', turn.requestId) ? 'keyframe_review' : 'conversation',
       reason: turn.errorCode ? reasons[turn.errorCode] ?? (turn.state === 'failed' ? 'failed' : 'unknown') : turn.state === 'completed' && !replied ? 'no_reply' : turn.state === 'interrupted' ? 'interrupted' : turn.state === 'failed' ? 'failed' : turn.state === 'unknown' ? 'unknown' : null,
-      effects: { notesCreated: notes, proposalsHeld: proposals, changesApplied: changes },
+      effects: { notesCreated: notes, proposalsHeld: proposals, changesApplied: changes,
+        generation: store.list<DirectorGenerationEffectRecord>('director_generation_effect', projectId)
+          .filter(record => record.requestId === turn.requestId && record.epochId === turn.epochId)
+          .map(record => structuredClone(record.effect)) },
       notesSaveFailure,
       activity: activity ? { phase: activity.phase, state: activity.state, at: activity.at } : null,
       progress: progress ? { tool: progress.tool, state: progress.state } : null };

@@ -1,0 +1,29 @@
+# Requested keyframes and voice lines
+
+Only a fresh human conversation request in an editing turn can start paid work with `make_keyframes`. The person must have asked for the keyframes of the whole film, named scenes or named shots. Read the saved scene and shot IDs, requested scope and current outcomes first. For the whole film, enumerate its scenes within that request's scope. Do not call the tool to improve quality, to complete an unrequested production stage, or for scenes or shots the person did not ask about.
+
+Call exactly one of these forms, using existing IDs:
+
+```json
+{"sceneIds":["requested-scene-id"]}
+```
+
+```json
+{"shotIds":["requested-shot-id"]}
+```
+
+Each list is nonempty, contains distinct IDs and has at most 400 entries. Never send both lists. A scene call starts its missing keyframes and needed voice lines as the scene's "Make keyframes" action does, with the same quote, holds, prerequisites and refusals. A shot call limits work to those shots and their needed voice lines. A refused scene does not prevent other eligible scenes from starting. Report the actual returned keyframe and voice-line work, its price/quote, and any per-scene refusal code; a request or quote alone does not establish that work started.
+
+Only when the person's message explicitly asks for new keyframe takes of specific shots, use:
+
+```json
+{"shotIds":["requested-shot-id"],"regenerate":true}
+```
+
+`regenerate: true` requires explicit `shotIds`; never use it for a scene-wide request or your own quality judgment. Preserve existing media unless the person requested its replacement.
+
+Keyframe-review turns, replies to a review, automatic turns, read-only turns, discuss-only turns and older tool contracts cannot start this work. A blocking refusal is not authority to create a new request, continue another request, clear a hold or retry with different IDs. Stop halts unsent work. The application records spending under the original human request and fences superseded work.
+
+Video is always human-only. Never author image, review, video or audio plan declarations or `requestNewTakes`. Tell the person which scenes are ready to review and use "Confirm frames & generate video" after inspecting the actual returned frames, motion, narration and video recipe. Returned clips need no additional acceptance gate.
+
+One tool call has one application invocation identity. On `TOOL_CALL_UNRESOLVED`, preserve its callId, inspect receipts and current outcomes, and stop dependent paid work until reconciled. Never blindly resubmit an unknown outcome or reinterpret it as a failed purchase. The executor owns technical recovery. Configured providers need no extra spending approval or usage allowance.

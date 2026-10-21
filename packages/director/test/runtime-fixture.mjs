@@ -92,6 +92,7 @@ lines.on("line", line => {
     if (["2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") tools.revise_narration_draft = { name: "revise_narration_draft" };
     if (["3.0.0", "4.0.0", "5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.prepare_recording_transcription = { name: "prepare_recording_transcription" }; tools.prepare_narration_speech = { name: "prepare_narration_speech" }; }
     if (["5.0.0", "6.0.0"].includes(config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT) && mode !== "catalog-legacy") { tools.record_notes = { name: "record_notes" }; tools.propose_change = { name: "propose_change" }; }
+    if (config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_TOOL_CONTRACT === "6.0.0" && mode !== "catalog-legacy") tools.make_keyframes = { name: "make_keyframes" };
     if (mode === "catalog-extra") tools.extra = { name: "extra" };
     return respond(id, { data: [{ name: "openslate", runtimeStatus: "connected", tools }], nextCursor: null });
   }

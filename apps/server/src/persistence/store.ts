@@ -661,6 +661,19 @@ export class Store {
       const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
       invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Director record request does not match its epoch");
     }
+    if (["director_generation_effect", "director_keyframes_receipt", "director_attachment_transcription"].includes(kind)) {
+      reference("message", body.requestId); reference("epoch", body.epochId);
+      const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
+      invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Generation evidence must belong to its original epoch request");
+    }
+    if (kind === "scene_confirmation_candidate") {
+      invariant(body.candidateId === id, "IDENTITY_MISMATCH", "Scene run mapping must retain its candidate identity");
+      reference("candidate", id); reference("scene_confirmation", body.confirmationId);
+      const candidate = this.get<{ grantId: string }>("candidate", id)!;
+      const grant = this.get<{ authorityId: string }>("grant", candidate.grantId);
+      const run = this.get<{ actor: { requestId: string } }>("scene_confirmation", String(body.confirmationId));
+      invariant(grant?.authorityId === run?.actor.requestId, "SCOPE_DENIED", "Scene run must retain the candidate's original human request");
+    }
     if (kind === "tool_invocation") {
       reference("message", body.requestId);
       reference("epoch", body.epochId);
@@ -717,6 +730,24 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
+      if (["director_generation_effect", "scene_confirmation_candidate"].includes(kind))
+        invariant(old.body === encoded, "IMMUTABLE_RECORD", "Generation and scene run evidence is immutable");
+      if (kind === "director_attachment_transcription") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestId", "epochId", "key", "inputDigest", "audioId", "operationDigest"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Attachment transcription identity is immutable");
+        if (previous.state !== "started") invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed attachment transcription is immutable");
+      }
+      if (kind === "director_keyframes_receipt") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        for (const field of ["requestId", "epochId", "argumentsDigest"])
+          invariant(canonical(previous[field]) === canonical(next[field]), "IMMUTABLE_RECORD", "Director generation identity is immutable");
+        if (previous.complete) invariant(old.body === encoded, "IMMUTABLE_RECORD", "Completed keyframe receipts are immutable");
+      }
+      if (kind === "message") {
+        const previous = JSON.parse(old.body), next = JSON.parse(encoded);
+        invariant(canonical(previous.attachments ?? []) === canonical(next.attachments ?? []), "IMMUTABLE_RECORD", "Message attachments are immutable");
+      }
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;
         const next = JSON.parse(encoded) as Record<string, unknown>;

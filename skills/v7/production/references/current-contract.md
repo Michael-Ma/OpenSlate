@@ -1,6 +1,6 @@
 # Current contract
 
-Guidance package `7.0.0`, tool contract `6.0.0`, workflow and planning contracts `1.0.0`. The ten tools include `record_notes` and `propose_change`. The application owns authority, project state, execution and app-computed previews. Read [notes](notes.md) before choosing a mutation.
+Guidance package `7.0.0`, tool contract `6.0.0`, workflow and planning contracts `1.0.0`. The eleven tools include `record_notes`, `propose_change` and `make_keyframes`. The application owns authority, project state, execution and app-computed previews. Read [notes](notes.md) before choosing a mutation.
 
 ## Reading current state
 
@@ -16,7 +16,7 @@ For a separate timeline/render edit, read all `plan` source chunks in returned o
 
 `prepare_change` accepts a change with `variant` (`workflow`, `project` or `plan`), current integer `expectedHeadVersion`, and optional `stages`, `creative` or `source`. At least one stage, creative patch or source is required. Use the exposed schema for the transport shape.
 
-Never combine `creative` and `source` in one call. For ordinary writing use `variant: "project"`, `creative` and no source. Never author image, review or video declarations, and never use `requestNewTakes`. Scene actions build all keyframe and video work. Only separate timeline and render source may remain, where needed; Film exports do not require Director-authored source.
+Never combine `creative` and `source` in one call. For ordinary writing use `variant: "project"`, `creative` and no source. Never author image, review or video declarations, and never use `requestNewTakes`. The application builds all keyframe and video work; `make_keyframes` requests keyframes and needed voice lines, while video requires human scene confirmation. Only separate timeline and render source may remain, where needed; Film exports do not require Director-authored source.
 
 A stage proposal has `stageId`, existing `scopeId`, concise `reason` and optional `gaps: [{key,message}]`. Do not add design-only mode, completion, severity, approval or authority fields. Application checks determine coverage.
 
@@ -38,6 +38,6 @@ Refresh and reprepare after a revision conflict. Stop old-request mutations afte
 
 `propose_change` accepts `{patch:{updateShots?:[{id,purpose?,action?,framing?,motion?,desiredFrames?,imagePrompt?,videoPrompt?,narration?}],updateScenes?:[{id,title?,purpose?}]}}`. Each entry changes at least one field; omit unused fields and lists. Use the same short framing/title rules. It holds one coherent creative change, with no source, new takes or generation. Link the returned `proposalId` in a typed note choice; the person accepts the exact application-computed Now/After preview. A proposal does not apply itself.
 
-In Plan save direction first. In Keyframes the person presses "Make keyframes", reviews returned frames, motion, narration and the actual video recipe, then presses "Confirm frames & generate video". One scene confirmation saves exact script, recording and timing together. Listening and recording edits are optional; no separate narration acceptance is required. Film holds clips, soundtrack and export; Assets holds saved media. Name these labels directly.
+In Plan save direction first. When the person asks for keyframes in a fresh editing conversation, call `make_keyframes` for exactly the requested scenes or shots. The person may also press "Make keyframes" in Keyframes. They review returned frames, motion, narration and the actual video recipe, then press "Confirm frames & generate video". One scene confirmation saves exact script, recording and timing together. Listening and recording edits are optional; no separate narration acceptance is required. Film holds clips, soundtrack and export; Assets holds saved media. Name these labels directly.
 
-Audio preparation tools save pending speech/transcription suggestions only. A person presses the existing audio action to start paid work. Suggestions cannot be applied with `apply_change`. Configured credentials need no separate key approval or usage allowance. The executor owns polling, technical retries and uncertain submissions; returned clips need no additional acceptance gate.
+Read [requested keyframes](keyframes.md) for the `make_keyframes` contract and authority limits. `prepare_recording_transcription` may start priced owned transcription only for an audio attachment sent with this fresh human editing request, when its words are requested or needed. Speech preparation and other transcription sources remain pending suggestions for a human press. Suggestions cannot be applied with `apply_change`. Configured credentials need no separate key approval or usage allowance. The executor owns polling, technical retries and uncertain submissions; returned clips need no additional acceptance gate.

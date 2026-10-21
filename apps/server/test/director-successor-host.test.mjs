@@ -108,3 +108,26 @@ for (const tool of ['record_notes', 'propose_change']) test(`6.0.0 ${tool} lost 
   for (const entityKind of ['grant', 'candidate', 'attempt', 'reservation']) assert.equal(f.store.list(entityKind, f.project.id).length, 0, entityKind);
   assert.equal(f.provider.acceptedCount(), 0);
 });
+
+
+test('contract-6 host guidance directs requested keyframes and eligible attached transcription while keeping video human-only', t => {
+  const f = fixture(t), input = createDirectorInput(f.service, { ...f.config, endpoint: 'http://127.0.0.1:3101' })(f.turn, f.human, f.bridge);
+  const context = JSON.parse(input.context), guide = context.filmPlanning.procedure.join('\n');
+  assert.match(guide, /fresh human editing conversation.*make_keyframes.*sceneIds or shotIds/);
+  assert.match(guide, /regenerate: true requires explicit shotIds/);
+  assert.match(guide, /Report actual started keyframes, voice lines and price\/quote/);
+  assert.match(guide, /per-scene refusal codes/);
+  assert.match(guide, /Reviews, review replies, automatic, read-only and discuss-only turns cannot start paid work/);
+  assert.match(guide, /Stop halts unsent work/);
+  assert.match(guide, /audio attachment was sent with this fresh human editing request/);
+  assert.match(guide, /Never automatically attach, adopt or accept its transcript/);
+  assert.match(guide, /conversation never starts video/);
+  assert.match(context.instructions, /call make_keyframes for exactly those scenes or shots/);
+  assert.match(context.instructions, /Video always requires/);
+  assert.match(context.instructions, /prepare_recording_transcription may start priced owned transcription/);
+  assert.doesNotMatch(context.instructions, /audio tools only prepare pending suggestions/);
+  const historical = filmPlanningGuidance(f.service, f.project.id, f.human.requestId, '5.0.0', true).procedure.join('\n');
+  assert.match(historical, /Only a human press may start paid speech or transcription/);
+  assert.doesNotMatch(historical, /make_keyframes/);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
