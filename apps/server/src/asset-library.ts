@@ -7,6 +7,7 @@ import type { CanonicalNarration } from "./narration/canonical-types.js";
 import type { NarrationSpeechProposal } from "./narration/narration-speech-types.js";
 import type { NarrationAudio } from "./narration/types.js";
 import { audioLibraryRole, type AudioLabel } from "./narration/audio-library-role.js";
+import type { SuppliedDocumentArtifact } from "./media/document-application.js";
 
 /** One project-scoped join per collection. Immutable history survives scene deletion and archive. */
 export function projectAssets(production: ProductionService, project: ProjectRecord): AssetItem[] {
@@ -50,21 +51,23 @@ export function projectAssets(production: ProductionService, project: ProjectRec
   const items: AssetItem[] = [];
   const firstEvent = store.readEvents(projectId)[0]?.occurredAt ?? new Date(0).toISOString();
   for (const record of records) {
-    if (!["image", "video", "audio"].includes(record.artifact.kind)) continue;
+    if (!["image", "video", "audio", "document"].includes(record.artifact.kind)) continue;
     const recording = audio.get(record.id);
     const attempt = record.attemptId ? attempts.get(record.attemptId) : undefined;
     const binding = attempt ? bindings.get(attempt.nodeId) : undefined;
     const shotId = binding?.node.shotId ?? (attempt ? speechShots.get(attempt.nodeId) : undefined) ?? audioShots.get(record.id);
     const shot = shotId ? shots.get(shotId) : undefined;
-    const role: AssetRole = record.origin === "local_render" ? "export"
+    const role: AssetRole = record.artifact.kind === "document" ? "document" : record.origin === "local_render" ? "export"
       : recording ? audioLibraryRole(project, recording, labels.get(record.id))
       : record.origin === "supplied_image" || record.origin === "supplied_video" ? "upload"
       : record.artifact.kind === "image" ? "keyframe" : record.artifact.kind === "video" ? "clip" : "voice";
     const group = `${shotId ?? ""}:${role}`, takeIndex = (counts.get(group) ?? 0) + 1;
     if (role === "keyframe" || role === "clip") counts.set(group, takeIndex);
-    const source = record.fixture ? "demo" : role === "upload" || (recording && !("originEvidence" in recording)) ? "imported" : "generated";
+    const source = record.fixture ? "demo" : role === "upload" || role === "document" || (recording && !("originEvidence" in recording)) ? "imported" : "generated";
     const scene = shot ? scenes.get(shot.sceneId) : undefined;
-    const label = labels.get(record.id)?.label ?? (role === "export" ? `${record.fixture ? "Demo export" : "Export"} · ${project.name}` : `${scene?.title || scene?.purpose || project.name}${shot ? ` · ${shot.purpose}` : ""} · ${role}${role === "keyframe" || role === "clip" ? ` ${takeIndex}` : ""}`);
+    const document = role === "document" ? record as SuppliedDocumentArtifact : undefined;
+    const label = document ? `${document.name}${document.pages !== undefined ? ` · ${document.pages} ${document.pages === 1 ? "page" : "pages"}` : ""}`
+      : labels.get(record.id)?.label ?? (role === "export" ? `${record.fixture ? "Demo export" : "Export"} · ${project.name}` : `${scene?.title || scene?.purpose || project.name}${shot ? ` · ${shot.purpose}` : ""} · ${role}${role === "keyframe" || role === "clip" ? ` ${takeIndex}` : ""}`);
     items.push({ artifact: { artifactId: record.artifact.artifactId, sha256: record.artifact.sha256, kind: record.artifact.kind as StudioArtifactRef["kind"] }, role, ...(shotId ? { shotId } : {}), ...(shot ? { sceneId: shot.sceneId } : {}),
       ...(role === "keyframe" || role === "clip" ? { takeIndex } : {}), current: current.has(record.id), source, label,
       createdAt: metadata.get(`artifact:${record.id}`) ?? attempt?.createdAt ?? firstEvent,
@@ -84,13 +87,13 @@ export function projectAssets(production: ProductionService, project: ProjectRec
 }
 /** Public references only: no local paths, credentials or execution receipts. */
 export function registerAssetLibrary(app: FastifyInstance, service: () => ProductionService) {
-  type Query = { offset?: string; kind?: "all" | "image" | "video" | "audio"; source?: "all" | "uploaded" | "generated" | "export" | "imported" | "demo"; search?: string; sceneId?: string; shotId?: string; role?: AssetRole };
+  type Query = { offset?: string; kind?: "all" | "image" | "video" | "audio" | "document"; source?: "all" | "uploaded" | "generated" | "export" | "imported" | "demo"; search?: string; sceneId?: string; shotId?: string; role?: AssetRole };
   app.get<{ Params: { projectId: string }; Querystring: Query }>("/api/projects/:projectId/assets", {
     schema: { querystring: { type: "object", additionalProperties: false, properties: {
-      offset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" }, kind: { enum: ["all", "image", "video", "audio"] },
+      offset: { type: "string", pattern: "^(0|[1-9][0-9]{0,6})$" }, kind: { enum: ["all", "image", "video", "audio", "document"] },
       source: { enum: ["all", "uploaded", "generated", "export", "imported", "demo"] }, search: { type: "string", maxLength: 160 },
       sceneId: { type: "string", minLength: 1, maxLength: 160 }, shotId: { type: "string", minLength: 1, maxLength: 160 },
-      role: { enum: ["keyframe", "clip", "voice", "music", "upload", "export"] },
+      role: { enum: ["keyframe", "clip", "voice", "music", "upload", "document", "export"] },
     } } },
   }, async request => {
     const production = service(), query = request.query, offset = Number(query.offset ?? 0);

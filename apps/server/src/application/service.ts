@@ -3,6 +3,7 @@ import { rebaseCreativeDraft } from "./creative-rebase.js";
 import { recordHumanFields, assertNoHumanFieldConflict } from "./human-fields.js";
 import { assertAcceptedNarrationDurationFloor } from "./publication-validation.js";
 import { directorNotes } from "./director-notes.js";
+import { messageAttachmentViews } from "./director-images.js";
 import { contextToolVersion } from "./audio-operation-context.js";
 import { requestScopesIntersect } from "./request-scopes.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -16,7 +17,7 @@ import type {
   ActorContext, ArtifactRef, ChangeProposal, CompiledPlan, NodeImpact, OperationKind, ProjectRecord,
   LocalExecutionIdentity, ProviderProfile, ShotRecord, StageRequirement,
 } from "@openslate/core";
-import type { RequestSource } from "@openslate/core/public";
+import type { DirectorAttachmentRef, MessageAttachmentView, RequestSource } from "@openslate/core/public";
 import { projectRequest, migrateLegacyRequestSources } from "./request-source.js";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
@@ -114,9 +115,9 @@ export class ProductionService {
   }
 
   /** Invoked from an authenticated human channel, never from model arguments. */
-  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; concurrency?: "alongside"; holdScopeIds?: string[]; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string } = {}): ActorContext {
+  beginRequest(projectId: string, principalId: string, text: string, options: { source?: RequestSource; concurrency?: "alongside"; holdScopeIds?: string[]; supersede?: "intersecting"; scopeIds?: string[]; editing?: boolean; key?: string; continuationRequestId?: string; continueEdits?: ContinueEdits; resumeFromStopId?: string; contextDigest?: string; attachments?: DirectorAttachmentRef[] } = {}): ActorContext {
     this.recovery.assertWritable(projectId);
-    invariant(text.trim().length > 0 && text.length <= 16000, "VALIDATION_ERROR", "Message must contain at most 16000 characters");
+    invariant((text.trim().length > 0 || options.attachments && options.attachments.length >= 1 && options.attachments.length <= 8 && options.contextDigest) && text.length <= 16000, "VALIDATION_ERROR", "Write a message of at most 16000 characters or attach files");
     invariant(options.source === undefined || ["user", "app", "director"].includes(options.source), "VALIDATION_ERROR", "Use a supported request source");
     invariant(options.concurrency !== "alongside" || !options.resumeFromStopId && !options.continueEdits, "VALIDATION_ERROR", "Alongside work cannot replace stopped or continued conversation authority");
     invariant(options.concurrency === undefined || options.concurrency === "alongside", "VALIDATION_ERROR", "Unsupported request concurrency");
@@ -812,10 +813,11 @@ export class ProductionService {
       const messages = this.store.list<RequestRecord>("message", projectId).map(message => projectRequest(this.store, message));
       const outputs = this.store.list<{ id: string; requestId: string; turnId: string; text: string; phase: string }>("director_output", projectId);
       const messageById = new Map(messages.map(message => [message.id, message])), outputById = new Map(outputs.map(output => [output.id, output]));
-      const conversation = this.store.readEvents(projectId).flatMap<{ id: string; role: "user" | "assistant"; text: string; state: string; requestId: string; at: string; scopeIds?: string[]; runtime?: "scripted" | "live" }>(event => {
+      const conversation = this.store.readEvents(projectId).flatMap<{ id: string; role: "user" | "assistant"; text: string; state: string; requestId: string; at: string; scopeIds?: string[]; runtime?: "scripted" | "live"; attachments?: MessageAttachmentView[] }>(event => {
         if (event.kind === "message.recorded") {
           const message = messageById.get(String(event.payload.requestId));
-          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id, at: event.occurredAt, ...(!message.scopeIds.includes(projectId) ? { scopeIds: message.scopeIds } : {}) }] : [];
+          const attachments = message ? (messageAttachmentViews(this.store, projectId, message.id) ?? []) : [];
+          return message && message.source === "user" ? [{ id: message.id, role: "user", text: message.text, state: message.state, requestId: message.id, at: event.occurredAt, ...(!message.scopeIds.includes(projectId) ? { scopeIds: message.scopeIds } : {}), ...(attachments.length ? { attachments } : {}) }] : [];
         }
         if (event.kind === "director.message") {
           const output = outputById.get(String(event.payload.outputId));

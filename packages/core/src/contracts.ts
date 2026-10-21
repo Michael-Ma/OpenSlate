@@ -19,7 +19,7 @@ export type OperationKind =
 export interface ArtifactRef {
   artifactId: Id;
   sha256: string;
-  kind: "image" | "video" | "audio" | "data";
+  kind: "image" | "video" | "audio" | "document" | "data";
 }
 
 export interface ShotRecord {

@@ -331,7 +331,8 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
     for (const [path, file] of files) {
       // Binary objects and timeline documents use the exact byte hash as the name.
       const named = /^(?:artifacts\/(?:images\/blobs|local-timelines\/documents|[^/]+)|media\/blobs|execution-output\/blobs|audio-derivatives\/blobs)\/([a-f0-9]{64})\.[a-z]+$/.exec(path)
-        ?? /^native\/[^/]+\/workspace\/image-attachments\/[a-f0-9]{64}\/[0-3]-([a-f0-9]{64})\.jpg$/.exec(path);
+        ?? /^native\/[^/]+\/workspace\/(?:image|material)-attachments\/[a-f0-9]{64}\/[0-7]-([a-f0-9]{64})\.jpg$/.exec(path)
+        ?? /^artifacts\/documents\/blobs\/([a-f0-9]{64})$/.exec(path);
       if (named) fail(file.sha256 === named[1], `Content-addressed filename differs: ${path}`);
       if (path.startsWith("media/sources/")) { const value = await json(path); fail(path === `media/sources/${value.id}.json`, "Source descriptor filename differs"); await source(value); }
       else if (path.startsWith("media/manifests/")) { const value = await json(path); fail(path === `media/manifests/${value.digest}.json`, "Render manifest filename differs"); await renderManifest(value); }
@@ -547,6 +548,9 @@ export async function verifyBackupClosure(bundle: string, originalRoot: string, 
       } else if (row.kind === "request_image_projection") {
         fail(Array.isArray(value.images), "Invalid saved image projection");
         for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/image-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);
+      } else if (row.kind === "request_attachment_projection") {
+        fail(Array.isArray(value.images) && value.images.length <= 8 && Array.isArray(value.attachments), "Invalid saved attachment projection");
+        for (const [index, image] of value.images.entries()) required(`native/${value.projectId}/workspace/material-attachments/${digest({ requestId: value.requestId })}/${index}-${image.thumbnailSha256}.jpg`, image.thumbnailSha256, image.byteLength);
       } else if (row.kind === "skill_activation") {
         for (const skill of value.activation?.skills ?? []) absoluteReference(skill.entryPath, skill.entrySha256);
       } else if (row.kind === "director_skill_lock") {

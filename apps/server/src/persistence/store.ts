@@ -315,7 +315,7 @@ export class Store {
     }
     if (kind === "request_image_selection") {
       reference("message", id);
-      invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 4 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
+      invariant(body.requestId === id && Array.isArray(body.images) && body.images.length >= 1 && body.images.length <= 8 && body.selectionDigest === digest(body.images), "IDENTITY_MISMATCH", "Image selection must bind a bounded ordered request payload");
       const images = body.images as Array<{ artifactId: string; sha256: string }>;
       invariant(new Set(images.map(image => image.artifactId)).size === images.length, "IDENTITY_MISMATCH", "Image selections must be unique");
       for (const image of images) {
@@ -334,6 +334,55 @@ export class Store {
       const images = body.images as Array<{ artifactId: string; sha256: string; thumbnailSha256: string; byteLength: number; mediaType: string }>;
       invariant(canonical(images.map(({ artifactId, sha256 }) => ({ artifactId, sha256 }))) === canonical(selection.images), "IDENTITY_MISMATCH", "Image projection must preserve selected reference order and identity");
       invariant(images.every(image => /^[a-f0-9]{64}$/.test(image.thumbnailSha256) && Number.isSafeInteger(image.byteLength) && image.byteLength > 0 && image.byteLength <= 128 * 1024 && image.mediaType === "image/jpeg"), "VALIDATION_ERROR", "Image projection requires bounded JPEG content receipts");
+    }
+    if (kind === "request_attachment_selection") {
+      reference("message", id);
+      type Ref = { artifactId: string; sha256: string };
+      invariant(body.requestId === id && Array.isArray(body.attachments) && body.attachments.length >= 1 && body.attachments.length <= 8 &&
+        (body.legacyImages === undefined || Array.isArray(body.legacyImages)), "IDENTITY_MISMATCH", "Attachments must bind a bounded ordered message selection");
+      const attachments = body.attachments as Ref[], images = body.legacyImages as Ref[] | undefined;
+      const refs = [...(images ?? []), ...attachments];
+      invariant(refs.length <= 8 && new Set(refs.map(ref => ref.artifactId)).size === refs.length &&
+        body.selectionDigest === digest({ attachments, ...(images ? { legacyImages: images } : {}) }), "IDENTITY_MISMATCH", "Attachment selection must preserve unique identities and order");
+      for (const ref of refs) {
+        invariant(ref && typeof ref.artifactId === "string" && ref.artifactId.length > 0 && ref.artifactId.length <= 160 && /^[a-f0-9]{64}$/.test(ref.sha256), "VALIDATION_ERROR", "Select an owned artifact identity and SHA-256");
+        const artifact = this.get<{ projectId: string; artifact: { artifactId: string; sha256: string; kind: string } }>("artifact", ref.artifactId);
+        if (artifact) {
+          reference("artifact", ref.artifactId);
+          invariant(artifact.artifact.artifactId === ref.artifactId && artifact.artifact.sha256 === ref.sha256 && ["image", "video", "audio", "document"].includes(artifact.artifact.kind), "IDENTITY_MISMATCH", "Attachment selection must bind exact owned content");
+        } else {
+          reference("narration_audio", ref.artifactId);
+          const audio = this.get<{ media: { sha256: string; artifactId: string; kind: string } }>("narration_audio", ref.artifactId)!;
+          invariant(audio.media.sha256 === ref.sha256 && audio.media.artifactId === ref.artifactId && audio.media.kind === "audio", "IDENTITY_MISMATCH", "Attachment selection must bind exact owned audio content");
+        }
+      }
+      const request = this.get<{ contextDigest: string }>("message", id)!;
+      invariant(request.contextDigest === digest({ replyToReviewId: body.replyToReviewId ?? null, ...(images ? { images } : {}), attachments }), "IDENTITY_MISMATCH", "Attachments must match their message context identity");
+    }
+    if (kind === "request_attachment_projection") {
+      reference("request_attachment_selection", id);
+      const selection = this.get<{ selectionDigest: string; attachments: Array<{ artifactId: string; sha256: string }>; legacyImages?: Array<{ artifactId: string; sha256: string }> }>("request_attachment_selection", id)!;
+      const refs = [...(selection.legacyImages ?? []), ...selection.attachments];
+      invariant(body.requestId === id && body.selectionDigest === selection.selectionDigest && Array.isArray(body.attachments) && body.attachments.length === refs.length &&
+        Array.isArray(body.images) && body.images.length <= 8 && [body.recipeDigest, body.toolchainDigest].every(value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)), "IDENTITY_MISMATCH", "Attachment projection must bind its message, recipe and toolchain");
+      const materials = body.attachments as Array<{ artifact: { artifactId: string; sha256: string }; name: string; readable: boolean; text?: string; characters?: number; truncated?: boolean }>;
+      invariant(materials.every((material, index) => material.artifact?.artifactId === refs[index]!.artifactId && material.artifact.sha256 === refs[index]!.sha256 &&
+        typeof material.name === "string" && typeof material.readable === "boolean" && (material.text === undefined || typeof material.text === "string" && material.text.length <= 200_000 && material.characters === material.text.length && typeof material.truncated === "boolean")), "IDENTITY_MISMATCH", "Attached material must preserve its selected identity and bounded text");
+      let totalBytes = 0;
+      for (const image of body.images as Array<{ artifactId: string; sha256: string; attachmentIndex: number; thumbnailSha256: string; byteLength: number; mediaType: string }>) {
+        invariant(Number.isSafeInteger(image.attachmentIndex) && refs[image.attachmentIndex]?.artifactId === image.artifactId && refs[image.attachmentIndex]?.sha256 === image.sha256 &&
+          /^[a-f0-9]{64}$/.test(image.thumbnailSha256) && Number.isSafeInteger(image.byteLength) && image.byteLength > 0 && image.byteLength <= 128 * 1024 && image.mediaType === "image/jpeg", "VALIDATION_ERROR", "Attachment pictures require exact bounded JPEG receipts");
+        totalBytes += image.byteLength;
+      }
+      invariant(totalBytes <= 1024 * 1024, "VALIDATION_ERROR", "Attachment picture bytes exceed their message limit");
+    }
+    if (kind === "document_import") reference("message", body.requestId);
+    if (kind === "document_import_receipt") {
+      reference("document_import", id);
+      const artifact = body.artifact as { artifactId?: unknown; sha256?: unknown; kind?: unknown } | undefined;
+      reference("artifact", artifact?.artifactId);
+      const imported = this.get<{ artifactId: string; sha256: string }>("document_import", id)!;
+      invariant(imported.artifactId === artifact?.artifactId && imported.sha256 === artifact?.sha256 && artifact?.kind === "document", "IDENTITY_MISMATCH", "Document receipt must match its import artifact identity");
     }
     if (kind === "image_import") reference("message", body.requestId);
     if (kind === "image_import_receipt") {
@@ -715,7 +764,7 @@ export class Store {
         "speech_execution_mapping", "speech_execution_dispatch", "speech_execution_result",
         "transcription_execution_mapping", "transcription_execution_dispatch", "transcription_execution_result", "transcription_preparation_intent", "transcript_candidate", "narration_transcript_selection", "owned_transcription_source", "owned_transcription_proposal", "owned_transcription_review", "owned_transcription_application", "narration_speech_proposal", "narration_speech_review", "narration_speech_application"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
-      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
+      if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "request_attachment_selection", "request_attachment_projection", "document_import", "document_import_receipt", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
       if (kind === "epoch") {
         const previous = JSON.parse(old.body) as Record<string, unknown>;

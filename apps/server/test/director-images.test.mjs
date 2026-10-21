@@ -91,7 +91,7 @@ test('selection rejects foreign, stale, fixture, duplicate, path-bearing and una
   const f = fixture(t), image = f.add(), foreignProject = f.service.createProject('Foreign'), foreign = f.add(foreignProject.id); await f.director.configure(f.project.id, f.native, 'native');
   const fixtureImage = f.add(f.project.id, png, { fixture: true, origin: 'fake' });
   const before = f.store.list('message', f.project.id).length;
-  for (const images of [[f.select(fixtureImage)], [f.select(foreign)], [{ ...f.select(image), sha256: 'a'.repeat(64) }], [f.select(image), f.select(image)], [{ ...f.select(image), path: image.path }], Array(5).fill(f.select(image))]) {
+  for (const images of [[f.select(fixtureImage)], [f.select(foreign)], [{ ...f.select(image), sha256: 'a'.repeat(64) }], [f.select(image), f.select(image)], [{ ...f.select(image), path: image.path }], Array(9).fill(f.select(image))]) {
     const response = await f.req({ text: 'Discuss', images }); assert.ok(response.statusCode >= 400, response.body);
   }
   for (const other of [{ replyToReviewId: 'unknown' }, { replyToQuestionId: 'unknown' }]) assert.ok((await f.req({ ...f.body([image]), ...other })).statusCode >= 400);
@@ -222,13 +222,13 @@ test('five frames become one bounded row-major contact sheet accepted by the run
   assert.ok(context.attachments[0].byteLength <= 512 * 1024); assert.equal((await prepareDirectorImages(prepared.images, c.projection)).length, 1);
   assert.match(context.instructions, /frozen at turn start/);
 });
-test('references take precedence; remaining frames share a sheet and a full reference budget describes omissions', async t => {
-  const f = fixture(t); keyframes(f, 3); const refs = [f.add(), f.add(), f.add(), f.add()];
+test('references take precedence; eight references fill the native budget and describe omitted frames', async t => {
+  const f = fixture(t); keyframes(f, 5); const refs = Array.from({length:8},()=>f.add());
   const c = frameContext(f, ['scene'], refs.slice(0, 2)), prepared = await c.projector.prepare(c.input, c.bridge.actor, c.projection);
-  assert.equal(prepared.images.length, 3); assert.equal(JSON.parse(prepared.context).attachedKeyframes.images.length, 3);
+  assert.equal(prepared.images.length, 3); assert.equal(JSON.parse(prepared.context).attachedKeyframes.images.length, 5);
   assert.equal((await prepareDirectorImages(prepared.images, c.projection)).length, 3);
   const full = frameContext(f, ['scene'], refs), input = await full.projector.prepare(full.input, full.bridge.actor, full.projection);
-  assert.equal(input.images.length, 4); assert.equal(JSON.parse(input.context).attachedKeyframes.images.length, 0);
+  assert.equal(input.images.length, 8); assert.equal(JSON.parse(input.context).attachedKeyframes.images.length, 0);
   assert.ok(JSON.parse(input.context).attachedKeyframes.described.every(s => s.reason === 'user_references_fill_image_budget'));
 });
 test('fixture SVG frames are described; scope and stale image intent exclude unshown frames', async t => {

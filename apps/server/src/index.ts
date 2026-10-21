@@ -12,7 +12,7 @@ import { ProductionService } from "./application/service.js";
 import { Store } from "./persistence/store.js";
 import { LocalDirectorController } from "./application/local-director.js";
 import { readCodexStartupTimeout, readDirectorRunTimeout } from "./application/director-run-config.js";
-import { ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from "./media/index.js";
+import { DocumentApplicationService, DOCUMENT_IMPORT_MAX_BYTES, ImageApplicationService, MediaApplicationService, PNG_IMPORT_MAX_BYTES } from "./media/index.js";
 import { NarrationService, NarrationCanonicalService } from "./narration/index.js";
 import { NarrationSpeechService } from "./narration/narration-speech-service.js";
 import { OwnedTranscriptionService } from "./narration/owned-transcription-service.js";
@@ -72,7 +72,7 @@ const { engine, localMedia, imageStore, providerCatalog, uploadDirectory } = run
 const service = new ProductionService(store, engine, undefined, runtime.productionOptions);
 const narration = new NarrationService(service, localMedia ?? undefined);
 // Each project starts in demo mode until its user chooses and checks local Codex.
-const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", runTimeoutMs: directorRunTimeoutMs, startupTimeoutMs, ...(ffmpegPath ? { ffmpegPath } : {}) });
+const director = new LocalDirectorController(service, { repositoryRoot: fileURLToPath(new URL("../../../", import.meta.url)), dataDirectory: directory, endpoint: "http://127.0.0.1:3001", runTimeoutMs: directorRunTimeoutMs, startupTimeoutMs, ...(ffmpegPath ? { ffmpegPath } : {}), ...(localMedia ? { media: localMedia } : {}) });
 const studioSessions = new StudioSessions();
 const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
 const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });
@@ -81,6 +81,8 @@ const app = createApp({ service, sceneCommands, director, runtimeSettings: direc
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
     uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "images"), maxBytes: PNG_IMPORT_MAX_BYTES }) },
+  documentRoutes: { production: service, documents: new DocumentApplicationService(service),
+    uploads: new ManagedUploadStore({ rootDir: join(uploadDirectory, "documents"), maxBytes: DOCUMENT_IMPORT_MAX_BYTES }) },
   narrationRoutes: { production: service, narration, narrationSpeech, canonical, uploadDirectory,
     ...(localMedia ? { ownedTranscription: new OwnedTranscriptionService(narration, join(directory, "artifacts")) } : {}) },
   ...(localMedia ? { mediaRoutes: { production: service, media: new MediaApplicationService(service, localMedia), uploads: new ManagedUploadStore({ rootDir: uploadDirectory }) } } : {}) });
