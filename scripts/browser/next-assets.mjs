@@ -305,8 +305,8 @@ export const scenarios = [
       await chooseFile(page, { name: "pier.png", mimeType: "image/png", buffer: png(32, 18, [80, 110, 150]) });
       await page.locator("[data-act='import-go']").click();
       await expectText(page, ".toast", /Imported pier\.png\./, 8000);
-      // The library keeps no name for an imported picture: it is numbered after the film's two earlier ones.
-      await expectText(page, "aside.detail h3", /^Imported image 3$/);
+      // An imported picture keeps the name it was imported with.
+      await expectText(page, "aside.detail h3", /^pier\.png$/);
       await page.waitForFunction(() => { const img = document.querySelector("aside.detail .big-pic img"); return img?.complete && img.naturalWidth > 0; }, null, { timeout: 6000 });
       await expectText(page, ".filters .count", /^Showing 18 of 18$/);
       // Once everything is sent, the sheet can be closed: the studio's check goes on in the background.
@@ -476,12 +476,12 @@ export const scenarios = [
       await chooseFile(page, { name: "pier.png", mimeType: "image/png", buffer: png(64, 36, [40, 70, 110]) });
       await page.locator("[data-act='import-go']").click();
       await expectText(page, ".toast", /Imported pier\.png\./, 20000);
-      await expectText(page, "aside.detail h3", /^Imported image$/, 10000);
+      await expectText(page, "aside.detail h3", /^pier\.png$/, 10000);
       await page.waitForFunction(() => { const img = document.querySelector("aside.detail .big-pic img"); return img?.complete && img.naturalWidth > 0; }, null, { timeout: 10000 });
       // Download loads and checks the file when pressed, then saves it.
       const savedImage = page.waitForEvent("download", { timeout: 15000 });
       await page.locator("aside.detail [data-act='download']").click();
-      expect((await savedImage).suggestedFilename() === "Imported image.png", "The PNG downloads under the wrong name");
+      expect((await savedImage).suggestedFilename() === "pier.png", "The PNG downloads under the wrong name");
       // A WAV as music through POST /audio-library/uploads?role=music; it plays from the narration audio route.
       await page.locator("[data-act='import']").click();
       await chooseFile(page, { name: "low-tide.wav", mimeType: "audio/wav", buffer: wav(1) });

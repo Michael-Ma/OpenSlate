@@ -77,10 +77,13 @@ export const kindMsg = (role: AssetRole): Msg => msg(`assets.kind.${role}` as co
 /** Server fallbacks for audio without a name; the view says it in the interface language instead. */
 const UNNAMED_AUDIO = new Set(["Uploaded audio", "Uploaded recording", "Voice line", "Generated narration"]);
 
-/** A label that is an imported file's own name ("pier.png"), not a server description ("The Last Ferry · upload"). */
+/**
+ * A label that is an imported file's own name ("pier.png", "Harbour · dawn"), not the server's description of an
+ * unnamed import ("The Last Ferry · upload"). Imports now keep the name they were sent with, extension or not.
+ */
 const fileName = (label: string): string => {
   const text = label.trim();
-  return MEDIA_EXTENSION.test(text) && !text.includes(" · ") ? text : "";
+  return text && !text.endsWith(" · upload") ? text : "";
 };
 
 /**

@@ -241,3 +241,14 @@ test("a clip longer than its shot says how much of it the film uses (from the fi
   const exact = clip('1.1', 1, { durationSeconds: seconds });
   assert.equal(assetDetail(exact, [exact], overview, now, 'en').rows.find((row) => en(row.label) === 'Length').sub, undefined);
 });
+
+test('an import is titled by the name it was sent with, extension or not; an unnamed one is numbered', async () => {
+  const { translateMsg } = await import('../../src/next/i18n/translate.ts');
+  const overview = lastFerryOverview();
+  const upload = (label, id = 'u1') => ({ artifact: { artifactId: id, sha256: 'a'.repeat(64), kind: 'image' }, role: 'upload', current: false, source: 'imported', label, createdAt: '2026-10-21T00:00:00Z' });
+  const en = m => translateMsg('en', m);
+  assert.equal(en(titleMsg(upload('pier.jpg'), overview)), 'pier.jpg');
+  assert.equal(en(titleMsg(upload('Harbour · dawn'), overview)), 'Harbour · dawn');
+  assert.equal(en(titleMsg(upload('moodboard'), overview)), 'moodboard');
+  assert.equal(en(titleMsg(upload('The Last Ferry · upload'), overview)), 'Imported image');
+});
