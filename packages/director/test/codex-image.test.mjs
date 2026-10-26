@@ -14,6 +14,7 @@ const input=()=>({attemptId:"attempt-1",requestDigest:"a".repeat(64),prompt:"A s
 async function fixture(t,scenario="inline",timeoutMs=2000) {
  const root=await realpath(await mkdtemp(join(tmpdir(),"openslate-codex-image-"))),nativeHome=join(root,"home"),codexHome=join(nativeHome,".codex");
  await mkdir(codexHome,{recursive:true});
+ await writeFile(join(codexHome,"auth.json"),"FAKE_AUTH_NEVER_READ");
  const options={command:{file:process.execPath,args:[entry]},nativeHome,codexHome,directory:join(root,"images"),timeoutMs,
   env:{SETUP_FIXTURE_LOG:join(root,"calls.jsonl"),SETUP_FIXTURE_SKILL:join(codexHome,"skills/private/SKILL.md"),SETUP_FIXTURE_MODEL:"gpt-6-astra",IMAGE_FIXTURE_SCENARIO:scenario,IMAGE_FIXTURE_CONTROL:join(root,"control")}};
  const workers=[],make=()=>{const worker=new CodexImageWorkerTransport(options);workers.push(worker);return worker;};

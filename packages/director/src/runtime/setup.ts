@@ -8,11 +8,12 @@ import { CodexTransport } from "./transport.js";
 import { object, requireRuntime, RuntimeFault } from "./validation.js";
 import { classifyNativeDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
 import type { NativeDiagnostic } from "@openslate/core";
+import { preparePrivateCodexHome } from "./private-home.js";
 
 export interface LocalCodexSetupInput {
   command: { file: string; args?: readonly string[] };
   model: string;
-  /** Existing native homes. OpenSlate never reads or copies their credential files. */
+  /** Existing native homes. OpenSlate only links the selected auth.json; it never reads or copies it. */
   nativeHome: string;
   codexHome: string;
   /** Complete environment apart from HOME/CODEX_HOME, which the explicit fields set. */
@@ -78,16 +79,25 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
   "SETUP_COMMAND_INVALID", "Native command arguments are invalid");
   requireRuntime(Object.keys(object(input.env)).length <= 128 && input.env && typeof input.env === "object" && !Array.isArray(input.env),
     "SETUP_ENV_INVALID", "Supply a bounded explicit native environment");
-  const nativeHome = await realpath(input.nativeHome), codexHome = await realpath(input.codexHome);
+  const nativeHome = await realpath(input.nativeHome);
+  let codexHome: string;
+  try { codexHome = await realpath(input.codexHome); }
+  catch (error) {
+    if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? ""))
+      throw new RuntimeFault("SETUP_AUTH_REQUIRED", "Sign in to the selected Codex installation before checking again");
+    throw error;
+  }
   requireRuntime((await stat(nativeHome)).isDirectory() && (await stat(codexHome)).isDirectory(),
     "SETUP_AUTH_HOME_INVALID", "Selected native homes must already exist");
   const projection = await plannedPath(resolve(input.directories.projection));
   const snapshots = await plannedPath(resolve(input.directories.snapshots));
   const storage = await plannedPath(resolve(input.directories.storage));
   const state = await plannedPath(join(storage, "native-state")), logs = await plannedPath(join(storage, "logs"));
+  const home = await plannedPath(join(storage, "director-home"));
   requireRuntime(!overlap(projection, storage) && !overlap(snapshots, storage) &&
     [projection, snapshots, storage].every(path => path !== dirname(path) && !within(path, nativeHome) && !overlap(path, codexHome)) &&
-    within(storage, state) && within(storage, logs) && state !== storage && logs !== storage && !overlap(state, logs),
+    within(storage, state) && within(storage, logs) && state !== storage && logs !== storage && !overlap(state, logs) &&
+    home === join(storage, "director-home") && within(storage, home) && home !== storage && !overlap(home, state) && !overlap(home, logs),
   "SETUP_PATH_OVERLAP", "Application projections and runtime storage must exclude native authentication homes and each other");
   const profile = { filesystem: { ":root": "deny", ":minimal": "read", [projection]: "read", [snapshots]: "read",
     [await realpath(process.execPath)]: "read" }, network: { enabled: false } };
@@ -95,12 +105,14 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
     default_permissions: PROFILE, permissions: { [PROFILE]: profile }, sqlite_home: state, log_dir: logs,
     model: input.model, model_provider: "openai", model_reasoning_effort: "low", approval_policy: "never", web_search: "disabled",
     project_doc_max_bytes: 0, "analytics.enabled": false, "feedback.enabled": false, "history.persistence": "none",
+    "skills.bundled.enabled": false,
     check_for_update_on_startup: false, "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
     "features.code_mode_host": true, "features.skip_host_skill_discovery": true, "features.default_mode_request_user_input": true,
   };
   for (const name of DISABLED) config[`features.${name}`] = false;
   const options = validateOptions({ command: structuredClone(input.command), cwd: projection,
-    env: { ...input.env, HOME: nativeHome, CODEX_HOME: codexHome }, model: input.model, runtimeVersion: CODEX_PROTOCOL_VERSION,
+    env: { ...input.env, HOME: nativeHome, CODEX_HOME: home }, privateCodexHome: { home, authSource: join(codexHome, "auth.json") },
+    model: input.model, runtimeVersion: CODEX_PROTOCOL_VERSION,
     policy: { mode: "local", id: PROFILE, runtimeVersion: CODEX_PROTOCOL_VERSION, config },
     ...(input.limits ? { limits: input.limits } : {}) });
   // Make no changes in either native home. Existing directories retain their permissions.
@@ -109,9 +121,11 @@ async function prepare(input: LocalCodexSetupInput): Promise<ReturnType<typeof v
     requireRuntime((await stat(path)).isDirectory() && await realpath(path) === path,
       "SETUP_DIRECTORY_CHANGED", "An application directory changed during setup");
   }
+  await preparePrivateCodexHome(options.privateCodexHome!);
   return options;
 }
 async function verifyVersion(options: ReturnType<typeof validateOptions>, signal: AbortSignal, readiness: LocalCodexReadiness): Promise<void> {
+  await preparePrivateCodexHome(options.privateCodexHome!);
   await new Promise<void>((yes, no) => {
     execFile(options.command.file, [...(options.command.args ?? []), "--version"], { cwd: options.cwd, env: { ...options.env },
       timeout: options.limits.startupTimeoutMs, killSignal: "SIGKILL", maxBuffer: 4096, signal }, (error, stdout) => {
@@ -128,6 +142,7 @@ async function verifyVersion(options: ReturnType<typeof validateOptions>, signal
 async function session<T>(options: ReturnType<typeof validateOptions>, signal: AbortSignal,
   run: (rpc: (method: string, params: unknown) => Promise<unknown>) => Promise<T>): Promise<T> {
   requireRuntime(!signal.aborted, "SETUP_ABORTED", "Local runtime setup was cancelled");
+  await preparePrivateCodexHome(options.privateCodexHome!);
   const args = [...(options.command.args ?? []), "app-server", "--strict-config",
     ...Object.entries(options.policy.config).flatMap(([key, value]) => ["-c", `${key}=${toml(value)}`])];
   requireRuntime(Buffer.byteLength(args.join("\0")) <= 128 * 1024, "SETUP_CATALOG_LIMIT", "Discovered catalog exceeds the native launch limit");
@@ -251,6 +266,7 @@ export async function setupLocalCodex(supplied: LocalCodexSetupInput, options: L
         object(config.analytics).enabled === false && object(config.feedback).enabled === false && object(config.history).persistence === "none" &&
         config.sqlite_home === runtime.policy.config.sqlite_home && config.log_dir === runtime.policy.config.log_dir &&
         config.project_doc_max_bytes === 0 && object(config.features).code_mode_host === true && object(config.features).skip_host_skill_discovery === true &&
+        object(object(config.skills).bundled).enabled === false &&
         object(config.features).default_mode_request_user_input === true &&
         DISABLED.every(name => object(config.features)[name] === false) && object(config.shell_environment_policy).inherit === "none" &&
         object(config.shell_environment_policy).experimental_use_profile === false,

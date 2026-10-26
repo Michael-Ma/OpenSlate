@@ -1,5 +1,6 @@
 // Synthetic native API: no Codex binary, authentication files, or network calls.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 const scenario = process.env.SETUP_FIXTURE_SCENARIO ?? "ready";
 const log = value => appendFileSync(process.env.SETUP_FIXTURE_LOG, JSON.stringify({ pid: process.pid, ...value }) + "\n");
@@ -19,12 +20,20 @@ for (let i = 2; i < process.argv.length; i++) {
   row[keys.at(-1)] = value;
 }
 const verifying = Array.isArray(config.skills?.config);
+const home = process.env.CODEX_HOME, auth = home ? join(home, "auth.json") : undefined;
 log({ kind: "launch", verifying, parentSecretAbsent: !process.env.SETUP_PARENT_SECRET,
-  home: process.env.HOME, codexHome: process.env.CODEX_HOME });
+  home: process.env.HOME, codexHome: home,
+  instructionSources: home ? ["AGENTS.md", "AGENTS.override.md"].map(name => join(home, name)).filter(existsSync) : [],
+  ...(auth && existsSync(auth) ? { authIsLink: lstatSync(auth).isSymbolicLink(), authLinkTarget: readlinkSync(auth) } : {}) });
 const send = value => process.stdout.write(JSON.stringify(value) + "\n");
 const respond = (id, result) => send({ id, result });
 const lines = createInterface({ input: process.stdin });
-lines.on("close", () => process.exit(0));
+lines.on("close", () => {
+  if (scenario === "auth-link-drift" && !verifying && auth) {
+    unlinkSync(auth); symlinkSync("/synthetic-wrong-auth.json", auth);
+  }
+  process.exit(0);
+});
 lines.on("line", line => {
   const message = JSON.parse(line), { id, method, params } = message;
   if (!method) { log({ kind: "rejected-request", response: message }); return; }
@@ -47,6 +56,7 @@ lines.on("line", line => {
     if (verifying && scenario === "mcp-drift") config.mcp_servers.new_server = { command: "must-not-launch" };
     if (verifying && scenario === "feature-drift") config.features.plugins = true;
     if (verifying && scenario === "question-feature-drift") config.features.default_mode_request_user_input = false;
+    if (verifying && scenario === "bundled-skills-drift") config.skills.bundled.enabled = true;
     if (verifying && scenario === "search-drift") config.web_search = "live";
     if (scenario === "invalid-mcp-name") config.mcp_servers["contains.dot"] = { enabled: true };
     return respond(id, { config });

@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomBytes } from "node:crypto";
 import { CodexDirectorRuntime, FakeDirectorRuntime } from "../dist/index.js";
+import { CodexTransport } from "../dist/runtime/transport.js";
 import { FIXTURE_DEADLINE_MS, PROTOCOL_FIXTURE_LIMITS } from "./fixture-timing.mjs";
 
 const entry = fileURLToPath(new URL("runtime-fixture.mjs", import.meta.url));
@@ -125,7 +126,7 @@ test("v2 native launch discovers six locked tools and rejects an advertised lega
   assert.equal((await legacy.records()).some(row => row.method === "turn/start"), false);
 });
 
-for (const scenario of ["version-wrong", "missing-result", "skill-extra", "skills-error", "catalog-extra", "instructions-extra", "bridge-wrong", "permissions-wrong", "permissions-expanded", "permissions-defaults-expanded", "permissions-defaults-unknown"]) {
+for (const scenario of ["version-wrong", "missing-result", "skill-extra", "skills-error", "catalog-extra", "instructions-extra", "bundled-skills-wrong", "bridge-wrong", "permissions-wrong", "permissions-expanded", "permissions-defaults-expanded", "permissions-defaults-unknown"]) {
   test(`fail closed before dispatch: ${scenario}`, async t => {
     const f = await fixture(t, scenario);
     const result = await deadline(f.runtime.start(f.input));
@@ -133,6 +134,74 @@ for (const scenario of ["version-wrong", "missing-result", "skill-extra", "skill
     assert.equal((await f.records()).some(row => row.method === "turn/start"), false);
   });
 }
+
+test("instruction-source refusal retains redacted file metadata before dispatch, including on resume", async t => {
+  const f = await fixture(t), home = join(f.options.cwd, "person");
+  f.options.env.HOME = home;
+  f.options.env.FIXTURE_INSTRUCTION_SOURCES = JSON.stringify([
+    join(home, ".codex/AGENTS.md"),
+    { path: "/tmp/other/AGENTS.override.md", contents: "PRIVATE_INSTRUCTIONS" },
+    { path: join(home, ".codex/AGENTS.md") },
+    { path: "PRIVATE_PROSE" }, { path: "/tmp/file\nPRIVATE_OUTPUT" }, { contents: "PRIVATE_INSTRUCTIONS" },
+  ]);
+  for (const input of [f.input, { ...f.input, resumeThreadId: "native-thread-1" }]) {
+    const result = await deadline(new CodexDirectorRuntime(f.options).start(input));
+    assert.equal(result.status, "failed"); assert.equal(result.dispatched, false);
+    assert.equal(result.error.code, "RUNTIME_INSTRUCTIONS_UNEXPECTED");
+    assert.deepEqual(result.error.nativeDiagnostic, { category: "native_instructions_unexpected",
+      instructionFiles: ["~/.codex/AGENTS.md", "/tmp/other/AGENTS.override.md"] });
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_|person|contents|token/);
+  }
+  assert.equal((await f.records()).some(row => row.method === "turn/start"), false);
+});
+
+test("missing or malformed instruction source metadata still refuses before dispatch", async t => {
+  for (const sources of [null, {}, "PRIVATE_PROSE", [{ contents: "PRIVATE_INSTRUCTIONS" }]]) {
+    const f = await fixture(t);
+    const runtime = new CodexDirectorRuntime({ ...f.options,
+      env: { ...f.options.env, FIXTURE_INSTRUCTION_SOURCES: JSON.stringify(sources) } });
+    const result = await deadline(runtime.start(f.input));
+    assert.equal(result.dispatched, false); assert.equal(result.error.code, "RUNTIME_INSTRUCTIONS_UNEXPECTED");
+    assert.deepEqual(result.error.nativeDiagnostic, { category: "native_instructions_unexpected", instructionFiles: [] });
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_/);
+  }
+});
+
+test("native turns use the private home despite personal instructions and repair its auth link on every turn", async t => {
+  const f = await fixture(t, "home-instructions"), root = await realpath(f.options.cwd);
+  const selected = join(root, "person/.codex"), storage = join(root, "runtime"), home = join(storage, "director-home");
+  await mkdir(selected, { recursive: true }); await mkdir(storage);
+  const backing = join(root, "synthetic-auth.json");
+  await writeFile(backing, "SYNTHETIC_AUTH_NEVER_READ");
+  await symlink(backing, join(selected, "auth.json"));
+  await writeFile(join(selected, "AGENTS.md"), "PRIVATE_PERSONAL_INSTRUCTIONS");
+  const privateCodexHome = { home, authSource: join(selected, "auth.json") };
+  const options = { ...f.options, privateCodexHome, env: { ...f.options.env, HOME: join(root, "person"), CODEX_HOME: home } };
+  const runtime = new CodexDirectorRuntime(options);
+  for (const replacement of ["first", "missing", "wrong"]) {
+    if (replacement !== "first") await unlink(join(home, "auth.json"));
+    if (replacement === "wrong") await symlink(backing, join(home, "auth.json"));
+    const result = await deadline(runtime.start(f.input));
+    assert.equal(result.status, "completed", result.error?.code);
+    assert.equal((await lstat(join(home, "auth.json"))).isSymbolicLink(), true);
+    assert.equal(await readlink(join(home, "auth.json")), privateCodexHome.authSource);
+  }
+  const inherited = await deadline(new CodexDirectorRuntime({ ...f.options, env: { ...f.options.env,
+    HOME: join(root, "person"), CODEX_HOME: selected } }).start(f.input));
+  assert.equal(inherited.dispatched, false); assert.equal(inherited.error.code, "RUNTIME_INSTRUCTIONS_UNEXPECTED");
+  assert.deepEqual(inherited.error.nativeDiagnostic.instructionFiles, ["~/.codex/AGENTS.md"]);
+  assert.equal((await f.records()).filter(row => row.method === "turn/start").length, 3);
+});
+
+test("instruction-source evidence survives a later cleanup and diagnostic-consumer failure", async t => {
+  const f = await fixture(t, "instructions-extra"), close = CodexTransport.prototype.close;
+  t.mock.method(CodexTransport.prototype, "close", async function () { await close.call(this); throw new Error("Synthetic cleanup failure"); });
+  const result = await deadline(f.runtime.start(f.input, { onEvent: () => { throw new Error("Synthetic event failure"); } }));
+  assert.equal(result.dispatched, false); assert.equal(result.status, "failed");
+  assert.equal(result.error.code, "RUNTIME_EVENT_CONSUMER_FAILED");
+  assert.deepEqual(result.error.nativeDiagnostic, { category: "native_instructions_unexpected", instructionFiles: ["/fake/AGENTS.md"] });
+  assert.equal((await f.records()).some(row => row.method === "turn/start"), false);
+});
 
 test("dotted policy configuration normalizes before exact profile comparison", async t => {
   const f = await fixture(t);

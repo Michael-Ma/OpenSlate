@@ -1,10 +1,11 @@
 import { canonical, digest, invariant, newId } from "@openslate/core";
-import type { ActorContext } from "@openslate/core";
+import type { ActorContext, NativeDiagnostic } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent } from "@openslate/director";
 import { DirectorStartRefusal } from "@openslate/director";
 import type { ProductionService } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
 import { directorInputDigest } from "./director-input-identity.js";
+import { safeNativeDiagnostic } from "./native-diagnostics.js";
 
 export type TurnState = "queued" | "running" | "completed" | "waiting_user" | "interrupted" | "unknown" | "failed";
 export interface DirectorTurn {
@@ -12,6 +13,7 @@ export interface DirectorTurn {
   createdAt: string; updatedAt: string; owner: string | null; leaseExpiresAt: number;
   epochId: string | null; nativeThreadId: string | null; nativeTurnId: string | null;
   dispatched: boolean; errorCode: string | null;
+  nativeDiagnostic?: NativeDiagnostic;
 }
 export interface StructuredAnswer { questionId: string; optionIndex?: number; optionLabel?: string; text?: string }
 interface Request { id: string; projectId: string; principalId: string; text: string; state: string; editing: boolean }
@@ -93,7 +95,10 @@ export class DirectorSupervisor {
     const current = turns.find(turn => turn.state === "running") ?? turns.find(turn => turn.state === "queued") ?? turns.at(-1);
     const status = !current ? "idle" : ["running", "queued"].includes(current.state) ? "running"
       : current.state === "waiting_user" ? "waiting_user" : ["failed", "unknown"].includes(current.state) ? "error" : "idle";
-    return { mode: this.options.mode, status, activeRequestId: current?.requestId ?? null, turn: current ?? null,
+    const { nativeDiagnostic: privateDiagnostic, ...publicTurn } = current ?? {};
+    const nativeDiagnostic = safeNativeDiagnostic(privateDiagnostic);
+    return { mode: this.options.mode, status, activeRequestId: current?.requestId ?? null,
+      turn: current ? { ...publicTurn, ...(nativeDiagnostic ? { nativeDiagnostic } : {}) } as DirectorTurn : null,
       message: current?.state === "unknown" ? "The previous turn ended without a confirmed result. Saved changes are retained; send a follow-up to continue." : null };
   }
 
@@ -253,7 +258,8 @@ export class DirectorSupervisor {
           const assembled = (finals.length ? finals : delivered).map(output => output.text).join("\n");
           if (text !== assembled) this.output(turn, text, "final");
         }
-        this.terminal({ ...turn, dispatched: result.dispatched, nativeThreadId: result.nativeThreadId ?? turn.nativeThreadId, nativeTurnId: result.nativeTurnId ?? turn.nativeTurnId },
+        const nativeDiagnostic = safeNativeDiagnostic(result.error?.nativeDiagnostic);
+        this.terminal({ ...turn, ...(nativeDiagnostic ? { nativeDiagnostic } : {}), dispatched: result.dispatched, nativeThreadId: result.nativeThreadId ?? turn.nativeThreadId, nativeTurnId: result.nativeTurnId ?? turn.nativeTurnId },
           result.status === "unknown" ? "unknown" : stale ? "interrupted" : pending ? "waiting_user" : result.status, result.error?.code ?? (stale ? "REQUEST_SUPERSEDED" : null));
         new ToolInvocationService(service).reconcileEpoch(claimed.projectId, turn.epochId!);
       });

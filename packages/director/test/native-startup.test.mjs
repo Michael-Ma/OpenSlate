@@ -102,3 +102,14 @@ test("the classifier reads whole words: the app's authority errors are not a Cod
   assert.equal(classifyNativeDiagnostic({ code: -32000, data: { code: "usage_limit_reached" } }).category, "native_rate_limited");
   assert.equal(classifyNativeDiagnostic({ code: -32000, data: { code: "rate-limited" } }).category, "native_rate_limited");
 });
+
+test("instruction diagnostic reclassification preserves only bounded printable file metadata", () => {
+  assert.deepEqual(classifyNativeDiagnostic({ code: "RUNTIME_INSTRUCTIONS_UNEXPECTED" }), { category: "native_instructions_unexpected" });
+  const files = ["~/.codex/AGENTS.md", "/tmp/AGENTS.override.md", "/tmp/AGENTS.override.md", "PRIVATE_TEXT", "/tmp/../private", "/tmp/AGENTS.md\nPRIVATE", "/tmp/\u202ePRIVATE"];
+  assert.deepEqual(classifyNativeDiagnostic({ nativeDiagnostic: { category: "native_instructions_unexpected", instructionFiles: files,
+    contents: "PRIVATE_CONTENT", limitMs: 5000, raw: "PRIVATE" } }), {
+    category: "native_instructions_unexpected", instructionFiles: ["~/.codex/AGENTS.md", "/tmp/AGENTS.override.md"],
+  });
+  assert.equal(classifyNativeDiagnostic({ nativeDiagnostic: { category: "native_instructions_unexpected",
+    instructionFiles: Array.from({ length: 50 }, (_, i) => `/tmp/${i}/AGENTS.md`) } }).instructionFiles.length, 32);
+});

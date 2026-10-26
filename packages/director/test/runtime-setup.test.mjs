@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, lstat, readlink, writeFile, unlink, readdir, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { setupLocalCodex, CodexDirectorRuntime, CODEX_RUNTIME_LIMITS } from "../dist/index.js";
 import { CodexTransport } from "../dist/runtime/transport.js";
+import { preparePrivateCodexHome } from "../dist/runtime/private-home.js";
 import { PROTOCOL_FIXTURE_LIMITS, waitForFixture } from "./fixture-timing.mjs";
 const entry = fileURLToPath(new URL("runtime-setup-fixture.mjs", import.meta.url));
 const fixture = async (t, scenario = "ready") => {
@@ -13,6 +14,8 @@ const fixture = async (t, scenario = "ready") => {
   t.after(() => rm(root, { recursive: true, force: true }));
   const nativeHome = join(root, "home"), codexHome = join(nativeHome, ".codex");
   await mkdir(codexHome, { recursive: true });
+  // Synthetic sign-in marker only. Neither OpenSlate nor the fixture reads its contents.
+  await writeFile(join(codexHome, "auth.json"), "FAKE_AUTH_NEVER_READ");
   const input = { command: { file: process.execPath, args: [entry] }, model: "gpt-6-astra", nativeHome, codexHome,
     directories: { projection: join(root, "workspace"), snapshots: join(root, "workspace/.agents/skills"), storage: join(root, "runtime") },
     env: { SETUP_FIXTURE_SCENARIO: scenario, SETUP_FIXTURE_LOG: join(root, "fixture.jsonl"), SETUP_FIXTURE_SKILL: join(codexHome, "skills/private/SKILL.md"),
@@ -39,6 +42,7 @@ test("setup generates exact local policy using two no-turn sessions and private 
     [await realpath(process.execPath)]: "read" } });
   assert.equal(policy.config.sqlite_home, join(f.input.directories.storage, "native-state"));
   assert.equal(policy.config["features.default_mode_request_user_input"], true);
+  assert.equal(policy.config["skills.bundled.enabled"], false);
   assert.equal(policy.config["mcp_servers.inherited.enabled"], false);
   assert.deepEqual(policy.config["skills.config"], [{ path: f.input.env.SETUP_FIXTURE_SKILL, enabled: false }]);
   assert.ok(!JSON.stringify(policy).includes("INHERITED_TOKEN"));
@@ -47,17 +51,108 @@ test("setup generates exact local policy using two no-turn sessions and private 
     assert.ok(!JSON.stringify(result.readiness).includes(secret));
   const records = await f.records(), launches = records.filter(row => row.kind === "launch");
   assert.equal(launches.length, 2); assert.ok(launches.every(row => row.parentSecretAbsent));
-  assert.ok(launches.every(row => row.home === f.input.nativeHome && row.codexHome === f.input.codexHome));
+  assert.ok(launches.every(row => row.home === f.input.nativeHome && row.codexHome === join(f.input.directories.storage, "director-home")));
+  assert.deepEqual(result.runtimeOptions.privateCodexHome, { home: join(f.input.directories.storage, "director-home"), authSource: join(f.input.codexHome, "auth.json") });
+  assert.equal((await lstat(join(result.runtimeOptions.env.CODEX_HOME, "auth.json"))).isSymbolicLink(), true);
   assert.deepEqual([...new Set(records.filter(row => row.method).map(row => row.method))].sort(),
     ["account/read", "config/read", "initialize", "initialized", "model/list", "skills/list"]);
   assert.deepEqual(records.find(row => row.method === "account/read").params, { refreshToken: false });
   for (const launch of launches) assert.throws(() => process.kill(launch.pid, 0), error => error.code === "ESRCH");
+});
+
+test("private home excludes the selected home's instructions and settings and links an already linked sign-in", async t => {
+  const f = await fixture(t), source = join(f.root, "fake-auth.json");
+  await writeFile(source, "SYNTHETIC_AUTH_BYTES_MUST_NOT_BE_COPIED");
+  await unlink(join(f.input.codexHome, "auth.json"));
+  await symlink(source, join(f.input.codexHome, "auth.json"));
+  for (const name of ["AGENTS.md", "AGENTS.override.md", "config.toml"]) await writeFile(join(f.input.codexHome, name), "PRIVATE_PERSONAL_INSTRUCTIONS");
+  for (const name of ["prompts", "rules", "skills"]) await mkdir(join(f.input.codexHome, name));
+  // The synthetic native sessions do not open auth, so unreadable credential bytes cannot affect setup.
+  await chmod(source, 0o000);
+  const result = await setupLocalCodex(f.input);
+  assert.equal(result.readiness.status, "ready", result.readiness.issues[0]?.code);
+  const home = result.runtimeOptions.env.CODEX_HOME;
+  assert.notEqual(home, f.input.codexHome);
+  assert.deepEqual(await readdir(home), ["auth.json"]);
+  assert.equal((await lstat(join(home, "auth.json"))).isSymbolicLink(), true);
+  assert.equal(await readlink(join(home, "auth.json")), join(f.input.codexHome, "auth.json"));
+  assert.equal((await lstat(join(f.input.codexHome, "auth.json"))).isSymbolicLink(), true);
+  assert.ok((await f.records()).filter(row => row.kind === "launch").every(row => row.instructionSources.length === 0));
+  assert.ok(!(await f.records()).some(row => JSON.stringify(row).includes("PRIVATE_PERSONAL_INSTRUCTIONS")));
+});
+
+test("setup repairs native-session sign-in link drift before its verification session", async t => {
+  const f = await fixture(t, "auth-link-drift"), result = await setupLocalCodex(f.input);
+  assert.equal(result.readiness.status, "ready", result.readiness.issues[0]?.code);
+  const launches = (await f.records()).filter(row => row.kind === "launch");
+  assert.equal(launches.length, 2);
+  assert.ok(launches.every(row => row.authIsLink === true && row.authLinkTarget === join(f.input.codexHome, "auth.json")));
+});
+
+test("every preparation repairs a missing, redirected or copied sign-in link without copying credential bytes", async t => {
+  const f = await fixture(t), result = await setupLocalCodex(f.input);
+  assert.equal(result.readiness.status, "ready");
+  const descriptor = result.runtimeOptions.privateCodexHome, link = join(descriptor.home, "auth.json"), wrong = join(f.root, "wrong-auth.json");
+  await writeFile(wrong, "SYNTHETIC_OTHER_AUTH");
+  for (const replacement of ["missing", "redirected", "regular-file"]) {
+    await unlink(link);
+    if (replacement === "redirected") await symlink(wrong, link);
+    if (replacement === "regular-file") await writeFile(link, "SYNTHETIC_OLD_COPY");
+    await preparePrivateCodexHome(descriptor);
+    assert.equal((await lstat(link)).isSymbolicLink(), true, replacement);
+    assert.equal(await readlink(link), descriptor.authSource, replacement);
+  }
+  const repeated = await setupLocalCodex(f.input);
+  assert.equal(repeated.readiness.status, "ready");
+  assert.equal(repeated.runtimeOptions.env.CODEX_HOME, descriptor.home);
+  assert.equal(await readlink(link), descriptor.authSource);
+});
+
+for (const scenario of ["missing", "directory", "dangling-link", "selected-home-missing"]) test(`missing usable sign-in (${scenario}) blocks setup before native launch`, async t => {
+  const f = await fixture(t), auth = join(f.input.codexHome, "auth.json");
+  await unlink(auth);
+  if (scenario === "directory") await mkdir(auth);
+  if (scenario === "dangling-link") await symlink(join(f.root, "missing-auth.json"), auth);
+  if (scenario === "selected-home-missing") await rm(f.input.codexHome, { recursive: true });
+  const result = await setupLocalCodex(f.input);
+  assert.equal(result.readiness.issues[0].code, "SETUP_AUTH_REQUIRED");
+  assert.deepEqual(result.readiness.nativeDiagnostic, { category: "native_auth_required" });
+  assert.equal(result.runtimeOptions, undefined);
+  assert.deepEqual(await f.records(), []);
+});
+
+test("private home alias and path overlap protections refuse before a native launch", async t => {
+  for (const target of ["selected-home", "state", "logs", "elsewhere"]) {
+    const f = await fixture(t), storage = f.input.directories.storage;
+    await mkdir(storage);
+    const path = target === "selected-home" ? f.input.codexHome : target === "state" ? join(storage, "native-state") : target === "logs" ? join(storage, "logs") : join(f.root, "elsewhere");
+    await mkdir(path, { recursive: true });
+    await symlink(path, join(storage, "director-home"));
+    const result = await setupLocalCodex(f.input);
+    assert.equal(result.readiness.issues[0].code, "SETUP_PATH_OVERLAP", target);
+    assert.deepEqual(await f.records(), []);
+  }
+});
+
+test("later directory aliases and instruction/settings additions are refused by every-launch preparation", async t => {
+  const f = await fixture(t), result = await setupLocalCodex(f.input), descriptor = result.runtimeOptions.privateCodexHome;
+  for (const name of ["AGENTS.md", "AGENTS.override.md", "config.toml", "managed_config.toml", "prompts", "rules", "skills", "plugins"]) {
+    const path = join(descriptor.home, name);
+    await writeFile(path, "UNEXPECTED_INSTRUCTION_OR_SETTING");
+    await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_INSTRUCTIONS_UNEXPECTED", name);
+    await unlink(path);
+  }
+  await rm(descriptor.home, { recursive: true });
+  const outside = join(f.root, "replacement"); await mkdir(outside);
+  await symlink(outside, descriptor.home);
+  await assert.rejects(preparePrivateCodexHome(descriptor), error => error.code === "SETUP_DIRECTORY_CHANGED");
 });
 for (const [scenario, code] of [
   ["version", "SETUP_VERSION_MISMATCH"], ["auth", "SETUP_AUTH_REQUIRED"], ["model", "SETUP_MODEL_UNAVAILABLE"],
   ["effort", "SETUP_MODEL_UNSUPPORTED"], ["cursor-loop", "SETUP_MODEL_CATALOG_INVALID"], ["policy", "SETUP_POLICY_MISMATCH"],
   ["mcp-drift", "SETUP_MCP_UNEXPECTED"], ["skill-drift", "SETUP_SKILLS_UNEXPECTED"], ["feature-drift", "SETUP_CONFIG_MISMATCH"],
   ["search-drift", "SETUP_CONFIG_MISMATCH"], ["question-feature-drift", "SETUP_CONFIG_MISMATCH"],
+  ["bundled-skills-drift", "SETUP_CONFIG_MISMATCH"],
   ["skill-error", "SETUP_SKILLS_INVALID"], ["invalid-mcp-name", "SETUP_CATALOG_INVALID"], ["rpc-error", "RUNTIME_RPC_REJECTED"],
   ["hang", "RUNTIME_RPC_TIMEOUT"], ["approval", "SETUP_INTERACTIVE_DENIED"],
   ["duplicate-model", "SETUP_MODEL_CATALOG_INVALID"], ["late-cursor-loop", "SETUP_MODEL_CATALOG_INVALID"],

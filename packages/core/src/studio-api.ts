@@ -9,11 +9,13 @@
 /** Money in integer micro-dollars, as a decimal string (matches ProviderProfile.unitCostMicros). */
 export type Micros = string;
 
-/** Allowlisted native-start failure evidence. Never carries native prose, paths or RPC bodies. */
+/** Allowlisted native-start failure evidence. Never carries native prose or RPC bodies. */
 export interface NativeDiagnostic {
-  category: "native_timeout" | "native_spawn_failed" | "native_auth_required" | "native_protocol" | "native_rate_limited" | "native_unknown";
+  category: "native_timeout" | "native_spawn_failed" | "native_auth_required" | "native_protocol" | "native_rate_limited" | "native_unknown" | "native_instructions_unexpected";
   /** Actual deadline that expired, in milliseconds. Only present for a timeout. */
   limitMs?: number;
+  /** Instruction-source paths only, bounded to 32 printable paths; the person's home is shown as ~. */
+  instructionFiles?: string[];
 }
 
 export interface StudioArtifactRef {

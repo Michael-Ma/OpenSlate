@@ -3,9 +3,10 @@ import type { DirectorTurn } from './director-supervisor.js';
 import type { ToolInvocation } from './tool-invocations.js';
 import type { ReviewNotesFailure } from '@openslate/core';
 import type { DirectorGenerationEffectRecord } from './director-generation-effects.js';
+import { safeNativeDiagnostic } from './native-diagnostics.js';
 
 const reasons: Record<string, string> = { RUNTIME_RUN_TIMEOUT: 'timeout', REQUEST_SUPERSEDED: 'superseded', OWNER_LOST: 'owner_lost' };
-/** Public progress has names/counts only, never tool arguments or native diagnostics. */
+/** Public progress includes allowlisted failure metadata, never tool arguments or native prose. */
 export function directorTurnViews(service: ProductionService, projectId: string) {
   const store = service.store, outputs = store.list<{ turnId: string; text: string; phase: string }>('director_output', projectId);
   const calls = store.list<ToolInvocation>('tool_invocation', projectId);
@@ -31,7 +32,9 @@ export function directorTurnViews(service: ProductionService, projectId: string)
       : !noteCall || noteCall.state === 'succeeded' || confirmed(noteCall) ? null
       : noteCall.state === 'failed' ? { code: noteCall.error?.code ?? 'VALIDATION_ERROR', reason: noteCall.error?.reason ?? 'unavailable' }
       : { code: 'TOOL_CALL_UNRESOLVED', reason: 'unknown' };
+    const nativeDiagnostic = safeNativeDiagnostic(turn.nativeDiagnostic);
     return { id: turn.id, requestId: turn.requestId, state: turn.state, at: turn.createdAt, updatedAt: turn.updatedAt,
+      ...(nativeDiagnostic ? { nativeDiagnostic } : {}),
       runtime: turn.runtimeId === 'codex-app-server' ? 'live' : 'scripted',
       action: store.get('keyframe_review_request', turn.requestId) ? 'keyframe_review' : 'conversation',
       reason: turn.errorCode ? reasons[turn.errorCode] ?? (turn.state === 'failed' ? 'failed' : 'unknown') : turn.state === 'completed' && !replied ? 'no_reply' : turn.state === 'interrupted' ? 'interrupted' : turn.state === 'failed' ? 'failed' : turn.state === 'unknown' ? 'unknown' : null,

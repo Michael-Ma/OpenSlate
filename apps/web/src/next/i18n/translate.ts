@@ -5,10 +5,19 @@ import { catalog, isMessageId, type MessageId } from "./messages.ts";
 
 const NATIVE_CATEGORIES = ["native_timeout", "native_spawn_failed", "native_auth_required", "native_protocol", "native_rate_limited", "native_unknown"] as const;
 
-/** Native text is never display copy: only an allowlisted category and a bounded numeric limit cross here. */
-export function nativeDiagnosticMsg(diagnostic: unknown, context: "setup" | "images", notDispatched = false): Msg | null {
+/** Native text is never display copy: only allowlisted categories and validated metadata cross here. */
+export function nativeDiagnosticMsg(diagnostic: unknown, context: "setup" | "images" | "director", notDispatched = false): Msg | null {
   if (!diagnostic || typeof diagnostic !== "object") return null;
-  const { category, limitMs } = diagnostic as { category?: unknown; limitMs?: unknown };
+  const { category, limitMs, instructionFiles } = diagnostic as { category?: unknown; limitMs?: unknown; instructionFiles?: unknown };
+  if (category === "native_instructions_unexpected" && context !== "images") {
+    const path = (value: unknown): value is string => typeof value === "string" && value.length <= 4096
+      && (value.startsWith("/") || value.startsWith("~/")) && !/[\\\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(value)
+      && value.split("/").slice(1).every((part) => part !== "" && part !== "." && part !== "..");
+    const files = Array.isArray(instructionFiles) && instructionFiles.length > 0 && instructionFiles.length <= 32
+      && [...instructionFiles].every(path) ? instructionFiles.join(", ") : null;
+    return files ? { id: "error.RUNTIME_INSTRUCTIONS_UNEXPECTED", values: { files } } : { id: "error.RUNTIME_INSTRUCTIONS_UNEXPECTED_no_files" };
+  }
+  if (context === "director") return null;
   if (typeof category !== "string" || !(NATIVE_CATEGORIES as readonly string[]).includes(category)) return null;
   const timed = category === "native_timeout" && typeof limitMs === "number" && Number.isFinite(limitMs) && limitMs > 0 && limitMs <= 600_000;
   const id = `error.${context === "setup" ? "DIRECTOR_SETUP" : "CODEX_IMAGES"}_${category}${category === "native_timeout" && !timed ? "_no_limit" : ""}`;
@@ -29,6 +38,8 @@ export function translateMsg(locale: Locale, message: Msg): string {
 
 /** Server codes map to messages by id; an unknown code still says which code it was. */
 export function errorMsg(code: string, details?: Readonly<Record<string, unknown>>): Msg {
+  if (code === "RUNTIME_INSTRUCTIONS_UNEXPECTED") return nativeDiagnosticMsg(details?.nativeDiagnostic, "director")
+    ?? { id: "error.RUNTIME_INSTRUCTIONS_UNEXPECTED_no_files" };
   if (code === "DIRECTOR_SETUP_REQUIRED" && details) {
     const native = nativeDiagnosticMsg(details.nativeDiagnostic, "setup");
     if (native) return native;

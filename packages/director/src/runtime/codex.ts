@@ -5,7 +5,8 @@ import type { CodexConfigValue, CodexDirectorOptions } from "./policy.js";
 import { CodexTransport, timeout, type RpcMessage } from "./transport.js";
 import { prepareDirectorImages } from "./images.js";
 import { beforeDispatch, fault, identity, object, requireRuntime, RuntimeFault, validateInput } from "./validation.js";
-import { classifyNativeDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
+import { classifyNativeDiagnostic, instructionSourcesDiagnostic, nativeTimeoutFault } from "./native-diagnostic.js";
+import { preparePrivateCodexHome } from "./private-home.js";
 import type { DirectorQuestion, DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorRuntimeEvent, DirectorStartOptions } from "./types.js";
 
 const SERVER = "openslate";
@@ -114,6 +115,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     let result: DirectorRunResult | undefined;
     try {
       requireRuntime(!options.signal?.aborted, "RUNTIME_ABORTED", "Director run was cancelled");
+      if (config.privateCodexHome) await preparePrivateCodexHome(config.privateCodexHome);
       const images = await prepareDirectorImages(input.images, config.cwd);
       await this.verifyVersion(cancellation.signal);
       if (stopReason) throw stopReason;
@@ -201,7 +203,9 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       requireRuntime(typeof thread.id === "string" && (!input.resumeThreadId || thread.id === input.resumeThreadId), "RUNTIME_PROTOCOL_INVALID", "Native thread identity differs from request");
       nativeThreadId = thread.id;
       requireRuntime(object(opened.activePermissionProfile).id === config.policy.id, "RUNTIME_POLICY_MISMATCH", "Native runtime did not select the configured permission profile");
-      requireRuntime(Array.isArray(opened.instructionSources) && opened.instructionSources.length === 0, "RUNTIME_INSTRUCTIONS_UNEXPECTED", "Unexpected inherited native instructions");
+      if (!Array.isArray(opened.instructionSources) || opened.instructionSources.length !== 0)
+        throw new RuntimeFault("RUNTIME_INSTRUCTIONS_UNEXPECTED", "Unexpected inherited native instructions",
+          instructionSourcesDiagnostic(opened.instructionSources, config.env.HOME));
       await this.catalog(transport, nativeThreadId, input, cancellation.signal);
       emit({ ...base, kind: "runtime_started", nativeThreadId });
       await delivery; if (stopReason) throw stopReason;
@@ -234,7 +238,9 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       if (transport) {
         try { await transport.close(); }
         catch {
-          const error = { code: "RUNTIME_CLEANUP_FAILED", message: "Native process cleanup was not confirmed" };
+          const error = { code: "RUNTIME_CLEANUP_FAILED", message: "Native process cleanup was not confirmed",
+            ...(!dispatched && result?.error?.nativeDiagnostic?.category === "native_instructions_unexpected"
+              ? { nativeDiagnostic: result.error.nativeDiagnostic } : {}) };
           result = { ...base, ...result, text: result?.text ?? "", dispatched, status: dispatched ? "unknown" : "failed", error };
           emit({ ...base, kind: "diagnostic", ...error });
         }
@@ -246,7 +252,9 @@ export class CodexDirectorRuntime implements DirectorRuntime {
     }
     if (deliveryFailed || stopReason?.code === "RUNTIME_EVENT_LIMIT") {
       result = { ...base, ...result, text: result?.text ?? "", dispatched, status: dispatched ? "unknown" : "failed",
-        error: { code: "RUNTIME_EVENT_CONSUMER_FAILED", message: "Runtime events were not completely delivered" } };
+        error: { code: "RUNTIME_EVENT_CONSUMER_FAILED", message: "Runtime events were not completely delivered",
+          ...(!dispatched && result?.error?.nativeDiagnostic?.category === "native_instructions_unexpected"
+            ? { nativeDiagnostic: result.error.nativeDiagnostic } : {}) } };
     }
     requireRuntime(result, "RUNTIME_FAILED", "Director runtime produced no result");
     return result;
@@ -286,6 +294,7 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "shell_environment_policy.inherit": "none", "shell_environment_policy.experimental_use_profile": false,
       "features.code_mode_host": true, "features.skip_host_skill_discovery": true,
       "features.default_mode_request_user_input": true,
+      "skills.bundled.enabled": false,
       "skills.config": [...(Array.isArray(this.#options.policy.config["skills.config"])
         ? this.#options.policy.config["skills.config"].filter(value => object(value).enabled === false &&
           !input.skills.some(skill => skill.path === object(value).path)) : []),
@@ -318,6 +327,8 @@ export class CodexDirectorRuntime implements DirectorRuntime {
       "RUNTIME_POLICY_MISMATCH", "Effective native permissions differ from the exact configured profile");
     const features = object(config.features);
     requireRuntime(features.code_mode_host === true && features.default_mode_request_user_input === true && DISABLED.every(name => features[name] === false), "RUNTIME_CONFIG_MISMATCH", "Native capability configuration differs from expected settings");
+    requireRuntime(object(object(config.skills).bundled).enabled === false,
+      "RUNTIME_CONFIG_MISMATCH", "Bundled native instructions must remain disabled");
     const data = object(await transport.request("skills/list", { cwds: [this.#options.cwd], forceReload: true }, signal)).data;
     requireRuntime(Array.isArray(data), "RUNTIME_PROTOCOL_INVALID", "Native skill catalog is missing");
     const found: { name: unknown; path: unknown }[] = [];

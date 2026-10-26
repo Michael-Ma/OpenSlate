@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { object, requireRuntime } from "./validation.js";
+import type { PrivateCodexHome } from "./private-home.js";
 
 export type CodexConfigValue = string | number | boolean | readonly CodexConfigValue[] | { readonly [key: string]: CodexConfigValue };
 /** Updating this requires regenerating protocol fixtures and rerunning compatibility evidence. */
@@ -56,6 +57,8 @@ export interface CodexDirectorOptions {
   cwd: string;
   /** Complete launch environment. No process.env merge or personal config/auth reads occur here. */
   env: Readonly<Record<string, string>>;
+  /** Studio-owned instruction-free home, prepared again before each native launch. */
+  privateCodexHome?: PrivateCodexHome;
   model: string;
   runtimeVersion: string;
   policy?: LocalCodexPolicy;
@@ -80,6 +83,12 @@ export function validateOptions(supplied: CodexDirectorOptions): CodexDirectorOp
     typeof value.model === "string" && /^[A-Za-z0-9_.:/-]{1,120}$/.test(value.model), "RUNTIME_CONFIG_INVALID", "Runtime paths and model must be explicit");
   requireRuntime(Object.entries(value.env).every(([key, item]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && typeof item === "string" && !item.includes("\0")),
     "RUNTIME_CONFIG_INVALID", "Invalid explicit runtime environment");
+  if (value.privateCodexHome !== undefined) {
+    requireRuntime(value.privateCodexHome && [value.privateCodexHome.home, value.privateCodexHome.authSource].every(path =>
+      typeof path === "string" && isAbsolute(path) && path.length <= 4096 && !/[\x00-\x1f\x7f]/.test(path)) &&
+      value.env.CODEX_HOME === value.privateCodexHome.home,
+    "RUNTIME_CONFIG_INVALID", "Private native home must match the explicit runtime environment");
+  }
   const limits = { ...CODEX_RUNTIME_LIMITS };
   for (const key of Object.keys(limits) as (keyof CodexRuntimeLimits)[]) {
     const requested = value.limits?.[key];

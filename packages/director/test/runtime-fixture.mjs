@@ -51,6 +51,7 @@ lines.on("line", line => {
   }
   if (method === "initialized") return;
   if (method === "config/read") {
+    if (mode === "bundled-skills-wrong") config.skills.bundled.enabled = true;
     if (mode === "question-feature-wrong") config.features.default_mode_request_user_input = false;
     if (mode === "bridge-wrong") config.mcp_servers.openslate.env.OPENSLATE_BRIDGE_CREDENTIAL = "wrong-fixed-credential";
     if (mode === "permissions-wrong") config.permissions.fixture.network.enabled = true;
@@ -85,7 +86,9 @@ lines.on("line", line => {
   if (method === "thread/start" || method === "thread/resume") {
     threadId = params.threadId ?? threadId;
     return respond(id, { thread: { id: threadId }, activePermissionProfile: { id: "fixture" },
-      instructionSources: mode === "instructions-extra" ? [{ path: "/fake/AGENTS.md" }] : [] });
+      instructionSources: mode === "home-instructions" ? ["AGENTS.md", "AGENTS.override.md"].map(name => join(process.env.CODEX_HOME, name)).filter(existsSync)
+        : process.env.FIXTURE_INSTRUCTION_SOURCES ? JSON.parse(process.env.FIXTURE_INSTRUCTION_SOURCES)
+        : mode === "instructions-extra" ? [{ path: "/fake/AGENTS.md" }] : [] });
   }
   if (method === "mcpServerStatus/list") {
     const tools = Object.fromEntries(["read_context", "prepare_change", "apply_change", "control_execution", "inspect_artifact"].map(name => [name, { name }]));

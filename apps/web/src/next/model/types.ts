@@ -1,4 +1,4 @@
-import type { DirectorGenerationEffect, DirectorNote, GenerationOverview, MessageAttachmentView, ReviewNotesFailure } from "@openslate/core/public";
+import type { DirectorGenerationEffect, DirectorNote, GenerationOverview, MessageAttachmentView, NativeDiagnostic, ReviewNotesFailure } from "@openslate/core/public";
 import type { MessageValues } from "../i18n/format.ts";
 import type { MessageId } from "../i18n/messages.ts";
 
@@ -75,6 +75,8 @@ export interface TurnView {
   progress?: { tool: string; state: string } | null;
   /** The latest refused note batch, cleared when a corrected batch saves; no tool arguments or model prose. */
   notesSaveFailure?: ReviewNotesFailure | null;
+  /** Allowlisted native-start failure metadata, retained with this turn; never native output. */
+  nativeDiagnostic?: NativeDiagnostic;
 }
 
 export interface PendingQuestion {
@@ -90,7 +92,7 @@ export interface DirectorStatus {
   status: "idle" | "running" | "waiting_user" | "error" | "not_connected";
   activeRequestId?: string | null;
   /** The current turn, when the server reports it: its request, state and (once failed) error code. */
-  turn?: { requestId: string; state: string; errorCode?: string | null } | null;
+  turn?: { requestId: string; state: string; errorCode?: string | null; nativeDiagnostic?: NativeDiagnostic } | null;
   /** The Director's own words about a turn that needs attention (English, from the server), when it has any. */
   message?: string | null;
   /** True when this film's Director can be shown pictures: the Codex Director with FFmpeg on this computer. */

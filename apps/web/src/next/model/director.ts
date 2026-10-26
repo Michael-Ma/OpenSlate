@@ -7,6 +7,7 @@ import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "
 import { noteViews, type NoteView } from "./notes.ts";
 import { isMessageId, type MessageId } from "../i18n/messages.ts";
 import { formatList } from "../i18n/typeset.ts";
+import { errorMsg, nativeDiagnosticMsg } from "../i18n/translate.ts";
 import { queuedToRun } from "./media-state.ts";
 import { msg, type ComposerImage, type ConversationEntry, type DirectorStatus, type Msg, type PendingQuestion, type ProjectSnapshot, type Target, type TurnView } from "./types.ts";
 
@@ -70,7 +71,8 @@ export interface ModeContext {
  */
 export function modeLine(director: DirectorStatus | null, loadError: string | undefined, context: ModeContext = {}): ModeLine | null {
   if (!director) return loadError ? { tone: "attention", message: msg("director.unreachable") } : null;
-  if (director.status === "error" && !context.errorShown) return { tone: "attention", message: msg("director.error") };
+  if (director.status === "error" && !context.errorShown) return { tone: "attention", message: nativeDiagnosticMsg(director.turn?.nativeDiagnostic, "director")
+    ?? (director.turn?.errorCode === "RUNTIME_INSTRUCTIONS_UNEXPECTED" ? errorMsg(director.turn.errorCode) : msg("director.error")) };
   if (director.mode === "offline" || director.status === "not_connected") return { tone: "attention", message: msg("director.offline") };
   if (director.mode === "fake") return { tone: "info", message: msg(context.filmUnchanged ? "director.mode.fake" : "director.mode.scripted") };
   return null;
@@ -600,7 +602,7 @@ const FAILED_STATES = new Set(["failed", "unknown"]);
 
 /**
  * The requests whose latest Director turn failed, with what is known about why. Only the current turn (the
- * Director status) carries an error code and the Director's own words; an older failure says only that it failed.
+ * Director status) carries an error code and the Director's own words. Safe native metadata stays with its turn.
  */
 export function failedTurns(turns: readonly TurnView[] | undefined, director: DirectorStatus | null): Map<string, Attention> {
   const latest = new Map<string, TurnView>();
@@ -613,7 +615,9 @@ export function failedTurns(turns: readonly TurnView[] | undefined, director: Di
     // An unconfirmed ending is one the catalog words exactly (the server's own sentence for it is English).
     if (turn.state === "unknown") { out.set(requestId, { detail: msg("director.attention.unknown"), text: null }); continue; }
     const code = current?.turn?.errorCode ?? null;
-    const coded = code && isMessageId(`error.${code}`) ? msg(`error.${code}` as MessageId) : null;
+    const native = nativeDiagnosticMsg(current?.turn?.nativeDiagnostic ?? turn.nativeDiagnostic, "director");
+    const coded = native ?? (code === "RUNTIME_INSTRUCTIONS_UNEXPECTED" ? errorMsg(code)
+      : code && isMessageId(`error.${code}`) ? msg(`error.${code}` as MessageId) : null);
     const words = current?.message?.trim() || null;
     const fallback = turn.reason === "timeout" ? msg("director.ending.timeout")
       : turn.reason === "owner_lost" ? msg("director.ending.owner_lost")

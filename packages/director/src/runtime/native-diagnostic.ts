@@ -1,18 +1,41 @@
 import type { NativeDiagnostic } from "@openslate/core";
 import { RuntimeFault } from "./validation.js";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 export type { NativeDiagnostic } from "@openslate/core";
-const categories = new Set<NativeDiagnostic["category"]>(["native_timeout", "native_spawn_failed", "native_auth_required", "native_protocol", "native_rate_limited", "native_unknown"]);
+const categories = new Set<NativeDiagnostic["category"]>(["native_timeout", "native_spawn_failed", "native_auth_required", "native_protocol", "native_rate_limited", "native_unknown", "native_instructions_unexpected"]);
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
-/** A whitelist projection only. Native text, paths, credentials and nested errors never escape. */
+const printablePath = (value: unknown): value is string => typeof value === "string" && value.length <= 4096 &&
+  /^(?:\/|~\/)(?!\/)/.test(value) && !/[\\\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(value) &&
+  value.split("/").slice(1).every(part => part !== "" && part !== "." && part !== "..");
+/** Retain file/folder identities only, never a native source's contents or other fields. */
+export function instructionSourcesDiagnostic(sources: unknown, home?: string): NativeDiagnostic {
+  const files = new Set<string>();
+  if (Array.isArray(sources)) for (const source of sources.slice(0, 512)) {
+    // The pinned native protocol reports strings; retain object-path compatibility
+    // for older host fixtures without ever projecting their other fields.
+    const path = typeof source === "string" ? source : record(source).path;
+    if (typeof path !== "string" || !isAbsolute(path) || !printablePath(path)) continue;
+    const normalized = resolve(path), delta = home && isAbsolute(home) ? relative(resolve(home), normalized) : undefined;
+    const display = delta !== undefined && delta !== ".." && !delta.startsWith(`..${sep}`) && !isAbsolute(delta)
+      ? `~/${delta}` : normalized;
+    if (printablePath(display)) files.add(display);
+    if (files.size === 32) break;
+  }
+  return { category: "native_instructions_unexpected", instructionFiles: [...files] };
+}
+/** A whitelist projection only. Native prose, credentials and nested errors never escape. */
 export function classifyNativeDiagnostic(error: unknown): NativeDiagnostic {
   const value = record(error), supplied = record(value.nativeDiagnostic);
   if (categories.has(supplied.category as NativeDiagnostic["category"])) {
     return { category: supplied.category as NativeDiagnostic["category"],
       ...(supplied.category === "native_timeout" && Number.isSafeInteger(supplied.limitMs) && Number(supplied.limitMs) > 0 && Number(supplied.limitMs) <= 600_000
-        ? { limitMs: Number(supplied.limitMs) } : {}) };
+        ? { limitMs: Number(supplied.limitMs) } : {}),
+      ...(supplied.category === "native_instructions_unexpected" && Array.isArray(supplied.instructionFiles)
+        ? { instructionFiles: [...new Set(supplied.instructionFiles.filter(printablePath))].slice(0, 32) } : {}) };
   }
   const code = typeof value.code === "string" ? value.code : "";
+  if (code === "RUNTIME_INSTRUCTIONS_UNEXPECTED") return { category: "native_instructions_unexpected" };
   if (/TIMEOUT$/.test(code)) return { category: "native_timeout" };
   if (["ENOENT", "EACCES", "ENOEXEC", "RUNTIME_SPAWN_FAILED", "SETUP_BINARY_FAILED", "RUNTIME_VERSION_FAILED", "CODEX_IMAGE_BINARY_INVALID"].includes(code)) return { category: "native_spawn_failed" };
   if (["SETUP_AUTH_REQUIRED", "SETUP_INTERACTIVE_DENIED", "CODEX_IMAGE_CHATGPT_REQUIRED"].includes(code)) return { category: "native_auth_required" };

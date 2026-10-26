@@ -10,6 +10,7 @@ import { Engine } from '../dist/execution/engine.js';
 import { ProductionService } from '../dist/application/service.js';
 import { DirectorSupervisor } from '../dist/application/director-supervisor.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
+import { safeNativeDiagnostic } from '../dist/application/native-diagnostics.js';
 
 const identity = input => Object.fromEntries(['projectId','requestId','epochId','turnId'].map(key => [key,input[key]]));
 const completed = (input, text = 'Saved response') => ({...identity(input), status:'completed',text,dispatched:true});
@@ -41,6 +42,41 @@ test('messages queue exactly once and persist a final response without persistin
   assert.equal(f.store.get('epoch',input.epochId).state,'revoked');
   const bodies=f.store.db.prepare('SELECT body FROM entities').all().map(row=>row.body).join('\n');
   assert.ok(!bodies.includes(input.bridge.credential));
+});
+
+test('instruction-source refusal persists safe turn metadata and survives later requests without automatic replay', async t => {
+  let calls = 0;
+  const nativeDiagnostic = { category: 'native_instructions_unexpected', instructionFiles: ['~/.codex/AGENTS.md', '/tmp/AGENTS.override.md'],
+    contents: 'PRIVATE_INSTRUCTIONS', stderr: 'PRIVATE_NATIVE_OUTPUT' };
+  const f = fixture(t, async input => {
+    calls++;
+    return { ...identity(input), status: 'failed', text: '', dispatched: false,
+      error: { code: 'RUNTIME_INSTRUCTIONS_UNEXPECTED', message: 'PRIVATE_NATIVE_OUTPUT', nativeDiagnostic } };
+  });
+  const turn = f.enqueue(); f.supervisor.tick(); await f.supervisor.settle();
+  const expected = { category: nativeDiagnostic.category, instructionFiles: nativeDiagnostic.instructionFiles };
+  assert.deepEqual(f.store.get('director_turn', turn.id).nativeDiagnostic, expected);
+  assert.deepEqual(f.supervisor.status(f.project.id).turn.nativeDiagnostic, expected);
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].nativeDiagnostic, expected);
+  assert.equal(f.store.get('director_turn', turn.id).dispatched, false);
+  f.supervisor.tick(); await f.supervisor.settle(); assert.equal(calls, 1);
+  f.enqueue('Try another request');
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].nativeDiagnostic, expected);
+  assert.equal(f.store.list('attempt', f.project.id).length, 0);
+  const bodies = f.store.db.prepare('SELECT body FROM entities').all().map(row => row.body).join('\n');
+  assert.doesNotMatch(bodies, /PRIVATE_/);
+});
+
+test('turn status and snapshot sanitize historical instruction metadata at the API boundary', async t => {
+  const f = fixture(t), turn = f.enqueue();
+  f.store.put('director_turn', turn.id, f.project.id, { ...turn, state: 'failed', errorCode: 'RUNTIME_INSTRUCTIONS_UNEXPECTED',
+    nativeDiagnostic: { category: 'native_instructions_unexpected', instructionFiles: ['~/.codex/AGENTS.md', '../private', '/tmp/\u202eprivate', '/tmp/file\nPRIVATE'],
+      contents: 'PRIVATE_INSTRUCTIONS', token: 'PRIVATE_TOKEN' } });
+  const expected = { category: 'native_instructions_unexpected', instructionFiles: ['~/.codex/AGENTS.md'] };
+  assert.deepEqual(f.supervisor.status(f.project.id).turn.nativeDiagnostic, expected);
+  assert.deepEqual(f.service.snapshot(f.project.id).turns[0].nativeDiagnostic, expected);
+  assert.deepEqual(safeNativeDiagnostic({ category: 'native_protocol', instructionFiles: ['/tmp/PRIVATE'] }), { category: 'native_protocol' });
+  assert.equal(safeNativeDiagnostic({ category: 'PRIVATE_CATEGORY' }), undefined);
 });
 
 test('one active turn per project while separate projects may progress concurrently',async t=>{
