@@ -17,7 +17,7 @@ import { registerProjectLibrary } from "./project-library.js";
 import { registerAssetLibrary } from "./asset-library.js";
 import { registerProjectEventStream } from "./application/project-event-stream.js";
 import { registerStudioSessions, type StudioSessions } from "./studio-sessions.js";
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import { ProjectModelSettings } from "./application/project-model-settings.js";
 import type { ProjectModelPreviewInput } from "./application/project-model-settings.js";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -45,7 +45,11 @@ import { assertDemoProviderProfiles, InstalledProviderCatalog } from "./applicat
 import { InstallationRecoveryGuard } from "./application/installation-recovery.js";
 import { RECOVERY_RELEASE_PATH, recoveryInspectionAllowed, registerRecoveryRoutes } from "./application/recovery-routes.js";
 
-interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string; logger?: boolean;
+interface AppOptions { sceneCommands?: SceneConfirmationRunner; service?: ProductionService; localToken?: string;
+  /** true logs to stdout; a stream receives the same JSON lines (tests). */
+  logger?: boolean | { stream: { write(line: string): void } };
+  /** Log every request and response (off by default: the studio's own refreshes would flood the log). Warnings and errors are always logged. */
+  logRequests?: boolean;
   /** Host-selected tools, also available when the complete media service could not be installed. */
   mediaToolPaths?: { ffmpeg: string | null; ffprobe: string | null };
   /** Browser origins allowed to call the API. Defaults to the dev server and the installed studio. */
@@ -64,7 +68,7 @@ const string = { type: "string", minLength: 1, maxLength: 160 };
 const object = (properties: object, required: string[]) => ({ type: "object", additionalProperties: false, properties, required });
 
 export function createApp(options: AppOptions = {}) {
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 3 * 1024 * 1024,
+  const app = Fastify({ logger: options.logger ?? false, logController: new LogController({ disableRequestLogging: !options.logRequests }), bodyLimit: 3 * 1024 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } } });
   const allowedOrigins = options.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS;
   const actors = new WeakMap<object, ActorContext>();

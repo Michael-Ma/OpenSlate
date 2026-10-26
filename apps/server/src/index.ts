@@ -77,6 +77,8 @@ const studioSessions = new StudioSessions();
 const narrationSpeech = new NarrationSpeechService(narration), canonical = new NarrationCanonicalService(narration);
 const sceneCommands = new SceneConfirmationRunner(service, { narration, narrationSpeech, canonical });
 const app = createApp({ service, sceneCommands, director, runtimeSettings: director, providerCatalog, localToken, studioSessions, logger: true,
+  // Each refresh reads several routes; set OPENSLATE_LOG_REQUESTS=1 to see every request while debugging.
+  logRequests: process.env.OPENSLATE_LOG_REQUESTS === "1",
   mediaToolPaths: { ffmpeg: ffmpegPath, ffprobe: ffprobePath },
   ...(webAssets ? { webAssets } : {}),
   imageRoutes: { production: service, images: imageStore ? new ImageApplicationService(service, imageStore) : null,
