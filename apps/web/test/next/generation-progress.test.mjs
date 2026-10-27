@@ -70,6 +70,9 @@ test('a stale-prompt block offers to ask the Director, as a draft the person sen
   const view = blockView({ kind: 'keyframes', sceneId: sceneId(2), code: 'STALE_PROMPT_INTENT', shotIds: [shotId('2.3')], at: 'now' }, lastFerryOverview());
   assert.deepEqual(view.ask.shotIds, [shotId('2.3')]);
   assert.equal(translateMsg('en', view.ask.text), 'Update the prompts for 2.3, then make their keyframes.');
+  assert.equal(blockView({ kind: 'keyframes', sceneId: sceneId(1), code: 'ALREADY_COMPLETE', shotIds: [], at: 'now' }, lastFerryOverview()), null);
+  const direction = blockView({ kind: 'keyframes', sceneId: sceneId(2), code: 'DIRECTION_REQUIRED', shotIds: [shotId('2.2')], at: 'now' }, lastFerryOverview());
+  assert.equal(translateMsg('zh-CN', direction.title), '2.2 还没有画面描述');
   const other = blockView({ kind: 'keyframes', sceneId: sceneId(3), code: 'SCENE_NOT_READY', shotIds: [], at: 'now' }, lastFerryOverview());
   assert.equal(other.open, null);
   assert.equal(translateMsg('en', other.title), 'Scene 3 needs something first');

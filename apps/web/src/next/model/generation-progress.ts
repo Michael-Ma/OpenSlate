@@ -104,8 +104,11 @@ function inTheWay(overview: GenerationOverview, attempt: NonNullable<DirectorGen
   return [slot, slot.replacement].some((s) => s?.attemptId === attempt.attemptId && (s.state === "running" || s.state === "no_answer"));
 }
 
+/** Refusals that need nothing from the person: the scene had nothing left to make. */
+const NOTHING_TO_DO = new Set(["ALREADY_COMPLETE"]);
+
 export function blockView(block: DirectorGenerationBlock, overview: GenerationOverview | null): BlockView | null {
-  if (!overview) return null;
+  if (!overview || NOTHING_TO_DO.has(block.code)) return null;
   const scene = overview.scenes.find((s) => s.sceneId === block.sceneId)?.ordinal ?? null;
   const label = (id: string) => overview.shots[id]?.label ?? "?";
   const sceneArg = { scene: scene ?? "?" };
@@ -129,6 +132,15 @@ export function blockView(block: DirectorGenerationBlock, overview: GenerationOv
       open: { shotId: block.shotIds[0]!, label: label(block.shotIds[0]!) },
       ask: { shotIds: block.shotIds, text: msg("director.blocked.prompt.ask", { shots }) },
       title: msg("director.blocked.prompt", { shots }), step: msg("director.blocked.prompt.step", { shot: label(block.shotIds[0]!) }),
+    };
+  }
+  if (block.code === "DIRECTION_REQUIRED" && block.shotIds.length) {
+    const shots = block.shotIds.map(label).join(", ");
+    return {
+      code: block.code, sceneId: block.sceneId, scene, resolved: false,
+      open: { shotId: block.shotIds[0]!, label: label(block.shotIds[0]!) },
+      ask: { shotIds: block.shotIds, text: msg("director.blocked.direction.ask", { shots }) },
+      title: msg("director.blocked.direction", { shots }), step: msg("director.blocked.direction.step", { shot: label(block.shotIds[0]!) }),
     };
   }
   return { code: block.code, sceneId: block.sceneId, scene, resolved: false, ask: null, open: null,
