@@ -343,3 +343,13 @@ test('a dispatched POST whose worker died with no receipt is lost only after any
   assert.equal(current(f).phase, 'failed'); assert.equal(current(f).failure.id, 'SUBMISSION_RESPONSE_LOST');
   assert.equal(f.store.get('reservation', current(f).reservationId).state, 'charged'); assert.equal(f.calls.post, 1);
 });
+
+test('a worker that died before the dispatch marker is fenced as never sent: released, not charged, no POST', async t => {
+  const f = await fixture(t); tamper(f, 'attempt', { ...current(f), leaseExpiresAt: 0 });
+  await f.engine.reconcile(); const settled = current(f);
+  assert.equal(settled.phase, 'failed'); assert.equal(settled.failure.retryAllowed, false);
+  assert.equal(f.store.get('reservation', settled.reservationId).state, 'released', 'never sent is never charged');
+  assert.equal(rows(f, 'viggle_h3_execution_submit')[0].observation.kind, 'not_dispatched');
+  for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.calls.post, 0); assert.equal(f.calls.credentials, 0);
+});
