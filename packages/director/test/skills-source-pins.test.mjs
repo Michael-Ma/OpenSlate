@@ -9,7 +9,7 @@ import { loadSkillCatalog } from '../dist/index.js';
 
 for (const [label, version, directory, pins] of [
   ['V1', '1.0.0', '', { production: 'a0ee6a6b355eb340ea18de2e4adcdeb9ab1cb5102d7cda6eac0209442c2197b2', 'plan-authoring': 'f0284e141496a4b2ee6e19be5903e78c03c412df1614958ba3257f295347378a' }],
-  ['current V7', '6.0.0', 'v7', { production: 'f4e3a71c5b62c75ab647c9ebc109bc93fe98bce8f682893467917856febca562', 'plan-authoring': '6ed8cdca8f26c0e62506bde0e46e41f41a62525060c8a1e5b038c7af41faf1bb' }],
+  ['current V7', '6.0.0', 'v7', { production: '6d86d6772bbaeadbf967f3d7d73b2e8531e56501096c8703acd226b339b439f5', 'plan-authoring': '16cb63a6398eaa11c2b474f05fe0cd52f12e46d603a6544e3aa2076b954d16cf' }],
 ]) test(`${label} source package pins are checked for the whole catalog before publishing any snapshot`, t => {
   const root = mkdtempSync(join(tmpdir(), 'openslate-skill-source-pins-')), snapshotRoot = join(root, 'snapshots'), skills = fileURLToPath(new URL('../../../skills/', import.meta.url));
   const writable = path => { chmodSync(path, 0o700); for (const row of readdirSync(path, { withFileTypes: true })) if (row.isDirectory()) writable(join(path, row.name)); };
