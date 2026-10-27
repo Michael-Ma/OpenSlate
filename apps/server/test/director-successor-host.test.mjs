@@ -66,7 +66,7 @@ test('6.0.0 host context names the new fields and scene actions while 5.0.0 keep
   assert.match(procedure, /Pure text with no media impact may apply directly/);
   assert.doesNotMatch(procedure, /locked creative schema has no separate scene title/);
   assert.match(context.instructions, /Contract 6.0.0 saves scene.title separately/);
-  assert.match(guide.surface, /^Plan: .*Keyframes: .*"Make keyframes".*"Confirm frames & generate video".*Film: .*Assets/);
+  assert.match(guide.surface, /^Chat: typed scene confirmation choices are also available in Keyframes\. Plan: .*Keyframes: .*"Make keyframes".*"Confirm frames & generate video".*Film: .*Assets/);
   assert.match(procedure, /Listening and recording edits are optional/);
   assert.ok(f.saved.lock.skills.every(skill => skill.version === '7.0.0'));
   assert.deepEqual(parseToolArguments('record_notes', guide.notes.example, '6.0.0').arguments, guide.notes.example);
@@ -110,7 +110,7 @@ for (const tool of ['record_notes', 'propose_change']) test(`6.0.0 ${tool} lost 
 });
 
 
-test('contract-6 host guidance directs requested keyframes and eligible attached transcription while keeping video human-only', t => {
+test('contract-6 host guidance directs requested keyframes and eligible transcription while video requires a clicked chat or workspace choice', t => {
   const f = fixture(t), input = createDirectorInput(f.service, { ...f.config, endpoint: 'http://127.0.0.1:3101' })(f.turn, f.human, f.bridge);
   const context = JSON.parse(input.context), guide = context.filmPlanning.procedure.join('\n');
   assert.match(guide, /fresh human editing conversation.*make_keyframes.*sceneIds or shotIds/);
@@ -121,13 +121,19 @@ test('contract-6 host guidance directs requested keyframes and eligible attached
   assert.match(guide, /Stop halts unsent work/);
   assert.match(guide, /audio attachment was sent with this fresh human editing request/);
   assert.match(guide, /Never automatically attach, adopt or accept its transcript/);
-  assert.match(guide, /conversation never starts video/);
+  assert.match(guide, /record one scene-anchored note per scene with a confirm_video choice/);
+  assert.match(guide, /Confirm in this chat or in Keyframes/);
+  assert.match(guide, /Offering a choice in an editing or keyframe-review turn starts nothing and costs nothing/);
+  assert.match(guide, /"yes", "ok" or "go ahead" replies are not confirmation/);
   assert.match(context.instructions, /call make_keyframes for exactly those scenes or shots/);
-  assert.match(context.instructions, /Video always requires/);
+  assert.match(context.instructions, /record a scene-anchored note for each with a confirm_video choice/);
+  assert.match(context.instructions, /Chat replies such as yes, ok or go ahead are not confirmation/);
+  assert.match(context.instructions, /Claim a start only after the application reports it/);
   assert.match(context.instructions, /prepare_recording_transcription may start priced owned transcription/);
   assert.doesNotMatch(context.instructions, /audio tools only prepare pending suggestions/);
   const historical = filmPlanningGuidance(f.service, f.project.id, f.human.requestId, '5.0.0', true).procedure.join('\n');
   assert.match(historical, /Only a human press may start paid speech or transcription/);
   assert.doesNotMatch(historical, /make_keyframes/);
+  for (const entityKind of ['director_note', 'grant', 'candidate', 'attempt', 'reservation']) assert.equal(f.store.list(entityKind, f.project.id).length, 0, entityKind);
   assert.equal(f.provider.acceptedCount(), 0);
 });

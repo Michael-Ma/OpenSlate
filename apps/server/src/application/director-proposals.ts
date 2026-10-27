@@ -114,7 +114,7 @@ function noteTransition(service: ProductionService, proposal: ProposalRecord, re
     if (reopen && note.resolution?.resultRef !== proposal.id) continue;
     const { resolution: _resolution, ...base } = note;
     const next: DirectorNote = { ...base, state: reopen ? 'open' : 'resolved', version: note.version + 1,
-      ...(!reopen ? { resolution: { choiceIndex, at: new Date().toISOString(), resultRef: proposal.id } } : {}) };
+      ...(!reopen ? { resolution: { choiceIndex, at: new Date().toISOString(), resultRef: proposal.id, elsewhere: true } } : {}) };
     service.store.put('director_note', note.noteId, proposal.projectId, next);
     if (!reopen) for (const choice of note.choices) {
       if (choice.kind !== 'proposal' || choice.proposalId === proposal.id) continue;

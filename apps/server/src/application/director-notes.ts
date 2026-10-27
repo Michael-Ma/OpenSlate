@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Store } from '../persistence/store.js';
 import type { ProductionService, RequestRecord } from './service.js';
 import type { ProposalRecord } from './director-proposals.js';
+import type { SceneConfirmationRecord } from '../scene-confirmations.js';
 import { requiredCommandKey } from './command-key.js';
 
 export type NoteInput = Pick<DirectorNote, 'anchor' | 'kind' | 'blocking' | 'text' | 'seenKeyframe' | 'choices'>;
@@ -62,6 +63,9 @@ export function recordNotes(service: ProductionService, projectId: string, actor
             && (proposal.patch.updateScenes ?? []).every(s => s.id === anchor.sceneId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/proposalId`, 'Link an owned proposal within this note anchor. Use the proposalId returned by propose_change.');
         }
         if (choice.kind === 'edit_field') check(ids.has(choice.shotId), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotId`, 'Edit choice must target an anchored shot. Use an ID from this note anchor.');
+        if (choice.kind === 'confirm_video') check(project.scenes.some(scene => scene.id === choice.sceneId)
+          && (anchor.sceneId === choice.sceneId || !anchor.sceneId && shots.length > 0 && shots.every(shot => shot.sceneId === choice.sceneId)),
+          'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/sceneId`, 'Video confirmation must target the anchored scene or the scene containing all anchored shots. Record separate notes for different scenes.');
         if (choice.kind === 'regenerate_keyframe') {
           check(choice.shotIds.every(id => ids.has(id)), 'SCOPE_DENIED', 'outside_scope', `choices/${choiceIndex}/shotIds`, 'Regeneration choice must target anchored shots. Use IDs from this note anchor.');
           check(new Set(shots.filter(shot => choice.shotIds.includes(shot.id)).map(shot => shot.sceneId)).size === 1,
@@ -90,6 +94,36 @@ export function recordNotes(service: ProductionService, projectId: string, actor
   });
 }
 
+function saveResolution(service: ProductionService, projectId: string, note: DirectorNote, resolution: NonNullable<DirectorNote['resolution']>, requestId: string): DirectorNote {
+  const store = service.store;
+  const resolved: DirectorNote = { ...note, state: 'resolved', version: note.version + 1, resolution };
+  store.put('director_note', note.noteId, projectId, resolved);
+  // Any chosen alternative retires the other held suggestions in the same command.
+  for (const choice of note.choices) {
+    if (choice.kind !== 'proposal') continue;
+    const proposal = store.get<ProposalRecord>('director_proposal', choice.proposalId);
+    if (proposal?.projectId !== projectId || proposal.principalId !== 'local-user' || proposal.state !== 'held') continue;
+    store.put('director_proposal', proposal.id, projectId, { ...proposal, state: 'rejected' });
+    store.appendEvent(projectId, 'proposal.changed', { proposalId: proposal.id, state: 'rejected', requestId });
+    service.releaseFinishedRequestHolds(projectId, proposal.requestId);
+  }
+  store.appendEvent(projectId, 'director.note_resolved', { noteId: note.noteId, resolution });
+  return resolved;
+}
+
+/** Call within the effect's command, before it changes the note's anchored evidence. */
+export function settleNotesElsewhere(service: ProductionService, projectId: string,
+  effect: { kind: 'confirm_video'; sceneId: string } | { kind: 'regenerate_keyframe'; shotIds: string[] }, resultRef: string, requestId: string): void {
+  for (const note of directorNotes(service.store, projectId)) {
+    if (note.state !== 'open') continue;
+    const choiceIndex = note.choices.findIndex(choice => effect.kind === 'confirm_video'
+      ? choice.kind === 'confirm_video' && choice.sceneId === effect.sceneId
+      : choice.kind === 'regenerate_keyframe' && choice.shotIds.every(id => effect.shotIds.includes(id)));
+    if (choiceIndex < 0) continue;
+    saveResolution(service, projectId, note, { choiceIndex, resultRef, at: new Date().toISOString(), elsewhere: true }, requestId);
+  }
+}
+
 export function resolveNote(service: ProductionService, projectId: string, noteId: string, input: ResolveNoteInput, key: string): DirectorNote {
   service.recovery.assertWritable(projectId);
   return service.store.command(`local-user:${projectId}:resolve-note`, key, digest({ noteId, ...input }), () => {
@@ -98,18 +132,12 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
     invariant(Number.isSafeInteger(input.choiceIndex) && Number.isSafeInteger(input.expectedVersion) && Object.keys(input).every(k => ['choiceIndex', 'expectedVersion', 'resultRef'].includes(k)), 'VALIDATION_ERROR', 'Choose a valid note action');
     const choice = note.choices[input.choiceIndex];
     invariant(choice, 'VALIDATION_ERROR', 'Choose an action on this note');
+    invariant(note.state !== 'resolved', 'NOTE_ALREADY_SETTLED', 'This note has already been settled. Refresh its saved resolution.');
     if (choice.kind === 'proposal') {
-      // Only the preview-bearing accept route may resolve a proposal choice.
-      // This route can acknowledge its existing result, never create another resolution.
-      const proposal = store.get<{ projectId: string; principalId: string; state: string }>('director_proposal', choice.proposalId);
-      invariant(proposal?.projectId === projectId && proposal.principalId === 'local-user' && proposal.state === 'accepted'
-        && input.resultRef === choice.proposalId && note.state === 'resolved'
-        && note.resolution?.choiceIndex === input.choiceIndex && note.resolution.resultRef === choice.proposalId,
-        'NOTE_RESULT_INVALID', 'Accept this note through the exact reviewed proposal first');
-      invariant(note.version === input.expectedVersion || note.version === input.expectedVersion + 1, 'REVISION_CONFLICT', 'This note has already changed');
-      return note;
+      // Only the preview-bearing accept route may settle a proposal choice.
+      throw new DomainError('NOTE_RESULT_INVALID', 'Accept this note through the exact reviewed proposal first');
     }
-    invariant(note.version === input.expectedVersion && note.state !== 'resolved', 'REVISION_CONFLICT', 'This note has already changed');
+    invariant(note.version === input.expectedVersion, 'REVISION_CONFLICT', 'This note has already changed');
     const events = store.readEvents(projectId);
     const noteSequence = events.find(e => e.kind === 'director.note' && e.payload.noteId === noteId)?.sequence ?? Infinity;
     if (choice.kind === 'accept' || choice.kind === 'reply') invariant(note.state === 'open', 'NOTE_STALE', 'This note is no longer current');
@@ -117,6 +145,16 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
       const reply = store.get<RequestRecord>('message', input.resultRef ?? '');
       invariant(reply?.projectId === projectId && reply.principalId === 'local-user' && reply.source === 'user'
         && events.some(e => e.kind === 'message.recorded' && e.payload.requestId === input.resultRef && e.sequence > noteSequence), 'NOTE_RESULT_INVALID', 'Link the human reply to this note');
+    }
+    if (choice.kind === 'confirm_video') {
+      const confirmation = store.get<SceneConfirmationRecord>('scene_confirmation', input.resultRef ?? '');
+      const request = confirmation ? store.get<RequestRecord>('message', confirmation.actor.requestId) : null;
+      invariant(confirmation?.projectId === projectId && confirmation.sceneId === choice.sceneId && confirmation.kind === 'video'
+        && confirmation.actor.kind === 'human' && confirmation.actor.principalId === 'local-user' && confirmation.actor.requestId === confirmation.id
+        && request?.projectId === projectId && request.principalId === 'local-user' && request.source === 'app'
+        && events.some(e => e.kind === 'message.recorded' && e.payload.requestId === confirmation.id && e.sequence > noteSequence)
+        && events.some(e => e.kind === 'scene.confirmation_changed' && e.payload.confirmationId === confirmation.id && e.sequence > noteSequence),
+        'NOTE_RESULT_INVALID', 'Link the later human confirmation of this scene');
     }
     if (choice.kind === 'regenerate_keyframe') {
       const action = store.get<{ regenerate: boolean; shotIds: string[] }>('scene_generation_action', input.resultRef ?? '');
@@ -136,20 +174,8 @@ export function resolveNote(service: ProductionService, projectId: string, noteI
         && canonical(before[choice.field] ?? null) !== canonical(after[choice.field] ?? null), 'NOTE_RESULT_INVALID', 'Link the human edit of this field');
     }
     const actor = service.beginRequest(projectId, 'local-user', 'Resolve this Director note.', { source: 'app', concurrency: 'alongside', scopeIds: note.anchor.shotIds?.length ? note.anchor.shotIds : note.anchor.sceneId ? [note.anchor.sceneId] : [projectId], key: `resolve-note:${key}` });
-    const resolved: DirectorNote = { ...note, state: 'resolved', version: note.version + 1, resolution: { choiceIndex: input.choiceIndex, at: new Date().toISOString(), ...(input.resultRef ? { resultRef: input.resultRef } : {}) } };
-    store.put('director_note', noteId, projectId, resolved);
-    // The person's alternate choice settles every held proposal linked from this
-    // note, including stale held records. Do this inside the resolution command.
-    const proposalIds = new Set(note.choices.flatMap(choice => choice.kind === 'proposal' ? [choice.proposalId] : []));
-    for (const proposalId of proposalIds) {
-      const proposal = store.get<ProposalRecord>('director_proposal', proposalId);
-      if (proposal?.projectId !== projectId || proposal.principalId !== 'local-user' || proposal.state !== 'held') continue;
-      store.put('director_proposal', proposal.id, projectId, { ...proposal, state: 'rejected' });
-      store.appendEvent(projectId, 'proposal.changed', { proposalId: proposal.id, state: 'rejected', requestId: actor.requestId });
-      service.releaseFinishedRequestHolds(projectId, proposal.requestId);
-    }
+    const resolved = saveResolution(service, projectId, note, { choiceIndex: input.choiceIndex, at: new Date().toISOString(), ...(input.resultRef ? { resultRef: input.resultRef } : {}) }, actor.requestId);
     service.releaseAlongsideHolds(projectId, actor);
-    store.appendEvent(projectId, 'director.note_resolved', { noteId, resolution: resolved.resolution! });
     return resolved;
   });
 }

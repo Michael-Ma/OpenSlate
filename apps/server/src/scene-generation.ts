@@ -2,7 +2,7 @@ import { assertDirectorGenerationAuthority } from "./application/director-genera
 import { recordDirectorGenerationEffect } from "./application/director-generation-effects.js";
 import { isKeyframeReview } from "./application/keyframe-review.js";
 import { requiredCommandKey } from "./application/command-key.js";
-import { sceneNotes, openBlockingNotes } from "./application/director-notes.js";
+import { sceneNotes, openBlockingNotes, settleNotesElsewhere } from "./application/director-notes.js";
 import type { FastifyInstance } from "fastify";
 import { requestScopesIntersect } from "./application/request-scopes.js";
 import { assertExpectedHumanRequest, currentHumanRequestId } from "./application/expected-human-request.js";
@@ -604,6 +604,8 @@ export async function generateScene(production: ProductionService, projectId: st
         `scene:${key}`,
         "user_change",
       );
+      if (input.kind === "image" && input.regenerate) settleNotesElsewhere(production, projectId,
+        { kind: "regenerate_keyframe", shotIds: selected.map(row => row.shotId) }, actionId ?? actor.requestId, actor.requestId);
       // Same-spec regeneration still needs a fresh, one-use human grant. Detaching inside
       // this transaction retains historical receipts and makes publication create that new candidate.
       const retained = input.regenerate ? store.list<NodeBinding>("node_binding", projectId)

@@ -4,6 +4,7 @@ import { digest, DomainError, invariant } from "@openslate/core";
 import type { ActorContext, ConfirmSceneInput, SceneConfirmationView } from "@openslate/core";
 import type { ProductionService } from "./application/service.js";
 import { requiredCommandKey } from "./application/command-key.js";
+import { settleNotesElsewhere } from "./application/director-notes.js";
 import { generateScene, sceneGenerationCommandDigest, sceneGenerationView, sceneView, type SceneGenerationInput } from "./scene-generation.js";
 import { generationTargets } from "./scene-row.js";
 import { quote } from "./generation-quotes.js";
@@ -149,6 +150,7 @@ export class SceneConfirmationRunner {
         steps: targets.filter(r => !r.narration.ready).map(r => ({ ...audioStep(this.production, projectId, r), ...(r.narration.mode !== "generated" ? { step: "accept" as const } : {}) })) };
       this.production.engine.setHold(projectId, { scopeId: sceneId, ownerId: row.id });
       this.save(row);
+      settleNotesElsewhere(this.production, projectId, { kind: "confirm_video", sceneId }, row.id, actor.requestId);
       return confirmationView(row);
     });
   }

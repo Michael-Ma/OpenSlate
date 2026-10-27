@@ -14,7 +14,7 @@ interface ShippedGuidance {
 }
 
 // Shipped and saved branch identities, independent of mutable checkout paths.
-// Never replace a pin; append a successor. K1 amends the unreleased 6.0.0/V7
+// Never replace a pin; append a successor. K1 and N1 amend the unreleased 6.0.0/V7
 // packages while retaining their earlier identity for fresh-turn upgrades.
 export const SHIPPED_DIRECTOR_GUIDANCE: readonly ShippedGuidance[] = [
   { toolContract: "1.0.0", guidanceVersion: "1.0.0", handlerDigest: "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec", planAuthoringDigest: "f0284e141496a4b2ee6e19be5903e78c03c412df1614958ba3257f295347378a", productionDigest: "a0ee6a6b355eb340ea18de2e4adcdeb9ab1cb5102d7cda6eac0209442c2197b2" },
@@ -26,6 +26,7 @@ export const SHIPPED_DIRECTOR_GUIDANCE: readonly ShippedGuidance[] = [
   { toolContract: "5.0.0", guidanceVersion: "6.0.0", handlerDigest: "e696fa1999ff0d088ba7ef9a6b64d42af111fb0e5af7a927973999e843f8914e", planAuthoringDigest: "b1747d2be71665532b92a3cf2827b860c354cbf59a66911aacc46f83edbeaa3e", productionDigest: "828e671fb1eb191c8c668fcc946d273e5c22c60ff6b948029a348122f9214c4d" },
   { toolContract: "6.0.0", guidanceVersion: "7.0.0", handlerDigest: "282275ce2d97c274f0e064357dac77a8d06e57fd8a58de37e187faf79e5a97ec", planAuthoringDigest: "a618b775c426712398ede04c0db8d36b647792adbd3ae1dff263507b19498fdf", productionDigest: "545d188a97105db9f78d43c5f8ebd260357a537b036e670fdef9158ee6fd80e8" },
   { toolContract: "6.0.0", guidanceVersion: "7.0.0", handlerDigest: "d54d4a2c470b38531048b60d89089e83e77932ee963e8144336490c72a55d18b", planAuthoringDigest: "14457cba9db0ea8ecfc28231193e318b2586ee4bbeb4377e25937733bcf8611b", productionDigest: "5cb88af3ef85c23898a60901c91406f1874cd179a9312abc890f80904353baa1" },
+  { toolContract: "6.0.0", guidanceVersion: "7.0.0", handlerDigest: "4a4d340f74977cc9f4a946f5c2f8005e361a695978cdbceba295a9b8e7da95e6", planAuthoringDigest: "e1c2d030049e99717e8c3efc977677de1501d4fd1d19f898ce547f0f3e1cb1aa", productionDigest: "7ef5d5d27cd5b78eac5979cd2468de67c130239d495755abbdee97323eda4fba" },
 ];
 for (const identity of SHIPPED_DIRECTOR_GUIDANCE) Object.freeze(identity);
 Object.freeze(SHIPPED_DIRECTOR_GUIDANCE);

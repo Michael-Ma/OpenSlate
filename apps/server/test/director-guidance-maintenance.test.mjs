@@ -18,14 +18,32 @@ import { createDirectorInput } from '../dist/application/director-input.js';
 import { createDirectorSkillLock } from '../dist/application/director-capabilities.js';
 import { ToolInvocationService } from '../dist/application/tool-invocations.js';
 import { installRecoveryQuarantine } from '../dist/application/installation-recovery.js';
+import { filmPlanningGuidance } from '../dist/application/film-planning-guidance.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../../', import.meta.url));
+const beforeN1V7 = JSON.parse(readFileSync(new URL('./fixtures/director-guidance-v7-before-n1.json', import.meta.url), 'utf8'));
 const earlierV7 = JSON.parse(readFileSync(new URL('./fixtures/director-guidance-v7-before-k1.json', import.meta.url), 'utf8'));
 const earlierV6 = JSON.parse(readFileSync(new URL('./fixtures/director-guidance-v6-3b3edf7.json', import.meta.url), 'utf8'));
 test('shipped Director guidance identities cannot be changed at runtime', () => {
   assert.ok(Object.isFrozen(SHIPPED_DIRECTOR_GUIDANCE)); assert.ok(SHIPPED_DIRECTOR_GUIDANCE.every(Object.isFrozen));
   assert.throws(() => SHIPPED_DIRECTOR_GUIDANCE.push(SHIPPED_DIRECTOR_GUIDANCE[0]), TypeError);
   assert.throws(() => { SHIPPED_DIRECTOR_GUIDANCE[0].handlerDigest = '0'.repeat(64); }, TypeError);
+});
+
+test('the N1 host amendment leaves every V1–V5 film-planning guidance output byte-identical', () => {
+  const service = { store: { getProject: () => ({ brief: '', story: '', scenes: [], shots: [], artifacts: [], narration: { source: 'undecided', script: '' } }), get: () => undefined } };
+  const pins = {
+    '1.0.0': ['1b1d0a76bf65edc8528b6d0d4b44931db4d1d607417606aec449b79ffd413562', '19aafb7bb341095ee3102a0468010c6d2ee2697ad4a6d6fec0ea1fd07444c0fd'],
+    '2.0.0': ['af0da6f91e8733abd860041a61c5627fc0a5b1134672858b0f3abde036ab9ab2', '709cd864ed2710ca8101ed49a395531c3623ed568f01544b35baf116cde89648'],
+    '3.0.0': ['0be38d6deacb9bc1cc497b00bfa2be782a5d252630816dc310bf15174c7223e8', '7f5f2b659142b13c3275ec581bc877d1b40b6dd6fc6f7e6b8928928e89219976'],
+    '4.0.0': ['ffb092d57537c879ce4c806b3002fb930ef5c6b0053c6ab25af9fda82ed7dbdf', 'e8a96f622df6e298658f937c90317af0f3b98ec64a204eb2620fbe90bcf6b733'],
+    '5.0.0': ['bd5badc1b62f256ea61533a2de30663d178d833ff438177a331d9ff838997161', '03d3442d45e5524e56183e0c76bf0d87e1c9f577f7d4168f3dd6258ce675bbc7'],
+  };
+  for (const [version, hashes] of Object.entries(pins)) for (const [index, audioRequests] of [false, true].entries()) {
+    const guidance = filmPlanningGuidance(service, 'project', 'request', version, audioRequests);
+    assert.equal(digest(guidance), hashes[index], `${version}, audioRequests=${audioRequests}`);
+    assert.doesNotMatch(JSON.stringify(guidance), /confirm_video|Confirm in this chat/);
+  }
 });
 function writable(path) { chmodSync(path, 0o700); for (const entry of readdirSync(path, { withFileTypes: true })) if (entry.isDirectory()) writable(join(path, entry.name)); }
 function fixture(t, start, overrides = {}) {
@@ -92,7 +110,7 @@ for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0', '5.0.0']) test(`next 
   assert.equal(context.snapshot.guard.applicationCapabilitiesDigest, digest(context.snapshot.applicationCapabilities));
   assert.ok(context.filmPlanning.procedure.some(text => text.includes('Writing needs no generation or spending permission')));
   // The Director names the studio's actual views and actions, not the retired Storyboard/Timeline or a button color.
-  assert.match(context.filmPlanning.surface, /^Plan: .*Keyframes: .*"Confirm frames & generate video".*Film: .*Assets/);
+  assert.match(context.filmPlanning.surface, /Plan: .*Keyframes: .*"Confirm frames & generate video".*Film: .*Assets/);
   assert.doesNotMatch(context.filmPlanning.surface, /Storyboard|Timeline|green/);
   assert.equal(f.store.get('director_epoch_lock', input.epochId).lockId, successor.id);
   assert.deepEqual(f.store.get('director_skill_lock', saved.lock.id).lock, saved.lock);
@@ -339,14 +357,14 @@ test('native projection disables late historical packages while retaining their 
  });
 
 
-function installEarlierV7(f) {
-  const earlierRoot = join(f.root, 'earlier-v7-before-k1');
-  for (const [path, bytes] of Object.entries(earlierV7.files)) {
+function installEarlierV7(f, snapshot = earlierV7) {
+  const earlierRoot = join(f.root, snapshot === earlierV7 ? 'earlier-v7-before-k1' : 'earlier-v7-before-n1');
+  for (const [path, bytes] of Object.entries(snapshot.files)) {
     const target = join(earlierRoot, 'skills', 'v7', path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, bytes);
   }
   const saved = createDirectorSkillLock({ ...f.configuration, repositoryRoot: earlierRoot }, '6.0.0');
   const { lockDigest: _, ...body } = structuredClone(saved.lock);
-  body.bindings = body.bindings.map(binding => binding.kind === 'handler' ? { ...binding, digest: earlierV7.catalog.digest } : binding);
+  body.bindings = body.bindings.map(binding => binding.kind === 'handler' ? { ...binding, digest: snapshot.catalog.digest } : binding);
   const lock = { ...body, lockDigest: digest(body) };
   new DirectorContextService(f.service, { ...saved.environment, bindings: lock.bindings }).bootstrapLock(f.project.id, lock);
   return lock;
@@ -366,15 +384,52 @@ test('K1 preserves the exact earlier 6.0.0 catalog and V7 package identity along
   verifyShippedDirectorGuidance(current, f.configuration);
   assert.equal(isCurrentShippedDirectorGuidance(current), true);
   const pins = SHIPPED_DIRECTOR_GUIDANCE.filter(row => row.toolContract === '6.0.0');
-  assert.equal(pins.length, 2);
+  assert.equal(pins.length, 3);
   assert.equal(pins[0].handlerDigest, earlierV7.catalog.digest);
-  assert.equal(pins[1].handlerDigest, toolCatalog('6.0.0').digest);
-  assert.equal(pins[1].planAuthoringDigest, current.skills.find(skill => skill.id === 'plan-authoring').packageDigest);
-  assert.equal(pins[1].productionDigest, current.skills.find(skill => skill.id === 'production').packageDigest);
+  assert.equal(pins[1].handlerDigest, beforeN1V7.catalog.digest);
+  assert.equal(pins[2].handlerDigest, toolCatalog('6.0.0').digest);
+  assert.equal(pins[2].planAuthoringDigest, current.skills.find(skill => skill.id === 'plan-authoring').packageDigest);
+  assert.equal(pins[2].productionDigest, current.skills.find(skill => skill.id === 'production').packageDigest);
 });
 
-test('a saved pre-K1 6.0.0/V7 project upgrades on its fresh native turn without changing old locks or snapshot bytes', t => {
-  const f = fixture(t), previous = installEarlierV7(f);
+test('N1 retains the exact pre-N1 6.0.0/V7 identity for saved-project upgrades', t => {
+  const f = fixture(t), previous = installEarlierV7(f, beforeN1V7);
+  assert.equal(digest(beforeN1V7.catalog), 'e917ffa20b828611349ef4bd836432ae18f690778e1a2e248a87a4a3677fa3d0');
+  assert.equal(beforeN1V7.catalog.digest, 'd54d4a2c470b38531048b60d89089e83e77932ee963e8144336490c72a55d18b');
+  assert.deepEqual(previous.skills.map(({ id, packageDigest }) => ({ id, packageDigest })), [
+    { id: 'plan-authoring', packageDigest: '14457cba9db0ea8ecfc28231193e318b2586ee4bbeb4377e25937733bcf8611b' },
+    { id: 'production', packageDigest: '5cb88af3ef85c23898a60901c91406f1874cd179a9312abc890f80904353baa1' },
+  ]);
+  verifyShippedDirectorGuidance(previous, f.configuration);
+  assert.equal(isCurrentShippedDirectorGuidance(previous), false);
+  assert.ok(SHIPPED_DIRECTOR_GUIDANCE.some(row => row.toolContract === '6.0.0'
+    && row.handlerDigest === beforeN1V7.catalog.digest
+    && row.planAuthoringDigest === previous.skills[0].packageDigest
+    && row.productionDigest === previous.skills[1].packageDigest));
+});
+
+test('current host guidance offers chat confirmation and preserves clicked application authority', t => {
+  const f = fixture(t), fresh = f.fresh('Generate video for ready scenes');
+  const input = f.prepareInput(fresh.turn, fresh.human, fresh.bridge), context = JSON.parse(input.context);
+  for (const text of [context.instructions, context.filmPlanning.procedure.join('\n')]) {
+    assert.match(text, /scene-anchored note (?:for each|per scene) with a confirm_video choice/);
+    assert.match(text, /Confirm in this chat or in Keyframes/);
+    assert.match(text, /regenerate_keyframe note choice/);
+    assert.match(text, /existing takes stay in history/);
+    assert.match(text, /(?:yes, ok or go ahead|"yes", "ok" or "go ahead").*not confirmation/);
+    assert.match(text, /open choice or offer a fresh one if stale or settled/);
+    assert.match(text, /(?:after|until) the application reports it/);
+    assert.match(text, /keyframe-review turn starts nothing and costs nothing/);
+    assert.match(text, /first chat or workspace action settles the note/);
+    assert.doesNotMatch(text, /chat approval (?:cannot|can't) replace|go (?:find|press) the button|conversation never starts video/i);
+  }
+  assert.match(context.filmPlanning.notes.limits, /\{kind:"confirm_video",sceneId\}.*does not count as accept\/keep/);
+  for (const kind of ['director_note', 'grant', 'candidate', 'attempt', 'reservation']) assert.equal(f.store.list(kind, f.project.id).length, 0);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+for (const [label, snapshot] of [['pre-K1', earlierV7], ['pre-N1', beforeN1V7]]) test(`a saved ${label} 6.0.0/V7 project upgrades on its fresh native turn without changing old locks or snapshot bytes`, t => {
+  const f = fixture(t), previous = installEarlierV7(f, snapshot);
   const snapshotFiles = previous.skills.flatMap(skill => {
     const root = join(f.configuration.snapshotRoot, skill.packageDigest);
     return readdirSync(root, { recursive: true }).filter(path => path.endsWith('.md') || path.endsWith('.json')).map(path => [join(root, path), readFileSync(join(root, path), 'utf8')]);
@@ -393,8 +448,8 @@ test('a saved pre-K1 6.0.0/V7 project upgrades on its fresh native turn without 
   assert.equal(f.provider.acceptedCount(), 0);
 });
 
-test('an explicit pre-K1 6.0.0 amendment reports its availability and replays without reinstalling', t => {
-  const f = fixture(t), previous = installEarlierV7(f), before = f.store.getProject(f.project.id);
+for (const [label, snapshot] of [['pre-K1', earlierV7], ['pre-N1', beforeN1V7]]) test(`an explicit ${label} 6.0.0 amendment reports its availability and replays without reinstalling`, t => {
+  const f = fixture(t), previous = installEarlierV7(f, snapshot), before = f.store.getProject(f.project.id);
   assert.equal(f.settings.status(f.project.id).upgradeAvailable, true);
   const input = { expectedLockId: previous.id, expectedLockDigest: previous.lockDigest, targetVersion: '6.0.0' };
   const result = f.settings.upgrade(f.project.id, input, 'explicit-k1-amendment');
