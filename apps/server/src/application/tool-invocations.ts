@@ -331,10 +331,13 @@ export class ToolInvocationService {
         if (call.tool === 'make_keyframes' && call.toolContractVersion === '6.0.0' && call.catalogDigest === toolCatalog('6.0.0').digest) {
           const saved = store.get<DirectorKeyframesReceipt>('director_keyframes_receipt', call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) {
-            // The effect commits with scene publication; progress can be lost just after that commit.
+            // Effects commit with scene publication; blocks commit with refusal checkpoints.
+            // Either can survive a lost completion receipt without authorizing another dispatch.
             const effects = store.list<DirectorGenerationEffectRecord>('director_generation_effect', projectId)
               .filter(row => row.requestId === call.requestId && row.epochId === epochId && row.key.startsWith(`director-keyframes:${call.id}:`));
-            if (saved.complete || effects.length) receipt = { started: effects.map(row => ({ ...row.effect, sceneId: row.effect.sceneIds[0] })),
+            const blocks = store.list<{ requestId: string; epochId: string; key: string }>('director_generation_block', projectId)
+              .filter(row => row.requestId === call.requestId && row.epochId === epochId && row.key.startsWith(`director-keyframes:${call.id}:`));
+            if (saved.complete || effects.length || blocks.length) receipt = { started: effects.map(row => ({ ...row.effect, sceneId: row.effect.sceneIds[0] })),
               refused: saved.refused, complete: saved.complete };
           }
         }

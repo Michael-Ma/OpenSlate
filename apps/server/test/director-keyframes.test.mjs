@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { digest, shotIntentDigest } from '@openslate/core';
+import { digest, DomainError, shotIntentDigest } from '@openslate/core';
 import { confirmationFixture } from './helpers/confirmation-fixture.mjs';
 import { projectFixture, sourceFor } from './execution-fixture.mjs';
 import { DirectorContextService } from '../dist/application/director-context.js';
@@ -53,6 +53,7 @@ async function fixture(t, { version = '6.0.0', scopeIds, editing = true, source 
   f.invoke = (input = { sceneIds: ['scene-0', 'scene-1'] }, callId = randomUUID(), actor = f.bridge.actor) =>
     f.tools.invoke(f.project.id, actor, callId, 'make_keyframes', input);
   f.effects = () => f.production.snapshot(f.project.id).turns.find(turn => turn.id === f.turn.id).effects.generation;
+  f.blocks = () => f.production.snapshot(f.project.id).turns.find(turn => turn.id === f.turn.id).effects.blocked;
   return f;
 }
 function noPaidWork(f) {
@@ -73,6 +74,7 @@ test('a human message makes every scene keyframe and voice once, with its quote 
   const f = await fixture(t), before = await f.overview();
   const input = { sceneIds: ['scene-0', 'scene-1'] }, result = await f.invoke(input, 'all-keyframes');
   assert.deepEqual(result.refused, []);
+  assert.deepEqual(f.blocks(), []);
   assert.deepEqual(result.started.map(scene => ({ sceneId: scene.sceneId, shotIds: scene.shotIds, keyframes: scene.keyframes, voiceLines: scene.voiceLines, quote: scene.quote })),
     before.scenes.map(scene => ({ sceneId: scene.sceneId, shotIds: scene.shotIds, keyframes: 2, voiceLines: 1, quote: scene.quotes.makeKeyframes })));
   assert.equal(f.store.get('message', f.human.requestId).state, 'active');
@@ -100,14 +102,39 @@ test('a human message makes every scene keyframe and voice once, with its quote 
 test('a scene needing direction is refused while another scene still starts', async t => {
   const f = await fixture(t);
   save(f, project => { project.shots[0].promptState = 'placeholder'; });
-  const result = await f.invoke();
+  const input = { sceneIds: ['scene-0', 'scene-1'] }, result = await f.invoke(input, 'mixed-refusal');
   assert.deepEqual(result.started.map(row => row.sceneId), ['scene-1']);
   assert.deepEqual(result.refused.map(row => [row.sceneId, row.code]), [['scene-0', 'DIRECTION_REQUIRED']]);
   assert.ok(result.refused[0].message);
+  const blocks = f.blocks();
+  assert.equal(blocks.length, 1);
+  assert.deepEqual(blocks[0], { kind: 'keyframes', sceneId: 'scene-0', code: 'DIRECTION_REQUIRED', shotIds: ['shot-0'], at: blocks[0].at });
+  assert.ok(Number.isFinite(Date.parse(blocks[0].at)));
   await f.tick(15);
   assert.equal(f.provider.acceptedCount(), 2); assert.equal(f.calls.speech, 1);
   const view = await f.overview(); assert.equal(view.shots['shot-0'].keyframe.state, 'direction_required');
   assert.deepEqual(f.effects().map(effect => effect.sceneIds), [['scene-1']]);
+  assert.deepEqual(await f.invoke(input, 'mixed-refusal'), result);
+  assert.equal(f.store.list('director_generation_block', f.project.id).length, 1);
+  assert.deepEqual(f.blocks(), blocks);
+});
+
+for (const known of [false, true]) test(`a stale prompt refusal uses ${known ? 'known stale shots' : 'the exact requested scene shots'} and replays one historical block`, async t => {
+  const f = await fixture(t), apply = f.production.applyCompiledSceneGeneration.bind(f.production);
+  f.production.applyCompiledSceneGeneration = () => { throw new DomainError('STALE_PROMPT_INTENT', 'Synthetic stale prompt refusal', known ? { shotIds: ['shot-1', 'shot-2'] } : undefined); };
+  const input = { shotIds: ['shot-0', 'shot-1'] }, result = await f.invoke(input, 'stale-prompts');
+  f.production.applyCompiledSceneGeneration = apply;
+  assert.deepEqual(result.started, []); assert.equal(result.refused[0].code, 'STALE_PROMPT_INTENT');
+  const blocks = f.blocks();
+  assert.equal(blocks.length, 1); assert.equal(blocks[0].code, 'STALE_PROMPT_INTENT');
+  assert.deepEqual(blocks[0].shotIds, known ? ['shot-1'] : ['shot-0', 'shot-1']);
+  assert.equal(blocks[0].attempts, undefined);
+  assert.deepEqual(await f.invoke(input, 'stale-prompts'), result);
+  assert.deepEqual(f.blocks(), blocks); noPaidWork(f);
+  const prior = f.turn.id;
+  Object.assign(f, f.openTurn('Make only a fresh take for the second scene.'));
+  assert.deepEqual(f.blocks(), []);
+  assert.deepEqual(f.production.snapshot(f.project.id).turns.find(turn => turn.id === prior).effects.blocked, blocks);
 });
 
 test('film Stop cancels unsent Director frames and voice lines across restart', async t => {
@@ -249,6 +276,8 @@ test('an active scene confirmation is refused without blocking another scene', a
   assert.deepEqual(result.started.map(row => row.sceneId), ['scene-1']);
   assert.deepEqual(result.refused.map(row => [row.sceneId, row.code]), [['scene-0', 'CONFIRMATION_RUNNING']]);
   assert.deepEqual(f.effects().map(effect => effect.sceneIds), [['scene-1']]);
+  assert.deepEqual(f.blocks().map(({ sceneId, code, shotIds }) => ({ sceneId, code, shotIds })),
+    [{ sceneId: 'scene-0', code: 'CONFIRMATION_RUNNING', shotIds: ['shot-0', 'shot-1'] }]);
 });
 
 test('an unknown submitted keyframe is never bought again with a new tool-call identity', async t => {
@@ -264,6 +293,11 @@ test('an unknown submitted keyframe is never bought again with a new tool-call i
   assert.ok(['ATTEMPT_EXISTS', 'SUBMISSION_UNKNOWN'].includes(result.refused[0].code));
   assert.equal(f.store.list('grant', f.project.id).length, grants); assert.equal(f.store.list('candidate', f.project.id).length, candidates);
   assert.equal(f.provider.acceptedCount(), 1);
+  const blocks = f.blocks();
+  assert.equal(blocks.length, 1); assert.equal(blocks[0].code, 'ATTEMPT_EXISTS');
+  assert.deepEqual(blocks[0].shotIds, ['shot-1']);
+  assert.deepEqual(blocks[0].attempts, [{ attemptId: attempt.id, shotId: 'shot-1', kind: 'image', phase: 'submission_unknown', action: 'human_release' }]);
+  assert.doesNotMatch(JSON.stringify(blocks), /"release"|"body"|acknowledgeDoubleCharge|nodeId|resolution|prompt|request|provider|\/api\//);
 });
 
 for (const action of ['supersede', 'stop']) test(`${action} during isolated keyframe composition prevents old paid publication`, async t => {
@@ -278,6 +312,9 @@ for (const action of ['supersede', 'stop']) test(`${action} during isolated keyf
     assert.ok(['EPOCH_REVOKED', 'ACTOR_DENIED', 'EXECUTION_PAUSED'].includes(result.refused[0].code));
   }, error => { assert.ok(['EPOCH_REVOKED', 'ACTOR_DENIED', 'EXECUTION_PAUSED'].includes(error.code), error.message); });
   noPaidWork(f); await f.tick(3); noPaidWork(f);
+  const blocks = f.blocks();
+  assert.equal(blocks.length, 1); assert.deepEqual(blocks[0].shotIds, ['shot-1']);
+  assert.ok(['EPOCH_REVOKED', 'ACTOR_DENIED', 'EXECUTION_PAUSED'].includes(blocks[0].code));
 });
 
 test('a partial unexpected failure reconciles the exact started scenes without dispatching the remainder', async t => {

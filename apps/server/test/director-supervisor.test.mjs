@@ -283,7 +283,7 @@ test('terminal snapshot reports no reply, failed, timeout, owner lost and supers
     const f = fixture(t, async input => ({ ...completed(input, ''), status, ...(code ? { error: { code, message: 'test' } } : {}) }));
     f.enqueue('Discuss only', { editing: false }); f.supervisor.tick(); await f.supervisor.settle();
     const turn = f.service.snapshot(f.project.id).turns[0];
-    assert.equal(turn.reason, reason); assert.deepEqual(turn.effects, { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [] });
+    assert.equal(turn.reason, reason); assert.deepEqual(turn.effects, { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [], blocked: [] });
     assert.equal(f.service.snapshot(f.project.id).conversation.filter(m => m.role === 'assistant').length, 0);
   }
 });

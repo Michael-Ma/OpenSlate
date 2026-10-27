@@ -11,6 +11,7 @@ import { createDirectorSkillLock } from '../dist/application/director-capabiliti
 import { DirectorContextService } from '../dist/application/director-context.js';
 import { makeDirectorKeyframes } from '../dist/application/director-keyframes.js';
 import { NarrationService } from '../dist/narration/service.js';
+import { directorGenerationBlocks } from '../dist/application/director-generation-blocks.js';
 
 const ok = response => { assert.equal(response.statusCode, 200, response.body); return response.json(); };
 const binding = (f, kind) => f.store.list('node_binding', f.project.id).find(b => b.node.kind === kind && b.node.shotId === 'shot-0');
@@ -51,6 +52,8 @@ test('a detached unanswered clip identifies its human recovery before new keyfra
   const starts = f.provider.acceptedCount(), invoke = director(f, t);
   const before = f.store.db.prepare('SELECT kind,id,body FROM entities ORDER BY kind,id').all();
   const result = await invoke({ shotIds: ['shot-0'], regenerate: true });
+  const blocks = f.store.list('director_generation_block', f.project.id);
+  assert.equal(blocks.length, 1);
   assert.deepEqual(result.started, []); assert.equal(result.refused[0].code, 'ATTEMPT_EXISTS');
   assert.match(result.next, /^Use the recovery steps for the requested scenes to choose the next action\./);
   assert.match(result.next, /Preserve unresolved work for reconciliation before any further submission/);
@@ -66,8 +69,8 @@ test('a detached unanswered clip identifies its human recovery before new keyfra
   assert.deepEqual(resolution.release, { actor: 'human', method: 'POST', path: `/api/projects/${f.project.id}/attempts/${old.id}/release`,
     body: { expectedPhase: 'submission_unknown', acknowledgeDoubleCharge: true } });
   assert.equal(f.provider.acceptedCount(), starts);
-  assert.deepEqual(f.store.db.prepare("SELECT kind,id,body FROM entities WHERE kind!='director_keyframes_receipt' ORDER BY kind,id").all(), before,
-    'the refusal publishes only its receipt and does not alter execution or creative state');
+  assert.deepEqual(f.store.db.prepare("SELECT kind,id,body FROM entities WHERE kind NOT IN ('director_keyframes_receipt','director_generation_block') ORDER BY kind,id").all(), before,
+    'the refusal publishes only its receipt and historical block without altering execution or creative state');
   const unresolved = f.provider.lookup.bind(f.provider);
   f.provider.lookup = async id => id === old.id ? { type: 'unknown', diagnostic: 'No retained provider answer' } : unresolved(id);
   await f.engine.reconcile(); await f.engine.runReady();
@@ -90,6 +93,7 @@ test('a detached unanswered clip identifies its human recovery before new keyfra
   assert.deepEqual(binding(f, 'video').outputs, {}, 'a late old clip cannot publish into the new recipe');
   assert.deepEqual(binding(f, 'image').outputs.image, selectedFrame);
   assert.equal(f.provider.acceptedCount(old.id), 1);
+  assert.deepEqual(f.store.list('director_generation_block', f.project.id), blocks, 'release, fresh work and a late result retain the original refusal history');
 });
 
 test('a known running keyframe names its job but never offers release, and unrelated shots do not enter the refusal', async t => {
@@ -105,6 +109,9 @@ test('a known running keyframe names its job but never offers release, and unrel
   assert.equal(recovery.total, 1); assert.equal(recovery.attempts[0].attemptId, attempt.id);
   assert.equal(recovery.attempts[0].phase, 'remote_pending'); assert.equal(recovery.attempts[0].detached, false);
   assert.equal(recovery.attempts[0].resolution.action, 'follow_existing_job'); assert.equal(recovery.attempts[0].resolution.release, undefined);
+  const blocks = directorGenerationBlocks(f.store.list('director_generation_block', f.project.id));
+  assert.deepEqual(blocks[0].shotIds, ['shot-0']);
+  assert.deepEqual(blocks[0].attempts, [{ attemptId: attempt.id, shotId: 'shot-0', kind: 'image', phase: 'remote_pending', action: 'follow_existing_job' }]);
   assert.ok(!JSON.stringify(recovery).includes(attempt.request.args.prompt), 'recovery does not expose request prompts');
   assert.equal(f.provider.acceptedCount(), starts);
 });
@@ -140,4 +147,9 @@ test('the maximum 400-scene request preserves every refusal within the one-MiB t
   assert.ok(result.refused.every(refusal => /Open this scene in Keyframes/.test(refusal.recovery.instruction)), 'omitted identities still point to the existing human recovery');
   assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1024 * 1024);
   assert.equal(f.provider.acceptedCount(), starts);
+  const records = f.store.list('director_generation_block', f.project.id);
+  assert.equal(records.length, 400);
+  assert.ok(records.every(record => record.block.shotIds.length === 1 && record.block.attempts.length === 1), 'receipt truncation never erases a scene block identity');
+  const blocks = directorGenerationBlocks(records);
+  assert.equal(blocks.length, 20); assert.equal(blocks.reduce((count, block) => count + block.attempts.length, 0), 20);
 });
