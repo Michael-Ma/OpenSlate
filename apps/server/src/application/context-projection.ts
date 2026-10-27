@@ -1,10 +1,11 @@
 import { directorNotes } from "./director-notes.js";
+import { directorProposals } from "./director-proposals.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
 import { projectRequest } from "./request-source.js";
 import type { RequestRecord } from "./service.js";
 import { canonical, digest, invariant, workflowReadiness } from "@openslate/core";
 import { continuedRequestAuthorities } from './pending-edit-continuation.js';
-import type { ActorContext, CompiledPlan, ProjectRecord, ProviderProfile } from "@openslate/core";
+import type { ActorContext, CompiledPlan, DirectorProposal, ProjectRecord, ProviderProfile } from "@openslate/core";
 import type { ProductionService } from "./service.js";
 import type { NarrationAudio, NarrationState, SegmentRevision } from "../narration/types.js";
 import { NarrationService } from "../narration/service.js";
@@ -41,6 +42,8 @@ export interface DirectorContextProjection {
   applicationCapabilities: DirectorApplicationCapabilities;
   page: { offset: number; returned: number; total: number; nextOffset: number | null; offsetUnit: "records" | "utf16_characters" };
   items: unknown[];
+  /** V6 notes context includes current proposals, using the same bounded record window as note items. */
+  proposals?: DirectorProposal[];
   messages: Message[];
   applicationActions?: Message[];
   directorActions?: Message[];
@@ -188,6 +191,16 @@ export function projectDirectorContext(service: ProductionService, projectId: st
     };
     if (section === "notes") {
       invariant(["5.0.0", "6.0.0"].includes(toolVersion), "CAPABILITY_MISMATCH", "Notes require the current catalog");
+      if (toolVersion === '6.0.0') {
+        const proposals = directorProposals(service, projectId).proposals;
+        base.guard.dataDigest = digest({ notes, proposals });
+        return adaptive(offset, Math.max(notes.length, proposals.length), count => ({ ...base,
+          items: notes.slice(offset, offset + count), proposals: proposals.slice(offset, offset + count),
+          page: page(offset, count, Math.max(notes.length, proposals.length)),
+          coverage: { ...base.coverage, proposalRecords: { total: proposals.length, returned: proposals.slice(offset, offset + count).length,
+            pagination: 'Notes and proposals share the record window. Follow nextOffset until null; compare guard/dataDigest across pages.' } },
+        }));
+      }
       return itemsPage(notes);
     }
     if (section === "audio_operations") {

@@ -23,6 +23,8 @@
     "prepare_narration_speech",
     "record_notes",
     "propose_change",
+    "accept_proposal",
+    "reject_proposal",
     "make_keyframes"
   ]
 }
