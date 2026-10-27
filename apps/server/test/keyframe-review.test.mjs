@@ -57,7 +57,7 @@ test('terminal fake press queues one read-only app review, writes two honest not
  const turn=f.store.list('director_turn',f.project.id)[0], request=f.store.get('message',turn.requestId);
  assert.equal(request.source,'app');assert.equal(request.editing,false);assert.deepEqual(request.scopeIds,f.project.shots.map(s=>s.id));
  assert.equal(f.store.get('epoch',turn.epochId).state,'revoked');assert.equal(f.store.list('hold',f.project.id).filter(h=>h.ownerId===request.id).length,0);
- assert.equal(snapshot.conversation.filter(e=>e.role==='user').length,0);assert.equal(snapshot.conversation[0].runtime,'scripted');assert.match(snapshot.conversation[0].text,/No picture was visually inspected/);
+ assert.equal(snapshot.conversation.filter(e=>e.role==='user').length,0);assert.equal(snapshot.conversation[0].runtime,'scripted');assert.match(snapshot.conversation[0].text,/two notes are saved.*Open the notes to choose your next step/);assert.doesNotMatch(snapshot.conversation[0].text,/No picture|not visually|cannot|can\'t/);
  assert.deepEqual(snapshot.notes.map(n=>n.letter),['a','b']);assert.equal(directorProposals(f.service,f.project.id).proposals.length,1);
  const count=f.provider.acceptedCount();assert.equal(count,3);f.director.tick();await f.director.settle();assert.equal(f.store.list('director_turn',f.project.id).length,1);
  const restarted=new LocalDirectorController(f.service,f.config);restarted.tick();await restarted.settle();await restarted.close();assert.equal(f.store.list('director_turn',f.project.id).length,1);assert.equal(f.provider.acceptedCount(),count);
@@ -106,7 +106,7 @@ test('Last Ferry seed matches eight shots, saved Scene 1, unopened Scene 2 frame
  assert.deepEqual(overview.scenes.map(s=>s.state),['video_saved','keyframes_back','not_started']);
  for(const row of lastFerryRows){const shot=overview.shots[`shot-${row.id.replace('.','-')}`];assert.equal(shot.imagePrompt,row.prompt);assert.equal(shot.durationFrames,row.seconds*30);assert.equal(shot.keyframe.opened,row.opened);}
  assert.equal(overview.shots['shot-2-3'].narration.measuredSeconds,7.4);assert.equal(overview.shots['shot-2-3'].narration.fits,false);assert.equal(overview.shots['shot-1-2'].narration.measuredSeconds,2.1);
- assert.deepEqual(snapshot.notes.map(n=>n.letter),['a','b']);assert.ok(snapshot.notes.every(n=>!n.seenKeyframe));assert.match(snapshot.notes[0].text,/has not seen the picture/);
+ assert.deepEqual(snapshot.notes.map(n=>n.letter),['a','b']);assert.ok(snapshot.notes.every(n=>!n.seenKeyframe));assert.match(snapshot.notes[0].text,/Scripted demo note: compare this frame with the saved brief/);assert.doesNotMatch(snapshot.notes[0].text,/has not seen|not visually|cannot|can\'t/);
  assert.equal(directorProposals(f.service,project.id).proposals[0].preview.filmSecondsAfter,50);
  assert.equal(snapshot.conversation.filter(e=>e.role==='user').length,0);
 });

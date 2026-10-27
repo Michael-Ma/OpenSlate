@@ -52,7 +52,9 @@ test('a detached unanswered clip identifies its human recovery before new keyfra
   const before = f.store.db.prepare('SELECT kind,id,body FROM entities ORDER BY kind,id').all();
   const result = await invoke({ shotIds: ['shot-0'], regenerate: true });
   assert.deepEqual(result.started, []); assert.equal(result.refused[0].code, 'ATTEMPT_EXISTS');
-  assert.match(result.next, /^No generation started\./);
+  assert.match(result.next, /^Use the recovery steps for the requested scenes to choose the next action\./);
+  assert.match(result.next, /Preserve unresolved work for reconciliation before any further submission/);
+  assert.doesNotMatch(result.next, /No generation started/);
   const recovery = result.refused[0].recovery;
   assert.deepEqual(recovery, httpRecovery, 'HTTP and Director refusals carry the same allowlisted human recovery');
   assert.equal(recovery.total, 1); assert.equal(recovery.truncated, false);

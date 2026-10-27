@@ -94,8 +94,8 @@ test('V7 keyframe examples name one requested scope and reserve regeneration for
   const keyframes = skillFile('production/references/keyframes.md');
   assert.match(keyframes, /fresh human conversation request in an editing turn/);
   assert.match(keyframes, /Never send both lists/);
-  assert.match(keyframes, /Report the actual returned keyframe and voice-line work, its price\/quote/);
-  assert.match(keyframes, /per-scene refusal code/);
+  assert.match(keyframes, /Use the actual returned keyframe and voice-line work and its price\/quote as evidence/);
+  assert.match(keyframes, /Only the application's reported outcome establishes that work started/);
   assert.match(keyframes, /replies to a review.*read-only turns.*discuss-only turns.*cannot start/);
   assert.match(keyframes, /scene-anchored note for each with a `confirm_video` choice/);
   assert.match(keyframes, /Confirm in this chat or in Keyframes/);
@@ -135,7 +135,8 @@ test('V7 keeps clicked confirmation for video while clear typed decisions settle
   }
   assert.match(notes, /source: "user"/);
   assert.match(notes, /App-message, keyframe-review, automatic and read-only turns cannot make proposal decisions/);
-  assert.match(notes, /report any refusal and current state without claiming success/);
+  assert.match(notes, /Only a successful application receipt establishes a proposal decision/);
+  assert.match(notes, /use its reported state for the next action/);
   for (const name of ['production', 'plan-authoring']) {
     const manifest = JSON.parse(skillFile(`${name}/openslate.skill.json`));
     assert.ok(manifest.requiredToolIds.includes('accept_proposal'));
@@ -144,6 +145,43 @@ test('V7 keeps clicked confirmation for video while clear typed decisions settle
   for (const path of readdirSync(join(repository, 'skills/v7'), { recursive: true }).filter(path => path.endsWith('.md'))) {
     assert.doesNotMatch(skillFile(path), /chat approval (?:cannot|can't) replace|go (?:find|press) the button|conversation never starts video|Video is always human-only/i, path);
   }
+});
+
+test('V7 has one concise bilingual reply style shared by both skills and preserves outcome evidence', () => {
+  const paths = readdirSync(join(repository, 'skills/v7'), { recursive: true }).filter(path => path.endsWith('.md'));
+  const styles = paths.flatMap(path => [...skillFile(path).matchAll(/^## Reply style\n([\s\S]*?)(?=^## |$(?![\s\S]))/gm)]
+    .map(match => ({ path, text: match[1] })));
+  assert.equal(styles.length, 1, 'reply style is defined once across the v7 packages');
+  assert.equal(styles[0].path, 'production/SKILL.md');
+  const style = styles[0].text;
+  assert.match(style, /Lead with concrete work saved, changed or started/);
+  assert.match(style, /app-reported results and the price when returned/);
+  assert.match(style, /Then give one plain next step or the one action/);
+  assert.match(style, /Mention an unmet request only when the person asked for it, once, with a brief reason and a way forward/);
+  assert.match(style, /concise in English and Chinese/);
+  assert.match(style, /omit unrelated disclaimers and unsolicited app rules or limits/);
+  assert.match(style, /omit 不代表\/不能视为\/不能评价\/我不会\/我没有 boilerplate/);
+  assert.match(style, /Only application evidence establishes that work started, was accepted or was saved/);
+  assert.match(style, /unknown outcome's original operation and call identities/);
+  assert.match(style, /inspect receipts and stop dependent work until reconciled; never resubmit blindly/);
+  assert.match(style, /"waiting for the service's answer", with the next step/);
+  assert.match(skillFile('plan-authoring/SKILL.md'), /Follow the production skill's Reply style/);
+  assert.match(skillFile('plan-authoring/references/grammar.md'), /Only an apply receipt establishes saved writing/);
+});
+
+test('V7 removes instructions to recite negative disclaimers while retaining truth and money boundaries', () => {
+  const paths = readdirSync(join(repository, 'skills/v7'), { recursive: true }).filter(path => path.endsWith('.md'));
+  for (const path of paths) {
+    const text = skillFile(path);
+    assert.doesNotMatch(text, /report (?:any|a) refusal[^.]*without claiming success|report no saved change|report returned work, price and (?:per-scene )?refusals|and any per-scene refusal code/i, path);
+    assert.doesNotMatch(text, /(?:say|state|tell|report)[^.\n]*(?:does not mean|nothing started|did not retry|cannot judge|not visually approved)/i, path);
+  }
+  const keyframes = skillFile('production/references/keyframes.md');
+  assert.match(keyframes, /only after the application reports it/);
+  assert.match(keyframes, /Never blindly resubmit an unknown outcome/);
+  assert.match(keyframes, /preserve its callId, inspect receipts and current outcomes/);
+  assert.match(skillFile('production/references/notes.md'), /Never claim work started until the application reports it/);
+  assert.match(skillFile('production/references/notes.md'), /Never judge a picture absent from exact `attachedKeyframes` evidence/);
 });
 
 test('V7 audio guidance permits only eligible current-request transcription and preserves explicit adoption', () => {

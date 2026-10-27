@@ -46,7 +46,7 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     };
     await invoke("read_context", {});
     const command = this.service.store.get<DemoCommand>("demo_command", input.requestId);
-    let text = "Your message is saved. This offline director is a scripted demonstration, so it cannot interpret arbitrary creative requests yet. Use Create a 2-shot demo, then review its frames or try a scoped close-up/wide edit. Real conversation requires the Codex runtime connection.";
+    let text = "Your message is saved. Use Create a 2-shot demo to explore this scripted demonstration, then review its frames or try a scoped close-up/wide edit. Connect the Codex runtime for creative conversation.";
     const projectForNotes = this.service.store.getProject(input.projectId);
     const request = this.service.store.get<RequestRecord>("message", input.requestId)!;
     // A deliberately bounded typed path for offline tests. Subject matching and
@@ -71,8 +71,8 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         const states = [...new Set(directorProposals(this.service, input.projectId).proposals
           .filter(proposal => proposal.proposalId === proposalId || linkedIds.has(proposal.proposalId)).map(proposal => proposal.state))];
         text = error.code === "TOOL_CALL_UNRESOLVED"
-          ? `Proposal ${proposalId}: the decision receipt is unresolved; current state: ${states.join(", ") || "not found"}. Check the saved receipts before continuing.`
-          : `Proposal ${proposalId} was not ${action === "accept" ? "accepted" : "declined"} (${error.code}); current state: ${states.join(", ") || "not found"}.`;
+          ? `Proposal ${proposalId}: waiting for the service's answer. Check the saved decision receipts; current state: ${states.join(", ") || "unavailable"}.`
+          : `Proposal ${proposalId}: current state: ${states.join(", ") || "unavailable"} (${error.code}). Open the current proposal notes and choose the proposal to act on.`;
       }
       await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
       return { ...identity, status: "completed", text, dispatched: true };
@@ -94,23 +94,23 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         anchor: request.scopeIds.includes(input.projectId) || request.scopeIds.includes(scene.sceneId)
           ? { sceneId: scene.sceneId } : { shotIds: scene.shotIds.filter(id => request.scopeIds.includes(id)) },
         kind: "recommendation", blocking: false,
-        text: "Scripted demo: this scene is ready for your video confirmation. No video has started.",
+        text: "Scripted demo: this scene is ready for your video confirmation. Confirm in this chat or in Keyframes.",
         choices: [{ kind: "confirm_video", sceneId: scene.sceneId }, { kind: "reply" }],
       })) });
-      text = "Scripted demo: confirm video in the chat or in Keyframes. No video has started.";
+      text = "Scripted demo: video confirmation is ready. Confirm video in the chat or in Keyframes.";
     } else if ((!command || command.action === "review") && scene && shots.length && ["5.0.0", "6.0.0"].includes(input.bridge.toolContractVersion ?? "1.0.0")) {
       const first = shots[0]!, last = shots.at(-1)!;
       const review = this.service.store.get("keyframe_review_request", input.requestId) || command?.action === "review";
       const proposal = review && last.desiredFrames < 240 ? await invoke("propose_change", { patch: { updateShots: [{ id: last.id, desiredFrames: 240 }] } }) as { proposalId: string } : null;
       await invoke("record_notes", { notes: [
         { anchor: { shotIds: [first.id] }, kind: "observation", blocking: false,
-          text: "Scripted demo note: a live Director would compare this frame with the brief. This offline Director has not seen the picture.",
+          text: "Scripted demo note: compare this frame with the saved brief.",
           choices: [{ kind: "accept", label: "Keep this frame" }, { kind: "regenerate_keyframe", shotIds: [first.id] }] },
         { anchor: { shotIds: [last.id] }, kind: "recommendation", blocking: true,
           text: review ? "Scripted demo recommendation: the closing line needs timing review; consider an eight-second shot." : "Scripted demo recommendation: check whether the closing narration expresses the scene's intent.",
           choices: [...(proposal ? [{ kind: "proposal", proposalId: proposal.proposalId }] : []), { kind: "accept", label: review ? `Keep ${last.desiredFrames / 30} s` : "Keep narration" }, { kind: "edit_field", shotId: last.id, field: "narration" }] },
       ] });
-      text = "Scripted demo review: two notes are saved for this scene. Keep the current choices, edit the narration, or use the human keyframe generation action. No picture was visually inspected.";
+      text = "Scripted demo review: two notes are saved for this scene. Open the notes to choose your next step.";
     }
     if (command && command.action !== "review") {
       const project = this.service.store.getProject(input.projectId);
@@ -128,13 +128,13 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         await invoke("record_notes", { notes: [{
           anchor: { shotIds: [shot.id] }, kind: held ? "recommendation" : "observation", blocking: !!held,
           text: held
-            ? `Scripted demo recommendation: try ${command.action === "close_up" ? "an extreme close-up" : "a wide view"} for this shot. Review the Now/After preview before accepting; no replacement media has been made.`
-            : "Scripted demo note: this shot already has the requested direction. No change or replacement media is needed.",
+            ? `Scripted demo recommendation: try ${command.action === "close_up" ? "an extreme close-up" : "a wide view"} for this shot. Review the Now/After preview before accepting.`
+            : "Scripted demo note: this shot already has the requested direction. Keep the current direction or choose another edit.",
           choices: [...(held ? [{ kind: "proposal", proposalId: held.proposalId }] : []), { kind: "accept", label: "Keep current direction" }],
         }] });
         text = held
-          ? "A scripted demo proposal is ready for the selected shot. Review its Now/After preview, then accept it or keep the current direction. Accepting changes the saved direction; replacement frames and clips still need your generation decision."
-          : "The selected shot already has this scripted demo direction. No change was made.";
+          ? "A scripted demo proposal is ready for the selected shot. Review its Now/After preview, then accept it or keep the current direction."
+          : "The selected shot already has this scripted demo direction. Keep the current direction or choose another edit.";
       } else {
         let proposed = project;
         const proposal: ChangeProposal = { variant: "workflow", expectedHeadVersion: project.headVersion };
@@ -152,12 +152,12 @@ export class FakeWorkflowDirector implements DirectorRuntime {
         const prepared = await invoke("prepare_change", proposal) as { preparedId: string };
         await invoke("apply_change", { preparedId: prepared.preparedId });
         text = command.action === "create"
-          ? "The two-shot fixture plan is ready. OpenSlate will prepare the sample frames and wait for your review before making sample videos. The pictures and one-second clips demonstrate the pipeline; they are not AI-generated creative results."
+          ? "The two-shot fixture plan is ready. OpenSlate will prepare the sample frames for your review before making sample videos. The sample pictures and one-second clips demonstrate the pipeline."
           : "The selected shot's framing and prompts were updated. Unchanged shots keep their saved work. Review the replacement sample frame before its video can run.";
       }
     }
     const attached = JSON.parse(input.context).attachedMaterial?.attachments as Array<{ name: string; readable: boolean }> | undefined;
-    if (attached?.length) text += ` Attached files received: ${attached.map(item => `${item.name}${item.readable ? "" : " (content unreadable)"}`).join(", ")}. This scripted Director acknowledges the files without interpreting their contents.`;
+    if (attached?.length) text += ` Attached files received: ${attached.map(item => `${item.name}${item.readable ? "" : " (content unreadable)"}`).join(", ")}.`;
     await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
     return { ...identity, status: "completed", text, dispatched: true };
   }

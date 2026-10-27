@@ -66,5 +66,5 @@ export async function makeDirectorKeyframes(service: ProductionService, projectI
   store.put('director_keyframes_receipt', invocationId, projectId, receipt);
   return JSON.parse(JSON.stringify({ started: receipt.started, refused: receipt.refused,
     next: receipt.started.length ? 'Follow these saved keyframe and voice jobs. When the returned frames and video recipe are ready, the person confirms each scene to generate video.'
-      : 'No generation started. Follow each refusal and its recovery instructions; unresolved work must never be resubmitted blindly.' })) as JsonValue;
+      : 'Use the recovery steps for the requested scenes to choose the next action. Preserve unresolved work for reconciliation before any further submission.' })) as JsonValue;
 }
