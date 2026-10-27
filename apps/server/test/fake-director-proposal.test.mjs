@@ -90,7 +90,7 @@ test('V6 fake Director accepts a named proposal from the typed message, settles 
   const context = JSON.parse(input.context);
   assert.match(context.instructions, /accept_proposal or reject_proposal with \{proposalId\}/);
   assert.match(context.instructions, /continue other requested work using the accepted prompts/i);
-  assert.match(context.instructions, /For video, chat replies.*not confirmation/);
+  assert.ok(context.instructions.includes('For video, point to the Confirm card in the chat or in Keyframes; offer a fresh one if the old one is settled or stale.'));
 });
 
 for (const verb of ['reject', 'decline']) test(`V6 fake Director handles explicit ${verb} without claiming a saved edit or Undo`, async t => {

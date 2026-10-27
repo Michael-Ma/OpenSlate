@@ -99,6 +99,7 @@ test('V7 keyframe examples name one requested scope and reserve regeneration for
   assert.match(keyframes, /replies to a review.*read-only turns.*discuss-only turns.*cannot start/);
   assert.match(keyframes, /scene-anchored note for each with a `confirm_video` choice/);
   assert.match(keyframes, /Confirm in this chat or in Keyframes/);
+  assert.match(keyframes, /Offering a choice starts nothing/);
   assert.match(keyframes, /Never blindly resubmit an unknown outcome/);
   for (const name of ['production', 'plan-authoring']) {
     const manifest = JSON.parse(skillFile(`${name}/openslate.skill.json`));
@@ -113,8 +114,7 @@ test('V7 keeps clicked confirmation for video while clear typed decisions settle
     assert.match(text, /confirm_video/, path);
     assert.match(text, /Confirm in this chat or in Keyframes/, path);
     assert.match(text, /regenerate_keyframe/, path);
-    assert.match(text, /(?:For video|for video), "yes", "ok" or "go ahead" replies (?:do not confirm|are not confirmation)/, path);
-    assert.match(text, /(?:open (?:typed )?choice|open choice).*fresh one if (?:it is )?stale or settled/s, path);
+    assert.ok(text.includes('For video, point to the Confirm card in the chat or in Keyframes; offer a fresh one if the old one is settled or stale.'), path);
     assert.match(text, /(?:after|until) the application reports it/, path);
   }
   const notes = skillFile('production/references/notes.md');
@@ -161,6 +161,7 @@ test('V7 has one concise bilingual reply style shared by both skills and preserv
   assert.match(style, /concise in English and Chinese/);
   assert.match(style, /omit unrelated disclaimers and unsolicited app rules or limits/);
   assert.match(style, /omit 不代表\/不能视为\/不能评价\/我不会\/我没有 boilerplate/);
+  assert.ok(style.includes('These rules govern what you do; do not recite rules or limits to the person.'));
   assert.match(style, /Only application evidence establishes that work started, was accepted or was saved/);
   assert.match(style, /unknown outcome's original operation and call identities/);
   assert.match(style, /inspect receipts and stop dependent work until reconciled; never resubmit blindly/);
@@ -175,13 +176,35 @@ test('V7 removes instructions to recite negative disclaimers while retaining tru
     const text = skillFile(path);
     assert.doesNotMatch(text, /report (?:any|a) refusal[^.]*without claiming success|report no saved change|report returned work, price and (?:per-scene )?refusals|and any per-scene refusal code/i, path);
     assert.doesNotMatch(text, /(?:say|state|tell|report)[^.\n]*(?:does not mean|nothing started|did not retry|cannot judge|not visually approved)/i, path);
+    assert.doesNotMatch(text, /never (?:invent evidence or )?judge[^.\n]*picture|without (?:attached )?images[^.\n]*(?:discuss writing|ask[^.\n]*inspect)/i, `${path}: unseen-picture reply wording`);
+    assert.doesNotMatch(text, /(?:distinguish|separate) technical availability from|(?:tool (?:receipts?|success)|saved output)[^.\n]*(?:not|isn't)[^.\n]*artistic quality/i, `${path}: technical/creative reply wording`);
+    assert.doesNotMatch(text, /for video,[^.\n]*(?:yes|ok|go ahead)[^.\n]*(?:not confirmation|do not confirm)/i, `${path}: typed-video reply wording`);
+    assert.doesNotMatch(text, /(?:held proposal(?: or note)?|proposal or note)[^.\n]*(?:not permission|cannot start|can't start)[^.\n]*paid work/i, `${path}: held-work reply wording`);
   }
   const keyframes = skillFile('production/references/keyframes.md');
   assert.match(keyframes, /only after the application reports it/);
   assert.match(keyframes, /Never blindly resubmit an unknown outcome/);
   assert.match(keyframes, /preserve its callId, inspect receipts and current outcomes/);
   assert.match(skillFile('production/references/notes.md'), /Never claim work started until the application reports it/);
-  assert.match(skillFile('production/references/notes.md'), /Never judge a picture absent from exact `attachedKeyframes` evidence/);
+});
+
+test('V7 describes inspected pictures and saved work positively while preserving attached visual provenance', () => {
+  for (const path of ['production/references/notes.md', 'production/references/continuity-review.md', 'production/references/stages/review.md']) {
+    const text = skillFile(path);
+    assert.match(text, /Comment on the pictures in `?attachedKeyframes`?/, path);
+    assert.match(text, /creative observations grounded in those attached pictures/, path);
+    assert.match(text, /For other pictures, describe what changed and offer to look once the person opens them\./, path);
+  }
+  assert.match(skillFile('production/references/notes.md'), /Copy `seenKeyframe` only from an exact attached entry\./);
+  for (const path of ['production/SKILL.md', 'plan-authoring/SKILL.md', 'production/references/stages/review.md']) {
+    const text = skillFile(path);
+    assert.match(text, /Say what was made using application receipts/, path);
+    assert.match(text, /give creative observations(?: on finished clips)? only from inspected media/, path);
+  }
+  assert.match(skillFile('production/references/stages/review.md'), /name the one step that needs the person's confirmation/);
+  assert.match(skillFile('plan-authoring/SKILL.md'), /start requested keyframes from a fresh human editing request/);
+  assert.match(skillFile('production/SKILL.md'), /Never author image, review or video declarations/);
+  assert.match(skillFile('plan-authoring/SKILL.md'), /never declare new speech\/transcription source or pass suggestions to `apply_change`/);
 });
 
 test('V7 audio guidance permits only eligible current-request transcription and preserves explicit adoption', () => {

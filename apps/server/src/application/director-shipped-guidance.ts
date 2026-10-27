@@ -14,7 +14,7 @@ interface ShippedGuidance {
 }
 
 // Shipped and saved branch identities, independent of mutable checkout paths.
-// Never replace a pin; append a successor. K1, N1, P1 and T1 amend the unreleased 6.0.0/V7
+// Never replace a pin; append a successor. K1, N1, P1, T1 and T2 amend the unreleased 6.0.0/V7
 // packages while retaining their earlier identity for fresh-turn upgrades.
 export const SHIPPED_DIRECTOR_GUIDANCE: readonly ShippedGuidance[] = [
   { toolContract: "1.0.0", guidanceVersion: "1.0.0", handlerDigest: "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec", planAuthoringDigest: "f0284e141496a4b2ee6e19be5903e78c03c412df1614958ba3257f295347378a", productionDigest: "a0ee6a6b355eb340ea18de2e4adcdeb9ab1cb5102d7cda6eac0209442c2197b2" },
@@ -29,6 +29,7 @@ export const SHIPPED_DIRECTOR_GUIDANCE: readonly ShippedGuidance[] = [
   { toolContract: "6.0.0", guidanceVersion: "7.0.0", handlerDigest: "4a4d340f74977cc9f4a946f5c2f8005e361a695978cdbceba295a9b8e7da95e6", planAuthoringDigest: "e1c2d030049e99717e8c3efc977677de1501d4fd1d19f898ce547f0f3e1cb1aa", productionDigest: "7ef5d5d27cd5b78eac5979cd2468de67c130239d495755abbdee97323eda4fba" },
   { toolContract: "6.0.0", guidanceVersion: "7.0.0", handlerDigest: "d1891b9f92dcb62401e91a1ac71b4aab54a7722db50559136fbbeed9cf4de198", planAuthoringDigest: "57fd9fcbc92d113833ce7442d07effdc60e288959988d492c1ddec7a821d0397", productionDigest: "be899af306b76045e4969e173deca16534a44b40eb880d7384fad46ee568f81f" },
   { toolContract: "6.0.0", guidanceVersion: "7.0.0", handlerDigest: "d1891b9f92dcb62401e91a1ac71b4aab54a7722db50559136fbbeed9cf4de198", planAuthoringDigest: "6ed8cdca8f26c0e62506bde0e46e41f41a62525060c8a1e5b038c7af41faf1bb", productionDigest: "f4e3a71c5b62c75ab647c9ebc109bc93fe98bce8f682893467917856febca562" },
+  { toolContract: "6.0.0", guidanceVersion: "7.0.0", handlerDigest: "d1891b9f92dcb62401e91a1ac71b4aab54a7722db50559136fbbeed9cf4de198", planAuthoringDigest: "16cb63a6398eaa11c2b474f05fe0cd52f12e46d603a6544e3aa2076b954d16cf", productionDigest: "6d86d6772bbaeadbf967f3d7d73b2e8531e56501096c8703acd226b339b439f5" },
 ];
 for (const identity of SHIPPED_DIRECTOR_GUIDANCE) Object.freeze(identity);
 Object.freeze(SHIPPED_DIRECTOR_GUIDANCE);

@@ -124,10 +124,10 @@ test('contract-6 host guidance permits typed proposal decisions and requested ke
   assert.match(guide, /record one scene-anchored note per scene with a confirm_video choice/);
   assert.match(guide, /Confirm in this chat or in Keyframes/);
   assert.match(guide, /Offering a choice in an editing or keyframe-review turn starts nothing and costs nothing/);
-  assert.match(guide, /For video, "yes", "ok" or "go ahead" replies are not confirmation/);
+  assert.ok(guide.includes('For video, point to the Confirm card in the chat or in Keyframes; offer a fresh one if the old one is settled or stale.'));
   assert.match(context.instructions, /call make_keyframes for exactly those scenes or shots/);
   assert.match(context.instructions, /record a scene-anchored note for each with a confirm_video choice/);
-  assert.match(context.instructions, /For video, chat replies such as yes, ok or go ahead are not confirmation/);
+  assert.ok(context.instructions.includes('For video, point to the Confirm card in the chat or in Keyframes; offer a fresh one if the old one is settled or stale.'));
   assert.match(context.instructions, /Treat a start as confirmed only after the application reports it/);
   assert.match(context.instructions, /prepare_recording_transcription may start priced owned transcription/);
   assert.doesNotMatch(context.instructions, /audio tools only prepare pending suggestions/);
@@ -143,5 +143,24 @@ test('contract-6 host guidance permits typed proposal decisions and requested ke
   assert.match(historical, /Only a human press may start paid speech or transcription/);
   assert.doesNotMatch(historical, /make_keyframes|accept_proposal|reject_proposal/);
   for (const entityKind of ['director_note', 'grant', 'candidate', 'attempt', 'reservation']) assert.equal(f.store.list(entityKind, f.project.id).length, 0, entityKind);
+  assert.equal(f.provider.acceptedCount(), 0);
+});
+
+test('contract-6 host guidance describes attached pictures, saved work and the next requested action without reply disclaimers', t => {
+  const f = fixture(t), input = createDirectorInput(f.service, { ...f.config, endpoint: 'http://127.0.0.1:3101' })(f.turn, f.human, f.bridge);
+  const context = JSON.parse(input.context), host = JSON.stringify({ instructions: context.instructions, filmPlanning: context.filmPlanning });
+  assert.match(context.filmPlanning.replyStyle, /These rules govern what you do; do not recite rules or limits to the person\./);
+  assert.ok(context.filmPlanning.notes.evidence.includes('Comment on the pictures in attachedKeyframes, with creative observations grounded in those attached pictures. For other pictures, describe what changed and offer to look once the person opens them.'));
+  assert.ok(context.filmPlanning.notes.evidence.includes('Copy seenKeyframe shotId, artifactId and sha256 only from an exact attachedKeyframes entry.'));
+  assert.ok(context.filmPlanning.truth.includes('Say what was made using application receipts; give creative observations only from inspected media.'));
+  assert.ok(context.filmPlanning.procedure.some(text => text.includes('Start what the person asked for under the current request, and name the one step that needs their confirmation.')));
+  assert.doesNotMatch(host, /never (?:invent evidence or )?judge[^.]*picture|without (?:attached )?images[^.]*(?:discuss writing|ask[^.]*inspect)/i);
+  assert.doesNotMatch(host, /(?:distinguish|separate) technical availability from|(?:tool (?:receipts?|success)|saved output)[^.]*(?:not|isn't)[^.]*artistic quality/i);
+  assert.doesNotMatch(host, /for video,[^.]*(?:yes|ok|go ahead)[^.]*(?:not confirmation|do not confirm)/i);
+  assert.doesNotMatch(host, /(?:held proposal(?: or note)?|proposal or note)[^.]*(?:not permission|cannot start|can't start)[^.]*paid work/i);
+  assert.match(context.instructions, /never author image, review or video declarations/);
+  assert.match(context.instructions, /never pass them to apply_change/);
+  assert.match(context.filmPlanning.truth, /successful application receipt is required evidence/);
+  assert.match(context.filmPlanning.truth, /Preserve original call identities and reconcile unknown outcomes before any retry/);
   assert.equal(f.provider.acceptedCount(), 0);
 });
