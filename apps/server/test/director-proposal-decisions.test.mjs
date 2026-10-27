@@ -431,3 +431,18 @@ test('accept then make_keyframes in the same typed turn generates from the accep
   assert.equal(f.provider.acceptedCount(), 1);
   assert.equal(f.engine.attempts(f.project.id).filter(attempt => attempt.request.kind === 'video').length, 0);
 });
+
+test('the Director cannot accept or decline a proposal it held in the same turn', async t => {
+  const f = fixture(t);
+  for (const [action, desiredFrames] of [['accept', 240], ['reject', 300]]) {
+    const turn = f.openTurn({ text: 'Make the first shot longer.' });
+    const proposal = await f.propose({ updateShots: [{ id: 'shot-0', desiredFrames }] }, turn);
+    const before = effectState(f);
+    await assert.rejects(f.decide(turn, proposal.proposalId, action), { code: 'PROPOSAL_DECISION_NOT_AUTHORIZED' });
+    assert.deepEqual(effectState(f), before);
+    assert.equal(f.proposal(proposal.proposalId).state, 'held');
+    // The person's next message may decide it.
+    const later = f.openTurn({ text: 'Accept that proposal.' });
+    if (action === 'accept') assert.equal((await f.decide(later, proposal.proposalId, action)).proposal.state, 'accepted');
+  }
+});

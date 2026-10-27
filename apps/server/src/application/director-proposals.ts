@@ -114,6 +114,8 @@ export function decideProposal(service: ProductionService, projectId: string, ac
       return previous.receipt;
     }
     const proposal = proposalIdentity(service, projectId, input.proposalId, actor.principalId);
+    // A proposal is held for the person: only a later message, written after they could see it, may decide it.
+    invariant(proposal.requestId !== actor.requestId, 'PROPOSAL_DECISION_NOT_AUTHORIZED', 'A proposal from this turn waits for the person; propose it and let them answer');
     const project = store.getProject(projectId), request = store.get<RequestRecord>('message', actor.requestId)!;
     const allows = (id: string) => request.scopeIds.includes(projectId) || request.scopeIds.includes(id)
       || project.shots.some(shot => shot.id === id && request.scopeIds.includes(shot.sceneId));

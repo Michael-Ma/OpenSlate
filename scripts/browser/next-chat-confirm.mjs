@@ -105,6 +105,24 @@ export const scenarios = [
     },
   },
   {
+    name: "next-chat-confirm-typed-accept",
+    query,
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      // Saying so in the chat is enough: the Director accepts note b's change on that word, no button to find.
+      await ask(page, "接受提案 b，然后生成新的关键帧");
+      await expectText(page, '.thread .note[data-note-id="note-b"] .handled', /^✓ Settled: change applied from your message$/, 10000);
+      await page.waitForFunction(() => [...document.querySelectorAll(".thread [data-entry]")].some((entry) => /Accepted proposal b as you asked/.test(entry.textContent)), null, { timeout: 10000 });
+      // The banner shows it settled too, and Undo is right under the note in the chat.
+      await page.click('[data-act="scene"][data-scene="scene-2"]');
+      if (await page.locator('.banner [data-act="note-choice"][data-note="note-b"]').count()) fail("The banner still offers note b after the Director accepted it");
+      await page.screenshot({ path: shot("typed-accept-1440"), clip: { x: 0, y: 0, width: 400, height: 900 } });
+      await page.click('.thread .note[data-note-id="note-b"] [data-act="undo"]');
+      await page.waitForSelector('.thread .note[data-note-id="note-b"][data-tone="open"] [data-act="note-choice"][data-kind="proposal"]', { timeout: 10000 });
+    },
+  },
+  {
     name: "next-chat-confirm-edit",
     query,
     viewport: { width: 1440, height: 900 },
