@@ -120,14 +120,14 @@ export const scenarios = [
       await box.click();
       await box.pressSequentially("Please make the keyframes for the rest of the film now.");
       await page.click('[data-act="send"]');
-      // The scripted Director starts Scene 3's keyframes and 3.2's voice line, and says what and the price.
-      await expectText(page, ".gen-note", /^Started 2 keyframes and 1 voice line in Scene 3 · about \$0\.09/, 10000);
-      if (!(await page.locator('.gen-note [data-act="stop-generation"]').isVisible())) fail("Stop is missing while the keyframes are made");
+      // The scripted Director starts Scene 3's keyframes and 3.2's voice line; the live line says how far and the price.
+      await expectText(page, ".gen-live .gl-head", /^Scene 3 · 0\/2 keyframes back · about \$0\.09/, 10000);
+      if (!(await page.locator('.gen-live [data-act="stop-generation"]').isVisible())) fail("Stop is missing while the keyframes are made");
       await page.screenshot({ path: shot("director-keyframes-1440") });
       await page.click('[data-act="scene"][data-scene="scene-3"]');
       await expectText(page, '[data-card="shot-3-1"] .stl', /Making keyframe|Not opened/, 10000);
-      // Once made, the line stays without Stop.
-      await page.waitForSelector('.gen-note[data-generation="done"]', { timeout: 20000 });
+      // Once made, the line says they are all back, without Stop, and opens the scene.
+      await page.waitForSelector('.gen-live[data-generation="done"] [data-act="open-scene"]', { timeout: 20000 });
     },
   },
 ];

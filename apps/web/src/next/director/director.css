@@ -202,3 +202,44 @@ button.atchip:hover{background:var(--track)}
 /* What the Director started (keyframes, voice lines) and its price; Stop while some of it is still being made. */
 .gen-note{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:8px;padding:8px 10px;border:1px solid var(--track);border-radius:10px;background:var(--raised);font-size:12.5px;line-height:1.45;color:var(--text-2)}
 .gen-note span{flex:1;min-width:0}
+
+/* ---------- live progress of the keyframes a turn started (failure-display item 1) ---------- */
+.gen-live{margin-top:8px;border:1px solid var(--track);border-radius:10px;background:var(--raised);padding:9px 11px;font-size:12.5px;line-height:1.45;color:var(--text-2)}
+.gen-live .gl-head{display:flex;align-items:center;gap:10px}
+.gen-live .gl-head span{flex:1;min-width:0;color:var(--text);font-weight:600}
+.gl-bar{display:flex;gap:3px;margin:8px 0 9px}
+.gen-live[data-generation="done"] .gl-bar{margin-bottom:2px}
+.gl-bar i{flex:1;height:4px;border-radius:2px;background:var(--track)}
+.gl-bar i[data-state="done"]{background:var(--green)}
+.gl-bar i[data-state="making"]{background:linear-gradient(90deg,var(--text-2),var(--track));animation:gl-pulse 1.4s ease-in-out infinite alternate}
+.gl-bar i[data-state="failed"]{background:var(--text)}
+.gl-bar i[data-state="no_answer"]{background:repeating-linear-gradient(90deg,var(--text-2) 0 3px,transparent 3px 6px)}
+@keyframes gl-pulse{from{opacity:.45}to{opacity:1}}
+.gl-shots{display:flex;flex-wrap:wrap;gap:6px}
+.shot-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;border:1px solid var(--hairline);background:var(--surface);color:var(--text-2);border-radius:var(--r-pill);padding:2px 9px 2px 7px;font:inherit;font-size:12px;cursor:pointer}
+.shot-chip:hover{border-color:var(--track);color:var(--text)}
+.shot-chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.shot-chip b{color:var(--text);font-weight:600}
+.shot-chip.needs{border-color:var(--track);background:var(--raised-2);color:var(--text)}
+.shot-chip .m{width:13px;height:13px;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:800;flex:none;box-sizing:border-box}
+.shot-chip .m[data-state="done"]{background:var(--green-surface);color:var(--green);border:1px solid var(--green-line)}
+.shot-chip .m[data-state="making"]{border:1.5px solid var(--text-2);border-top-color:transparent;animation:gl-spin 1s linear infinite}
+.shot-chip .m[data-state="failed"]{background:var(--select);color:var(--select-ink)}
+.shot-chip .m[data-state="no_answer"]{border:1.5px dashed var(--text-2)}
+.shot-chip .m[data-state="queued"],.shot-chip .m[data-state="stopped"]{border:1.5px solid var(--track)}
+@keyframes gl-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.gl-bar i[data-state="making"],.shot-chip .m[data-state="making"]{animation:none}}
+.gl-next{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px solid var(--hairline);color:var(--text)}
+.gl-next span{flex:1 1 12em;min-width:0}
+
+/* ---------- a refused part of the request, from the application's record (failure-display item 2) ---------- */
+.blocked{display:flex;gap:9px;align-items:flex-start;margin-top:8px;border:1px solid var(--track);background:var(--raised);border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.5;color:var(--text-2)}
+.blocked .mark{flex:none;width:16px;height:16px;border-radius:50%;background:var(--select);color:var(--select-ink);display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px}
+.blocked[data-resolved="true"] .mark{background:var(--green-surface);color:var(--green);border:1px solid var(--green-line);box-sizing:border-box}
+.blocked .b-body{flex:1;min-width:0}
+.blocked .b-title{color:var(--text);font-weight:600;display:block}
+.blocked .b-step{display:block;margin-top:2px}
+.blocked .row{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.blocked details{margin-top:6px;font-size:11.5px;color:var(--muted)}
+.blocked summary{cursor:pointer}
+.blocked code{font-size:11px;color:var(--text-2);overflow-wrap:anywhere}

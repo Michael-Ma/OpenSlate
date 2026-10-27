@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18n.tsx";
-import type { MessageAttachmentView } from "@openslate/core/public";
+import type { DirectorGenerationBlock, MessageAttachmentView } from "@openslate/core/public";
+import { blockView, type GenerationProgress, type ShotProgress } from "../model/generation-progress.ts";
+import { msg } from "../model/types.ts";
+import { useOpenTarget } from "./useOpenTarget.ts";
 import { directorElapsed, resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type GenerationLine, type ThreadBox, type ThreadEntry } from "../model/director.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
@@ -191,7 +194,8 @@ function Entry({ entry }: { entry: ThreadEntry }) {
       <Markdown blocks={entry.blocks} />
       {entry.reviewNotesFailure && <p className="dir-ending" role="status" data-review-notes="unsaved">{tm(entry.reviewNotesFailure)}</p>}
       {entry.attention && <AttentionNote attention={entry.attention} />}
-      {entry.generation.map((line, index) => <GenerationNote key={index} line={line} />)}
+      {entry.generation.map((line, index) => (line.progress ? <GenerationProgressNote key={index} progress={line.progress} /> : <GenerationNote key={index} line={line} />))}
+      {entry.blocked.map((block, index) => <BlockedNote key={index} block={block} />)}
       {/* A reply that started work says so in its line; "nothing was changed" would then be untrue. */}
       {entry.scripted && !entry.generation.length && <ScriptedTag />}
       <NoteCards notes={entry.notes} />
@@ -225,6 +229,102 @@ function GenerationNote({ line }: { line: GenerationLine }) {
       {line.running ? (
         <button type="button" className="pill sm" data-act="stop-generation" {...guard} title={guard.title ?? t("director.generation.stop_hint")} disabled={guard.disabled} onClick={() => void store.stopFilm()}>{t("director.generation.stop")}</button>
       ) : null}
+    </div>
+  );
+}
+
+function StopButton() {
+  const { t } = useI18n();
+  const store = useStore();
+  const guard = useGuarded("server");
+  return <button type="button" className="pill sm" data-act="stop-generation" {...guard} title={guard.title ?? t("director.generation.stop_hint")} disabled={guard.disabled} onClick={() => void store.stopFilm()}>{t("director.generation.stop")}</button>;
+}
+
+const stateKey = (shot: ShotProgress) => (shot.state === "failed" && shot.charged ? "failed_charged" : shot.state);
+const MARK: Record<ShotProgress["state"], string> = { done: "✓", making: "", queued: "", stopped: "", failed: "!", no_answer: "" };
+
+/**
+ * The keyframes a Director turn started, live (failure-display item 1): a head with the count and the price, one
+ * segment and one chip per shot (a chip opens its shot), and one next step when a shot needs the person.
+ */
+function GenerationProgressNote({ progress }: { progress: GenerationProgress }) {
+  const { t, tm } = useI18n();
+  const open = useOpenTarget();
+  const total = progress.shots.length;
+  const all = progress.done === total;
+  const values = { count: progress.sceneCount, scenes: progress.scenes, done: progress.done, total };
+  const head = all ? msg(progress.sceneCount ? "director.progress.all_done" : "director.progress.all_done_shots", values)
+    : msg(progress.sceneCount ? "director.progress.head" : "director.progress.head_shots", values);
+  const scene = progress.sceneId && progress.sceneCount === 1 ? progress.scenes : null;
+  return (
+    <div className="gen-live" role="status" data-generation={progress.running ? "running" : all ? "done" : "attention"}>
+      <div className="gl-head">
+        <span>{tm({ ...head, messages: { price: progress.price } })}</span>
+        {progress.running ? <StopButton /> : all && scene && progress.sceneId ? (
+          <button type="button" className="pill sm" data-act="open-scene" onClick={() => open({ kind: "scene", id: progress.sceneId! })}>{t("director.progress.open_scene", { scene })}</button>
+        ) : null}
+      </div>
+      <div className="gl-bar" aria-hidden="true">{progress.shots.map((shot) => <i key={shot.shotId} data-state={shot.state} />)}</div>
+      {!all && (
+        <div className="gl-shots">
+          {progress.shots.map((shot) => {
+            const state = t(`director.progress.state.${stateKey(shot)}` as const);
+            return (
+              <button type="button" key={shot.shotId} className={`shot-chip${shot.state === "failed" || shot.state === "no_answer" ? " needs" : ""}`}
+                data-act="progress-shot" data-shot={shot.shotId} data-state={shot.state} aria-label={t("director.progress.chip", { shot: shot.label, state })}
+                onClick={() => open({ kind: "shot", id: shot.shotId })}>
+                <span className="m" data-state={shot.state} aria-hidden="true">{MARK[shot.state]}</span><b>{shot.label}</b>{state}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {progress.next && (
+        <div className="gl-next">
+          <span>{tm(progress.next.text)}</span>
+          <button type="button" className="pill sm" data-act="progress-open" data-shot={progress.next.shotId} onClick={() => open({ kind: "shot", id: progress.next!.shotId })}>
+            {t("director.progress.open_shot", { shot: progress.next.label })}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A refused part of the Director's request (failure-display item 2), from the application's record: what it waits
+ * on, how to unblock it, and the button that does the next step. "Ask the Director" only fills the composer.
+ */
+function BlockedNote({ block }: { block: DirectorGenerationBlock }) {
+  const { t, tm } = useI18n();
+  const store = useStore();
+  const open = useOpenTarget();
+  const overview = useStudio((s) => s.overview);
+  const composer = useStudio((s) => s.composer.text);
+  const view = blockView(block, overview);
+  if (!view) return null;
+  const ask = () => {
+    if (!view.ask) return;
+    for (const id of view.ask.shotIds) store.pointAt({ kind: "shot", id });
+    if (!composer.trim()) store.setComposerText(tm(view.ask.text));
+    if (window.matchMedia?.("(max-width: 899px)").matches) store.setDirectorOpen(true);
+    document.querySelector<HTMLTextAreaElement>('.composer [data-field="message"]')?.focus();
+  };
+  return (
+    <div className="blocked" role="note" data-blocked={block.code} data-scene={block.sceneId} data-resolved={view.resolved ? "true" : "false"}>
+      <span className="mark" aria-hidden="true">{view.resolved ? "✓" : "!"}</span>
+      <div className="b-body">
+        <span className="b-title">{tm(view.title)}</span>
+        <span className="b-step">{tm(view.step)}</span>
+        {(view.open || view.ask || (!view.resolved && !view.open)) && (
+          <div className="row">
+            {view.ask && <button type="button" className="pill sm" data-act="blocked-ask" onClick={ask}>{t("director.blocked.ask")}</button>}
+            {view.open && <button type="button" className="pill sm" data-act="blocked-open" data-shot={view.open.shotId} onClick={() => open({ kind: "shot", id: view.open!.shotId })}>{t("director.progress.open_shot", { shot: view.open.label })}</button>}
+            {!view.open && !view.resolved && view.scene !== null && <button type="button" className="pill sm" data-act="blocked-open-scene" onClick={() => open({ kind: "scene", id: block.sceneId })}>{t("director.progress.open_scene", { scene: view.scene })}</button>}
+          </div>
+        )}
+        {!view.resolved && <details><summary>{t("director.blocked.details")}</summary><code>{block.code}{block.attempts?.length ? ` · ${block.attempts.map((a) => `${a.kind} ${a.phase}`).join(", ")}` : ""}</code></details>}
+      </div>
     </div>
   );
 }

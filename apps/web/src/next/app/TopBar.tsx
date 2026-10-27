@@ -6,6 +6,7 @@ import { useStore, useStudio } from "../store/react.tsx";
 import { DisconnectDialog } from "./DisconnectDialog.tsx";
 import { StopDialog } from "./StopDialog.tsx";
 import { StudioMenu } from "./StudioMenu.tsx";
+import { AttentionMenu } from "./AttentionMenu.tsx";
 import { useNarrow } from "./useNarrow.ts";
 import { useWriteGuard } from "./useWriteGuard.ts";
 
@@ -200,6 +201,7 @@ export function TopBar({ inert = false, expired = false, offline = false, onNavi
           </button>
         )}
         {mode === "film" && heading.counts && <span className="counts">{tm(heading.counts)}</span>}
+        {mode === "film" && <AttentionMenu />}
         <span className={`saved ${pill.tone}`} role="status" data-connection={connection}>{tm(pill.label)}</span>
         <button type="button" className="lang" data-act="language" lang={nextLocale} title={t("shell.language_label")} onClick={switchLanguage}>
           {t("shell.language")}

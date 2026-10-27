@@ -11,4 +11,10 @@ Study: `index.html` (links the app's built `studio.css`, copied from `apps/web/d
 
 **Visual rules kept from the Last Ferry DESIGN.md:** failures are never red; they use neutral raised grey with a filled white "!". Amber stays the Director's. Green appears only for done or opened. Waiting uses a dashed or hollow mark. Copy says what to do next, in the same tone as T1/T2.
 
-**Open decisions for the owner:** whether the "Ask the Director to update" button may send a message for them (it is a typed request in their name); and whether the attention list should also hold outdated media ("frame older than its prompt").
+**Decided by the owner (2026-10-27), as recommended:**
+- "Ask the Director to update" only fills the composer (and points it at the shots). The person sends it. A typed request in their name is never sent for them.
+- Needs attention holds only jobs that failed for good or wait for the service's answer. Outdated media, failures with automatic retries left, and the Director's notes stay out.
+
+**Built (feature/last-ferry-ui):** `model/generation-progress.ts`, `model/attention.ts`, `director/Thread.tsx` (GenerationProgressNote, BlockedNote), `app/AttentionMenu.tsx`. The server records refusals as `DirectorGenerationBlock` (card G1). In the sample film, the `?director=jobs` preset shows all three. Differences from the study:
+- The price stays "about $" when the work is done, because the overview has no actual spend to show.
+- The progress line counts keyframes only. Voice lines still show in their own states.

@@ -14,6 +14,7 @@ import type {
   NarrationFitReceipt,
   NoteChoice,
   PriceQuote,
+  DirectorGenerationBlock,
   ProposalReceipt,
   ReleaseAttemptInput,
   ReleaseAttemptReceipt,
@@ -201,12 +202,14 @@ interface Extra {
   accepted: Record<string, { shotId: string; before: ShotOverview; after: number }>;
   /** Which voice run owns a shot's transient making marker. Later runs replace this ownership. */
   voiceOwners: Record<string, string>;
+  /** Shots whose next keyframe the service refuses (the `jobs` Director preset), not charged. */
+  failNext: Set<string>;
 }
 
 const extras = new WeakMap<FixtureWorld, Extra>();
 function extra(world: FixtureWorld): Extra {
   let value = extras.get(world);
-  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {}, voiceOwners: {} }; extras.set(world, value); }
+  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {}, voiceOwners: {}, failNext: new Set() }; extras.set(world, value); }
   return value;
 }
 const nextId = (world: FixtureWorld, prefix: string) => `${prefix}-${++extra(world).serial}`;
@@ -399,6 +402,9 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
         if (shot.keyframe.state !== "running" || shot.keyframe.attemptId !== attempts[id]) return shot;
         const take = shot.keyframe.takeCount + 1;
         const artifact = takeArtifact(shot.label, take);
+        if (extra(w).failNext.delete(id)) return { ...shot, keyframe: { state: "failed", takeCount: shot.keyframe.takeCount, opened: false,
+          ...(shot.keyframe.previous ? { previous: shot.keyframe.previous } : {}),
+          failure: { code: "PROVIDER_REFUSED", technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: now() } } };
         extra(w).madeAt[takeKey(artifact)] = localTime(new Date());
         return { ...shot, keyframe: { state: "ready", artifact, takeCount: take, opened: false } };
       });
@@ -416,19 +422,44 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
  * each scene that still has keyframes to make starts the way its Make keyframes press would. Scenes that cannot
  * start (working, stopped, nothing to make) are left out. Returns what started, with its estimate.
  */
-export function fixtureDirectorKeyframes(world: FixtureWorld): { sceneIds: string[]; shotIds: string[]; keyframes: number; voiceLines: number; quote: PriceQuote } | null {
+export function fixtureDirectorKeyframes(world: FixtureWorld): { sceneIds: string[]; shotIds: string[]; keyframes: number; voiceLines: number; quote: PriceQuote; blocked: DirectorGenerationBlock[] } | null {
   if (world.overview.stopped) return null;
   const started = { sceneIds: [] as string[], shotIds: [] as string[], keyframes: 0, voiceLines: 0 };
+  const blocked: DirectorGenerationBlock[] = [];
   for (const scene of [...world.overview.scenes].sort((a, b) => a.ordinal - b.ordinal)) {
     if (!scene.keyframeTargets.length) continue;
     const images = scene.keyframeTargets.filter((id) => world.overview.shots[id]!.keyframe.state !== "ready").length;
     const voices = scene.keyframeTargets.filter((id) => needsVoice(world.overview.shots[id]!, world.snapshot.project.shots)).length;
     try { generateKeyframes(world, scene, { kind: "image" } as GenerateInput); }
-    catch (error) { if (error instanceof ApiError) continue; throw error; }
+    catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      // As the studio records a refused scene for the chat (DirectorGenerationBlock); nothing to make is not a refusal.
+      if (error.code !== "ALREADY_COMPLETE") blocked.push(sceneBlock(world, scene, error.code));
+      continue;
+    }
     started.sceneIds.push(scene.sceneId); started.shotIds.push(...scene.keyframeTargets);
     started.keyframes += images; started.voiceLines += voices;
   }
-  return started.sceneIds.length ? { ...started, quote: generationQuote(started.keyframes, started.voiceLines) } : null;
+  return started.sceneIds.length || blocked.length ? { ...started, quote: generationQuote(started.keyframes, started.voiceLines), blocked } : null;
+}
+
+/** The jobs in a refused scene's way: unanswered or running keyframes and clips, as the studio's recovery lists them. */
+function sceneBlock(world: FixtureWorld, scene: SceneOverview, code: string): DirectorGenerationBlock {
+  const attempts = scene.shotIds.flatMap((id) => {
+    const shot = world.overview.shots[id]!;
+    return (["keyframe", "video"] as const).flatMap((media) => {
+      const slot = shot[media];
+      if ((slot.state !== "no_answer" && slot.state !== "running") || !slot.attemptId) return [];
+      return [{ attemptId: slot.attemptId, shotId: id, kind: media === "keyframe" ? "image" as const : "video" as const,
+        phase: slot.state === "no_answer" ? "submission_unknown" : "running", action: slot.state === "no_answer" ? "human_release" as const : "follow_existing_job" as const }];
+    });
+  });
+  return { kind: "keyframes", sceneId: scene.sceneId, code, shotIds: [...new Set(attempts.map((a) => a.shotId))], ...(code === "ATTEMPT_EXISTS" ? { attempts } : {}), at: now() };
+}
+
+/** The `jobs` Director preset: the service will refuse this shot's next keyframe. */
+export function fixtureFailNextKeyframe(world: FixtureWorld, shotId: string): void {
+  extra(world).failNext.add(shotId);
 }
 
 /** The browser-run video press (before phase P3). Kept for older clients; new ones confirm through /confirm. */

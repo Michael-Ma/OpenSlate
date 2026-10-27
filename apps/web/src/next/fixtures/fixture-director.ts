@@ -1,7 +1,7 @@
 import type { DirectorNote, ShotOverview } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import type { ConversationEntry, DirectorStatus, TurnView } from "../model/types.ts";
-import { FIXTURE_TIMING, fixtureAcceptOnWord, fixtureDirectorKeyframes, recompute } from "./fixture-commands.ts";
+import { FIXTURE_TIMING, fixtureAcceptOnWord, fixtureDirectorKeyframes, fixtureFailNextKeyframe, recompute } from "./fixture-commands.ts";
 import type { MessageAttachmentView } from "@openslate/core/public";
 import { fixtureAsset } from "./routes/assets.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
@@ -170,10 +170,12 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
     const started = !questionId && ASKS_FOR_KEYFRAMES.test(text) ? fixtureDirectorKeyframes(w) : null;
     const asks = !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
     const askNames = asks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
-    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + scriptedReply(names, !!questionId, pictures, attachments.length, !!started, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
+    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + scriptedReply(names, !!questionId, pictures, attachments.length, !!started?.sceneIds.length, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
     const at = new Date().toISOString();
     const turn: TurnView | null = started || asks.length || accepted?.ok ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
-      effects: { notesCreated: asks.length, proposalsHeld: 0, changesApplied: accepted?.ok ? 1 : 0, ...(started ? { generation: [{ kind: "keyframes" as const, ...started, at }] } : {}) } } : null;
+      effects: { notesCreated: asks.length, proposalsHeld: 0, changesApplied: accepted?.ok ? 1 : 0,
+        ...(started?.sceneIds.length ? { generation: [{ kind: "keyframes" as const, sceneIds: started.sceneIds, shotIds: started.shotIds, keyframes: started.keyframes, voiceLines: started.voiceLines, quote: started.quote, at }] } : {}),
+        ...(started?.blocked.length ? { blocked: started.blocked } : {}) } } : null;
     w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), reply], ...(turn ? { turns: [...(w.snapshot.turns ?? []), turn] } : {}), ...(asks.length ? { notes: [...(w.snapshot.notes ?? []), ...asks] } : {}) };
     if (left === 0) {
       w.director = { ...w.director, status: "idle", activeRequestId: null };
@@ -227,6 +229,8 @@ export const directorRoutes: FixtureRoute[] = [
  * - `failed`: the latest reply failed with a generic run failure (DIRECTOR_RUN_FAILED): like the server, the status
  *   carries no words of its own for it, so the thread says it in the interface language.
  * - `markdown`: one more reply that uses lists, a table, code, links and references.
+ * - `jobs`: 1.2's clip waits for an answer the service never sent (so Scene 1's keyframes are refused, ATTEMPT_EXISTS),
+ *   and the service refuses 3.2's next keyframe: the live progress, the blocked line and Needs attention all show.
  */
 export function directorPresets(): string[] {
   try { return (new URLSearchParams(globalThis.location?.search ?? "").get("director") ?? "").split(",").map((part) => part.trim()).filter(Boolean); } catch { return []; }
@@ -261,7 +265,7 @@ const MARKDOWN_REPLY = [
 /** Apply the `?director=` presets to a fresh sample world (tests pass the list themselves). */
 export function applyDirectorPresets(world: FixtureWorld, presets: readonly string[] = directorPresets()): void {
   // In one order whatever the list's, so the sample conversation stays in time order.
-  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed"];
+  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs"];
   for (const preset of order.filter((name) => presets.includes(name))) {
     if (preset === "codex") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: true };
     if (preset === "no-ffmpeg") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: false };
@@ -277,6 +281,17 @@ export function applyDirectorPresets(world: FixtureWorld, presets: readonly stri
         shots[shot.shotId] = { ...shot, keyframe: { state: "queued", takeCount: 0, opened: false, waiting: { code: "edit_pending", since, requestId } } };
       }
       world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
+    }
+    if (preset === "jobs") {
+      // 1.2's clip was sent but the service never answered, and its keyframe is due a new take: Scene 1 waits on the
+      // old job. The service will refuse 3.2's next keyframe (not charged).
+      const shots = { ...world.overview.shots };
+      const shot = shots[shotId("1.2")]!;
+      const { artifact, ...keyframe } = shot.keyframe;
+      shots[shot.shotId] = { ...shot, keyframe: { ...keyframe, state: "outdated", ...(artifact ? { previous: artifact } : {}), outdatedFields: ["imagePrompt"] },
+        video: { state: "no_answer", takeCount: shot.video.takeCount, attemptId: "fixture-attempt-1-2-video", phase: "submission_unknown", startedAt: laterToday(1) } };
+      world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
+      fixtureFailNextKeyframe(world, shotId("3.2"));
     }
     if (preset === "failed") {
       const requestId = "request-failed";

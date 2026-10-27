@@ -1,6 +1,7 @@
 import { filesAfterSend, filesProblem, readyRefs, type ComposerFile } from "./composer-files.ts";
-import type { AssetItem, DirectorGenerationEffect, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, MessageAttachmentView, ReviewNotesFailure, ShotOverview } from "@openslate/core/public";
+import type { AssetItem, DirectorGenerationBlock, DirectorGenerationEffect, DirectorNote, DirectorProposal, GenerationOverview, MediaSlot, MessageAttachmentView, ReviewNotesFailure, ShotOverview } from "@openslate/core/public";
 import { priceMsg } from "./price.ts";
+import { generationProgress, type GenerationProgress } from "./generation-progress.ts";
 import type { Locale } from "../../shared/locale-preference.ts";
 import { readAllAssets, type AssetPage } from "./assets.ts";
 import { parseMarkdown, parseRefLink, refLink, type Block, type RefLink } from "./markdown.ts";
@@ -339,12 +340,16 @@ export interface ThreadEntry {
   attachments: MessageAttachmentView[];
   /** Director replies: the paid work its turn started (keyframes and voice lines, a transcription), priced. */
   generation: GenerationLine[];
+  /** Director replies: the parts of the request the application refused, with what unblocks them. */
+  blocked: DirectorGenerationBlock[];
 }
 
 export interface GenerationLine {
   text: Msg;
   /** Some of it is still being made: Stop can halt what has not been sent. */
   running: boolean;
+  /** Keyframes: live per-shot progress from the overview, in place of the static line. */
+  progress: GenerationProgress | null;
 }
 
 /**
@@ -360,7 +365,8 @@ export function generationLines(effects: readonly DirectorGenerationEffect[] | u
       ? msg("director.generation.transcription", { price: "" })
       : msg(scenes.length ? "director.generation.keyframes_in" : "director.generation.keyframes", { keyframes: effect.keyframes, voices: effect.voiceLines, scenes: where, count: scenes.length });
     const running = !!overview && effect.shotIds.some((id) => { const shot = overview.shots[id]; return !!shot && (shot.keyframe.state === "running" || queuedToRun(shot.keyframe) || shot.narration.state === "making"); });
-    return { text: { ...text, messages: { price } }, running };
+    const progress = generationProgress(effect, overview, locale);
+    return { text: { ...text, messages: { price } }, running: progress ? progress.running : running, progress };
   });
 }
 
@@ -558,17 +564,31 @@ export function threadView(
       });
       const chips = scoped.map((chip) => chip.label);
       const text = userText(entry.text, chips.length > 0);
-      return { id: entry.id, who: "you", time, chips, chipTargets: scoped.map((chip) => chip.target), paragraphs: text ? [text] : [], user: userMessage(entry.text, chips.length > 0, entry.scopeIds), blocks: [], scripted: false, requestId: entry.requestId ?? null, notes: [], attention: failed, reviewNotesFailure: null, attachments: entry.attachments ?? [], generation: [] };
+      return { id: entry.id, who: "you", time, chips, chipTargets: scoped.map((chip) => chip.target), paragraphs: text ? [text] : [], user: userMessage(entry.text, chips.length > 0, entry.scopeIds), blocks: [], scripted: false, requestId: entry.requestId ?? null, notes: [], attention: failed, reviewNotesFailure: null, attachments: entry.attachments ?? [], generation: [], blocked: [] };
     }
-    return { id: entry.id, who: "director", time, chips: [], chipTargets: [], paragraphs: paragraphs(entry.text), user: noWords, blocks: replyBlocks(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id), attention: failed, reviewNotesFailure: null, attachments: [], generation: [] };
+    return { id: entry.id, who: "director", time, chips: [], chipTargets: [], paragraphs: paragraphs(entry.text), user: noWords, blocks: replyBlocks(entry.text), scripted: entry.runtime === "scripted", requestId: entry.requestId ?? null, notes: notesFor(entry.id), attention: failed, reviewNotesFailure: null, attachments: [], generation: [], blocked: [] };
   });
   // What each turn started is said under its last reply.
   const turnsByRequest = new Map<string, TurnView>();
-  for (const turn of snapshot?.turns ?? []) if (turn.effects?.generation?.length) turnsByRequest.set(turn.requestId, turn);
+  for (const turn of snapshot?.turns ?? []) if (turn.effects?.generation?.length || turn.effects?.blocked?.length) turnsByRequest.set(turn.requestId, turn);
   for (const [requestId, turn] of turnsByRequest) {
     let index = entries.length - 1;
     while (index >= 0 && (entries[index]!.who !== "director" || entries[index]!.requestId !== requestId)) index--;
-    if (index >= 0) entries[index] = { ...entries[index]!, generation: generationLines(turn.effects!.generation, overview, locale) };
+    if (index >= 0) entries[index] = { ...entries[index]!, generation: generationLines(turn.effects!.generation, overview, locale), blocked: turn.effects!.blocked ?? [] };
+  }
+  // A shot's live state belongs to the newest line that started it; an earlier line keeps its plain summary.
+  const claimed = new Set<string>();
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]!;
+    if (!entry.generation.some((line) => line.progress)) continue;
+    const generation = [...entry.generation].reverse().map((line) => {
+      if (!line.progress) return line;
+      const ids = line.progress.shots.map((shot) => shot.shotId);
+      const stale = ids.some((id) => claimed.has(id));
+      ids.forEach((id) => claimed.add(id));
+      return stale ? { ...line, progress: null, running: false } : line;
+    }).reverse();
+    entries[index] = { ...entry, generation };
   }
   const reviewNotesFailures: ThreadView["reviewNotesFailures"] = [];
   const latestByRequest = new Map<string, TurnView>();
