@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>生成进度与失败提示</title>
+<!-- The app's own built stylesheet (apps/web/dist), so every existing part looks exactly as in the studio. -->
+<link rel="stylesheet" href="studio.css">
+<style>
+  /* ---------- review page chrome (not part of the design) ---------- */
+  html,body{background:#0e0f11;margin:0;height:auto!important;overflow:auto!important}
+  .page{max-width:1320px;margin:0 auto;padding:32px 24px 80px;font-family:var(--font);color:var(--text)}
+  .page > h1{font-size:22px;margin:0 0 6px}
+  .lede{color:var(--text-2);font-size:14px;line-height:1.6;margin:0 0 28px;max-width:820px}
+  .study{display:grid;grid-template-columns:400px 1fr;gap:28px;margin:0 0 44px;align-items:start}
+  .study.wide{grid-template-columns:1fr}
+  .study h2{font-size:16px;margin:0 0 6px}
+  .why-box{font-size:13.5px;line-height:1.65;color:var(--text-2)}
+  .why-box b{color:var(--text)}
+  .why-box ul{margin:6px 0 0;padding-left:18px}
+  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+  .frame{background:var(--bar);border:1px solid var(--hairline);border-radius:14px;overflow:hidden}
+  .frame .thread-body{padding:14px 16px 18px}
+  .state-label{font-size:11px;color:var(--muted);margin:16px 0 -2px;letter-spacing:.04em}
+
+  /* ---------- NEW: live progress line (replaces the static "Started 2 keyframes…") ---------- */
+  .gen-live{margin-top:8px;border:1px solid var(--track);border-radius:10px;background:var(--raised);padding:9px 11px;font-size:12.5px;line-height:1.45;color:var(--text-2)}
+  .gen-live .gl-head{display:flex;align-items:center;gap:10px}
+  .gen-live .gl-head span{flex:1;min-width:0}
+  .gen-live .gl-head b{color:var(--text);font-weight:600}
+  .gl-bar{display:flex;gap:3px;margin:8px 0 9px}
+  .gl-bar i{flex:1;height:4px;border-radius:2px;background:var(--track)}
+  .gl-bar i.done{background:var(--green)}
+  .gl-bar i.run{background:linear-gradient(90deg,var(--text-2),var(--track));animation:gl 1.4s ease-in-out infinite alternate}
+  .gl-bar i.fail{background:var(--text)}
+  .gl-bar i.wait{background:repeating-linear-gradient(90deg,var(--text-2) 0 3px,transparent 3px 6px)}
+  @keyframes gl{from{opacity:.45}to{opacity:1}}
+  .gl-shots{display:flex;flex-wrap:wrap;gap:6px}
+  .shot-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hairline);background:var(--surface);color:var(--text-2);border-radius:var(--r-pill);padding:2px 9px 2px 7px;font:inherit;font-size:12px;cursor:pointer}
+  .shot-chip:hover{border-color:var(--track);color:var(--text)}
+  .shot-chip b{color:var(--text);font-weight:600}
+  .shot-chip .m{width:13px;height:13px;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:800;flex:none}
+  .m.done{background:var(--green-surface);color:var(--green);border:1px solid var(--green-line)}
+  .m.run{border:1.5px solid var(--text-2);border-top-color:transparent;animation:spin 1s linear infinite;box-sizing:border-box}
+  .m.fail{background:var(--select);color:var(--select-ink)}
+  .m.wait{border:1.5px dashed var(--text-2);box-sizing:border-box}
+  .m.queue{border:1.5px solid var(--track);box-sizing:border-box}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .shot-chip.needs{border-color:var(--track);background:var(--raised-2);color:var(--text)}
+  .gl-next{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px solid var(--hairline);color:var(--text)}
+  .gl-next span{flex:1;min-width:0}
+
+  /* ---------- NEW: a refused Director call, as a structured line under the reply ---------- */
+  .blocked{display:flex;gap:9px;align-items:flex-start;margin-top:8px;border:1px solid var(--track);background:var(--raised);border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.5;color:var(--text-2)}
+  .blocked .mark{flex:none;width:16px;height:16px;border-radius:50%;background:var(--select);color:var(--select-ink);display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px}
+  .blocked .b-body{flex:1;min-width:0}
+  .blocked .b-title{color:var(--text);font-weight:600;display:block}
+  .blocked .b-step{display:block;margin-top:2px}
+  .blocked .row{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+  .blocked details{margin-top:6px;font-size:11.5px;color:var(--muted)}
+  .blocked summary{cursor:pointer;list-style:none}
+  .blocked summary::-webkit-details-marker{display:none}
+  .blocked code{font-size:11px;color:var(--text-2)}
+
+  /* ---------- NEW: top-bar "needs attention" + film-wide list ---------- */
+  .topbar.demo{height:52px;border-radius:14px 14px 0 0}
+  .attn-btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--track);background:var(--raised);color:var(--text);border-radius:var(--r-pill);padding:4px 11px 4px 8px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+  .attn-btn .count{min-width:16px;height:16px;border-radius:8px;background:var(--select);color:var(--select-ink);font-size:10.5px;font-weight:800;display:grid;place-items:center;padding:0 4px;box-sizing:border-box}
+  .attn-btn[aria-expanded="true"]{background:var(--raised-2)}
+  .attn-wrap{position:relative;height:auto;background:var(--ground);border-top:0;padding:0 18px 22px;min-height:360px}
+  .attn-pop{position:absolute;right:150px;top:6px;width:440px;max-width:calc(100% - 32px);background:var(--raised);border:1px solid var(--track);border-radius:14px;box-shadow:0 14px 34px rgba(0,0,0,.5);padding:8px}
+  .attn-pop h3{font-size:13px;margin:6px 8px 2px;font-weight:700}
+  .attn-pop .sub{font-size:12px;color:var(--text-2);margin:0 8px 8px}
+  .attn-group{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--muted);margin:10px 8px 4px;text-transform:uppercase}
+  .attn-item{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px;border-radius:10px}
+  .attn-item:hover{background:var(--raised-2)}
+  .attn-item .thumb{width:54px;height:30px;border-radius:5px;background:repeating-linear-gradient(135deg,var(--raised-2) 0 4px,var(--surface-stripe) 4px 8px);position:relative;overflow:hidden}
+  .attn-item .thumb img{width:100%;height:100%;object-fit:cover;opacity:.55}
+  .attn-item .thumb .badge{position:absolute;left:3px;top:3px;font-size:9.5px;line-height:13px;padding:0 4px}
+  .attn-item .t{font-size:12.5px;line-height:1.4;color:var(--text-2);min-width:0}
+  .attn-item .t b{display:block;color:var(--text);font-weight:600}
+  .attn-foot{display:flex;justify-content:space-between;align-items:center;margin:6px 8px 4px;font-size:11.5px;color:var(--muted)}
+  .ghost-work{opacity:.35;filter:saturate(.6);pointer-events:none;padding-top:18px}
+  .ghost-work .bar{height:26px;width:44%;background:var(--raised);border-radius:8px;margin-bottom:12px}
+  .ghost-work .blk{height:230px;background:var(--surface);border-radius:14px}
+  @media (max-width:900px){.study{grid-template-columns:1fr}.attn-pop{right:16px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>生成进度与失败提示 · 设计稿</h1>
+  <p class="lede">三处新增，都在现有 Last Ferry 界面里，沿用它的规则：失败不用红色（中性灰 + 白色"!"），琥珀色只给导演。下面的内容是样例影片 The Last Ferry 的示意数据，不是你的真实影片。按钮在这份稿子里不可点，只看样子和文案。</p>
+
+  <!-- ===================== 1 ===================== -->
+  <section class="study">
+    <div class="frame">
+      <div class="thread-body">
+        <div class="entry" data-who="you"><div class="byline you"><b>你</b> · 15:19</div><div class="bubble"><span>生成第 3 场的关键帧</span></div></div>
+        <div class="entry" data-who="director"><div class="byline"><b>导演</b> · 15:19</div>
+          <div class="dir-text md"><p>第 3 场的 4 个关键帧已经开始生成。好了以后逐个打开看，视频等你在每一场确认。</p></div>
+
+          <p class="state-label">① 进行中</p>
+          <div class="gen-live" role="status">
+            <div class="gl-head"><span><b>第 3 场 · 关键帧 1/4 完成</b> · 约 $0.16</span><button type="button" class="pill sm">停止</button></div>
+            <div class="gl-bar" aria-hidden="true"><i class="done"></i><i class="run"></i><i class="run"></i><i class="queue"></i></div>
+            <div class="gl-shots">
+              <button type="button" class="shot-chip"><span class="m done">✓</span><b>3.1</b>完成</button>
+              <button type="button" class="shot-chip"><span class="m run"></span><b>3.2</b>生成中</button>
+              <button type="button" class="shot-chip"><span class="m run"></span><b>3.3</b>生成中</button>
+              <button type="button" class="shot-chip"><span class="m queue"></span><b>3.4</b>排队</button>
+            </div>
+          </div>
+
+          <p class="state-label">② 结束，有需要处理的</p>
+          <div class="gen-live" role="status">
+            <div class="gl-head"><span><b>第 3 场 · 关键帧 2/4 完成</b> · 已花 $0.08</span></div>
+            <div class="gl-bar" aria-hidden="true"><i class="done"></i><i class="done"></i><i class="fail"></i><i class="wait"></i></div>
+            <div class="gl-shots">
+              <button type="button" class="shot-chip"><span class="m done">✓</span><b>3.1</b>完成</button>
+              <button type="button" class="shot-chip"><span class="m done">✓</span><b>3.2</b>完成</button>
+              <button type="button" class="shot-chip needs"><span class="m fail">!</span><b>3.3</b>失败 · 未计费</button>
+              <button type="button" class="shot-chip needs"><span class="m wait"></span><b>3.4</b>在等服务回应</button>
+            </div>
+            <div class="gl-next"><span>3.3 被服务拒绝，改一下提示词再生成；3.4 先等它回应。</span><button type="button" class="pill sm">打开 3.3</button></div>
+          </div>
+
+          <p class="state-label">③ 全部完成</p>
+          <div class="gen-live" role="status">
+            <div class="gl-head"><span><b>第 3 场 · 4 个关键帧都好了</b> · 已花 $0.16</span><button type="button" class="pill sm">打开第 3 场</button></div>
+            <div class="gl-bar" aria-hidden="true"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="why-box">
+      <span class="tag">1 · 导演聊天</span>
+      <h2>"已开始生成"变成实时进度</h2>
+      <p>导演启动的生成，进度和结果就留在发起它的那条回复下面。你不用离开对话，也不用一个个镜头去找哪个出了问题。</p>
+      <ul>
+        <li><b>每个镜头一个小标签</b>，状态实时更新：完成 / 生成中 / 排队 / 失败 / 在等服务回应。点标签直接打开那个镜头。</li>
+        <li><b>有问题的镜头标签加深</b>，下面一行用一句话说下一步，再给一个"打开"按钮。只说要做什么，不说"没能……"。</li>
+        <li><b>花费</b>：进行中显示预估（约 $），结束后显示实际（已花 $）。失败的那条写明计没计费，和卡片上的说法一致。</li>
+        <li><b>全部完成</b>时收成一行，进度条全绿，加一个"打开第 3 场"。</li>
+        <li>"停止"只在还有任务在跑时出现，和现在一样。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================== 2 ===================== -->
+  <section class="study">
+    <div class="frame">
+      <div class="thread-body">
+        <div class="entry" data-who="you"><div class="byline you"><b>你</b> · 11:27</div><div class="bubble"><span>接受提案 c，你开始生成所有的新的关键帧</span></div></div>
+        <div class="entry" data-who="director"><div class="byline"><b>导演</b> · 11:28</div>
+          <div class="dir-text md"><p>已接受提案 c，第 3 场换成了新地点。第 2、3 场的 8 个新关键帧开始生成了。</p></div>
+          <div class="gen-live" role="status">
+            <div class="gl-head"><span><b>第 2–3 场 · 关键帧 0/8 完成</b> · 约 $0.32</span><button type="button" class="pill sm">停止</button></div>
+            <div class="gl-bar" aria-hidden="true"><i class="run"></i><i class="run"></i><i class="queue"></i><i class="queue"></i><i class="queue"></i><i class="queue"></i><i class="queue"></i><i class="queue"></i></div>
+          </div>
+
+          <p class="state-label">导演请求里有一部分被挡住时</p>
+          <div class="blocked" role="note">
+            <span class="mark" aria-hidden="true">!</span>
+            <div class="b-body">
+              <span class="b-title">第 1 场先等 1.2 的旧视频任务</span>
+              <span class="b-step">1.2 上次的视频一直没收到服务回应。打开 1.2 点"放弃这个任务"，第 1 场就能生成（旧任务可能已计费）。</span>
+              <div class="row"><button type="button" class="pill sm">打开 1.2</button><button type="button" class="pill sm">之后再说</button></div>
+              <details><summary>技术细节</summary><code>ATTEMPT_EXISTS · video · cdfa0d46…</code></details>
+            </div>
+          </div>
+          <div class="blocked" role="note">
+            <span class="mark" aria-hidden="true">!</span>
+            <div class="b-body">
+              <span class="b-title">2.3 的提示词要先更新</span>
+              <span class="b-step">你改了 2.3 的动作，提示词还是按旧动作写的。让导演更新提示词，或者在 2.3 里自己改。</span>
+              <div class="row"><button type="button" class="pill sm">让导演更新</button><button type="button" class="pill sm">打开 2.3</button></div>
+              <details><summary>技术细节</summary><code>STALE_PROMPT_INTENT · shot 2.3</code></details>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="why-box">
+      <span class="tag">2 · 导演聊天</span>
+      <h2>导演的请求被挡住时，给结构化提示</h2>
+      <p>今天 1–2 镜被 <code>ATTEMPT_EXISTS</code> 挡住，你只能从导演的文字里读到。改成由 app 直接在回复下面放一张提示，内容来自服务端返回的原因，不靠导演转述。</p>
+      <ul>
+        <li><b>标题说卡在哪</b>：哪个镜头、在等什么。<b>第二行说怎么解决</b>，涉及花钱的写清楚。</li>
+        <li><b>按钮直接做下一步</b>："打开 1.2"跳到那个镜头，并把检查面板里的"放弃这个任务"放在最前面；"让导演更新"会替你发一条消息给导演。</li>
+        <li>没被挡住的部分照常开始，进度条照常显示。提示只列被挡住的部分。</li>
+        <li>错误码收在"技术细节"里，平时不显示。</li>
+        <li>样式沿用聊天里现有的"需要注意"提示（灰底、白色"!"），不用红色。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================== 3 ===================== -->
+  <section class="study wide">
+    <div class="why-box" style="max-width:860px">
+      <span class="tag">3 · 顶栏</span>
+      <h2>"需要处理"标记和全片列表</h2>
+      <p>有需要你处理的事情时，顶栏"已同步"左边出现一个带数字的按钮；没有时不显示。点开是全片的列表，按要做的事分组，每一条都能直接打开那个镜头。</p>
+      <ul>
+        <li><b>收进列表的</b>：生成失败、在等服务回应、配音失败、被挡住的生成。导演的建议不放进来，它们已经在导演那边和横幅里了。</li>
+        <li><b>每一条</b>：镜头缩略图和编号、状态、计没计费、一个按钮。</li>
+        <li><b>处理完自动消失</b>：重新生成成功、放弃任务、或者服务回应了。</li>
+        <li><b>手机上</b>：按钮缩成只有数字的圆标，列表从底部弹出。</li>
+      </ul>
+    </div>
+    <div class="frame" style="margin-top:16px">
+      <header class="topbar demo">
+        <button type="button" class="brand"><span class="logo" aria-hidden="true"><i></i></span><span class="word">OpenSlate</span></button>
+        <div class="film"><div class="film-name"><b>The Last Ferry</b></div><span class="film-meta">48&nbsp;s · 30&nbsp;fps</span></div>
+        <div class="tabs" role="tablist"><button type="button" role="tab" class="tab" aria-selected="false">Plan</button><button type="button" role="tab" class="tab" aria-selected="true">Keyframes</button><button type="button" role="tab" class="tab" aria-selected="false">Assets</button><button type="button" role="tab" class="tab" aria-selected="false">Film</button></div>
+        <div class="top-right">
+          <span class="counts">3 场 · 8 个镜头</span>
+          <button type="button" class="attn-btn" aria-expanded="true"><span class="count">3</span>需要处理</button>
+          <span class="saved ok">已同步</span>
+          <button type="button" class="lang">EN</button>
+        </div>
+      </header>
+      <div class="attn-wrap">
+        <div class="ghost-work"><div class="bar"></div><div class="blk"></div></div>
+        <div class="attn-pop" role="dialog" aria-label="需要处理">
+          <h3>需要处理 · 3</h3>
+          <p class="sub">点一条就打开那个镜头。</p>
+          <div class="attn-group">在等服务回应</div>
+          <div class="attn-item">
+            <div class="thumb"><span class="badge">1.2</span></div>
+            <div class="t"><b>1.2 视频 · 服务一直没回应</b>可能已计费。放弃后可以重新生成，第 1 场就能继续。</div>
+            <button type="button" class="pill sm">打开 1.2</button>
+          </div>
+          <div class="attn-group">失败</div>
+          <div class="attn-item">
+            <div class="thumb"><span class="badge">3.3</span></div>
+            <div class="t"><b>3.3 关键帧 · 服务拒绝了</b>未计费。改一下提示词再生成。</div>
+            <button type="button" class="pill sm">打开 3.3</button>
+          </div>
+          <div class="attn-item">
+            <div class="thumb"><span class="badge">2.3</span></div>
+            <div class="t"><b>2.3 配音失败</b>下次生成这一场的关键帧或视频时会重做。</div>
+            <button type="button" class="pill sm">打开 2.3</button>
+          </div>
+          <div class="attn-foot"><span>处理完会自动从这里消失</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>
