@@ -113,10 +113,10 @@ test('credential callback cannot publish local failure or POST after stealing th
   assert.equal(rows(f, 'viggle_h3_execution_submit').length, 0); assert.equal(rows(f, 'viggle_h3_execution_dispatch').length, 0); assert.equal(f.calls.post, 0);
 });
 
-test('unknown marker and observation survive reopen without blind GET, credential lookup, or another POST', async t => {
+test('lost reply marker and observation survive reopen as final loss without blind GET, credential lookup, or another POST', async t => {
   const f = await fixture(t, { fetch: async () => { throw Error('lost response'); } });
-  assert.equal((await f.bridge.submit(f.request, context(f))).type, 'unknown'); const reopened = reopen(f);
-  assert.equal((await reopened.bridge.submit(f.request)).type, 'unknown'); assert.equal((await reopened.bridge.lookup(f.attempt.id)).type, 'unknown');
+  assert.deepEqual(await f.bridge.submit(f.request, context(f)), lostReply); const reopened = reopen(f);
+  assert.deepEqual(await reopened.bridge.submit(f.request), lostReply); assert.deepEqual(await reopened.bridge.lookup(f.attempt.id), lostReply);
   assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0); assert.equal(reopened.store.list('viggle_h3_execution_dispatch', f.project.id).length, 1);
 });
 
@@ -316,43 +316,30 @@ test('human scene-scope approval retains historical validity after the shot move
   assert.equal(f.calls.post, 1);
 });
 
-async function lostSubmission(t) {
-  const f = await fixture(t, { deferAdmission: true, fetch: async () => { throw Error('lost response'); } });
-  await f.engine.runReady(); f.attempt = current(f); f.request = f.attempt.request;
-  assert.equal(f.attempt.phase, 'submission_unknown'); assert.equal(f.attempt.taskId, null); return f;
-}
 const attemptEvents = f => f.store.readEvents(f.project.id).filter(event => event.payload?.attemptId === f.attempt.id);
-const wakeNow = f => { const saved = current(f); tamper(f, 'attempt', { ...saved, unknownWait: { ...saved.unknownWait, nextEligibleAt: 0 } }); };
+const lostReply = { type: 'failed', taskId: null, failureId: 'SUBMISSION_RESPONSE_LOST', technical: true, retryAllowed: false };
 
-test('repeated identical unknown observations append no events, never resubmit and never declare failure', async t => {
-  const f = await lostSubmission(t), before = attemptEvents(f).length;
-  for (let cycle = 0; cycle < 25; cycle++) { if (current(f).unknownWait) wakeNow(f); await f.engine.reconcile(); }
-  const after = current(f);
-  assert.equal(attemptEvents(f).length, before, 'unchanged observations are not history');
-  assert.equal(after.phase, 'submission_unknown'); assert.equal(after.failure, null); assert.equal(after.taskId, null);
-  assert.ok(after.leaseEpoch >= f.attempt.leaseEpoch + 25, 'every cycle still re-observed the attempt');
-  assert.equal(f.store.get('reservation', after.reservationId).state, 'reserved');
-  assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0);
+test('a lost POST reply with no task id ends charged at once, with one POST, no GET and no automatic retry', async t => {
+  const f = await fixture(t, { deferAdmission: true, fetch: async () => { throw Error('lost response'); } });
+  await f.engine.runReady(); f.attempt = current(f);
+  assert.equal(f.attempt.phase, 'failed'); assert.equal(f.attempt.taskId, null);
+  assert.deepEqual(f.attempt.failure, { id: 'SUBMISSION_RESPONSE_LOST', technical: true, source: f.attempt.failure.source, retryAllowed: false });
+  assert.equal(f.store.get('reservation', f.attempt.reservationId).state, 'charged', 'counted as spent');
+  assert.deepEqual(attemptEvents(f).map(event => event.payload.phase), ['submitting', 'failed']);
+  for (let cycle = 0; cycle < 5; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.calls.post, 1, 'never resubmitted without a human press'); assert.equal(f.calls.query, 0);
+  assert.equal(attemptEvents(f).length, 2); assert.equal(f.engine.attempts(f.project.id).length, 1);
 });
 
-test('unknown outcome polling backs off, caps, resets on real change and still allows human release', async t => {
-  const f = await lostSubmission(t);
-  await f.engine.reconcile(); const first = current(f);
-  assert.equal(first.unknownWait.count, 1); assert.ok(first.unknownWait.nextEligibleAt > Date.now());
-  for (let cycle = 0; cycle < 5; cycle++) await f.engine.reconcile();
-  assert.equal(current(f).leaseEpoch, first.leaseEpoch, 'a waiting unknown attempt is not reclaimed every tick');
-  for (let cycle = 0; cycle < 12; cycle++) { wakeNow(f); await f.engine.reconcile(); }
-  const waited = current(f); assert.equal(waited.unknownWait.count, 13);
-  assert.ok(waited.unknownWait.nextEligibleAt - Date.now() <= 60_000 && waited.unknownWait.nextEligibleAt - Date.now() > 30_000, 'delay is capped at one minute');
-  const events = attemptEvents(f).length;
-  const released = f.engine.releaseAttempt(f.project.id, f.attempt.id, 'offline-human', true);
-  assert.equal(released.attemptId, f.attempt.id); assert.ok(current(f).released);
-  assert.deepEqual(attemptEvents(f).slice(events).map(event => event.kind), ['attempt.released']);
-  // Late accepted evidence is a real change: one event, and the unknown backoff is gone.
-  f.store.insert('execution_evidence', randomUUID(), f.project.id, { attemptId: f.attempt.id, outcome: { type: 'accepted', taskId },
-    outcomeDigest: digest({ type: 'accepted', taskId }), recordedAt: new Date().toISOString() });
-  wakeNow(f); await f.engine.reconcile(); const repaired = current(f);
-  assert.equal(repaired.phase, 'remote_pending'); assert.equal(repaired.taskId, taskId); assert.equal(repaired.unknownWait, undefined);
-  assert.deepEqual(attemptEvents(f).slice(events + 1).map(event => event.payload.phase), ['remote_pending']);
-  assert.equal(f.calls.post, 1);
+test('a dispatched POST whose worker died with no receipt is lost only after any POST must have ended', async t => {
+  const f = await fixture(t, { deferAdmission: true, fetch: async () => { throw Error('lost response'); } }), insert = f.store.insert.bind(f.store);
+  f.store.insert = (...args) => { if (args[0] === 'viggle_h3_execution_submit') throw Error('worker died before the receipt'); return insert(...args); };
+  try { await f.engine.runReady(); } finally { f.store.insert = insert; }
+  f.attempt = current(f); assert.equal(f.attempt.phase, 'submission_unknown'); assert.equal(rows(f, 'viggle_h3_execution_submit').length, 0);
+  const wake = () => { const { unknownWait: _wait, ...saved } = current(f); tamper(f, 'attempt', { ...saved, leaseExpiresAt: 0 }); };
+  f.clock.value = rows(f, 'viggle_h3_execution_dispatch')[0].createdAt + 119999; wake(); await f.engine.reconcile();
+  assert.equal(current(f).phase, 'submission_unknown', 'a POST that may still be running is not declared lost');
+  f.clock.value += 1; wake(); await f.engine.reconcile();
+  assert.equal(current(f).phase, 'failed'); assert.equal(current(f).failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(f.store.get('reservation', current(f).reservationId).state, 'charged'); assert.equal(f.calls.post, 1);
 });

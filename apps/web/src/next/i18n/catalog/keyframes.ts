@@ -131,6 +131,7 @@ export const keyframes = {
   "inspector.clip_outdated": { en: "The clip is out of date and will be made again with the scene's video.", zh: "视频已过期，会随这一场的视频重新生成。" },
   "inspector.failed.retrying": { en: "Failed; it will retry by itself ({count} left).", zh: "失败了，会自动重试（还剩 {count} 次）。" },
   "inspector.failed.refused": { en: "The service refused this and did not charge. Change the prompt, then make it again.", zh: "服务拒绝了这次请求，未计费。请修改画面描述后再生成。" },
+  "inspector.failed.response_lost": { en: "The service never replied, so this may already have been charged. Making it again costs again.", zh: "服务商没有返回结果，这次可能已经扣费。重新生成需要再付一次费用。" },
   "inspector.failed.refused_charged": { en: "The service refused this and counted it as spent. Change the prompt, then make it again.", zh: "服务拒绝了这次请求，已计费。请修改画面描述后再生成。" },
   "inspector.line_cut": { en: "cut at {seconds} s", zh: "在 {seconds} 秒处截断" },
   "inspector.duration_value": { en: "{seconds} s", zh: "{seconds} 秒" },

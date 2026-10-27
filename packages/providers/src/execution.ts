@@ -205,7 +205,9 @@ export function normalizeExecutionOutcome(value: unknown, request?: ExecutionReq
       || (value.retryAllowed !== undefined && typeof value.retryAllowed !== "boolean")
       || (value.type === "failed" ? !(id(value.taskId) || value.taskId === null && request?.kind === "image"
         && request.execution?.adapter === "codex-image" && request.execution.version === "1"
-        && value.technical === false && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
+        && value.technical === false && value.retryAllowed === false
+        || value.taskId === null && request?.kind === "video" && request.execution?.adapter === "viggle-h3" && request.execution.version === "1"
+        && value.failureId === "SUBMISSION_RESPONSE_LOST" && value.retryAllowed === false) : value.certainty !== "not_accepted")) return invalid();
     // Missing retryAllowed remains missing for historical evidence; the engine requires explicit true.
     return structuredClone(value) as unknown as ExecutionOutcome;
   }

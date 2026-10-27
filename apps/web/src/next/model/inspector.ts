@@ -134,16 +134,20 @@ function keyframePrice(overview: GenerationOverview, shot: ShotOverview): { unit
   return estimate ? { unitMicros: estimate.micros, unknown: estimate.priceUnknown, ...(estimate.subscription ? { subscription: estimate.subscription } : {}) } : null;
 }
 
+/** The service never replied with a task id, so the job cannot be found again; only a new paid press can replace it. */
+const SUBMISSION_RESPONSE_LOST = "SUBMISSION_RESPONSE_LOST";
 function failureMessage(slot: MediaSlot, kind: "keyframe" | "video"): Msg {
   const failure = slot.failure;
   const native = kind === "keyframe" && failure ? nativeDiagnosticMsg(failure.nativeDiagnostic, "images", failure.notDispatched === true && !failure.charged) : null;
   if (native) return native;
   if (failure && failure.technical && failure.autoRetriesLeft > 0) return msg("inspector.failed.retrying", { count: failure.autoRetriesLeft });
+  if (failure?.code === SUBMISSION_RESPONSE_LOST) return msg("inspector.failed.response_lost");
   if (kind === "video" && failure && !failure.retryAllowed) return msg(failure.charged ? "inspector.failed.refused_charged" : "inspector.failed.refused");
   return msg(`card.${kind}.${failure?.charged ? "failed_charged" : "failed"}`);
 }
 
-const canRetry = (slot: MediaSlot) => !slot.failure || (slot.failure.retryAllowed && !(slot.failure.technical && slot.failure.autoRetriesLeft > 0));
+const canRetry = (slot: MediaSlot) => !slot.failure || slot.failure.code === SUBMISSION_RESPONSE_LOST
+  || (slot.failure.retryAllowed && !(slot.failure.technical && slot.failure.autoRetriesLeft > 0));
 
 function regenerateAction(overview: GenerationOverview, shot: ShotOverview, scene: SceneOverview | undefined, locale: string): RegenerateAction {
   const unit = keyframePrice(overview, shot);
