@@ -349,7 +349,9 @@ export type NoteChoice =
   | { kind: "proposal"; proposalId: string }
   | { kind: "regenerate_keyframe"; shotIds: string[] }
   | { kind: "edit_field"; shotId: string; field: "narration" | "imagePrompt" | "motion" }
-  | { kind: "reply" };
+  | { kind: "reply" }
+  /** The person's "Confirm frames & generate video" for this scene, offered in the note (contract 6.0.0). */
+  | { kind: "confirm_video"; sceneId: string };
 
 export interface DirectorNote {
   noteId: string;
@@ -367,7 +369,11 @@ export interface DirectorNote {
   choices: NoteChoice[];
   /** stale: the anchored shot or the seen keyframe changed since the note was written. */
   state: "open" | "resolved" | "stale";
-  resolution?: { choiceIndex: number; at: string; resultRef?: string };
+  /**
+   * elsewhere: the choice's effect was carried out by another control (the scene's confirm, a regenerate press, the
+   * proposal's own Accept), and the studio settled the note with it. Whichever happens first settles the note.
+   */
+  resolution?: { choiceIndex: number; at: string; resultRef?: string; elsewhere?: true };
   version: number;
   createdAt: string;
 }
