@@ -18,6 +18,11 @@ import type { ViggleFrameEvidence } from "./viggle-h3-authority.js";
 import { assertViggleSpoolLineage, viggleObservations } from "./viggle-h3-lineage.js";
 
 const unknown = (diagnostic: string, taskId?: string): ExecutionOutcome => ({ type: "unknown", diagnostic, ...(taskId ? { taskId } : {}) });
+/** Any host's POST is aborted by then, whatever timeout the original host used. */
+const MAX_SUBMIT_TIMEOUT_MS = 120000;
+/** H3 has no way to find a task without its id. A lost POST reply is final, counted as spent, and only a human press may buy again. */
+export const SUBMISSION_RESPONSE_LOST = "SUBMISSION_RESPONSE_LOST";
+const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: SUBMISSION_RESPONSE_LOST, technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "VIGGLE_H3_EXECUTION_CANCELLED", "H3 operation was cancelled");
 
 /** A saved completed task still owns its clip; a local download failure is never an unknown submission. */
@@ -65,7 +70,7 @@ export class ViggleH3Execution implements ExecutionProvider {
     this.#store = options.store; this.#outputs = options.outputStore; this.#credentials = options.credentials; this.#download = options.downloader;
     this.#recovery = new InstallationRecoveryGuard(options.store);
     this.#fetch = options.fetch; this.#timeout = options.timeoutMs ?? 30000; this.#now = options.now ?? Date.now;
-    invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= 120000,
+    invariant(Number.isSafeInteger(this.#timeout) && this.#timeout >= 1 && this.#timeout <= MAX_SUBMIT_TIMEOUT_MS,
       "VIGGLE_H3_EXECUTION_CONFIGURATION", "H3 request timeout must be bounded");
     this.#policy = Object.freeze({ initialMs: options.pollPolicy?.initialMs ?? 2000, maximumMs: options.pollPolicy?.maximumMs ?? 15000,
       retryAfterMaximumMs: options.pollPolicy?.retryAfterMaximumMs ?? 86400000, claimMs: this.#timeout + 301000 });
@@ -308,11 +313,16 @@ export class ViggleH3Execution implements ExecutionProvider {
       return unknown("H3 owned output requires local recovery", attempt.taskId ?? undefined);
     }
     const submit = retained ?? this.submission(attempt);
-    if (!submit) return unknown("H3 acceptance is unresolved; automatic resubmission is disabled", attempt.taskId ?? undefined);
+    if (!submit) {
+      // A dispatch with no receipt is a POST whose worker died. Once that POST must have ended, its reply is lost.
+      const dispatch = this.#store.get<ViggleH3ExecutionDispatch>("viggle_h3_execution_dispatch", attempt.id);
+      if (!attempt.taskId && dispatch && this.now() - dispatch.createdAt >= MAX_SUBMIT_TIMEOUT_MS) return responseLost();
+      return unknown("H3 acceptance is unresolved; automatic resubmission is disabled", attempt.taskId ?? undefined);
+    }
     const observation = submit.observation;
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
       failureId: `h3-${digest(submit).slice(0, 32)}`, technical: observation.kind === "not_dispatched", retryAllowed: false };
-    if (observation.kind === "unknown") return unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId ?? undefined);
+    if (observation.kind === "unknown") return attempt.taskId ? unknown(`H3 submission unresolved: ${observation.error.code}`, attempt.taskId) : responseLost();
     invariant(!attempt.taskId || attempt.taskId === observation.taskId, "VIGGLE_H3_EXECUTION_CONFLICT", "H3 accepted identity contradicts the saved task");
     const schedule = this.#store.transaction(() => this.schedule(attempt, submit));
     const completedTask = completedViggleTask(this.#store, attempt);
