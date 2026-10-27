@@ -595,6 +595,22 @@ export interface DirectorGenerationEffect {
   at: string;
 }
 
+/**
+ * A part of a Director generation request the application refused, per scene (make_keyframes refusals). Shown under
+ * the reply as a structured line, from this record rather than the Director's prose. Only allowlisted identities.
+ */
+export interface DirectorGenerationBlock {
+  kind: "keyframes";
+  sceneId: string;
+  /** The refusal's stable code, e.g. ATTEMPT_EXISTS, STALE_PROMPT_INTENT. */
+  code: string;
+  /** Shots the refusal concerns, when the application knows them (blocking jobs' shots, stale prompts' shots). */
+  shotIds: string[];
+  /** ATTEMPT_EXISTS: the jobs in the way and what resolves each (the person's Give up, or waiting for the job). */
+  attempts?: { attemptId: string; shotId: string; kind: "image" | "video"; phase: string; action: "follow_existing_job" | "human_release" }[];
+  at: string;
+}
+
 /** GET /api/projects/:projectId/assets?sceneId=&shotId=&role= */
 export interface AssetItem {
   artifact: StudioArtifactRef;
