@@ -263,14 +263,16 @@ test('blocking recommendation allows images, refuses paid video, then accept per
  assert.equal((await scenePress(f,'video',{notesDigest:staleDigest})).json().error.code,'SCENE_REVIEW_STALE');
  const video=await scenePress(f,'video');assert.equal(video.statusCode,200,video.body);await finish(f);assert.equal(f.provider.acceptedCount(),before+1);
 });
-test('regenerate choice accepts only the subsequent exact human regeneration press, never starts work itself',async t=>{
+test('regenerate choice rejects ordinary image results and settles with the subsequent human regeneration press',async t=>{
  const f=fixture(t),note=(await f.record([f.note({choices:[{kind:'regenerate_keyframe',shotIds:['shot-0']}]})])).notes[0];
  const image=await scenePress(f,'image');assert.equal(image.statusCode,200,image.body);await finish(f);
  const input={choiceIndex:0,expectedVersion:1,resultRef:image.json().requestId};
  assert.equal((await f.resolve(note.noteId,input,'ordinary-image')).json().error.code,'NOTE_RESULT_INVALID');
  const regen=await scenePress(f,'image',{regenerate:true,targetShotIds:['shot-0']});assert.equal(regen.statusCode,200,regen.body);
  const before=f.provider.acceptedCount(),resolved=await f.resolve(note.noteId,{...input,resultRef:regen.json().requestId},'regeneration');
- assert.equal(resolved.statusCode,200,resolved.body);assert.equal(resolved.json().resolution.resultRef,regen.json().requestId);assert.equal(f.provider.acceptedCount(),before);
+ assert.equal(resolved.json().error.code,'NOTE_ALREADY_SETTLED');
+ const saved=f.service.snapshot(f.project.id).notes.find(n=>n.noteId===note.noteId);
+ assert.equal(saved.resolution.resultRef,regen.json().requestId);assert.equal(saved.resolution.elsewhere,true);assert.equal(f.provider.acceptedCount(),before);
 });
 test('an alternate human keyframe regeneration rejects the linked held proposal without dispatching extra work',async t=>{
  const f=fixture(t),proposal=await f.tools.invoke(f.project.id,f.bridge.actor,'proposal','propose_change',{patch:{updateShots:[{id:'shot-0',motion:'Slow drift'}]}});
@@ -278,7 +280,8 @@ test('an alternate human keyframe regeneration rejects the linked held proposal 
  const image=await scenePress(f,'image');assert.equal(image.statusCode,200,image.body);await finish(f);
  const regen=await scenePress(f,'image',{regenerate:true,targetShotIds:['shot-0']});assert.equal(regen.statusCode,200,regen.body);
  const before=f.provider.acceptedCount(),resolved=await f.resolve(note.noteId,{choiceIndex:1,expectedVersion:1,resultRef:regen.json().requestId},'alternate-regeneration');
- assert.equal(resolved.statusCode,200,resolved.body);assert.equal(f.provider.acceptedCount(),before);
+ assert.equal(resolved.json().error.code,'NOTE_ALREADY_SETTLED');assert.equal(f.provider.acceptedCount(),before);
+ assert.equal(f.service.snapshot(f.project.id).notes.find(n=>n.noteId===note.noteId).resolution.elsewhere,true);
  assert.equal(f.store.get('director_proposal',proposal.proposalId).state,'rejected');
 });
 test('reply choices require a saved human reply and preserve it in the resolution',async t=>{

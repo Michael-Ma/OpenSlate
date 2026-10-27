@@ -2,9 +2,11 @@ import { applyCreativePatch, invariant, shotIntentDigest } from "@openslate/core
 import type { ChangeProposal, ProjectRecord } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorStartRefusal } from "@openslate/director";
-import type { ProductionService } from "./service.js";
+import type { ProductionService, RequestRecord } from "./service.js";
 import { ToolInvocationService } from "./tool-invocations.js";
 import { derivedShotPrompts } from "./shot-prompts.js";
+import { GenerationOverviewReader } from "../generation-overview.js";
+import { isKeyframeReview } from "./keyframe-review.js";
 
 export interface DemoCommand { action: "create" | "close_up" | "wide" | "review"; shotId?: string; sceneId?: string }
 
@@ -45,10 +47,29 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     const command = this.service.store.get<DemoCommand>("demo_command", input.requestId);
     let text = "Your message is saved. This offline director is a scripted demonstration, so it cannot interpret arbitrary creative requests yet. Use Create a 2-shot demo, then review its frames or try a scoped close-up/wide edit. Real conversation requires the Codex runtime connection.";
     const projectForNotes = this.service.store.getProject(input.projectId);
-    const request = this.service.store.get<{ scopeIds: string[] }>("message", input.requestId)!;
+    const request = this.service.store.get<RequestRecord>("message", input.requestId)!;
     const scene = projectForNotes.scenes.find(scene => request.scopeIds.includes(scene.id) || projectForNotes.shots.some(s => s.sceneId === scene.id && request.scopeIds.includes(s.id)));
     const shots = projectForNotes.shots.filter(shot => shot.sceneId === scene?.id && (request.scopeIds.includes(scene!.id) || request.scopeIds.includes(shot.id)));
-    if ((!command || command.action === "review") && scene && shots.length && ["5.0.0", "6.0.0"].includes(input.bridge.toolContractVersion ?? "1.0.0")) {
+    // This bounded script only recognizes an explicit request to make video. The
+    // application still owns readiness and the later human confirmation press.
+    const wantsVideo = /\b(?:make|generate|create|start)\s+(?:(?:a|the|scene)\s+)*(?:videos?|clips?)\b/i.test(request.text);
+    const readyScenes = (!command || command.action === "review") && input.bridge.toolContractVersion === "6.0.0" && wantsVideo
+      && (request.editing || isKeyframeReview(this.service, input.requestId))
+      ? new GenerationOverviewReader(this.service).read(input.projectId).scenes.filter(scene =>
+        (request.scopeIds.includes(input.projectId) || request.scopeIds.includes(scene.sceneId) || scene.shotIds.some(id => request.scopeIds.includes(id)))
+        && scene.state === "keyframes_back" && scene.confirmationDigest !== null && scene.videoTargets.length > 0
+        && scene.blockers.every(blocker => blocker.code === "director_working"))
+      : [];
+    if (readyScenes.length) {
+      for (let offset = 0; offset < readyScenes.length; offset += 6) await invoke("record_notes", { notes: readyScenes.slice(offset, offset + 6).map(scene => ({
+        anchor: request.scopeIds.includes(input.projectId) || request.scopeIds.includes(scene.sceneId)
+          ? { sceneId: scene.sceneId } : { shotIds: scene.shotIds.filter(id => request.scopeIds.includes(id)) },
+        kind: "recommendation", blocking: false,
+        text: "Scripted demo: this scene is ready for your video confirmation. No video has started.",
+        choices: [{ kind: "confirm_video", sceneId: scene.sceneId }, { kind: "reply" }],
+      })) });
+      text = "Scripted demo: confirm video in the chat or in Keyframes. No video has started.";
+    } else if ((!command || command.action === "review") && scene && shots.length && ["5.0.0", "6.0.0"].includes(input.bridge.toolContractVersion ?? "1.0.0")) {
       const first = shots[0]!, last = shots.at(-1)!;
       const review = this.service.store.get("keyframe_review_request", input.requestId) || command?.action === "review";
       const proposal = review && last.desiredFrames < 240 ? await invoke("propose_change", { patch: { updateShots: [{ id: last.id, desiredFrames: 240 }] } }) as { proposalId: string } : null;

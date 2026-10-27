@@ -5,6 +5,19 @@ import { applyCreativePatch, parseChangeProposal, parseToolArguments, toolCatalo
 const prepare = creative => ({ variant: 'project', expectedHeadVersion: 0, creative });
 const shot = { key: 'shot', sceneId: 'scene', purpose: 'Reveal the ferry', action: 'Passenger boards', framing: 'Wide', motion: 'Slow push', desiredFrames: 180, imagePrompt: 'Ferry ramp', videoPrompt: 'Passenger boards slowly', referenceArtifactIds: [], cueId: null };
 
+test('V6 notes accept the exact confirm_video choice while V5 keeps its saved grammar', () => {
+  const note = { anchor: { sceneId: 'scene' }, kind: 'recommendation', blocking: false, text: 'Confirm this scene for video.', choices: [{ kind: 'confirm_video', sceneId: 'scene' }, { kind: 'reply' }] };
+  for (const anchor of [{ sceneId: 'scene' }, { shotIds: ['shot'] }]) {
+    const input = { notes: [{ ...note, anchor }] };
+    assert.deepEqual(parseToolArguments('record_notes', input, '6.0.0').arguments, input);
+    assert.throws(() => parseToolArguments('record_notes', input, '5.0.0'), { code: 'VALIDATION_ERROR' });
+  }
+  for (const choice of [{ kind: 'confirm_video' }, { kind: 'confirm_video', sceneId: '' }, { kind: 'confirm_video', sceneId: 'scene', label: 'Confirm' }, { kind: 'confirm_video', shotIds: ['shot'] }])
+    assert.throws(() => parseToolArguments('record_notes', { notes: [{ ...note, choices: [choice] }] }, '6.0.0'), { code: 'VALIDATION_ERROR' });
+  const legacy = { notes: [{ ...note, choices: [{ kind: 'accept', label: 'Keep it' }, { kind: 'regenerate_keyframe', shotIds: ['shot'] }] }] };
+  for (const version of ['5.0.0', '6.0.0']) assert.deepEqual(parseToolArguments('record_notes', legacy, version).arguments, legacy);
+});
+
 test('V6 proposes all creative shot fields and scene title independently of purpose', () => {
   const patch = { updateShots: [{ id: 'shot', purpose: 'Departure', action: 'Passenger turns', framing: 'Close-up', motion: 'Slow pan', desiredFrames: 240, imagePrompt: 'Passenger', videoPrompt: 'Passenger turns slowly', narration: { mode: 'none', text: '', voice: 'stock' } }], updateScenes: [{ id: 'scene', title: 'Last Ferry', purpose: 'Leave the harbor behind' }] };
   assert.deepEqual(parseToolArguments('propose_change', { patch }, '6.0.0').arguments, { patch });

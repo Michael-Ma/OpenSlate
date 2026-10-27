@@ -97,12 +97,35 @@ test('V7 keyframe examples name one requested scope and reserve regeneration for
   assert.match(keyframes, /Report the actual returned keyframe and voice-line work, its price\/quote/);
   assert.match(keyframes, /per-scene refusal code/);
   assert.match(keyframes, /replies to a review.*read-only turns.*discuss-only turns.*cannot start/);
-  assert.match(keyframes, /Video is always human-only/);
+  assert.match(keyframes, /scene-anchored note for each with a `confirm_video` choice/);
+  assert.match(keyframes, /Confirm in this chat or in Keyframes/);
   assert.match(keyframes, /Never blindly resubmit an unknown outcome/);
   for (const name of ['production', 'plan-authoring']) {
     const manifest = JSON.parse(skillFile(`${name}/openslate.skill.json`));
     assert.ok(manifest.requiredToolIds.includes('make_keyframes'));
     assert.match(skillFile(`${name}/SKILL.md`), /make_keyframes/);
+  }
+});
+
+test('V7 uses clicked chat choices for video, remakes and proposals without claiming reply authority', () => {
+  for (const path of ['production/SKILL.md', 'production/references/notes.md', 'production/references/keyframes.md', 'production/references/stages/review.md', 'production/references/stages/video.md', 'plan-authoring/SKILL.md', 'plan-authoring/references/grammar.md']) {
+    const text = skillFile(path);
+    assert.match(text, /confirm_video/, path);
+    assert.match(text, /Confirm in this chat or in Keyframes/, path);
+    assert.match(text, /regenerate_keyframe/, path);
+    assert.match(text, /"yes", "ok" or "go ahead" (?:replies (?:do not confirm|are not confirmation)|is not confirmation)/, path);
+    assert.match(text, /(?:open (?:typed )?choice|open choice).*fresh one if (?:it is )?stale or settled/s, path);
+    assert.match(text, /(?:after|until) the application reports it/, path);
+  }
+  const notes = skillFile('production/references/notes.md');
+  assert.match(notes, /confirm_video` is not an accept\/keep choice/);
+  assert.match(notes, /Offering choices in editing or keyframe-review turns starts nothing and costs nothing/);
+  assert.match(notes, /first chat or workspace action settles the note/);
+  assert.match(notes, /elsewhere: true/);
+  assert.match(notes, /settled note stays settled/);
+  assert.match(notes, /proposal` choice.*Now\/After preview in chat/);
+  for (const path of readdirSync(join(repository, 'skills/v7'), { recursive: true }).filter(path => path.endsWith('.md'))) {
+    assert.doesNotMatch(skillFile(path), /chat approval (?:cannot|can't) replace|go (?:find|press) the button|conversation never starts video|Video is always human-only/i, path);
   }
 });
 

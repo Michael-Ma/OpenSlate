@@ -137,6 +137,11 @@ Object.assign(v6ProposalProperties.updateShots.items.properties, {
 v6ProposalProperties.updateScenes = { type: "array", minItems: 1, maxItems: 400,
   items: { ...object({ id, title: structuredClone(sceneTitleSchema), purpose: { type: "string", minLength: 1, maxLength: 16000 } }, ["id"]), minProperties: 2 } };
 const v6ProposeChangeSchema = object({ patch: { ...v6ProposalPatchSchema, minProperties: 1 } }, ["patch"]);
+const v6RecordNotesSchema = structuredClone(recordNotesSchema);
+const v6NoteProperties = v6RecordNotesSchema.properties as { notes: { items: { properties: { choices: { items: { oneOf: object[] } } } } } };
+v6NoteProperties.notes.items.properties.choices.items.oneOf.push(
+  object({ kind: { const: "confirm_video" }, sceneId: id }, ["kind", "sceneId"]),
+);
 const generationIds = { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: id };
 export const makeKeyframesSchema = {
   ...object({ sceneIds: generationIds, shotIds: generationIds, regenerate: { type: "boolean" } }),
@@ -148,8 +153,10 @@ export const makeKeyframesSchema = {
 const v6Descriptors = freeze(v5Descriptors.map(tool => tool.name === "read_context" ? { ...tool, description: tool.description.replace("Preparing an audio proposal never approves or starts generation.", "Audio operations report pending suggestions and actual request-owned transcription outcomes; only an eligible current human attachment can start transcription from conversation.") }
   : tool.name === "prepare_change" ? { ...tool, inputSchema: v6ChangeSchema }
   : tool.name === "propose_change" ? { ...tool, inputSchema: v6ProposeChangeSchema }
+  : tool.name === "record_notes" ? { ...tool, inputSchema: v6RecordNotesSchema,
+    description: `${tool.description} For requested video in ready scenes, offer a scene-anchored confirm_video choice, available in chat and Keyframes. Unclear or Director-proposed remakes use regenerate_keyframe choices; named human remake requests may use make_keyframes. Only a human click confirms, never an ambiguous chat reply.` }
   : tool.name === "prepare_recording_transcription" ? { ...tool, description: "Prepare transcription of an exact owned recording. In a fresh human editing conversation, an audio attachment sent with that request may be transcribed when the person asks what it says or its line is needed. The application prices and records the operation under that human request. Other recordings remain pending suggestions for a human press. Never attach, adopt or accept the returned text, or blindly resubmit an unknown outcome." }
-  : tool).concat(descriptor("make_keyframes", "Start only the keyframes and needed voice lines the person's fresh editing conversation requested. Pass exactly one of sceneIds or shotIds using saved IDs within that request's scope. regenerate: true requires explicit shotIds and the person's request for new takes of those shots; never regenerate for your own quality judgment. Reports started work, quotes and per-scene refusal codes. Review, read-only and automatic turns cannot start work. Video always requires the person's Confirm frames & generate video action. Reconcile unknown outcomes before retrying.", makeKeyframesSchema, false)));
+  : tool).concat(descriptor("make_keyframes", "Start only the keyframes and needed voice lines the person's fresh editing conversation requested. Pass exactly one of sceneIds or shotIds using saved IDs within that request's scope. regenerate: true requires explicit shotIds and the person's request for new takes of those shots. For unclear or Director-proposed remakes offer a regenerate_keyframe note choice; preserve existing takes in history. Reports started work, quotes and per-scene refusal codes. Review, read-only and automatic turns cannot start work. For requested video in ready scenes offer confirm_video note choices in chat or Keyframes; only a human click confirms. Reconcile unknown outcomes before retrying.", makeKeyframesSchema, false)));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },

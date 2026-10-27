@@ -327,7 +327,7 @@ test("actual V4 stdio child advertises the saved catalog and forwards compact wr
 
 test("every shipped tool catalog has an immutable complete catalog and handler digest", () => {
   const hashes = {
-    "6.0.0": ["e917ffa20b828611349ef4bd836432ae18f690778e1a2e248a87a4a3677fa3d0", "d54d4a2c470b38531048b60d89089e83e77932ee963e8144336490c72a55d18b"],
+    "6.0.0": ["5967c822a2c77bdc9be1218d31fb9c354a08c836c664f4a0450eb4b18a479336", "4a4d340f74977cc9f4a946f5c2f8005e361a695978cdbceba295a9b8e7da95e6"],
     "5.0.0": ["271ad801bf43075bcb1ed0188fd8ca5822f3845f903a9ee2d4cca92fb910530c", "e696fa1999ff0d088ba7ef9a6b64d42af111fb0e5af7a927973999e843f8914e"],
     "1.0.0": ["b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa", "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec"],
     "2.0.0": ["c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df", "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e"],
@@ -347,7 +347,7 @@ const shippedPackages = {
   '4': ['25f6c9e86417c128a69c39586bab717edcf6148144947d1c31ba14f0fa463981', '6b67cf6e4252c79d9d97fb1906fdfee88ed6f192b4487dbb5e7e0a7a49a353cc'],
   '5': ['206b5110da0b22965e89a4c30ab1ce3866ad913a2b6fae0ebe1db43f345c45c7', 'd61e3c6581a23bb6c46419d10a7a9d26979edacd6ab5885bd1c551d7ede53a20'],
   '6': ['b1747d2be71665532b92a3cf2827b860c354cbf59a66911aacc46f83edbeaa3e', '828e671fb1eb191c8c668fcc946d273e5c22c60ff6b948029a348122f9214c4d'],
-  '7': ['14457cba9db0ea8ecfc28231193e318b2586ee4bbeb4377e25937733bcf8611b', '5cb88af3ef85c23898a60901c91406f1874cd179a9312abc890f80904353baa1'],
+  '7': ['e1c2d030049e99717e8c3efc977677de1501d4fd1d19f898ce547f0f3e1cb1aa', '7ef5d5d27cd5b78eac5979cd2468de67c130239d495755abbdee97323eda4fba'],
 };
 function writableSkillDirectories(root) {
   chmodSync(root, 0o700);
@@ -471,7 +471,7 @@ test('contract 6 alone accepts scoped keyframes and explicit-shot regeneration w
   const descriptor = toolCatalog('6.0.0').descriptors.find(tool => tool.name === 'make_keyframes');
   assert.equal(descriptor.annotations.readOnlyHint, false);
   assert.match(descriptor.description, /person's fresh editing conversation/);
-  assert.match(descriptor.description, /Video always requires/);
+  assert.match(descriptor.description, /confirm_video note choices in chat or Keyframes; only a human click confirms/);
   assert.match(descriptor.description, /explicit shotIds/);
 });
 

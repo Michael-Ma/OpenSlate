@@ -239,11 +239,22 @@ test('undo restores an originally absent narration field and leaves scene edits 
  const p=await propose(f,patch({narration:{mode:'generated',text:'Welcome aboard',voice:'stock'}}));assert.equal((await accept(f,p)).statusCode,200);
  const undo=await f.http('POST',`/director/proposals/${p.proposalId}/undo`,{},'undo');assert.equal(undo.statusCode,200,undo.body);assert.equal(f.store.getProject(f.project.id).shots[0].narration,undefined);
 });
-test('note resolve after accepting a proposal returns the saved choice; note links must stay in scope',async t=>{
+test('note resolve after accepting a proposal refuses the settled note; note links must stay in scope',async t=>{
  const f=fixture(t),p=await propose(f),n=(await f.record([f.note({choices:[{kind:'proposal',proposalId:p.proposalId}]})])).notes[0];
  assert.equal((await accept(f,p)).statusCode,200);
- const result=await f.resolve(n.noteId,{expectedVersion:1,choiceIndex:0,resultRef:p.proposalId},'resolved-via-accept');assert.equal(result.statusCode,200,result.body);assert.equal(result.json().state,'resolved');
+ const result=await f.resolve(n.noteId,{expectedVersion:1,choiceIndex:0,resultRef:p.proposalId},'resolved-via-accept');assert.equal(result.json().error.code,'NOTE_ALREADY_SETTLED');
+ assert.equal(f.service.snapshot(f.project.id).notes.find(note=>note.noteId===n.noteId).resolution.elsewhere,true);
  await assert.rejects(f.record([f.note({anchor:{shotIds:['shot-1']},choices:[{kind:'proposal',proposalId:p.proposalId}]})]),{code:'SCOPE_DENIED'});
+});
+test('declining a proposal leaves its note open with the rejected choice visible and its keep choice usable',async t=>{
+ const f=fixture(t),p=await propose(f),n=(await f.record([f.note({choices:[{kind:'proposal',proposalId:p.proposalId},{kind:'accept',label:'Keep it'}]})])).notes[0];
+ const rejected=await f.http('POST',`/director/proposals/${p.proposalId}/reject`,{},'decline-note-proposal');assert.equal(rejected.statusCode,200,rejected.body);
+ const note=f.service.snapshot(f.project.id).notes.find(note=>note.noteId===n.noteId);
+ assert.equal(note.state,'open');assert.equal(note.resolution,undefined);assert.equal(note.version,1);
+ const proposal=(await list(f)).find(proposal=>proposal.proposalId===p.proposalId);assert.equal(proposal.state,'rejected');assert.equal(proposal.noteId,n.noteId);
+ assert.equal((await f.resolve(n.noteId,{expectedVersion:1,choiceIndex:0,resultRef:p.proposalId},'declined-choice')).json().error.code,'NOTE_RESULT_INVALID');
+ assert.equal((await f.resolve(n.noteId,{expectedVersion:1,choiceIndex:1},'keep-after-decline')).statusCode,200);
+ assert.equal(f.provider.acceptedCount(),0);
 });
 test('actual running fake Director survives hand edit, proposal accept and note resolution then completes',async t=>{
  const f=fixture(t),{DirectorSupervisor}=await import('../dist/application/director-supervisor.js');
@@ -288,16 +299,16 @@ test('actual fake media matches proposal effects: duration keeps frame, outdates
  assert.equal(f.engine.outputs(f.project.id).find(o=>o.nodeId===frame.nodeId).artifact.artifactId,frame.artifact.artifactId);
  assert.equal((await f.engine.runReady()).dispatched,0);assert.equal(f.provider.acceptedCount(),count);
 });
-test('note route only acknowledges the proposal accept route and cannot resolve another note with the accepted ID',async t=>{
+test('note route refuses settled proposal notes and cannot resolve another note with the accepted ID',async t=>{
  const f=fixture(t),p=await propose(f),choice={kind:'proposal',proposalId:p.proposalId};
  const n=(await f.record([f.note({choices:[choice]})])).notes[0];
  const first=await f.resolve(n.noteId,{expectedVersion:1,choiceIndex:0,resultRef:p.proposalId},'before-accept');assert.equal(first.json().error.code,'NOTE_RESULT_INVALID');
  const accepted=await accept(f,p);assert.equal(accepted.statusCode,200,accepted.body);
  const before=f.service.snapshot(f.project.id).notes.find(note=>note.noteId===n.noteId),cursor=f.store.cursor(f.project.id);
  for(const expectedVersion of [1,2]) {
-  const ack=await f.resolve(n.noteId,{expectedVersion,choiceIndex:0,resultRef:p.proposalId},`ack-${expectedVersion}`);assert.equal(ack.statusCode,200,ack.body);assert.deepEqual(ack.json(),before);assert.equal(f.store.cursor(f.project.id),cursor);
+  const ack=await f.resolve(n.noteId,{expectedVersion,choiceIndex:0,resultRef:p.proposalId},`ack-${expectedVersion}`);assert.equal(ack.json().error.code,'NOTE_ALREADY_SETTLED');assert.deepEqual(f.service.snapshot(f.project.id).notes.find(note=>note.noteId===n.noteId),before);assert.equal(f.store.cursor(f.project.id),cursor);
  }
- assert.equal((await f.resolve(n.noteId,{expectedVersion:2,choiceIndex:0,resultRef:'other'},'wrong-ref')).json().error.code,'NOTE_RESULT_INVALID');
+ assert.equal((await f.resolve(n.noteId,{expectedVersion:2,choiceIndex:0,resultRef:'other'},'wrong-ref')).json().error.code,'NOTE_ALREADY_SETTLED');
  const later=(await f.record([f.note({choices:[choice]})])).notes[0];
  const rejected=await f.resolve(later.noteId,{expectedVersion:1,choiceIndex:0,resultRef:p.proposalId},'no-new-resolution');assert.equal(rejected.json().error.code,'NOTE_RESULT_INVALID');
  assert.equal(f.service.snapshot(f.project.id).notes.find(note=>note.noteId===later.noteId).state,'open');
