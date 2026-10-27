@@ -47,13 +47,14 @@ function fixture(t, options = {}) {
   });
   const profile = { id: "offline-openai-image", revision: "1", kind: "image", adapter: "openai-image", executionVersion: "1",
     configuration: { model: OPENAI_IMAGE_MODEL, settings: { width: 1024, height: 1024, quality: "medium", ...options.settings } },
-    maxConcurrency: 2, unitCostMicros: "100", maxRetries: 0 };
+    maxConcurrency: options.maxConcurrency ?? 2, unitCostMicros: "100", maxRetries: options.maxRetries ?? 0 };
   if (options.omitQuality) delete profile.configuration.settings.quality;
   const outputs = new ExecutionOutputStore(store, { rootDir: join(directory, "outputs") });
   const calls = { http: 0, credentials: 0 }, readCredential = options.credential ?? (() => key);
   const credentials = new EnvironmentMediaCredentials(name => { calls.credentials++; assert.equal(name, "OPENSLATE_OPENAI_API_KEY"); return readCredential(); });
   const fetch = async (...args) => { calls.http++; return (options.fetch ?? (async () => response()))(...args); };
-  const bridge = new OpenAIImageExecution({ store, outputStore: outputs, artifactRoot, credentials, fetch, timeoutMs: options.timeoutMs ?? 1000 });
+  const clock = { value: Date.now() };
+  const bridge = new OpenAIImageExecution({ store, outputStore: outputs, artifactRoot, credentials, fetch, timeoutMs: options.timeoutMs ?? 1000, now: () => clock.value });
   const images = options.ingest ? new LocalImageStore({ rootDir: join(artifactRoot, "generated"),
     ffmpegPath: process.env.OPENSLATE_FFMPEG_PATH ?? (existsSync("/opt/homebrew/bin/ffmpeg") ? "/opt/homebrew/bin/ffmpeg" : "/usr/bin/ffmpeg"),
     ffprobePath: process.env.OPENSLATE_FFPROBE_PATH ?? (existsSync("/opt/homebrew/bin/ffprobe") ? "/opt/homebrew/bin/ffprobe" : "/usr/bin/ffprobe") }) : undefined;
@@ -72,7 +73,7 @@ function fixture(t, options = {}) {
   const admit = () => engine.admit(project.id, node.id, engine.resolveInputs(project.id, node).fingerprint);
   const attempt = options.deferAdmission ? undefined : admit();
   t.after(() => { if (store.db.open) store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { directory, path, store, project, artifactRoot, outputs, credentials, fetch, bridge, calls, attempt, request: attempt?.request, engine, admit, references, profile };
+  return { directory, path, store, project, artifactRoot, outputs, credentials, fetch, bridge, calls, attempt, request: attempt?.request, engine, admit, references, profile, clock };
 }
 const context = f => ({ expectedLease: { owner: f.attempt.leaseOwner, epoch: f.attempt.leaseEpoch } });
 function preparationBarrier() { let enter, release; return { entered:new Promise(resolve=>{enter=resolve;}),wait:new Promise(resolve=>{release=resolve;}),enter:()=>enter(),release:()=>release() }; }
@@ -388,4 +389,64 @@ test("immutable mapping/dispatch/outcome records reject changed payloads and cro
   }
   const result = rows(f, "image_execution_result")[0];
   assert.throws(() => f.store.put("image_execution_result", result.id, f.project.id, { ...result, observation: { kind: "not_dispatched", code: "LOCAL_CANCELLED" } }));
+});
+
+
+const imageLostReply = { type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false };
+const currentImage = f => f.engine.attempts(f.project.id)[0];
+function wakeImage(f) {
+  const { unknownWait: _wait, ...current } = currentImage(f);
+  f.store.put("attempt", current.id, f.project.id, { ...current, leaseExpiresAt: 0 });
+}
+function competingImageAdmission(f) {
+  const project = projectFixture(randomUUID(), 1); f.store.createProject(project);
+  const q = JSON.stringify, shot = project.shots[0];
+  const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});return p.image("frame",{intent:shot,profile:${q(f.profile.id)},prompt:${q(shot.imagePrompt)},references:[]});});`;
+  const plan = compilePlan(source, { project, profiles: [f.profile], logicalIds: {}, allocateId: randomUUID }), node = plan.nodes.find(value => value.kind === "image"), planId = randomUUID();
+  const grant = f.engine.createGrant(project.id, shot.id, "image", "another-human-press", "initial_slot");
+  f.engine.installPlan(project.id, planId, plan, { [node.id]: grant.id }); f.store.saveProject({ ...project, activePlanId: planId }, 0);
+  const hold = f.engine.setHold(project.id, { scopeId: project.id, ownerId: "capacity-probe" });
+  return () => { f.engine.releaseHold(project.id, hold.id, "capacity-probe"); try { return f.engine.admit(project.id, node.id, f.engine.resolveInputs(project.id, node).fingerprint); } finally { f.engine.setHold(project.id, { scopeId: project.id, ownerId: "capacity-probe", id: hold.id }); } };
+}
+for (const receipt of ["unknown", "missing"]) test(`OpenAI image L1 ${receipt} POST receipt stays in flight until the cross-host deadline, then charges once and frees capacity`, async t => {
+  const f = fixture(t, { deferAdmission: true, maxRetries: 3, maxConcurrency: 1, fetch: async () => { throw Error("reply lost"); } });
+  const insert = f.store.insert.bind(f.store);
+  if (receipt === "missing") f.store.insert = (...args) => { if (args[0] === "image_execution_result") throw Error("crash before receipt"); return insert(...args); };
+  try { await f.engine.runReady(); } finally { f.store.insert = insert; }
+  f.attempt = currentImage(f); f.request = f.attempt.request;
+  const dispatch = rows(f, "image_execution_dispatch")[0];
+  assert.equal(f.attempt.phase, "submission_unknown"); assert.equal(f.calls.http, 1);
+  const competing = competingImageAdmission(f); assert.throws(competing, { code: "CAPACITY_EXCEEDED" });
+  const other = new OpenAIImageExecution({ store: f.store, outputStore: f.outputs, artifactRoot: f.artifactRoot, credentials: f.credentials, fetch: f.fetch, timeoutMs: 1, now: () => f.clock.value });
+  f.clock.value = Date.parse(dispatch.createdAt) + 599999;
+  assert.equal((await other.lookup(f.attempt.id)).type, "unknown", "the recovering host's shorter timeout cannot end the original POST");
+  wakeImage(f); await f.engine.reconcile(); assert.equal(currentImage(f).phase, "submission_unknown");
+  assert.equal(f.store.get("reservation", f.attempt.reservationId).state, "reserved");
+  f.clock.value += 1;
+  assert.deepEqual(await other.lookup(f.attempt.id), imageLostReply);
+  wakeImage(f); await f.engine.reconcile();
+  const final = currentImage(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(final.failure.retryAllowed, false);
+  assert.equal(f.store.get("reservation", final.reservationId).state, "charged"); assert.equal(f.engine.budget(f.project.id).committedMicros, "100");
+  for (let cycle = 0; cycle < 5; cycle++) { await f.engine.reconcile(); const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); }
+  assert.equal(f.engine.attempts(f.project.id).length, 1); assert.equal(f.calls.http, 1);
+  assert.equal(competing().phase, "submitting", "the failed attempt released its concurrency slot");
+});
+
+test("OpenAI image L1 fenced pre-dispatch recovery releases the reservation and permanently prevents the stale worker's POST", async t => {
+  const f = fixture(t), old = context(f);
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type, "unknown");
+  assert.equal((await f.bridge.lookup(f.attempt.id, f.request, { expectedLease: { owner: "stale", epoch: 0 } })).type, "unknown");
+  assert.equal(rows(f, "image_execution_result").length, 0);
+  wakeImage(f); await f.engine.reconcile();
+  const final = currentImage(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.retryAllowed, false);
+  assert.equal(f.store.get("reservation", final.reservationId).state, "released"); assert.equal(f.engine.budget(f.project.id).committedMicros, "0");
+  const proof = rows(f, "image_execution_result")[0]; assert.equal(proof.observation.kind, "not_dispatched");
+  assert.equal((await f.bridge.submit(f.request, old)).type, "rejected");
+  assert.equal(rows(f, "image_execution_dispatch").length, 0); assert.equal(f.calls.http, 0); assert.equal(f.calls.credentials, 0);
+});
+
+test("OpenAI image L1 saved completion stays locally recoverable beyond the lost-reply deadline", async t => {
+  const f = fixture(t), completed = await f.bridge.submit(f.request, context(f));
+  f.clock.value = Date.parse(rows(f, "image_execution_dispatch")[0].createdAt) + 600000;
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), completed); assert.equal(f.calls.http, 1);
 });

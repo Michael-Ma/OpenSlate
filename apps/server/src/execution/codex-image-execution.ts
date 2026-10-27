@@ -149,6 +149,11 @@ export class CodexImageExecution implements ExecutionProvider {
     };
     const prior=await local();if(prior)return prior;
     if(!allowNative||!records.mapping||!records.dispatch||records.result?.observation.kind==='failed'||signal?.aborted)return unknown();
+    // Unlike an HTTP task id returned by submit, prepare durably saved this real
+    // thread id before turn/start. Record validation requires the same nonempty
+    // id in the dispatch marker, so even a lost turn/start reply keeps a real
+    // thread/read recovery source after the native turn deadline. A dispatched
+    // state with neither thread nor turn identity cannot pass record validation.
     try {
       const observation=await this.#transport.lookup(structuredClone(records.mapping.native),{...(records.run?{turnId:records.run.turnId}:{}),...(signal?{signal}:{})});
       await this.observe(attempt,records.mapping,observation,signal);records=assertCodexImageRecords(this.#store,attempt);
