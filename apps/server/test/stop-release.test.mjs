@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { DEFAULT_PROFILES, RECIPE_DIGEST, STAGE_CONTRACTS_DIGEST, TOOL_NAMES } from '@openslate/core';
-import { setup } from './execution-fixture.mjs';
+import { elapseUnknownBackoff, setup } from './execution-fixture.mjs';
 import { ProductionService } from '../dist/application/service.js';
 import { Store } from '../dist/persistence/store.js';
 import { Engine } from '../dist/execution/engine.js';
@@ -139,7 +139,7 @@ test('released unknown work frees shot, scene and capacity; late success stays h
   await f.engine.reconcile();
   const newTake = f.store.get('node_binding', replacement.nodeId).outputs.image;
   assert.ok(newTake);
-  f.provider.lookup = poll;
+  f.provider.lookup = poll; elapseUnknownBackoff(f.store, old.id);
   await f.engine.reconcile();
   assert.equal(f.store.get('attempt', old.id).phase, 'succeeded');
   assert.ok(f.store.get('attempt', old.id).outputs.image);

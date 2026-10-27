@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { fixture } from './helpers/generation-fixture.mjs';
+import { elapseUnknownBackoff } from './execution-fixture.mjs';
 import { createDirectorSkillLock } from '../dist/application/director-capabilities.js';
 import { DirectorContextService } from '../dist/application/director-context.js';
 import { makeDirectorKeyframes } from '../dist/application/director-keyframes.js';
@@ -80,7 +81,7 @@ test('a detached unanswered clip identifies its human recovery before new keyfra
   ok(await f.post(await f.get(), 'image', randomUUID(), { targetShotIds: ['shot-0'], regenerate: true }));
   await f.finish(); const selectedFrame = binding(f, 'image').outputs.image;
   assert.equal(f.provider.acceptedCount(), starts + 1, 'only the fresh human generation press buys new work');
-  f.provider.lookup = unresolved; await f.engine.reconcile();
+  f.provider.lookup = unresolved; elapseUnknownBackoff(f.store, old.id); await f.engine.reconcile();
   const completed = f.store.get('attempt', old.id);
   assert.equal(completed.phase, 'succeeded'); assert.ok(completed.outputs.video);
   assert.equal(f.store.get('reservation', old.reservationId).state, 'charged');

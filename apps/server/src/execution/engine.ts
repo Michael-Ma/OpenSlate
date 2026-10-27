@@ -65,6 +65,8 @@ export interface Attempt {
   taskId: string | null; reservationId: string | null;
   failure: { id: string; technical: boolean; source: string; retryAllowed: boolean } | null;
   preparation?: { intentId: string; intentDigest: string; waitCount: number; nextEligibleAt: number };
+  /** Mutable backoff for repeated identical unknown observations; never evidence. */
+  unknownWait?: { count: number; nextEligibleAt: number };
   applicationInput?: OwnedTranscriptionAttemptInput;
   narrationSpeech?: NarrationSpeechAttemptInput;
   outputs: Record<string, ArtifactRef>; createdAt: string;
@@ -104,6 +106,12 @@ export interface ExternalExecutionAdmission {
 }
 const GENERATED = new Set<OperationKind>(["image", "video", "speech", "transcription"]);
 const TERMINAL = new Set<AttemptPhase>(["succeeded", "failed"]);
+export const UNKNOWN_BACKOFF_BASE_MS = 1000, UNKNOWN_BACKOFF_MAX_MS = 60_000;
+/** Re-observation never resubmits; an unchanged unknown answer only waits longer before the next look. */
+function unknownBackoff(previousCount: number, now = Date.now()): { count: number; nextEligibleAt: number } {
+  const count = Math.min(1_000_000, previousCount + 1);
+  return { count, nextEligibleAt: now + Math.min(UNKNOWN_BACKOFF_MAX_MS, UNKNOWN_BACKOFF_BASE_MS * 2 ** Math.min(count - 1, 6)) };
+}
 const WAIT_CODES = new Set(["CAPACITY_EXCEEDED", "LOCAL_EXECUTION_BUSY", "EXECUTION_HELD", "HUMAN_REVIEW_REQUIRED", "INPUT_PENDING", "TIMING_REQUIRED"]);
 
 /** Durable executor over registered ports. The shipped launcher enables only fake execution. */
@@ -1200,8 +1208,11 @@ export class Engine {
       const attempt = this.store.get<Attempt>("attempt", observed.id)!;
       if (TERMINAL.has(attempt.phase) || attempt.leaseExpiresAt > Date.now()) return null;
       if (attempt.phase === "preparing" && !this.preparationObserved(attempt)) return null;
+      if (attempt.phase === "submission_unknown" && (attempt.unknownWait?.nextEligibleAt ?? 0) > Date.now()) return null;
       const updated: Attempt = { ...attempt, phase: attempt.phase === "submitting" ? "submission_unknown" : attempt.phase, leaseOwner: this.workerId, leaseEpoch: attempt.leaseEpoch + 1, leaseExpiresAt: Date.now() + this.leaseMs };
-      this.store.put("attempt", updated.id, updated.projectId, updated); return updated;
+      this.store.put("attempt", updated.id, updated.projectId, updated);
+      if (updated.phase !== attempt.phase) this.store.appendEvent(updated.projectId, "attempt.state_changed", { attemptId: updated.id, phase: updated.phase });
+      return updated;
     });
   }
   private owns(attempt: Attempt): Attempt | null {
@@ -1237,7 +1248,12 @@ export class Engine {
         ? { id: outcome.failureId, technical: outcome.technical, source: executionFailureSource(provider),
           retryAllowed: outcome.technical === true && outcome.retryAllowed === true } : null;
       const taskId = outcome.type === "accepted" || outcome.type === "failed" || outcome.type === "unknown" ? outcome.taskId ?? current.taskId : current.taskId;
-      const updated: Attempt = { ...current, phase, taskId, failure, leaseExpiresAt: ingesting && !issue ? current.leaseExpiresAt : 0 };
+      // Reconciliation re-observes the same answer every cycle. Only a change in
+      // observable state is history; an identical unknown answer backs off instead.
+      const unchanged = phase === current.phase && taskId === current.taskId && canonical(failure) === canonical(current.failure);
+      const { unknownWait: previousWait, ...base } = current;
+      const unknownWait = unchanged && phase === "submission_unknown" ? unknownBackoff(previousWait?.count ?? 0) : undefined;
+      const updated: Attempt = { ...base, phase, taskId, failure, leaseExpiresAt: ingesting && !issue ? current.leaseExpiresAt : 0, ...(unknownWait ? { unknownWait } : {}) };
       this.store.put("attempt", current.id, current.projectId, updated);
       if (ingesting && !issue) {
         // Immutable provider completion survives a lost polling lease. The new
@@ -1255,7 +1271,8 @@ export class Engine {
       }
       if (outcome.type === "rejected" && !current.released) this.setReservation(current, "released");
       if (outcome.type === "failed") this.setReservation(current, "charged");
-      this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase }); return false;
+      if (!unchanged) this.store.appendEvent(current.projectId, "attempt.state_changed", { attemptId: current.id, phase });
+      return false;
     });
     if (!owns || outcome.type !== "completed") return;
     const completed = outcome;

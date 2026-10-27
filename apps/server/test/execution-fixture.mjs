@@ -41,3 +41,7 @@ export function setup(t, { count = 2, budgetMicros = "100000", profiles = DEFAUL
   t.after(() => { if (store.db.open) store.close(); if (provider.db.open) provider.close(); rmSync(directory, { recursive: true, force: true }); });
   return { directory, dbPath, providerPath, artifactDir, store, provider, engine, projectId: project.id, plan, compile, logicalIds };
 }
+/** Simulates time passing beyond an unchanged-unknown backoff; it is mutable wakeup metadata, not evidence. */
+export function elapseUnknownBackoff(store, attemptId) {
+  const { unknownWait: _wait, ...attempt } = store.get("attempt", attemptId); store.put("attempt", attempt.id, attempt.projectId, attempt);
+}
