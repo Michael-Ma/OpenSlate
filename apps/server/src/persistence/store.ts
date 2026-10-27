@@ -710,7 +710,7 @@ export class Store {
       const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
       invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Director record request does not match its epoch");
     }
-    if (["director_generation_effect", "director_keyframes_receipt", "director_attachment_transcription"].includes(kind)) {
+    if (["director_generation_effect", "director_generation_block", "director_keyframes_receipt", "director_attachment_transcription"].includes(kind)) {
       reference("message", body.requestId); reference("epoch", body.epochId);
       const epoch = this.get<{ requestId: string }>("epoch", String(body.epochId));
       invariant(epoch?.requestId === body.requestId, "SCOPE_DENIED", "Generation evidence must belong to its original epoch request");
@@ -779,7 +779,7 @@ export class Store {
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Audio derivation records are immutable");
       if (["grant", "candidate", "artifact", "plan", "review_snapshot", "approval", "execution_evidence", "execution_output_receipt", "execution_output_spool", "execution_output_slot", "image_execution_mapping", "image_execution_dispatch", "image_execution_result", "video_derivation_intent", "video_derivation_receipt", "capability_lock", "director_skill_lock", "director_epoch_lock", "director_context", "skill_activation", "skill_read", "director_output", "tool_reconciliation", "native_model_start", "request_image_selection", "request_image_projection", "request_attachment_selection", "request_attachment_projection", "document_import", "document_import_receipt", "media_source", "media_import", "media_import_receipt", "image_import", "image_import_receipt", "narration_session", "narration_segment", "narration_audio", "narration_cue", "narration_acceptance", "narration_revision", "narration_prepared", "narration_canonical", "narration_commit_receipt", "personal_voice", "personal_voice_revocation"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", `${kind} records are immutable`);
-      if (["director_generation_effect", "scene_confirmation_candidate"].includes(kind))
+      if (["director_generation_effect", "director_generation_block", "scene_confirmation_candidate"].includes(kind))
         invariant(old.body === encoded, "IMMUTABLE_RECORD", "Generation and scene run evidence is immutable");
       if (kind === "director_attachment_transcription") {
         const previous = JSON.parse(old.body), next = JSON.parse(encoded);

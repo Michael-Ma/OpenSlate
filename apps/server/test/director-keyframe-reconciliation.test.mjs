@@ -114,3 +114,51 @@ test('a different successful invocation in the same request cannot settle an emp
   assert.deepEqual(f.store.list('candidate', f.project.id), candidates);
   assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.calls.speech, 0);
 });
+
+for (const checkpoint of ['tool-result', 'completion', 'refusal']) test(`a lost ${checkpoint} checkpoint never duplicates or redispatches a refused keyframe scene`, async t => {
+  const f = await fixture(t), project = f.store.getProject(f.project.id);
+  project.shots[0].promptState = 'placeholder';
+  f.store.saveProject(project, project.headVersion);
+  const put = f.store.put.bind(f.store);
+  let lost = false;
+  f.store.put = (...args) => {
+    const fail = checkpoint === 'tool-result' ? args[0] === 'tool_invocation' && args[3].state === 'succeeded'
+      : args[0] === 'director_keyframes_receipt' && (checkpoint === 'completion' ? args[3].complete : args[3].refused.length > 0);
+    if (!lost && fail) { lost = true; throw Error(`Synthetic loss at ${checkpoint} checkpoint`); }
+    return put(...args);
+  };
+  const callId = `refused-${checkpoint}`;
+  await assert.rejects(f.invoke(callId), { code: 'TOOL_CALL_UNRESOLVED' }); f.store.put = put;
+  const call = f.invocation(callId), blocks = f.store.list('director_generation_block', f.project.id);
+  const saved = f.store.get('director_keyframes_receipt', call.id);
+  assert.equal(blocks.length, checkpoint === 'refusal' ? 0 : 1);
+  assert.equal(saved.refused.length, blocks.length, 'block and refusal checkpoint commit or roll back together');
+  assert.equal(saved.complete, checkpoint === 'tool-result');
+  await assert.rejects(f.invoke(callId), { code: 'TOOL_CALL_UNRESOLVED' });
+  await f.restart(); f.tools = new ToolInvocationService(f.production, { enqueueVoice: f.runner.enqueueKeyframes });
+  f.fence(); f.reconcile(); f.reconcile();
+  const reconciliation = f.store.get('tool_reconciliation', call.id);
+  assert.equal(reconciliation.state, checkpoint === 'refusal' ? 'needs_followup' : 'effect_confirmed');
+  if (checkpoint === 'refusal') assert.equal(reconciliation.receipt, null);
+  else {
+    assert.deepEqual(reconciliation.receipt.started, []);
+    assert.deepEqual(reconciliation.receipt.refused, saved.refused);
+    assert.equal(blocks[0].block.code, 'DIRECTION_REQUIRED'); assert.deepEqual(blocks[0].block.shotIds, ['shot-0']);
+  }
+  assert.deepEqual(f.store.list('director_generation_block', f.project.id), blocks);
+  assert.equal(f.store.list('tool_reconciliation', f.project.id).length, 1);
+  for (const kind of ['grant', 'candidate', 'attempt', 'reservation', 'director_generation_effect']) assert.equal(f.store.list(kind, f.project.id).length, 0, kind);
+  assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.calls.speech, 0);
+});
+
+test('another call in the same epoch cannot settle an empty keyframe call with its refusal block', async t => {
+  const f = await fixture(t), project = f.store.getProject(f.project.id);
+  project.shots[0].promptState = 'placeholder'; f.store.saveProject(project, project.headVersion);
+  const result = await f.invoke('refused-first'); assert.equal(result.refused[0].code, 'DIRECTION_REQUIRED');
+  const blocks = f.store.list('director_generation_block', f.project.id), restore = loseInitialReceiptReply(f);
+  await assert.rejects(f.invoke('empty-second'), { code: 'TOOL_CALL_UNRESOLVED' }); restore();
+  f.fence(); f.reconcile();
+  assert.equal(f.store.get('tool_reconciliation', f.invocation('empty-second').id).state, 'needs_followup');
+  assert.deepEqual(f.store.list('director_generation_block', f.project.id), blocks);
+  assert.equal(f.provider.acceptedCount(), 0); assert.equal(f.calls.speech, 0);
+});

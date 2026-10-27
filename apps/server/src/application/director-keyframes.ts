@@ -5,6 +5,7 @@ import type { NarrationService } from '../narration/service.js';
 import { generateScene, sceneView, type EnqueueSceneVoice } from '../scene-generation.js';
 import { assertDirectorGenerationAuthority } from './director-generation-authority.js';
 import { GENERATION_BLOCKER_LIMIT, GenerationAttemptBlockedError, type GenerationAttemptRecovery } from './generation-blockers.js';
+import { recordDirectorGenerationBlock } from './director-generation-blocks.js';
 
 export interface MakeKeyframesInput { sceneIds?: string[]; shotIds?: string[]; regenerate?: boolean }
 export interface DirectorKeyframesReceipt {
@@ -32,12 +33,12 @@ export async function makeDirectorKeyframes(service: ProductionService, projectI
   invariant(!store.get('director_keyframes_receipt', invocationId), 'TOOL_CALL_UNRESOLVED', 'Reconcile the original keyframe operation');
   store.insert('director_keyframes_receipt', invocationId, projectId, receipt);
   for (const sceneId of scenes) {
+    const targetShotIds = input.shotIds?.filter(id => project.shots.some(shot => shot.id === id && shot.sceneId === sceneId));
+    const requestedIds = targetShotIds ?? project.shots.filter(shot => shot.sceneId === sceneId).map(shot => shot.id);
     try {
       invariant(!signal?.aborted, 'TOOL_CALL_CANCELLED', 'Tool invocation was cancelled');
       assertDirectorGenerationAuthority(service, projectId, actor);
-      const targetShotIds = input.shotIds?.filter(id => project.shots.some(shot => shot.id === id && shot.sceneId === sceneId));
       const request = store.get<{ scopeIds: string[] }>('message', actor.requestId)!;
-      const requestedIds = targetShotIds ?? project.shots.filter(shot => shot.sceneId === sceneId).map(shot => shot.id);
       invariant(requestedIds.every(id => request.scopeIds.includes(projectId) || request.scopeIds.includes(sceneId) || request.scopeIds.includes(id)),
         'SCOPE_DENIED', 'Generation exceeds this conversation scope');
       const captured = sceneView(service, projectId, sceneId, undefined, targetShotIds, actor.requestId);
@@ -58,7 +59,23 @@ export async function makeDirectorKeyframes(service: ProductionService, projectI
       const remaining = GENERATION_BLOCKER_LIMIT - receipt.refused.reduce((count, refusal) => count + (refusal.recovery?.attempts.length ?? 0), 0);
       const recovery = error instanceof GenerationAttemptBlockedError ? { ...error.recovery,
         attempts: error.recovery.attempts.slice(0, remaining), truncated: error.recovery.total > remaining } : undefined;
-      receipt.refused.push({ sceneId, code: error.code, message: error.message, ...(recovery ? { recovery } : {}) });
+      const attempts = error instanceof GenerationAttemptBlockedError ? error.recovery.attempts.map(attempt => ({
+        attemptId: attempt.attemptId, shotId: attempt.shotId, kind: attempt.kind, phase: attempt.phase, action: attempt.resolution.action,
+      })) : undefined;
+      const details = error.details as { shotIds?: unknown; shotId?: unknown } | undefined;
+      const knownIds = details && (Array.isArray(details.shotIds) ? details.shotIds : typeof details.shotId === 'string' ? [details.shotId] : []);
+      const promptIds = ['STALE_PROMPT_INTENT', 'DIRECTION_REQUIRED'].includes(error.code)
+        ? requestedIds.filter(id => knownIds?.includes(id)) : [];
+      store.transaction(() => {
+        recordDirectorGenerationBlock(service, projectId, actor, `director-keyframes:${invocationId}:${sceneId}`, {
+          kind: 'keyframes', sceneId, code: error.code,
+          shotIds: attempts ? [...new Set(attempts.map(attempt => attempt.shotId))] : promptIds.length ? promptIds : requestedIds,
+          ...(attempts ? { attempts } : {}), at: new Date().toISOString(),
+        });
+        receipt.refused.push({ sceneId, code: error.code, message: error.message, ...(recovery ? { recovery } : {}) });
+        store.put('director_keyframes_receipt', invocationId, projectId, receipt);
+      });
+      continue;
     }
     store.put('director_keyframes_receipt', invocationId, projectId, receipt);
   }
