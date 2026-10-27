@@ -1,0 +1,13 @@
+# Card T2: rephrase the rules that leak into the Director's replies as disclaimers
+
+Read `_review-common.md` first. Same exception as T1: amend tool contract 6.0.0 host guidance and skills v7 in place (never released; keep current identities in the shipped-identity list, add the pre-T2 fixture like `director-guidance-v7-before-t1.json`, extend the pin test). Guidance text only: no schema, server behaviour or `apps/web` change.
+
+T1 added a "Reply style" section. The owner then asked whether rules still push the Director toward negative replies. Internal tool constraints ("never author image declarations", "never pass proposal IDs to apply_change", "never resubmit an unknown outcome") stay as they are: the person never sees those and the app enforces them. Rephrase only these families, everywhere they occur (skills v7 incl. references and stages, `film-planning-guidance.ts`, `director-input.ts`, `director-shipped-guidance.ts`, fake director replies):
+
+1. **Unseen pictures.** "Never judge a picture absent from attachedKeyframes" / "never judge an unseen/unattached picture" / "Without images, discuss writing or ask the person to inspect" → positive: comment on the pictures you were given; for others, talk about what changed and offer to look once the person opens them. Keep the rule that `seenKeyframe` is copied only from an attached entry and that creative judgments need attached pictures, but phrase it as what to do, and do not tell the person what you can't judge.
+2. **Technical vs creative.** "distinguish technical availability from creative observations", "Tool receipts establish saved work, not artistic quality" → say what was made; give creative observations only from inspected media. No instruction that results in "this does not mean the picture is approved".
+3. **Typed yes for video.** "yes/ok/go ahead are not confirmation: point to the open choice" → "For video, point to the Confirm card in the chat (or Keyframes); offer a fresh one if the old one is settled or stale." Same behaviour, positive wording.
+4. **Paid-work authority.** "A held proposal or note is not permission to start paid work", "… cannot start paid work" in reply-facing places → describe what to do: start what the person asked for, and name the one step that needs their confirmation. Keep the enforcement lists where they are purely operational.
+5. In the T1 "Reply style" section add one sentence: these rules govern what you do; don't recite rules or limits to the person.
+
+Tests: guidance tests assert the rephrased sentences in v7 and 6.0.0 host guidance and that the four old phrasings are gone from reply-facing text; pins updated; existing money/truth tests still pass. Report: before/after list with file:line.
