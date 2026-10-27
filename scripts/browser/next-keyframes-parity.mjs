@@ -251,8 +251,8 @@ export const scenarios = [
       expect((await focused(page)) === "h4", "The strip did not take focus");
       await expectText(page, ".insp .takes", /Takes of 2\.2[\s\S]*Take 2[\s\S]*In use[\s\S]*Take 1[\s\S]*Use this take/);
       await expectText(page, '.insp [data-act="takes-impact"]', /^Using an earlier take is free\. The take in use now is kept\.$/);
-      // The Director's note on 2.2 looked at the take before: it says what changed since.
-      await expectText(page, '#director .note[data-note="a"] .handled', /^Out of date: 2\.2 has a new keyframe since this note\.$/);
+      // The Director's note on 2.2 offered this regeneration: pressing it in the inspector settled the note (first press wins).
+      await expectText(page, '#director .note[data-note="a"] .handled', /^✓ Settled: 2\.2 regenerated$/);
       expect(!(await page.locator(".insp .insp-actions").count()), "The actions stay under the open strip");
       await screenshot(page, "takes-strip-1440");
       // Esc goes back to the rows, with focus on the Takes button.
