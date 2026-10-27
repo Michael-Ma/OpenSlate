@@ -23,9 +23,31 @@ test('V6 proposes all creative shot fields and scene title independently of purp
   assert.deepEqual(parseToolArguments('propose_change', { patch }, '6.0.0').arguments, { patch });
   assert.deepEqual(parseToolArguments('propose_change', { patch: { updateScenes: [{ id: 'scene', title: 'Last Ferry' }] } }, '6.0.0').arguments.patch.updateScenes, [{ id: 'scene', title: 'Last Ferry' }]);
   assert.equal(toolHandlerId('6.0.0'), 'director-tools@6');
-  assert.deepEqual(toolCatalog('6.0.0').names, [...toolCatalog('5.0.0').names, 'make_keyframes']);
+  assert.deepEqual(toolCatalog('6.0.0').names, [...toolCatalog('5.0.0').names, 'make_keyframes', 'accept_proposal', 'reject_proposal']);
   for (const row of [{ id: 'scene' }, { id: 'scene', title: null }]) assert.throws(() => parseToolArguments('propose_change', { patch: { updateScenes: [row] } }, '6.0.0'), { code: 'VALIDATION_ERROR' });
   assert.throws(() => parseToolArguments('propose_change', { patch: { updateShots: [{ id: 'shot', framing: 'Wide', reauthorPrompts: true }] } }, '6.0.0'), { code: 'VALIDATION_ERROR' });
+});
+
+test('V6 proposal decisions accept only a proposal identity while every older contract refuses the tools', () => {
+  for (const name of ['accept_proposal', 'reject_proposal']) {
+    for (const proposalId of ['proposal-id', 'c', 'C', 'x'.repeat(160)]) {
+      const input = { proposalId };
+      const parsed = parseToolArguments(name, input, '6.0.0');
+      assert.deepEqual(parsed, { name, arguments: input });
+      input.proposalId = 'changed';
+      assert.equal(parsed.arguments.proposalId, proposalId, 'parsed arguments are detached from the caller');
+    }
+    for (const input of [{}, null, [], { proposalId: '' }, { proposalId: 1 }, { proposalId: 'x'.repeat(161) },
+      { proposalId: 'c', previewDigest: 'a'.repeat(64) }, { proposalId: 'c', requestId: 'forged' }, { proposalId: 'c', actor: 'human' }])
+      assert.throws(() => parseToolArguments(name, input, '6.0.0'), { code: 'VALIDATION_ERROR' });
+    for (const version of ['1.0.0', '2.0.0', '3.0.0', '4.0.0', '5.0.0'])
+      assert.throws(() => parseToolArguments(name, { proposalId: 'c' }, version), { code: 'NOT_FOUND' });
+    const descriptor = toolCatalog('6.0.0').descriptors.find(tool => tool.name === name);
+    assert.equal(descriptor.annotations.readOnlyHint, false);
+    assert.match(descriptor.description, /source:user.*editing turn/);
+    assert.match(descriptor.description, /App messages, review, automatic and read-only turns cannot/);
+    assert.match(descriptor.description, /app-assigned note letter/);
+  }
 });
 
 test('V6 creative framing is a bounded one-to-three-word label for creates, updates and proposals', () => {

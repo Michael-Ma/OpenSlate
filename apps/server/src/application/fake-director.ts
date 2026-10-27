@@ -1,5 +1,5 @@
-import { applyCreativePatch, invariant, shotIntentDigest } from "@openslate/core";
-import type { ChangeProposal, ProjectRecord } from "@openslate/core";
+import { applyCreativePatch, DomainError, invariant, shotIntentDigest } from "@openslate/core";
+import type { ChangeProposal, DirectorNote, ProjectRecord, ProposalReceipt } from "@openslate/core";
 import type { DirectorRunInput, DirectorRunResult, DirectorRuntime, DirectorStartOptions } from "@openslate/director";
 import { DirectorStartRefusal } from "@openslate/director";
 import type { ProductionService, RequestRecord } from "./service.js";
@@ -7,6 +7,7 @@ import { ToolInvocationService } from "./tool-invocations.js";
 import { derivedShotPrompts } from "./shot-prompts.js";
 import { GenerationOverviewReader } from "../generation-overview.js";
 import { isKeyframeReview } from "./keyframe-review.js";
+import { directorProposals } from "./director-proposals.js";
 
 export interface DemoCommand { action: "create" | "close_up" | "wide" | "review"; shotId?: string; sceneId?: string }
 
@@ -48,6 +49,34 @@ export class FakeWorkflowDirector implements DirectorRuntime {
     let text = "Your message is saved. This offline director is a scripted demonstration, so it cannot interpret arbitrary creative requests yet. Use Create a 2-shot demo, then review its frames or try a scoped close-up/wide edit. Real conversation requires the Codex runtime connection.";
     const projectForNotes = this.service.store.getProject(input.projectId);
     const request = this.service.store.get<RequestRecord>("message", input.requestId)!;
+    // A deliberately bounded typed path for offline tests. Subject matching and
+    // other natural language remain the real Director's responsibility; the app
+    // resolves IDs/letters and enforces the originating human request's authority.
+    const decision = !command && input.bridge.toolContractVersion === "6.0.0"
+      ? /^\s*(accept|reject|decline)\s+proposal\s+([a-z0-9-]+)\b/i.exec(request.text) : null;
+    if (decision) {
+      const action = decision[1]!.toLowerCase() === "accept" ? "accept" : "reject", proposalId = decision[2]!;
+      try {
+        const receipt = await invoke(`${action}_proposal`, { proposalId }) as unknown as ProposalReceipt;
+        invariant(receipt.proposal.state === (action === "accept" ? "accepted" : "rejected"), "TOOL_CALL_UNRESOLVED", "Proposal decision has no matching receipt");
+        const fields = [...new Set(receipt.proposal.preview.changes.map(row => (({ desiredFrames: "duration", imagePrompt: "keyframe prompt", videoPrompt: "video prompt" } as Record<string, string>)[row.field] ?? row.field)))].join(", ");
+        text = action === "accept"
+          ? `Accepted proposal ${proposalId}; updated ${fields}. Undo is available.`
+          : `Declined proposal ${proposalId}; the saved direction stays as it was.`;
+      } catch (error) {
+        if (!(error instanceof DomainError)) throw error;
+        const notes = this.service.store.list<DirectorNote>("director_note", input.projectId);
+        const linkedIds = new Set(notes.filter(note => note.letter.toLowerCase() === proposalId.toLowerCase())
+          .flatMap(note => note.choices.flatMap(choice => choice.kind === "proposal" ? [choice.proposalId] : [])));
+        const states = [...new Set(directorProposals(this.service, input.projectId).proposals
+          .filter(proposal => proposal.proposalId === proposalId || linkedIds.has(proposal.proposalId)).map(proposal => proposal.state))];
+        text = error.code === "TOOL_CALL_UNRESOLVED"
+          ? `Proposal ${proposalId}: the decision receipt is unresolved; current state: ${states.join(", ") || "not found"}. Check the saved receipts before continuing.`
+          : `Proposal ${proposalId} was not ${action === "accept" ? "accepted" : "declined"} (${error.code}); current state: ${states.join(", ") || "not found"}.`;
+      }
+      await options.onEvent?.({ ...identity, kind: "assistant_message", text, phase: "final" });
+      return { ...identity, status: "completed", text, dispatched: true };
+    }
     const scene = projectForNotes.scenes.find(scene => request.scopeIds.includes(scene.id) || projectForNotes.shots.some(s => s.sceneId === scene.id && request.scopeIds.includes(s.id)));
     const shots = projectForNotes.shots.filter(shot => shot.sceneId === scene?.id && (request.scopeIds.includes(scene!.id) || request.scopeIds.includes(shot.id)));
     // This bounded script only recognizes an explicit request to make video. The

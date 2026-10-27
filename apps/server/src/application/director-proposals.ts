@@ -2,10 +2,11 @@ import { canonical, digest, DomainError, invariant, newId, parseChangeProposal, 
 import type { ActorContext, CreativePatch, DirectorNote, DirectorProposal, ProjectRecord, ProposalPatch, ProposalPreview, ProposalReceipt, PreviewBindings } from '@openslate/core';
 import type { FastifyInstance } from 'fastify';
 import type { NodeBinding } from '../execution/engine.js';
-import type { ProductionService, ShotNarrationAcceptance } from './service.js';
+import type { ProductionService, RequestRecord, ShotNarrationAcceptance } from './service.js';
 import { requiredCommandKey } from './command-key.js';
 import { derivedShotPrompts } from './shot-prompts.js';
 import { narrationSpeechShotScopes } from '../narration/narration-scope.js';
+import { requestSource } from './request-source.js';
 
 interface TouchedField { shotId?: string; sceneId?: string; field: string; before: unknown; after: unknown }
 interface NarrationAcceptanceSnapshot { state: ShotNarrationAcceptance; cueDigest: string }
@@ -17,6 +18,7 @@ export interface ProposalRecord {
   baseShotDigests: Record<string, string>;
   state: DirectorProposal['state']; preview: ProposalPreview; previewDigest: string; createdAt: string;
   accepted?: { at: string; touchedFields: TouchedField[]; cursor?: number; narration?: NarrationProposalUndo[] }; noteId?: string;
+  decision?: DirectorProposal['decision'];
 }
 const creative = (patch: ProposalPatch): CreativePatch => ({ ...patch, ...(patch.updateShots ? { updateShots: patch.updateShots.map(row => { const copy = { ...row, reauthorPrompts: true }; if (copy.narration === null) delete copy.narration; return copy; }) } : {}) });
 function acceptedDirection(project: ProjectRecord, input: ProposalPatch): ProposalPatch {
@@ -65,11 +67,66 @@ function view(service: ProductionService, record: ProposalRecord): DirectorPropo
   const preview = state.state === 'held' ? previewCreativePatch(project, patch, bindings(service, project)) : record.preview;
   const noteId = service.store.list<DirectorNote>('director_note', record.projectId).find(n => n.choices.some(c => c.kind === 'proposal' && c.proposalId === record.id))?.noteId;
   return { proposalId: record.id, requestId: record.requestId, ...(noteId ? { noteId } : {}), ...state, preview, previewDigest: proposalPreviewDigest(preview), createdAt: record.createdAt,
+    ...(record.decision ? { decision: record.decision } : {}),
     ...(record.accepted ? { accepted: { at: record.accepted.at, touchedFields: record.accepted.touchedFields.map(({ before: _b, after: _a, ...field }) => field) } } : {}) };
 }
 export function directorProposals(service: ProductionService, projectId: string) {
   service.store.getProject(projectId);
   return { proposals: service.store.list<ProposalRecord>('director_proposal', projectId).map(p => view(service, p)) };
+}
+/** Only the current typed editing request may delegate a proposal decision to its Director. */
+export function assertDirectorProposalDecisionAuthority(service: ProductionService, projectId: string, actor: ActorContext): void {
+  invariant(actor.kind === 'director', 'PROPOSAL_DECISION_NOT_AUTHORIZED', 'Proposal decisions require a human editing conversation');
+  service.assertActor(projectId, actor);
+  const store = service.store, request = store.get<RequestRecord>('message', actor.requestId);
+  const epoch = store.get<{ state: string }>('epoch', actor.epochId);
+  invariant(request?.projectId === projectId && request.principalId === actor.principalId && request.state === 'active'
+    && request.editing && requestSource(store, request) === 'user' && epoch?.state === 'active'
+    && !store.get('keyframe_review_request', actor.requestId)
+    && !store.list<{ answerRequestId?: string; requestId: string }>('director_question', projectId)
+      .some(question => question.answerRequestId === actor.requestId && !!store.get('keyframe_review_request', question.requestId))
+    && store.list<{ requestId: string; epochId: string }>('director_turn', projectId)
+      .some(turn => turn.requestId === actor.requestId && turn.epochId === actor.epochId),
+  'PROPOSAL_DECISION_NOT_AUTHORIZED', 'Only a typed human message in an editing turn may accept or decline a proposal');
+  service.assertActor(projectId, actor, true);
+}
+/** Resolve letters without guessing across turns (letters are assigned per turn, not per film). */
+function proposalIdentity(service: ProductionService, projectId: string, value: string, principalId: string): ProposalRecord {
+  if (service.store.get<ProposalRecord>('director_proposal', value)) return owned(service, projectId, value, principalId);
+  const ids = [...new Set(service.store.list<DirectorNote>('director_note', projectId)
+    .filter(note => note.letter.toLowerCase() === value.trim().toLowerCase())
+    .flatMap(note => note.choices.filter(choice => choice.kind === 'proposal').map(choice => choice.proposalId)))];
+  invariant(ids.length > 0, 'NOT_FOUND', 'No proposal has that ID or note letter in this film');
+  invariant(ids.length === 1, 'PROPOSAL_AMBIGUOUS', 'That letter names several proposals. Read the notes and use the exact proposal ID.');
+  return owned(service, projectId, ids[0]!, principalId);
+}
+/** The decision and its reconciliation receipt commit together; an unknown call is never re-executed. */
+export function decideProposal(service: ProductionService, projectId: string, actor: ActorContext, invocationId: string,
+  input: { proposalId: string }, action: 'accept' | 'reject'): ProposalReceipt {
+  return service.store.transaction(() => {
+    assertDirectorProposalDecisionAuthority(service, projectId, actor);
+    invariant(actor.kind === 'director', 'PROPOSAL_DECISION_NOT_AUTHORIZED', 'A Director epoch is required');
+    const store = service.store, argumentsDigest = digest(input);
+    const previous = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; action: string; receipt: ProposalReceipt }>('director_proposal_decision_receipt', invocationId);
+    if (previous) {
+      invariant(previous.projectId === projectId && previous.requestId === actor.requestId && previous.epochId === actor.epochId
+        && previous.argumentsDigest === argumentsDigest && previous.action === action, 'IDEMPOTENCY_CONFLICT', 'This decision call identity belongs to different work');
+      return previous.receipt;
+    }
+    const proposal = proposalIdentity(service, projectId, input.proposalId, actor.principalId);
+    const project = store.getProject(projectId), request = store.get<RequestRecord>('message', actor.requestId)!;
+    const allows = (id: string) => request.scopeIds.includes(projectId) || request.scopeIds.includes(id)
+      || project.shots.some(shot => shot.id === id && request.scopeIds.includes(shot.sceneId));
+    invariant((proposal.patch.updateShots ?? []).every(shot => allows(shot.id)) && (proposal.patch.updateScenes ?? []).every(scene => allows(scene.id)),
+      'SCOPE_DENIED', 'This proposal exceeds the human message scope');
+    // The application captures the current preview under the same transaction as the human command.
+    const current = view(service, proposal);
+    const receipt = proposalCommand(service, projectId, proposal.id, action, `director-proposal:${invocationId}`,
+      action === 'accept' ? current.previewDigest : undefined, actor.principalId, actor);
+    store.insert('director_proposal_decision_receipt', invocationId, projectId,
+      { projectId, requestId: actor.requestId, epochId: actor.epochId, argumentsDigest, action, receipt });
+    return receipt;
+  });
 }
 export function proposeChange(service: ProductionService, projectId: string, actor: ActorContext, invocationId: string, input: { patch: ProposalPatch }): DirectorProposal {
   return service.store.transaction(() => {
@@ -161,12 +218,17 @@ function laterNarrationEdit(service: ProductionService, projectId: string, propo
     (event.payload.fields as unknown as { shotId?: string; field: string }[]).some(field => field.shotId === shotId &&
       ['*', 'narration', 'cueId', 'narrationPending', 'narrationTimingMode', 'narrationFit'].includes(field.field)));
 }
-export function proposalCommand(service: ProductionService, projectId: string, id: string, action: 'accept' | 'reject' | 'undo', key: string, previewDigest?: string, principalId = 'local-user'): ProposalReceipt {
+export function proposalCommand(service: ProductionService, projectId: string, id: string, action: 'accept' | 'reject' | 'undo', key: string, previewDigest?: string, principalId = 'local-user', directorActor?: ActorContext): ProposalReceipt {
   service.recovery.assertWritable(projectId);
-  return service.store.command(`${principalId}:${projectId}:proposal`, key, digest({ id, action, previewDigest: previewDigest ?? null }), () => {
+  return service.store.command(`${principalId}:${projectId}:proposal`, key, digest({ id, action, previewDigest: previewDigest ?? null,
+    ...(directorActor ? { directorRequestId: directorActor.requestId, directorEpochId: directorActor.kind === 'director' ? directorActor.epochId : null } : {}) }), () => {
+    if (directorActor) {
+      assertDirectorProposalDecisionAuthority(service, projectId, directorActor);
+      invariant(directorActor.principalId === principalId && action !== 'undo', 'PROPOSAL_DECISION_NOT_AUTHORIZED', 'Use the human proposal Undo action');
+    }
     const proposal = owned(service, projectId, id, principalId), current = view(service, proposal), store = service.store;
     if (action === 'undo' && proposal.state === 'undone') return { proposal: current, leftAlone: [] };
-    invariant(action === 'undo' ? proposal.state === 'accepted' : current.state === 'held', 'PROPOSAL_STALE', 'This proposal is no longer available for this action');
+    invariant(action === 'undo' ? proposal.state === 'accepted' : current.state === 'held', 'PROPOSAL_STALE', `This proposal is ${current.state} and is no longer available for ${action}`);
     if (action === 'accept') invariant(previewDigest === current.previewDigest, 'PROPOSAL_PREVIEW_CHANGED', 'The Now/After preview changed. Review it again.');
     const project = store.getProject(projectId);
     let patch = action === 'accept' ? acceptedDirection(project, proposal.patch) : proposal.patch;
@@ -213,10 +275,14 @@ export function proposalCommand(service: ProductionService, projectId: string, i
         ...(action === 'accept' ? { accepted: { at: new Date().toISOString(), touchedFields, cursor: store.cursor(projectId), narration } } : {}) };
       noteTransition(service, next, action === 'undo');
     } else next = { ...proposal, state: 'rejected', preview: current.preview, previewDigest: current.previewDigest };
+    const decision: DirectorProposal['decision'] = action === 'undo' ? undefined : { action,
+      actor: directorActor ? 'director_on_user_request' : 'human', requestId: directorActor?.requestId ?? actor.requestId, at: new Date().toISOString() };
+    if (decision) next = { ...next, decision };
     service.releaseAlongsideHolds(projectId, actor);
     store.put('director_proposal', id, projectId, next);
     service.releaseFinishedRequestHolds(projectId, proposal.requestId);
-    store.appendEvent(projectId, 'proposal.changed', { proposalId: id, state: next.state, requestId: actor.requestId });
+    store.appendEvent(projectId, 'proposal.changed', { proposalId: id, state: next.state, requestId: decision?.requestId ?? actor.requestId,
+      actor: decision?.actor ?? 'human' });
     return { proposal: view(service, next), ...(action === 'undo' ? { leftAlone } : {}) };
   });
 }

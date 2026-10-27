@@ -8,7 +8,7 @@ export const TOOL_NAMES = Object.freeze(["read_context", "prepare_change", "appl
 export const V2_TOOL_NAMES = Object.freeze([...TOOL_NAMES, "revise_narration_draft"] as const);
 const V3_TOOL_NAMES = Object.freeze([...V2_TOOL_NAMES, "prepare_recording_transcription", "prepare_narration_speech"] as const);
 const V5_TOOL_NAMES = Object.freeze([...V3_TOOL_NAMES, "record_notes", "propose_change"] as const);
-export const ALL_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes"] as const);
+export const ALL_TOOL_NAMES = Object.freeze([...V5_TOOL_NAMES, "make_keyframes", "accept_proposal", "reject_proposal"] as const);
 export type ToolName = typeof ALL_TOOL_NAMES[number];
 export const TOOL_CONTRACT_VERSION = "1.0.0";
 export const SUPPORTED_TOOL_CONTRACTS = Object.freeze(["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"] as const);
@@ -143,6 +143,7 @@ v6NoteProperties.notes.items.properties.choices.items.oneOf.push(
   object({ kind: { const: "confirm_video" }, sceneId: id }, ["kind", "sceneId"]),
 );
 const generationIds = { type: "array", minItems: 1, maxItems: 400, uniqueItems: true, items: id };
+const proposalDecisionSchema = object({ proposalId: id }, ["proposalId"]);
 export const makeKeyframesSchema = {
   ...object({ sceneIds: generationIds, shotIds: generationIds, regenerate: { type: "boolean" } }),
   oneOf: [{ required: ["sceneIds"] }, { required: ["shotIds"] }],
@@ -154,9 +155,13 @@ const v6Descriptors = freeze(v5Descriptors.map(tool => tool.name === "read_conte
   : tool.name === "prepare_change" ? { ...tool, inputSchema: v6ChangeSchema }
   : tool.name === "propose_change" ? { ...tool, inputSchema: v6ProposeChangeSchema }
   : tool.name === "record_notes" ? { ...tool, inputSchema: v6RecordNotesSchema,
-    description: `${tool.description} For requested video in ready scenes, offer a scene-anchored confirm_video choice, available in chat and Keyframes. Unclear or Director-proposed remakes use regenerate_keyframe choices; named human remake requests may use make_keyframes. Only a human click confirms, never an ambiguous chat reply.` }
+    description: `${tool.description} For requested video in ready scenes, offer a scene-anchored confirm_video choice, available in chat and Keyframes. Unclear or Director-proposed remakes use regenerate_keyframe choices; named human remake requests may use make_keyframes. Only a human click on confirm_video confirms video, never a chat reply. Clear requests to accept or decline a specific held proposal use accept_proposal or reject_proposal.` }
   : tool.name === "prepare_recording_transcription" ? { ...tool, description: "Prepare transcription of an exact owned recording. In a fresh human editing conversation, an audio attachment sent with that request may be transcribed when the person asks what it says or its line is needed. The application prices and records the operation under that human request. Other recordings remain pending suggestions for a human press. Never attach, adopt or accept the returned text, or blindly resubmit an unknown outcome." }
-  : tool).concat(descriptor("make_keyframes", "Start only the keyframes and needed voice lines the person's fresh editing conversation requested. Pass exactly one of sceneIds or shotIds using saved IDs within that request's scope. regenerate: true requires explicit shotIds and the person's request for new takes of those shots. For unclear or Director-proposed remakes offer a regenerate_keyframe note choice; preserve existing takes in history. Reports started work, quotes and per-scene refusal codes. Review, read-only and automatic turns cannot start work. For requested video in ready scenes offer confirm_video note choices in chat or Keyframes; only a human click confirms. Reconcile unknown outcomes before retrying.", makeKeyframesSchema, false)));
+  : tool).concat(
+  descriptor("make_keyframes", "Start only the keyframes and needed voice lines the person's fresh editing conversation requested. Pass exactly one of sceneIds or shotIds using saved IDs within that request's scope. regenerate: true requires explicit shotIds and the person's request for new takes of those shots. For unclear or Director-proposed remakes offer a regenerate_keyframe note choice; preserve existing takes in history. Reports started work, quotes and per-scene refusal codes. Review, read-only and automatic turns cannot start work. For requested video in ready scenes offer confirm_video note choices in chat or Keyframes; only a human click confirms. Reconcile unknown outcomes before retrying.", makeKeyframesSchema, false),
+  descriptor("accept_proposal", "Accept a specific held creative proposal when the person's current source:user message clearly requests it in an editing turn. Pass its saved proposal ID or app-assigned note letter; ask which proposal if ambiguous. The application uses its current preview and applies the same patch, note settlement and Undo as the banner. App messages, review, automatic and read-only turns cannot decide proposals. Report success only from the result, then continue other requested work using the accepted prompts. Video still requires a clicked confirm_video choice after its frames are opened.", proposalDecisionSchema, false),
+  descriptor("reject_proposal", "Decline a specific held creative proposal when the person's current source:user message clearly requests it in an editing turn. Pass its saved proposal ID or app-assigned note letter; ask which proposal if ambiguous. The application uses its current preview and settles the same proposal and linked note as the banner. App messages, review, automatic and read-only turns cannot decide proposals. Report its actual result and never claim a settled or stale proposal changed.", proposalDecisionSchema, false),
+));
 export interface ToolCatalog { version: ToolContractVersion; names: readonly ToolName[]; descriptors: readonly ToolDescriptor[]; digest: string }
 export const TOOL_CATALOGS: Readonly<Record<ToolContractVersion, ToolCatalog>> = freeze({
   "1.0.0": { version: "1.0.0", names: TOOL_NAMES, descriptors: TOOL_DESCRIPTORS, digest: TOOL_CATALOG_DIGEST },

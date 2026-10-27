@@ -107,13 +107,13 @@ test('V7 keyframe examples name one requested scope and reserve regeneration for
   }
 });
 
-test('V7 uses clicked chat choices for video, remakes and proposals without claiming reply authority', () => {
+test('V7 keeps clicked confirmation for video while clear typed decisions settle proposals', () => {
   for (const path of ['production/SKILL.md', 'production/references/notes.md', 'production/references/keyframes.md', 'production/references/stages/review.md', 'production/references/stages/video.md', 'plan-authoring/SKILL.md', 'plan-authoring/references/grammar.md']) {
     const text = skillFile(path);
     assert.match(text, /confirm_video/, path);
     assert.match(text, /Confirm in this chat or in Keyframes/, path);
     assert.match(text, /regenerate_keyframe/, path);
-    assert.match(text, /"yes", "ok" or "go ahead" (?:replies (?:do not confirm|are not confirmation)|is not confirmation)/, path);
+    assert.match(text, /(?:For video|for video), "yes", "ok" or "go ahead" replies (?:do not confirm|are not confirmation)/, path);
     assert.match(text, /(?:open (?:typed )?choice|open choice).*fresh one if (?:it is )?stale or settled/s, path);
     assert.match(text, /(?:after|until) the application reports it/, path);
   }
@@ -124,6 +124,23 @@ test('V7 uses clicked chat choices for video, remakes and proposals without clai
   assert.match(notes, /elsewhere: true/);
   assert.match(notes, /settled note stays settled/);
   assert.match(notes, /proposal` choice.*Now\/After preview in chat/);
+  for (const path of ['production/SKILL.md', 'production/references/notes.md', 'production/references/current-contract.md', 'plan-authoring/SKILL.md', 'plan-authoring/references/grammar.md']) {
+    const text = skillFile(path);
+    assert.match(text, /accept_proposal/, path);
+    assert.match(text, /reject_proposal/, path);
+    assert.match(text, /\{proposalId\}/, path);
+    assert.match(text, /letter, subject.*only held proposal/, path);
+    assert.match(text, /several are open.*ambiguous.*ask which one/s, path);
+    assert.match(text, /continue other requested work.*accepted prompts/, path);
+  }
+  assert.match(notes, /source: "user"/);
+  assert.match(notes, /App-message, keyframe-review, automatic and read-only turns cannot make proposal decisions/);
+  assert.match(notes, /report any refusal and current state without claiming success/);
+  for (const name of ['production', 'plan-authoring']) {
+    const manifest = JSON.parse(skillFile(`${name}/openslate.skill.json`));
+    assert.ok(manifest.requiredToolIds.includes('accept_proposal'));
+    assert.ok(manifest.requiredToolIds.includes('reject_proposal'));
+  }
   for (const path of readdirSync(join(repository, 'skills/v7'), { recursive: true }).filter(path => path.endsWith('.md'))) {
     assert.doesNotMatch(skillFile(path), /chat approval (?:cannot|can't) replace|go (?:find|press) the button|conversation never starts video|Video is always human-only/i, path);
   }

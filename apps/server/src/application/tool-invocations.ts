@@ -5,7 +5,7 @@ import { assertDirectorGenerationAuthority } from "./director-generation-authori
 import { SceneConfirmationRunner } from "../scene-confirmations.js";
 import { NarrationCanonicalService } from "../narration/canonical.js";
 import type { EnqueueSceneVoice } from "../scene-generation.js";
-import { proposeChange } from "./director-proposals.js";
+import { assertDirectorProposalDecisionAuthority, decideProposal, proposeChange } from "./director-proposals.js";
 import type { ProposalPatch } from "@openslate/core";
 import { recordNotes, type NoteInput } from "./director-notes.js";
 import { SUPPORTED_TOOL_CONTRACTS } from "@openslate/core";
@@ -156,6 +156,7 @@ export class ToolInvocationService {
     this.service.assertActor(projectId, actor);
     invariant(/^[A-Za-z0-9_-]{1,160}$/.test(callId), "VALIDATION_ERROR", "Invalid tool call identity");
     if (tool === "make_keyframes") assertDirectorGenerationAuthority(this.service, projectId, actor);
+    if (tool === 'accept_proposal' || tool === 'reject_proposal') assertDirectorProposalDecisionAuthority(this.service, projectId, actor);
     invariant(!this.service.store.get("keyframe_review_request", actor.requestId) || ["read_context", "record_notes", "propose_change", "read_skill"].includes(tool),
       "ACTOR_DENIED", "Keyframe reviews may only read context, record notes and propose changes");
     const selected = this.catalog(projectId, actor);
@@ -228,6 +229,8 @@ export class ToolInvocationService {
       switch (parsed.name) {
         case "make_keyframes": value = await makeDirectorKeyframes(this.service, projectId, actor, id, parsed.arguments,
           this.narration, this.#enqueueVoice, signal); break;
+        case 'accept_proposal': case 'reject_proposal': value = decideProposal(this.service, projectId, actor, id,
+          parsed.arguments as unknown as { proposalId: string }, parsed.name === 'accept_proposal' ? 'accept' : 'reject'); break;
         case "propose_change": value = proposeChange(this.service, projectId, actor, id, parsed.arguments as unknown as { patch: ProposalPatch }); break;
         case "record_notes": value = recordNotes(this.service, projectId, actor, id, parsed.arguments as unknown as { notes: NoteInput[] }); break;
         case "read_context": value = this.service.readContext(projectId, actor, parsed.arguments); break;
@@ -336,6 +339,11 @@ export class ToolInvocationService {
         if ((call.tool === "record_notes" || call.tool === "propose_change") && call.toolContractVersion && ["5.0.0", "6.0.0"].includes(call.toolContractVersion) && call.catalogDigest === toolCatalog(call.toolContractVersion).digest) {
           const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; receipt: unknown }>(call.tool === "record_notes" ? "director_notes_receipt" : "director_proposal_receipt", call.id);
           if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest) receipt = saved.receipt;
+        }
+        if ((call.tool === 'accept_proposal' || call.tool === 'reject_proposal') && call.toolContractVersion === '6.0.0' && call.catalogDigest === toolCatalog('6.0.0').digest) {
+          const saved = store.get<{ projectId: string; requestId: string; epochId: string; argumentsDigest: string; action: string; receipt: unknown }>('director_proposal_decision_receipt', call.id);
+          if (saved?.projectId === projectId && saved.requestId === call.requestId && saved.epochId === epochId && saved.argumentsDigest === call.argumentsDigest
+            && saved.action === (call.tool === 'accept_proposal' ? 'accept' : 'reject')) receipt = saved.receipt;
         }
         if (call.tool === "apply_change" && call.recovery?.preparedId) {
           const prepared = store.get<{ projectId: string; requestId: string; epochId: string; proposalDigest: string }>("prepared", call.recovery.preparedId);

@@ -327,7 +327,7 @@ test("actual V4 stdio child advertises the saved catalog and forwards compact wr
 
 test("every shipped tool catalog has an immutable complete catalog and handler digest", () => {
   const hashes = {
-    "6.0.0": ["5967c822a2c77bdc9be1218d31fb9c354a08c836c664f4a0450eb4b18a479336", "4a4d340f74977cc9f4a946f5c2f8005e361a695978cdbceba295a9b8e7da95e6"],
+    "6.0.0": ["857fcfc65113b20272eba548c5e1eceff7b79c34b8391934b7043b3ff838fd3c", "d1891b9f92dcb62401e91a1ac71b4aab54a7722db50559136fbbeed9cf4de198"],
     "5.0.0": ["271ad801bf43075bcb1ed0188fd8ca5822f3845f903a9ee2d4cca92fb910530c", "e696fa1999ff0d088ba7ef9a6b64d42af111fb0e5af7a927973999e843f8914e"],
     "1.0.0": ["b205f7ba3a89eca36a44f9997673b02e4ccc62777766b78db53a0e234286b1fa", "4d9723ce7c4ab83739ab188b87ed31374ba7a60cb02f25f755b665d757cc4bec"],
     "2.0.0": ["c4e9ae02f5e9154e5efed3b20d1eef5562c1d0da6f2a7c8c870d9f62b13325df", "2a5ccb9878d62e0edd93a68e5c77c67e36dd70078584ecc6027105684b8e8b4e"],
@@ -347,7 +347,7 @@ const shippedPackages = {
   '4': ['25f6c9e86417c128a69c39586bab717edcf6148144947d1c31ba14f0fa463981', '6b67cf6e4252c79d9d97fb1906fdfee88ed6f192b4487dbb5e7e0a7a49a353cc'],
   '5': ['206b5110da0b22965e89a4c30ab1ce3866ad913a2b6fae0ebe1db43f345c45c7', 'd61e3c6581a23bb6c46419d10a7a9d26979edacd6ab5885bd1c551d7ede53a20'],
   '6': ['b1747d2be71665532b92a3cf2827b860c354cbf59a66911aacc46f83edbeaa3e', '828e671fb1eb191c8c668fcc946d273e5c22c60ff6b948029a348122f9214c4d'],
-  '7': ['e1c2d030049e99717e8c3efc977677de1501d4fd1d19f898ce547f0f3e1cb1aa', '7ef5d5d27cd5b78eac5979cd2468de67c130239d495755abbdee97323eda4fba'],
+  '7': ['57fd9fcbc92d113833ce7442d07effdc60e288959988d492c1ddec7a821d0397', 'be899af306b76045e4969e173deca16534a44b40eb880d7384fad46ee568f81f'],
 };
 function writableSkillDirectories(root) {
   chmodSync(root, 0o700);
@@ -500,4 +500,30 @@ test('a lost make_keyframes response retains its exact unresolved call identity 
   assert.equal(result.isError, true); assert.equal(result.value.error.code, 'TOOL_CALL_UNRESOLVED');
   assert.equal(result.value.error.callId, result.callId); assert.equal(result.value.error.outcome, 'unknown');
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].headers['x-openslate-tool-call-id'], result.callId);
+});
+
+for (const version of ['5.0.0', '6.0.0']) test(`${version} stdio ${version === '6.0.0' ? 'forwards' : 'refuses'} typed proposal decisions with no model-authored preview or actor`, async t => {
+  const f = await fixture(t), c = await childFixture(t, { ...f.options, toolContractVersion: version });
+  await c.initialize();
+  const listed = (await c.request('tools/list', {}).response).result.tools;
+  for (const name of ['accept_proposal', 'reject_proposal']) {
+    assert.equal(listed.some(tool => tool.name === name), version === '6.0.0');
+    const input = { proposalId: name === 'accept_proposal' ? 'c' : 'proposal-id' };
+    const response = (await c.request('tools/call', { name, arguments: input }).response).result;
+    if (version === '5.0.0') {
+      assert.equal(response.isError, true);
+      assert.equal(JSON.parse(response.content[0].text).error.code, 'NOT_FOUND');
+      continue;
+    }
+    assert.equal(response.isError, false);
+    assert.deepEqual(JSON.parse(response.content[0].text), { ok: true, args: input });
+    assert.deepEqual(f.calls.at(-1).body, input);
+    assert.match(f.calls.at(-1).url, new RegExp(`/tools/${name}$`));
+    for (const extra of [{ previewDigest: 'a'.repeat(64) }, { requestId: 'forged' }, { actor: 'human' }]) {
+      const refused = (await c.request('tools/call', { name, arguments: { ...input, ...extra } }).response).result;
+      assert.equal(refused.isError, true);
+      assert.equal(JSON.parse(refused.content[0].text).error.code, 'VALIDATION_ERROR');
+    }
+  }
+  assert.equal(f.calls.length, version === '6.0.0' ? 2 : 0, 'only the two exact current-contract inputs reach the application');
 });

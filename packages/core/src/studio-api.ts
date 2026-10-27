@@ -502,6 +502,8 @@ export interface DirectorProposal {
   createdAt: string;
   /** After accept: what can be undone. Fields a person changed since are left alone. */
   accepted?: { at: string; touchedFields: { shotId?: string; sceneId?: string; field: string }[] };
+  /** The decision's authority; requestId is the person's message when the Director acts on their word. */
+  decision?: { action: "accept" | "reject"; actor: "human" | "director_on_user_request"; requestId: string; at: string };
 }
 
 /** GET /api/projects/:projectId/director/proposals */
