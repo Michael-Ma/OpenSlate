@@ -69,11 +69,14 @@ test('V6 scripted video request offers an in-scope ready scene confirmation in c
   const f = fixture(t); await f.readyScene(); await f.readyScene('scene-1');
   const { result, turn, notes } = await f.run();
   assert.equal(result.status, 'completed');
-  assert.match(result.text, /confirm video in the chat or in Keyframes/);
-  assert.match(result.text, /No video has started/);
+  assert.match(result.text, /Confirm video in the chat or in Keyframes/);
+  assert.match(result.text, /video confirmation is ready/);
+  assert.doesNotMatch(result.text, /No video has started|did not|cannot|can\'t/i);
   assert.equal(notes.length, 1);
   assert.deepEqual(notes[0].anchor, { sceneId: 'scene-0' });
   assert.deepEqual(notes[0].choices, [{ kind: 'confirm_video', sceneId: 'scene-0' }, { kind: 'reply' }]);
+  assert.match(notes[0].text, /scene is ready.*Confirm in this chat or in Keyframes/);
+  assert.doesNotMatch(notes[0].text, /No video has started/);
   assert.equal(notes[0].state, 'open'); assert.equal(notes[0].blocking, false);
   const calls = f.store.list('tool_invocation', f.project.id).filter(call => call.requestId === turn.requestId);
   assert.deepEqual(calls.map(call => call.tool), ['read_context', 'record_notes']);
@@ -121,4 +124,13 @@ for (const text of ['ok', 'go ahead']) test(`ambiguous scripted chat reply ${JSO
   const { notes } = await f.run({ text });
   assert.ok(notes.every(note => note.choices.every(choice => choice.kind !== 'confirm_video')));
   assert.equal(f.store.list('scene_confirmation', f.project.id).length, 0);
+});
+
+test('unrecognized offline request leads with its saved message and concrete demo next steps', async t => {
+  const f = fixture(t);
+  const { result, notes } = await f.run({ scope: [f.project.id], text: 'Help me explore this film' });
+  assert.match(result.text, /^Your message is saved\..*Use Create a 2-shot demo/);
+  assert.match(result.text, /scripted demonstration.*Connect the Codex runtime for creative conversation/);
+  assert.doesNotMatch(result.text, /cannot interpret|can't|not seen|did not|No picture/i);
+  assert.deepEqual(notes, []);
 });

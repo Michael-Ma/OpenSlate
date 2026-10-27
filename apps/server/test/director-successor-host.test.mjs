@@ -115,8 +115,8 @@ test('contract-6 host guidance permits typed proposal decisions and requested ke
   const context = JSON.parse(input.context), guide = context.filmPlanning.procedure.join('\n');
   assert.match(guide, /fresh human editing conversation.*make_keyframes.*sceneIds or shotIds/);
   assert.match(guide, /regenerate: true requires explicit shotIds/);
-  assert.match(guide, /Report actual started keyframes, voice lines and price\/quote/);
-  assert.match(guide, /per-scene refusal codes/);
+  assert.match(guide, /Use app-reported started keyframes, voice lines and returned price\/quote/);
+  assert.match(guide, /scene refusal supplies the reason for that requested scene’s next step/);
   assert.match(guide, /Reviews, review replies, automatic, read-only and discuss-only turns cannot start paid work/);
   assert.match(guide, /Stop halts unsent work/);
   assert.match(guide, /audio attachment was sent with this fresh human editing request/);
@@ -128,7 +128,7 @@ test('contract-6 host guidance permits typed proposal decisions and requested ke
   assert.match(context.instructions, /call make_keyframes for exactly those scenes or shots/);
   assert.match(context.instructions, /record a scene-anchored note for each with a confirm_video choice/);
   assert.match(context.instructions, /For video, chat replies such as yes, ok or go ahead are not confirmation/);
-  assert.match(context.instructions, /Claim a start only after the application reports it/);
+  assert.match(context.instructions, /Treat a start as confirmed only after the application reports it/);
   assert.match(context.instructions, /prepare_recording_transcription may start priced owned transcription/);
   assert.doesNotMatch(context.instructions, /audio tools only prepare pending suggestions/);
   for (const text of [guide, context.instructions]) {
@@ -137,7 +137,7 @@ test('contract-6 host guidance permits typed proposal decisions and requested ke
     assert.match(text, /letter, subject, or a clear reference to the only held proposal/);
     assert.match(text, /If several are open.*ambiguous.*ask which one; never guess/);
     assert.match(text, /App-message, keyframe-review, automatic and read-only turns cannot make proposal decisions/);
-    assert.match(text, /continue.*requested work.*using the accepted prompts/);
+    assert.match(text, /continue.*requested work.*using the accepted prompts/i);
   }
   const historical = filmPlanningGuidance(f.service, f.project.id, f.human.requestId, '5.0.0', true).procedure.join('\n');
   assert.match(historical, /Only a human press may start paid speech or transcription/);

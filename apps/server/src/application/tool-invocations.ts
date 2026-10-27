@@ -248,7 +248,9 @@ export class ToolInvocationService {
             value = { state: "awaiting_human_generation", preparedId: null, applied: false, generationStarted: false,
               savedProject: { revisionId: saved.revisionId, headVersion: saved.headVersion, activePlanId: saved.activePlanId,
                 sceneCount: saved.scenes.length, shotCount: saved.shots.length },
-              next: "A human generation press is the expected next step. This call saved no writing or generation plan and returned no prepared-change ID; previously saved writing is retained. Save any remaining writing with a creative patch without source. For visual work, the person uses the scene action to create keyframes, then reviews the returned frames and actual video recipe before the video action. For audio, the person presses the existing audio request action. Do not call apply_change with this result or retry preparation to obtain authorization." };
+              next: selected.catalog.version === "6.0.0"
+                ? "Previously saved writing is retained. Save any remaining writing with a creative patch without source. For requested keyframes, use make_keyframes within the current human request's scope; for requested video, offer the scene's confirm_video choice after frame review. Only a returned prepared-change ID can be applied; preserve this result's state and use the existing generation actions."
+                : "A human generation press is the expected next step. This call saved no writing or generation plan and returned no prepared-change ID; previously saved writing is retained. Save any remaining writing with a creative patch without source. For visual work, the person uses the scene action to create keyframes, then reviews the returned frames and actual video recipe before the video action. For audio, the person presses the existing audio request action. Do not call apply_change with this result or retry preparation to obtain authorization." };
             break;
           }
           // Full source, next project and compiled graph stay in the durable proposal.

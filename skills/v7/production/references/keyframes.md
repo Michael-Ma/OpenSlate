@@ -12,7 +12,7 @@ Call exactly one of these forms, using existing IDs:
 {"shotIds":["requested-shot-id"]}
 ```
 
-Each list is nonempty, contains distinct IDs and has at most 400 entries. Never send both lists. A scene call starts its missing keyframes and needed voice lines as the scene's "Make keyframes" action does, with the same quote, holds, prerequisites and refusals. A shot call limits work to those shots and their needed voice lines. A refused scene does not prevent other eligible scenes from starting. Report the actual returned keyframe and voice-line work, its price/quote, and any per-scene refusal code; a request or quote alone does not establish that work started.
+Each list is nonempty, contains distinct IDs and has at most 400 entries. Never send both lists. A scene call starts its missing keyframes and needed voice lines as the scene's "Make keyframes" action does, with the same quote, holds, prerequisites and refusals. A shot call limits work to those shots and their needed voice lines. A refused scene does not prevent other eligible scenes from starting. Use the actual returned keyframe and voice-line work and its price/quote as evidence. Only the application's reported outcome establishes that work started.
 
 Only when the person's message explicitly asks for new keyframe takes of specific shots, use:
 

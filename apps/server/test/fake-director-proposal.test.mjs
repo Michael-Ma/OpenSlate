@@ -54,8 +54,9 @@ function fixture(t, { toolContract = '6.0.0' } = {}) {
     store.put('director_turn', seed.turn.id, project.id, { ...seed.turn, state: 'completed' });
     return { proposal, note };
   };
-  const run = async options => {
+  const run = async ({ demoCommand, ...options } = {}) => {
     const active = startTurn({ editing: true, ...options }), events = [];
+    if (demoCommand) store.insert('demo_command', active.human.requestId, project.id, demoCommand);
     const before = { accepted: provider.acceptedCount(), attempts: engine.attempts(project.id),
       candidates: store.list('candidate', project.id), grants: store.list('grant', project.id),
       confirmations: store.list('scene_confirmation', project.id), budget: engine.budget(project.id) };
@@ -88,7 +89,7 @@ test('V6 fake Director accepts a named proposal from the typed message, settles 
   assert.equal(f.store.get('director_note', note.noteId).state, 'open');
   const context = JSON.parse(input.context);
   assert.match(context.instructions, /accept_proposal or reject_proposal with \{proposalId\}/);
-  assert.match(context.instructions, /continue other requested work using the accepted prompts/);
+  assert.match(context.instructions, /continue other requested work using the accepted prompts/i);
   assert.match(context.instructions, /For video, chat replies.*not confirmation/);
 });
 
@@ -114,7 +115,7 @@ test('V6 fake Director accepts an unlinked proposal by exact ID', async t => {
 for (const options of [{ source: 'app' }, { editing: false }, { review: true }]) test(`V6 fake Director truthfully reports proposal refusal for ${JSON.stringify(options)}`, async t => {
   const f = fixture(t), { note } = await f.propose(), before = f.store.getProject(f.project.id);
   const { result, calls } = await f.run({ text: `accept proposal ${note.letter}`, ...options });
-  assert.match(result.text, /was not accepted \(PROPOSAL_DECISION_NOT_AUTHORIZED\); current state: held/);
+  assert.match(result.text, /current state: held \(PROPOSAL_DECISION_NOT_AUTHORIZED\)\. Open the current proposal notes/);
   assert.doesNotMatch(result.text, /^Accepted|Undo is available/);
   assert.deepEqual(calls.map(call => call.tool), ['read_context'], 'authorization refuses the decision before invocation dispatch');
   assert.deepEqual(f.store.getProject(f.project.id), before);
@@ -126,9 +127,20 @@ for (const settled of ['accepted', 'stale']) test(`V6 fake Director reports the 
   else editStoryboard(f.service, f.project.id, { kind: 'shot', id: 'shot-0', field: 'desiredFrames', value: '210',
     expectedHeadVersion: f.store.getProject(f.project.id).headVersion }, randomUUID());
   const before = f.store.getProject(f.project.id), { result, calls } = await f.run({ text: `accept proposal ${note.letter}` });
-  assert.match(result.text, new RegExp(`was not accepted \\(PROPOSAL_STALE\\); current state: ${settled}`));
+  assert.match(result.text, new RegExp(`current state: ${settled} \\(PROPOSAL_STALE\\)\\. Open the current proposal notes`));
   assert.doesNotMatch(result.text, /^Accepted|Undo is available/);
   assert.equal(calls.find(call => call.tool === 'accept_proposal').state, 'failed');
+  assert.deepEqual(f.store.getProject(f.project.id), before);
+});
+
+test('V6 fake Director points a missing proposal decision to current notes without inventing a preview or effect', async t => {
+  const f = fixture(t), before = f.store.getProject(f.project.id);
+  const { result, calls } = await f.run({ text: 'accept proposal missing' });
+  assert.match(result.text, /current state: unavailable \(NOT_FOUND\)\. Open the current proposal notes and choose the proposal to act on/);
+  assert.doesNotMatch(result.text, /^Accepted|Undo is available|current preview|was not accepted/);
+  assert.deepEqual(calls.map(call => call.tool), ['read_context', 'accept_proposal']);
+  assert.equal(calls[1].state, 'failed');
+  assert.equal(directorProposals(f.service, f.project.id).proposals.length, 0);
   assert.deepEqual(f.store.getProject(f.project.id), before);
 });
 
@@ -145,7 +157,7 @@ test('V6 fake Director preserves an unresolved acceptance receipt without retryi
   try { run = await f.run({ text: `accept proposal ${note.letter}` }); }
   finally { f.store.put = put; }
   assert.equal(lost, true);
-  assert.match(run.result.text, /decision receipt is unresolved; current state: accepted/);
+  assert.match(run.result.text, /waiting for the service's answer\. Check the saved decision receipts; current state: accepted/);
   assert.doesNotMatch(run.result.text, /was not accepted|^Accepted|Undo is available/);
   assert.deepEqual(run.calls.map(call => call.tool), ['read_context', 'accept_proposal']);
   assert.equal(run.calls[1].state, 'unresolved');
@@ -158,4 +170,29 @@ test('V5 fake Director preserves its historical path and never calls proposal-de
   assert.doesNotMatch(result.text, /^Accepted|Undo is available/);
   assert.ok(calls.every(call => !['accept_proposal', 'reject_proposal'].includes(call.tool)));
   assert.equal(directorProposals(f.service, f.project.id).proposals.find(row => row.proposalId === proposal.proposalId).state, 'held');
+});
+
+test('scripted framing proposal reports its saved proposal and one next decision', async t => {
+  const f = fixture(t), before = f.store.getProject(f.project.id);
+  const { result, calls } = await f.run({ demoCommand: { action: 'close_up', shotId: 'shot-0' } });
+  assert.match(result.text, /proposal is ready.*Review its Now\/After preview/);
+  assert.doesNotMatch(result.text, /no replacement|has not|did not|cannot|still need/i);
+  assert.deepEqual(calls.map(call => call.tool), ['read_context', 'propose_change', 'record_notes']);
+  assert.ok(calls.every(call => call.state === 'succeeded'));
+  assert.equal(directorProposals(f.service, f.project.id).proposals[0].state, 'held');
+  assert.deepEqual(f.store.getProject(f.project.id), before);
+  const note = f.service.snapshot(f.project.id).notes[0];
+  assert.match(note.text, /Review the Now\/After preview before accepting/);
+  assert.doesNotMatch(note.text, /no replacement|has not|did not|cannot/i);
+});
+
+test('scripted existing framing reports the current direction without a no-change disclaimer', async t => {
+  const f = fixture(t), before = f.store.getProject(f.project.id);
+  const { result, calls } = await f.run({ demoCommand: { action: 'wide', shotId: 'shot-0' } });
+  assert.match(result.text, /already has this scripted demo direction.*Keep the current direction or choose another edit/);
+  assert.doesNotMatch(result.text, /No change|no replacement|did not|cannot/i);
+  assert.deepEqual(calls.map(call => call.tool), ['read_context', 'record_notes']);
+  assert.equal(directorProposals(f.service, f.project.id).proposals.length, 0);
+  assert.deepEqual(f.store.getProject(f.project.id), before);
+  assert.doesNotMatch(f.service.snapshot(f.project.id).notes[0].text, /No change|no replacement|did not|cannot/i);
 });

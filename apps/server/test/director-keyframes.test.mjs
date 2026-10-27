@@ -214,6 +214,12 @@ test('keyframe authority cannot authorize a video plan declaration', async t => 
     variant: 'plan', expectedHeadVersion: project.headVersion, source: sourceFor(project),
   });
   assert.equal(outcome.state, 'awaiting_human_generation'); assert.equal(outcome.generationStarted, false);
+  assert.match(outcome.next, /Previously saved writing is retained/);
+  assert.match(outcome.next, /Save any remaining writing with a creative patch without source/);
+  assert.match(outcome.next, /make_keyframes within the current human request's scope/);
+  assert.match(outcome.next, /confirm_video choice after frame review/);
+  assert.match(outcome.next, /Only a returned prepared-change ID can be applied/);
+  assert.doesNotMatch(outcome.next, /This call saved no|No generation started|returned no prepared-change ID/);
   assert.equal(f.store.list('grant', f.project.id).length, grants);
   assert.equal(f.store.list('approval', f.project.id).length, 0);
   assert.equal(f.engine.attempts(f.project.id).filter(attempt => attempt.request.kind === 'video').length, 0);
@@ -252,6 +258,9 @@ test('an unknown submitted keyframe is never bought again with a new tool-call i
   const grants = f.store.list('grant', f.project.id).length, candidates = f.store.list('candidate', f.project.id).length;
   const result = await f.invoke({ shotIds: ['shot-1'], regenerate: true });
   assert.deepEqual(result.started, []); assert.equal(result.refused.length, 1);
+  assert.match(result.next, /Use the recovery steps for the requested scenes to choose the next action/);
+  assert.match(result.next, /Preserve unresolved work for reconciliation before any further submission/);
+  assert.doesNotMatch(result.next, /No generation started|Follow each refusal/);
   assert.ok(['ATTEMPT_EXISTS', 'SUBMISSION_UNKNOWN'].includes(result.refused[0].code));
   assert.equal(f.store.list('grant', f.project.id).length, grants); assert.equal(f.store.list('candidate', f.project.id).length, candidates);
   assert.equal(f.provider.acceptedCount(), 1);
