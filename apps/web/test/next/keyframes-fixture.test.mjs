@@ -5,6 +5,8 @@ import { FixturePort } from '../../src/next/fixtures/fixture-port.ts';
 import { lastFerryOverview, lastFerrySnapshot, lastFerryDirector, lastFerryNotes, lastFerryProposals, sceneId, shotId } from '../../src/next/fixtures/last-ferry.ts';
 import { confirmBody, keyframesBody, videoBody } from '../../src/next/model/commands.ts';
 import { StudioStore } from '../../src/next/store/store.ts';
+import { fixtureMessage, FIXTURE_REPLY_MS } from '../../src/next/fixtures/fixture-director.ts';
+import { noteViews } from '../../src/next/model/notes.ts';
 
 /** A fixture world with a manual clock, so simulated provider time runs on demand. */
 function world() {
@@ -425,4 +427,40 @@ test('the store and the fixture agree on the whole Scene 2 path', async (t) => {
     store.stop();
     port.close();
   }
+});
+
+test('the scripted Director accepts proposal b on the person\'s typed word, as a banner accept with their message as authority', () => {
+  const w = world();
+  const note = (w.snapshot.notes ?? []).find(n => n.choices.some(c => c.kind === 'proposal' && c.proposalId === 'p1'));
+  assert.ok(note, 'golden note carries p1');
+  fixtureMessage(w, { text: `接受提案 ${note.letter}` });
+  w.advance(FIXTURE_REPLY_MS);
+  const proposal = w.proposals.find(p => p.proposalId === 'p1');
+  assert.equal(proposal.state, 'accepted');
+  assert.equal(proposal.decision.actor, 'director_on_user_request');
+  assert.equal(proposal.decision.requestId, w.snapshot.conversation.at(-2).requestId);
+  assert.equal(shot(w, '2.3').durationFrames, Number(proposal.preview.changes[0].after));
+  const settled = w.snapshot.notes.find(n => n.noteId === note.noteId);
+  assert.equal(settled.state, 'resolved');
+  const view = noteViews(w.snapshot.notes, w.overview, w.proposals).find(v => v.noteId === note.noteId);
+  assert.equal(view.acceptedFromMessage, 'p1');
+  assert.equal(view.settled.id, 'note.settled.applied_from_message');
+  assert.match(w.snapshot.conversation.at(-1).text, /^Accepted proposal b as you asked/);
+  // First wins: a banner press afterwards is refused, and Undo restores as for a human accept.
+  assert.throws(() => acceptP1(w), refused('PROPOSAL_STALE'));
+  post(w, '/director/proposals/p1/undo');
+  assert.equal(w.proposals.find(p => p.proposalId === 'p1').state, 'undone');
+  assert.equal(noteViews(w.snapshot.notes, w.overview, w.proposals).find(v => v.noteId === note.noteId).acceptedFromMessage, null);
+});
+
+test('a banner accept records the person as decider; a typed accept of a settled proposal changes nothing', () => {
+  const w = world();
+  acceptP1(w);
+  assert.equal(w.proposals.find(p => p.proposalId === 'p1').decision.actor, 'human');
+  const letter = w.snapshot.notes.find(n => n.choices.some(c => c.kind === 'proposal')).letter;
+  const before = w.overview.revision;
+  fixtureMessage(w, { text: `accept proposal ${letter}` });
+  w.advance(FIXTURE_REPLY_MS);
+  assert.equal(w.overview.revision, before);
+  assert.match(w.snapshot.conversation.at(-1).text, /no longer open, so I didn't change anything/);
 });

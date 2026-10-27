@@ -816,6 +816,23 @@ function narrationFit(world: FixtureWorld, shotId: string, body: NarrationFitInp
 // ---- Director notes and proposals (phase P4: DC-2, DC-4, DC-10) ----------------------------------
 
 /**
+ * The scripted Director's accept_proposal on the person's typed word ("accept proposal c"): the banner's accept with
+ * the current preview, recorded as the Director acting on that message. A letter must name exactly one proposal.
+ */
+export function fixtureAcceptOnWord(world: FixtureWorld, letter: string, requestId: string): { ok: true; proposal: DirectorProposal } | { ok: false; code: string } {
+  const ids = new Set((world.snapshot.notes ?? []).filter((note) => note.letter.toLowerCase() === letter.toLowerCase())
+    .flatMap((note) => note.choices.flatMap((choice) => (choice.kind === "proposal" ? [choice.proposalId] : []))));
+  if (ids.size !== 1) return { ok: false, code: ids.size ? "PROPOSAL_AMBIGUOUS" : "NOT_FOUND" };
+  const proposal = world.proposals.find((p) => ids.has(p.proposalId));
+  if (!proposal) return { ok: false, code: "NOT_FOUND" };
+  try {
+    return { ok: true, proposal: proposalAction(world, proposal.proposalId, "accept", { previewDigest: proposal.previewDigest }, { actor: "director_on_user_request", requestId }).proposal };
+  } catch (error) {
+    return { ok: false, code: error instanceof ApiError ? error.code : "PROPOSAL_STALE" };
+  }
+}
+
+/**
  * Whichever happens first settles a note (card N1): a press that carries out an open note's choice (the scene's
  * confirm, a regenerate) settles that note too, wherever it was pressed, naming the press. Resolving it again is
  * then refused as already settled (NOTE_ALREADY_SETTLED).
@@ -875,7 +892,8 @@ function resolveNote(world: FixtureWorld, noteId: string, body: ResolveNoteInput
  * Accept a held proposal exactly as previewed: apply it and, atomically, resolve the note choice that carries it.
  * Reject sets it aside (its note stays open). Undo reverts the fields still at the accepted value and reopens the note.
  */
-function proposalAction(world: FixtureWorld, proposalId: string, action: "accept" | "reject" | "undo", body: AcceptProposalInput | undefined): ProposalReceipt {
+function proposalAction(world: FixtureWorld, proposalId: string, action: "accept" | "reject" | "undo", body: AcceptProposalInput | undefined,
+  by: Pick<NonNullable<DirectorProposal["decision"]>, "actor" | "requestId"> = { actor: "human", requestId: "fixture-press" }): ProposalReceipt {
   const proposal = world.proposals.find((p) => p.proposalId === proposalId);
   if (!proposal) throw new ApiError("NOT_FOUND", 404);
   const state = extra(world);
@@ -884,8 +902,9 @@ function proposalAction(world: FixtureWorld, proposalId: string, action: "accept
   if (action === "accept" && body?.previewDigest !== proposal.previewDigest) throw new ApiError("PROPOSAL_PREVIEW_CHANGED", 409);
   const setState = (next: DirectorProposal["state"], extraFields: Partial<DirectorProposal> = {}) =>
     world.proposals.map((p) => (p.proposalId === proposalId ? { ...p, ...extraFields, state: next } : p));
+  const decision = (decided: "accept" | "reject") => ({ decision: { action: decided, ...by, at: now() } });
   if (action === "reject") {
-    world.update((w) => { w.proposals = setState("rejected"); });
+    world.update((w) => { w.proposals = setState("rejected", decision("reject")); });
     return { proposal: world.proposals.find((p) => p.proposalId === proposalId)! };
   }
   const change = proposal.preview.changes.find((c) => c.field === "desiredFrames" && c.shotId);
@@ -898,7 +917,7 @@ function proposalAction(world: FixtureWorld, proposalId: string, action: "accept
     state.undo = null;
     const accepted = { at: now(), touchedFields: [{ shotId: shot.shotId, field: "desiredFrames" }] };
     commit(world, (overview, snapshot) => {
-      world.proposals = setState("accepted", { accepted });
+      world.proposals = setState("accepted", { accepted, ...decision("accept") });
       const notes = (snapshot.notes ?? []).map((note) => {
         const index = note.choices.findIndex((c) => c.kind === "proposal" && c.proposalId === proposalId);
         if (index < 0 || note.state === "resolved") return note;

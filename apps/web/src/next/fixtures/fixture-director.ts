@@ -1,7 +1,7 @@
 import type { DirectorNote, ShotOverview } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import type { ConversationEntry, DirectorStatus, TurnView } from "../model/types.ts";
-import { FIXTURE_TIMING, fixtureDirectorKeyframes, recompute } from "./fixture-commands.ts";
+import { FIXTURE_TIMING, fixtureAcceptOnWord, fixtureDirectorKeyframes, recompute } from "./fixture-commands.ts";
 import type { MessageAttachmentView } from "@openslate/core/public";
 import { fixtureAsset } from "./routes/assets.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
@@ -26,6 +26,9 @@ interface MessageBody {
 
 /** Asking for keyframes ("make the keyframes", "生成关键帧"): the scripted Director starts them. */
 const ASKS_FOR_KEYFRAMES = /(make|generate|create|start)\b[^.?!]*\bkeyframes?\b|keyframes?\b[^.?!]*\b(please|now)|(生成|做|出)[^。？！]*关键帧/i;
+
+/** Accepting a proposal by its letter ("accept proposal c", "接受提案 c"): the scripted Director accepts it on that word. */
+const ACCEPTS_PROPOSAL = /\b(?:accept|approve)\s+proposal\s+([a-z])\b|(?:接受|批准|采用)\s*提案\s*([a-z])(?![a-z])/i;
 
 /** Asking for video ("make the video for Scene 2", "生成视频"): the scripted Director asks for the scene's confirm in the chat. */
 const ASKS_FOR_VIDEO = /(make|generate|create|start)\b[^.?!]*\b(video|clips?)\b|(生成|做|出)[^。？！]*视频/i;
@@ -83,6 +86,15 @@ function scopeName(world: FixtureWorld, id: string): string | null {
   const scene = world.overview.scenes.find((s) => s.sceneId === id);
   if (scene) return `Scene ${scene.ordinal}`;
   return world.overview.shots[id]?.label ?? null;
+}
+
+function acceptedReply(named: RegExpMatchArray | null, outcome: ReturnType<typeof fixtureAcceptOnWord> | null): string {
+  if (!named || !outcome) return "";
+  const letter = (named[1] ?? named[2])!.toLowerCase();
+  if (outcome.ok) return `Accepted proposal ${letter} as you asked. You can undo it under the note. `;
+  return outcome.code === "PROPOSAL_AMBIGUOUS" ? `More than one proposal is lettered ${letter}; which one do you mean? `
+    : outcome.code === "NOT_FOUND" ? `I can't find a proposal ${letter}. `
+    : `Proposal ${letter} is no longer open, so I didn't change anything. `;
 }
 
 /** Sample film content, like the fixture conversation: it stays English in both interface languages. */
@@ -151,14 +163,17 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
   world.later(FIXTURE_REPLY_MS, (w) => {
     const left = Math.max(0, (turns.get(w) ?? 1) - 1);
     turns.set(w, left);
+    // Accepted a proposal by its letter: done first, as the person asked, then anything else in the same message.
+    const named = !questionId ? text.match(ACCEPTS_PROPOSAL) : null;
+    const accepted = named ? fixtureAcceptOnWord(w, (named[1] ?? named[2])!, requestId) : null;
     // Asked for keyframes: the scripted Director starts them as the person's press would, and says what and the price.
     const started = !questionId && ASKS_FOR_KEYFRAMES.test(text) ? fixtureDirectorKeyframes(w) : null;
     const asks = !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
     const askNames = asks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
-    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: scriptedReply(names, !!questionId, pictures, attachments.length, !!started, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
+    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + scriptedReply(names, !!questionId, pictures, attachments.length, !!started, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
     const at = new Date().toISOString();
-    const turn: TurnView | null = started || asks.length ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
-      effects: { notesCreated: asks.length, proposalsHeld: 0, changesApplied: 0, ...(started ? { generation: [{ kind: "keyframes" as const, ...started, at }] } : {}) } } : null;
+    const turn: TurnView | null = started || asks.length || accepted?.ok ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
+      effects: { notesCreated: asks.length, proposalsHeld: 0, changesApplied: accepted?.ok ? 1 : 0, ...(started ? { generation: [{ kind: "keyframes" as const, ...started, at }] } : {}) } } : null;
     w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), reply], ...(turn ? { turns: [...(w.snapshot.turns ?? []), turn] } : {}), ...(asks.length ? { notes: [...(w.snapshot.notes ?? []), ...asks] } : {}) };
     if (left === 0) {
       w.director = { ...w.director, status: "idle", activeRequestId: null };

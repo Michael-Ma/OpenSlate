@@ -69,7 +69,8 @@ export function NoteCards({ notes }: { notes: ThreadNote[] }) {
             })()}
             {view.settled && <span className="handled">{tone === "done" ? "✓ " : ""}{tm(view.settled)}</span>}
             {(() => {
-              const proposalId = undoable[view.noteId];
+              // Undo for a change accepted here, or one the Director accepted on the person's typed word.
+              const proposalId = undoable[view.noteId] ?? view.acceptedFromMessage;
               const accepted = proposalId && view.state === "resolved" && proposals.find((p) => p.proposalId === proposalId)?.state === "accepted";
               return accepted ? (
                 <div className="row">

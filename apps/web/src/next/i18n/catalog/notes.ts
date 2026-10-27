@@ -45,6 +45,7 @@ export const notes = {
   "note.settled.regenerating": { en: "Regenerating {shots}…", zh: "正在重新生成 {shots}…" },
   "note.settled.edited": { en: "Settled: {shot} edited", zh: "已处理：{shot} 已修改" },
   "note.settled.applied": { en: "Settled: change applied", zh: "已处理：已采用修改" },
+  "note.settled.applied_from_message": { en: "Settled: change applied from your message", zh: "已处理：已按你的消息采用修改" },
   "note.settled.replied": { en: "Settled: you replied", zh: "已处理：你已回复" },
   "note.settled.video_confirmed": { en: "Settled: Scene {scene} video confirmed", zh: "已处理：第 {scene} 场视频已确认" },
   "note.settled.stale": { en: "Out of date: the film changed after this note.", zh: "已过期：写这条备注后，影片有了改动。" },

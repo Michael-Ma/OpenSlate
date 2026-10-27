@@ -47,6 +47,8 @@ export interface NoteView {
    * and without a check, until the new take arrives.
    */
   making: boolean;
+  /** The proposal the Director accepted on the person's typed word; the chat offers its Undo under the note. */
+  acceptedFromMessage: string | null;
 }
 
 const labels = (overview: GenerationOverview, shotIds: readonly string[]) => shotIds.map((id) => overview.shots[id]?.label ?? "?").join(", ");
@@ -100,13 +102,19 @@ export function regenerationSummary(overview: GenerationOverview, shotIds: reado
   return msg(state === "making" ? "note.settled.regenerating" : state === "complete" ? "note.settled.regenerated" : "note.settled.waiting", { shots: names });
 }
 
-function settledMsg(choice: NoteChoice, overview: GenerationOverview): Msg {
+function fromMessage(choice: NoteChoice | undefined, proposals: readonly DirectorProposal[]): DirectorProposal | undefined {
+  if (choice?.kind !== "proposal") return undefined;
+  const proposal = proposals.find((p) => p.proposalId === choice.proposalId);
+  return proposal?.state === "accepted" && proposal.decision?.action === "accept" && proposal.decision.actor === "director_on_user_request" ? proposal : undefined;
+}
+
+function settledMsg(choice: NoteChoice, overview: GenerationOverview, proposals: readonly DirectorProposal[]): Msg {
   switch (choice.kind) {
     case "confirm_video": return msg("note.settled.video_confirmed", { scene: ordinalOf(overview, choice.sceneId) });
     case "accept": return msg("note.settled.accepted", { choice: choice.label });
     case "regenerate_keyframe": return regenerationSummary(overview, choice.shotIds);
     case "edit_field": return msg("note.settled.edited", { shot: labels(overview, [choice.shotId]) });
-    case "proposal": return msg("note.settled.applied");
+    case "proposal": return msg(fromMessage(choice, proposals) ? "note.settled.applied_from_message" : "note.settled.applied");
     case "reply": return msg("note.settled.replied");
   }
 }
@@ -165,9 +173,10 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
         chosen: note.resolution?.choiceIndex === index,
         paid: choice.kind === "regenerate_keyframe" || choice.kind === "confirm_video",
       })),
-      settled: note.state === "stale" ? staleMsg(note, overview, where) : resolvedChoice ? settledMsg(resolvedChoice, overview) : null,
+      settled: note.state === "stale" ? staleMsg(note, overview, where) : resolvedChoice ? settledMsg(resolvedChoice, overview, proposals) : null,
       regeneration,
       making: regeneration === "making",
+      acceptedFromMessage: fromMessage(resolvedChoice, proposals)?.proposalId ?? null,
     };
   });
 }
