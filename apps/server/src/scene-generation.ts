@@ -1,4 +1,5 @@
 import { assertDirectorGenerationAuthority } from "./application/director-generation-authority.js";
+import { assertGenerationJobsResolved } from "./application/generation-blockers.js";
 import { recordDirectorGenerationEffect } from "./application/director-generation-effects.js";
 import { isKeyframeReview } from "./application/keyframe-review.js";
 import { requiredCommandKey } from "./application/command-key.js";
@@ -7,6 +8,7 @@ import type { FastifyInstance } from "fastify";
 import { requestScopesIntersect } from "./application/request-scopes.js";
 import { assertExpectedHumanRequest, currentHumanRequestId } from "./application/expected-human-request.js";
 import { sceneNarrationView } from "./scene-narration-view.js";
+import { scenePlanCompositionProject } from "./scene-plan-context.js";
 import type { NarrationService } from "./narration/service.js";
 import {
   canonical,
@@ -19,6 +21,7 @@ import {
 } from "@openslate/core";
 import type {
   CompiledPlan,
+  ProjectRecord,
   ProviderProfile,
   SceneOperation,
 } from "@openslate/core";
@@ -357,22 +360,13 @@ export async function generateScene(production: ProductionService, projectId: st
       "WAITING_USER",
       "Finish the current conversation before starting this scene",
     );
-    invariant(
-      !now.rows
-        .filter(
-          (row) =>
-            !input.targetShotIds ||
-            input.targetShotIds.includes(row.shotId),
-        )
-        .some(
-          (r) =>
-            r.blockedCode === "SUBMISSION_UNKNOWN" ||
-            r.imagePending ||
-            r.videoPending,
-        ),
-      "ATTEMPT_EXISTS",
-      "Follow the existing scene jobs before starting more work",
-    );
+    const pendingRows = now.rows.filter(row =>
+      (!input.targetShotIds || input.targetShotIds.includes(row.shotId)) &&
+      (row.blockedCode === "SUBMISSION_UNKNOWN" || row.imagePending || row.videoPending));
+    if (pendingRows.length) {
+      assertGenerationJobsResolved(production, projectId, pendingRows.map(row => row.shotId));
+      throw new DomainError("ATTEMPT_EXISTS", "Follow the existing scene jobs before starting more work");
+    }
     return current;
   };
   fresh();
@@ -392,28 +386,7 @@ export async function generateScene(production: ProductionService, projectId: st
     "This scene already has the requested media",
   );
   const assertNoDetachedJobs = () => {
-    const nodeIds = new Set(
-      store
-        .list<NodeBinding>("node_binding", projectId)
-        .filter(
-          (binding) =>
-            selected.some((row) => row.shotId === binding.node.shotId) &&
-            ["image", "video"].includes(binding.node.kind),
-        )
-        .map((binding) => binding.id),
-    );
-    invariant(
-      !production.engine
-        .attempts(projectId)
-        .some(
-          (attempt) =>
-            !attempt.released &&
-            nodeIds.has(attempt.nodeId) &&
-            !["succeeded", "failed"].includes(attempt.phase),
-        ),
-      "ATTEMPT_EXISTS",
-      "Resolve this shot's existing jobs before creating another keyframe",
-    );
+    assertGenerationJobsResolved(production, projectId, selected.map(row => row.shotId));
   };
   assertNoDetachedJobs();
   if (input.kind === "video") {
@@ -499,7 +472,7 @@ export async function generateScene(production: ProductionService, projectId: st
   for (let pass = 0; pass < limit; pass++) {
     const aliases = currentAliases(), aliasDigest = digest(aliases);
     const compiled = await composeScenePlanIsolated(base.plan, operations, {
-      project: base.project,
+      project: scenePlanCompositionProject(base.project, base.plan, operations, () => store.list<{ project: ProjectRecord }>('project_revision', projectId)),
       profiles: base.lock.profiles,
       logicalIds: aliases,
       allocateId: newId,
