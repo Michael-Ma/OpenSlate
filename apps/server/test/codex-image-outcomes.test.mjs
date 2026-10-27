@@ -90,7 +90,8 @@ test('no saved native outcome remains unknown and reserves capacity without blin
   const original = f.attempt();
   for (let cycle = 0; cycle < 3; cycle++) {
     const attempt = f.attempt();
-    f.store.put('attempt', attempt.id, attempt.projectId, { ...attempt, leaseExpiresAt: 0 });
+    const { unknownWait: _wait, ...due } = attempt; // time passes beyond the unchanged-unknown backoff
+    f.store.put('attempt', attempt.id, attempt.projectId, { ...due, leaseExpiresAt: 0 });
     await f.engine.reconcile();
     await f.engine.runReady();
   }
