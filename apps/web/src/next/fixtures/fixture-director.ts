@@ -1,4 +1,4 @@
-import type { ShotOverview } from "@openslate/core/public";
+import type { DirectorNote, ShotOverview } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import type { ConversationEntry, DirectorStatus, TurnView } from "../model/types.ts";
 import { FIXTURE_TIMING, fixtureDirectorKeyframes, recompute } from "./fixture-commands.ts";
@@ -27,6 +27,38 @@ interface MessageBody {
 /** Asking for keyframes ("make the keyframes", "生成关键帧"): the scripted Director starts them. */
 const ASKS_FOR_KEYFRAMES = /(make|generate|create|start)\b[^.?!]*\bkeyframes?\b|keyframes?\b[^.?!]*\b(please|now)|(生成|做|出)[^。？！]*关键帧/i;
 
+/** Asking for video ("make the video for Scene 2", "生成视频"): the scripted Director asks for the scene's confirm in the chat. */
+const ASKS_FOR_VIDEO = /(make|generate|create|start)\b[^.?!]*\b(video|clips?)\b|(生成|做|出)[^。？！]*视频/i;
+
+/** "a", …, "z", "aa": the next letter after every note in the film, so a new note never repeats one shown nearby. */
+function nextLetter(notes: readonly DirectorNote[], offset: number): string {
+  let n = notes.length + offset;
+  let letter = "";
+  do { letter = String.fromCharCode(97 + (n % 26)) + letter; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return letter;
+}
+
+/**
+ * The scripted Director asking for video (card N1): for each scene with frames waiting for video (within what the
+ * message pointed at), a note with that scene's "Confirm frames & generate video" choice and a reply choice. It
+ * starts nothing; the person confirms in the chat or in Keyframes, and the first press settles the note.
+ */
+function fixtureVideoAsks(world: FixtureWorld, requestId: string, scope: readonly string[]): DirectorNote[] {
+  const notes = world.snapshot.notes ?? [];
+  const inScope = (sceneId: string, shotIds: readonly string[]) => !scope.length || scope.includes(sceneId) || shotIds.some((id) => scope.includes(id));
+  const at = new Date().toISOString();
+  return world.overview.scenes
+    .filter((scene) => scene.videoTargets.length > 0 && !!scene.confirmationDigest && inScope(scene.sceneId, scene.shotIds))
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .map((scene, index) => ({
+      noteId: `${requestId}-note-${index + 1}`, requestId, turnId: `${requestId}-turn`, letter: nextLetter(notes, index),
+      anchor: { sceneId: scene.sceneId }, kind: "recommendation", blocking: false,
+      text: `Scene ${scene.ordinal} is ready for video once its frames are opened.`,
+      choices: [{ kind: "confirm_video", sceneId: scene.sceneId }, { kind: "reply" }],
+      state: "open", version: 1, createdAt: at,
+    }));
+}
+
 /**
  * The server's checks on message attachments: one to eight distinct owned files saved in this film's Assets (the
  * sample's own and those imported in this tab). Each is listed on the message by name and kind.
@@ -54,8 +86,9 @@ function scopeName(world: FixtureWorld, id: string): string | null {
 }
 
 /** Sample film content, like the fixture conversation: it stays English in both interface languages. */
-function scriptedReply(names: string[], answer: boolean, pictures: number, files = 0, started = false): string {
+function scriptedReply(names: string[], answer: boolean, pictures: number, files = 0, started = false, videoAsks: string[] = []): string {
   if (answer) return "Thanks, noted. I would carry that into the next keyframes.";
+  if (videoAsks.length) return `${videoAsks.join(" and ")} ${videoAsks.length === 1 ? "is" : "are"} ready for video. Confirm below, or in Keyframes.`;
   const pointed = names.length ? ` for ${names.join(", ")}` : "";
   const looked = pictures ? ` I looked at ${pictures === 1 ? "the picture" : `the ${pictures} pictures`} you showed me.` : "";
   const read = files ? ` I went through ${files === 1 ? "the file" : `the ${files} files`} you sent.` : "";
@@ -120,11 +153,13 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
     turns.set(w, left);
     // Asked for keyframes: the scripted Director starts them as the person's press would, and says what and the price.
     const started = !questionId && ASKS_FOR_KEYFRAMES.test(text) ? fixtureDirectorKeyframes(w) : null;
-    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: scriptedReply(names, !!questionId, pictures, attachments.length, !!started), requestId, at: new Date().toISOString(), runtime: "scripted" };
+    const asks = !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
+    const askNames = asks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
+    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: scriptedReply(names, !!questionId, pictures, attachments.length, !!started, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
     const at = new Date().toISOString();
-    const turn: TurnView | null = started ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
-      effects: { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [{ kind: "keyframes", ...started, at }] } } : null;
-    w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), reply], ...(turn ? { turns: [...(w.snapshot.turns ?? []), turn] } : {}) };
+    const turn: TurnView | null = started || asks.length ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
+      effects: { notesCreated: asks.length, proposalsHeld: 0, changesApplied: 0, ...(started ? { generation: [{ kind: "keyframes" as const, ...started, at }] } : {}) } } : null;
+    w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), reply], ...(turn ? { turns: [...(w.snapshot.turns ?? []), turn] } : {}), ...(asks.length ? { notes: [...(w.snapshot.notes ?? []), ...asks] } : {}) };
     if (left === 0) {
       w.director = { ...w.director, status: "idle", activeRequestId: null };
       w.overview = { ...w.overview, director: { state: "idle", scopeIds: [] } };

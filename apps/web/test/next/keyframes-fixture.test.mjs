@@ -308,24 +308,30 @@ test('a held proposal goes stale while its shot differs and is held again when i
   assert.deepEqual([proposal(w, 'p1').state, note(w, 'note-b').state], ['rejected', 'open']);
 });
 
-test('a regenerate choice names the press that carried it out', () => {
+test('a regenerate press settles the note whose choice it carries out, wherever it was pressed (first wins)', () => {
   const w = world();
   assert.throws(() => resolve(w, 'note-a', 1, 'request-unknown'), refused('NOTE_RESULT_INVALID'));
   const receipt = post(w, `/scenes/${sceneId(2)}/generate`, { ...keyframesBody(read(w, sceneId(2)), [shotId('2.2')], true), expectedEstimateMicros: '40000' });
   assert.ok(receipt.requestId);
   assert.deepEqual(receipt.shotIds, [shotId('2.2')]);
-  assert.equal(resolve(w, 'note-a', 1, receipt.requestId).state, 'resolved');
+  assert.deepEqual([note(w, 'note-a').state, note(w, 'note-a').resolution.choiceIndex, note(w, 'note-a').resolution.resultRef, note(w, 'note-a').resolution.elsewhere],
+    ['resolved', 1, receipt.requestId, true]);
+  assert.throws(() => resolve(w, 'note-a', 1, receipt.requestId), refused('REVISION_CONFLICT'), 'the second place to press finds it settled');
   w.advance(FIXTURE_TIMING.keyframeMs);
   assert.equal(note(w, 'note-a').state, 'resolved', 'a settled note does not go stale when its new take lands');
 });
 
-test('a note whose seen keyframe is replaced some other way goes stale and leaves the banner', () => {
+test('a video confirm settles the note that asked for it, from the chat or from Keyframes', () => {
   const w = world();
-  post(w, `/scenes/${sceneId(2)}/generate`, { ...keyframesBody(read(w, sceneId(2)), [shotId('2.2')], true), expectedEstimateMicros: '40000' });
-  assert.equal(note(w, 'note-a').state, 'open', 'still open while the new take is being made');
-  w.advance(FIXTURE_TIMING.keyframeMs);
-  assert.equal(note(w, 'note-a').state, 'stale');
-  assert.throws(() => resolve(w, 'note-a', 0), refused('NOTE_STALE'));
+  w.update((x) => { x.snapshot = { ...x.snapshot, notes: [...x.snapshot.notes, { ...x.snapshot.notes[0], noteId: 'note-v', letter: 'c', anchor: { sceneId: sceneId(2) }, kind: 'recommendation', seenKeyframe: undefined, choices: [{ kind: 'confirm_video', sceneId: sceneId(2) }, { kind: 'reply' }] }] }; });
+  assert.throws(() => resolve(w, 'note-v', 0, 'confirmation-unknown'), refused('NOTE_RESULT_INVALID'));
+  open(w, '2.2'); open(w, '2.3');
+  acceptP1(w);
+  const view = post(w, `/scenes/${sceneId(2)}/confirm`, confirmBody(w.overview, scene(w, 2)));
+  assert.ok(view.confirmationId);
+  assert.deepEqual([note(w, 'note-v').state, note(w, 'note-v').resolution.choiceIndex, note(w, 'note-v').resolution.resultRef, note(w, 'note-v').resolution.elsewhere],
+    ['resolved', 0, view.confirmationId, true]);
+  assert.throws(() => resolve(w, 'note-v', 0, view.confirmationId), refused('REVISION_CONFLICT'));
 });
 
 test('an edit choice names the edit that carried it out, and undoing that edit reopens the note', () => {

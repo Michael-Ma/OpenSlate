@@ -13,6 +13,8 @@ export type NoteAction =
   /** Opens the inline editor; the note resolves with the edit's command id once it is saved. */
   | { kind: "edit"; noteId: string; choiceIndex: number; shotId: string; field: "narration" | "imagePrompt" | "motion" }
   | { kind: "proposal"; noteId: string; choiceIndex: number; proposalId: string }
+  /** The scene's "Confirm frames & generate video", pressed from the note; it resolves with the confirmation. */
+  | { kind: "confirm_video"; noteId: string; choiceIndex: number; sceneId: string }
   /** Points the composer at the note's anchor so the person can answer in words. */
   | { kind: "reply"; noteId: string; choiceIndex: number };
 
@@ -48,6 +50,7 @@ export interface NoteView {
 }
 
 const labels = (overview: GenerationOverview, shotIds: readonly string[]) => shotIds.map((id) => overview.shots[id]?.label ?? "?").join(", ");
+const ordinalOf = (overview: GenerationOverview, sceneId: string) => overview.scenes.find((s) => s.sceneId === sceneId)?.ordinal ?? "?";
 
 function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals: readonly DirectorProposal[]): Msg | { text: string } {
   switch (choice.kind) {
@@ -55,6 +58,7 @@ function choiceLabel(choice: NoteChoice, overview: GenerationOverview, proposals
     case "regenerate_keyframe": return msg("note.choice.regenerate", { shots: labels(overview, choice.shotIds) });
     case "edit_field": return msg(`note.choice.edit.${choice.field}`, { shot: labels(overview, [choice.shotId]) });
     case "reply": return msg("note.choice.reply");
+    case "confirm_video": return msg("note.choice.confirm_video", { scene: ordinalOf(overview, choice.sceneId) });
     case "proposal": {
       const proposal = proposals.find((p) => p.proposalId === choice.proposalId);
       const changes = proposal?.preview.changes ?? [];
@@ -98,6 +102,7 @@ export function regenerationSummary(overview: GenerationOverview, shotIds: reado
 
 function settledMsg(choice: NoteChoice, overview: GenerationOverview): Msg {
   switch (choice.kind) {
+    case "confirm_video": return msg("note.settled.video_confirmed", { scene: ordinalOf(overview, choice.sceneId) });
     case "accept": return msg("note.settled.accepted", { choice: choice.label });
     case "regenerate_keyframe": return regenerationSummary(overview, choice.shotIds);
     case "edit_field": return msg("note.settled.edited", { shot: labels(overview, [choice.shotId]) });
@@ -113,6 +118,7 @@ function action(note: DirectorNote, choice: NoteChoice, choiceIndex: number): No
     case "regenerate_keyframe": return { kind: "regenerate", ...base, shotIds: choice.shotIds };
     case "edit_field": return { kind: "edit", ...base, shotId: choice.shotId, field: choice.field };
     case "proposal": return { kind: "proposal", ...base, proposalId: choice.proposalId };
+    case "confirm_video": return { kind: "confirm_video", ...base, sceneId: choice.sceneId };
     case "reply": return { kind: "reply", ...base };
   }
 }
@@ -157,7 +163,7 @@ export function noteViews(notes: readonly DirectorNote[], overview: GenerationOv
         label: choiceLabel(choice, overview, proposals),
         action: action(note, choice, index),
         chosen: note.resolution?.choiceIndex === index,
-        paid: choice.kind === "regenerate_keyframe",
+        paid: choice.kind === "regenerate_keyframe" || choice.kind === "confirm_video",
       })),
       settled: note.state === "stale" ? staleMsg(note, overview, where) : resolvedChoice ? settledMsg(resolvedChoice, overview) : null,
       regeneration,

@@ -12,6 +12,7 @@ import type {
   MediaSlot,
   NarrationFitInput,
   NarrationFitReceipt,
+  NoteChoice,
   PriceQuote,
   ProposalReceipt,
   ReleaseAttemptInput,
@@ -406,6 +407,7 @@ function generateKeyframes(world: FixtureWorld, scene: SceneOverview, body: Gene
   if (voices.length) startVoices(world, scene, [], voices, "keyframes");
   const requestId = nextId(world, "request");
   extra(world).requests[requestId] = { regenerate: !!body.regenerate, shotIds: targets };
+  if (body.regenerate) settleNotesElsewhere(world, (choice) => choice.kind === "regenerate_keyframe" && choice.shotIds.every((id) => targets.includes(id)), requestId);
   return { accepted: true, requestId, sceneId: scene.sceneId, kind: "image", shotIds: targets, targetShotIds: targets };
 }
 
@@ -466,11 +468,10 @@ function confirmScene(world: FixtureWorld, sceneId: string, body: ConfirmSceneIn
   // Lines with words but no voice yet are voiced first, one shot at a time: make, save, fit (speech, attach, accept).
   const voices = targets.filter((id) => needsVoice(world.overview.shots[id]!, world.snapshot.project.shots));
   if (body.expectedEstimateMicros !== undefined && body.expectedEstimateMicros !== generationQuote(0, voices.length, targets.length).micros) throw new ApiError("ESTIMATE_CHANGED", 409);
-  if (!voices.length) {
-    const confirmationId = startClips(world, scene, targets);
-    return { confirmationId, state: "running", currentShotId: targets[0]!, currentStep: "video" };
-  }
-  return startVoices(world, scene, targets, voices);
+  const view: SceneConfirmationView = voices.length ? startVoices(world, scene, targets, voices)
+    : { confirmationId: startClips(world, scene, targets), state: "running", currentShotId: targets[0]!, currentStep: "video" };
+  settleNotesElsewhere(world, (choice) => choice.kind === "confirm_video" && choice.sceneId === sceneId, view.confirmationId);
+  return view;
 }
 
 /** One confirm's voice steps: its clips, the lines to voice first, and the frames it was confirmed with. */
@@ -815,6 +816,19 @@ function narrationFit(world: FixtureWorld, shotId: string, body: NarrationFitInp
 // ---- Director notes and proposals (phase P4: DC-2, DC-4, DC-10) ----------------------------------
 
 /**
+ * Whichever happens first settles a note (card N1): a press that carries out an open note's choice (the scene's
+ * confirm, a regenerate) settles that note too, wherever it was pressed, naming the press. Resolving it again is
+ * then refused as already changed.
+ */
+function settleNotesElsewhere(world: FixtureWorld, matches: (choice: NoteChoice) => boolean, resultRef: string): void {
+  const hits = new Set((world.snapshot.notes ?? []).filter((note) => note.state === "open" && note.choices.some(matches)).map((note) => note.noteId));
+  if (!hits.size) return;
+  commit(world, (overview, snapshot) => ({ overview, snapshot: { ...snapshot, notes: (snapshot.notes ?? []).map((note) => !hits.has(note.noteId) ? note : {
+    ...note, state: "resolved" as const, version: note.version + 1, resolution: { choiceIndex: note.choices.findIndex(matches), at: now(), resultRef, elsewhere: true as const },
+  }) } }));
+}
+
+/**
  * Settle a note with one of its choices. A paid or edit choice must name the press or edit that carried it
  * out; a proposal choice is carried out by accepting the proposal, and this route only acknowledges it.
  */
@@ -843,6 +857,9 @@ function resolveNote(world: FixtureWorld, noteId: string, body: ResolveNoteInput
       if (!request?.regenerate || !choice.shotIds.every((id) => request.shotIds.includes(id))) throw new ApiError("NOTE_RESULT_INVALID", 409);
       break;
     }
+    case "confirm_video":
+      if (!body.resultRef || findScene(world, choice.sceneId).confirmation?.confirmationId !== body.resultRef) throw new ApiError("NOTE_RESULT_INVALID", 409);
+      break;
     case "edit_field": {
       const edit = body.resultRef ? state.edits[body.resultRef] : undefined;
       if (edit?.shotId !== choice.shotId || edit.field !== choice.field) throw new ApiError("NOTE_RESULT_INVALID", 409);

@@ -25,7 +25,7 @@ export function NoteBanner({ view, busy, nextLetter, canUndo, onChoose, onNext, 
   const { t, tm } = useI18n();
   const server = useGuarded("server");
   const run = useGuarded("run");
-  const guardOf = (action: NoteBannerAction) => (action.action.kind === "regenerate" ? run : action.action.kind === "reply" ? null : server);
+  const guardOf = (action: NoteBannerAction) => (action.action.kind === "regenerate" || action.action.kind === "confirm_video" ? run : action.action.kind === "reply" ? null : server);
   const label = (value: Label) => ("text" in value ? value.text : tm(value));
   const style = (action: NoteBannerAction) => (action.style === "chosen" ? "pill chosen" : action.style === "ghost" ? "pill ghost" : "pill");
   return (
@@ -82,7 +82,7 @@ const CLOSED_HIDDEN = new Set(["desiredFrames", "imagePrompt", "videoPrompt"]);
  * prompts included, so the banner stays short; opened, every value is whole. A cut value stays whole in the page
  * for screen readers and in its tooltip.
  */
-function Changes({ rows, label }: { rows: ProposalChangeRow[]; label: (value: Label) => string }) {
+export function Changes({ rows, label }: { rows: ProposalChangeRow[]; label: (value: Label) => string }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const inline = rows.filter((row) => !CLOSED_HIDDEN.has(row.field)).slice(0, INLINE_CHANGES);

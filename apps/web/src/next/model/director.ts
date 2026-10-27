@@ -293,7 +293,7 @@ export interface NoteOpen {
   label: Msg;
 }
 
-/** A lettered Director note under the reply that wrote it (DC-18). Choices live in the banner, not here. */
+/** A lettered Director note under the reply that wrote it (DC-18). An open note offers its choices here and in the Keyframes banner; the first press settles it. */
 export interface ThreadNote {
   view: NoteView;
   /**

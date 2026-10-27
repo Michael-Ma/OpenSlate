@@ -117,6 +117,22 @@ button.atchip:hover{background:var(--track)}
 
 /* the Director's lettered notes (studio.css has .note, .letter, .note.done, .handled) */
 .note-text{white-space:pre-line;overflow-wrap:anywhere}
+/* An open note's choices in the chat, and a video confirm's frames: open one to see it large (that counts as opened). */
+.note .note-choices{margin-top:10px}
+/* A long priced choice wraps inside the card instead of running past it. */
+.note .note-choices .pill{white-space:normal;text-align:left;max-width:100%;line-height:1.35;border-radius:14px}
+.note .note-why{margin:6px 0 0;color:var(--text-2);font-size:12.5px}
+.note-frames{margin-top:9px}
+.note-thumbs{display:flex;gap:6px;flex-wrap:wrap}
+.note-thumb{position:relative;width:72px;aspect-ratio:16/9;padding:0;border:1px solid var(--hairline);border-radius:7px;overflow:hidden;background:var(--track);cursor:pointer}
+.note-thumb[aria-pressed="true"]{outline:2px solid var(--focus);outline-offset:1px}
+.note-thumb:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.note-thumb:disabled{cursor:default}
+.note-thumb .pic-img{position:absolute;inset:0}
+.note-thumb-label{position:absolute;left:3px;bottom:3px;padding:0 4px;border-radius:4px;background:rgb(0 0 0 / .6);color:#fff;font-size:11px;line-height:16px}
+.note-thumb[data-opened="true"] .note-thumb-label{background:var(--green);color:#0b1a12}
+.note-large{position:relative;margin-top:8px;aspect-ratio:16/9;border-radius:9px;overflow:hidden;background:var(--track)}
+.note-large .pic-img{position:absolute;inset:0;object-fit:contain}
 /* stale: a global .stale rule styles inspector lines, so key off the state attribute instead */
 .note[data-state="stale"] .handled,.note[data-tone="making"] .handled,.note[data-tone="failed"] .handled{color:var(--text-2);font-weight:500}
 

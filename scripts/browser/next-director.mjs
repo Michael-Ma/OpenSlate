@@ -217,9 +217,9 @@ export const scenarios = [
       if (JSON.stringify(letters) !== JSON.stringify([["a", false], ["b", false]])) fail(`Notes under the 10:44 reply: ${JSON.stringify(letters)}`);
       const amber = await reply.locator(".note .letter").first().evaluate((node) => getComputedStyle(node).backgroundColor);
       if (amber !== "rgb(240, 178, 74)") fail(`The open note's letter is ${amber}, not the Director's amber`);
-      // No choices in the thread: Open is the only action.
-      const acts = await reply.locator(".note button").evaluateAll((nodes) => [...new Set(nodes.map((node) => node.dataset.act))]);
-      if (acts.join() !== "note-open") fail(`Note cards offer ${acts}`);
+      // An open note offers its choices in the chat too (as in the Keyframes banner), then Open.
+      const acts = await reply.locator(".note button").evaluateAll((nodes) => nodes.map((node) => `${node.dataset.act}:${node.dataset.kind ?? ""}`));
+      if (acts.join() !== "note-choice:accept,note-choice:regenerate,note-open:,note-choice:proposal,note-choice:edit,note-open:") fail(`Note cards offer ${acts}`);
       await page.screenshot({ path: shot("notes-1440"), clip: { x: 0, y: 0, width: 400, height: 900 } });
       // Open 2.2 selects the shot in the Keyframes view.
       await reply.getByRole("button", { name: "Open 2.2" }).click();

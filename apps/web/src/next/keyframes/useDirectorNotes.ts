@@ -1,7 +1,7 @@
 import type { DirectorNote, GenerationOverview } from "@openslate/core/public";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { noteBanner, noteCallout, type NoteBannerAction, type NoteBannerView, type NoteCallout } from "../model/note-banner.ts";
-import { noteCommandCurrent, noteCommandOwner, openNoteEditor, runNoteRegeneration, type NoteCommandOwner } from "../model/note-command.ts";
+import { noteCommandCurrent, noteCommandOwner, pendingNoteEdit, runNoteChoice, setPendingNoteEdit, type NoteCommandOwner } from "../model/note-command.ts";
 import { noteViews, sceneOpenNotes, shotCallouts, type NoteView } from "../model/notes.ts";
 import { useStore, useStudio } from "../store/react.tsx";
 
@@ -15,14 +15,6 @@ interface SettledNote extends NoteCommandOwner {
   undo: { kind: "proposal"; proposalId: string } | { kind: "edit"; commandId: string } | null;
   /** The snapshot cursor when it settled; only later snapshots can contradict it. */
   cursor: number;
-}
-
-/** An "edit" choice opened the inline editor; saving that field settles the note with the edit's command id. */
-interface PendingNoteEdit extends NoteCommandOwner {
-  noteId: string;
-  choiceIndex: number;
-  shotId: string;
-  field: "narration" | "imagePrompt" | "motion";
 }
 
 export interface DirectorNotes {
@@ -49,10 +41,8 @@ export interface DirectorNotes {
 }
 
 /**
- * The Director's notes in the Keyframes view (DC-18, WA-10). Each choice is carried out the way the server
- * requires: accept resolves directly; a regenerate is pressed first and the note names that request; an edit
- * opens the inline editor and the note names the saved edit; a proposal is accepted with its preview digest,
- * which resolves its note atomically; a reply points the composer at the note's anchor.
+ * The Director's notes in the Keyframes view (DC-18, WA-10). Each choice is carried out by `runNoteChoice`, the same
+ * as from the chat; whichever place settles a note first wins, and the other then shows it settled.
  */
 export function useDirectorNotes(options: {
   overview: GenerationOverview;
@@ -69,8 +59,8 @@ export function useDirectorNotes(options: {
   const projectEpoch = useStudio((s) => s.projectEpoch);
   const views = useMemo(() => noteViews(notes, overview, proposals), [notes, overview, proposals]);
   const [settled, setSettled] = useState<SettledNote | null>(null);
-  const pendingEdit = useRef<PendingNoteEdit | null>(null);
-  useEffect(() => { setSettled(null); pendingEdit.current = null; }, [projectEpoch]);
+  // A waiting edit carries its film's opening and is ignored after another one; it may come from the chat, before this view mounts.
+  useEffect(() => { setSettled(null); }, [projectEpoch]);
 
   // Undo (or anything else) that reopens the note ends its settled view.
   useEffect(() => {
@@ -87,35 +77,9 @@ export function useDirectorNotes(options: {
   const run = useCallback(async (note: NoteView, choice: NoteBannerAction) => {
     const owner = noteCommandOwner(store, overview);
     if (!owner) return;
-    const action = choice.action;
-    switch (action.kind) {
-      case "accept": {
-        if (await store.resolveNote(action.noteId, action.choiceIndex)) settle(note, action.choiceIndex, null, owner);
-        return;
-      }
-      case "regenerate": {
-        if (await runNoteRegeneration(store, overview, action)) settle(note, action.choiceIndex, null, owner);
-        return;
-      }
-      case "edit": {
-        if (openNoteEditor(store, overview, action, openShot))
-          pendingEdit.current = { ...owner, noteId: action.noteId, choiceIndex: action.choiceIndex, shotId: action.shotId, field: action.field };
-        return;
-      }
-      case "proposal": {
-        if (!choice.proposal) return;
-        const receipt = await store.acceptProposal(choice.proposal);
-        if (receipt) settle(note, action.choiceIndex, { kind: "proposal", proposalId: choice.proposal.proposalId }, owner);
-        return;
-      }
-      case "reply": {
-        if (note.shotIds.length) for (const id of note.shotIds) store.pointAt({ kind: "shot", id });
-        else if (note.sceneId) store.pointAt({ kind: "scene", id: note.sceneId });
-        if (window.matchMedia?.("(max-width: 899px)").matches) store.setDirectorOpen(true);
-        return;
-      }
-    }
-  }, [store, overview, sceneId, openShot, settle]);
+    const outcome = await runNoteChoice(store, overview, note, choice.action, choice.proposal, openShot);
+    if (outcome?.kind === "settled") settle(note, choice.action.choiceIndex, outcome.undo, owner);
+  }, [store, overview, openShot, settle]);
 
   const open = sceneId ? sceneOpenNotes(views, sceneId) : [];
   const settledView = settled && noteCommandCurrent(store, settled) && settled.sceneId === sceneId ? views.find((view) => view.noteId === settled.noteId) ?? null : null;
@@ -149,17 +113,17 @@ export function useDirectorNotes(options: {
       else if (undo?.kind === "edit") void store.undo(undo.commandId);
     },
     editSaved: (shotId, field, commandId) => {
-      const waiting = pendingEdit.current;
+      const waiting = pendingNoteEdit(store);
       if (!waiting || !noteCommandCurrent(store, waiting) || waiting.shotId !== shotId || waiting.field !== field || !commandId) return;
-      pendingEdit.current = null;
+      setPendingNoteEdit(store, null);
       const note = views.find((view) => view.noteId === waiting.noteId);
       void store.resolveNote(waiting.noteId, waiting.choiceIndex, commandId).then((done) => {
         if (done && note) settle(note, waiting.choiceIndex, { kind: "edit", commandId }, waiting);
       });
     },
     editChanged: (draft) => {
-      const waiting = pendingEdit.current;
-      if (waiting && (!draft || draft.shotId !== waiting.shotId || draft.field !== waiting.field)) pendingEdit.current = null;
+      const waiting = pendingNoteEdit(store);
+      if (waiting && (!draft || draft.shotId !== waiting.shotId || draft.field !== waiting.field)) setPendingNoteEdit(store, null);
     },
     forgetUndo: () => setSettled((current) => (current ? { ...current, undo: null } : current)),
   };

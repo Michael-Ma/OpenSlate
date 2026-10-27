@@ -1,6 +1,6 @@
 import type { DirectorProposal, GenerationOverview, ProposalPreview, ShotOverview } from "@openslate/core/public";
 import type { TimelineSegment } from "./checks.ts";
-import { isWorking, shotHasNoAnswer, unresolvedQueue, waitingMsg } from "./keyframes.ts";
+import { isWorking, shotHasNoAnswer, unresolvedQueue, videoPanel, waitingMsg } from "./keyframes.ts";
 import { regenerationState, regenerationSummary, type NoteAction, type NoteView } from "./notes.ts";
 import { pendingAutomaticRetry } from "./media-state.ts";
 import { formatMicros, keyframeEstimate, priceMsg } from "./price.ts";
@@ -19,9 +19,11 @@ export interface NoteBannerAction {
   action: NoteAction;
   /** chosen: the Director's recommendation (white); outline: an alternative; ghost: reply. */
   style: "chosen" | "outline" | "ghost";
-  /** A paid choice (regenerate) shows its price next to its label. */
+  /** A paid choice (regenerate, video) shows its price next to its label. */
   price: Msg | null;
   enabled: boolean;
+  /** Why a video confirm is off right now (frames still to make or open, a line to settle, clips being made). */
+  reason: Msg | null;
   /** A proposal choice is carried out by accepting this exact proposal (with its preview digest). */
   proposal: DirectorProposal | null;
 }
@@ -159,7 +161,7 @@ function choiceAction(note: NoteView, index: number, overview: GenerationOvervie
   const choice = note.choices[index]!;
   const action = choice.action;
   const style = action.kind === "reply" ? "ghost" : index === 0 ? "chosen" : "outline";
-  const base = { label: choice.label, action, style, price: null, enabled: note.state === "open", proposal: null } satisfies NoteBannerAction;
+  const base = { label: choice.label, action, style, price: null, enabled: note.state === "open", reason: null, proposal: null } satisfies NoteBannerAction;
   switch (action.kind) {
     case "proposal": {
       const proposal = proposals.find((p) => p.proposalId === action.proposalId) ?? null;
@@ -172,6 +174,14 @@ function choiceAction(note: NoteView, index: number, overview: GenerationOvervie
       return { ...base, price: regeneratePrice(action.shotIds, overview, locale), enabled: (note.state !== "resolved" || note.regeneration === "failed") && !busy && keyframeEstimate(action.shotIds, overview) !== null };
     }
     case "edit": return { ...base, enabled: note.state !== "resolved" };
+    case "confirm_video": {
+      // The same check as the scene's own button: one confirm, wherever it is pressed.
+      const scene = overview.scenes.find((s) => s.sceneId === action.sceneId);
+      const panel = scene ? videoPanel(overview, scene, locale) : null;
+      const ready = panel?.action === "confirm" && panel.enabled;
+      const reason = !base.enabled || !panel ? null : panel.action === "confirm" ? panel.reason : panel.label;
+      return { ...base, price: ready ? panel.price : null, enabled: base.enabled && ready, reason };
+    }
     default: return base;
   }
 }
@@ -226,6 +236,7 @@ export function settledMsg(action: NoteAction, label: Label, overview: Generatio
     case "regenerate": return regenerationSummary(overview, action.shotIds);
     case "edit": return msg("note.settled.edited", { shot: labels([action.shotId]) });
     case "proposal": return msg("note.settled.applied");
+    case "confirm_video": return msg("note.settled.video_confirmed", { scene: overview.scenes.find((s) => s.sceneId === action.sceneId)?.ordinal ?? "?" });
     case "reply": return msg("note.settled.replied");
   }
 }
