@@ -9,6 +9,7 @@ import { SceneConfirmationRunner, registerSceneConfirmations } from "./scene-con
 import { registerNarrationFit } from "./narration-fit.js";
 import { requiredCommandKey } from "./application/command-key.js";
 import { registerGenerationOverview } from "./generation-overview.js";
+import { GenerationAttemptBlockedError } from "./application/generation-blockers.js";
 import { registerSceneGeneration } from './scene-generation.js';
 import { continueEditsSchema, type ContinueEdits } from './application/pending-edit-continuation.js';
 import { registerStoryboard } from "./storyboard.js";
@@ -96,7 +97,7 @@ export function createApp(options: AppOptions = {}) {
       const nativeDiagnostic = error.code === "DIRECTOR_SETUP_REQUIRED"
         ? safeNativeDiagnostic((error.details as { nativeDiagnostic?: unknown } | undefined)?.nativeDiagnostic) : undefined;
       void reply.status(status).send({ error: { code: error.code, message: error.message,
-        ...(nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
+        ...(error instanceof GenerationAttemptBlockedError ? { details: error.recovery } : nativeDiagnostic ? { details: { nativeDiagnostic } } : ["SHOT_SHORTER_THAN_NARRATION", "DIRECTION_REQUIRED", "EXPORT_BLOCKED", "DIRECTOR_CODEX_VERSION_MISMATCH"].includes(error.code) && error.details !== undefined ? { details: error.details } : {}) } });
     } else if ((error as { validation?: unknown }).validation) void reply.status(400).send({ error: { code: "VALIDATION_ERROR", message: "Request does not match its schema" } });
     else { app.log.error(error); void reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "The operation could not be completed" } }); }
   });
