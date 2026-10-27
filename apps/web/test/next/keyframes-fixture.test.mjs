@@ -266,7 +266,7 @@ test('Keep maroon resolves note a; a non-blocking note never gated the confirm',
   assert.ok(!scene(w, 2).blockers.some(b => b.code === 'recommendation_open' && b.shotId === shotId('2.2')));
   const resolved = resolve(w, 'note-a', 0);
   assert.deepEqual([resolved.state, resolved.version, resolved.resolution.choiceIndex], ['resolved', 2, 0]);
-  assert.throws(() => resolve(w, 'note-a', 0), refused('REVISION_CONFLICT'));
+  assert.throws(() => resolve(w, 'note-a', 0), refused('NOTE_ALREADY_SETTLED'));
 });
 
 test('accepting p1 applies it and resolves note b atomically; the note route only acknowledges; undo reopens', () => {
@@ -278,8 +278,8 @@ test('accepting p1 applies it and resolves note b atomically; the note route onl
   assert.equal(shot(w, '2.3').durationFrames, 240);
   assert.deepEqual([note(w, 'note-b').state, note(w, 'note-b').resolution.resultRef, note(w, 'note-b').version], ['resolved', 'p1', 2]);
   assert.ok(!scene(w, 2).blockers.some(b => b.code === 'recommendation_open' || b.code === 'narration_too_long'));
-  // Acknowledging the already accepted proposal through the note is idempotent.
-  assert.equal(post(w, '/director/notes/note-b/resolve', { choiceIndex: 0, expectedVersion: 1, resultRef: 'p1' }).state, 'resolved');
+  assert.equal(note(w, 'note-b').resolution.elsewhere, true, 'accepting the proposal settled its note');
+  assert.throws(() => post(w, '/director/notes/note-b/resolve', { choiceIndex: 0, expectedVersion: 1, resultRef: 'p1' }), refused('NOTE_ALREADY_SETTLED'));
   assert.throws(() => acceptP1(w), refused('PROPOSAL_STALE'));
   const undone = post(w, '/director/proposals/p1/undo');
   assert.deepEqual([undone.proposal.state, undone.leftAlone], ['undone', []]);
@@ -316,7 +316,7 @@ test('a regenerate press settles the note whose choice it carries out, wherever 
   assert.deepEqual(receipt.shotIds, [shotId('2.2')]);
   assert.deepEqual([note(w, 'note-a').state, note(w, 'note-a').resolution.choiceIndex, note(w, 'note-a').resolution.resultRef, note(w, 'note-a').resolution.elsewhere],
     ['resolved', 1, receipt.requestId, true]);
-  assert.throws(() => resolve(w, 'note-a', 1, receipt.requestId), refused('REVISION_CONFLICT'), 'the second place to press finds it settled');
+  assert.throws(() => resolve(w, 'note-a', 1, receipt.requestId), refused('NOTE_ALREADY_SETTLED'), 'the second place to press finds it settled');
   w.advance(FIXTURE_TIMING.keyframeMs);
   assert.equal(note(w, 'note-a').state, 'resolved', 'a settled note does not go stale when its new take lands');
 });
@@ -331,7 +331,7 @@ test('a video confirm settles the note that asked for it, from the chat or from 
   assert.ok(view.confirmationId);
   assert.deepEqual([note(w, 'note-v').state, note(w, 'note-v').resolution.choiceIndex, note(w, 'note-v').resolution.resultRef, note(w, 'note-v').resolution.elsewhere],
     ['resolved', 0, view.confirmationId, true]);
-  assert.throws(() => resolve(w, 'note-v', 0, view.confirmationId), refused('REVISION_CONFLICT'));
+  assert.throws(() => resolve(w, 'note-v', 0, view.confirmationId), refused('NOTE_ALREADY_SETTLED'));
 });
 
 test('an edit choice names the edit that carried it out, and undoing that edit reopens the note', () => {

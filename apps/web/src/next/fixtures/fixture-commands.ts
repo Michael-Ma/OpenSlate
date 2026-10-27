@@ -818,7 +818,7 @@ function narrationFit(world: FixtureWorld, shotId: string, body: NarrationFitInp
 /**
  * Whichever happens first settles a note (card N1): a press that carries out an open note's choice (the scene's
  * confirm, a regenerate) settles that note too, wherever it was pressed, naming the press. Resolving it again is
- * then refused as already changed.
+ * then refused as already settled (NOTE_ALREADY_SETTLED).
  */
 function settleNotesElsewhere(world: FixtureWorld, matches: (choice: NoteChoice) => boolean, resultRef: string): void {
   const hits = new Set((world.snapshot.notes ?? []).filter((note) => note.state === "open" && note.choices.some(matches)).map((note) => note.noteId));
@@ -836,10 +836,10 @@ function resolveNote(world: FixtureWorld, noteId: string, body: ResolveNoteInput
   const note = (world.snapshot.notes ?? []).find((n) => n.noteId === noteId);
   if (!note) throw new ApiError("NOT_FOUND", 404);
   const choice = note.choices[body?.choiceIndex];
-  if (note.state === "resolved" && choice?.kind === "proposal" && note.resolution?.choiceIndex === body.choiceIndex
-    && note.resolution.resultRef === body.resultRef && note.version === body.expectedVersion + 1) return note;
-  if (note.version !== body?.expectedVersion || note.state === "resolved") throw new ApiError("REVISION_CONFLICT", 409);
   if (!choice) throw new ApiError("VALIDATION_ERROR", 400);
+  // Whichever happens first settles a note; a later resolve, from anywhere, is told so.
+  if (note.state === "resolved") throw new ApiError("NOTE_ALREADY_SETTLED", 409);
+  if (note.version !== body?.expectedVersion) throw new ApiError("REVISION_CONFLICT", 409);
   const state = extra(world);
   switch (choice.kind) {
     case "proposal": {
@@ -902,7 +902,7 @@ function proposalAction(world: FixtureWorld, proposalId: string, action: "accept
       const notes = (snapshot.notes ?? []).map((note) => {
         const index = note.choices.findIndex((c) => c.kind === "proposal" && c.proposalId === proposalId);
         if (index < 0 || note.state === "resolved") return note;
-        return { ...note, state: "resolved" as const, version: note.version + 1, resolution: { choiceIndex: index, at: now(), resultRef: proposalId } };
+        return { ...note, state: "resolved" as const, version: note.version + 1, resolution: { choiceIndex: index, at: now(), resultRef: proposalId, elsewhere: true as const } };
       });
       return bumpRevision(
         { ...snapshot, notes, project: { ...snapshot.project, shots: snapshot.project.shots.map((row) => (row.id === shot.shotId ? { ...row, desiredFrames: frames } : row)) } },

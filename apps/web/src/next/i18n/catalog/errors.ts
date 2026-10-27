@@ -16,6 +16,7 @@ export const errors = {
   "error.FILM_GAIN_SAVE_FAILED": { en: "Your volume is kept. Check the save result before retrying.", zh: "你的音量已保留。请先检查保存结果，再重试。" },
   "error.PROJECTION_CHANGED": { en: "The film is updating. Wait for the displayed version to catch up before changing it.", zh: "影片正在更新。请等显示内容同步后再修改。" },
   "error.PLAN_PROJECTION_CHANGED": { en: "The saved film is updating. Your text is kept; wait for the displayed version to catch up.", zh: "已保存的影片正在更新。已保留你的文字，请等显示内容同步。" },
+  "error.NOTE_ALREADY_SETTLED": { en: "This note was already settled, in the chat or in Keyframes.", zh: "这条备注已经在对话或关键帧里处理过了。" },
   "error.REVISION_CONFLICT": { en: "The film changed while you were editing. Your edit was not saved; try again.", zh: "你编辑时影片已经变化，这次修改没有保存，请重试。" },
   "error.IDEMPOTENCY_CONFLICT": { en: "This press was already used for a different request. Try again.", zh: "这次操作已用于另一个请求，请重试。" },
   "error.FRAME_STALE": { en: "This keyframe was replaced. Open the new one.", zh: "这张关键帧已被替换，请查看新的。" },
