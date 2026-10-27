@@ -203,7 +203,8 @@ export function inspectorView(overview: GenerationOverview, shot: ShotOverview, 
 
   let failure: InspectorView["failure"] = null;
   if (shot.keyframe.state === "failed") failure = { slot: "keyframe", message: failureMessage(shot.keyframe, "keyframe"), retryVideo: null };
-  else if (shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "failed" && shot.keyframe.replacement.failure?.nativeDiagnostic)
+  else if (shot.keyframe.state === "ready" && shot.keyframe.replacement?.state === "failed"
+    && (shot.keyframe.replacement.failure?.nativeDiagnostic || shot.keyframe.replacement.failure?.code === SUBMISSION_RESPONSE_LOST))
     failure = { slot: "keyframe", message: failureMessage({ ...shot.keyframe, failure: shot.keyframe.replacement.failure }, "keyframe"), retryVideo: null };
   else if (shot.video.state === "failed" && !shot.video.ingestionIssue) {
     const clip = clipUnit(overview, scene);
