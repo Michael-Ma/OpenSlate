@@ -39,12 +39,14 @@ test('unknown outcome polling backs off, caps, resets on real change and still a
   const count = events(f, id).length;
   assert.equal(f.engine.releaseAttempt(f.projectId, id, 'local-user', true).attemptId, id); assert.ok(attempt(f).released);
   assert.deepEqual(events(f, id).slice(count).map(event => event.kind), ['attempt.released']);
-  // The answer now changes: the vendor's record of this job becomes visible.
-  delete f.provider.lookup;
-  elapseUnknownBackoff(f.store, id); await f.engine.reconcile(); const repaired = attempt(f);
+  // A delayed local acceptance receipt supplies the real vendor task id.
+  // The vendor is queried only by that saved task id, never by our attempt id.
+  const taskId = f.provider.jobs()[0].id;
+  f.provider.lookup = async () => ({ type: 'accepted', taskId });
+  elapseUnknownBackoff(f.store, id); await f.engine.reconcile(); await f.engine.reconcile(); const repaired = attempt(f);
   assert.equal(repaired.unknownWait, undefined);
   assert.equal(repaired.phase, 'succeeded', 'a late result still lands after release, as history');
-  assert.deepEqual(events(f, id).slice(count + 1).filter(event => event.kind === 'attempt.state_changed').map(event => event.payload.phase), ['succeeded'],
-    'one state event for the one real change');
+  assert.deepEqual(events(f, id).slice(count + 1).filter(event => event.kind === 'attempt.state_changed').map(event => event.payload.phase), ['remote_pending', 'succeeded'],
+    'one state event for each real change');
   assert.equal(f.provider.acceptedCount(), 1);
 });

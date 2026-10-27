@@ -13,7 +13,7 @@ export type FakeOutcome = ExecutionOutcome;
 
 interface JobRow { id: string; request: string; status: string; outputs: string; failure_id: string | null }
 
-/** Fault-injectable backend with durable acceptance evidence in a separate database.
+/** Fault-injectable vendor with task-id-only status queries in a separate database.
  * submit intentionally does NOT deduplicate attempt IDs: tests can detect a blind resubmit.
  */
 export class FakeProvider implements ExecutionProvider {
@@ -74,10 +74,10 @@ export class FakeProvider implements ExecutionProvider {
     return { type: "completed", taskId, outputs: JSON.parse(job.outputs) as FakeOutput[] };
   }
 
-  async lookup(attemptId: string): Promise<FakeOutcome> {
-    const jobs = this.db.prepare("SELECT id FROM fake_jobs WHERE attempt_id=?").all(attemptId) as { id: string }[];
-    if (jobs.length !== 1) return { type: "unknown", diagnostic: jobs.length === 0 ? "Acceptance is not yet known" : "Multiple accepts require reconciliation" };
-    return this.poll(jobs[0]!.id);
+  async lookup(_attemptId: string): Promise<FakeOutcome> {
+    // A real vendor cannot discover jobs using our attempt id. The fake submit
+    // has already returned, so there is no in-flight HTTP window to wait out.
+    return { type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false };
   }
 
   complete(taskId: string): void { this.db.prepare("UPDATE fake_jobs SET status='completed' WHERE id=? AND status='pending'").run(taskId); }

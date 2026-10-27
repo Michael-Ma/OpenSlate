@@ -114,7 +114,7 @@ test("quarantine rollback leaves no partial fences, pause or native transition; 
   assert.throws(() => new InstallationRecoveryGuard(f.store).snapshot(), { code: "RECOVERY_INVALID" });
 });
 
-test("released restoration recovers accepted and uncertain fixture receipts after reopen without another submit or refund", async t => {
+test("released restoration recovers known tasks and charges lost replies after reopen without resubmit or refund", async t => {
   const f = setup(t, { count: 2, imagesOnly: true });
   f.provider.setMode(f.plan.nodes[0].id, "unknown_after_accept"); await f.engine.runReady();
   assert.equal(f.provider.acceptedCount(), 2);
@@ -126,12 +126,19 @@ test("released restoration recovers accepted and uncertain fixture receipts afte
   release(f.store); f.store.close(); f.provider.close();
   const store = new Store(f.dbPath), provider = new FakeProvider(f.providerPath), engine = new Engine(store, provider, { artifactDir: f.artifactDir });
   try {
-    await engine.reconcile(); assert.equal(provider.acceptedCount(), 2); assert.ok(engine.attempts(f.projectId).every(attempt => attempt.phase === "succeeded"));
+    await engine.reconcile(); assert.equal(provider.acceptedCount(), 2);
+    const recovered = engine.attempts(f.projectId);
+    assert.equal(recovered.filter(attempt => attempt.phase === "succeeded").length, 1);
+    const lost = recovered.find(attempt => attempt.phase === "failed");
+    assert.equal(lost.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(lost.failure.retryAllowed, false);
+    assert.equal(store.get("reservation", lost.reservationId).state, "charged");
+    for (let i = 0; i < 3; i++) { await engine.reconcile(); await engine.runReady(); }
+    assert.equal(provider.acceptedCount(), 2);
     assert.equal(engine.budget(f.projectId).committedMicros, "200");
     assert.equal(store.get("execution_control", f.projectId).paused, true);
     for (const attempt of attempts) assert.throws(() => engine.recovery.assertFirstSubmit(f.projectId, attempt.id), { code: "RESTORED_AUTHORITY_REQUIRES_NEW" });
-    assert.equal(engine.outputs(f.projectId).length, 2); // existing accepted results remain available for review while paused
-    assert.equal(store.list("artifact", f.projectId).length, 2);
+    assert.equal(engine.outputs(f.projectId).length, 1); // only the known task remains recoverable while paused
+    assert.equal(store.list("artifact", f.projectId).length, 1);
   } finally { store.close(); provider.close(); }
 });
 

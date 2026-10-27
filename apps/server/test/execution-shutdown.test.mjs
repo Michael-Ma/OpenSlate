@@ -14,7 +14,7 @@ test("host shutdown fences fresh dispatch and reconciliation without persisting 
   assert.equal(f.provider.acceptedCount(), 1, "a later installation can continue existing authorized work");
 });
 
-for (const receipt of ["accepted", "unknown"]) test(`host shutdown aborts the provider wait while preserving a late ${receipt} outcome and its reserved liability`, async t => {
+for (const receipt of ["accepted", "unknown"]) test(`host shutdown aborts the provider wait and settles a late ${receipt} outcome without resubmission`, async t => {
   const f = setup(t, { count: 1, imagesOnly: true }); f.provider.setMode(f.plan.nodes[0].id, "pending");
   const submit = f.provider.submit.bind(f.provider); let entered, signal, taskId, calls = 0;
   const started = new Promise(resolve => { entered = resolve; });
@@ -33,6 +33,14 @@ for (const receipt of ["accepted", "unknown"]) test(`host shutdown aborts the pr
   f.provider.complete(taskId);
   const replacement = new Engine(f.store, f.provider, { artifactDir: f.artifactDir });
   await replacement.reconcile(); await replacement.runReady();
-  assert.equal(replacement.attempts(f.projectId)[0].phase, "succeeded"); assert.equal(replacement.attempts(f.projectId).length, 1);
+  const settled = replacement.attempts(f.projectId)[0];
+  assert.equal(settled.phase, receipt === "accepted" ? "succeeded" : "failed");
+  assert.equal(f.store.get("reservation", settled.reservationId).state, "charged");
+  if (receipt === "unknown") {
+    assert.equal(settled.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(settled.failure.retryAllowed, false);
+    assert.deepEqual(settled.outputs, {});
+    for (let cycle = 0; cycle < 3; cycle++) { await replacement.reconcile(); await replacement.runReady(); }
+  }
+  assert.equal(replacement.attempts(f.projectId).length, 1);
   assert.equal(replacement.attempts(f.projectId)[0].request.attemptId, original.id); assert.equal(calls, 1); assert.equal(f.provider.acceptedCount(), 1);
 });

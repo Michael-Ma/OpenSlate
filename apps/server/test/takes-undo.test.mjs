@@ -216,20 +216,45 @@ test('a terminally failed regeneration does not prevent selecting an earlier suc
   assert.deepEqual((await shot(f)).keyframe.artifact, before.keyframe.artifact);
 });
 
-test('released unknown regeneration can switch takes while its late result stays historical', async t => {
+test('released regeneration with a retained task id can switch takes while its late result stays historical', async t => {
+  const f = await completed(t), earlier = (await shot(f)).keyframe.artifact;
+  await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.tick(4);
+  const node = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'image');
+  f.provider.setMode(node.id, 'pending');
+  await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.engine.runReady();
+  const poll = f.provider.poll.bind(f.provider);
+  f.provider.poll = async () => ({ type: 'unknown', diagnostic: 'Known task status temporarily unavailable' });
+  await f.engine.reconcile();
+  const unknown = f.engine.attempts(f.project.id).find(a => a.phase === 'submission_unknown'); assert.ok(unknown);
+  assert.ok(unknown.taskId);
+  assert.equal((await use(f, earlier.artifactId)).json().error.code, 'ATTEMPT_EXISTS');
+  await f.call('POST', `/attempts/${unknown.id}/release`, { expectedPhase: 'submission_unknown', acknowledgeDoubleCharge: true }).then(f.ok);
+  const grants = f.store.list('grant', f.project.id).length;
+  await use(f, earlier.artifactId).then(f.ok);
+  f.provider.complete(unknown.taskId); f.provider.poll = poll; await f.tick(4);
+  assert.deepEqual((await shot(f)).keyframe.artifact, earlier);
+  assert.equal(f.store.list('grant', f.project.id).length, grants);
+  assert.equal((await f.call('GET', '/shots/shot-0/takes').then(f.ok)).keyframes.length, 3);
+});
+
+test('lost regeneration has no late take, remains charged and permits selecting an earlier take without another purchase', async t => {
   const f = await completed(t), earlier = (await shot(f)).keyframe.artifact;
   await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.tick(4);
   const node = f.store.list('node_binding', f.project.id).find(b => b.node.kind === 'image');
   f.provider.setMode(node.id, 'unknown_after_accept');
   await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.engine.runReady();
-  const unknown = f.engine.attempts(f.project.id).find(a => a.phase === 'submission_unknown'); assert.ok(unknown);
-  assert.equal((await use(f, earlier.artifactId)).json().error.code, 'ATTEMPT_EXISTS');
-  await f.call('POST', `/attempts/${unknown.id}/release`, { expectedPhase: 'submission_unknown', acknowledgeDoubleCharge: true }).then(f.ok);
-  const grants = f.store.list('grant', f.project.id).length;
+  const lost = f.engine.attempts(f.project.id).find(a => a.phase === 'submission_unknown'), count = f.provider.acceptedCount();
+  await f.tick(4);
+  const failed = f.store.get('attempt', lost.id);
+  assert.equal(failed.phase, 'failed'); assert.equal(failed.failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(failed.failure.retryAllowed, false); assert.deepEqual(failed.outputs, {});
+  assert.equal(f.store.get('reservation', lost.reservationId).state, 'charged');
+  const grants = f.store.list('grant', f.project.id);
   await use(f, earlier.artifactId).then(f.ok); await f.tick(4);
   assert.deepEqual((await shot(f)).keyframe.artifact, earlier);
-  assert.equal(f.store.list('grant', f.project.id).length, grants);
-  assert.equal((await f.call('GET', '/shots/shot-0/takes').then(f.ok)).keyframes.length, 3);
+  assert.deepEqual(f.store.list('grant', f.project.id), grants);
+  assert.equal(f.provider.acceptedCount(), count);
+  assert.equal((await f.call('GET', '/shots/shot-0/takes').then(f.ok)).keyframes.length, 2);
 });
 
 test('HTTP shotFields outdates both media slots and a single Undo restores every field and exact paid take', async t => {

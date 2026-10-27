@@ -171,12 +171,22 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
     const editReviewer = service.beginRequest(projectId, "simulated-demo-human", "Approve the displayed revised shot 1 keyframe and motion.", { scopeIds: [changedShotId], editing: false });
     service.approve(projectId, editReviewer, revisedReview.id, [editedVideo.id]);
 
-    // The fake backend durably accepts this job and deliberately loses its response.
-    provider.setMode(editedVideo.id, "unknown_after_accept");
+    // A real vendor's saved task id survives a temporary status outage. Restart
+    // may poll that exact job; it cannot discover a lost POST reply by attempt id.
+    provider.setMode(editedVideo.id, "pending");
     await engine.runReady();
+    const accepted = engine.attempts(projectId).find(attempt => attempt.nodeId === editedVideo.id && attempt.phase === "remote_pending");
+    expect(accepted && typeof accepted.taskId === "string", "The vendor task id must be saved before the status outage");
+    const recoveredTaskId = accepted.taskId, poll = provider.poll.bind(provider);
+    provider.poll = async taskId => taskId === recoveredTaskId
+      ? { type: "unknown", taskId, diagnostic: "Injected temporary status outage for the known vendor task" }
+      : poll(taskId);
+    await engine.reconcile();
     const unresolved = engine.attempts(projectId).find(attempt => attempt.nodeId === editedVideo.id && attempt.phase === "submission_unknown");
-    expect(unresolved && provider.acceptedCount() === 6, "Fault injection must leave exactly one uncertain accepted attempt");
+    expect(unresolved && unresolved.id === accepted.id && unresolved.taskId === recoveredTaskId && provider.acceptedCount() === 6,
+      "A temporary status outage must retain the original accepted task identity");
     const recoveredAttemptId = unresolved.id;
+    provider.poll = poll; provider.complete(recoveredTaskId);
     store.close(); provider.close();
 
     store = new Store(statePath); provider = new FakeProvider(providerPath);
@@ -185,7 +195,7 @@ export async function runDemo(directory = mkdtempSync(join(tmpdir(), "openslate-
     await finishReadyWork(engine, projectId);
     expect(service.snapshot(projectId).outputs.length === 6, "Restarted application did not reconstruct all six current outputs");
     const recovered = engine.attempts(projectId).find(attempt => attempt.id === recoveredAttemptId);
-    expect(recovered?.phase === "succeeded", "Restart did not reconcile the original uncertain attempt");
+    expect(recovered?.phase === "succeeded" && recovered.taskId === recoveredTaskId, "Restart did not poll the original known vendor task");
     expect(provider.acceptedCount() === 6 && provider.acceptedCount(recoveredAttemptId) === 1, "Restart duplicated a fake paid acceptance");
     const kept = binding(store, projectId, "shot-2/take");
     expect(kept.candidateId === preservedTake.candidateId && kept.outputs.video?.artifactId === preservedTake.outputs.video.artifactId, "Restart lost the untouched shot's selected execution output");

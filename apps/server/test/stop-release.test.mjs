@@ -110,7 +110,7 @@ test('controls require a key and explicit Continue authority, and persist the St
   assert.equal((await f.engine.runReady()).dispatched, 1);
 });
 
-test('released unknown work frees shot, scene and capacity; late success stays history behind the new take', async t => {
+test('released unknown work frees capacity; a lost reply stays charged behind the new human take', async t => {
   const f = fixture(t), node = f.plan.nodes[0];
   f.provider.setMode(node.id, 'unknown_after_accept');
   await f.engine.runReady();
@@ -141,12 +141,16 @@ test('released unknown work frees shot, scene and capacity; late success stays h
   assert.ok(newTake);
   f.provider.lookup = poll; elapseUnknownBackoff(f.store, old.id);
   await f.engine.reconcile();
-  assert.equal(f.store.get('attempt', old.id).phase, 'succeeded');
-  assert.ok(f.store.get('attempt', old.id).outputs.image);
+  assert.equal(f.store.get('attempt', old.id).phase, 'failed');
+  assert.equal(f.store.get('attempt', old.id).failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(f.store.get('attempt', old.id).failure.retryAllowed, false);
+  assert.deepEqual(f.store.get('attempt', old.id).outputs, {});
   assert.equal(reservation(f, old).state, 'charged');
   assert.deepEqual(f.store.get('node_binding', replacement.nodeId).outputs.image, newTake);
   assert.deepEqual(f.engine.currentAttemptIds(f.projectId), [replacement.id]);
-  assert.equal(f.store.list('artifact', f.projectId).length, 2);
+  assert.equal(f.store.list('artifact', f.projectId).length, 1);
+  for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.provider.acceptedCount(), 2);
   const cursor = f.store.cursor(f.projectId), count = f.store.list('message', f.projectId).length;
   assert.deepEqual((await f.release(old, {}, key)).json(), released.json());
   assert.equal(f.store.cursor(f.projectId), cursor);
@@ -281,12 +285,14 @@ test('HTTP overview keeps stopped taken-off slots through Continue until a new p
   assert.equal((await f.overview()).shots['shot-0'].keyframe.takenOff, undefined);
 });
 
-test('HTTP overview releases no-answer slots and preserves the reason through late historical completion', async t => {
+test('HTTP overview releases no-answer slots and preserves the reason through charged lost-reply failure', async t => {
   const f = fixture(t); f.provider.setMode(f.plan.nodes[0].id, 'unknown_after_accept'); await f.engine.runReady();
   const attempt = f.engine.attempts(f.projectId)[0]; assert.equal((await f.overview()).shots['shot-0'].keyframe.state, 'no_answer');
   const response = await f.release(attempt); assert.equal(response.statusCode, 200, response.body);
   let slot = (await f.overview()).shots['shot-0'].keyframe; assert.equal(slot.takenOff, 'released'); assert.notEqual(slot.state, 'no_answer');
   await f.engine.reconcile(); slot = (await f.overview()).shots['shot-0'].keyframe;
-  assert.equal(slot.takenOff, 'released'); assert.equal(slot.artifact, undefined); assert.equal(slot.takeCount, 1);
+  assert.equal(slot.takenOff, 'released'); assert.equal(slot.artifact, undefined); assert.equal(slot.takeCount, 0);
+  assert.equal(f.store.get('attempt', attempt.id).failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(reservation(f, attempt).state, 'charged');
   assert.equal((await f.generate()).statusCode, 200); assert.equal((await f.overview()).shots['shot-0'].keyframe.takenOff, undefined);
 });

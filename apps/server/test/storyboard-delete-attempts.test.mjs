@@ -54,7 +54,12 @@ for (const kind of ['image', 'video']) {
       const accepted = f.provider.acceptedCount();
       if (mode === 'pending') f.provider.complete(attempt.taskId);
       await f.engine.reconcile();
-      assert.equal(f.store.get('attempt', attempt.id).phase, 'succeeded');
+      assert.equal(f.store.get('attempt', attempt.id).phase, mode === 'pending' ? 'succeeded' : 'failed');
+      if (mode === 'unknown_after_accept') {
+        assert.equal(f.store.get('attempt', attempt.id).failure.id, 'SUBMISSION_RESPONSE_LOST');
+        assert.equal(f.store.get('reservation', attempt.reservationId).state, 'charged');
+        assert.deepEqual(f.store.get('attempt', attempt.id).outputs, {});
+      }
       const artifacts = f.store.list('artifact', f.projectId);
       f.edit({ kind: 'deleteShot', id: 'shot-0' });
       assert.equal(f.store.getProject(f.projectId).shots.length, 0);
@@ -103,7 +108,7 @@ for (const kind of ['image', 'video']) {
   });
 }
 
-test('deleteShot keeps released unknown work protected until reconciliation settles it', async t => {
+test('deleteShot keeps released unknown work protected until its lost reply is charged', async t => {
   const f = fixture(t, { imagesOnly: true }), node = f.plan.nodes[0];
   f.provider.setMode(node.id, 'unknown_after_accept');
   await f.engine.runReady();
@@ -113,7 +118,9 @@ test('deleteShot keeps released unknown work protected until reconciliation sett
   assert.equal(f.store.get('node_binding', node.id).candidateId, null);
   assertDeleteRefused(f);
   await f.engine.reconcile();
-  assert.equal(f.store.get('attempt', attempt.id).phase, 'succeeded');
+  assert.equal(f.store.get('attempt', attempt.id).phase, 'failed');
+  assert.equal(f.store.get('attempt', attempt.id).failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(f.store.get('reservation', attempt.reservationId).state, 'charged');
   f.edit({ kind: 'deleteShot', id: 'shot-0' });
   assert.equal(f.store.getProject(f.projectId).shots.length, 0);
   assert.equal(f.provider.acceptedCount(attempt.id), 1);
