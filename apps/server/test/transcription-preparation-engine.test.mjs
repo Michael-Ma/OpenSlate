@@ -219,14 +219,21 @@ test("interruption after installed local proof reopens into dedicated preparatio
   assert.deepEqual(liability(f), saved); assert.equal(current(f).phase, "ingesting");
 });
 
-test("a crash before protocol installation remains ordinary unknown recovery and cannot enter preparation", async t => {
+test("a crash before protocol installation is fenced as never dispatched and cannot enter preparation", async t => {
   const f = await preparationEngineFixture(t);
   f.control.beforeStart = () => { throw Error("synthetic crash before protocol installation"); };
   await f.engine.runReady(); assert.equal(current(f).phase, "submission_unknown");
   assert.equal(rows(f, "transcription_preparation_intent").length, 0); const saved = liability(f);
   f.control.beforeStart = undefined; f.reopen(); await f.engine.reconcile();
-  assert.equal(current(f).phase, "submission_unknown"); assert.equal(f.calls.lookups, 1); assert.equal(f.calls.resumes, 0);
-  assert.equal(f.calls.prepare, 0); assert.equal(f.calls.http, 0); assert.deepEqual(liability(f), saved);
+  assert.equal(current(f).phase, "failed"); assert.equal(f.calls.lookups, 1); assert.equal(f.calls.resumes, 0);
+  assert.equal(current(f).failure.retryAllowed, false);
+  assert.equal(rows(f, "transcription_execution_result")[0].observation.kind, "not_dispatched");
+  assert.equal(rows(f, "transcription_execution_dispatch").length, 0);
+  assert.equal(f.calls.prepare, 0); assert.equal(f.calls.http, 0);
+  const { reservations: oldReservations, ...before } = saved, { reservations, ...after } = liability(f);
+  assert.deepEqual(after, before); assert.equal(reservations[0].id, oldReservations[0].id); assert.equal(reservations[0].state, "released");
+  for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.calls.starts, 1); assert.equal(f.calls.prepare, 0); assert.equal(f.calls.http, 0);
 });
 
 test("post-marker interruption recovers only observations and never prepares or submits again after reopen", async t => {

@@ -33,14 +33,17 @@ function director(f, t, scopeIds = ['shot-0']) {
 async function unknownVideo(f) {
   ok(await f.post(await f.get())); await f.finish();
   ok(await f.post(await f.get(), 'video'));
-  f.provider.setMode(binding(f, 'video').id, 'unknown_after_accept');
+  f.provider.setMode(binding(f, 'video').id, 'pending');
   await f.engine.runReady();
+  f.knownPoll = f.provider.poll.bind(f.provider);
+  f.provider.poll = async () => ({ type: 'unknown', diagnostic: 'Known task status temporarily unavailable' });
+  await f.engine.reconcile();
   return f.engine.attempts(f.project.id).find(a => a.request.kind === 'video');
 }
 
-test('a detached unanswered clip identifies its human recovery before new keyframes, preserves liability and accepts a later result only as history', async t => {
+test('a detached unanswered clip with a retained task id identifies human recovery and accepts its later result only as history', async t => {
   const f = fixture(t), old = await unknownVideo(f);
-  assert.equal(old.phase, 'submission_unknown'); assert.equal(old.taskId, null);
+  assert.equal(old.phase, 'submission_unknown'); assert.ok(old.taskId);
   ok(await f.call('POST', '/storyboard', { kind: 'shot', field: 'imagePrompt', id: 'shot-0', value: 'The accepted new location', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }));
   await f.engine.runReady();
   assert.equal(binding(f, 'video').candidateId, null, 'the changed recipe detaches the old video candidate');
@@ -86,7 +89,7 @@ test('a detached unanswered clip identifies its human recovery before new keyfra
   ok(await f.post(await f.get(), 'image', randomUUID(), { targetShotIds: ['shot-0'], regenerate: true }));
   await f.finish(); const selectedFrame = binding(f, 'image').outputs.image;
   assert.equal(f.provider.acceptedCount(), starts + 1, 'only the fresh human generation press buys new work');
-  f.provider.lookup = unresolved; elapseUnknownBackoff(f.store, old.id); await f.engine.reconcile();
+  f.provider.complete(old.taskId); f.provider.poll = f.knownPoll; elapseUnknownBackoff(f.store, old.id); await f.engine.reconcile();
   const completed = f.store.get('attempt', old.id);
   assert.equal(completed.phase, 'succeeded'); assert.ok(completed.outputs.video);
   assert.equal(f.store.get('reservation', old.reservationId).state, 'charged');
@@ -94,6 +97,28 @@ test('a detached unanswered clip identifies its human recovery before new keyfra
   assert.deepEqual(binding(f, 'image').outputs.image, selectedFrame);
   assert.equal(f.provider.acceptedCount(old.id), 1);
   assert.deepEqual(f.store.list('director_generation_block', f.project.id), blocks, 'release, fresh work and a late result retain the original refusal history');
+});
+
+test('a detached clip with a lost submission reply settles charged with no result and a fresh human press can make keyframes', async t => {
+  const f = fixture(t);
+  ok(await f.post(await f.get())); await f.finish();
+  ok(await f.post(await f.get(), 'video'));
+  f.provider.setMode(binding(f, 'video').id, 'unknown_after_accept'); await f.engine.runReady();
+  const lost = f.engine.attempts(f.project.id).find(a => a.request.kind === 'video'), count = f.provider.acceptedCount();
+  ok(await f.call('POST', '/storyboard', { kind: 'shot', field: 'imagePrompt', id: 'shot-0', value: 'New frame after a lost clip reply', expectedHeadVersion: f.store.getProject(f.project.id).headVersion }));
+  await f.engine.reconcile();
+  const failed = f.store.get('attempt', lost.id);
+  assert.equal(failed.phase, 'failed'); assert.equal(failed.failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(failed.failure.retryAllowed, false); assert.deepEqual(failed.outputs, {});
+  assert.equal(f.store.get('reservation', lost.reservationId).state, 'charged');
+  for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.provider.acceptedCount(), count);
+  assert.equal(f.provider.acceptedCount(lost.id), 1);
+  ok(await f.post(await f.get(), 'image', randomUUID(), { targetShotIds: ['shot-0'], regenerate: true }));
+  await f.finish();
+  assert.equal(f.provider.acceptedCount(), count + 1);
+  assert.ok(binding(f, 'image').outputs.image);
+  assert.deepEqual(f.store.get('attempt', lost.id).outputs, {});
 });
 
 test('a known running keyframe names its job but never offers release, and unrelated shots do not enter the refusal', async t => {

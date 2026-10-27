@@ -15,6 +15,9 @@ import { assertCurrentGeneratedSelection } from './current-generated-selection.j
 import { assertImageExecutionDispatch, assertImageExecutionMapping, assertImageExecutionResult } from "./openai-image-receipts.js";
 import type { ImageExecutionDispatch, ImageExecutionMapping, ImageExecutionObservation, ImageExecutionResult } from "./openai-image-receipts.js";
 
+// OpenAIImageAdapter allows at most ten minutes, including on a different dispatch host.
+const MAX_SUBMIT_TIMEOUT_MS = 600000;
+const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false });
 const unknown = (diagnostic: string): ExecutionOutcome => ({ type: "unknown", diagnostic });
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const hash = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
@@ -32,13 +35,14 @@ export class OpenAIImageExecution implements ExecutionProvider {
   readonly #credentials: EnvironmentMediaCredentials;
   readonly #fetch: typeof globalThis.fetch | undefined;
   readonly #timeoutMs: number | undefined;
+  readonly #now: () => number;
   constructor(options: { store: Store; outputStore: ExecutionOutputStore; artifactRoot: string;
-    credentials: EnvironmentMediaCredentials; fetch?: typeof globalThis.fetch; timeoutMs?: number }) {
+    credentials: EnvironmentMediaCredentials; fetch?: typeof globalThis.fetch; timeoutMs?: number; now?: () => number }) {
     invariant(options.outputStore.store === options.store && isAbsolute(options.artifactRoot) && options.artifactRoot !== "/",
       "IMAGE_EXECUTION_CONFIGURATION", "Use one application store and a private absolute artifact root");
     this.#store = options.store; this.#outputs = options.outputStore; this.#credentials = options.credentials;
     this.#recovery = new InstallationRecoveryGuard(options.store);
-    this.#fetch = options.fetch; this.#timeoutMs = options.timeoutMs;
+    this.#fetch = options.fetch; this.#timeoutMs = options.timeoutMs; this.#now = options.now ?? Date.now;
     mkdirSync(options.artifactRoot, { recursive: true, mode: 0o700 }); this.#root = realpathSync(options.artifactRoot);
     registerExecutionProvider(this, { adapter: "openai-image", version: "1" });
   }
@@ -79,7 +83,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
         if (this.hasDispatchOrResult(attempt.id)) return false;
         stopped(signal); this.dispatchable(attempt, expectedLease);
         const intent: ImageExecutionDispatch = { ...this.identity(attempt), mappingDigest: digest(mapping),
-          transportDigest: mapping.transport.requestDigest, externalAllowanceId: (request.externalAllowanceId ?? null), createdAt: new Date().toISOString() };
+          transportDigest: mapping.transport.requestDigest, externalAllowanceId: (request.externalAllowanceId ?? null), createdAt: new Date(this.#now()).toISOString() };
         this.#store.insert("image_execution_dispatch", attempt.id, attempt.projectId, intent); return true;
       });
     } catch {
@@ -126,6 +130,7 @@ export class OpenAIImageExecution implements ExecutionProvider {
     const signal = options.signal, saved = this.#store.get<Attempt>("attempt", attemptId);
     invariant(saved && (!input || input.attemptId === attemptId), "IMAGE_EXECUTION_CONFLICT", "Unknown or mismatched image attempt");
     const attempt = this.admitted(structuredClone(input ?? saved.request));
+    this.fenceNeverDispatched(attempt, options);
     return this.recover(attempt, signal);
   }
 
@@ -166,6 +171,16 @@ export class OpenAIImageExecution implements ExecutionProvider {
       && current.leaseExpiresAt > Date.now() && reservation?.state === "reserved", "IMAGE_EXECUTION_NOT_DISPATCHABLE",
     "Image dispatch no longer owns its live admission lease");
   }
+  private fenceNeverDispatched(attempt: Attempt, options: ExecutionCallOptions): void {
+    this.#store.transaction(() => {
+      const current = this.admitted(attempt.request), expected = options.expectedLease;
+      // A current reconciliation lease fences the submitter before durable no-POST evidence is written.
+      if (options.signal?.aborted || this.hasDispatchOrResult(current.id) || current.taskId || !expected || current.phase !== "submission_unknown"
+        || current.leaseOwner !== expected.owner || current.leaseEpoch !== expected.epoch || current.leaseExpiresAt <= Date.now()
+        || this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state !== "reserved") return;
+      this.saveResult(current, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
+    });
+  }
   private hasDispatchOrResult(id: string): boolean {
     return !!(this.#store.get("image_execution_dispatch", id) || this.#store.get("image_execution_result", id));
   }
@@ -191,13 +206,15 @@ export class OpenAIImageExecution implements ExecutionProvider {
     const result = this.#store.get<ImageExecutionResult>("image_execution_result", attempt.id);
     if (mapping) assertImageExecutionMapping(attempt, mapping);
     if (dispatch) { invariant(mapping, "IMAGE_EXECUTION_CONFLICT", "Dispatch has no prepared mapping"); assertImageExecutionDispatch(attempt, mapping, dispatch); }
-    if (!result) return unknown("Image dispatch has no durable outcome; automatic resubmission is disabled");
+    if (!result) return dispatch && this.#now() - Date.parse(dispatch.createdAt) >= MAX_SUBMIT_TIMEOUT_MS ? responseLost()
+      : unknown("Image dispatch has no durable outcome; automatic resubmission is disabled");
     const observation = result.observation;
     assertImageExecutionResult(attempt, mapping, dispatch, result, observation.kind === "completed"
       ? this.#store.get("execution_output_receipt", observation.outputReceiptId) : undefined);
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
       failureId: `image-${digest(result).slice(0, 32)}`, technical: observation.kind === "not_dispatched" || observation.source === "local", retryAllowed: false };
-    if (observation.kind === "unknown") return unknown(`Image submission unresolved: ${observation.code}`);
+    if (observation.kind === "unknown") return dispatch && this.#now() - Date.parse(dispatch.createdAt) >= MAX_SUBMIT_TIMEOUT_MS ? responseLost()
+      : unknown(`Image submission unresolved: ${observation.code}`);
     try {
       await this.#outputs.recover(attempt.projectId, observation.outputReceiptId, signal ? { signal } : {});
       const completion = await this.#outputs.recoverCompletion(attempt.projectId, attempt.id, signal ? { signal } : {});

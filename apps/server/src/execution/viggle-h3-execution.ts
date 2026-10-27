@@ -141,7 +141,9 @@ export class ViggleH3Execution implements ExecutionProvider {
   async lookup(attemptId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
     const saved = this.#store.get<Attempt>("attempt", attemptId);
     invariant(saved && (!input || input.attemptId === attemptId), "VIGGLE_H3_EXECUTION_CONFLICT", "Unknown or mismatched H3 attempt");
-    return this.replay(this.admitted(structuredClone(input ?? saved.request)), options.signal);
+    const attempt = this.admitted(structuredClone(input ?? saved.request));
+    this.fenceNeverDispatched(attempt, options);
+    return this.replay(attempt, options.signal);
   }
 
   async poll(taskId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
@@ -245,6 +247,16 @@ export class ViggleH3Execution implements ExecutionProvider {
     const mapping = this.#store.get<ViggleH3ExecutionMapping>('viggle_h3_execution_mapping', previous.id);
     const admission = resolveViggleAdmission(this.#store, previous.request, mapping);
     assertViggleDispatchLease(this.#store, { ...admission, attempt: previous }, expected);
+  }
+  private fenceNeverDispatched(attempt: Attempt, options: ExecutionCallOptions): void {
+    this.#store.transaction(() => {
+      const current = this.admitted(attempt.request), expected = options.expectedLease;
+      // Reconciliation owns a new epoch, so every old first-POST writer is fenced before this receipt is sealed.
+      if (options.signal?.aborted || this.started(current.id) || current.taskId || !expected || current.phase !== "submission_unknown"
+        || current.leaseOwner !== expected.owner || current.leaseEpoch !== expected.epoch || current.leaseExpiresAt <= Date.now()
+        || this.#store.get<{ state: string }>("reservation", current.reservationId!)?.state !== "reserved") return;
+      this.saveSubmit(current, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
+    });
   }
   private started(id: string): boolean { return !!(this.#store.get("viggle_h3_execution_dispatch", id) || this.#store.get("viggle_h3_execution_submit", id)); }
   private transport(timeoutMs = this.#timeout): ViggleH3Provider {

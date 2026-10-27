@@ -48,7 +48,7 @@ function fixture(t, options = {}) {
     validationDigest: digest({ sha256: reference.sha256, syntheticDecode: true }) });
   const profile = { id: "offline-h3-video", revision: "1", kind: "video", adapter: "minimax-h3", executionVersion: "1",
     configuration: { model: options.model ?? "MiniMax-H3", settings: { resolution: "768P", ...options.profileSettings } },
-    minFrames: 120, maxFrames: 450, maxConcurrency: 2, unitCostMicros: "300", maxRetries: 0 };
+    minFrames: 120, maxFrames: 450, maxConcurrency: options.maxConcurrency ?? 2, unitCostMicros: "300", maxRetries: options.maxRetries ?? 0 };
   const outputs = new ExecutionOutputStore(store, { rootDir: join(directory, "outputs") }), clock = { value: Date.now() };
   const calls = { post: 0, query: 0, download: 0, credentials: 0 };
   const credentials = new EnvironmentMediaCredentials(name => { calls.credentials++; assert.equal(name, "OPENSLATE_MINIMAX_API_KEY"); return options.credential ? options.credential() : key; });
@@ -407,4 +407,68 @@ test("late accepted evidence survives both lease theft and bridge receipt-write 
     f.clock.value = restoredStore.list("h3_poll_schedule", f.project.id)[0].nextPollAt;
     await engine.reconcile(); assert.equal(f.calls.query, 1); assert.equal(f.calls.post, 1);
   } finally { restoredStore.close(); }
+});
+
+
+const minimaxLostReply = { type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false };
+function wakeMiniMax(f) {
+  const { unknownWait: _wait, ...current } = attempt(f);
+  f.store.put("attempt", current.id, f.project.id, { ...current, leaseExpiresAt: 0 });
+}
+function competingMiniMaxAdmission(f) {
+  const project = projectFixture(randomUUID(), 1), artifact = { ...f.reference, artifactId: randomUUID() };
+  project.artifacts = [artifact]; f.store.createProject(project);
+  const { id: _id, projectId: _projectId, ...record } = f.store.get("artifact", f.reference.artifactId);
+  f.store.insert("artifact", artifact.artifactId, project.id, { ...record, artifact });
+  const q = JSON.stringify, shot = project.shots[0];
+  const source = `definePlan({baseRevision:${q(project.revisionId)}},p=>{const shot=p.shot(${q(shot.id)});const frame=p.asset(${q(artifact.artifactId)});const review=p.humanReview("review",{shots:[{intent:shot,keyframe:frame,videoProfile:${q(f.profile.id)},motionPrompt:${q(shot.videoPrompt)},seconds:6}]});return p.video("video",{intent:shot,profile:${q(f.profile.id)},firstFrame:p.approvedImage(frame,review),prompt:${q(shot.videoPrompt)},seconds:6});});`;
+  const plan = compilePlan(source, { project, profiles: [f.profile], logicalIds: {}, allocateId: randomUUID }), node = plan.nodes.find(value => value.kind === "video"), planId = randomUUID();
+  const grant = f.engine.createGrant(project.id, shot.id, "video", "another-human-press", "initial_slot");
+  f.engine.installPlan(project.id, planId, plan, { [node.id]: grant.id }); f.store.saveProject({ ...project, activePlanId: planId }, 0);
+  const review = f.engine.reviewSnapshot(project.id); f.engine.approve(project.id, review.id, [node.id], "another-review");
+  const hold = f.engine.setHold(project.id, { scopeId: project.id, ownerId: "capacity-probe" });
+  return () => { f.engine.releaseHold(project.id, hold.id, "capacity-probe"); try { return f.engine.admit(project.id, node.id, f.engine.resolveInputs(project.id, node).fingerprint); } finally { f.engine.setHold(project.id, { scopeId: project.id, ownerId: "capacity-probe", id: hold.id }); } };
+}
+for (const receipt of ["unknown", "missing"]) test(`MiniMax L1 ${receipt} POST receipt stays in flight until the cross-host deadline, then charges once and frees capacity`, async t => {
+  const f = fixture(t, { deferAdmission: true, maxRetries: 3, maxConcurrency: 1, fetch: async () => { throw Error("reply lost"); } });
+  const insert = f.store.insert.bind(f.store);
+  if (receipt === "missing") f.store.insert = (...args) => { if (args[0] === "h3_execution_submit") throw Error("crash before receipt"); return insert(...args); };
+  try { await f.engine.runReady(); } finally { f.store.insert = insert; }
+  f.attempt = attempt(f); f.request = f.attempt.request;
+  const dispatch = rows(f, "h3_execution_dispatch")[0];
+  assert.equal(f.attempt.phase, "submission_unknown"); assert.equal(f.calls.post, 1);
+  const competing = competingMiniMaxAdmission(f); assert.throws(competing, { code: "CAPACITY_EXCEEDED" });
+  const other = new MiniMaxH3Execution({ ...f.bridgeOptions, timeoutMs: 1 });
+  f.clock.value = dispatch.createdAt + 119999;
+  assert.equal((await other.lookup(f.attempt.id)).type, "unknown", "the recovering host's shorter timeout cannot end the original POST");
+  wakeMiniMax(f); await f.engine.reconcile(); assert.equal(attempt(f).phase, "submission_unknown");
+  assert.equal(f.store.get("reservation", f.attempt.reservationId).state, "reserved");
+  f.clock.value += 1;
+  assert.deepEqual(await other.lookup(f.attempt.id), minimaxLostReply);
+  wakeMiniMax(f); await f.engine.reconcile();
+  const final = attempt(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.id, "SUBMISSION_RESPONSE_LOST"); assert.equal(final.failure.retryAllowed, false);
+  assert.equal(f.store.get("reservation", final.reservationId).state, "charged"); assert.equal(f.engine.budget(f.project.id).committedMicros, "300");
+  for (let cycle = 0; cycle < 5; cycle++) { await f.engine.reconcile(); const result = await f.engine.runReady(); assert.equal(result.dispatched, 0); }
+  assert.equal(f.engine.attempts(f.project.id).length, 1); assert.equal(f.calls.post, 1); assert.equal(f.calls.query, 0);
+  assert.equal(competing().phase, "submitting", "the failed attempt released its concurrency slot");
+});
+
+test("MiniMax L1 fenced pre-dispatch recovery releases the reservation and permanently prevents the stale worker's POST", async t => {
+  const f = fixture(t), old = context(f);
+  assert.equal((await f.bridge.lookup(f.attempt.id)).type, "unknown");
+  assert.equal((await f.bridge.lookup(f.attempt.id, f.request, { expectedLease: { owner: "stale", epoch: 0 } })).type, "unknown");
+  assert.equal(rows(f, "h3_execution_submit").length, 0);
+  wakeMiniMax(f); await f.engine.reconcile();
+  const final = attempt(f); assert.equal(final.phase, "failed"); assert.equal(final.failure.retryAllowed, false);
+  assert.equal(f.store.get("reservation", final.reservationId).state, "released"); assert.equal(f.engine.budget(f.project.id).committedMicros, "0");
+  const proof = rows(f, "h3_execution_submit")[0]; assert.equal(proof.observation.kind, "not_dispatched");
+  assert.equal((await f.bridge.submit(f.request, old)).type, "rejected");
+  assert.equal(rows(f, "h3_execution_dispatch").length, 0); assert.equal(f.calls.post, 0); assert.equal(f.calls.credentials, 0);
+});
+
+test("MiniMax L1 retained acceptance survives the lost-reply deadline and still polls its vendor task", async t => {
+  const f = fixture(t); await f.bridge.submit(f.request, context(f));
+  f.clock.value = rows(f, "h3_execution_dispatch")[0].createdAt + 120000;
+  assert.deepEqual(await f.bridge.lookup(f.attempt.id), { type: "accepted", taskId });
+  assert.equal((await f.bridge.poll(taskId, f.request)).type, "accepted"); assert.equal(f.calls.query, 1); assert.equal(f.calls.post, 1);
 });

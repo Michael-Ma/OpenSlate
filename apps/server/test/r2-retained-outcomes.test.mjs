@@ -89,18 +89,22 @@ test('R2 Stop restores a queued unsent replacement frame and Continue never buys
   await confirmAndUseEarlier(f, earlier, current);
 });
 
-test('R2 releasing a no-answer replacement restores its current frame and a late paid result stays an earlier take', async t => {
+test('R2 releasing a no-answer replacement with a retained task id restores its frame and a late paid result stays an earlier take', async t => {
   const { f, earlier, current } = await twoFrames(t);
-  f.provider.setMode(current.id, 'unknown_after_accept');
+  f.provider.setMode(current.id, 'pending');
   await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.engine.runReady();
+  const poll = f.provider.poll.bind(f.provider);
+  f.provider.poll = async () => ({ type: 'unknown', diagnostic: 'Known task status temporarily unavailable' });
+  await f.engine.reconcile();
   const replacement = imageBinding(f), unknown = imageAttempts(f, replacement.candidateId)[0];
-  assert.equal(unknown.phase, 'submission_unknown');
+  assert.equal(unknown.phase, 'submission_unknown'); assert.ok(unknown.taskId);
   const count = f.provider.acceptedCount();
   await f.call('POST', `/attempts/${unknown.id}/release`, { expectedPhase: 'submission_unknown', acknowledgeDoubleCharge: true }).then(f.ok);
   assertRestored(f, current);
   const released = f.store.get('attempt', unknown.id);
   assert.equal(released.phase, 'submission_unknown'); assert.ok(released.released);
   assert.notEqual(f.store.get('reservation', unknown.reservationId).state, 'released', 'human release must preserve possible liability');
+  f.provider.complete(unknown.taskId); f.provider.poll = poll;
   await f.restart(); await f.engine.reconcile();
   const late = f.store.get('attempt', unknown.id);
   assert.equal(late.phase, 'succeeded'); assert.ok(late.released);
@@ -111,6 +115,26 @@ test('R2 releasing a no-answer replacement restores its current frame and a late
   assert.equal(takes.keyframes.length, 3);
   assert.equal(takes.keyframes.find(t => t.artifact.artifactId === late.outputs.image.artifactId).current, false);
   await confirmAndUseEarlier(f, earlier, current);
+});
+
+test('R2 a lost replacement reply is charged once, restores its frame and requires a fresh human press for another take', async t => {
+  const { f, earlier, current } = await twoFrames(t);
+  f.provider.setMode(current.id, 'unknown_after_accept');
+  await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.engine.runReady();
+  const replacement = imageBinding(f), lost = imageAttempts(f, replacement.candidateId)[0], count = f.provider.acceptedCount();
+  await f.engine.reconcile();
+  const failed = f.store.get('attempt', lost.id);
+  assert.equal(failed.phase, 'failed'); assert.equal(failed.failure.id, 'SUBMISSION_RESPONSE_LOST');
+  assert.equal(failed.failure.retryAllowed, false); assert.deepEqual(failed.outputs, {});
+  assert.equal(f.store.get('reservation', lost.reservationId).state, 'charged');
+  assertRestored(f, current);
+  await f.restart(); await f.tick(4);
+  assert.equal(f.provider.acceptedCount(), count);
+  assert.equal(imageAttempts(f, replacement.candidateId).length, 1);
+  assert.equal((await f.call('GET', '/shots/shot-0/takes').then(f.ok)).keyframes.length, 2, 'a lost reply has no recoverable take');
+  await f.make({ targetShotIds: ['shot-0'], regenerate: true }); await f.tick(4);
+  assert.equal(f.provider.acceptedCount(), count + 1, 'only the new human press buys a replacement');
+  await confirmAndUseEarlier(f, earlier, imageBinding(f));
 });
 
 test('R2 a temporary retained-frame replacement cannot detach a queued confirmation voice or strand it after frame restoration', async t => {

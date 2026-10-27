@@ -115,9 +115,20 @@ try {
   provider.setMode(video.id, "unknown_after_accept"); await engine.runReady();
   const uncertain = engine.attempts(projectId).find(row => row.nodeId === video.id && row.phase === "submission_unknown"); assert.ok(uncertain);
   assert.equal(provider.acceptedCount(), 122); close(); open();
-  await timed("restartRecoveryMs", () => driveUntil(projectId, () => engine.outputs(projectId).length === 122, "Restart recovery"));
-  assert.equal(engine.attempts(projectId).find(row => row.id === uncertain.id).phase, "succeeded");
-  assert.equal(provider.acceptedCount(), 122); assert.equal(provider.acceptedCount(uncertain.id), 1);
+  await engine.reconcile();
+  const lost = store.get("attempt", uncertain.id);
+  assert.equal(lost.phase, "failed"); assert.equal(lost.failure.id, "SUBMISSION_RESPONSE_LOST");
+  assert.equal(lost.failure.retryAllowed, false); assert.equal(store.get("reservation", lost.reservationId).state, "charged");
+  for (let cycle = 0; cycle < 5; cycle++) { await engine.reconcile(); await engine.runReady(); }
+  assert.equal(provider.acceptedCount(), 122); assert.deepEqual(store.get("attempt", lost.id).outputs, {});
+  // Only this new human decision buys another video; restart/reconciliation never does.
+  const freshPress = service.beginRequest(projectId, "simulated-human", "The reply was lost and may have been charged. Make this clip again.", { scopeIds: [changed.id], editing: false });
+  const grant = engine.createGrant(projectId, changed.id, "video", freshPress.requestId, "user_change");
+  const current = store.getProject(projectId), plan = store.get("plan", current.activePlanId).compiled, planId = randomUUID();
+  store.transaction(() => { engine.installPlan(projectId, planId, plan, { [video.id]: grant.id }); store.saveProject({ ...current, activePlanId: planId }, current.headVersion); });
+  await timed("restartRecoveryMs", () => driveUntil(projectId, () => engine.outputs(projectId).length === 122, "New human replacement"));
+  assert.equal(store.get("attempt", uncertain.id).phase, "failed");
+  assert.equal(provider.acceptedCount(), 123); assert.equal(provider.acceptedCount(uncertain.id), 1);
   const acceptsByAttempt = new Map();
   for (const job of provider.jobs()) acceptsByAttempt.set(job.attemptId, (acceptsByAttempt.get(job.attemptId) ?? 0) + 1);
   const duplicateFakeAccepts = [...acceptsByAttempt.values()].filter(count => count > 1).length; assert.equal(duplicateFakeAccepts, 0);
@@ -129,8 +140,8 @@ try {
   const oldFrame = initialBindings.get("shot-29/frame").outputs.image; assert.ok(existsSync(store.get("artifact", oldFrame.artifactId).path));
   const summary = { schemaVersion: 1, recordedAt: new Date().toISOString(), nodeVersion: process.version, platform: process.platform, arch: process.arch,
     mode: "fake", label: "Synthetic state-machine acceptance; no native model or media API calls. Fake video/preview bytes are one second, not a physical six-minute film.",
-    projectId, plannedSeconds: 360, shots: 60, syntheticAcceptedCues: 60, operations: 122, exactReviewMembers: 60, reviewBatchSize: 15, initialFakeAccepts: 120, finalFakeAccepts: 122,
-    changedShot: 30, preservedShots: 59, preservedMediaNodes: 118, replacedNodes: 4, duplicateFakeAccepts, uncertainAttemptRecovered: true,
+    projectId, plannedSeconds: 360, shots: 60, syntheticAcceptedCues: 60, operations: 122, exactReviewMembers: 60, reviewBatchSize: 15, initialFakeAccepts: 120, finalFakeAccepts: 123,
+    changedShot: 30, preservedShots: 59, preservedMediaNodes: 118, replacedNodes: 4, duplicateFakeAccepts, lostReplyCharged: true, replacementRequiredNewHumanPress: true,
     narrationCuesAndScenesUnchanged: true, sourceBytes: Buffer.byteLength(prepared.compiled.source),
     durationOverflowRejected: true, canonicalSourceRoundTrip: true, currentOutputHashesVerified: 122, oldKeyframeRetained: true,
     modelStarts: 0, mediaApiCalls: 0, imageRounds, initialVideoRounds, metrics };

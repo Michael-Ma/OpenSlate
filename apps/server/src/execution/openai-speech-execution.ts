@@ -12,6 +12,9 @@ import type { SpeechExecutionDispatch, SpeechExecutionMapping, SpeechExecutionOb
 import { assertPersonalVoiceCurrent } from '../narration/personal-voices.js';
 
 const unknown = (diagnostic: string): ExecutionOutcome => ({ type: "unknown", diagnostic });
+// AudioHttpClient bounds every host's speech POST to this maximum, even if a host selects a shorter timeout.
+const MAX_SUBMIT_TIMEOUT_MS = 120000;
+const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false });
 const stopped = (signal?: AbortSignal): void => invariant(!signal?.aborted, "SPEECH_EXECUTION_CANCELLED", "Speech preparation was cancelled");
 
 /** Explicit host bridge: registration is availability, never a spending allowance or default activation. */
@@ -115,7 +118,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
     const saved = this.#store.get<Attempt>("attempt", attemptId);
     invariant(saved && (!input || input.attemptId === attemptId), "SPEECH_EXECUTION_CONFLICT", "Unknown or mismatched speech attempt");
     const admission = this.admission(structuredClone(input ?? saved.request));
-    return this.recover(admission.attempt, signal);
+    return this.recover(admission.attempt, signal, options.expectedLease);
   }
 
   async poll(_taskId: string, input?: Readonly<ExecutionRequest>, options: ExecutionCallOptions = {}): Promise<ExecutionOutcome> {
@@ -159,7 +162,7 @@ export class OpenAISpeechExecution implements ExecutionProvider {
     }
     return this.recover(admission.attempt, signal);
   }
-  private async recover(attempt: Attempt, signal?: AbortSignal): Promise<ExecutionOutcome> {
+  private async recover(attempt: Attempt, signal?: AbortSignal, lease?: ExecutionCallOptions["expectedLease"]): Promise<ExecutionOutcome> {
     const admission = this.admission(attempt.request);
     const mapping = this.#store.get<SpeechExecutionMapping>("speech_execution_mapping", attempt.id);
     const dispatch = this.#store.get<SpeechExecutionDispatch>("speech_execution_dispatch", attempt.id);
@@ -169,13 +172,26 @@ export class OpenAISpeechExecution implements ExecutionProvider {
       invariant(mapping, "SPEECH_EXECUTION_CONFLICT", "Speech dispatch has no prepared mapping");
       assertSpeechExecutionDispatch(admission.attempt, mapping, dispatch);
     }
-    if (!result) return unknown("Speech dispatch has no durable outcome; automatic resubmission is disabled");
+    if (!dispatch && !result && lease) {
+      // The reconciler's live lease fences every old pre-marker worker. Retain this proof so replay cannot submit it later.
+      this.#store.transaction(() => {
+        if (this.hasDispatchOrResult(attempt.id)) return;
+        const current = this.admission(attempt.request);
+        if (current.attempt.phase !== "submission_unknown" || current.attempt.leaseOwner !== lease.owner
+          || current.attempt.leaseEpoch !== lease.epoch || current.attempt.leaseExpiresAt <= Date.now() || current.reservation.state !== "reserved") return;
+        this.saveResult(current.attempt, { kind: "not_dispatched", code: "LOCAL_CANCELLED" });
+      });
+      if (this.hasDispatchOrResult(attempt.id)) return this.recover(attempt, signal);
+    }
+    const unresolved = (): ExecutionOutcome => dispatch && Date.now() - Date.parse(dispatch.createdAt) >= MAX_SUBMIT_TIMEOUT_MS
+      ? responseLost() : unknown("Speech dispatch has no durable outcome; automatic resubmission is disabled");
+    if (!result) return unresolved();
     const observation = result.observation;
     assertSpeechExecutionResult(admission.attempt, mapping, dispatch, result, observation.kind === "completed"
       ? this.#store.get("execution_output_receipt", observation.outputReceiptId) : undefined);
     if (observation.kind === "not_dispatched" || observation.kind === "rejected") return { type: "rejected", certainty: "not_accepted",
       failureId: `speech-${digest(result).slice(0, 32)}`, technical: observation.kind === "not_dispatched" || observation.source === "local", retryAllowed: false };
-    if (observation.kind === "unknown") return unknown(`Speech submission unresolved: ${observation.code}`);
+    if (observation.kind === "unknown") return unresolved();
     try {
       const saved = this.#returnedBytes.get(attempt.id);
       if (saved) {

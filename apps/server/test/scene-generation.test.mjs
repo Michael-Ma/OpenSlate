@@ -782,7 +782,7 @@ test("shot regeneration rejects ambiguous scope, video shortcuts, missing identi
   assert.deepEqual(f.store.list("hold", f.project.id), held);
 });
 
-test("shot regeneration cannot replace an uncertain provider job after a prompt edit detached its candidate", async (t) => {
+test("detached uncertain keyframes block regeneration until a charged lost reply allows a new human press", async (t) => {
   const f = fixture(t);
   const generated = await f.post(await f.get());
   assert.equal(generated.statusCode, 200, generated.body);
@@ -817,6 +817,16 @@ test("shot regeneration cannot replace an uncertain provider job after a prompt 
   assert.equal(f.store.list("candidate", f.project.id).length, candidateCount);
   assert.equal(f.provider.acceptedCount(), 1);
   assert.equal(f.engine.attempts(f.project.id)[0].id, attempt.id);
+  await f.engine.reconcile();
+  const lost = f.store.get("attempt", attempt.id);
+  assert.equal(lost.phase, "failed"); assert.equal(lost.failure.id, "SUBMISSION_RESPONSE_LOST");
+  assert.equal(lost.failure.retryAllowed, false); assert.equal(f.store.get("reservation", lost.reservationId).state, "charged");
+  for (let cycle = 0; cycle < 3; cycle++) { await f.engine.reconcile(); await f.engine.runReady(); }
+  assert.equal(f.provider.acceptedCount(), 1); assert.deepEqual(lost.outputs, {});
+  const fresh = await f.post(await f.get(), "image", randomUUID(), { targetShotIds: ["shot-0"], regenerate: true });
+  assert.equal(fresh.statusCode, 200, fresh.body);
+  await f.finish(); assert.equal(f.provider.acceptedCount(), 2);
+  assert.equal(f.store.get("attempt", attempt.id).phase, "failed");
 });
 
 test("shot generation respects current unanswered direction and Stop, while superseded questions do not block", async (t) => {

@@ -175,7 +175,7 @@ test('playback maps a shared legacy absolute cue only to the cut aligned with it
   assert.equal(playback.json().placements[0].atSample, 0); assert.deepEqual(f.canonical.workspaceCurrent(project.id), saved);
 });
 
-test('editing and accepting one shot leaves another reviewed video eligible and preserves its uncertain attempt and cue',async t=>{
+test('editing and accepting one shot preserves another cue while its lost video reply is charged once',async t=>{
  const f=await fixture(t),project=f.store.getProject(f.project.id),q=JSON.stringify;
  const human=f.production.beginRequest(project.id,'local-user','Authorize these offline fixture slots'),actor=f.production.openEpoch(project.id,human).actor;
  f.production.authorize(project.id,human,project.shots.flatMap(shot=>[{scopeId:shot.id,kind:'image'},{scopeId:shot.id,kind:'video'}]),randomUUID());
@@ -190,8 +190,10 @@ test('editing and accepting one shot leaves another reviewed video eligible and 
  const response=await f.request(`/shots/${project.shots[0].id}/accept`,f.acceptBody(audio,segment));assert.equal(response.statusCode,200,response.body);
  const accepted=f.store.getProject(project.id);assert.deepEqual(accepted.shots[1],before.shots[1]);assert.deepEqual(accepted.cues.find(cue=>cue.id===oldCue.id),oldCue);
  assert.ok(f.store.list('hold',project.id).filter(hold=>hold.active).every(hold=>hold.scopeId===project.shots[0].id));
- await f.engine.reconcile();assert.equal(f.engine.attempts(project.id).find(row=>row.id===attempt.id).phase,'succeeded');assert.equal(f.provider.acceptedCount(),3);
- assert.ok(f.engine.outputs(project.id).some(output=>output.nodeId===otherVideo.id&&output.artifact.kind==='video'));assert.equal(f.engine.attempts(project.id).filter(row=>row.nodeId===otherVideo.id).length,1);
+ await f.engine.reconcile();const lost=f.store.get('attempt',attempt.id);assert.equal(lost.phase,'failed');assert.equal(lost.failure.id,'SUBMISSION_RESPONSE_LOST');assert.equal(lost.failure.retryAllowed,false);assert.equal(f.store.get('reservation',attempt.reservationId).state,'charged');assert.equal(f.provider.acceptedCount(),3);
+ assert.ok(!f.engine.outputs(project.id).some(output=>output.nodeId===otherVideo.id&&output.artifact.kind==='video'));
+ for(let cycle=0;cycle<3;cycle++){await f.engine.reconcile();await f.engine.runReady();}assert.equal(f.provider.acceptedCount(),3);
+ assert.deepEqual(f.store.getProject(project.id).cues.find(cue=>cue.id===oldCue.id),oldCue);assert.equal(f.engine.attempts(project.id).filter(row=>row.nodeId===otherVideo.id).length,1);
 });
 
 test('compact session cannot borrow another shot path or mutate its immutable scope',async t=>{
