@@ -1,7 +1,7 @@
 import type { DirectorNote, ShotOverview } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import type { ConversationEntry, DirectorStatus, TurnView } from "../model/types.ts";
-import { FIXTURE_TIMING, fixtureAcceptOnWord, fixtureDirectorKeyframes, fixtureFailNextKeyframe, recompute } from "./fixture-commands.ts";
+import { FIXTURE_TIMING, fixtureAcceptOnWord, fixtureDeclineOnWord, fixtureDirectorKeyframes, fixtureFailNextKeyframe, recompute } from "./fixture-commands.ts";
 import type { MessageAttachmentView } from "@openslate/core/public";
 import { fixtureAsset } from "./routes/assets.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
@@ -29,6 +29,9 @@ const ASKS_FOR_KEYFRAMES = /(make|generate|create|start)\b[^.?!]*\bkeyframes?\b|
 
 /** Accepting a proposal by its letter ("accept proposal c", "接受提案 c"): the scripted Director accepts it on that word. */
 const ACCEPTS_PROPOSAL = /\b(?:accept|approve)\s+proposal\s+([a-z])\b|(?:接受|批准|采用)\s*提案\s*([a-z])(?![a-z])/i;
+
+/** Declining one the same way ("decline proposal c", "拒绝提案 c"): set aside on that word, as the studio does. */
+const DECLINES_PROPOSAL = /\b(?:decline|reject)\s+proposal\s+([a-z])\b|(?:拒绝|不要|驳回)\s*提案\s*([a-z])(?![a-z])/i;
 
 /** Asking for video ("make the video for Scene 2", "生成视频"): the scripted Director asks for the scene's confirm in the chat. */
 const ASKS_FOR_VIDEO = /(make|generate|create|start)\b[^.?!]*\b(video|clips?)\b|(生成|做|出)[^。？！]*视频/i;
@@ -88,10 +91,10 @@ function scopeName(world: FixtureWorld, id: string): string | null {
   return world.overview.shots[id]?.label ?? null;
 }
 
-function acceptedReply(named: RegExpMatchArray | null, outcome: ReturnType<typeof fixtureAcceptOnWord> | null): string {
+function acceptedReply(named: RegExpMatchArray | null, outcome: ReturnType<typeof fixtureAcceptOnWord> | null, declined = false): string {
   if (!named || !outcome) return "";
   const letter = (named[1] ?? named[2])!.toLowerCase();
-  if (outcome.ok) return `Accepted proposal ${letter} as you asked. You can undo it under the note. `;
+  if (outcome.ok) return declined ? `Declined proposal ${letter} as you asked. ` : `Accepted proposal ${letter} as you asked. You can undo it under the note. `;
   return outcome.code === "PROPOSAL_AMBIGUOUS" ? `More than one proposal is lettered ${letter}; which one do you mean? `
     : outcome.code === "NOT_FOUND" ? `I can't find a proposal ${letter}. `
     : `Proposal ${letter} is no longer open, so I didn't change anything. `;
@@ -166,15 +169,19 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
     // Accepted a proposal by its letter: done first, as the person asked, then anything else in the same message.
     const named = !questionId ? text.match(ACCEPTS_PROPOSAL) : null;
     const accepted = named ? fixtureAcceptOnWord(w, (named[1] ?? named[2])!, requestId) : null;
+    // Declined one by its letter: set aside the same way (only when the message accepts none).
+    const declineNamed = !questionId && !named ? text.match(DECLINES_PROPOSAL) : null;
+    const declined = declineNamed ? fixtureDeclineOnWord(w, (declineNamed[1] ?? declineNamed[2])!, requestId) : null;
     // Asked for keyframes: the scripted Director starts them as the person's press would, and says what and the price.
     const started = !questionId && ASKS_FOR_KEYFRAMES.test(text) ? fixtureDirectorKeyframes(w) : null;
     const asks = !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
     const askNames = asks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
-    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + scriptedReply(names, !!questionId, pictures, attachments.length, !!started?.sceneIds.length, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
+    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + acceptedReply(declineNamed, declined, true) + scriptedReply(names, !!questionId, pictures, attachments.length, !!started?.started.length, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
     const at = new Date().toISOString();
-    const turn: TurnView | null = started || asks.length || accepted?.ok ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
+    const turn: TurnView | null = started || asks.length || accepted?.ok || declined?.ok ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
       effects: { notesCreated: asks.length, proposalsHeld: 0, changesApplied: accepted?.ok ? 1 : 0,
-        ...(started?.sceneIds.length ? { generation: [{ kind: "keyframes" as const, sceneIds: started.sceneIds, shotIds: started.shotIds, keyframes: started.keyframes, voiceLines: started.voiceLines, quote: started.quote, at }] } : {}),
+        // One effect per started scene, as the studio records them.
+        ...(started?.started.length ? { generation: started.started.map((scene) => ({ kind: "keyframes" as const, ...scene, at })) } : {}),
         ...(started?.blocked.length ? { blocked: started.blocked } : {}) } } : null;
     w.snapshot = { ...w.snapshot, conversation: [...(w.snapshot.conversation ?? []), reply], ...(turn ? { turns: [...(w.snapshot.turns ?? []), turn] } : {}), ...(asks.length ? { notes: [...(w.snapshot.notes ?? []), ...asks] } : {}) };
     if (left === 0) {
@@ -234,6 +241,8 @@ export const directorRoutes: FixtureRoute[] = [
  * - `lost`: 1.2's voice line waits for an answer (Give up returns it to its words), the voice service never replied for 2.3's line, and the transcription of a recording the person sent got
  *   no reply either (both SUBMISSION_RESPONSE_LOST, counted as spent): the voice row, Needs attention and the thread
  *   say it may be charged and how it is made again.
+ * - `transcribing`: a recording the person sent is being transcribed; it comes back after a few seconds.
+ * - `unanswered`: a recording's transcription was sent and the service never answered: the line offers Give up.
  */
 export function directorPresets(): string[] {
   try { return (new URLSearchParams(globalThis.location?.search ?? "").get("director") ?? "").split(",").map((part) => part.trim()).filter(Boolean); } catch { return []; }
@@ -268,7 +277,7 @@ const MARKDOWN_REPLY = [
 /** Apply the `?director=` presets to a fresh sample world (tests pass the list themselves). */
 export function applyDirectorPresets(world: FixtureWorld, presets: readonly string[] = directorPresets()): void {
   // In one order whatever the list's, so the sample conversation stays in time order.
-  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs", "lost"];
+  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs", "lost", "transcribing", "unanswered"];
   for (const preset of order.filter((name) => presets.includes(name))) {
     if (preset === "codex") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: true };
     if (preset === "no-ffmpeg") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: false };
@@ -311,6 +320,24 @@ export function applyDirectorPresets(world: FixtureWorld, presets: readonly stri
         effects: { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [{ kind: "transcription", sceneIds: [], shotIds: [], keyframes: 0, voiceLines: 0,
           quote: { micros: "6000", units: 1, unitMicros: "6000", priceUnknown: false }, at: laterToday(4), transcription: { state: "failed", failure: lost } }] } };
       world.snapshot = { ...world.snapshot, conversation: [...(world.snapshot.conversation ?? []), message, reply], turns: [...(world.snapshot.turns ?? []), turn] };
+    }
+    if (preset === "transcribing" || preset === "unanswered") {
+      // A recording the person sent is being transcribed (it comes back on the simulated clock), or its job was sent
+      // and the service never answered (Give up lets it go).
+      const running = preset === "transcribing";
+      const requestId = `request-${preset}`;
+      const turnId = `turn-${preset}`;
+      const message: ConversationEntry = { id: requestId, role: "user", text: "Here is my reading of the closing line, can you write it down?", requestId, at: laterToday(5) };
+      const reply: ConversationEntry = { id: `m-${preset}`, role: "assistant", text: "I sent your recording to be transcribed.", requestId, at: laterToday(5), runtime: "scripted" };
+      const transcription = running ? { state: "running" as const, attemptId: "fixture-attempt-transcribing" } : { state: "no_answer" as const, attemptId: "fixture-attempt-transcription" };
+      const turn: TurnView = { id: turnId, requestId, state: "completed", runtime: "scripted", action: "conversation",
+        effects: { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [{ kind: "transcription", sceneIds: [], shotIds: [], keyframes: 0, voiceLines: 0,
+          quote: { micros: "6000", units: 1, unitMicros: "6000", priceUnknown: false }, at: laterToday(5), transcription }] } };
+      world.snapshot = { ...world.snapshot, conversation: [...(world.snapshot.conversation ?? []), message, reply], turns: [...(world.snapshot.turns ?? []), turn] };
+      if (running) world.later(FIXTURE_TIMING.keyframeMs, (w) => {
+        w.snapshot = { ...w.snapshot, turns: (w.snapshot.turns ?? []).map((t) => t.id !== turnId || !t.effects?.generation ? t
+          : { ...t, effects: { ...t.effects, generation: t.effects.generation.map((effect) => ({ ...effect, transcription: { state: "ready" as const, attemptId: "fixture-attempt-transcribing" } })) } }) };
+      });
     }
     if (preset === "failed") {
       const requestId = "request-failed";
