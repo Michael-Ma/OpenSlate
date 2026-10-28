@@ -292,14 +292,19 @@ test('read_context audio_library lists owned recordings, roles, cached timing an
 
 test('character tools dispatch to the character module; mixed patches are refused before it', async t => {
   const f = seven(t), before = f.saved();
-  const unavailable = (value) => ['CHARACTERS_UNAVAILABLE'].includes(value);
-  assert.ok(unavailable(await code(f.openTurn().call('read_context', { section: 'characters' }))));
-  assert.ok(unavailable(await code(f.openTurn().call('make_character_sheets', { characterIds: ['c1'] }))));
-  assert.ok(unavailable(await code(f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: {
-    createCharacters: [{ key: 'mara', name: 'Mara', identity: 'Tall, grey coat' }], updateShots: [{ id: 'shot-0', characterIds: ['mara'] }] } }))));
+  // A patch mixing character fields with other creative fields is refused before the character module saves anything.
   assert.equal(await code(f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: {
     brief: 'New brief', createCharacters: [{ key: 'mara', name: 'Mara', identity: 'Tall' }] } })), 'VALIDATION_ERROR');
   assert.deepEqual(f.saved(), before);
+  const empty = await f.openTurn().call('read_context', { section: 'characters' });
+  assert.deepEqual(empty.characters, []);
+  assert.equal(await code(f.openTurn().call('make_character_sheets', { characterIds: ['c1'] })), 'NOT_FOUND');
+  const created = await f.openTurn().call('prepare_change', { variant: 'project', expectedHeadVersion: f.head(), creative: {
+    createCharacters: [{ key: 'mara', name: 'Mara', identity: 'Tall, grey coat' }], updateShots: [{ id: 'shot-0', characterIds: ['mara'] }] } });
+  assert.deepEqual(created.changedShotIds, ['shot-0']);
+  const read = await f.openTurn().call('read_context', { section: 'characters' });
+  assert.deepEqual(read.characters.map(character => character.name), ['Mara']);
+  assert.deepEqual(read.casting.find(row => row.shotId === 'shot-0').characterIds, [created.keys.mara]);
 });
 
 test('7.0.0 Directors keep make_keyframes authority, and music wording no longer calls choosing a song a human action', async t => {

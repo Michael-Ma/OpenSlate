@@ -587,6 +587,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
     const previous = current ? null : shot.keyframe.previous ?? null;
     const remaking = shot.keyframe.replacement?.state === "running";
     const workingOn = shot.keyframe.state === "running" || remaking ? "keyframe" : shot.video.state === "running" ? "video" : voiceStep ? "voice" : null;
+    const lipSync = lipSyncLine(shot);
     return {
       shotId: shot.shotId,
       label: shot.label,
@@ -603,7 +604,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
       workingOn,
       selected: shot.shotId === selected?.shotId,
       callouts: checks.filter((entry) => entry.check.shotId === shot.shotId),
-      ...(shot.lipSync ? { lipSync: lipSyncLine(shot) } : {}),
+      ...(lipSync ? { lipSync } : {}),
     };
   });
   return {
