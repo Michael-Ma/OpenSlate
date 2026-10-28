@@ -13,6 +13,7 @@
   - 唱歌镜头（`performance: "singing"`）不再走 Viggle，而是用 fal 的 `minimax/h3-max/lip-sync/image-to-video`，直接从**已审的关键帧 + 本镜头的歌曲片段**一步出片。不唱的镜头照旧走 Viggle。
   - 凭证：环境变量 **`OPENSLATE_FAL_API_KEY`**（fal 的 `id:secret` key）。没有设置时，唱歌镜头诚实地显示「没有对口型模型：按普通片段生成」。
   - 本节下面的 sync.so「先出片再对口型」方案改为 A/B 备选（v8 计划第 2 条决定）。原来的 seam（§4.5–4.6）保留，切片和显示规则被新执行复用。
+- **歌曲分析（已实现，Gemini `gemini-3.8-flash`，见 §9）**：段落标签、人声区间、带时间的歌词和每段情绪，进入 `analyze_music` 的 `enrichment`。节拍、tempo、时长始终来自本地测量。3 分钟的歌一般约 $0.02，最多 $0.07；会把歌发送给 Google，所以由人在 Assets 里对每段录音按一次「分析歌曲」，结果缓存。凭证 **`OPENSLATE_GEMINI_API_KEY`**。
 - **需要 catalog / skill 版本升级的仅规格项**：`set_soundtrack` 工具、`read_context` 的 `audio_library` 小节、`filmKind`、镜头 `performance` 字段、lip-sync 执行节点，以及 V8 skill 指南。见 §5。
 
 ---
@@ -405,7 +406,82 @@ shipped package 不可变，所以只能以新版本发布。
 - 每秒价格来自 fal 模型页；`unitCostMicros` 预留是上限，实际扣费以 fal 账单为准。
 - `isSingingShot` 的文字识别不再用于路由，只保留给 seam 的旧测试。
 
+## 9. Gemini 歌曲分析（`analyze_music` 的 enrichment 槽，已实现）
+
+分支 `feature/gemini-music-enrichment`（基于 `origin/feature/last-ferry-ui` 2004df3）。**没有任何真实 Gemini 调用**：所有测试都用 fake transport 或 fake fetch。为什么不用 Astra 见 `2026-10-28-astra-audio-probe.md`。
+
+### 9.1 Gemini 接口（2026-10-28 对照 Gemini API 文档核对）
+
+| 项 | 结论 |
+|---|---|
+| 模型 | **`gemini-3.8-flash`**（stable，"most intelligent Flash"，模型页明确支持 audio 输入、structured output、thinking low/medium/high，不支持 minimal）。备选 `gemini-3.5-flash-lite`（价格表里唯一明确写了 audio 输入价的 Flash 级模型），代码里有价格行，可以通过 `GeminiMusicListener({ model })` 切换 |
+| 接口 | `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent`，header `x-goog-api-key`。文档现在主推 Interactions API，并说 generateContent 是 legacy 但 "remains fully supported"；选 generateContent 是因为它的请求和响应结构有完整文档（Interactions 的响应 JSON 在文档里没有写全） |
+| 音频 | **inline**（`inlineData {mimeType:"audio/wav", data}`），不用 Files API：音频文档写着 inline 请求总大小上限 20 MB（Files 页面写的是 100 MB，按更严的 20 MB 处理）。本机把规范化的 48 kHz 立体声 WAV 下混并 3:1 平均降到 **16 kHz 单声道 PCM16**（32 kB/s；Gemini 自己会降到 16 kbps 单声道，不损失它能用的信息），base64 后 8 分钟以内都在 20 MB 以下，所以上限 `LISTEN_MAX_SECONDS = 480`。Files API 文件会在 Google 保存 48 小时，inline 不产生存储文件 |
+| 长度 | 单次 prompt 最多 9.5 小时音频；音频按 **32 token/秒** 计（1 分钟 1,920 token） |
+| 结构化输出 | `generationConfig: { responseMimeType: "application/json", responseJsonSchema, maxOutputTokens: 16384, thinkingConfig: { thinkingLevel: "low" } }`。schema 用 `enum`（段落标签、能量）、`required`、`maxItems`；文档说 `minLength/maxLength` 等不会被强制，所以结果在本机再校验一遍 |
+| 时间戳 | 文档用 `MM:SS` 表示音频里的位置，**没有给出精度说明**。所以要求 `M:SS.s`（也接受秒数和 `H:MM:SS`），然后按本机测量裁剪、并把段落边界吸附到小节重拍上 |
+| 价格（付费层，每 1M token） | `gemini-3.8-flash`：输入 $0.75（到 2026-12-31），2027-01-01 起 $1.50；输出（含 thinking）$3.75，2027 起 $7.50。页面对这个模型只有一个输入价，没有单独的 audio 行。`gemini-3.5-flash-lite`：输入 $0.30（明确含 audio），输出 $2.50 |
+
+**一首 3 分钟的歌**（`gemini-3.8-flash`，今天的价格）：输入 180 × 32 + 600 = 6,360 token ≈ $0.0048；输出一般约 3,700 token ≈ $0.014。**合计一般约 $0.02，最多 $0.066**（最多 = 用满 16,384 个输出 token）。2027 年起约翻倍（一般 $0.04，最多 $0.13）。Flash-Lite 一般约 $0.011。报价在 `packages/providers/src/gemini-audio.ts` 的 `geminiAudioQuote`，按日期选价格行。
+
+### 9.2 同意规则：每段录音由人确认一次（决定）
+
+- 依据：现有规则里**没有「低于某个金额就当免费」的例外**。v7 skill 写的是 "Reviews, replies to reviews, automatic, discuss-only and read-only turns cannot start paid work"，付费工作只能由人按下带价格的按钮，或在新的人工编辑请求里明确要求（`make_keyframes`）。而 `analyze_music` 在 catalog 里是 "Free and read-only"，讨论和只读回合都能调用，所以它**不能**花钱。另外，这一步会把歌发给 Google，这和金额无关，本身就需要人知情。
+- 所以：
+  - `analyze_music` **从不调用 Gemini**。它只读缓存，或者告诉导演现在的状态和下一步。
+  - 人在 **Assets → 这首音乐 → 歌曲分析** 里按「分析歌曲 · 约 $0.02」。按钮下面写明「这会把这首歌发送给 Google」。这一次按下就是同意，记在 `music_listen` 记录里（时间、`local-user`、报价、模型、版本）。
+  - 结果按 **项目 + 录音 sha256 + analyzer 版本（`gemini-music@1`）+ 模型** 缓存在 `music_enrichment`。同样的字节重新导入也会复用；换了字节、版本或模型，就需要再按一次。
+  - 失败不会自动重试。每次重试都要人再按一次，按钮上同样显示价格。
+- tool catalog 没有改：导演看到的仍是同一个 `analyze_music`，只是结果里多了 `enrichment` 字段。
+
+### 9.3 `analyze_music` 返回的 `enrichment`
+
+| state | 含义 |
+|---|---|
+| `ready` | `sections[]`：`label`（intro/verse/pre-chorus/chorus/bridge/solo/outro）、`mood`、`energy`（low/medium/high）、吸附后的 `startFrame/endFrame`、`suggestedShotFrames`，以及 `snap {reportedStartSeconds, reportedEndSeconds, start:{frame, movedFrames, to:"downbeat"\|"edge"\|"none"}, end}`；`vocalRanges`、`lyrics`（同时填进顶层的 `vocalRanges`/`lyrics`）；`adjustments`（out-of-range、clamped、invalid 等计数）；`cost.estimatedMicros`（按 usage 算）；`audioLeftMachine` 说明这段录音已经发给过 Google |
+| `needs_confirmation` | 有 key、还没分析过：`quote {typicalUsd, maxUsd, …}`、`audioLeavesMachine`、`next`（请人去 Assets 按「分析歌曲」，同时先按测量的节拍做规划） |
+| `running` | 正在听 |
+| `failed` | `code`、`reason`、`charged: "no" \| "maybe"`、重试报价。重启时如果还有正在进行的分析，显示 `LISTEN_INTERRUPTED`，可能已扣费 |
+| `unavailable` | `GEMINI_KEY_MISSING`（原因里写了 `OPENSLATE_GEMINI_API_KEY`）、`SONG_TOO_LONG`、`MEDIA_CREDENTIAL_UNAVAILABLE`、`MUSIC_LISTENER_NOT_CONFIGURED`（服务器没装 listener） |
+
+**测量的值从不被替换**：顶层的 `tempo`、`beats`、`durationFrames` 和本地 `sections` 不变，Gemini 的段落只放在 `enrichment.sections` 里。`fit` 仍然用本地测量计算。
+
+### 9.4 校验、裁剪与吸附（`apps/server/src/media/music-enrichment.ts`，纯函数）
+
+- JSON 解析失败或结构不对 → `GEMINI_OUTPUT_MALFORMED`。`canHear:false` → `GEMINI_COULD_NOT_HEAR`。没有可用段落 → `GEMINI_SECTIONS_MISSING`。
+- 起点 ≥ 测量时长的条目丢弃；终点超出的裁到时长。**超过一半带时间的条目都越界时，整份结果作废**（`GEMINI_TIMESTAMPS_OUT_OF_RANGE`），因为这说明 Gemini 用错了时间尺度。
+- 重叠的段落：前一段的终点截到下一段的起点。
+- **重拍**：本地分析只测节拍，不测重拍。所以按 4/4 拍，每 4 个测量节拍取一个，相位选让最多本地段落起点（按小节响度变化、已在节拍上）落在重拍上的那个。每个内部边界吸附到最近的重拍（半小节以内）；离歌曲开头或结尾 1 秒以内的边界吸到 0 或结尾。没有节拍时不吸附（`to:"none"`）。吸附后变空的段落丢弃并计数。
+- 人声区间合并重叠；歌词文字去掉控制字符，最多 300 字。
+
+### 9.5 凭证、Settings 与隐私
+
+- `OPENSLATE_GEMINI_API_KEY`，和其他服务商一样，经 `EnvironmentMediaCredentials` 只按名字读取（新 id `gemini-audio`）。key 只在人按下后、发送前解析一次，只放在 `x-goog-api-key` header 里，不写进记录、结果或日志（有测试检查）。
+- `GET /api/providers` 新增 `musicListener {configured, model, variable, audioLeavesMachine, typicalSongMicros}`。Settings → This computer 新增一行「Gemini key (song analysis) / Gemini 密钥（歌曲分析）」，说明价格，以及「在素材里按分析歌曲会把这首歌发送给 Google，速度和节拍始终在本机测量」。
+- 路由：`GET|POST /api/projects/:id/audio-library/:audioId/song-analysis`。POST body 是 `{expectedSha256}`，字节变了就拒绝（`RECORDING_CHANGED`）。导演没有对应的路由。
+- 示例影片（fixture）从不发送歌曲：分析显示为不可用，Settings 显示 key 未设置。
+
+### 9.6 主人第一次真实测试
+
+1. 在本机环境（不要写进仓库）设置 `OPENSLATE_GEMINI_API_KEY=<Google AI Studio 的付费 key>`。
+2. 用新的数据目录启动（不要用 3001 上正在用的实例）。Settings → This computer 里「Gemini key」应显示「Set」。
+3. 导入一首 ≤3 分钟的歌（Assets → 音乐），选中它。歌曲分析应显示「约 $0.02，最多 $0.07」和「分析歌曲 · $0.02」。
+4. 按下按钮。大约 10–60 秒后，应显示「已分析：N 个段落，M 行歌词」。
+5. 让导演调用 `analyze_music`（例如问「这首歌的结构？」），核对：`enrichment.state === "ready"`；`tempo/beats` 与之前一样；段落标签和 `snap.movedFrames` 合理（通常在 ±1 秒以内）；歌词时间和实际演唱大致对齐。
+6. **需要验证的假设**：generateContent 接受 `responseJsonSchema` 和 `thinkingConfig.thinkingLevel:"low"`；返回结果里有 `usageMetadata`。如果 400（`GEMINI_INVALID_REQUEST`，不扣费），先去掉 `thinkingConfig` 再试。
+7. 预计花费：一首 3 分钟的歌约 **$0.02**，最多 $0.07。建议预算上限 $0.25。
+
+### 9.7 已知限制
+
+- 重拍假设 4/4 拍；3/4 或变拍子的歌，吸附可能落在小节中间（`snap` 里能看到移动了多少）。
+- Gemini 的时间戳精度没有公开说明，歌词时间不做吸附，只裁剪。
+- 超过 8 分钟的歌不能分析（inline 上限）。如果需要，可以改用 Files API（会在 Google 保存 48 小时）。
+- 有名的歌曲，Gemini 可能因为 `RECITATION` 拒绝转写歌词，这时显示为 `GEMINI_REFUSED`，可能已扣费。
+- 价格来自 Gemini 价格页，按 usage 估算，实际以 Google 账单为准。
+
 ## 7. 调研来源（访问日 2026-10-28）
+
+- Gemini：音频理解 https://ai.google.dev/gemini-api/docs/audio · 价格 https://ai.google.dev/gemini-api/docs/pricing · 模型 https://ai.google.dev/gemini-api/docs/models 与 https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash · 结构化输出 https://ai.google.dev/gemini-api/docs/structured-output · thinking https://ai.google.dev/gemini-api/docs/thinking · Files API https://ai.google.dev/gemini-api/docs/files · Interactions API https://ai.google.dev/gemini-api/docs/interactions · generateContent 参考 https://ai.google.dev/api/generate-content
 
 - fal H3 Max lip sync：https://fal.ai/models/minimax/h3-max/lip-sync/image-to-video · https://fal.ai/models/minimax/h3-max/lip-sync/image-to-video/api · 队列：https://fal.ai/docs/model-apis/model-endpoints/queue · 上传：https://fal.ai/docs/model-apis/model-endpoints/file-uploads 与 https://github.com/fal-ai/fal-js/blob/main/libs/client/src/storage.ts · 错误：https://fal.ai/docs/model-apis/errors · 计费 FAQ：https://fal.ai/docs/model-apis/faq
 
