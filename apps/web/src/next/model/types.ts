@@ -35,9 +35,17 @@ export interface ProjectSnapshot {
       narration?: { mode: "undecided" | "none" | "generated" | "uploaded"; text: string; voice: string };
       /** Keep the clip's own sound (model/clip-sound.ts); absent: the film's default. */
       clipAudio?: { keep: boolean; gainMilliDb?: number };
+      /** Music video: "singing" shots are made by lip sync (storyboard command shotPerformance). Absent otherwise. */
+      performance?: "singing";
+      /** The shot's cast, in reference order (Plan › Cast). Absent on plans without characters. */
+      characterIds?: string[];
     }[];
     /** film-kind@1 record; read only through model/clip-sound.ts here. */
     filmKind?: unknown;
+    /** The film's single look (contract 7.0.0); absent until one is chosen. */
+    visualStyle?: { styleId: string; label: string; traits?: { palette?: string; lighting?: string; lensFormat?: string; texture?: string }; rationale?: string };
+    /** The film's song or music bed (set_soundtrack); null or absent without one. */
+    soundtrack?: { audioId: string; gainMilliDb: number; startFrame?: number; muted?: boolean } | null;
   };
   conversation?: ConversationEntry[];
   questions?: PendingQuestion[];

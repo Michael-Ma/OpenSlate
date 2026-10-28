@@ -85,6 +85,8 @@ export function confirmBody(overview: GenerationOverview, scene: SceneOverview):
 export type StoryboardEdit =
   | { kind: "shot"; id: string; field: "imagePrompt" | "motion" | "desiredFrames" | "videoPrompt" | "framing" | "purpose"; value: string }
   | { kind: "narration"; id: string; field: "text" | "mode" | "voice"; value: string }
+  /** Music video: mark a shot as singing (lip sync) or not. Free and undoable; it keeps every current clip. */
+  | { kind: "shotPerformance"; id: string; value: "singing" | "none" }
   | { kind: "undo"; commandId: string };
 
 export function seconds(frames: number, fps: number): number {

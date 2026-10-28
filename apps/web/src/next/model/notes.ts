@@ -144,8 +144,10 @@ function anchorOf(note: DirectorNote, overview: GenerationOverview): { sceneId: 
   const shotIds = note.anchor.shotIds ?? [];
   const sceneId = note.anchor.sceneId ?? (shotIds[0] ? overview.shots[shotIds[0]]?.sceneId ?? null : null);
   if (shotIds.length) return { sceneId, shotIds, anchor: msg("note.anchor.shots", { shots: labels(overview, shotIds) }) };
-  const ordinal = overview.scenes.find((s) => s.sceneId === sceneId)?.ordinal ?? 0;
-  return { sceneId, shotIds, anchor: msg("note.anchor.scene", { scene: ordinal }) };
+  // A note anchored to nothing is about the whole film (the resume card), never "Scene 0".
+  if (!sceneId) return { sceneId, shotIds, anchor: msg("note.anchor.film") };
+  const ordinal = overview.scenes.find((s) => s.sceneId === sceneId)?.ordinal;
+  return { sceneId, shotIds, anchor: ordinal === undefined ? msg("note.anchor.scene_removed") : msg("note.anchor.scene", { scene: ordinal }) };
 }
 
 /**

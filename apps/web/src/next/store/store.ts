@@ -224,8 +224,8 @@ export class StudioStore {
       const saved = keys.saved(pressId);
       const sent = saved && saved.logical === canonicalJson(logical) ? saved : keys.begin(pressId, logical, await build());
       requestKey = sent.key;
-      const { path: target, body } = sent.body as { path: string; body: unknown };
-      const result = await this.#deps.client.request<T>(target, { method: "POST", body, key: sent.key, ...(timeoutMs ? { timeoutMs } : {}) });
+      const { path: target, body, method } = sent.body as { path: string; body: unknown; method?: "PUT" };
+      const result = await this.#deps.client.request<T>(target, { method: method ?? "POST", body, key: sent.key, ...(timeoutMs ? { timeoutMs } : {}) });
       keys.settle(pressId, sent.key);
       if (current() && toast) this.dispatch({ type: "toast", message: toast, tone: "info" });
       if (current()) void this.refresh();
@@ -549,11 +549,12 @@ export class StudioStore {
    * and a builder for the path and body. Refreshes the studio afterwards. Errors become toasts.
    */
   /** `timeoutMs` for slow commands (e.g. Codex setup checks take up to 90 s); the default is 15 s. */
-  command<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown }> | { path: string; body: unknown }, toast?: Msg, options?: { timeoutMs?: number }): Promise<T | undefined> {
+  command<T>(pressId: string, logical: unknown, build: () => Promise<{ path: string; body: unknown; method?: "PUT" }> | { path: string; body: unknown; method?: "PUT" }, toast?: Msg, options?: { timeoutMs?: number }): Promise<T | undefined> {
     const projectId = this.#state.projectId;
     return this.#press<T>(pressId, logical, async () => {
       const request = await build();
-      return { path: request.path.startsWith("/api/") ? request.path : path(projectId ?? "", request.path), body: request.body };
+      // POST unless the route is a whole-collection PUT (PUT /characters); a resend keeps the method with its key.
+      return { path: request.path.startsWith("/api/") ? request.path : path(projectId ?? "", request.path), body: request.body, ...(request.method ? { method: request.method } : {}) };
     }, toast, options?.timeoutMs);
   }
 

@@ -7,6 +7,8 @@ import { fixtureCommand } from "./fixture-commands.ts";
 import { fixtureRoute } from "./routes/index.ts";
 import { recoveryRequest } from "./routes/recovery.ts";
 import { DECLINE } from "./routes/types.ts";
+import { applyCastPresets } from "./routes/cast.ts";
+import { applyCardPresets } from "./routes/cards.ts";
 import { applyDirectorPresets, fixtureMessage } from "./fixture-director.ts";
 import { lastFerryDirector, lastFerryOverview, lastFerryProposals, lastFerrySnapshot, pictureKey, PROJECT_ID } from "./last-ferry.ts";
 
@@ -55,6 +57,10 @@ export class FixturePort implements StudioPort {
     };
     // The sample Director's `?director=` presets (Codex with pictures, a held edit, a failed reply…).
     applyDirectorPresets(this.world);
+    // The sample cast's `?cast=` presets (Plan › Cast; none by default).
+    applyCastPresets(this.world);
+    // v8 Director cards (`?director=cards,resume,style,song,look`): confirmation cards, the style proposal, a song.
+    applyCardPresets(this.world);
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -74,7 +80,7 @@ export class FixturePort implements StudioPort {
     const below = path.startsWith(base) ? path.slice(base.length) : path;
     const answer = fixtureRoute(this.world, method, below, options.body);
     if (answer !== DECLINE) return answer as T;
-    if (path.startsWith(base)) return fixtureCommand(this.world, method, below, options.body) as T;
+    if (path.startsWith(base) && method !== "PUT") return fixtureCommand(this.world, method, below, options.body) as T;
     throw new ApiError("FIXTURE_UNSUPPORTED", 400);
   }
 
@@ -96,10 +102,10 @@ export class FixturePort implements StudioPort {
 }
 
 export async function fixtureMedia(): Promise<MediaSource> {
-  const { pictures } = await import("./last-ferry-pictures.ts");
+  const [{ pictures }, { CAST_PICTURES }] = await Promise.all([import("./last-ferry-pictures.ts"), import("./last-ferry-cast.ts")]);
   return {
     async url(artifact) {
-      const svg = pictures[pictureKey(artifact.artifactId)];
+      const svg = pictures[pictureKey(artifact.artifactId)] ?? CAST_PICTURES[pictureKey(artifact.artifactId)];
       if (!svg) throw new ApiError("NOT_FOUND", 404);
       // A standalone SVG image needs its namespace; the illustrations were written for inline use.
       const standalone = /^<svg[^>]*\sxmlns=/.test(svg) ? svg : svg.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');

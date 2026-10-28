@@ -10,9 +10,10 @@ import { planMessages } from "./catalog/plan.ts";
 import { settingsMessages } from "./catalog/settings.ts";
 import { startMessages } from "./catalog/start.ts";
 import { shell } from "./catalog/shell.ts";
+import { castMessages } from "./catalog/cast.ts";
 
 /** Every message id of the next UI. Add ids to the catalog file of their area. */
-export const catalog = { ...shell, ...keyframes, ...director, ...notes, ...planMessages, ...filmMessages, ...assetsMessages, ...settingsMessages, ...startMessages, ...narrationMessages, ...errors } satisfies Record<string, Entry>;
+export const catalog = { ...shell, ...keyframes, ...director, ...notes, ...planMessages, ...filmMessages, ...assetsMessages, ...settingsMessages, ...startMessages, ...narrationMessages, ...castMessages, ...errors } satisfies Record<string, Entry>;
 export type MessageId = keyof typeof catalog;
 
 export function isMessageId(value: string): value is MessageId {

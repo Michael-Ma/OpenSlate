@@ -9,7 +9,7 @@ export type Decline = typeof DECLINE;
 
 /** One simulated route. `match` gets the path below /api/projects/:projectId (or the full path for /api/... routes outside a project). */
 export interface FixtureRoute {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   match: RegExp;
   /** Return the response body (or a promise of it); throw ApiError to refuse; return DECLINE to pass. `params` are the regex groups. */
   handle(world: FixtureWorld, params: string[], body: unknown): unknown;

@@ -16,7 +16,8 @@ export class ApiError extends Error {
 }
 
 export interface RequestOptions {
-  method?: "GET" | "POST";
+  /** PUT for whole-collection saves (Plan › Cast's PUT /characters). */
+  method?: "GET" | "POST" | "PUT";
   body?: unknown;
   /** Idempotency-Key. Required by the server on every paid or state-changing command. */
   key?: string;

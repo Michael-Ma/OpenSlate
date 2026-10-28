@@ -8,6 +8,7 @@ import type { FixtureWorld } from "./fixture-port.ts";
 import { artifactFor, sceneId, shotId } from "./last-ferry.ts";
 import { fixtureAssetPicture, isFixtureImport } from "./routes/assets.ts";
 import type { FixtureRoute } from "./routes/types.ts";
+import { fixtureStyleNote } from "./fixture-style.ts";
 
 /** How long the scripted Director "works" before it replies. */
 export const FIXTURE_REPLY_MS = 1500;
@@ -35,6 +36,9 @@ const DECLINES_PROPOSAL = /\b(?:decline|reject)\s+proposal\s+([a-z])\b|(?:拒绝
 
 /** Asking for video ("make the video for Scene 2", "生成视频"): the scripted Director asks for the scene's confirm in the chat. */
 const ASKS_FOR_VIDEO = /(make|generate|create|start)\b[^.?!]*\b(video|clips?)\b|(生成|做|出)[^。？！]*视频/i;
+
+/** Asking for a look ("suggest visual styles", "推荐视觉风格"): the scripted Director proposes three (decision 7). */
+const ASKS_FOR_STYLE = /\bvisual styles?\b|\b(suggest|propose|choose|pick)\b[^.?!]*\blooks?\b|视觉风格|推荐[^。？！]*风格/i;
 
 /** "a", …, "z", "aa": the next letter after every note in the film, so a new note never repeats one shown nearby. */
 function nextLetter(notes: readonly DirectorNote[], offset: number): string {
@@ -174,9 +178,14 @@ export function fixtureMessage(world: FixtureWorld, body: unknown): unknown {
     const declined = declineNamed ? fixtureDeclineOnWord(w, (declineNamed[1] ?? declineNamed[2])!, requestId) : null;
     // Asked for keyframes: the scripted Director starts them as the person's press would, and says what and the price.
     const started = !questionId && ASKS_FOR_KEYFRAMES.test(text) ? fixtureDirectorKeyframes(w) : null;
-    const asks = !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
-    const askNames = asks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
-    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + acceptedReply(declineNamed, declined, true) + scriptedReply(names, !!questionId, pictures, attachments.length, !!started?.started.length, askNames), requestId, at: new Date().toISOString(), runtime: "scripted" };
+    const videoAsks = !questionId && !started && ASKS_FOR_VIDEO.test(text) ? fixtureVideoAsks(w, requestId, filmScope) : [];
+    // Asked for a look ("suggest visual styles", "推荐风格"): three looks on a card, nothing applied (decision 7).
+    const styleAsk = !questionId && !started && !videoAsks.length && ASKS_FOR_STYLE.test(text) ? [fixtureStyleNote(requestId, nextLetter(w.snapshot.notes ?? [], 0))] : [];
+    const asks: DirectorNote[] = [...videoAsks, ...styleAsk];
+    const askNames = videoAsks.map((note) => `Scene ${w.overview.scenes.find((scene) => scene.sceneId === note.anchor.sceneId)?.ordinal}`);
+    const replyText = styleAsk.length ? "Here are three looks that suit the brief. Choose one and I'll use it for every keyframe."
+      : scriptedReply(names, !!questionId, pictures, attachments.length, !!started?.started.length, askNames);
+    const reply: ConversationEntry = { id: `${requestId}-reply`, role: "assistant", text: acceptedReply(named, accepted) + acceptedReply(declineNamed, declined, true) + replyText, requestId, at: new Date().toISOString(), runtime: "scripted" };
     const at = new Date().toISOString();
     const turn: TurnView | null = started || asks.length || accepted?.ok || declined?.ok ? { id: `${requestId}-turn`, requestId, state: "completed", at, runtime: "scripted", action: "conversation",
       effects: { notesCreated: asks.length, proposalsHeld: 0, changesApplied: accepted?.ok ? 1 : 0,

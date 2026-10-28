@@ -844,6 +844,8 @@ function storyboard(world: FixtureWorld, body: StoryboardBody): { commandId: str
     });
     return { commandId };
   }
+  // The Plan routes answer shotPerformance (fixtures/routes/plan.ts); it never reaches the Keyframes fields here.
+  if (body.kind === "shotPerformance") throw new ApiError("FIXTURE_UNSUPPORTED", 400);
   const shot = findShot(world, body.id);
   if (isWorking(shot.video) && body.kind === "shot") throw new ApiError("ATTEMPT_EXISTS", 409);
   const edited = body.kind === "narration" ? (body.field === "text" ? editNarration(shot, body.value) : shot) : editShot(shot, body, world.overview.fps);
