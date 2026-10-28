@@ -8,9 +8,9 @@
 
 代码在 `packages/core/src/aspect.ts`，由 `@openslate/core` 导出。
 
-- 数据来源是 `project.filmKind?.format`（film-kind@1，见 `feat/film-kind-taxonomy` 和 `docs/ai/film-kind/2026-10-28-film-kind-taxonomy.md`）。读取时做了防御：本分支上 `filmKind` 还是字符串枚举，所以按 `unknown` 读。
-  - 有 `format.aspect` 时用它；没有时按 `format.platform` 取平台默认值（本文件里有一份 `PLATFORM_DEFAULT_ASPECT` 的副本，合并 filmkind 分支后应改成从 core 导入）。
-  - 旧字符串 `"social_vertical"` 视为 9:16（filmkind 在 `Store.getProject` 里也会这样归一化）。
+- 数据来源是 `project.filmKind?.format`（film-kind@1，`packages/core/src/film-kind.ts`，见 `docs/ai/film-kind/2026-10-28-film-kind-taxonomy.md`）。读取时做了防御，按 `unknown` 读，没有 `format` 或字段不合法都不会报错。
+  - 有 `format.aspect` 时用它；没有时按 `format.platform` 取 `PLATFORM_DEFAULT_ASPECT`（`other` 没有默认值）。
+  - 旧字符串 `"social_vertical"` 视为 9:16（`Store.getProject` 读出时也会这样归一化）。
 - 返回值只有三种：`"16:9" | "9:16" | "1:1"`（`PROJECT_ASPECTS`）。
 - **4:5 不支持**：Viggle H3 的 `aspect_ratio` 只有 `16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9`（`packages/providers/src/viggle-h3.ts:11`），Codex 也没有 4:5 画布。所以下面几种比例是有意映射过去的：
   - `4:5`（ig_feed、facebook）→ `1:1`，这是最接近的已支持比例，内容不会被裁成竖条；
@@ -96,6 +96,7 @@
 
 ## 10. 合并注意
 
-- 和 filmkind 分支合并后：`aspect.ts` 里的平台默认表改为导入 `PLATFORM_DEFAULT_ASPECT`；`ProjectRecord.filmKind` 变成对象后，这里的防御读取仍然成立。
+- 本分支已经 rebase 到包含 film-kind@1 的 `origin/feature/last-ferry-ui`（0a05050），直接使用 core 的 `PLATFORM_DEFAULT_ASPECT`。
+- Director 技能里的 `plan-authoring/references/grammar.md` 仍写着 “Image dimensions default to 1024 square” 和 “Render dimensions default to 1280×720”。按要求本次不改 `skills/`；下一版技能应改成 “跟随项目画幅”。
 - filmkind 说过：画幅未设时 `filmKindIntake(filmKind).ask` 会包含 `"aspect"`，Director 应在规划前问。本分支对没选画幅的项目保持旧尺寸，问完之后才会切到新尺寸。
 - 一个已有项目中途改画幅：关键帧节点参数变化，旧关键帧和视频会过期，需要重新生成，这是预期行为。
