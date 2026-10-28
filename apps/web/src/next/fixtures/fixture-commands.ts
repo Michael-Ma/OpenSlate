@@ -210,12 +210,14 @@ interface Extra {
   voiceOwners: Record<string, string>;
   /** Shots whose next keyframe the service refuses (the `jobs` Director preset), not charged. */
   failNext: Set<string>;
+  /** Shots whose next voice line the service refuses (the `voices` Director preset), not charged. */
+  failNextVoice: Set<string>;
 }
 
 const extras = new WeakMap<FixtureWorld, Extra>();
 function extra(world: FixtureWorld): Extra {
   let value = extras.get(world);
-  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {}, voiceOwners: {}, failNext: new Set() }; extras.set(world, value); }
+  if (!value) { value = { serial: 0, undo: null, takes: {}, opened: new Set(), madeAt: {}, requests: {}, edits: {}, accepted: {}, voiceOwners: {}, failNext: new Set(), failNextVoice: new Set() }; extras.set(world, value); }
   return value;
 }
 const nextId = (world: FixtureWorld, prefix: string) => `${prefix}-${++extra(world).serial}`;
@@ -469,6 +471,11 @@ export function fixtureFailNextKeyframe(world: FixtureWorld, shotId: string): vo
   extra(world).failNext.add(shotId);
 }
 
+/** The `voices` Director preset: the service will refuse this shot's next voice line. */
+export function fixtureFailNextVoice(world: FixtureWorld, shotId: string): void {
+  extra(world).failNextVoice.add(shotId);
+}
+
 /** The browser-run video press (before phase P3). Kept for older clients; new ones confirm through /confirm. */
 function generateVideo(world: FixtureWorld, scene: SceneOverview, body: GenerateInput): { accepted: true; targetShotIds: string[] } {
   if (body.targetShotIds !== undefined || body.regenerate !== undefined) throw new ApiError("VALIDATION_ERROR", 400);
@@ -593,6 +600,14 @@ function scheduleVoice(world: FixtureWorld, run: VoiceRun, index: number, step: 
     }
     if (extra(w).voiceOwners[shotId] !== confirmationId) return;
     if (next.shots[shotId]?.narration.text !== run.texts[shotId] || (JSON.stringify(w.snapshot.project.shots.find((row) => row.id === shotId)?.narration) ?? "") !== run.intents[shotId]) { settle(w, blockConfirm(clearOwnedMaking(next), run, "SCENE_REVIEW_STALE", shotId)); return; }
+    // A refused voice line fails (not charged) and stops the run at its shot, as the studio's speech step does.
+    if (step === "speech" && extra(w).failNextVoice.delete(shotId)) {
+      delete extra(w).voiceOwners[shotId];
+      next = withShot(next, shotId, (shot) => ({ ...shot, narration: { ...settledLine(shot.narration, "text_only"), state: "failed",
+        failure: { code: "PROVIDER_REFUSED", technical: false, retryAllowed: false, autoRetriesLeft: 0, charged: false, at: now() } } }));
+      settle(w, blockConfirm(next, run, "PROVIDER_REFUSED", shotId));
+      return;
+    }
     if (step === "speech") next = withShot(next, shotId, (shot) => ({ ...shot, narration: settledLine(shot.narration, "text_only") }));
     // A confirmed frame that changed meanwhile (a new take, an edited prompt) stops the confirm at its shot.
     const changed = targets.find((id) => { const keyframe = next.shots[id]?.keyframe; return keyframe?.state !== "ready" || keyframe.artifact?.artifactId !== run.frames[id]; });

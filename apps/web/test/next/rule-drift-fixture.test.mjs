@@ -138,3 +138,27 @@ test('an unanswered transcription offers Give up for its attempt; once given up 
   assert.deepEqual([line().outcome, line().release], ['no_answer', null]);
   assert.throws(() => release(w, 'fixture-attempt-transcription'), (error) => error.code === 'ATTEMPT_NOT_RELEASABLE');
 });
+
+test('the voices preset: asking for keyframes makes only 3.2\'s voice line; it is counted in voice lines and its refusal is the next step', () => {
+  const w = world();
+  applyDirectorPresets(w, ['voices']);
+  fixtureMessage(w, { text: 'Please make the keyframes.' });
+  w.advance(FIXTURE_REPLY_MS);
+  const [effect] = w.snapshot.turns.at(-1).effects.generation;
+  assert.deepEqual([effect.sceneIds, effect.keyframes, effect.voiceLines], [[sceneId(3)], 0, 1]);
+  let progress = generationProgress(effect, w.overview, 'en');
+  assert.deepEqual([progress.media, progress.done, progress.total, progress.running], ['voices', 0, 1, true]);
+  w.advance(FIXTURE_TIMING.voiceStepMs);
+  progress = generationProgress(effect, w.overview, 'en');
+  assert.deepEqual([shot(w, '3.2').narration.state, shot(w, '3.2').narration.failure.charged, progress.running], ['failed', false, false]);
+  assert.equal(translateMsg('en', progress.next.text), "3.2's voice line failed. Open the shot to see why.");
+});
+
+test('the queue preset: an unexplained queue is waiting and a given-up keyframe says so, with no Stop', () => {
+  const w = world();
+  applyDirectorPresets(w, ['queue']);
+  const [effect] = w.snapshot.turns.at(-1).effects.generation;
+  const progress = generationProgress(effect, w.overview, 'en');
+  assert.deepEqual(progress.shots.map((s) => [s.label, s.state]), [['3.1', 'waiting'], ['3.2', 'given_up']]);
+  assert.deepEqual([progress.done, progress.total, progress.running, progress.next], [0, 2, false, null]);
+});

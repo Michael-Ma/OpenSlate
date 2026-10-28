@@ -1,7 +1,7 @@
 import type { DirectorNote, ShotOverview } from "@openslate/core/public";
 import { ApiError } from "../api/client.ts";
 import type { ConversationEntry, DirectorStatus, TurnView } from "../model/types.ts";
-import { FIXTURE_TIMING, fixtureAcceptOnWord, fixtureDeclineOnWord, fixtureDirectorKeyframes, fixtureFailNextKeyframe, recompute } from "./fixture-commands.ts";
+import { FIXTURE_TIMING, fixtureAcceptOnWord, fixtureDeclineOnWord, fixtureDirectorKeyframes, fixtureFailNextKeyframe, fixtureFailNextVoice, recompute } from "./fixture-commands.ts";
 import type { MessageAttachmentView } from "@openslate/core/public";
 import { fixtureAsset } from "./routes/assets.ts";
 import type { FixtureWorld } from "./fixture-port.ts";
@@ -241,6 +241,8 @@ export const directorRoutes: FixtureRoute[] = [
  * - `lost`: 1.2's voice line waits for an answer (Give up returns it to its words), the voice service never replied for 2.3's line, and the transcription of a recording the person sent got
  *   no reply either (both SUBMISSION_RESPONSE_LOST, counted as spent): the voice row, Needs attention and the thread
  *   say it may be charged and how it is made again.
+ * - `voices`: Scene 3's keyframes are back, so asking for keyframes makes only 3.2's voice line; the service refuses it.
+ * - `queue`: an earlier reply started Scene 3's keyframes; 3.1 waits in an unexplained queue and 3.2 was given up.
  * - `transcribing`: a recording the person sent is being transcribed; it comes back after a few seconds.
  * - `unanswered`: a recording's transcription was sent and the service never answered: the line offers Give up.
  */
@@ -277,7 +279,7 @@ const MARKDOWN_REPLY = [
 /** Apply the `?director=` presets to a fresh sample world (tests pass the list themselves). */
 export function applyDirectorPresets(world: FixtureWorld, presets: readonly string[] = directorPresets()): void {
   // In one order whatever the list's, so the sample conversation stays in time order.
-  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs", "lost", "transcribing", "unanswered"];
+  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs", "lost", "voices", "queue", "transcribing", "unanswered"];
   for (const preset of order.filter((name) => presets.includes(name))) {
     if (preset === "codex") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: true };
     if (preset === "no-ffmpeg") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: false };
@@ -320,6 +322,33 @@ export function applyDirectorPresets(world: FixtureWorld, presets: readonly stri
         effects: { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [{ kind: "transcription", sceneIds: [], shotIds: [], keyframes: 0, voiceLines: 0,
           quote: { micros: "6000", units: 1, unitMicros: "6000", priceUnknown: false }, at: laterToday(4), transcription: { state: "failed", failure: lost } }] } };
       world.snapshot = { ...world.snapshot, conversation: [...(world.snapshot.conversation ?? []), message, reply], turns: [...(world.snapshot.turns ?? []), turn] };
+    }
+    if (preset === "voices") {
+      // Scene 3's keyframes are back, so asking for keyframes makes only 3.2's voice line, which the service refuses.
+      const shots = { ...world.overview.shots };
+      for (const label of ["3.1", "3.2"]) {
+        const shot = shots[shotId(label)]!;
+        shots[shot.shotId] = { ...shot, keyframe: { state: "ready", artifact: artifactFor(label), takeCount: 1, opened: false } };
+      }
+      world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
+      fixtureFailNextVoice(world, shotId("3.2"));
+    }
+    if (preset === "queue") {
+      // An earlier reply started Scene 3's keyframes: 3.1 waits in a queue the studio has not explained, and the
+      // person gave up on 3.2's job. Nothing is on its way, so the line offers no Stop.
+      const requestId = "request-queue";
+      const at = laterToday(5);
+      const message: ConversationEntry = { id: requestId, role: "user", text: "Make Scene 3's keyframes.", requestId, at };
+      const reply: ConversationEntry = { id: "m-queue", role: "assistant", text: "Starting the keyframes now.", requestId, at, runtime: "scripted" };
+      const turn: TurnView = { id: "turn-queue", requestId, state: "completed", runtime: "scripted", action: "conversation",
+        effects: { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [{ kind: "keyframes", sceneIds: [sceneId(3)], shotIds: [shotId("3.1"), shotId("3.2")], keyframes: 2, voiceLines: 0,
+          quote: { micros: "80000", units: 2, unitMicros: "40000", priceUnknown: false }, at }] } };
+      world.snapshot = { ...world.snapshot, conversation: [...(world.snapshot.conversation ?? []), message, reply], turns: [...(world.snapshot.turns ?? []), turn] };
+      const shots = { ...world.overview.shots };
+      const s31 = shots[shotId("3.1")]!, s32 = shots[shotId("3.2")]!;
+      shots[s31.shotId] = { ...s31, keyframe: { state: "queued", takeCount: 0, opened: false, waiting: { code: "unknown", since: at } } };
+      shots[s32.shotId] = { ...s32, keyframe: { state: "none", takeCount: 0, opened: false, takenOff: "released", releasedAttemptIds: ["fixture-attempt-3-2"] } };
+      world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
     }
     if (preset === "transcribing" || preset === "unanswered") {
       // A recording the person sent is being transcribed (it comes back on the simulated clock), or its job was sent
