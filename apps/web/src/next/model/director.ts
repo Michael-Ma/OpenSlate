@@ -352,6 +352,8 @@ export interface GenerationLine {
   progress: GenerationProgress | null;
   /** A transcription that is no longer running: how it ended (null while running, and for keyframes). */
   outcome: "ready" | "failed" | "no_answer" | null;
+  /** An unanswered transcription the person can give up on (its attempt), as in the inspector. */
+  release: string | null;
 }
 
 /** A transcription's words follow its live outcome; an older server that sends none keeps "Started…". */
@@ -381,9 +383,10 @@ export function generationLines(effects: readonly DirectorGenerationEffect[] | u
     if (effect.kind === "transcription") {
       // Without a live outcome (an older server) the line stays "Started…" and never offers Stop, as before.
       const state = effect.transcription?.state;
-      return { text: { ...text, messages: { price } }, running: state === "running", progress: null, outcome: !state || state === "running" ? null : state };
+      const release = state === "no_answer" ? effect.transcription?.attemptId ?? null : null;
+      return { text: { ...text, messages: { price } }, running: state === "running", progress: null, outcome: !state || state === "running" ? null : state, release };
     }
-    return { text: { ...text, messages: { price } }, running: progress ? progress.running : running, progress, outcome: null };
+    return { text: { ...text, messages: { price } }, running: progress ? progress.running : running, progress, outcome: null, release: null };
   });
 }
 

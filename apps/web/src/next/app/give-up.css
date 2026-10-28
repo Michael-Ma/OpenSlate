@@ -1,0 +1,5 @@
+/* The give-up flow outside the inspector (the Director's transcription line); the inspector keeps its .insp rules. */
+.give-up .ack{display:flex;gap:8px;align-items:flex-start;color:var(--text-2);font-size:12px;line-height:1.4}
+.give-up .ack input{width:auto;margin:2px 0 0;padding:0;flex:none;accent-color:var(--select)}
+.give-up .two{display:flex;gap:6px;flex-wrap:wrap}
+.give-up .two .pill{flex:1;justify-content:center}

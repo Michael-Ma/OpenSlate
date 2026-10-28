@@ -7,6 +7,7 @@ import { useOpenTarget } from "./useOpenTarget.ts";
 import { directorElapsed, resolveRef, scriptedTag, threadScrolled, threadView, type Attention, type GenerationLine, type ThreadBox, type ThreadEntry } from "../model/director.ts";
 import { useMode, useStore, useStudio } from "../store/react.tsx";
 import { useGuarded } from "../app/useWriteGuard.ts";
+import { GiveUp } from "../app/GiveUp.tsx";
 import { HeldEdits } from "./HeldEdits.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { NoteCards } from "./NoteCards.tsx";
@@ -218,11 +219,15 @@ function SentFiles({ files }: { files: MessageAttachmentView[] }) {
   );
 }
 
-/** What the Director started, with its price; Stop halts the film while some of it is still being made. */
+/**
+ * What the Director started, with its price; Stop halts the film while some of it is still being made. An unanswered
+ * transcription offers Give up, with the same acknowledgement as the inspector.
+ */
 function GenerationNote({ line }: { line: GenerationLine }) {
   const { t, tm } = useI18n();
   const store = useStore();
   const guard = useGuarded("server");
+  const releasing = useStudio((s) => !!line.release && !!s.pending[`release:${line.release}`]);
   return (
     <div className="gen-note" role="status" data-generation={line.running ? "running" : "done"} data-outcome={line.outcome ?? undefined}>
       {line.outcome === "failed" || line.outcome === "no_answer" ? <span className={`mark ${line.outcome}`} aria-hidden="true">{line.outcome === "failed" ? "!" : ""}</span> : null}
@@ -230,6 +235,7 @@ function GenerationNote({ line }: { line: GenerationLine }) {
       {line.running ? (
         <button type="button" className="pill sm" data-act="stop-generation" {...guard} title={guard.title ?? t("director.generation.stop_hint")} disabled={guard.disabled} onClick={() => void store.stopFilm()}>{t("director.generation.stop")}</button>
       ) : null}
+      {line.release ? <GiveUp attemptId={line.release} busy={releasing} onRelease={(attemptId) => void store.releaseAttempt(attemptId)} className="gen-give-up" note={false} /> : null}
     </div>
   );
 }
