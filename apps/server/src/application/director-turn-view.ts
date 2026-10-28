@@ -5,6 +5,7 @@ import type { ReviewNotesFailure } from '@openslate/core';
 import type { DirectorGenerationEffectRecord } from './director-generation-effects.js';
 import { directorGenerationBlocks, type DirectorGenerationBlockRecord } from './director-generation-blocks.js';
 import { safeNativeDiagnostic } from './native-diagnostics.js';
+import { directorAttachmentTranscriptionOutcome } from './director-attachment-transcription.js';
 
 const reasons: Record<string, string> = { RUNTIME_RUN_TIMEOUT: 'timeout', REQUEST_SUPERSEDED: 'superseded', OWNER_LOST: 'owner_lost' };
 /** Public progress includes allowlisted failure metadata, never tool arguments or native prose. */
@@ -42,7 +43,8 @@ export function directorTurnViews(service: ProductionService, projectId: string)
       effects: { notesCreated: notes, proposalsHeld: proposals, changesApplied: changes,
         generation: store.list<DirectorGenerationEffectRecord>('director_generation_effect', projectId)
           .filter(record => record.requestId === turn.requestId && record.epochId === turn.epochId)
-          .map(record => structuredClone(record.effect)),
+          .map(record => ({ ...structuredClone(record.effect), ...(record.effect.kind === 'transcription'
+            ? { transcription: directorAttachmentTranscriptionOutcome(service, projectId, record) } : {}) })),
         blocked: directorGenerationBlocks(store.list<DirectorGenerationBlockRecord>('director_generation_block', projectId)
           .filter(record => record.requestId === turn.requestId && record.epochId === turn.epochId)) },
       notesSaveFailure,

@@ -5,11 +5,14 @@ import type { ProductionService, RequestRecord } from './service.js';
 import type { OwnedTranscriptionService } from '../narration/owned-transcription-service.js';
 import type { OwnedTranscriptionApplyReceipt, OwnedTranscriptionProposal, PrepareOwnedTranscription } from '../narration/owned-transcription-types.js';
 import type { NarrationAudio } from '../narration/types.js';
+import type { Attempt } from '../execution/engine.js';
+import { attemptMediaFailure } from '../media-failure.js';
 import { resolveOwnedTranscriptionApplication } from '../narration/owned-transcription-authorization.js';
 import { snapshotOwnedTranscriptionData } from '../narration/owned-transcription-records.js';
 import { requestHoldCutoff } from '../narration/request-holds.js';
 import { assertDirectorGenerationAuthority } from './director-generation-authority.js';
 import { recordDirectorGenerationEffect } from './director-generation-effects.js';
+import type { DirectorGenerationEffectRecord } from './director-generation-effects.js';
 
 export interface DirectorAttachmentTranscriptionRecord {
   id: string; projectId: string; requestId: string; epochId: string; key: string; inputDigest: string;
@@ -51,6 +54,38 @@ export function readDirectorAttachmentTranscription(service: ProductionService, 
     && canonical(resolved.application.receipt) === canonical(record.receipt.applied),
   'TOOL_CALL_UNRESOLVED', 'The original attachment transcription differs from its retained evidence');
   return { proposal: resolved.proposal, receipt: structuredClone(record.receipt), effect: structuredClone(record.effect) };
+}
+
+/** A turn read observes the exact published candidate, never the frozen tool reply or a later recording request. */
+export function directorAttachmentTranscriptionOutcome(service: ProductionService, projectId: string,
+  effect: DirectorGenerationEffectRecord): NonNullable<DirectorGenerationEffect['transcription']> {
+  const id = digest({ purpose: 'director_attachment_transcription', projectId,
+    requestId: effect.requestId, epochId: effect.epochId, key: effect.key });
+  const publication = service.store.get<DirectorAttachmentTranscriptionRecord>('director_attachment_transcription', id);
+  // Missing or inconsistent historical linkage is an unknown outcome, never
+  // evidence that this work completed or permission to submit something else.
+  if (!publication || publication.id !== id || publication.projectId !== projectId || publication.requestId !== effect.requestId
+    || publication.epochId !== effect.epochId || publication.key !== effect.key || publication.state !== 'succeeded') return { state: 'no_answer' };
+  try {
+    const { receipt, proposal } = readDirectorAttachmentTranscription(service, projectId, publication);
+    invariant(canonical(publication.effect) === canonical(effect.effect), 'TOOL_CALL_UNRESOLVED',
+      'The transcription effect differs from its original publication');
+    const node = proposal.compiled.nodes.find(item => item.alias === proposal.operation.alias && item.kind === 'transcription');
+    invariant(node, 'TOOL_CALL_UNRESOLVED', 'The original transcription operation is unavailable');
+    const attempts = service.store.list<Attempt>('attempt', projectId)
+      .filter(attempt => attempt.projectId === projectId && attempt.candidateId === receipt.candidateId);
+    const attempt = attempts.sort((a, b) => a.ordinal - b.ordinal).at(-1);
+    if (!attempt) return { state: 'running' };
+    invariant(attempt.nodeId === node.id && attempt.request.kind === 'transcription'
+      && attempt.request.attemptId === attempt.id, 'TOOL_CALL_UNRESOLVED', 'The transcription attempt differs from its original operation');
+    if (attempt.phase === 'failed') return { state: 'failed', attemptId: attempt.id,
+      failure: attemptMediaFailure(service.store, attempt, proposal.profile.maxRetries) };
+    if (attempt.phase === 'succeeded') return { state: 'ready', attemptId: attempt.id };
+    return { state: attempt.phase === 'submission_unknown' ? 'no_answer' : 'running', attemptId: attempt.id };
+  } catch (error) {
+    if (error instanceof DomainError) return { state: 'no_answer' };
+    throw error;
+  }
 }
 
 /** Trusted host adapter: the old owned-transcription path retains pricing, grants and admission checks. */
