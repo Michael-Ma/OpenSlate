@@ -1,4 +1,5 @@
 import type { FilmKind } from "./film-kind.js";
+import type { ShotClipAudio } from "./clip-audio-mix.js";
 /** Shared domain values. All persisted IDs are issued by application services. */
 export type Id = string;
 export type JsonValue =
@@ -60,6 +61,12 @@ export interface ShotRecord {
    * from its keyframe and that shot's song segment instead of the project's normal video profile.
    */
   performance?: "singing";
+
+  /**
+   * Keep the clip's own sound (effects, ambience) in the film, at an optional gain. Optional and omitted unless set,
+   * so older plans and digests are unchanged; absent means the project default (clipAudioDefault), muted for them.
+   */
+  clipAudio?: ShotClipAudio;
 }
 
 /** One character's outfit for one scene. Clothing only; identity stays on the character. */
