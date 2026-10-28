@@ -249,6 +249,17 @@ export function recordingInUse(shot: ShotOverview, mode: NarrationMode | undefin
 }
 
 /**
+ * Why a voice line failed, for its words: the service never replied (it may be charged and a new one costs again),
+ * it was counted as spent, or it was not charged. null when the overview does not say (an older server).
+ */
+export function voiceFailureKind(line: ShotNarration): "lost" | "charged" | "free" | null {
+  const failure = line.state === "failed" ? line.failure : undefined;
+  if (!failure) return null;
+  if (failure.code === "SUBMISSION_RESPONSE_LOST") return "lost";
+  return failure.charged ? "charged" : "free";
+}
+
+/**
  * The voice line's state from the overview's narration slot: being made, failed, no answer from the service,
  * not voiced yet, or no recording yet. A voiced shot says nothing (its take plays), unless "My recording" is the
  * choice and the take is still a voice line: then it says the voice line plays until a recording is added.
@@ -257,7 +268,7 @@ export function slotNote(shot: ShotOverview, mode: NarrationMode | undefined, or
   const line = shot.narration;
   switch (line.state) {
     case "making": return { message: msg("narr.state.making"), tone: "plain" };
-    case "failed": return { message: msg("narr.state.failed"), tone: "warn" };
+    case "failed": { const why = voiceFailureKind(line); return { message: msg(why ? `narr.state.failed_${why}` : "narr.state.failed"), tone: "warn" }; }
     case "no_answer": return { message: msg("narr.state.no_answer"), tone: "warn" };
     case "text_only": return { message: msg(mode === "uploaded" ? "narr.state.no_recording" : "narr.state.not_voiced"), tone: "plain" };
     case "none": return mode === "uploaded" ? { message: msg("narr.state.no_recording"), tone: "plain" } : null;
@@ -289,7 +300,7 @@ export function narrationRow(shot: ShotOverview, fps: number, mode?: NarrationMo
   } else if (line.measuredSeconds !== undefined) notes.push({ message: msg("inspector.narration.measured", { seconds: round1(line.measuredSeconds) }), tone: "plain" });
   else if (line.estimatedSeconds !== undefined) notes.push({ message: msg("inspector.narration.estimated", { seconds: round1(line.estimatedSeconds) }), tone: "plain" });
   if (line.state === "making") notes.push({ message: msg("inspector.narration.making"), tone: "plain" });
-  if (line.state === "failed") notes.push({ message: msg("inspector.narration.failed"), tone: "warn" });
+  if (line.state === "failed") { const why = voiceFailureKind(line); notes.push({ message: msg(why ? `inspector.narration.failed_${why}` : "inspector.narration.failed"), tone: "warn" }); }
   if (line.state === "no_answer") notes.push({ message: msg("narr.row.no_answer"), tone: "warn" });
   if (line.fit === "cut_to_shot") notes.push({ message: msg("inspector.line_cut", { seconds: seconds(shot.durationFrames, fps) }), tone: "plain" });
   else if (line.fits === false) notes.push({ message: msg("inspector.narration.too_long"), tone: "warn" });

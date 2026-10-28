@@ -224,7 +224,8 @@ function GenerationNote({ line }: { line: GenerationLine }) {
   const store = useStore();
   const guard = useGuarded("server");
   return (
-    <div className="gen-note" role="status" data-generation={line.running ? "running" : "done"}>
+    <div className="gen-note" role="status" data-generation={line.running ? "running" : "done"} data-outcome={line.outcome ?? undefined}>
+      {line.outcome === "failed" || line.outcome === "no_answer" ? <span className={`mark ${line.outcome}`} aria-hidden="true">{line.outcome === "failed" ? "!" : ""}</span> : null}
       <span>{tm(line.text)}</span>
       {line.running ? (
         <button type="button" className="pill sm" data-act="stop-generation" {...guard} title={guard.title ?? t("director.generation.stop_hint")} disabled={guard.disabled} onClick={() => void store.stopFilm()}>{t("director.generation.stop")}</button>

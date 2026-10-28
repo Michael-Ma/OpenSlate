@@ -116,3 +116,39 @@ test('only the newest line that started a shot stays live; an earlier one keeps 
   assert.deepEqual(lines.map((line) => !!line.progress), [false, true]);
   assert.equal(translateMsg('en', lines[0].text), 'Started 2 keyframes in Scene 2 · about $0.08');
 });
+
+test('a voice line whose reply was lost says it may be charged, in its row, its state and Needs attention', async () => {
+  const { slotNote, narrationRow, voiceFailureKind } = await import('../../src/next/model/narration.ts');
+  const lost = failure({ code: 'SUBMISSION_RESPONSE_LOST', technical: true, charged: true });
+  const overview = withShot(lastFerryOverview(), '2.3', (shot) => ({ ...shot, narration: { ...shot.narration, state: 'failed', failure: lost } }));
+  const shot = overview.shots[shotId('2.3')];
+  assert.equal(voiceFailureKind(shot.narration), 'lost');
+  assert.match(translateMsg('zh-CN', slotNote(shot, 'voice').message), /可能已经扣费/);
+  assert.ok(narrationRow(shot, 24, 'voice').notes.some((note) => translateMsg('en', note.message) === 'The voice line got no reply · may be charged'));
+  const [item] = attentionItems(overview);
+  assert.equal(item.key, `${shotId('2.3')}:voice`);
+  assert.match(translateMsg('en', item.detail), /^The service never replied, so it may be charged/);
+  // Not charged, and an older server that sends no failure, keep their own words.
+  const free = withShot(lastFerryOverview(), '2.3', (s) => ({ ...s, narration: { ...s.narration, state: 'failed', failure: failure() } }));
+  assert.equal(translateMsg('en', attentionItems(free)[0].detail), "Not charged. It is made again with the scene's next keyframes or video.");
+  const bare = withShot(lastFerryOverview(), '2.3', (s) => ({ ...s, narration: { ...s.narration, state: 'failed' } }));
+  assert.equal(voiceFailureKind(bare.shots[shotId('2.3')].narration), null);
+  // A voice line waiting for an answer offers Give up only when it can be let go.
+  const waiting = withShot(lastFerryOverview(), '2.3', (s) => ({ ...s, narration: { ...s.narration, state: 'no_answer' } }));
+  assert.equal(translateMsg('en', attentionItems(waiting)[0].detail), 'It may still arrive.');
+});
+
+test('a transcription line follows its live outcome, and an older server keeps "Started…"', async () => {
+  const { generationLines } = await import('../../src/next/model/director.ts');
+  const base = { kind: 'transcription', sceneIds: [], shotIds: [], keyframes: 0, voiceLines: 0, quote: { micros: '6000', units: 1, unitMicros: '6000', priceUnknown: false }, at: 'now' };
+  const say = (transcription) => { const [line] = generationLines([{ ...base, ...(transcription ? { transcription } : {}) }], lastFerryOverview(), 'en'); return [translateMsg('en', line.text), line.running, line.outcome]; };
+  assert.deepEqual(say(undefined).slice(1), [false, null]);
+  assert.match(say(undefined)[0], /^Started transcribing the recording you sent/);
+  assert.deepEqual(say({ state: 'running' }).slice(1), [true, null]);
+  assert.match(say({ state: 'ready' })[0], /^Transcribed the recording you sent/);
+  const lost = say({ state: 'failed', failure: failure({ code: 'SUBMISSION_RESPONSE_LOST', technical: true, charged: true }) });
+  assert.deepEqual(lost.slice(1), [false, 'failed']);
+  assert.match(lost[0], /may already have been charged/);
+  assert.match(say({ state: 'failed', failure: failure() })[0], /was not charged/);
+  assert.deepEqual(say({ state: 'no_answer', attemptId: 'a' }).slice(1), [false, 'no_answer']);
+});

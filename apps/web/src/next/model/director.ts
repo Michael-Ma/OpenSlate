@@ -350,6 +350,18 @@ export interface GenerationLine {
   running: boolean;
   /** Keyframes: live per-shot progress from the overview, in place of the static line. */
   progress: GenerationProgress | null;
+  /** A transcription that is no longer running: how it ended (null while running, and for keyframes). */
+  outcome: "ready" | "failed" | "no_answer" | null;
+}
+
+/** A transcription's words follow its live outcome; an older server that sends none keeps "Started…". */
+function transcriptionKey(effect: DirectorGenerationEffect): MessageId {
+  const live = effect.transcription;
+  if (live?.state === "ready") return "director.generation.transcription_done";
+  if (live?.state === "no_answer") return "director.generation.transcription_waiting";
+  if (live?.state === "failed") return live.failure?.code === "SUBMISSION_RESPONSE_LOST" ? "director.generation.transcription_lost"
+    : live.failure?.charged ? "director.generation.transcription_failed_charged" : "director.generation.transcription_failed";
+  return "director.generation.transcription";
 }
 
 /**
@@ -362,11 +374,16 @@ export function generationLines(effects: readonly DirectorGenerationEffect[] | u
     const price = priceMsg(effect.quote, locale);
     const where = scenes.length ? labelList(scenes, locale) : "";
     const text = effect.kind === "transcription"
-      ? msg("director.generation.transcription", { price: "" })
+      ? msg(transcriptionKey(effect), { price: "" })
       : msg(scenes.length ? "director.generation.keyframes_in" : "director.generation.keyframes", { keyframes: effect.keyframes, voices: effect.voiceLines, scenes: where, count: scenes.length });
     const running = !!overview && effect.shotIds.some((id) => { const shot = overview.shots[id]; return !!shot && (shot.keyframe.state === "running" || queuedToRun(shot.keyframe) || shot.narration.state === "making"); });
     const progress = generationProgress(effect, overview, locale);
-    return { text: { ...text, messages: { price } }, running: progress ? progress.running : running, progress };
+    if (effect.kind === "transcription") {
+      // Without a live outcome (an older server) the line stays "Started…" and never offers Stop, as before.
+      const state = effect.transcription?.state;
+      return { text: { ...text, messages: { price } }, running: state === "running", progress: null, outcome: !state || state === "running" ? null : state };
+    }
+    return { text: { ...text, messages: { price } }, running: progress ? progress.running : running, progress, outcome: null };
   });
 }
 

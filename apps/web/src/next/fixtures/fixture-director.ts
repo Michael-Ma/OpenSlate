@@ -231,6 +231,9 @@ export const directorRoutes: FixtureRoute[] = [
  * - `markdown`: one more reply that uses lists, a table, code, links and references.
  * - `jobs`: 1.2's clip waits for an answer the service never sent (so Scene 1's keyframes are refused, ATTEMPT_EXISTS),
  *   and the service refuses 3.2's next keyframe: the live progress, the blocked line and Needs attention all show.
+ * - `lost`: the voice service never replied for 2.3's line, and the transcription of a recording the person sent got
+ *   no reply either (both SUBMISSION_RESPONSE_LOST, counted as spent): the voice row, Needs attention and the thread
+ *   say it may be charged and how it is made again.
  */
 export function directorPresets(): string[] {
   try { return (new URLSearchParams(globalThis.location?.search ?? "").get("director") ?? "").split(",").map((part) => part.trim()).filter(Boolean); } catch { return []; }
@@ -265,7 +268,7 @@ const MARKDOWN_REPLY = [
 /** Apply the `?director=` presets to a fresh sample world (tests pass the list themselves). */
 export function applyDirectorPresets(world: FixtureWorld, presets: readonly string[] = directorPresets()): void {
   // In one order whatever the list's, so the sample conversation stays in time order.
-  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs"];
+  const order = ["codex", "no-ffmpeg", "markdown", "held", "failed", "jobs", "lost"];
   for (const preset of order.filter((name) => presets.includes(name))) {
     if (preset === "codex") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: true };
     if (preset === "no-ffmpeg") world.director = { ...world.director, mode: "native", imageAttachmentsAvailable: false };
@@ -292,6 +295,20 @@ export function applyDirectorPresets(world: FixtureWorld, presets: readonly stri
         video: { state: "no_answer", takeCount: shot.video.takeCount, attemptId: "fixture-attempt-1-2-video", phase: "submission_unknown", startedAt: laterToday(1) } };
       world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
       fixtureFailNextKeyframe(world, shotId("3.2"));
+    }
+    if (preset === "lost") {
+      const lost = { code: "SUBMISSION_RESPONSE_LOST", technical: true, retryAllowed: false, autoRetriesLeft: 0, charged: true, at: laterToday(4) };
+      const shots = { ...world.overview.shots };
+      const shot = shots[shotId("2.3")]!;
+      shots[shot.shotId] = { ...shot, narration: { ...shot.narration, state: "failed", failure: lost } };
+      world.overview = recompute({ ...world.overview, shots }, world.snapshot.notes ?? [], world.snapshot.project.shots);
+      const requestId = "request-lost";
+      const message: ConversationEntry = { id: requestId, role: "user", text: "Here is my reading of the opening line, can you write it down?", requestId, at: laterToday(4) };
+      const reply: ConversationEntry = { id: "m-lost", role: "assistant", text: "I sent your recording to be transcribed.", requestId, at: laterToday(4), runtime: "scripted" };
+      const turn: TurnView = { id: "turn-lost", requestId, state: "completed", runtime: "scripted", action: "conversation",
+        effects: { notesCreated: 0, proposalsHeld: 0, changesApplied: 0, generation: [{ kind: "transcription", sceneIds: [], shotIds: [], keyframes: 0, voiceLines: 0,
+          quote: { micros: "6000", units: 1, unitMicros: "6000", priceUnknown: false }, at: laterToday(4), transcription: { state: "failed", failure: lost } }] } };
+      world.snapshot = { ...world.snapshot, conversation: [...(world.snapshot.conversation ?? []), message, reply], turns: [...(world.snapshot.turns ?? []), turn] };
     }
     if (preset === "failed") {
       const requestId = "request-failed";

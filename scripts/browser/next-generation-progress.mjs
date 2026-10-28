@@ -94,4 +94,22 @@ export const scenarios = [
       await page.screenshot({ path: shot("narrow-390") });
     },
   },
+  {
+    name: "next-generation-progress-lost-reply",
+    query: "ui=next&fixture=last-ferry&director=lost&lang=zh-CN",
+    viewport: { width: 1440, height: 900 },
+    async run({ page }) {
+      await ready(page);
+      // The transcription that got no reply says it may be charged and how to retry, with a failure mark and no Stop.
+      const note = page.locator('.thread .gen-note[data-outcome="failed"]');
+      await note.waitFor({ timeout: 8000 });
+      await expectText(page, '.thread .gen-note[data-outcome="failed"]', /^!\s*转写没有收到服务的返回结果，可能已经扣费。想重试就再发一次录音，需要再付一次费用。$/);
+      if (await note.locator('[data-act="stop-generation"]').count()) fail("A finished transcription still offers Stop");
+      // 2.3's lost voice line is in Needs attention with what it cost and how it is made again.
+      await page.click('[data-act="attention"]');
+      await page.waitForSelector(".attn-pop");
+      await expectText(page, '.attn-pop .attn-item[data-item="shot-2-3:voice"]', /2\.3 配音失败[\s\S]*服务没有返回结果，可能已计费。/);
+      await page.screenshot({ path: shot("lost-reply-1440") });
+    },
+  },
 ];

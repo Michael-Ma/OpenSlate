@@ -1,4 +1,6 @@
 import type { GenerationOverview, MediaSlot, ShotOverview } from "@openslate/core/public";
+import { voiceFailureKind } from "./narration.ts";
+import type { MessageId } from "../i18n/messages.ts";
 import { msg, type Msg } from "./types.ts";
 
 /**
@@ -32,6 +34,13 @@ function slotItem(shot: ShotOverview, media: Exclude<Media, "voice">, slot: Medi
   return null;
 }
 
+/** A voice line is made again with its scene, so the detail says what it cost; Give up only when the job can be let go. */
+function voiceDetail(line: ShotOverview["narration"]): MessageId {
+  if (line.state === "no_answer") return line.attemptId ? "attention.no_answer.detail" : "attention.voice.no_answer_detail";
+  const why = voiceFailureKind(line);
+  return why ? `attention.voice.failed_detail_${why}` : "attention.voice.failed_detail";
+}
+
 export function attentionItems(overview: GenerationOverview | null): AttentionItem[] {
   if (!overview) return [];
   const items: AttentionItem[] = [];
@@ -44,7 +53,7 @@ export function attentionItems(overview: GenerationOverview | null): AttentionIt
       if (voice === "failed" || voice === "no_answer") items.push({ key: `${shot.shotId}:voice`, group: voice === "failed" ? "failed" : "waiting",
         shotId, sceneId: shot.sceneId, label: shot.label,
         title: msg(voice === "failed" ? "attention.voice.failed" : "attention.voice.no_answer", { shot: shot.label }),
-        detail: msg(voice === "failed" ? "attention.voice.failed_detail" : "attention.no_answer.detail") });
+        detail: msg(voiceDetail(shot.narration)) });
     }
   }
   // Waiting first: it holds its scene back until the person decides.
