@@ -152,10 +152,6 @@ export interface ShotNarration {
    * by its own rule and profile bounds. Absent for an estimated line: fit needs a measured voice line.
    */
   fitSeconds?: number;
-  /** Present for making and no_answer: the attempt (no_answer: the target of POST .../attempts/:attemptId/release, if releasable). */
-  attemptId?: string;
-  /** Present for failed: the same allowlisted failure as keyframes and clips. */
-  failure?: MediaFailure;
 }
 
 export interface ShotOverview {
