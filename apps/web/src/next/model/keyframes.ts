@@ -44,6 +44,18 @@ export interface ShotCard {
   selected: boolean;
   /** App-computed checks attached to this card, each with the neutral check mark (never a Director's letter). */
   callouts: { letter: string; check: AppCheck }[];
+  /** Singing shots only: whether the clip is lip-synced, will be, failed (status says if charged), or cannot be. */
+  lipSync?: { state: "synced" | "planned" | "failed" | "unavailable"; label: Msg };
+}
+
+/** A singing shot's lip-sync line. The clip's own status pill keeps the usual running, failed and no-answer states. */
+export function lipSyncLine(shot: ShotOverview): ShotCard["lipSync"] {
+  const lip = shot.lipSync;
+  if (!lip) return undefined;
+  if (lip.state === "unavailable") return { state: "unavailable", label: msg(lip.reason === "no_song" ? "card.lipsync.no_song" : "card.lipsync.no_profile") };
+  if (shot.video.state === "ready") return { state: "synced", label: msg("card.lipsync.synced") };
+  if (shot.video.state === "failed") return { state: "failed", label: msg("card.lipsync.failed") };
+  return { state: "planned", label: msg("card.lipsync.planned") };
 }
 
 export interface VideoPanel {
@@ -591,6 +603,7 @@ export function keyframesView(overview: GenerationOverview, sceneId: string | nu
       workingOn,
       selected: shot.shotId === selected?.shotId,
       callouts: checks.filter((entry) => entry.check.shotId === shot.shotId),
+      ...(shot.lipSync ? { lipSync: lipSyncLine(shot) } : {}),
     };
   });
   return {

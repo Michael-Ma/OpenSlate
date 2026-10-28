@@ -164,6 +164,7 @@ export function ShotCards({ cards, notes, sceneOrdinal, busy, held, onOpen, onNo
               {bar ? <div className="vprog indeterminate" role="progressbar" aria-label={t("card.progress", { shot: card.label })} data-working={card.workingOn ?? undefined}><i /></div> : null}
             </div>
             <div className="ttl"><b>{title}</b><span>{t("card.seconds", { seconds: card.seconds })}</span></div>
+            {card.lipSync ? <div className="lipsync" data-lipsync={card.lipSync.state}>{tm(card.lipSync.label)}</div> : null}
             <div className="stl"><StatusPill status={card.status} tone={card.tone} /><span>{motion}</span></div>
           </article>
         );

@@ -179,7 +179,7 @@ const KEYFRAMES_FIELDS = new Set(["imagePrompt", "motion", "desiredFrames", "vid
 const DIRECTION_FIELDS = new Set(["purpose", "action", "framing"]);
 
 /** The storyboard kinds the server has (its body schema); the Plan view makes all of them but soundtrack. */
-const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "shotFields", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack", "shotTiming"]);
+const SERVER_KINDS = new Set(["treatment", "scene", "sceneTitle", "deleteScene", "moveScene", "addScene", "shot", "shotFields", "addShot", "deleteShot", "moveShot", "narration", "undo", "soundtrack", "shotTiming", "shotPerformance"]);
 const OTHER_VIEWS_KINDS = new Set(["soundtrack"]);
 /** What the server still takes while a written plan is pending (storyboard.ts, IMPORT_PENDING). */
 const DURING_IMPORT = new Set(["treatment", "scene", "shot", "shotFields", "narration"]);
@@ -483,6 +483,27 @@ function storyboard(world: FixtureWorld, raw: unknown): unknown {
         const shots = { ...overview.shots };
         for (const [id, durationFrames] of lengths) shots[id] = { ...shots[id]!, durationFrames, video: outdateClip(shots[id]!.video, "desiredFrames") };
         return { overview: { ...overview, shots }, project: { ...project, shots: project.shots.map((s) => (lengths.has(s.id) ? { ...s, desiredFrames: lengths.get(s.id)! } : s)) } };
+      });
+      break;
+    }
+    case "shotPerformance": {
+      // Music video: a singing shot is made by lip sync. Like the server, the flag never touches the current clip;
+      // the fixture studio has a lip-sync model, so the shot reads "planned".
+      const shot = world.overview.shots[typeof body.id === "string" ? body.id : ""];
+      if (!shot) throw new ApiError("NOT_FOUND", 404);
+      if (body.value !== "singing" && body.value !== "none") throw new ApiError("VALIDATION_ERROR", 400);
+      const singing = body.value === "singing";
+      change(world, (overview, project) => {
+        const { lipSync: _lipSync, ...rest } = shot;
+        const next: ShotOverview = singing ? { ...rest, lipSync: { state: "planned", profileId: "fixture-lipsync" } } : rest;
+        return {
+          overview: { ...overview, shots: { ...overview.shots, [shot.shotId]: next } },
+          project: { ...project, shots: project.shots.map((s) => {
+            if (s.id !== shot.shotId) return s;
+            const { performance: _performance, ...plain } = s as typeof s & { performance?: "singing" };
+            return singing ? { ...plain, performance: "singing" as const } : plain;
+          }) },
+        };
       });
       break;
     }

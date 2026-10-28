@@ -21,7 +21,7 @@ export interface ComputerRow {
   jobs: MessageId[];
 }
 
-type Credential = "openai" | "minimax" | "viggle";
+type Credential = "openai" | "minimax" | "viggle" | "fal";
 
 const CREDENTIAL_OF: Record<string, Credential> = {
   "openai-image": "openai",
@@ -29,9 +29,10 @@ const CREDENTIAL_OF: Record<string, Credential> = {
   "openai-transcription": "openai",
   "minimax-h3": "minimax",
   "viggle-h3": "viggle",
+  "fal-h3-lipsync": "fal",
 };
 
-const KEY_NAME: Record<Credential, MessageId> = { openai: "set.computer.key.openai", minimax: "set.computer.key.minimax", viggle: "set.computer.key.viggle" };
+const KEY_NAME: Record<Credential, MessageId> = { openai: "set.computer.key.openai", minimax: "set.computer.key.minimax", viggle: "set.computer.key.viggle", fal: "set.computer.key.fal" };
 
 const KIND_ORDER: readonly MediaKind[] = ["image", "video", "speech", "transcription"];
 const jobsOf = (kinds: Iterable<string>): MessageId[] => {
@@ -93,7 +94,7 @@ function keyRows(catalog: ProviderCatalogView): ComputerRow[] {
     if (option.profile?.kind && isMediaKind(option.profile.kind)) entry.kinds.add(option.profile.kind);
     keys.set(credential, entry);
   }
-  return (["openai", "minimax", "viggle"] as const).flatMap((credential) => {
+  return (["openai", "minimax", "viggle", "fal"] as const).flatMap((credential) => {
     const entry = keys.get(credential);
     if (!entry) return [];
     const jobs = jobsOf(entry.kinds);

@@ -211,6 +211,7 @@ export const settingsMessages = {
   "set.computer.key.openai": { en: "OpenAI key", zh: "OpenAI 密钥" },
   "set.computer.key.minimax": { en: "MiniMax key", zh: "MiniMax 密钥" },
   "set.computer.key.viggle": { en: "Viggle key", zh: "Viggle 密钥" },
+  "set.computer.key.fal": { en: "fal key (lip sync)", zh: "fal 密钥（对口型）" },
   "set.computer.found": { en: "Found", zh: "已找到" },
   "set.computer.set": { en: "Set", zh: "已设置" },
   "set.computer.not_found": { en: "Not found", zh: "未找到" },

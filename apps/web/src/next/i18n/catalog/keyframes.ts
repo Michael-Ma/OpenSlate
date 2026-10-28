@@ -73,6 +73,12 @@ export const keyframes = {
   "card.direction_required": { en: "Needs direction first", zh: "需要先写好画面描述" },
   "card.no_keyframe": { en: "No keyframe yet", zh: "还没有关键帧" },
   "card.seconds": { en: "{seconds} s", zh: "{seconds} 秒" },
+  // Singing shots (music video): the clip is made by lip sync from the keyframe and this shot's song.
+  "card.lipsync.synced": { en: "Lip-synced", zh: "已对口型" },
+  "card.lipsync.planned": { en: "Lip sync", zh: "对口型" },
+  "card.lipsync.failed": { en: "Lip sync failed", zh: "对口型失败" },
+  "card.lipsync.no_profile": { en: "No lip sync model: made as a normal clip", zh: "没有对口型模型：按普通片段生成" },
+  "card.lipsync.no_song": { en: "No song under this shot: made as a normal clip", zh: "这个镜头下没有歌曲：按普通片段生成" },
   "card.select": { en: "Open shot {shot}, {framing}", zh: "打开镜头 {shot}，{framing}" },
   "card.making": { en: "Making…", zh: "生成中…" },
   "card.empty": { en: "No more shots in this scene", zh: "这一场没有更多镜头" },

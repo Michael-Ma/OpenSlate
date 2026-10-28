@@ -134,6 +134,9 @@
 .card .ttl { gap: 8px; min-width: 0; }
 .card .ttl b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .ttl span { flex: none; white-space: nowrap; }
+/* Singing shots: one muted line under the title (lip-synced, planned, failed, or why not). */
+.card .lipsync { font-size: 11px; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .lipsync[data-lipsync="failed"], .card .lipsync[data-lipsync="unavailable"] { opacity: 1; }
 .card .stl > .status { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .card .stl > .status > [aria-hidden] { margin-right: 4px; }
 .card .stl > span:last-child { flex: 1 1 0; min-width: min(4.5em, 40%); }

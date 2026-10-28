@@ -193,7 +193,8 @@ export function modelPlan(catalog: ProviderCatalog, codex: Codex, locale: Locale
       ? { job: "director", model: null, price: msg("start.price.stand_in"), status: msg("start.ready.codex_missing"), ok: false }
       : { job: "director", model: "Codex", price: msg("start.price.codex"), status: msg("start.ready.codex_unknown"), ok: false });
   for (const { job, kind, price } of JOBS) {
-    const candidates = catalog.profiles.filter((row) => row.profile?.kind === kind);
+    // Lip sync is pinned by the studio beside a real video model (singing shots only), never chosen as the video model.
+    const candidates = catalog.profiles.filter((row) => row.profile?.kind === kind && row.profile.adapter !== "fal-h3-lipsync");
     const real = candidates.filter((row) => !isStandIn(row));
     const usable = real.find((row) => row.readiness.realExecutionEnabled);
     const standIn = candidates.find((row) => catalog.defaults.includes(row.id)) ?? candidates.find(isStandIn);

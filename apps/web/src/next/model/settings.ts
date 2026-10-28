@@ -202,7 +202,8 @@ export interface ModelRow {
 export function modelRows(status: ModelSettingsStatus, locale: string): ModelRow[] {
   return MEDIA_KINDS.map((kind) => {
     const choices = status.options
-      .filter((option) => option.profile?.kind === kind)
+      // Lip sync makes only singing shots and is pinned beside the video model; it is never the video choice.
+      .filter((option) => option.profile?.kind === kind && option.profile.adapter !== "fal-h3-lipsync")
       .map((option): ModelChoice => {
         const ready = readiness(option);
         return { value: option.id, name: modelName(option), estimate: estimateMsg(option, locale), ready: ready.ready, reason: ready.reason };
