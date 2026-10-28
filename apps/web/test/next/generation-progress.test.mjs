@@ -195,3 +195,17 @@ test('a transcription line follows its live outcome, and an older server keeps "
   assert.match(say({ state: 'failed', failure: failure() })[0], /was not charged/);
   assert.deepEqual(say({ state: 'no_answer', attemptId: 'a' }).slice(1), [false, 'no_answer']);
 });
+
+test('a refused scene stays blocked while the server still lists a job for its shots, even one no slot shows', () => {
+  const block = { kind: 'keyframes', sceneId: sceneId(1), code: 'ATTEMPT_EXISTS', shotIds: [shotId('1.2')], at: 'now',
+    attempts: [{ attemptId: 'lost', shotId: shotId('1.2'), kind: 'video', phase: 'submission_unknown', action: 'human_release' }] };
+  const withBlockers = (blockedBy, truncated = false) => ({ ...lastFerryOverview(), scenes: lastFerryOverview().scenes.map((scene) => scene.sceneId === sceneId(1)
+    ? { ...scene, blockedBy, blockedByTotal: blockedBy.length, blockedByTruncated: truncated } : scene) });
+  // The slot shows nothing, but an older detached job of 1.2 still blocks: the line names it.
+  const hidden = blockView(block, withBlockers([{ attemptId: 'older', shotId: shotId('1.2'), kind: 'image', phase: 'submission_unknown', action: 'human_release' }]));
+  assert.equal(hidden.resolved, false);
+  assert.equal(translateMsg('en', hidden.title), "Scene 1 waits for 1.2's earlier keyframe job");
+  assert.equal(blockView(block, withBlockers([])).resolved, true);
+  // A cut-off list that does not reach 1.2 keeps the recorded job.
+  assert.equal(blockView(block, withBlockers([], true)).resolved, false);
+});

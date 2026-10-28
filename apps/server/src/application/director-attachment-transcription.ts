@@ -81,6 +81,8 @@ export function directorAttachmentTranscriptionOutcome(service: ProductionServic
     if (attempt.phase === 'failed') return { state: 'failed', attemptId: attempt.id,
       failure: attemptMediaFailure(service.store, attempt, proposal.profile.maxRetries) };
     if (attempt.phase === 'succeeded') return { state: 'ready', attemptId: attempt.id };
+    // A released job stays polled for a late result, but it is no longer the person's to give up again.
+    if (attempt.phase === 'submission_unknown' && attempt.released) return { state: 'no_answer' };
     return { state: attempt.phase === 'submission_unknown' ? 'no_answer' : 'running', attemptId: attempt.id };
   } catch (error) {
     if (error instanceof DomainError) return { state: 'no_answer' };

@@ -138,9 +138,12 @@ test('giving up a restarted Director transcription clears the restart strip with
   f.store.appendEvent(f.project.id, 'test.restarted_transcription', {});
   const reader = new GenerationOverviewReader(f.production);
   assert.deepEqual(reader.read(f.project.id).restartCasualties, [attempt.id]);
+  assert.deepEqual(f.read().transcription, { state: 'no_answer', attemptId: attempt.id });
   const history = canonical(rows(f, 'director_generation_effect'));
   f.engine.releaseAttempt(f.project.id, attempt.id, 'local-user', true);
   assert.deepEqual(reader.read(f.project.id).restartCasualties, []);
+  // Still polled for a late result, but no longer offered to give up again.
+  assert.deepEqual(f.read().transcription, { state: 'no_answer' });
   assert.ok(f.attempt().released);
   assert.equal(f.attempt().phase, 'submission_unknown');
   assert.equal(f.store.get('reservation', attempt.reservationId).state, 'reserved');

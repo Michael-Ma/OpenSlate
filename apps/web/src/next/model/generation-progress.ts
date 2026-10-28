@@ -157,6 +157,20 @@ function inTheWay(overview: GenerationOverview, attempt: NonNullable<DirectorGen
   return [slot, slot.replacement].some((s) => s?.attemptId === attempt.attemptId && (s.state === "running" || s.state === "no_answer"));
 }
 
+/**
+ * The jobs still in the way of a refused scene. A current server lists the scene's jobs with the refusal's own rule
+ * (card X2, including detached and older jobs no slot shows), so the line resolves exactly when a new request would be
+ * accepted; a cut-off list keeps the recorded jobs. An older server falls back to what the slots show.
+ */
+function stillBlocking(block: DirectorGenerationBlock, overview: GenerationOverview): NonNullable<DirectorGenerationBlock["attempts"]> {
+  const recorded = block.attempts ?? [];
+  const scene = overview.scenes.find((s) => s.sceneId === block.sceneId);
+  if (!scene?.blockedBy) return recorded.filter((attempt) => inTheWay(overview, attempt));
+  const shots = new Set(recorded.map((attempt) => attempt.shotId));
+  const live = scene.blockedBy.filter((job) => shots.has(job.shotId));
+  return live.length || !scene.blockedByTruncated ? live : recorded;
+}
+
 /** Refusals that need nothing from the person: the scene had nothing left to make. */
 const NOTHING_TO_DO = new Set(["ALREADY_COMPLETE"]);
 
@@ -166,7 +180,7 @@ export function blockView(block: DirectorGenerationBlock, overview: GenerationOv
   const label = (id: string) => overview.shots[id]?.label ?? "?";
   const sceneArg = { scene: scene ?? "?" };
   if (block.code === "ATTEMPT_EXISTS" && block.attempts?.length) {
-    const blocking = block.attempts.filter((attempt) => inTheWay(overview, attempt));
+    const blocking = stillBlocking(block, overview);
     if (!blocking.length) return { code: block.code, sceneId: block.sceneId, scene, resolved: true, ask: null, open: null,
       title: msg("director.blocked.resolved", sceneArg), step: msg("director.blocked.resolved_step", sceneArg) };
     const first = blocking.find((attempt) => attempt.action === "human_release") ?? blocking[0]!;
