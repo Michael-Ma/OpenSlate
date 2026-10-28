@@ -82,7 +82,7 @@ export interface MediaFailure {
   charged: boolean;
   at: string;
   nativeDiagnostic?: NativeDiagnostic;
-  /** Proven by the exact native pre-dispatch receipt; never inferred from reservation state. */
+  /** Proven by the exact native or audio pre-dispatch receipt; never inferred from reservation state. */
   notDispatched?: boolean;
 }
 
@@ -134,6 +134,10 @@ export interface KeyframeSlot extends MediaSlot {
 export interface ShotNarration {
   /** none: no line; text_only: a line exists but no voice yet; making; ready: voice exists; failed; no_answer: outcome unknown. */
   state: "none" | "text_only" | "making" | "ready" | "failed" | "no_answer";
+  /** Present for making and no_answer: the attempt (no_answer: the target of POST .../attempts/:attemptId/release, if releasable). */
+  attemptId?: string;
+  /** Present for failed: the same allowlisted failure as keyframes and clips. */
+  failure?: MediaFailure;
   text: string;
   /** Measured length of the accepted or current voice line. */
   measuredSeconds?: number;
@@ -593,6 +597,8 @@ export interface DirectorGenerationEffect {
   /** Total estimate of what was started. */
   quote: PriceQuote;
   at: string;
+  /** kind "transcription" only: the transcription's live outcome, recomputed for every read of the turn view. */
+  transcription?: { state: "running" | "ready" | "failed" | "no_answer"; attemptId?: string; failure?: MediaFailure };
 }
 
 /**

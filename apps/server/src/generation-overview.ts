@@ -14,9 +14,7 @@ import { sceneView, sceneGenerationView } from "./scene-generation.js";
 import { generationTargets } from "./scene-row.js";
 import { quote, unitQuote } from "./generation-quotes.js";
 import { narrationFitFrames } from "./narration-fit.js";
-import { automaticRetriesLeft } from "./execution/retry-eligibility.js";
-import { assertCodexImageRecords } from "./execution/codex-image-lineage.js";
-import { safeNativeDiagnostic } from "./application/native-diagnostics.js";
+import { attemptMediaFailure } from "./media-failure.js";
 import { activeAttemptIngestionIssue } from "./execution/ingestion-issue.js";
 
 /** Existing scenes retain their purpose-derived label until named. */
@@ -116,21 +114,9 @@ export class GenerationOverviewReader {
             }
             const last = history.filter(a => !a.released && a.candidateId === binding?.candidateId).at(-1);
             if (last?.phase === "failed") {
-              const evidence = store.list<{ attemptId: string; outcome: { type: string; failureId?: string; technical?: boolean; retryAllowed?: boolean }; recordedAt: string }>("execution_evidence", projectId).filter(e => e.attemptId === last.id).at(-1);
-              const failure = last.failure ?? (evidence?.outcome.failureId ? { id: evidence.outcome.failureId, technical: evidence.outcome.technical === true, retryAllowed: false } : null);
               const profile = captured.lock.profiles.find(p => p.id === binding?.node.profileId);
-              const retriesLeft = automaticRetriesLeft(store, last, profile?.maxRetries ?? 0);
-              // Diagnostic only: an older or inconsistent native record must not fail the whole overview read.
-              const native = last.request.execution?.adapter === "codex-image" ? (() => {
-                try { return assertCodexImageRecords(store, last).result?.observation; } catch { return undefined; }
-              })() : undefined;
-              const nativeDiagnostic = native?.kind === "not_dispatched" ? safeNativeDiagnostic(native.nativeDiagnostic)
-                : native?.kind === "failed" && native.code === "USAGE_LIMIT" ? { category: "native_rate_limited" as const } : undefined;
-              return progress({ ...base, state: retriesLeft ? "queued" : "failed", attemptId: last.id, phase: last.phase, failure: { code: failure?.id ?? "EXECUTION_FAILED", technical: failure?.technical ?? false,
-                retryAllowed: retriesLeft > 0, autoRetriesLeft: retriesLeft,
-                ...(nativeDiagnostic ? { nativeDiagnostic, ...(native?.kind === "not_dispatched" ? { notDispatched: true } : {}) } : {}),
-                charged: !last.reservationId || store.get<{ state: string }>("reservation", last.reservationId)?.state !== "released",
-                at: evidence?.recordedAt ?? last.createdAt } });
+              const failure = attemptMediaFailure(store, last, profile?.maxRetries ?? 0);
+              return progress({ ...base, state: failure.autoRetriesLeft ? "queued" : "failed", attemptId: last.id, phase: last.phase, failure });
             }
             if (current && output && !binding?.retainedTake) return { ...base, state: "ready", artifact: ref(output) };
             // Proposal publication retains paid outputs. A stale completed recipe is
@@ -161,9 +147,19 @@ export class GenerationOverviewReader {
             const review = application ? store.get<{ section: { segmentId: string; segmentRevisionId: string } }>("narration_speech_review", application.review.id) : undefined;
             return review?.section.segmentId === row.narration.segmentId && review?.section.segmentRevisionId === row.narration.segmentRevisionId;
           }).at(-1);
-          if (!row.narration.ready && speech?.phase === "submission_unknown") audio.state = "no_answer";
-          else if (!row.narration.ready && speech && !["failed", "succeeded"].includes(speech.phase)) audio.state = "making";
-          else if (!row.narration.ready && speech?.phase === "failed") audio.state = "failed";
+          if (!row.narration.ready && speech) {
+            if (speech.phase === "submission_unknown") {
+              audio.state = "no_answer";
+              audio.attemptId = speech.id;
+            } else if (!["failed", "succeeded"].includes(speech.phase)) {
+              audio.state = "making";
+              audio.attemptId = speech.id;
+            } else if (speech.phase === "failed") {
+              audio.state = "failed";
+              const profile = captured.lock.profiles.find(p => p.id === speech.request.args.profileIdentity);
+              audio.failure = attemptMediaFailure(store, speech, profile?.maxRetries ?? 0);
+            }
+          }
           overview.shots[shot.id] = { shotId: shot.id, sceneId: scene.id, label: `${index + 1}.${shotIndex + 1}`, framing: shot.framing, purpose: shot.purpose,
             imagePrompt: shot.imagePrompt, motion: shot.motion, durationFrames: shot.desiredFrames, keyframe: { ...image, opened }, video, narration: audio, quotes: { regenerateKeyframe: quote(captured.lock, [row], "regenerateKeyframe") } };
           if (image.state === "direction_required") blockers.push({ code: "direction_required", shotId: shot.id });
