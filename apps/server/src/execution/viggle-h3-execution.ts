@@ -20,6 +20,8 @@ import { assertViggleSpoolLineage, viggleObservations } from "./viggle-h3-lineag
 const unknown = (diagnostic: string, taskId?: string): ExecutionOutcome => ({ type: "unknown", diagnostic, ...(taskId ? { taskId } : {}) });
 /** Any host's POST is aborted by then, whatever timeout the original host used. */
 const MAX_SUBMIT_TIMEOUT_MS = 120000;
+/** Polling interval floor for a released (detached) task; liability and reconciliation continue. */
+export const DETACHED_POLL_MS = 300000;
 /** H3 has no way to find a task without its id. A lost POST reply is final, counted as spent, and only a human press may buy again. */
 export const SUBMISSION_RESPONSE_LOST = "SUBMISSION_RESPONSE_LOST";
 const responseLost = (): ExecutionOutcome => ({ type: "failed", taskId: null, failureId: SUBMISSION_RESPONSE_LOST, technical: true, retryAllowed: false });
@@ -217,6 +219,8 @@ export class ViggleH3Execution implements ExecutionProvider {
         const observation = saved?.observation;
         if (observation?.kind === "unknown" && ["auth", "quota", "throttled"].includes(observation.error.category))
           delay = Math.max(delay, Math.min(current.policy.retryAfterMaximumMs, observation.error.retryAfterMs ?? 0));
+        // A job the person stopped waiting for (decision R3) is still polled for its late result, just less often.
+        if (this.#store.get<{ released?: unknown }>("attempt", attempt.id)?.released) delay = Math.max(delay, DETACHED_POLL_MS);
         this.#store.put("viggle_h3_poll_schedule", attempt.id, attempt.projectId, { ...current, claimId: null, nextPollAt: this.now() + delay,
           lastObservationId: saved?.id ?? current.lastObservationId });
       });

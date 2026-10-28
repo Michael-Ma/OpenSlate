@@ -169,7 +169,9 @@ test('release rejects missing acknowledgement, key, wrong phase and foreign atte
   expectError(await f.post(`/attempts/${attempt.id}/release`, { expectedPhase: 'submission_unknown' }), 'DOUBLE_CHARGE_NOT_ACKNOWLEDGED');
   expectError(await f.release(attempt, {}, null), 'IDEMPOTENCY_KEY_REQUIRED');
   expectError(await f.release(attempt, {}, '   '), 'IDEMPOTENCY_KEY_REQUIRED');
-  expectError(await f.release(attempt, { expectedPhase: 'remote_pending' }), 'VALIDATION_ERROR');
+  expectError(await f.release(attempt, { expectedPhase: 'ingesting' }), 'VALIDATION_ERROR');
+  // Decision R3 makes remote_pending a valid request, but never for an unanswered job.
+  expectError(await f.release(attempt, { expectedPhase: 'remote_pending' }), 'ATTEMPT_NOT_RELEASABLE');
   expectError(await f.release({ id: 'missing' }), 'NOT_FOUND');
   assert.equal(f.store.cursor(f.projectId), before);
   assert.equal(f.store.get('attempt', attempt.id).released, undefined);

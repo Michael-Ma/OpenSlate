@@ -21,8 +21,8 @@ import type { DirectorAttachmentRef, MessageAttachmentView, RequestSource } from
 import { projectRequest, migrateLegacyRequestSources } from "./request-source.js";
 import { Store } from "../persistence/store.js";
 import { Engine } from "../execution/engine.js";
-import type { ArtifactRecord, NodeBinding } from "../execution/engine.js";
-import type { StopView, ReleaseAttemptInput, ReleaseAttemptReceipt } from "@openslate/core/public";
+import type { ArtifactRecord, Attempt, NodeBinding } from "../execution/engine.js";
+import type { StopView, ReleaseAttemptInput, ReleaseAttemptReceipt, DiscardAttemptInput, DiscardAttemptReceipt, RetryLocalAttemptInput, RetryLocalAttemptReceipt } from "@openslate/core/public";
 import { projectDirectorContext } from "./context-projection.js";
 import type { DirectorContextQuery } from "./context-projection.js";
 import { selectedProviderProfiles } from "./provider-catalog.js";
@@ -899,8 +899,28 @@ export class ProductionService {
   releaseAttempt(projectId: string, actor: ActorContext, attemptId: string, input: ReleaseAttemptInput): ReleaseAttemptReceipt {
     this.assertActor(projectId, actor);
     invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Releasing a job requires a human project command");
-    invariant(input.expectedPhase === "submission_unknown", "ATTEMPT_NOT_RELEASABLE", "Only an unconfirmed submission can be released");
-    return this.engine.releaseAttempt(projectId, attemptId, actor.principalId, input.acknowledgeDoubleCharge);
+    invariant(input.expectedPhase === "submission_unknown" || input.expectedPhase === "remote_pending", "ATTEMPT_NOT_RELEASABLE", "Only an unconfirmed or still-running submission can be released");
+    return this.engine.releaseAttempt(projectId, attemptId, actor.principalId, input.acknowledgeDoubleCharge, input.expectedPhase);
+  }
+
+  /** Decision R2: discard a finished job's unusable output; it stays charged and in history. */
+  discardAttempt(projectId: string, actor: ActorContext, attemptId: string, input: DiscardAttemptInput): DiscardAttemptReceipt {
+    this.assertActor(projectId, actor);
+    invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Discarding a job requires a human project command");
+    invariant(input.expectedPhase === "ingesting", "ATTEMPT_NOT_DISCARDABLE", "Only a finished job whose output needs attention can be discarded");
+    return this.engine.discardAttempt(projectId, attemptId, actor.principalId, input.acknowledgeDiscard);
+  }
+
+  /** Decision R4, asynchronous half: validate and run the final receipt check without writing anything. */
+  checkLocalRetry(projectId: string, attemptId: string, input: RetryLocalAttemptInput): Promise<Attempt> {
+    invariant(input.expectedFailure === "LOCAL_EXECUTION_INTERRUPTED", "ATTEMPT_NOT_RETRYABLE", "Only interrupted local work can be rendered again");
+    return this.engine.checkLocalRetry(projectId, attemptId, input.acknowledgeRerender);
+  }
+  /** Decision R4: record a person's fresh retry identity for the checked interrupted local render. */
+  retryLocalAttempt(projectId: string, actor: ActorContext, checked: Attempt): RetryLocalAttemptReceipt {
+    this.assertActor(projectId, actor);
+    invariant(actor.kind === "human" && this.allows(this.store.getProject(projectId), actor, projectId), "ACTOR_DENIED", "Rendering again requires a human project command");
+    return this.engine.recordLocalRetry(projectId, checked, actor.principalId);
   }
 
   control(projectId: string, actor: ActorContext, action: "pause" | "resume" | "stop", expectedAuthorityId?: string | null) {

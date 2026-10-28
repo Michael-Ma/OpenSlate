@@ -17,6 +17,8 @@ import type { CodexImageAdmission } from './codex-image-authority.js';
 import { assertCodexImageOperationOptions } from './codex-image-receipts.js';
 import type { CodexImageExecutionMapping,CodexImageExecutionDispatch,CodexImageExecutionRun,CodexImageExecutionResult,CodexImageObservation } from './codex-image-receipts.js';
 import { assertCodexImageRecords,assertCodexImageSpoolLineage } from './codex-image-lineage.js';
+/** Mutable latest-reason row beside the immutable receipts; never part of their lineage. */
+export interface CodexImageExecutionUnresolved {id:string;projectId:string;version:1;attemptId:string;requestDigest:string;nativeDiagnostic:NativeDiagnostic;observedAt:string}
 const unknown=():ExecutionOutcome=>({type:'unknown',diagnostic:'Codex image outcome is unresolved; no automatic turn restart'});
 const stopped=(signal?:AbortSignal):void=>invariant(!signal?.aborted,'CODEX_IMAGE_CANCELLED','Codex image work was cancelled');
 const identity=(attempt:Attempt)=>({id:attempt.id,projectId:attempt.projectId,version:1 as const,attemptId:attempt.id,requestDigest:digest(attempt.request)});
@@ -73,7 +75,7 @@ export class CodexImageExecution implements ExecutionProvider {
       const observation=await this.#transport.start(structuredClone(mapping.native),structuredClone(prepared),{...(signal?{signal}:{}),
         observeTurn:async turnId=>{this.observeTurn(attempt,mapping,turnId);}});
       await this.observe(attempt,mapping,observation,signal);
-    }catch{return unknown();}
+    }catch(error){return this.unresolved(attempt,error);}
     return this.recover(attempt,signal,false);
   }
   async lookup(attemptId:string,input?:Readonly<ExecutionRequest>,options:ExecutionCallOptions={}):Promise<ExecutionOutcome> {
@@ -101,8 +103,25 @@ export class CodexImageExecution implements ExecutionProvider {
     return this.#store.put('codex_image_execution_result',attempt.id,attempt.projectId,{...identity(attempt),mappingDigest:mapping?digest(mapping):null,
       dispatchDigest:dispatch?digest(dispatch):null,runDigest:run?digest(run):null,observation});
   }
+  /**
+   * Post-marker evidence only (decision R1): keep the worker's exact safe code as an allowlisted diagnostic. It never
+   * changes the unknown outcome, liability or retry authority; an unchanged reason writes nothing.
+   */
+  private unresolved(attempt:Attempt,cause:unknown):ExecutionOutcome {
+    try {
+      const nativeDiagnostic=classifyNativeDiagnostic(cause);
+      this.#store.transaction(()=>{
+        if(!this.#store.get('codex_image_execution_dispatch',attempt.id))return;
+        const previous=this.#store.get<CodexImageExecutionUnresolved>('codex_image_execution_unresolved',attempt.id);
+        if(previous&&canonical(previous.nativeDiagnostic)===canonical(nativeDiagnostic))return;
+        this.#store.put('codex_image_execution_unresolved',attempt.id,attempt.projectId,{...identity(attempt),nativeDiagnostic,observedAt:new Date().toISOString()});
+        logNativeDiagnostic('codex_image_unresolved',attempt.projectId,nativeDiagnostic,attempt.id);
+      });
+    }catch{/* diagnostic evidence never decides the outcome */}
+    return unknown();
+  }
   private async observe(attempt:Attempt,mapping:CodexImageExecutionMapping,observation:CodexImageOutcome,signal?:AbortSignal):Promise<void> {
-    if(observation.kind==='unknown')return;
+    if(observation.kind==='unknown'){this.unresolved(attempt,{code:observation.code});return;}
     invariant(observation.threadId===mapping.native.session.threadId,'CODEX_IMAGE_EXECUTION_CONFLICT','Result came from another thread');
     this.observeTurn(attempt,mapping,observation.turnId);
     if(observation.kind==='pending')return;
@@ -158,7 +177,7 @@ export class CodexImageExecution implements ExecutionProvider {
       const observation=await this.#transport.lookup(structuredClone(records.mapping.native),{...(records.run?{turnId:records.run.turnId}:{}),...(signal?{signal}:{})});
       await this.observe(attempt,records.mapping,observation,signal);records=assertCodexImageRecords(this.#store,attempt);
       return await local()??unknown();
-    }catch{return unknown();}
+    }catch(error){return this.unresolved(attempt,error);}
   }
   private async prepareInputs(attempt:Attempt,signal?:AbortSignal):Promise<CodexImageInput> {
     const references=resolveCodexImageReferences(this.#store,attempt),images:CodexImageInput['images']=[];

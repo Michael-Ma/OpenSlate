@@ -115,7 +115,8 @@ test("known native preparation guards retain their allowlisted reason", () => {
   assert.deepEqual(classifyNativeDiagnostic({ code: "CODEX_IMAGE_INTERACTIVE_DENIED" }), { category: "native_auth_required" });
   assert.deepEqual(classifyNativeDiagnostic({ code: "SETUP_INSTRUCTIONS_UNEXPECTED" }), { category: "native_instructions_unexpected" });
   for (const code of ["CODEX_IMAGE_CLOSED", "CODEX_IMAGE_BUSY", "RUNTIME_PROCESS_EXIT", "RUNTIME_TRANSPORT_FAILED", "RUNTIME_CLEANUP_FAILED"])
-    assert.deepEqual(classifyNativeDiagnostic({ code, message: "PRIVATE auth required" }), { category: "native_unknown" }, code);
+    // Still unexplained: never a configuration or sign-in category. Decision R1 adds only an allowlisted reason.
+    assert.equal(classifyNativeDiagnostic({ code, message: "PRIVATE auth required" }).category, "native_unknown", code);
 });
 
 test("instruction diagnostic reclassification preserves only bounded printable file metadata", () => {
@@ -127,4 +128,23 @@ test("instruction diagnostic reclassification preserves only bounded printable f
   });
   assert.equal(classifyNativeDiagnostic({ nativeDiagnostic: { category: "native_instructions_unexpected",
     instructionFiles: Array.from({ length: 50 }, (_, i) => `/tmp/${i}/AGENTS.md`) } }).instructionFiles.length, 32);
+});
+
+// Decision R1 (rule-drift review section 3.1): unexplained native stages keep native_unknown with a closed reason.
+test("unexplained native exits keep native_unknown with an allowlisted reason and never native text", () => {
+  const raw = "PRIVATE native text /Users/someone/.codex token=secret";
+  for (const [code, reason] of [["RUNTIME_PROCESS_EXIT", "process_exit"], ["CODEX_IMAGE_PREPARED_PROCESS_LOST", "process_exit"],
+    ["RUNTIME_TRANSPORT_FAILED", "transport_failed"], ["RUNTIME_CLOSED", "worker_closed"], ["CODEX_IMAGE_BUSY", "worker_busy"],
+    ["CODEX_IMAGE_CLEANUP_FAILED", "cleanup_failed"], ["CODEX_IMAGE_ABORTED", "aborted"], ["CODEX_IMAGE_COMPLETION_MISSING", "completion_missing"],
+    ["CODEX_IMAGE_MULTIPLE_OUTPUTS", "output_invalid"], ["CODEX_IMAGE_TURN_MISMATCH", "identity_mismatch"]]) {
+    const diagnostic = classifyNativeDiagnostic(Object.assign(new Error(raw), { code, detail: raw }));
+    assert.deepEqual(diagnostic, { category: "native_unknown", reason }, code);
+    assert.equal(JSON.stringify(diagnostic).includes("PRIVATE"), false);
+  }
+  // Unexplained causes stay plain unknown; existing categories are unchanged; a supplied reason is filtered.
+  assert.deepEqual(classifyNativeDiagnostic({ code: "SOMETHING_ELSE" }), { category: "native_unknown" });
+  assert.deepEqual(classifyNativeDiagnostic({ code: "RUNTIME_RPC_TIMEOUT" }), { category: "native_timeout" });
+  assert.deepEqual(classifyNativeDiagnostic({ nativeDiagnostic: { category: "native_unknown", reason: "process_exit", message: raw } }), { category: "native_unknown", reason: "process_exit" });
+  assert.deepEqual(classifyNativeDiagnostic({ nativeDiagnostic: { category: "native_unknown", reason: raw } }), { category: "native_unknown" });
+  assert.deepEqual(classifyNativeDiagnostic({ nativeDiagnostic: { category: "native_protocol", reason: "process_exit" } }), { category: "native_protocol" });
 });

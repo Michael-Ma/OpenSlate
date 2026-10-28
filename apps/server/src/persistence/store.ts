@@ -826,10 +826,18 @@ export class Store {
         if (previous.released) invariant(canonical(previous.released) === canonical(next.released ?? null), "IMMUTABLE_RECORD", "Attempt release evidence is immutable");
         else if (next.released) {
           const released = next.released as Attempt["released"];
-          invariant(previous.phase === "submission_unknown" && next.phase === previous.phase
+          // remote_pending: a job the provider still reports as running, detached by the person (decision R3).
+          invariant((previous.phase === "submission_unknown" || previous.phase === "remote_pending") && next.phase === previous.phase
             && released && typeof released.by === "string" && released.by.length > 0
             && typeof released.at === "string" && Number.isFinite(Date.parse(released.at)),
-          "ATTEMPT_NOT_RELEASABLE", "Release requires a retained unknown submission and human audit evidence");
+          "ATTEMPT_NOT_RELEASABLE", "Release requires a retained unknown or running submission and human audit evidence");
+        }
+        if (previous.discarded) invariant(canonical(previous.discarded) === canonical(next.discarded ?? null), "IMMUTABLE_RECORD", "Attempt discard evidence is immutable");
+        else if (next.discarded) {
+          const discarded = next.discarded as NonNullable<Attempt["discarded"]>;
+          invariant(previous.phase === "ingesting" && next.phase === "failed" && typeof discarded.by === "string" && discarded.by.length > 0
+            && typeof discarded.at === "string" && Number.isFinite(Date.parse(discarded.at)) && typeof discarded.code === "string",
+          "ATTEMPT_NOT_DISCARDABLE", "Discard requires a finished ingesting job and human audit evidence");
         }
         invariant(Object.hasOwn(previous, "narrationSpeech") === Object.hasOwn(next, "narrationSpeech")
           && (!Object.hasOwn(previous, "narrationSpeech") || canonical(previous.narrationSpeech) === canonical(next.narrationSpeech)),

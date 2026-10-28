@@ -17,6 +17,7 @@ import { narrationFitFrames } from "./narration-fit.js";
 import { attemptMediaFailure } from "./media-failure.js";
 import { activeAttemptIngestionIssue } from "./execution/ingestion-issue.js";
 import { readGenerationJobBlockers } from "./application/generation-blockers.js";
+import { safeNativeDiagnostic } from "./application/native-diagnostics.js";
 
 /** Existing scenes retain their purpose-derived label until named. */
 export function sceneTitle(purpose: string, title?: string): string {
@@ -78,6 +79,8 @@ export class GenerationOverviewReader {
         director: { state: question || turn?.state === "waiting_user" ? "waiting_user" : turn ? "working" : "idle", scopeIds, ...(requestId ? { requestId } : {}) },
         controlAuthorityId: "authorityId" in snapshot.control ? snapshot.control.authorityId : null,
         scenes: [], shots: {}, restartCasualties: snapshot.attempts.filter(a => !a.released && a.phase === "submission_unknown" && a.createdAt < this.production.engine.startedAt).map(a => a.id) };
+      const interrupted = this.production.engine.interruptedLocalWork(projectId);
+      if (interrupted.length) overview.interruptedRenders = interrupted.map(({ attemptId, kind, at }) => ({ attemptId, kind, at }));
       for (const [index, scene] of project.scenes.entries()) {
         const captured = sceneView(this.production, projectId, scene.id, { snapshot, review, tolerateAlternatives: true });
         const view = sceneGenerationView(this.production, projectId, scene.id, this.narration, captured, snapshot);
@@ -104,14 +107,19 @@ export class GenerationOverviewReader {
             // Keep showing the selected output while exposing the replacement's recovery identity.
             const progress = (pending: MediaSlot & { state: "running" | "queued" | "failed" | "no_answer" }): MediaSlot => current && output
               ? { ...base, ...(pending.ingestionIssue ? { ingestionIssue: pending.ingestionIssue } : {}), state: "ready", artifact: ref(output), replacement: { state: pending.state,
-                ...(pending.attemptId ? { attemptId: pending.attemptId } : {}), ...(pending.phase ? { phase: pending.phase } : {}),
-                ...(pending.failure ? { failure: pending.failure } : {}), ...(pending.waiting ? { waiting: pending.waiting } : {}) } }
+                ...(pending.attemptId ? { attemptId: pending.attemptId } : {}), ...(pending.phase ? { phase: pending.phase } : {}), ...(pending.startedAt ? { startedAt: pending.startedAt } : {}),
+                ...(pending.failure ? { failure: pending.failure } : {}), ...(pending.waiting ? { waiting: pending.waiting } : {}),
+                ...(pending.nativeDiagnostic ? { nativeDiagnostic: pending.nativeDiagnostic } : {}) } }
               : pending;
             // Detached, still-live attempts are honest in-flight work; they must never look safe to resubmit.
             const active = history.filter(a => !a.released && !["failed", "succeeded"].includes(a.phase)).at(-1);
             if (active) {
               const issue = activeAttemptIngestionIssue(store, active);
-              return progress({ ...base, ...(issue ? { ingestionIssue: { code: issue.code, at: issue.observedAt } } : {}), state: active.phase === "submission_unknown" ? "no_answer" : "running", phase: active.phase, startedAt: active.createdAt, attemptId: active.id });
+              // Decision R1: the native worker's allowlisted reason for an unresolved job, re-filtered on every read.
+              const unresolved = active.phase === "submission_unknown" && active.request.execution?.adapter === "codex-image"
+                ? safeNativeDiagnostic(store.get<{ attemptId?: string; nativeDiagnostic?: unknown }>("codex_image_execution_unresolved", active.id)?.nativeDiagnostic) : undefined;
+              return progress({ ...base, ...(issue ? { ingestionIssue: { code: issue.code, at: issue.observedAt } } : {}), state: active.phase === "submission_unknown" ? "no_answer" : "running", phase: active.phase, startedAt: active.createdAt, attemptId: active.id,
+                ...(unresolved ? { nativeDiagnostic: unresolved } : {}) });
             }
             const last = history.filter(a => !a.released && a.candidateId === binding?.candidateId).at(-1);
             if (last?.phase === "failed") {

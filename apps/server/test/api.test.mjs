@@ -98,6 +98,16 @@ test("a review reply key binds replyToReviewId while identical approval replies 
   assert.equal(f.store.list("approval", f.projectId).length, 2);
 });
 
+test("job recovery commands (rule-drift decisions R2-R4) are human commands that refuse without acknowledgement", async t => {
+  const f = await reviewFixture(t);
+  error(await f.post("attempts/unknown/discard", { expectedPhase: "ingesting", acknowledgeDiscard: false }, "discard-unacknowledged"), 409, "DISCARD_NOT_ACKNOWLEDGED");
+  error(await f.post("attempts/unknown/discard", { expectedPhase: "ingesting", acknowledgeDiscard: true }, "discard-missing"), 404, "NOT_FOUND");
+  error(await f.post("attempts/unknown/discard", { expectedPhase: "remote_pending", acknowledgeDiscard: true }, "discard-wrong-phase"), 400, "VALIDATION_ERROR");
+  error(await f.post("attempts/unknown/release", { expectedPhase: "remote_pending", acknowledgeDoubleCharge: true }, "detach-missing"), 404, "NOT_FOUND");
+  error(await f.post("attempts/unknown/retry-local", { expectedFailure: "LOCAL_EXECUTION_INTERRUPTED", acknowledgeRerender: false }, "retry-unacknowledged"), 409, "RERENDER_NOT_ACKNOWLEDGED");
+  error(await f.post("attempts/unknown/retry-local", { expectedFailure: "LOCAL_EXECUTION_STALE", acknowledgeRerender: true }, "retry-wrong-failure"), 400, "VALIDATION_ERROR");
+});
+
 test("health remains public on loopback while project routes require a valid local session", async t => {
   const f = fixture(t);
   for (const [method, url, payload] of [
@@ -106,6 +116,9 @@ test("health remains public on loopback while project routes require a valid loc
     ["POST", `${f.path}/messages`, { text: "Denied request" }],
     ["POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
     ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "remote_pending", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/discard`, { expectedPhase: "ingesting", acknowledgeDiscard: true }],
+    ["POST", `${f.path}/attempts/unknown/retry-local`, { expectedFailure: "LOCAL_EXECUTION_INTERRUPTED", acknowledgeRerender: true }],
     ["POST", `${f.path}/scenes/unknown/confirm`, { confirmationDigest: "a".repeat(64), reviewedFrames: [] }],
   ]) {
     error(await f.app.inject({ method, url, payload, headers: { host: "127.0.0.1" } }), 403, "AUTH_REQUIRED");
@@ -177,6 +190,9 @@ test("local-user and director tokens cannot cross routes or gain human review an
     ["GET", f.path],
     ["POST", `${f.path}/controls`, { action: "resume", expectedAuthorityId: null }],
     ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "submission_unknown", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/release`, { expectedPhase: "remote_pending", acknowledgeDoubleCharge: true }],
+    ["POST", `${f.path}/attempts/unknown/discard`, { expectedPhase: "ingesting", acknowledgeDiscard: true }],
+    ["POST", `${f.path}/attempts/unknown/retry-local`, { expectedFailure: "LOCAL_EXECUTION_INTERRUPTED", acknowledgeRerender: true }],
     ["POST", `${f.path}/scenes/unknown/confirm`, { confirmationDigest: "a".repeat(64), reviewedFrames: [] }],
   ]) error(await f.app.inject({ method, url, payload, headers: f.headers(bridge.token) }), 403, "AUTH_REQUIRED");
   const read = await f.tool("read_context", {}, bridge.token);

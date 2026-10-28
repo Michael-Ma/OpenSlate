@@ -16,7 +16,15 @@ export interface NativeDiagnostic {
   limitMs?: number;
   /** Instruction-source paths only, bounded to 32 printable paths; the person's home is shown as ~. */
   instructionFiles?: string[];
+  /**
+   * native_unknown only: the allowlisted stage the worker reported, derived from its exact safe code. Never native
+   * text. Absent when the cause is unexplained, and on records saved before reasons existed (never relabeled).
+   */
+  reason?: NativeUnknownReason;
 }
+/** Kept in step with NATIVE_UNKNOWN_REASONS in public.ts. */
+export type NativeUnknownReason = "process_exit" | "transport_failed" | "worker_closed" | "worker_busy" | "cleanup_failed"
+  | "aborted" | "completion_missing" | "output_invalid" | "identity_mismatch";
 
 export interface StudioArtifactRef {
   artifactId: string;
@@ -116,11 +124,13 @@ export interface MediaSlot {
    * It is not an unknown submission: never offer give-up for it.
    */
   ingestionIssue?: { code: string; at: string };
+  /** no_answer only: the allowlisted reason the native worker gave for an unresolved job (decision R1). */
+  nativeDiagnostic?: NativeDiagnostic;
   /**
    * A replacement take in progress while the current output stays shown (state "ready"): its own state,
    * so a no-answer replacement can be given up (attemptId) and a failed one explained.
    */
-  replacement?: { state: "running" | "queued" | "failed" | "no_answer"; attemptId?: string; phase?: string; failure?: MediaFailure; waiting?: WaitingReason };
+  replacement?: { state: "running" | "queued" | "failed" | "no_answer"; attemptId?: string; phase?: string; startedAt?: string; failure?: MediaFailure; waiting?: WaitingReason; nativeDiagnostic?: NativeDiagnostic };
 }
 
 export interface KeyframeSlot extends MediaSlot {
@@ -291,6 +301,8 @@ export interface GenerationOverview {
   shots: Record<string, ShotOverview>;
   /** Unreleased no_answer attempts created before the current server start. Released jobs remain in history and reconciliation. */
   restartCasualties: string[];
+  /** Local film renders that were interrupted after they started and can be run again by the person (decision R4). */
+  interruptedRenders?: { attemptId: string; kind: "timeline" | "render"; at: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +323,12 @@ export interface FrameViewReceipt {
 
 /** POST /api/projects/:projectId/attempts/:attemptId/release  (GR-10). */
 export interface ReleaseAttemptInput {
-  expectedPhase: "submission_unknown";
+  /**
+   * submission_unknown: give up on a job the service never confirmed. remote_pending: stop waiting for a job the
+   * provider keeps reporting as running (decision R3). Either way the old job is still polled, stays billable, and a
+   * late result becomes an earlier take; nothing infers failure or a refund.
+   */
+  expectedPhase: "submission_unknown" | "remote_pending";
   /** Must be true: the old job may still finish and be charged. */
   acknowledgeDoubleCharge: true;
 }
@@ -319,6 +336,36 @@ export interface ReleaseAttemptReceipt {
   attemptId: string;
   shotId: string | null;
   releasedAt: string;
+}
+
+/**
+ * POST /api/projects/:projectId/attempts/:attemptId/discard  (decision R2). Only a finished job whose output needs
+ * attention (MediaSlot.ingestionIssue). It stays charged and in history; the shot can then be made again.
+ */
+export interface DiscardAttemptInput {
+  expectedPhase: "ingesting";
+  /** Must be true: the finished job stays charged. */
+  acknowledgeDiscard: true;
+}
+export interface DiscardAttemptReceipt {
+  attemptId: string;
+  shotId: string | null;
+  discardedAt: string;
+}
+
+/**
+ * POST /api/projects/:projectId/attempts/:attemptId/retry-local  (decision R4). A fresh retry identity for an
+ * interrupted local render (GenerationOverview.interruptedRenders); the old attempt and its evidence are kept.
+ */
+export interface RetryLocalAttemptInput {
+  expectedFailure: "LOCAL_EXECUTION_INTERRUPTED";
+  /** Must be true: the render runs again on this computer. */
+  acknowledgeRerender: true;
+}
+export interface RetryLocalAttemptReceipt {
+  attemptId: string;
+  nodeId: string;
+  retriedAt: string;
 }
 
 /** POST /api/projects/:projectId/controls  (GR-13). */
@@ -344,6 +391,11 @@ export type StudioErrorCode =
   | "SHOT_SHORTER_THAN_NARRATION"
   | "ATTEMPT_NOT_RELEASABLE"
   | "DOUBLE_CHARGE_NOT_ACKNOWLEDGED"
+  | "ATTEMPT_NOT_DISCARDABLE"
+  | "DISCARD_NOT_ACKNOWLEDGED"
+  | "ATTEMPT_NOT_RETRYABLE"
+  | "RERENDER_NOT_ACKNOWLEDGED"
+  | "LOCAL_EXECUTION_RECOVERABLE"
   | "HUMAN_EDITED_FIELD";
 
 // ---------------------------------------------------------------------------

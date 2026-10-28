@@ -77,7 +77,11 @@ export interface Attempt {
   outputs: Record<string, ArtifactRef>; createdAt: string;
   /** Human release removes blocking/publication authority, never reconciliation or liability. */
   released?: { by: string; at: string };
+  /** Human discard of a finished job's unusable output (decision R2): it stays charged; `code` is the issue the person saw. */
+  discarded?: { by: string; at: string; code: string };
 }
+/** A person's single-use authority to render interrupted local work again under a fresh attempt (decision R4). */
+export interface LocalExecutionRetry { id: string; projectId: string; version: 1; attemptId: string; intentDigest: string; dispatchDigest: string; by: string; at: string }
 export interface ArtifactRecord {
   id: string; projectId: string; artifact: ArtifactRef; path: string; mimeType: string;
   fixture: boolean; attemptId: string | null; physicalDurationSeconds: number | null;
@@ -425,23 +429,124 @@ export class Engine {
     });
   }
 
-  releaseAttempt(projectId: string, attemptId: string, by: string, acknowledgeDoubleCharge: boolean) {
+  /**
+   * submission_unknown: give up on a job the service never confirmed. remote_pending (decision R3): stop waiting for a
+   * job the provider keeps reporting as running. Both keep reconciliation, liability and late results as history;
+   * neither infers failure or a refund, from elapsed time or otherwise.
+   */
+  releaseAttempt(projectId: string, attemptId: string, by: string, acknowledgeDoubleCharge: boolean, expectedPhase: "submission_unknown" | "remote_pending" = "submission_unknown") {
     return this.store.transaction(() => {
       this.recovery.assertWritable(projectId);
       invariant(acknowledgeDoubleCharge === true, "DOUBLE_CHARGE_NOT_ACKNOWLEDGED", "Acknowledge that both jobs may be charged");
       const attempt = this.store.get<Attempt>("attempt", attemptId);
       invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
-      invariant(attempt.phase === "submission_unknown" && !attempt.released && !viggleHasCompletedObservation(this.store, attempt),
-        "ATTEMPT_NOT_RELEASABLE", "Only an unreleased unconfirmed submission can be released");
+      invariant(["submission_unknown", "remote_pending"].includes(expectedPhase) && attempt.phase === expectedPhase && !attempt.released
+        && !isLocalExecutionAttempt(attempt) && (expectedPhase === "submission_unknown" || attempt.taskId !== null)
+        && !viggleHasCompletedObservation(this.store, attempt),
+        "ATTEMPT_NOT_RELEASABLE", "Only an unreleased unconfirmed or still-running submission can be released");
       const at = new Date().toISOString();
       this.store.put("attempt", attempt.id, projectId, { ...attempt, released: { by, at } });
       const binding = this.store.get<NodeBinding>("node_binding", attempt.nodeId);
       if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId)
         this.store.put("node_binding", binding.id, projectId, restoreRetainedTake(binding) ?? { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
       if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId) this.clearNodeWait(projectId, binding.id);
-      this.store.appendEvent(projectId, "attempt.released", { attemptId, by, at, acknowledgeDoubleCharge: true });
+      this.store.appendEvent(projectId, "attempt.released", { attemptId, by, at, acknowledgeDoubleCharge: true, ...(expectedPhase === "remote_pending" ? { phase: expectedPhase } : {}) });
       return { attemptId, shotId: binding?.node.shotId ?? null, releasedAt: at };
     });
+  }
+
+  /**
+   * Decision R2: a finished job whose owned output is damaged or whose download expired, as its recorded ingestion
+   * issue shows. The person confirms the discard; the job stays charged, its provider evidence and issue stay as
+   * history, and only its publication/blocking authority ends. It is never relabeled unknown or retried.
+   */
+  discardAttempt(projectId: string, attemptId: string, by: string, acknowledgeDiscard: boolean) {
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      invariant(acknowledgeDiscard === true, "DISCARD_NOT_ACKNOWLEDGED", "Acknowledge that the finished job stays charged");
+      const attempt = this.store.get<Attempt>("attempt", attemptId);
+      invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
+      const issue = activeAttemptIngestionIssue(this.store, attempt);
+      invariant(attempt.phase === "ingesting" && !attempt.discarded && !isLocalExecutionAttempt(attempt) && issue,
+        "ATTEMPT_NOT_DISCARDABLE", "Only a finished job whose output needs attention can be discarded");
+      const at = new Date().toISOString();
+      const { ingestionDeferred: _deferred, unknownWait: _wait, ...base } = attempt;
+      // Ending the phase also fences any worker still holding this attempt's lease (owns() rejects terminal phases).
+      this.store.put("attempt", attempt.id, projectId, { ...base, phase: "failed", leaseExpiresAt: 0, discarded: { by, at, code: issue.code },
+        failure: { id: "OUTPUT_DISCARDED", technical: false, source: "human:discard/1", retryAllowed: false } });
+      this.setReservation(attempt, "charged");
+      this.store.put("attempt_ingestion_issue", attempt.id, projectId, { ...issue, active: false, resolvedAt: at });
+      const binding = this.store.get<NodeBinding>("node_binding", attempt.nodeId);
+      if (binding?.projectId === projectId && binding.candidateId === attempt.candidateId) {
+        this.store.put("node_binding", binding.id, projectId, restoreRetainedTake(binding) ?? { ...binding, candidateId: null, outputs: {}, outdatedReason: "released" });
+        this.clearNodeWait(projectId, binding.id);
+      }
+      this.store.appendEvent(projectId, "attempt.discarded", { attemptId, by, at, code: issue.code, acknowledgeDiscard: true });
+      this.store.appendEvent(projectId, "attempt.state_changed", { attemptId, phase: "failed" });
+      return { attemptId, shotId: binding?.node.shotId ?? null, discardedAt: at };
+    });
+  }
+
+  /** Read-only: interrupted dispatched local work on the active plan that a person may render again (decision R4). */
+  interruptedLocalWork(projectId: string): { attemptId: string; nodeId: string; kind: "timeline" | "render"; at: string }[] {
+    const project = this.store.getProject(projectId);
+    const local = this.attempts(projectId).filter(isLocalExecutionAttempt);
+    return this.store.list<NodeBinding>("node_binding", projectId)
+      .filter(binding => binding.state === "active" && binding.planId === project.activePlanId && !Object.keys(binding.outputs).length
+        && (binding.node.kind === "timeline" || binding.node.kind === "render"))
+      .flatMap(binding => {
+        const latest = local.filter(attempt => attempt.nodeId === binding.id).sort((a, b) => b.ordinal - a.ordinal || b.createdAt.localeCompare(a.createdAt))[0];
+        return latest && this.localRetryable(latest) && !this.store.get("local_execution_retry", latest.id)
+          ? [{ attemptId: latest.id, nodeId: binding.id, kind: binding.node.kind as "timeline" | "render", at: latest.createdAt }] : [];
+      });
+  }
+
+  /**
+   * Decision R4: a person's fresh retry identity for dispatched local work that ended LOCAL_EXECUTION_INTERRUPTED.
+   * A final receipt check first: a completion that appeared meanwhile is never rendered over. The old attempt, its
+   * intent and dispatch stay untouched; the next ordinary run admits one new attempt with the same content.
+   */
+  async retryLocalAttempt(projectId: string, attemptId: string, by: string, acknowledgeRerender: boolean) {
+    const checked = await this.checkLocalRetry(projectId, attemptId, acknowledgeRerender);
+    return this.recordLocalRetry(projectId, checked, by);
+  }
+  /** The asynchronous half: validation plus the final receipt check, with no writes. */
+  async checkLocalRetry(projectId: string, attemptId: string, acknowledgeRerender: boolean): Promise<Attempt> {
+    this.recovery.assertWritable(projectId);
+    invariant(acknowledgeRerender === true, "RERENDER_NOT_ACKNOWLEDGED", "Acknowledge that the local render runs again");
+    const attempt = this.store.get<Attempt>("attempt", attemptId);
+    invariant(attempt?.projectId === projectId, "NOT_FOUND", "Attempt does not belong to this project");
+    invariant(this.localRetryable(attempt) && !this.store.get("local_execution_retry", attempt.id), "ATTEMPT_NOT_RETRYABLE", "Only interrupted local work can be rendered again, once");
+    const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", attempt.id)!;
+    const port = this.requireLocalPort(), abort = this.operationController();
+    try {
+      // The old lease is long gone; the port's own receipt is the only evidence of a late completion.
+      const late = await port.recover(structuredClone(intent), this.localOptions(attempt, abort.signal));
+      invariant(!late, "LOCAL_EXECUTION_RECOVERABLE", "The interrupted render left a receipt; it is not rendered again");
+    } finally { this.finishOperation(abort); }
+    return attempt;
+  }
+  /** The synchronous half: record the retry only if the checked attempt is unchanged. */
+  recordLocalRetry(projectId: string, attempt: Attempt, by: string) {
+    const attemptId = attempt.id;
+    return this.store.transaction(() => {
+      this.recovery.assertWritable(projectId);
+      const current = this.store.get<Attempt>("attempt", attemptId);
+      invariant(current?.projectId === projectId && canonical(current) === canonical(attempt) && this.localRetryable(current) && !this.store.get("local_execution_retry", attemptId),
+        "ATTEMPT_NOT_RETRYABLE", "The interrupted render changed while it was checked");
+      const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", attemptId)!;
+      const at = new Date().toISOString(), dispatch = this.store.get<LocalExecutionDispatch>("local_execution_dispatch", attemptId)!;
+      this.store.insert<LocalExecutionRetry>("local_execution_retry", attemptId, projectId,
+        { id: attemptId, projectId, version: 1, attemptId, intentDigest: digest(intent), dispatchDigest: digest(dispatch), by, at });
+      this.store.appendEvent(projectId, "attempt.local_retry_requested", { attemptId, nodeId: attempt.nodeId, by, at });
+      return { attemptId, nodeId: attempt.nodeId, retriedAt: at };
+    });
+  }
+  private localRetryable(attempt: Attempt): boolean {
+    if (!isLocalExecutionAttempt(attempt) || attempt.phase !== "failed" || attempt.failure?.id !== "LOCAL_EXECUTION_INTERRUPTED") return false;
+    const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", attempt.id);
+    if (!intent || !this.store.get("local_execution_dispatch", attempt.id) || this.store.get("local_execution_completion", attempt.id)) return false;
+    try { assertLocalExecutionIntent(intent, attempt); return true; } catch { return false; }
   }
 
   /** Read-only UI evidence. Historical attempts remain available for reconciliation. */
@@ -729,10 +834,12 @@ export class Engine {
         && this.resolveInputs(project.id, binding.node).fingerprint === effective, "LOCAL_EXECUTION_STALE", "Local admission target changed");
       const predecessors = this.attempts(project.id).filter(sameContent);
       // A stale admission that never crossed dispatch can be rebased onto a fresh
-      // target. Any dispatch or completion retains the no-automatic-rerender rule.
+      // target. Any dispatch or completion retains the no-automatic-rerender rule,
+      // except interrupted work a person explicitly asked to render again (R4).
       invariant(predecessors.every(value => {
         const intent = this.store.get<LocalExecutionIntent>("local_execution_intent", value.id);
         if (intent) assertLocalExecutionIntent(intent, value);
+        if (this.store.get("local_execution_retry", value.id) && this.localRetryable(value)) return true;
         return isLocalExecutionAttempt(value) && value.phase === "failed" && value.failure?.id === "LOCAL_EXECUTION_STALE"
           && !this.store.get("local_execution_dispatch", value.id) && !this.store.get("local_execution_completion", value.id)
           && intent?.prepared.contentDigest === prepared.contentDigest && canonical(intent.prepared.capture) !== canonical(prepared.capture);

@@ -27,7 +27,7 @@ import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync }
 import { join, relative, sep } from "node:path";
 import { APP_NAME, DomainError, digest, invariant, newId } from "@openslate/core";
 import type { ActorContext, HealthResponse } from "@openslate/core";
-import type { ControlInput, DirectorAttachmentRef, InstallationStatus, ReleaseAttemptInput } from "@openslate/core/public";
+import type { ControlInput, DirectorAttachmentRef, InstallationStatus, ReleaseAttemptInput, DiscardAttemptInput, RetryLocalAttemptInput } from "@openslate/core/public";
 import { ToolInvocationService } from "./application/tool-invocations.js";
 import { executionControlCommand } from "./application/execution-controls.js";
 import { ExportLauncher } from "./media/export-launcher.js";
@@ -343,12 +343,36 @@ export function createApp(options: AppOptions = {}) {
     return receipt;
   });
   app.post<{ Params: { projectId: string; attemptId: string }; Body: ReleaseAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/release", {
-    schema: { body: object({ expectedPhase: { const: "submission_unknown" }, acknowledgeDoubleCharge: { type: "boolean" } }, ["expectedPhase"]) },
+    schema: { body: object({ expectedPhase: { enum: ["submission_unknown", "remote_pending"] }, acknowledgeDoubleCharge: { type: "boolean" } }, ["expectedPhase"]) },
   }, async request => {
     const key = requiredCommandKey(request);
     return service().store.command(`local-user:${request.params.projectId}:release-attempt`, key, digest({ attemptId: request.params.attemptId, ...request.body }), () => {
-      const actor = service().beginRequest(request.params.projectId, "local-user", "Release an unconfirmed submission; both jobs may be charged.", { source: "app", editing: false, key: `release-attempt:${key}` });
+      const actor = service().beginRequest(request.params.projectId, "local-user", request.body.expectedPhase === "remote_pending"
+        ? "Stop waiting for a job the provider still reports as running; it may still finish and be charged."
+        : "Release an unconfirmed submission; both jobs may be charged.", { source: "app", editing: false, key: `release-attempt:${key}` });
       return service().releaseAttempt(request.params.projectId, actor, request.params.attemptId, request.body);
+    });
+  });
+  app.post<{ Params: { projectId: string; attemptId: string }; Body: DiscardAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/discard", {
+    schema: { body: object({ expectedPhase: { const: "ingesting" }, acknowledgeDiscard: { type: "boolean" } }, ["expectedPhase"]) },
+  }, async request => {
+    const key = requiredCommandKey(request);
+    return service().store.command(`local-user:${request.params.projectId}:discard-attempt`, key, digest({ attemptId: request.params.attemptId, ...request.body }), () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", "Discard a finished job's unusable output; it stays charged.", { source: "app", editing: false, key: `discard-attempt:${key}` });
+      return service().discardAttempt(request.params.projectId, actor, request.params.attemptId, request.body);
+    });
+  });
+  app.post<{ Params: { projectId: string; attemptId: string }; Body: RetryLocalAttemptInput }>("/api/projects/:projectId/attempts/:attemptId/retry-local", {
+    schema: { body: object({ expectedFailure: { const: "LOCAL_EXECUTION_INTERRUPTED" }, acknowledgeRerender: { type: "boolean" } }, ["expectedFailure"]) },
+  }, async request => {
+    const key = requiredCommandKey(request), scope = `local-user:${request.params.projectId}:retry-local-attempt`;
+    const inputDigest = digest({ attemptId: request.params.attemptId, ...request.body });
+    const replay = service().store.commandReplay(scope, key, inputDigest);
+    if (replay) return replay.result;
+    const checked = await service().checkLocalRetry(request.params.projectId, request.params.attemptId, request.body);
+    return service().store.command(scope, key, inputDigest, () => {
+      const actor = service().beginRequest(request.params.projectId, "local-user", "Render interrupted local work again with the same content.", { source: "app", editing: false, key: `retry-local-attempt:${key}` });
+      return service().retryLocalAttempt(request.params.projectId, actor, checked);
     });
   });
   if (options.service) registerProjectEventStream(app, { store: options.service.store,
